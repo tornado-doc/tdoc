@@ -130,8 +130,15 @@
   :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: #f7f7f5; border: 1px solid #e8e7e3; border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
   :where(body pre code) { background: transparent; padding: 0; border-radius: 0; }
   :where(body hr) { border: 0; border-top: 1px solid #e8e7e3; margin: 36px 0; }
-  /* Tables: Claude-style rounded cells with white gutters — no rules/borders. */
-  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px -14px; font-size: 16px; }
+  /* Tables: Claude-style rounded cells with white gutters — no rules/borders.
+     NOTE: no negative left margin here. A negative margin pulls the table's
+     left edge outside its containing block, and any table inside an
+     overflow:auto/scroll wrapper (which our own authoring guidance in SKILL.md
+     recommends, and which the @media rule below also creates) then CLIPS that
+     overhang — the first column gets cut off and is unreachable by scroll.
+     Tables sit flush in their container instead; first-cell text is indented
+     by the cell padding, exactly like GitHub/Claude markdown tables. */
+  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
   :where(body th, body td) { padding: 10px 14px; background: #f0f0ee; border-radius: 8px; border: 0; text-align: left; }
   :where(body th) { font-weight: 600; color: #1a1a1a; }
   :where(body figcaption) { font-size: 13px; color: #6b6a66; margin-top: 6px; text-align: center; }

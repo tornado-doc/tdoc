@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wide table fixture</title>
+  <style>
+    /* Mirrors a real authored doc: the doc supplies its own collapsed table
+       and wraps it in an overflow-x:auto container, as SKILL.md instructs.
+       It does NOT set a table margin, so the overlay default governs that. */
+    .tblwrap { overflow-x: auto; margin: 20px 0; }
+    table { border-collapse: collapse; width: 100%; font-size: 15px; }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #ececef; vertical-align: top; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Wide table fixture</h1>
+    <p>A phased plan with a single-character first column — the case where a
+    clipped left edge is most visible.</p>
+
+    <div class="tblwrap" id="clip-probe-wrap">
+      <table>
+        <thead><tr><th id="clip-probe-cell">Phase</th><th>Ships</th><th>User-visible?</th><th>Gate to advance</th></tr></thead>
+        <tbody>
+          <tr><td><strong>0</strong></td><td>Header extraction + provider-neutral struct</td><td>No (additive)</td><td>Headers round-trip into thread_metadata</td></tr>
+          <tr><td><strong>1</strong></td><td>Deterministic credibility facts</td><td>No (logged)</td><td>Unit tests per signal green</td></tr>
+          <tr><td><strong>2</strong></td><td>Credibility verdict folded into the enricher LLM pass</td><td>No (logged)</td><td>Verdict parsed; no category regression</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

@@ -41,6 +41,7 @@ const GATED = [
   'publish.test.js',     // dry-publish + (gated) real publish
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright
+  'table-clip.test.js',  // playwright — table not clipped in overflow wrapper
 ];
 
 const runAll = process.argv.includes('--all');
