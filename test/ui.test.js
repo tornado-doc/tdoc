@@ -251,14 +251,15 @@ async function tPub(name, fn) {
     if (popup) throw new Error('popup opened from clicking a doc button — should be skipped');
   });
 
-  await t('Click on existing comment card adds .active to card + anchor', async () => {
-    const card = await page.$('.tdoc-margin-comment');
-    if (!card) { console.log('  (no comments to test, skipping)'); return; }
-    // Click the author row (text), not the body — avoids hitting reaction chips
-    // and other interactive children that stopPropagation.
-    const author = await card.$('.author');
-    if (author) await author.click();
-    else await card.click({ position: { x: 30, y: 10 } });
+  await t('Clicking a comment pin reveals + activates its card + anchor', async () => {
+    // v0.8.0 pins model: in wide mode comment cards are display:none by default
+    // and revealed only via their margin PIN. Prefer a single (non-cluster) pin;
+    // the fixture produces one. Clicking it pins the comment: card gets
+    // .tdoc-floating-open (visible) + .active, the pin gets .tdoc-pin-active, and
+    // the text anchor highlight goes active.
+    const pin = await page.$('#tdoc-pin-layer .tdoc-pin:not(.tdoc-pin-cluster)');
+    if (!pin) { console.log('  (no single comment pin to test, skipping)'); return; }
+    await pin.click();
     await page.waitForTimeout(150);
     const state = await page.evaluate(() => {
       // Text anchors highlight via the CSS Custom Highlight API
@@ -270,13 +271,22 @@ async function tPub(name, fn) {
       const activeFallback = document.querySelectorAll(
         '.tdoc-anchor-mark.active, .tdoc-element-outline.active'
       ).length;
+      const openCards = [...document.querySelectorAll('.tdoc-margin-comment.tdoc-floating-open')]
+        .filter(c => c.offsetWidth > 0 && c.offsetHeight > 0);
       return {
+        openCards: openCards.length,
         activeCards: document.querySelectorAll('.tdoc-margin-comment.active').length,
+        activePins: document.querySelectorAll('.tdoc-pin.tdoc-pin-active').length,
         activeAnchors: activeHighlight + activeFallback,
       };
     });
+    if (state.openCards !== 1) throw new Error(`expected exactly 1 visible floating card, got ${state.openCards}`);
+    if (state.activePins !== 1) throw new Error(`expected pin to be .tdoc-pin-active, got ${state.activePins}`);
     if (state.activeCards !== 1) throw new Error(`expected 1 active card, got ${state.activeCards}`);
     if (state.activeAnchors < 1) throw new Error(`expected anchor to be active (highlight or mark), got ${state.activeAnchors}`);
+    // Leave a clean slate for later tests: unpin by clicking the pin again.
+    await pin.click();
+    await page.waitForTimeout(100);
   });
 
   await t('Click on a comment-anchored text highlight activates the matching card', async () => {
@@ -290,21 +300,27 @@ async function tPub(name, fn) {
     if (activeCards !== 1) throw new Error(`expected 1 active card after anchor click, got ${activeCards}`);
   });
 
-  await t('Clicking outside any card / anchor deselects the active card', async () => {
-    // Activate a card via its author row (avoid reaction chip stopPropagation)
-    const card = await page.$('.tdoc-margin-comment');
-    if (!card) { console.log('  (no cards, skipping)'); return; }
-    const author = await card.$('.author');
-    if (author) await author.click();
-    else await card.click({ position: { x: 30, y: 10 } });
+  await t('Clicking outside any card / pin deselects the pinned card', async () => {
+    // v0.8.0 pins model: pin a card open via its margin PIN (cards are hidden by
+    // default in wide mode), then click empty doc area (the h1). The document
+    // click handler unpins when the target is neither a card nor a pin, closing
+    // the floating card and clearing the pin's active ring.
+    const pin = await page.$('#tdoc-pin-layer .tdoc-pin:not(.tdoc-pin-cluster)');
+    if (!pin) { console.log('  (no single comment pin, skipping)'); return; }
+    await pin.click();
     await page.waitForTimeout(100);
-    let activeCount = await page.$$eval('.tdoc-margin-comment.active', els => els.length);
-    if (activeCount !== 1) throw new Error(`expected 1 active before outside-click, got ${activeCount}`);
-    // Click in the H1 area on the doc — outside any UI
+    let opened = await page.$$eval('.tdoc-margin-comment.tdoc-floating-open', els => els.length);
+    if (opened !== 1) throw new Error(`expected 1 open floating card before outside-click, got ${opened}`);
+    // Click in the H1 area on the doc — outside any card/pin/UI.
     await page.click('h1', { position: { x: 5, y: 5 } });
     await page.waitForTimeout(150);
-    activeCount = await page.$$eval('.tdoc-margin-comment.active', els => els.length);
-    if (activeCount !== 0) throw new Error(`expected 0 active after outside-click, got ${activeCount}`);
+    const after = await page.evaluate(() => ({
+      open: document.querySelectorAll('.tdoc-margin-comment.tdoc-floating-open').length,
+      activeCards: document.querySelectorAll('.tdoc-margin-comment.active').length,
+      activePins: document.querySelectorAll('.tdoc-pin.tdoc-pin-active').length,
+    }));
+    if (after.open !== 0) throw new Error(`expected 0 open floating cards after outside-click, got ${after.open}`);
+    if (after.activePins !== 0) throw new Error(`expected 0 .tdoc-pin-active after outside-click, got ${after.activePins}`);
   });
 
   await tPub('Sign-in button visible (anon view)', async () => {
@@ -344,6 +360,15 @@ async function tPub(name, fn) {
   await t('Clicking replies toggle expands replies', async () => {
     const toggle = await page.$('.tdoc-replies-toggle');
     if (!toggle) { console.log('  (no replies in fixture, skipping)'); return; }
+    // v0.8.0 pins model: the toggle lives inside the comment card, which is
+    // display:none in wide mode until its margin PIN reveals it. Reveal the card
+    // first (click its pin) so the toggle is actually visible/clickable. The
+    // toggle's own handler stopPropagation()s, so clicking it won't unpin.
+    const pin = await page.$('#tdoc-pin-layer .tdoc-pin:not(.tdoc-pin-cluster)');
+    if (pin) {
+      await pin.click();
+      await page.waitForTimeout(150);
+    }
     await toggle.click();
     await page.waitForSelector('.tdoc-replies.open', { timeout: 1000 });
     // Collapse again
@@ -351,6 +376,8 @@ async function tPub(name, fn) {
     await page.waitForTimeout(200);
     const stillOpen = await page.$('.tdoc-replies.open');
     if (stillOpen) throw new Error('replies did not collapse on second click');
+    // Unpin to leave a clean slate for any later tests.
+    if (pin) { await pin.click(); await page.waitForTimeout(100); }
   });
 
   await tPub('Clicking + React on anon view triggers sign-in (no picker)', async () => {

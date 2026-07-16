@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '20'
+          node-version: '24'
       # jq is needed by the CLI tests that drive bin/tdoc-* hermetically.
       - name: Ensure jq
         run: jq --version || sudo apt-get update && sudo apt-get install -y jq
@@ -65,3 +65,30 @@ jobs:
       # the dangerous classes (quoting/word-splitting/injection), not lint nits.
       - name: ShellCheck CLIs
         run: shellcheck --severity=warning --exclude=SC2034 bin/tdoc-publish bin/tdoc-doctor bin/tdoc-pull bin/tdoc-new bin/tdoc-unpublish bin/tdoc-update
+
+  # Browser suites (playwright). A SEPARATE job from `offline` so a browser/
+  # playwright hiccup never blocks the zero-dependency offline gate. Runs on the
+  # free ubuntu-latest runner: the suites boot server/server.js against the
+  # committed fixture, so they need NO Cloudflare secrets. This is the coverage
+  # that used to run on nobody's machine (playwright is an optional dep, gated
+  # out of the offline suite), which is how the v0.8.0 comment-interaction
+  # regression could ship without any red signal.
+  browser:
+    name: browser suite (playwright)
+    runs-on: ubuntu-latest
+    steps:
+      # Same SHA-pinning discipline as the offline job (see note above).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24'
+      # playwright is the repo's optional dep. Install it + chromium with the OS
+      # libraries the headless browser needs (`--with-deps` runs the apt step).
+      - name: Install Playwright + Chromium
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+      # Runs ONLY the browser subset (responsive + ui) via run.js --browser —
+      # never the Cloudflare-gated publish/onboarding suites.
+      - name: Run browser suites
+        run: node test/run.js --browser

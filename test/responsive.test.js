@@ -76,6 +76,17 @@ async function tPub(name, fn) {
       const cards = [...document.querySelectorAll('.tdoc-margin-comment')].map(c => {
         const r = c.getBoundingClientRect(); return { left: r.left, right: r.right };
       });
+      // v0.8.0 pins model: in wide mode comment cards are display:none by default
+      // and each comment renders a .tdoc-pin in #tdoc-pin-layer in the right
+      // margin. Capture the pins + the article's right edge so the wide-mode
+      // margin-column invariant can assert on the PINS (the visible margin
+      // affordance), not on the hidden cards.
+      const article = document.querySelector('.wrap') || document.querySelector('article') || document.querySelector('main');
+      const articleRight = article ? article.getBoundingClientRect().right : null;
+      const pins = [...document.querySelectorAll('#tdoc-pin-layer .tdoc-pin')].map(p => {
+        const r = p.getBoundingClientRect();
+        return { left: r.left, right: r.right, vis: p.offsetWidth > 0 && p.offsetHeight > 0 };
+      });
       return {
         narrow: document.body.classList.contains('tdoc-narrow'),
         hasComments: document.querySelectorAll('.tdoc-margin-comment').length > 0,
@@ -83,6 +94,8 @@ async function tPub(name, fn) {
         more: vis('#tdoc-more-btn'),
         fab: vis('.tdoc-fab'),
         cards,
+        pins,
+        articleRight,
         scrollW: document.documentElement.scrollWidth,
         winW: window.innerWidth,
       };
@@ -136,10 +149,19 @@ async function tPub(name, fn) {
       await t('wide mode: FAB hidden', async () => {
         if (st.fab) throw new Error('FAB should be hidden in wide (non-narrow) mode');
       });
-      await t('wide mode: cards sit in the right margin column', async () => {
-        if (!st.cards.length) { console.log('    (no cards)'); return; }
-        for (const c of st.cards) {
-          if (c.left < st.winW * 0.5) throw new Error(`card left=${c.left} too far left for a margin column (win ${st.winW})`);
+      await t('wide mode: comment pins sit in the right margin column', async () => {
+        // v0.8.0 pins model: the margin affordance in wide mode is the PIN, not
+        // the card (cards are display:none until revealed). Assert the pins live
+        // in #tdoc-pin-layer, are visible, and sit in the right margin: left of
+        // the pin is past the article's right edge, and the whole pin fits inside
+        // the viewport. Do NOT assert on the hidden cards' geometry.
+        if (!st.hasComments) { console.log('    (no comments)'); return; }
+        if (!st.pins.length) throw new Error('wide + has comments but no .tdoc-pin in #tdoc-pin-layer');
+        if (st.articleRight == null) throw new Error('could not resolve article right edge');
+        for (const p of st.pins) {
+          if (!p.vis) throw new Error(`pin not visible (left=${p.left})`);
+          if (p.left < st.articleRight) throw new Error(`pin left=${p.left} not past article right edge ${st.articleRight} — not in the right margin`);
+          if (p.right > st.winW + 1) throw new Error(`pin right=${p.right} overflows window ${st.winW}`);
         }
       });
     }
