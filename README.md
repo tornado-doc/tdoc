@@ -1,5 +1,7 @@
 # tdoc — Google Docs for markdown, with your agent as collaborator
 
+<a href="https://trendshift.io/repositories/47678?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-47678" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/47678/daily?language=JavaScript" alt="serenakeyitan%2Ftdoc | Trendshift" width="250" height="55"/></a>
+
 See it live: https://tdoc.serenatan.workers.dev/d/conway-life/v/2
 ### 🌳 use artifacts in [first-tree](https://first-tree.ai/?utm_source=github&utm_medium=readme&utm_campaign=tdoc-site) for **free** — the most efficient way for **human & agent collaboration** :D
 
