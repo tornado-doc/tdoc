@@ -18,5 +18,11 @@
     "prompt-native",
     "interactive"
   ],
-  "repository": "https://github.com/tornado-doc/tdoc"
+  "repository": "https://github.com/tornado-doc/tdoc",
+  "contributors": [
+    {
+      "name": "Julie Shi",
+      "url": "https://github.com/yayashuxue"
+    }
+  ]
 }

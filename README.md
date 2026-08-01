@@ -206,7 +206,7 @@ line — no excuse not to).
 
 ## Credit
 
-Originally inspired by [bdocs](https://x.com/jessepollak/status/2054313757543964857) by [Jesse Pollak](https://x.com/jessepollak). tdoc is an independent open-source project by [Tornado](https://github.com/tornado-doc).
+Originally inspired by [bdocs](https://x.com/jessepollak/status/2054313757543964857) by [Jesse Pollak](https://x.com/jessepollak). tdoc is an independent open-source project by [Tornado](https://github.com/tornado-doc), maintained by [Julie Shi](https://github.com/yayashuxue) and the Tornado team.
 
 ## License
 
