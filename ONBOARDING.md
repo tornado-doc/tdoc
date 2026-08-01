@@ -14,7 +14,7 @@ Install + onboarding takes ~3 minutes on a clean machine. Most steps are automat
 
 ## Step 1 — Install the skill (if not already installed)
 
-First check whether the user has already installed via the plugin marketplace. The marketplace install is a separate path the user runs themselves (`/plugin marketplace add serenakeyitan/tdoc`) and does NOT need you to clone anything.
+First check whether the user has already installed via the plugin marketplace. The marketplace install is a separate path the user runs themselves (`/plugin marketplace add tornado-doc/tdoc`) and does NOT need you to clone anything.
 
 ```bash
 ls ~/.claude/skills/tdoc/SKILL.md 2>/dev/null && echo "already installed"
@@ -25,7 +25,7 @@ If that prints "already installed" → skip to Step 2.
 Otherwise, the user reached this doc via Option B or Option C and you need to clone:
 
 ```bash
-git clone https://github.com/serenakeyitan/tdoc ~/.claude/skills/tdoc
+git clone https://github.com/tornado-doc/tdoc ~/.claude/skills/tdoc
 ```
 
 If the user already has `~/.claude/skills/tdoc/` from a prior install, update instead:
@@ -37,8 +37,8 @@ cd ~/.claude/skills/tdoc && git pull --ff-only origin main
 **Important about the plugin marketplace path:** if the user said they want the "one-line marketplace install," that's a direct slash-command they run themselves in Claude Code — NOT an agent task. The two commands are:
 
 ```
-/plugin marketplace add serenakeyitan/tdoc
-/plugin install tdoc@serenakeyitan-tdoc
+/plugin marketplace add tornado-doc/tdoc
+/plugin install tdoc@tornado-tdoc
 ```
 
 Don't try to run these for the user via Bash — they're Claude Code slash commands.
@@ -141,7 +141,7 @@ Tell the user:
 - They can now run `/tdoc new <prompt>` for any new doc
 - Run `/tdoc update` to pull the latest skill code anytime
 - Run `/tdoc doctor` if anything feels off
-- Visit `https://github.com/serenakeyitan/tdoc` for the source, issues, contributions
+- Visit `https://github.com/tornado-doc/tdoc` for the source, issues, contributions
 
 ## Idempotency
 
@@ -168,4 +168,4 @@ node --version  # should be v18 or higher
 
 ## Credit
 
-`tdoc` is an open-source community implementation of Jesse Pollak's bdocs idea ([source](https://x.com/jessepollak/status/2054313757543964857)). All credit for the original concept and framing goes to Jesse.
+`tdoc` is an open-source project by Tornado. All credit for the original concept and framing goes to Jesse.

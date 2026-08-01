@@ -640,7 +640,7 @@ function landingHtml() {
   <h1>tdoc</h1>
   <p>Prompt-native, commentable documents.</p>
   <p class="sub">Open a document from its shared link ·
-    <a href="https://github.com/serenakeyitan/tdoc">github.com/serenakeyitan/tdoc</a></p>
+    <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
 </body></html>`;
 }
 
@@ -1485,7 +1485,7 @@ export default {
       if (!isOwnerSession(env, s)) {
         return new Response(null, {
           status: 302,
-          headers: { Location: 'https://github.com/serenakeyitan/tdoc' },
+          headers: { Location: 'https://github.com/tornado-doc/tdoc' },
         });
       }
       return html(await indexHtml(env, s));

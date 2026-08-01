@@ -226,9 +226,23 @@
   /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
      buttons / cards keep their inline layout instead of stacking to 16px tall. */
   :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; }
-  /* Reading column for the doc container. :where() so a doc's own rule wins. */
+  /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
+     column, wrapper or not. Two halves: (a) recognized wrappers get max-width
+     AND margin:auto (previously margin was missing, so wrapped docs without
+     their own margin rule sat left-aligned); (b) docs with no wrapper at all
+     get the same column applied to body itself via :has(). :where() keeps both
+     at zero specificity so a doc that truly wants full-bleed can override. */
   :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
     max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 56px 24px 80px;
+    box-sizing: border-box;
+  }
+  :where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
     padding: 56px 24px 80px;
     box-sizing: border-box;
   }
@@ -536,11 +550,11 @@
   .tdoc-comment-pill {
     position: absolute !important; z-index: 999998 !important;
     background: #fff !important; color: #1a1a1a !important;
-    font: 600 12px system-ui !important;
-    padding: 7px 13px !important;
+    font: 600 11.5px system-ui !important;
+    padding: 5px 10px !important;
     border: 1px solid #e2e2e4 !important; border-radius: 999px !important;
     cursor: pointer !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 6px 18px rgba(0,0,0,0.10) !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 4px 12px rgba(0,0,0,0.08) !important;
     display: inline-flex !important; align-items: center !important; gap: 6px !important;
     transition: transform .12s, background-color .12s, border-color .12s, color .12s, box-shadow .12s !important;
     line-height: 1 !important;
@@ -809,7 +823,7 @@
   // no public catalog; the owner reaches their doc list via the profile
   // chip menu instead.
   document.getElementById('tdoc-bar-mark').onclick = () =>
-    window.open('https://github.com/serenakeyitan/tdoc', '_blank', 'noopener');
+    window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
 
   // Fork: opens the renderable /fork view in a new tab AND triggers a download
   // (one click, both happen). We use a hidden iframe to fire the download so
@@ -913,7 +927,7 @@
     b.onclick = (e) => {
       e.stopPropagation();
       secMenu.classList.remove('open');
-      if (b.dataset.action === 'repo') window.open('https://github.com/serenakeyitan/tdoc', '_blank', 'noopener');
+      if (b.dataset.action === 'repo') window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
       if (b.dataset.action === 'fork') forkAndDownload();
       if (b.dataset.action === 'share') showShareModal();
       if (b.dataset.action === 'publish') showPublishModal();
@@ -1078,11 +1092,10 @@
   footer.className = 'tdoc-footer';
   footer.innerHTML =
     '<div class="tdoc-footer-row">' +
-      '<a href="https://github.com/serenakeyitan/tdoc" target="_blank" rel="noopener">github.com/serenakeyitan/tdoc</a>' +
+      '<a href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener">github.com/tornado-doc/tdoc</a>' +
       '<span class="sep">·</span>' +
-      '<span>built with <a href="https://github.com/serenakeyitan/tdoc" target="_blank" rel="noopener">tdoc</a></span>' +
+      '<span>built with <a href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener">tdoc</a></span>' +
       '<span class="sep">·</span>' +
-      '<span>inspired by <a href="https://x.com/jessepollak/status/2054313757543964857" target="_blank" rel="noopener">bdocs by @jessepollak</a></span>' +
     '</div>';
   document.body.appendChild(footer);
 
@@ -3137,7 +3150,8 @@
     commentPill = document.createElement('button');
     commentPill.className = 'tdoc-comment-pill';
     commentPill.type = 'button';
-    commentPill.setAttribute('aria-label', 'Comment on this');
+    commentPill.setAttribute('aria-label', 'Comment on this section');
+    commentPill.title = 'Comment on this section';
     commentPill.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Comment`;
     // Top-right corner of the SECTION, so it visually belongs to the whole
     // artifact regardless of where inside it the cursor is.

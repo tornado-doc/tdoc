@@ -1,15 +1,15 @@
 {
-  "name": "serenakeyitan-tdoc",
+  "name": "tornado-tdoc",
   "owner": {
-    "name": "Serena Keyitan"
+    "name": "Tornado"
   },
   "description": "Single-plugin marketplace hosting tdoc.",
   "plugins": [
     {
       "name": "tdoc",
-      "source": "github:serenakeyitan/tdoc",
-      "description": "Prompt-native interactive HTML docs. Open-source community implementation of Jesse Pollak's bdocs idea.",
-      "homepage": "https://github.com/serenakeyitan/tdoc"
+      "source": "github:tornado-doc/tdoc",
+      "description": "Prompt-native interactive HTML docs.",
+      "homepage": "https://github.com/tornado-doc/tdoc"
     }
   ]
 }

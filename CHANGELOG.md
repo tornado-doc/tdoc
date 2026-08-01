@@ -179,5 +179,5 @@ were stuck on the buggy 0.7.9 until this bump.
   the pending tdoc highlight but never called `getSelection().removeAllRanges()`.
   Now cleared on submit / cancel / Esc / click-away.
 
-[0.7.10]: https://github.com/serenakeyitan/tdoc/releases/tag/v0.7.10
-[0.7.9]: https://github.com/serenakeyitan/tdoc/releases/tag/v0.7.9
+[0.7.10]: https://github.com/tornado-doc/tdoc/releases/tag/v0.7.10
+[0.7.9]: https://github.com/tornado-doc/tdoc/releases/tag/v0.7.9

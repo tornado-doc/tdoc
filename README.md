@@ -1,8 +1,6 @@
 # tdoc — Google Docs for markdown, with your agent as collaborator
 
-<a href="https://trendshift.io/repositories/47678?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-47678" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/47678/daily?language=JavaScript" alt="serenakeyitan%2Ftdoc | Trendshift" width="250" height="55"/></a>
 
-See it live: https://tdoc.serenatan.workers.dev/d/conway-life/v/2
 ### 🌳 use artifacts in [first-tree](https://first-tree.ai/?utm_source=github&utm_medium=readme&utm_campaign=tdoc-site) for **free** — the most efficient way for **human & agent collaboration** :D
 
 https://github.com/user-attachments/assets/872957b6-34bd-4c67-a3fa-3911ebd09d09
@@ -13,7 +11,7 @@ https://github.com/user-attachments/assets/872957b6-34bd-4c67-a3fa-3911ebd09d09
 
 **Turn a prompt into an interactive doc, share it as a live URL, get Google-Docs-style comments back — straight into your agent.**
 
-Open-source take on Jesse Pollak's bdocs concept. Authored by an agent, not maintained by hand. tdoc deploys to **your own free Cloudflare Worker**, so you get a public shareable link with zero hosting cost and zero infra to manage — and it's an **agent skill** with built-in version control. It's a first-class **Claude Code** skill; it also runs under **Codex** (the skill auto-detects the host and falls back to plain-text prompts where Claude-specific tools aren't available — see [Using tdoc with Codex](#using-tdoc-with-codex)).
+Authored by an agent, not maintained by hand. tdoc deploys to **your own free Cloudflare Worker**, so you get a public shareable link with zero hosting cost and zero infra to manage — and it's an **agent skill** with built-in version control. It's a first-class **Claude Code** skill; it also runs under **Codex** (the skill auto-detects the host and falls back to plain-text prompts where Claude-specific tools aren't available — see [Using tdoc with Codex](#using-tdoc-with-codex)).
 
 ```
 You:  /tdoc new "an explainer with a slider showing how interest compounds"
@@ -44,12 +42,12 @@ Think of it as **Google Docs, but for markdown files and with your agent as a co
 Paste this into Claude Code or Codex:
 
 ```
-Install tdoc by following https://github.com/serenakeyitan/tdoc/blob/main/ONBOARDING.md
+Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md
 ```
 
 The agent clones the repo, runs the doctor, walks you through the ~2 browser clicks for Cloudflare, and ends with a published URL. **Zero to live in ~3 minutes.**
 
-Or via the plugin marketplace: `/plugin marketplace add serenakeyitan/tdoc`
+Or via the plugin marketplace: `/plugin marketplace add tornado-doc/tdoc`
 
 ### Using tdoc with Codex
 
@@ -208,7 +206,6 @@ line — no excuse not to).
 
 ## Credit
 
-The concept and original framing are [Jesse Pollak](https://x.com/jessepollak)'s [bdocs](https://x.com/jessepollak/status/2054313757543964857) at Coinbase. `tdoc` is one possible open-source community implementation. If Jesse open-sources the real bdocs, use that.
 
 ## License
 
