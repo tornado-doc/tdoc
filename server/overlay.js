@@ -104,53 +104,124 @@
      headings, lists, code, tables, quotes. Wrapped in :where() so a doc that
      truly needs a different aesthetic can override per element. Future
      templates would live alongside this block, switched by a body class. */
-  /* theme-v1 "editorial": warm paper ground, serif display headings, terracotta
-     accent. Distinct from stock Claude/GitHub markdown look (JUL-21). Same
-     selectors/structure as before — only the values changed. */
+  /* ===== Theme tokens (JUL-21 v2). Every themable color in the doc template
+     AND the overlay UI goes through these variables — no stray literals, so a
+     palette switch recolors hover/focus/shadows/chips in one place. Default =
+     "Classic" (the original tdoc look). Users pick a palette from the bar;
+     choice persists in localStorage and applies via a body class. ===== */
+  :root {
+    --td-accent: #1652f0;
+    --td-accent-hover: #1245d0;
+    --td-accent-ring: rgba(22,82,240,0.35);
+    --td-accent-ring-soft: rgba(22,82,240,0.18);
+    --td-accent-wash: rgba(22,82,240,0.06);
+    --td-accent-tint: #e8eeff;
+    --td-ground: #fff;
+    --td-ink: #1a1a1a;
+    --td-heading: #1a1a1a;
+    --td-muted: #6b6a66;
+    --td-line: #e8e7e3;
+    --td-surface: #f0f0ee;
+    --td-surface-2: #f7f7f5;
+    --td-pre-ink: #1a1a1a;
+    --td-th-bg: #f0f0ee;
+    --td-th-ink: #1a1a1a;
+    --td-check: #1a1a1a;
+    --td-font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --td-h2-rule: transparent;
+    --td-selection: #cfe0ff;
+    --td-quote: #d9d8d3;
+  }
+  body.td-theme-editorial {
+    --td-accent: #b3441e;
+    --td-accent-hover: #96350f;
+    --td-accent-ring: rgba(179,68,30,0.35);
+    --td-accent-ring-soft: rgba(179,68,30,0.18);
+    --td-accent-wash: rgba(179,68,30,0.06);
+    --td-accent-tint: #f6e3d7;
+    --td-ground: #f7f5f0;
+    --td-ink: #22211d;
+    --td-heading: #1b1a17;
+    --td-muted: #78766c;
+    --td-line: #e5e0d4;
+    --td-surface: #efece2;
+    --td-surface-2: #24221c;
+    --td-pre-ink: #ece8dc;
+    --td-th-bg: #8a5a2b;
+    --td-th-ink: #f7f5f0;
+    --td-check: #b3441e;
+    --td-font-display: "Iowan Old Style", "Palatino Nova", Palatino, Georgia, "Times New Roman", serif;
+    --td-h2-rule: #e5e0d4;
+    --td-selection: #f4d9c4;
+    --td-quote: #b3441e;
+  }
+  body.td-theme-forest {
+    --td-accent: #1e6f50;
+    --td-accent-hover: #175a41;
+    --td-accent-ring: rgba(30,111,80,0.35);
+    --td-accent-ring-soft: rgba(30,111,80,0.18);
+    --td-accent-wash: rgba(30,111,80,0.06);
+    --td-accent-tint: #e0efe7;
+    --td-ground: #f6f8f6;
+    --td-ink: #1d2420;
+    --td-heading: #16201a;
+    --td-muted: #64716a;
+    --td-line: #dfe6e0;
+    --td-surface: #eaf0ea;
+    --td-surface-2: #182420;
+    --td-pre-ink: #dfe9e2;
+    --td-th-bg: #1e6f50;
+    --td-th-ink: #f6f8f6;
+    --td-check: #1e6f50;
+    --td-font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --td-h2-rule: #dfe6e0;
+    --td-selection: #cde8db;
+    --td-quote: #1e6f50;
+  }
+  /* Default template ("Classic" = original tdoc look), all colors via tokens. */
   :where(body) {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     font-size: 17px;
-    line-height: 1.65;
-    color: #22211d;
-    background: #f7f5f0;
+    line-height: 1.6;
+    color: var(--td-ink);
+    background: var(--td-ground);
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
   }
-  :where(body h1) { font-family: "Iowan Old Style", "Palatino Nova", Palatino, Georgia, "Times New Roman", serif; font-size: 42px; line-height: 1.12; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 22px; color: #1b1a17; }
-  :where(body h2) { font-family: "Iowan Old Style", "Palatino Nova", Palatino, Georgia, "Times New Roman", serif; font-size: 29px; line-height: 1.22; font-weight: 700; letter-spacing: -0.008em; margin: 46px 0 14px; color: #1b1a17; padding-bottom: 8px; border-bottom: 1px solid #e5e0d4; }
-  :where(body h3) { font-family: "Iowan Old Style", "Palatino Nova", Palatino, Georgia, "Times New Roman", serif; font-size: 22px; line-height: 1.32; font-weight: 700; margin: 34px 0 10px; color: #1b1a17; }
-  :where(body h4) { font-size: 17px; font-weight: 700; margin: 22px 0 6px; color: #1b1a17; }
-  :where(body h5, body h6) { font-size: 13.5px; font-weight: 600; margin: 16px 0 4px; color: #8a5a2b; text-transform: uppercase; letter-spacing: 0.09em; }
+  :where(body h1) { font-family: var(--td-font-display); font-size: 38px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 20px; color: var(--td-heading); }
+  :where(body h2) { font-family: var(--td-font-display); font-size: 27px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 44px 0 14px; color: var(--td-heading); padding-bottom: 6px; border-bottom: 1px solid var(--td-h2-rule); }
+  :where(body h3) { font-family: var(--td-font-display); font-size: 21px; line-height: 1.35; font-weight: 700; margin: 32px 0 10px; color: var(--td-heading); }
+  :where(body h4) { font-size: 17px; font-weight: 700; margin: 22px 0 6px; color: var(--td-heading); }
+  :where(body h5, body h6) { font-size: 14px; font-weight: 600; margin: 16px 0 4px; color: var(--td-heading); text-transform: uppercase; letter-spacing: 0.06em; }
   :where(body p) { margin: 0 0 16px; }
-  :where(body a) { color: #b3441e; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #dfa88f; }
-  :where(body a:hover) { text-decoration-thickness: 2px; text-decoration-color: #b3441e; }
+  :where(body a) { color: var(--td-accent); text-decoration: underline; text-underline-offset: 2px; }
+  :where(body a:hover) { text-decoration-thickness: 2px; }
   :where(body ul, body ol) { margin: 0 0 18px; padding-left: 26px; }
   :where(body li) { margin: 8px 0; }
-  :where(body li::marker) { color: #b3441e; }
-  :where(body blockquote) { font-family: "Iowan Old Style", Palatino, Georgia, serif; font-style: italic; font-size: 18px; margin: 22px 0; padding: 10px 20px 10px 22px; border-left: 3px solid #b3441e; color: #5c5a52; background: #f1ede4; border-radius: 0 8px 8px 0; }
-  :where(body code) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; background: #edeade; color: #703a12; padding: 2px 6px; border-radius: 6px; }
-  :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: #24221c; color: #ece8dc; border: 1px solid #24221c; border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
+  :where(body blockquote) { margin: 20px 0; padding: 2px 0 2px 20px; border-left: 3px solid var(--td-quote); color: var(--td-muted); }
+  :where(body code) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; background: var(--td-surface); padding: 2px 6px; border-radius: 6px; }
+  :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: var(--td-surface-2); color: var(--td-pre-ink); border: 1px solid var(--td-line); border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
   :where(body pre code) { background: transparent; color: inherit; padding: 0; border-radius: 0; }
-  :where(body hr) { border: 0; border-top: 1px solid #e5e0d4; margin: 36px 0; }
-  /* Tables: rounded cells on warm ground, header row tinted with the accent. */
+  :where(body hr) { border: 0; border-top: 1px solid var(--td-line); margin: 36px 0; }
+  /* Tables: rounded cells with gutters — header tint comes from the theme. */
   :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px -14px; font-size: 16px; }
-  :where(body th, body td) { padding: 10px 14px; background: #efece2; border-radius: 8px; border: 0; text-align: left; }
-  :where(body th) { font-weight: 600; color: #f7f5f0; background: #8a5a2b; }
-  :where(body figcaption) { font-size: 13px; color: #78766c; margin-top: 6px; text-align: center; }
-  :where(body) ::selection { background: #f4d9c4; }
+  :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
+  :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
+  :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
+  :where(body) ::selection { background: var(--td-selection); }
   /* Task lists: circle checkboxes, Claude Code style. Works for raw
      <input type=checkbox> in lists and markdown-converted .task-list-item. */
   :where(body li:has(> input[type="checkbox"]), body li.task-list-item) { list-style: none; margin-left: -26px; }
   :where(body input[type="checkbox"]) {
     appearance: none; -webkit-appearance: none;
     width: 17px; height: 17px;
-    border: 1.5px solid #c6c0b0; border-radius: 50%;
+    border: 1.5px solid #c9c8c3; border-radius: 50%;
     vertical-align: -3px; margin: 0 8px 0 0;
-    background: #fdfcf9; cursor: default;
+    background: var(--td-ground); cursor: default;
   }
   :where(body input[type="checkbox"]:checked) {
-    background: #b3441e center / 11px no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 5" stroke="white" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
-    border-color: #b3441e;
+    background: var(--td-check) center / 11px no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 5" stroke="white" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    border-color: var(--td-check);
   }
   /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
      buttons / cards keep their inline layout instead of stacking to 16px tall. */
@@ -200,8 +271,8 @@
   .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 
   /* Workspace mark — circular dot like HackMD's logo. Clicks → /. */
-  .tdoc-bar-mark { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 12px; border-radius: 999px; background: #b3441e; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: -0.01em; cursor: pointer; flex-shrink: 0; border: none; }
-  .tdoc-bar-mark:hover { background: #96350f; }
+  .tdoc-bar-mark { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--td-accent); color: #fff; font-weight: 700; font-size: 13px; letter-spacing: -0.01em; cursor: pointer; flex-shrink: 0; border: none; }
+  .tdoc-bar-mark:hover { background: var(--td-accent-hover); }
 
   /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
   .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -215,8 +286,8 @@
   .tdoc-bar button svg { flex-shrink: 0; }
 
   /* Primary CTA (Share / Publish) — filled blue button at the right. */
-  .tdoc-bar button.primary { background: #b3441e; color: #fff; padding: 7px 14px; font-weight: 600; }
-  .tdoc-bar button.primary:hover { background: #96350f; color: #fff; }
+  .tdoc-bar button.primary { background: var(--td-accent); color: #fff; padding: 7px 14px; font-weight: 600; }
+  .tdoc-bar button.primary:hover { background: var(--td-accent-hover); color: #fff; }
 
   /* Version picker chip — pill in the left breadcrumb. */
   .tdoc-version-wrap { position: relative; display: inline-block; flex-shrink: 0; }
@@ -232,24 +303,30 @@
   .tdoc-menu button, .tdoc-secondary-menu button, .tdoc-version-menu button { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 4px; color: #1a1a1a; font: 13px system-ui, sans-serif; }
   .tdoc-version-menu button { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
   .tdoc-menu button:hover, .tdoc-secondary-menu button:hover, .tdoc-version-menu button:hover { background: #f0f1f4; }
-  .tdoc-version-menu button.current { color: #b3441e; font-weight: 600; }
+  .tdoc-version-menu button.current { color: var(--td-accent); font-weight: 600; }
 
   .tdoc-menu-wrap { position: relative; display: inline-block; }
   /* Overflow ⋯ button shows on narrow viewports. */
   .tdoc-bar .tdoc-secondary-toggle { display: none; padding: 6px 10px; }
+  /* Palette picker (JUL-21 v2): swatch menu; selection persists per browser. */
+  .tdoc-theme-menu { top: calc(100% + 6px); right: 0; min-width: 150px; }
+  .tdoc-theme-menu button { display: flex; align-items: center; gap: 8px; }
+  .tdoc-swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.15); }
+  .tdoc-theme-menu button .tick { margin-left: auto; opacity: 0; font-size: 12px; }
+  .tdoc-theme-menu button.active .tick { opacity: 1; }
 
   /* Identity chip — avatar + name (name hides on narrow). */
   .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; }
   .tdoc-chip:hover { background: #e5e6ea; }
   .tdoc-chip img { width: 26px; height: 26px; border-radius: 50%; }
   .tdoc-chip .name { font-size: 13px; font-weight: 500; }
-  .tdoc-chip.signin { padding: 7px 14px; background: #b3441e; color: #fff; font-weight: 600; }
-  .tdoc-chip.signin:hover { background: #96350f; }
+  .tdoc-chip.signin { padding: 7px 14px; background: var(--td-accent); color: #fff; font-weight: 600; }
+  .tdoc-chip.signin:hover { background: var(--td-accent-hover); }
 
   /* Comment cards */
   #tdoc-comment-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; z-index: 999996; }
   .tdoc-margin-comment { position: absolute; width: 280px; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font: 13px system-ui, sans-serif; transition: box-shadow .15s, transform .15s; z-index: 999996; pointer-events: auto; }
-  .tdoc-margin-comment.active { box-shadow: 0 4px 16px rgba(22,82,240,0.18); border-color: #b3441e; }
+  .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
   .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
   /* A resolved (agent-applied) comment whose anchor text was rewritten is the
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
@@ -262,7 +339,7 @@
   .tdoc-margin-comment.tdoc-unanchored .tdoc-reanchor-btn { display: block; }
   /* Anchored cards also expose a "move anchor" action when they're active. */
   .tdoc-margin-comment.active .tdoc-reanchor-btn { display: block; }
-  .tdoc-reanchor-btn:hover { color: #b3441e; }
+  .tdoc-reanchor-btn:hover { color: var(--td-accent); }
   /* Label swap: "unanchored" wording on unanchored cards, "move anchor" on
      active anchored cards. */
   .tdoc-reanchor-btn .tdoc-reanchor-unanchored,
@@ -275,7 +352,7 @@
      user to select. */
   /* Re-anchor banner: pinned below the bar with three actions. Visible
      only while body.tdoc-reanchoring is set. */
-  .tdoc-reanchor-banner { display: none; position: fixed; top: 56px; left: 50%; transform: translateX(-50%); background: #b3441e; color: #fff; padding: 6px 10px 6px 14px; border-radius: 999px; font: 12px system-ui; z-index: 999999; align-items: center; gap: 6px; box-shadow: 0 4px 16px rgba(22,82,240,0.35); }
+  .tdoc-reanchor-banner { display: none; position: fixed; top: 56px; left: 50%; transform: translateX(-50%); background: var(--td-accent); color: #fff; padding: 6px 10px 6px 14px; border-radius: 999px; font: 12px system-ui; z-index: 999999; align-items: center; gap: 6px; box-shadow: 0 4px 16px var(--td-accent-ring); }
   body.tdoc-reanchoring .tdoc-reanchor-banner { display: inline-flex; }
   .tdoc-reanchor-banner .label { padding: 0 4px; }
   .tdoc-reanchor-banner button { background: rgba(255,255,255,0.15); border: none; color: #fff; padding: 4px 10px; border-radius: 999px; font: 12px system-ui; cursor: pointer; }
@@ -316,9 +393,9 @@
   .tdoc-margin-comment .del:hover { text-decoration: underline; }
   .tdoc-margin-comment .actions { display: inline-flex; gap: 8px; align-items: center; flex-shrink: 0; }
   .tdoc-margin-comment .copy-md { cursor: pointer; color: #888; display: inline-flex; align-items: center; }
-  .tdoc-margin-comment .copy-md:hover { color: #b3441e; }
+  .tdoc-margin-comment .copy-md:hover { color: var(--td-accent); }
   .tdoc-margin-comment .copy-md svg { width: 14px; height: 14px; display: block; }
-  .tdoc-margin-comment .tdoc-reply-toggle { cursor: pointer; color: #b3441e; }
+  .tdoc-margin-comment .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); }
   .tdoc-margin-comment .tdoc-reply-toggle:hover { text-decoration: underline; }
 
   /* ===== Pins model (wide mode only) =====
@@ -335,14 +412,14 @@
   body.tdoc-pins:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { display: block; }
 
   .tdoc-pin { position: absolute; pointer-events: auto; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #cdd3dc; box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; transition: transform .12s, border-color .12s, box-shadow .12s; box-sizing: border-box; }
-  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active { transform: scale(1.12); border-color: #b3441e; box-shadow: 0 2px 8px rgba(22,82,240,0.25); z-index: 1; }
+  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active { transform: scale(1.12); border-color: var(--td-accent); box-shadow: 0 2px 8px var(--td-accent-ring-soft); z-index: 1; }
   .tdoc-pin img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
   .tdoc-pin .tdoc-pin-anon { width: 100%; height: 100%; border-radius: 50%; background: #8a93a2; }
   /* Resolved pins get a green ring + a small ✓ overlay badge. */
   .tdoc-pin.tdoc-pin-resolved { border-color: #1a7340; }
   .tdoc-pin.tdoc-pin-resolved::after { content: "✓"; position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; background: #1a7340; color: #fff; font-size: 9px; line-height: 14px; text-align: center; font-weight: 700; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
-  .tdoc-pin.tdoc-pin-cluster { background: #b3441e; border-color: #b3441e; color: #fff; font: 600 12px system-ui; }
+  .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
   .tdoc-pin.tdoc-pin-cluster::after { content: none; }
 
@@ -366,7 +443,7 @@
   .tdoc-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; align-items: center; }
   .tdoc-react-chip { position: relative; display: inline-flex; align-items: center; gap: 4px; font: 12px system-ui; background: #f5f6f8; border: 1px solid #e5e5e5; border-radius: 999px; padding: 2px 8px; cursor: pointer; color: #333; transition: background .12s, border-color .12s; }
   .tdoc-react-chip:hover { background: #eef0f3; }
-  .tdoc-react-chip.mine { background: #e8eeff; border-color: #b3441e; color: #b3441e; }
+  .tdoc-react-chip.mine { background: var(--td-accent-tint); border-color: var(--td-accent); color: var(--td-accent); }
   /* Agent reactions get a tinted background so users can scan a long doc
      and spot which comments the agent has already responded to. */
   .tdoc-react-chip.agent { background: #f3eaff; border-color: #c3a8f0; color: #5a2da8; }
@@ -397,15 +474,15 @@
   .tdoc-margin-comment:hover .tdoc-reactions .tdoc-react-add, .tdoc-reply:hover .tdoc-reactions .tdoc-react-add, .tdoc-reactions:has(.tdoc-react-chip) .tdoc-react-add { opacity: 1; }
   .tdoc-react-add.inline svg { width: 14px; height: 14px; }
   .tdoc-react-add.inline { opacity: 0.55; vertical-align: middle; }
-  .tdoc-react-add:hover { color: #b3441e; opacity: 1; }
+  .tdoc-react-add:hover { color: var(--td-accent); opacity: 1; }
   .tdoc-emoji-picker { position: absolute; background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 6px; display: grid; grid-template-columns: repeat(6, 32px); gap: 2px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 1000001; }
   .tdoc-emoji-picker button { background: transparent; border: none; padding: 0; cursor: pointer; border-radius: 4px; width: 32px; height: 32px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
   .tdoc-emoji-picker button:hover { background: #f5f6f8; }
-  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: #b3441e; }
-  .tdoc-emoji-picker button.tdoc-emoji-text:hover { background: #e8eeff; }
+  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: var(--td-accent); }
+  .tdoc-emoji-picker button.tdoc-emoji-text:hover { background: var(--td-accent-tint); }
 
   /* Replies + reply form */
-  .tdoc-replies-toggle { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #b3441e; user-select: none; }
+  .tdoc-replies-toggle { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: var(--td-accent); user-select: none; }
   .tdoc-replies-toggle:hover { text-decoration: underline; }
   .tdoc-replies-toggle .chev { transition: transform .15s; }
   .tdoc-replies-toggle.open .chev { transform: rotate(90deg); }
@@ -423,11 +500,11 @@
   .tdoc-reply-form { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; }
   .tdoc-reply-form.open { display: block; }
   .tdoc-reply-form textarea { width: 100%; min-height: 48px; box-sizing: border-box; padding: 6px 8px; font: 13px system-ui; border: 1px solid #ccc; border-radius: 6px; resize: vertical; outline: none; }
-  .tdoc-reply-form textarea:focus { border-color: #b3441e; }
+  .tdoc-reply-form textarea:focus { border-color: var(--td-accent); }
   .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
   .tdoc-reply-form-foot .hint { color: #888; font-size: 11px; }
-  .tdoc-reply-form-foot .tdoc-reply-submit { background: #b3441e; color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
-  .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: #96350f; }
+  .tdoc-reply-form-foot .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
+  .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: var(--td-accent-hover); }
 
   /* Anchor highlights (Custom Highlight API + fallback span) */
   ::highlight(tdoc-pending) { background-color: #fff3a8; }
@@ -446,48 +523,51 @@
   .tdoc-anchor-mark.active { background: #ffd84d; box-shadow: 0 -3px 0 -1px #b8860b inset; }
 
   /* Element outlines + hover affordance */
-  .tdoc-element-outline { position: absolute; pointer-events: none; border: 1.5px solid rgba(22,82,240,0.35); border-radius: 4px; box-sizing: border-box; z-index: 999995; transition: border-color .15s, box-shadow .15s, border-width .15s; }
+  .tdoc-element-outline { position: absolute; pointer-events: none; border: 1.5px solid var(--td-accent-ring); border-radius: 4px; box-sizing: border-box; z-index: 999995; transition: border-color .15s, box-shadow .15s, border-width .15s; }
   .tdoc-element-outline.pending { border-color: #f0d000; border-width: 2px; background: transparent; }
-  .tdoc-element-outline.active { border-color: #b3441e; border-width: 2px; box-shadow: 0 0 0 4px rgba(22,82,240,0.18); }
-  .tdoc-hover-outline { position: absolute; pointer-events: none; z-index: 999995; border: 2px dashed #b3441e; border-radius: 4px; background: rgba(22,82,240,0.06); box-sizing: border-box; transition: opacity .12s; }
+  .tdoc-element-outline.active { border-color: var(--td-accent); border-width: 2px; box-shadow: 0 0 0 4px var(--td-accent-ring-soft); }
+  .tdoc-hover-outline { position: absolute; pointer-events: none; z-index: 999995; border: 2px dashed var(--td-accent); border-radius: 4px; background: var(--td-accent-wash); box-sizing: border-box; transition: opacity .12s; }
   /* Clickable pill that appears NEXT TO commentable artifacts (img/canvas/svg/video/pre).
      Positioned just outside the artifact's right edge so it can't obscure
      content. Uses !important on the visible colors to defend against doc-side
      button:hover rules that would otherwise repaint our background. */
+  /* v2 redesign: quiet surface chip (white card + hairline border + neutral
+     shadow, dark label, accent icon); accent fill arrives only on hover. */
   .tdoc-comment-pill {
     position: absolute !important; z-index: 999998 !important;
-    background: #b3441e !important; color: #fff !important;
-    font: 600 11px system-ui !important;
-    padding: 4px 10px !important;
-    border: none !important; border-radius: 999px !important;
+    background: #fff !important; color: #1a1a1a !important;
+    font: 600 12px system-ui !important;
+    padding: 7px 13px !important;
+    border: 1px solid #e2e2e4 !important; border-radius: 999px !important;
     cursor: pointer !important;
-    box-shadow: 0 2px 8px rgba(22,82,240,0.38) !important;
-    display: inline-flex !important; align-items: center !important; gap: 4px !important;
-    transition: transform .12s, background-color .12s, box-shadow .12s, opacity .12s !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 6px 18px rgba(0,0,0,0.10) !important;
+    display: inline-flex !important; align-items: center !important; gap: 6px !important;
+    transition: transform .12s, background-color .12s, border-color .12s, color .12s, box-shadow .12s !important;
     line-height: 1 !important;
     text-decoration: none !important;
-    opacity: 0.92 !important; visibility: visible !important;
+    visibility: visible !important;
   }
   .tdoc-comment-pill:hover {
-    background: #96350f !important; color: #fff !important;
-    opacity: 1 !important;
+    background: var(--td-accent) !important; color: #fff !important;
+    border-color: var(--td-accent) !important;
     transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(22,82,240,0.50) !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 8px 22px var(--td-accent-ring-soft) !important;
   }
-  .tdoc-comment-pill:active { background: #0f3bb0 !important; transform: translateY(0) !important; }
-  .tdoc-comment-pill svg { width: 12px !important; height: 12px !important; flex-shrink: 0 !important; stroke: #fff !important; }
-  .tdoc-drag-marquee { position: absolute; pointer-events: none; z-index: 999997; border: 1.5px solid #b3441e; background: rgba(22,82,240,0.1); box-sizing: border-box; }
+  .tdoc-comment-pill:active { background: var(--td-accent-hover) !important; transform: translateY(0) !important; }
+  .tdoc-comment-pill svg { width: 13px !important; height: 13px !important; flex-shrink: 0 !important; stroke: var(--td-accent) !important; }
+  .tdoc-comment-pill:hover svg { stroke: #fff !important; }
+  .tdoc-drag-marquee { position: absolute; pointer-events: none; z-index: 999997; border: 1.5px solid var(--td-accent); background: var(--td-accent-wash); box-sizing: border-box; }
 
   /* Popup (new-comment) */
   .tdoc-popup { position: absolute; background: #0a0a0a; color: #fff; border-radius: 10px; padding: 14px; width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); z-index: 999998; font: 13px system-ui, sans-serif; }
   .tdoc-popup .head { display: flex; justify-content: space-between; margin-bottom: 8px; }
   .tdoc-popup .head .h { color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
-  .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid #b3441e; border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
+  .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
   .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
-  .tdoc-popup .submit { background: #b3441e; border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
-  .tdoc-popup .submit:hover { background: #96350f; }
+  .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
+  .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
   .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
 
   /* Modal (sign-in) */
@@ -497,11 +577,11 @@
   .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
   .tdoc-modal .code { background: #0a0a0a; color: #fff; padding: 18px; border-radius: 8px; font: 24px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.15em; text-align: center; margin: 0 0 14px; user-select: all; cursor: copy; }
   .tdoc-modal .step { display: flex; gap: 10px; margin-bottom: 8px; color: #444; }
-  .tdoc-modal .step .n { width: 22px; height: 22px; border-radius: 50%; background: #b3441e; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .tdoc-modal .step .n { width: 22px; height: 22px; border-radius: 50%; background: var(--td-accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
   .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
   .tdoc-modal button { padding: 8px 16px; border-radius: 6px; font: inherit; cursor: pointer; border: 1px solid #ccc; background: #fff; }
-  .tdoc-modal button.primary { background: #b3441e; border-color: #b3441e; color: #fff; }
-  .tdoc-modal button.primary:hover { background: #96350f; }
+  .tdoc-modal button.primary { background: var(--td-accent); border-color: var(--td-accent); color: #fff; }
+  .tdoc-modal button.primary:hover { background: var(--td-accent-hover); }
   .tdoc-modal .status { color: #888; font-size: 13px; }
   /* Modal helper classes used by Publish/Share so dark-mode can override. */
   .tdoc-modal .muted { color: #666; font-size: 13px; }
@@ -540,7 +620,7 @@
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle { display: block; width: 36px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 12px; cursor: grab; touch-action: none; user-select: none; }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
-  body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: #b3441e; color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px rgba(22,82,240,0.35); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
   body.tdoc-narrow .tdoc-modal { width: calc(100vw - 32px); padding: 20px; }
@@ -561,7 +641,7 @@
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
   .tdoc-footer .tdoc-footer-row { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; row-gap: 4px; }
   .tdoc-footer a { color: #666; text-decoration: none; }
-  .tdoc-footer a:hover { color: #b3441e; text-decoration: underline; }
+  .tdoc-footer a:hover { color: var(--td-accent); text-decoration: underline; }
   .tdoc-footer .sep { color: #ccc; }
   @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
 
@@ -664,6 +744,16 @@
 
   const rightHtml = `
     ${copyMenuHtml}
+    <div class="tdoc-menu-wrap">
+      <button id="tdoc-theme-btn" title="Color palette" aria-label="Color palette" aria-haspopup="menu">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.68-.75 1.68-1.68 0-.44-.17-.83-.44-1.12-.27-.29-.43-.68-.43-1.12a1.68 1.68 0 0 1 1.68-1.68h1.98A5.53 5.53 0 0 0 22 10.87C22 5.97 17.5 2 12 2z"/></svg>
+      </button>
+      <div class="tdoc-menu tdoc-theme-menu" id="tdoc-theme-menu">
+        <button data-theme="classic"><span class="tdoc-swatch" style="background:#1652f0"></span>Classic<span class="tick">✓</span></button>
+        <button data-theme="editorial"><span class="tdoc-swatch" style="background:#b3441e"></span>Editorial<span class="tick">✓</span></button>
+        <button data-theme="forest"><span class="tdoc-swatch" style="background:#1e6f50"></span>Forest<span class="tick">✓</span></button>
+      </div>
+    </div>
     ${forkBtnHtml}
     ${primaryCtaHtml}
     <div class="tdoc-menu-wrap">
@@ -830,6 +920,26 @@
       if (b.dataset.action === 'saveas') triggerForkDownload(slug, version);
     };
   });
+
+  // Palette picker (JUL-21 v2): body class + localStorage; "classic" = no class.
+  const THEME_CLASSES = { editorial: 'td-theme-editorial', forest: 'td-theme-forest' };
+  const themeBtn = document.getElementById('tdoc-theme-btn');
+  const themeMenu = document.getElementById('tdoc-theme-menu');
+  function applyTheme(name) {
+    Object.values(THEME_CLASSES).forEach(c => document.body.classList.remove(c));
+    if (THEME_CLASSES[name]) document.body.classList.add(THEME_CLASSES[name]);
+    try { localStorage.setItem('tdoc-theme', name); } catch (e) {}
+    themeMenu.querySelectorAll('button').forEach(b =>
+      b.classList.toggle('active', b.dataset.theme === name));
+  }
+  let savedTheme = 'classic';
+  try { savedTheme = localStorage.getItem('tdoc-theme') || 'classic'; } catch (e) {}
+  applyTheme(savedTheme);
+  themeBtn.onclick = (e) => { e.stopPropagation(); themeMenu.classList.toggle('open'); };
+  themeMenu.querySelectorAll('button').forEach(b => {
+    b.onclick = (e) => { e.stopPropagation(); themeMenu.classList.remove('open'); applyTheme(b.dataset.theme); };
+  });
+  document.addEventListener('click', () => themeMenu.classList.remove('open'));
 
   function renderIdentity() {
     const slot = document.getElementById('tdoc-identity-slot');
