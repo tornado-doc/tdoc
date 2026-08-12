@@ -90,6 +90,26 @@ This is the main release-chain risk: local preview, installed skill, canonical
 repo, and hosted Worker can all be on different commits while showing the same
 document slug.
 
+## Author HTML Compatibility Contract
+
+Agents can generate arbitrary HTML, so tdoc's compatibility model is a contract
+rather than a hard sandbox:
+
+- Use one primary content container: `.wrap`, `main`, `article`, `.content`, or
+  `.container`. The overlay uses these roots to size the reading column and
+  comment rail.
+- Treat `tdoc-*` classes and ids as reserved for the overlay.
+- Scope document UI rules to the document. Avoid broad rules such as
+  `button:hover` because they can affect overlay buttons and comment controls.
+- Prefer responsive layout rules over fixed widths. A document can override
+  tdoc's low-specificity defaults, so a fixed `1120px` container can still
+  break mobile.
+
+The framework guarantees a readable default when a document does not bring its
+own CSS, and it adds safety defaults for common content such as images, tables,
+code, and artifacts. If a document brings high-specificity CSS, preserving that
+style is the author's responsibility.
+
 ## Theme and Style State
 
 There are two different style planes:
