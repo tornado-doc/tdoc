@@ -109,9 +109,10 @@ chrome:
 - overlay UI may differ if local and published runtimes were built from
   different commits.
 
-Viewer palette selection is currently overlay UI state stored in browser
-`localStorage`. It is scoped by origin, so a palette selected on `localhost`
-does not carry to `tdoc.<subdomain>.workers.dev`.
+Viewer palette selection should not be modeled as browser-only overlay state if
+the author expects it to publish. Browser `localStorage` is scoped by origin, so
+a choice made on `localhost` will not carry to
+`tdoc.<subdomain>.workers.dev`.
 
 If tdoc needs an author-chosen default palette for published docs, that should
 be a separate product design:
@@ -122,7 +123,7 @@ meta.json.theme.defaultPalette
   -> overlay first-load behavior
 ```
 
-That is distinct from polishing the local palette picker.
+That is distinct from #91's polish scope.
 
 ## Release Observability Gap
 
