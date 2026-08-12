@@ -106,9 +106,9 @@
      templates would live alongside this block, switched by a body class. */
   /* ===== Theme tokens (JUL-21 v2). Every themable color in the doc template
      AND the overlay UI goes through these variables — no stray literals, so a
-     palette switch recolors hover/focus/shadows/chips in one place. Default =
-     "Classic" (the original tdoc look). Users pick a palette from the bar;
-     choice persists in localStorage and applies via a body class. ===== */
+     single place to change a colour instead of hunting literals. These are the
+     Classic values — the look is unchanged. Alternate palettes and any picker
+     UI are deliberately out of scope here; see ARCHITECTURE.md. ===== */
   :root {
     --td-accent: #1652f0;
     --td-accent-hover: #1245d0;
@@ -131,52 +131,6 @@
     --td-h2-rule: transparent;
     --td-selection: #cfe0ff;
     --td-quote: #d9d8d3;
-  }
-  body.td-theme-editorial {
-    --td-accent: #b3441e;
-    --td-accent-hover: #96350f;
-    --td-accent-ring: rgba(179,68,30,0.35);
-    --td-accent-ring-soft: rgba(179,68,30,0.18);
-    --td-accent-wash: rgba(179,68,30,0.06);
-    --td-accent-tint: #f6e3d7;
-    --td-ground: #f7f5f0;
-    --td-ink: #22211d;
-    --td-heading: #1b1a17;
-    --td-muted: #78766c;
-    --td-line: #e5e0d4;
-    --td-surface: #efece2;
-    --td-surface-2: #24221c;
-    --td-pre-ink: #ece8dc;
-    --td-th-bg: #8a5a2b;
-    --td-th-ink: #f7f5f0;
-    --td-check: #b3441e;
-    --td-font-display: "Iowan Old Style", "Palatino Nova", Palatino, Georgia, "Times New Roman", serif;
-    --td-h2-rule: #e5e0d4;
-    --td-selection: #f4d9c4;
-    --td-quote: #b3441e;
-  }
-  body.td-theme-forest {
-    --td-accent: #1e6f50;
-    --td-accent-hover: #175a41;
-    --td-accent-ring: rgba(30,111,80,0.35);
-    --td-accent-ring-soft: rgba(30,111,80,0.18);
-    --td-accent-wash: rgba(30,111,80,0.06);
-    --td-accent-tint: #e0efe7;
-    --td-ground: #f6f8f6;
-    --td-ink: #1d2420;
-    --td-heading: #16201a;
-    --td-muted: #64716a;
-    --td-line: #dfe6e0;
-    --td-surface: #eaf0ea;
-    --td-surface-2: #182420;
-    --td-pre-ink: #dfe9e2;
-    --td-th-bg: #1e6f50;
-    --td-th-ink: #f6f8f6;
-    --td-check: #1e6f50;
-    --td-font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --td-h2-rule: #dfe6e0;
-    --td-selection: #cde8db;
-    --td-quote: #1e6f50;
   }
   /* Default template ("Classic" = original tdoc look), all colors via tokens. */
   :where(body) {
@@ -323,11 +277,7 @@
   /* Overflow ⋯ button shows on narrow viewports. */
   .tdoc-bar .tdoc-secondary-toggle { display: none; padding: 6px 10px; }
   /* Palette picker (JUL-21 v2): swatch menu; selection persists per browser. */
-  .tdoc-theme-menu { top: calc(100% + 6px); right: 0; min-width: 150px; }
-  .tdoc-theme-menu button { display: flex; align-items: center; gap: 8px; }
   .tdoc-swatch { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.15); }
-  .tdoc-theme-menu button .tick { margin-left: auto; opacity: 0; font-size: 12px; }
-  .tdoc-theme-menu button.active .tick { opacity: 1; }
 
   /* Identity chip — avatar + name (name hides on narrow). */
   .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; }
@@ -759,14 +709,6 @@
   const rightHtml = `
     ${copyMenuHtml}
     <div class="tdoc-menu-wrap">
-      <button id="tdoc-theme-btn" title="Color palette" aria-label="Color palette" aria-haspopup="menu">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.68-.75 1.68-1.68 0-.44-.17-.83-.44-1.12-.27-.29-.43-.68-.43-1.12a1.68 1.68 0 0 1 1.68-1.68h1.98A5.53 5.53 0 0 0 22 10.87C22 5.97 17.5 2 12 2z"/></svg>
-      </button>
-      <div class="tdoc-menu tdoc-theme-menu" id="tdoc-theme-menu">
-        <button data-theme="classic"><span class="tdoc-swatch" style="background:#1652f0"></span>Classic<span class="tick">✓</span></button>
-        <button data-theme="editorial"><span class="tdoc-swatch" style="background:#b3441e"></span>Editorial<span class="tick">✓</span></button>
-        <button data-theme="forest"><span class="tdoc-swatch" style="background:#1e6f50"></span>Forest<span class="tick">✓</span></button>
-      </div>
     </div>
     ${forkBtnHtml}
     ${primaryCtaHtml}
@@ -935,25 +877,6 @@
     };
   });
 
-  // Palette picker (JUL-21 v2): body class + localStorage; "classic" = no class.
-  const THEME_CLASSES = { editorial: 'td-theme-editorial', forest: 'td-theme-forest' };
-  const themeBtn = document.getElementById('tdoc-theme-btn');
-  const themeMenu = document.getElementById('tdoc-theme-menu');
-  function applyTheme(name) {
-    Object.values(THEME_CLASSES).forEach(c => document.body.classList.remove(c));
-    if (THEME_CLASSES[name]) document.body.classList.add(THEME_CLASSES[name]);
-    try { localStorage.setItem('tdoc-theme', name); } catch (e) {}
-    themeMenu.querySelectorAll('button').forEach(b =>
-      b.classList.toggle('active', b.dataset.theme === name));
-  }
-  let savedTheme = 'classic';
-  try { savedTheme = localStorage.getItem('tdoc-theme') || 'classic'; } catch (e) {}
-  applyTheme(savedTheme);
-  themeBtn.onclick = (e) => { e.stopPropagation(); themeMenu.classList.toggle('open'); };
-  themeMenu.querySelectorAll('button').forEach(b => {
-    b.onclick = (e) => { e.stopPropagation(); themeMenu.classList.remove('open'); applyTheme(b.dataset.theme); };
-  });
-  document.addEventListener('click', () => themeMenu.classList.remove('open'));
 
   function renderIdentity() {
     const slot = document.getElementById('tdoc-identity-slot');
