@@ -1,17 +1,25 @@
-# tdoc — Google Docs for markdown, with your agent as collaborator
+# tdoc — agent-native document review
 
+**Turn a prompt into an interactive HTML document, share it as a live URL, and
+bring anchored comments back into your agent workflow.**
 
-### 🌳 use artifacts in [first-tree](https://first-tree.ai/?utm_source=github&utm_medium=readme&utm_campaign=tdoc-site) for **free** — the most efficient way for **human & agent collaboration** :D
+tdoc is a prompt-native document surface for agent-assisted writing and review.
+It creates versioned HTML snapshots, adds Google-Docs-style comments on text
+and artifacts, and lets an agent pull those comments to generate the next
+version with per-comment status replies.
 
-https://github.com/user-attachments/assets/872957b6-34bd-4c67-a3fa-3911ebd09d09
+It runs in two modes:
 
-<img width="1149" height="603" alt="Screenshot 2026-05-13 at 00 21 01" src="https://github.com/user-attachments/assets/f89b12fa-6661-49b6-b9eb-dc0677e3cf1b" />
+- **Local Studio** for private authoring, preview, and agent iteration on
+  `localhost`.
+- **Published Reader** for stable public sharing and GitHub-authenticated
+  comments on your own Cloudflare Worker or Vercel project.
 
-> check out my recent work at https://github.com/agent-team-foundation/first-tree 🥇
+For the runtime model and release-chain details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-**Turn a prompt into an interactive doc, share it as a live URL, get Google-Docs-style comments back — straight into your agent.**
-
-Started as an agent-authored project. tdoc deploys to **your own free Cloudflare Worker**, so you get a public shareable link with zero hosting cost and zero infra to manage — and it's an **agent skill** with built-in version control. It's a first-class **Claude Code** skill; it also runs under **Codex** (the skill auto-detects the host and falls back to plain-text prompts where Claude-specific tools aren't available — see [Using tdoc with Codex](#using-tdoc-with-codex)).
+tdoc is a first-class **Claude Code** skill and also runs under **Codex**. The
+skill auto-detects the host and falls back to plain-text prompts where
+Claude-specific tools are unavailable. See [Using tdoc with Codex](#using-tdoc-with-codex).
 
 ```
 You:  /tdoc new "an explainer with a slider showing how interest compounds"
@@ -20,9 +28,12 @@ You:  /tdoc publish
 Claude: https://tdoc.yourname.workers.dev/d/compound-interest/v/1
 ```
 
-Anyone with the link reads it instantly and comments on any sentence, image, or chart. Your agent pulls those comments, regenerates the next version, and replies on each comment with ✅ applied / 🟡 partial / ❓ question — so you can see exactly what got addressed without leaving the doc.
+Anyone with the link reads it instantly and comments on any sentence, image, or
+chart. Your agent pulls those comments, regenerates the next version, and
+replies on each comment with ✅ applied / 🟡 partial / ❓ question so reviewers
+can see exactly what changed without leaving the doc.
 
-## The painpoint
+## The pain point
 
 **You no longer need to be the router between your colleagues' comments and your agent.**
 
@@ -35,7 +46,9 @@ And docs made in chat have no version history — every regeneration overwrites 
 
 `tdoc` gives you both sides: humans comment Google-Docs-style on any sentence/image/chart, the agent reads the same comments as structured input, and every edit is a new version you can flip back to. All free, all yours.
 
-Think of it as **Google Docs, but for markdown files and with your agent as a collaborator** — multiplayer comments, comment status that stays in sync, full version history, and a one-line CLI to drive it all.
+Think of it as **Google Docs, but for agent-authored HTML documents**:
+multiplayer comments, comment status that stays in sync, full version history,
+and a one-line CLI to drive it all.
 
 ## Install
 
@@ -93,9 +106,24 @@ first publish and it sticks (saved in `~/.tdoc/published.json`):
   ~4.5 MB per doc by Vercel's request limit. Details in
   [vercel/README.md](vercel/README.md).
 
+## Local vs published
+
+Local and published docs serve the same document snapshots, but they are
+different runtimes:
+
+- **Local Studio** reads `~/tdocs` and `server/overlay.js` from disk on each
+  request. It is anonymous, private to the machine, and optimized for fast
+  preview and agent iteration.
+- **Published Reader** serves uploaded snapshots through the deployed runtime.
+  It has public URLs, GitHub identity for comments, and hosted comment storage.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full flow, including how overlay
+code is bundled at publish time.
+
 ## How comments work
 
-It's the Google-Docs commenting model, built for markdown and wired to your agent:
+It's the Google-Docs commenting model, built for generated HTML documents and
+wired to your agent:
 
 - **Text**: highlight any sentence (across paragraphs, across bold/links — anchors survive regeneration) → comment popup, cursor ready to type
 - **Artifacts** (img / canvas / svg / video / `<pre>`): hover → "Comment" pill → click
