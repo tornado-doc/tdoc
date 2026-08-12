@@ -487,21 +487,18 @@
   .tdoc-element-outline.pending { border-color: #f0d000; border-width: 2px; background: transparent; }
   .tdoc-element-outline.active { border-color: var(--td-accent); border-width: 2px; box-shadow: 0 0 0 4px var(--td-accent-ring-soft); }
   .tdoc-hover-outline { position: absolute; pointer-events: none; z-index: 999995; border: 2px dashed var(--td-accent); border-radius: 4px; background: var(--td-accent-wash); box-sizing: border-box; transition: opacity .12s; }
-  /* Clickable pill that appears NEXT TO commentable artifacts (img/canvas/svg/video/pre).
+  /* Icon-only button that appears on commentable artifacts (img/canvas/svg/video/pre).
      Positioned just outside the artifact's right edge so it can't obscure
      content. Uses !important on the visible colors to defend against doc-side
      button:hover rules that would otherwise repaint our background. */
-  /* v2 redesign: quiet surface chip (white card + hairline border + neutral
-     shadow, dark label, accent icon); accent fill arrives only on hover. */
   .tdoc-comment-pill {
     position: absolute !important; z-index: 999998 !important;
-    background: #fff !important; color: #1a1a1a !important;
-    font: 600 11.5px system-ui !important;
-    padding: 5px 10px !important;
-    border: 1px solid #e2e2e4 !important; border-radius: 999px !important;
+    width: 30px !important; height: 30px !important; padding: 0 !important;
+    background: rgba(255,255,255,0.96) !important; color: var(--td-accent) !important;
+    border: 1px solid #dedee3 !important; border-radius: 999px !important;
     cursor: pointer !important;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 4px 12px rgba(0,0,0,0.08) !important;
-    display: inline-flex !important; align-items: center !important; gap: 6px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 3px 10px rgba(0,0,0,0.08) !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
     transition: transform .12s, background-color .12s, border-color .12s, color .12s, box-shadow .12s !important;
     line-height: 1 !important;
     text-decoration: none !important;
@@ -514,7 +511,7 @@
     box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 8px 22px var(--td-accent-ring-soft) !important;
   }
   .tdoc-comment-pill:active { background: var(--td-accent-hover) !important; transform: translateY(0) !important; }
-  .tdoc-comment-pill svg { width: 13px !important; height: 13px !important; flex-shrink: 0 !important; stroke: var(--td-accent) !important; }
+  .tdoc-comment-pill svg { width: 14px !important; height: 14px !important; flex-shrink: 0 !important; stroke: currentColor !important; margin: 0 !important; }
   .tdoc-comment-pill:hover svg { stroke: #fff !important; }
   .tdoc-drag-marquee { position: absolute; pointer-events: none; z-index: 999997; border: 1.5px solid var(--td-accent); background: var(--td-accent-wash); box-sizing: border-box; }
 
@@ -1315,9 +1312,9 @@
   function renderAuthor(author) {
     if (!author) return `<div class="author"><span class="anon">anonymous</span></div>`;
     if (author.kind === 'agent') {
-      // Agent identity (currently always 'tdoc-agent'). No avatar URL — use
-      // a generic icon-circle to differentiate from human commenters.
-      return `<div class="author tdoc-agent-author"><span class="tdoc-agent-badge">⚡</span><span class="login">${escapeHtml(author.login || 'tdoc-agent')}</span></div>`;
+      const label = author.name || author.login || 'tdoc-agent';
+      const title = author.login && author.name && author.login !== author.name ? author.login : label;
+      return `<div class="author tdoc-agent-author" title="${escapeHtml(title)}"><span class="tdoc-agent-badge">⚡</span><span class="login">${escapeHtml(label)}</span></div>`;
     }
     const avatar = author.avatar_url ? `<img src="${escapeHtml(author.avatar_url)}" alt="">` : '';
     return `<div class="author">${avatar}<span class="login">${escapeHtml(author.login || 'anonymous')}</span></div>`;
@@ -1329,7 +1326,7 @@
     if (!entries.length) return '';
     const chips = entries.map(([emoji, users]) => {
       const mine = users.includes(me);
-      const hasAgent = users.includes('tdoc-agent');
+      const hasAgent = users.some(u => u === 'tdoc-agent' || /agent|codex|claude/i.test(u));
       const cls = [`tdoc-react-chip`, mine ? 'mine' : '', hasAgent ? 'agent' : ''].filter(Boolean).join(' ');
       return `<span class="${cls}" data-emoji="${escapeHtml(emoji)}" data-target-id="${escapeHtml(target.id)}" data-users="${users.map(escapeHtml).join('\n')}">${escapeHtml(emoji)} ${users.length}</span>`;
     }).join('');
@@ -1377,8 +1374,9 @@
     // and expand its replies so the agent's resolution is visible, not buried.
     const isResolved = comment.status === 'applied';
     const verdict = comment._agentVerdict || 'applied';
+    const resolvedBy = comment._agentActor || comment.agent_actor || 'tdoc-agent';
     const resolvedChip = isResolved
-      ? `<span class="tdoc-resolved-chip" title="Resolved by tdoc-agent${comment.applied_in ? ' in v' + escapeHtml(String(comment.applied_in)) : ''}">✓ ${
+      ? `<span class="tdoc-resolved-chip" title="Resolved by ${escapeHtml(resolvedBy)}${comment.applied_in ? ' in v' + escapeHtml(String(comment.applied_in)) : ''}">✓ ${
           verdict === 'partial' ? 'partially fixed' : verdict === 'question' ? 'needs input' : 'fixed'
         }${comment.applied_in ? ' · v' + escapeHtml(String(comment.applied_in)) : ''}</span>`
       : '';
@@ -3071,10 +3069,10 @@
     commentPill.type = 'button';
     commentPill.setAttribute('aria-label', 'Comment on this section');
     commentPill.title = 'Comment on this section';
-    commentPill.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Comment`;
+    commentPill.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
     // Top-right corner of the SECTION, so it visually belongs to the whole
     // artifact regardless of where inside it the cursor is.
-    const pillW = 110;
+    const pillW = 30;
     commentPill.style.top = (window.scrollY + r.top + 8) + 'px';
     commentPill.style.left = (window.scrollX + Math.max(r.left + 8, r.right - pillW - 8)) + 'px';
     commentPill.onclick = (e) => {

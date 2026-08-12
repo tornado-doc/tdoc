@@ -76,6 +76,20 @@ function canMutate(record, session, env) {
   const who = record && record.author && record.author.login;
   return !!(who && session && session.login && who === session.login);
 }
+function agentIdentity(body = {}, env = {}) {
+  const fallbackLogin = env.TDOC_AGENT_LOGIN || 'tdoc-agent';
+  const fallbackName = env.TDOC_AGENT_NAME || fallbackLogin;
+  const clean = (v, fallback) => {
+    if (typeof v !== 'string') return fallback;
+    const s = v.trim().slice(0, 80);
+    return s || fallback;
+  };
+  const avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
+    ? body.agent_avatar_url
+    : null;
+  const login = clean(body.agent_login || body.agent_id, fallbackLogin);
+  return { kind: 'agent', login, name: clean(body.agent_name, fallbackName), avatar_url: avatar };
+}
 function rand(n) {
   const a = new Uint8Array(n);
   crypto.getRandomValues(a);
@@ -878,11 +892,13 @@ function snapshotAt(c, V) {
         snap.status = 'applied';
         snap.applied_in = e.applied_in || e.at_version;
         snap._agentVerdict = e.agent_status || 'applied';
+        snap._agentActor = e.by || 'tdoc-agent';
         break;
       case 'marked_open':
         snap.status = 'open';
         snap.applied_in = undefined;
         snap._agentVerdict = e.agent_status || null;
+        snap._agentActor = e.by || 'tdoc-agent';
         break;
       case 'deleted':
         snap.deleted = true;
@@ -950,8 +966,9 @@ function snapshotAt(c, V) {
   // parent card) matches today without storing it as a real reaction event.
   if (snap._agentVerdict && AGENT_STATUS_EMOJI[snap._agentVerdict]) {
     const emoji = AGENT_STATUS_EMOJI[snap._agentVerdict];
+    const actor = snap._agentActor || 'tdoc-agent';
     const u = snap.reactions[emoji] || [];
-    if (!u.includes('tdoc-agent')) u.push('tdoc-agent');
+    if (!u.includes(actor)) u.push(actor);
     snap.reactions[emoji] = u;
   }
   delete snap._agentVerdict;
@@ -1856,7 +1873,8 @@ export default {
     // ---- agent reply (from `tdoc edit` after applying a comment) ----
     // Authenticated with the same upload token as /api/upload — only the doc
     // owner's machine has it, so this can't be spoofed by readers. Posts a
-    // reply on the parent comment, attributed to the `tdoc-agent` identity.
+    // reply on the parent comment, attributed to the supplied agent identity
+    // with `tdoc-agent` kept as the compatibility fallback.
     // status values: 'applied', 'partial', 'question'. The status appears as
     // a visible badge on the reply and also flips the parent comment's
     // status to 'applied' / 'open' so the dashboard reflects it.
@@ -1878,31 +1896,32 @@ export default {
       if (!parent) return json({ error: 'parent_not_found' }, { status: 404 });
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
+      const agent = agentIdentity(body, env);
       const V = coerceBodyVersion(applied_in, parent.created_in || 1);
       const now = new Date().toISOString();
       const replyId = `r_${Date.now()}_${rand(4)}`;
 
       const events = [{
         kind: 'reply_added', at_version: V, at: now,
-        reply: { id: replyId, author: { kind: 'agent', login: 'tdoc-agent', name: 'tdoc-agent', avatar_url: null }, text: replyText, agent_status: verdict },
+        reply: { id: replyId, author: agent, text: replyText, agent_status: verdict },
       }];
       if (verdict === 'applied') {
-        events.push({ kind: 'marked_applied', at_version: V, at: now, applied_in: V, by: 'tdoc-agent', agent_status: 'applied' });
+        events.push({ kind: 'marked_applied', at_version: V, at: now, applied_in: V, by: agent.login, agent_status: 'applied' });
       } else if (verdict === 'partial' || verdict === 'question') {
-        events.push({ kind: 'marked_open', at_version: V, at: now, by: 'tdoc-agent', agent_status: verdict });
+        events.push({ kind: 'marked_open', at_version: V, at: now, by: agent.login, agent_status: verdict });
       }
       if (bind_anchor_aid && typeof bind_anchor_aid === 'string') {
         const cur = snapshotAt(parent, V) || {};
         const fallback = cur.anchor?.fallback;
         const label = cur.anchor?.label || 'svg';
         events.push({
-          kind: 'anchor_changed', at_version: V, at: now, by: 'tdoc-agent', reset_status: false,
+          kind: 'anchor_changed', at_version: V, at: now, by: agent.login, reset_status: false,
           anchor: { kind: 'element', aid: bind_anchor_aid, selector: `[data-tdoc-aid="${bind_anchor_aid}"]`, label, ...(fallback ? { fallback } : {}) },
         });
       }
       const res = await mutateComments(env, slug, {
         kind: 'raw_events', slug, id: parent_id, events,
-        responseBody: { id: replyId, parent_id, text: replyText, author: { kind: 'agent', login: 'tdoc-agent', name: 'tdoc-agent', avatar_url: null }, agent_status: verdict, created: now, reactions: {} },
+        responseBody: { id: replyId, parent_id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
       });
       return json(res.body, { status: res.status });
     }
