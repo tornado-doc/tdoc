@@ -594,7 +594,7 @@ Always set `body { background: #fff; }` (or your chosen color) so the page doesn
 Every doc must work on mobile out of the box. The overlay injects defensive CSS for artifacts, but the doc itself should also be authored responsively:
 
 - **Always include** `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`. (The overlay injects this if you forget, but include it.)
-- **Use fluid widths**, not hardcoded pixels. Container: `max-width: 720px; padding: 0 24px;` (no `margin: 0 auto` — overlay handles it).
+- **Use fluid widths**, not hardcoded pixels. Container: `max-width: 720px;` (no `margin: 0 auto`; no top-level `padding: 0 ...` — overlay handles margins and top/bottom reading space). If you need custom inner spacing, put it on a child element inside the container.
 - **Canvas / SVG / images**: do NOT hardcode width=N height=M. Either:
   - Use `width="100%"` + CSS aspect-ratio (`aspect-ratio: 16/9`), or
   - Use a wrapper with `max-width: 100%` and let the artifact scale.
