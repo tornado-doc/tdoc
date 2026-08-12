@@ -420,8 +420,10 @@ when `server/overlay.js` or `worker/worker.js` is newer than the bundled file
 and redeploys the Worker automatically so users get the latest overlay code.
 Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch uploads).
 
-On published docs, viewers sign in with GitHub (Device Flow, shared OAuth App
-`Ov23liZ1UAGOchvKPmlS`, scope `read:user`) before commenting.
+On published docs, viewers sign in with GitHub (Device Flow, scope
+`read:user`) before commenting. The deployment must configure an org-owned
+`GITHUB_CLIENT_ID`; if it is unset, published-doc sign-in is disabled rather
+than falling back to a personal OAuth app.
 
 Requires `jq`, plus `wrangler` (`npm i -g wrangler`) for the Cloudflare
 target or `vercel` (`npm i -g vercel`) for the Vercel target.
@@ -485,8 +487,9 @@ installed, or might be partway through. You **must** drive the flow from
 - ALWAYS show the user what you're running. Print the JSON status if helpful.
 - If a "click" step doesn't take effect after the user says "done", offer to
   re-check after waiting 10s (Cloudflare API can be slow to reflect changes).
-- The shared OAuth App client ID (`Ov23liZ1UAGOchvKPmlS`) is already baked
-  into the Worker — users do NOT register their own.
+- GitHub sign-in requires an org-owned OAuth App client ID in
+  `GITHUB_CLIENT_ID`. If it is unset, sign-in is disabled; do not point users
+  at a personal/deprecated OAuth app.
 
 ### `/tdoc update` — check for updates and pull the latest
 

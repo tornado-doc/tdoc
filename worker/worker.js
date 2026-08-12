@@ -4,7 +4,7 @@
 //   DOCS   — R2 bucket (key: docs/<slug>/v<N>/index.html)
 //   META   — KV namespace
 // Vars:
-//   GITHUB_CLIENT_ID — hardcoded "Ov23liZ1UAGOchvKPmlS"
+//   GITHUB_CLIENT_ID — GitHub OAuth App client ID for Device Flow auth.
 // Secrets:
 //   TDOC_UPLOAD_TOKEN — shared secret for /api/upload from `tdoc publish`
 //
@@ -624,15 +624,23 @@ function injectOverlayCfg(rawHtml, cfg) {
   return rawHtml + inject;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, authConfigured) {
   return injectOverlayCfg(rawHtml, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
-    authConfigured: true,
+    authConfigured: !!authConfigured,
     mode: 'published',
     versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
   });
+}
+
+function githubClientId(env) {
+  return String(env?.GITHUB_CLIENT_ID || '').trim();
+}
+
+function hasGitHubAuth(env) {
+  return githubClientId(env).length > 0;
 }
 
 // Neutral landing page served at `/`. No catalog, no slug list — just
@@ -1527,7 +1535,7 @@ export default {
           if (Array.isArray(meta.versions)) versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
         }
       } catch {}
-      return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwnerSession(env, session)));
+      return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwnerSession(env, session), hasGitHubAuth(env)));
     }
 
     // ---- doc export / fork ----
@@ -1646,14 +1654,18 @@ export default {
       return json({
         identity: s ? { login: s.login, avatar_url: s.avatar_url, name: s.name } : null,
         isOwner: isOwnerSession(env, s),
-        authConfigured: true,
+        authConfigured: hasGitHubAuth(env),
       });
     }
 
     if (p === '/api/auth/device/start' && method === 'POST') {
+      const clientId = githubClientId(env);
+      if (!clientId) {
+        return json({ error: 'auth_not_configured', message: 'GitHub OAuth is not configured for this tdoc deployment.' }, { status: 503 });
+      }
       try {
         const r = await ghPost('/login/device/code', {
-          client_id: env.GITHUB_CLIENT_ID,
+          client_id: clientId,
           scope: 'read:user',
         });
         if (r.error) return json({ error: r.error, message: r.error_description }, { status: 400 });
@@ -1670,12 +1682,16 @@ export default {
     }
 
     if (p === '/api/auth/device/poll' && method === 'POST') {
+      const clientId = githubClientId(env);
+      if (!clientId) {
+        return json({ error: 'auth_not_configured', message: 'GitHub OAuth is not configured for this tdoc deployment.' }, { status: 503 });
+      }
       let body = {};
       try { body = await req.json(); } catch {}
       if (!body.device_code) return json({ error: 'device_code required' }, { status: 400 });
       try {
         const r = await ghPost('/login/oauth/access_token', {
-          client_id: env.GITHUB_CLIENT_ID,
+          client_id: clientId,
           device_code: body.device_code,
           grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
         });

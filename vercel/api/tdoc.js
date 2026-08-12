@@ -59,9 +59,10 @@ async function buildEnv() {
       META: createKvStore({ url: kvUrl, token: kvToken }),
       TDOC_UPLOAD_TOKEN: process.env.TDOC_UPLOAD_TOKEN,
       TDOC_OWNER: process.env.TDOC_OWNER || '',
-      // Same public GitHub Device Flow app the wrangler template ships —
-      // device flow has no redirect URI, so it works from any host.
-      GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID || 'Ov23liZ1UAGOchvKPmlS',
+      // GitHub Device Flow app for published-doc comments. The OAuth app
+      // identity is user-visible on GitHub's authorization screen, so do not
+      // silently fall back to a personal/deprecated app.
+      GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID || '',
       TDOC_DEBUG: process.env.TDOC_DEBUG || '',
     },
   };

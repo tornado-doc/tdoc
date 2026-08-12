@@ -20,6 +20,7 @@ const OFFLINE = [
   'event-convergence.test.js',// eid dedup convergence + fold ordering
   'reconcile.test.js',        // anchor reconcile branches + compaction
   'security.test.js',         // injection / authz / CSRF / path-traversal
+  'auth-config.test.js',      // GitHub OAuth app must be explicit, no old fallback
   'oldver-strip.test.js',     // old-version banner predicate
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard

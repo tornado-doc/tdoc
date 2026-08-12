@@ -26,7 +26,10 @@ tag = "v1-comments-do"
 new_sqlite_classes = ["CommentsStore"]
 
 [vars]
-GITHUB_CLIENT_ID = "Ov23liZ1UAGOchvKPmlS"
+# GitHub OAuth App client ID for Device Flow auth. The OAuth app identity is
+# user-visible on GitHub's authorization screen, so configure an org-owned app
+# for hosted/share rollout. Leave empty to disable published-doc sign-in.
+GITHUB_CLIENT_ID = ""
 # The worker owner's GitHub login. Only this signed-in viewer sees the
 # "My docs" catalog (profile chip → My docs). Empty = catalog stays fully
 # private (no one can enumerate docs; they're reachable only by direct link).
