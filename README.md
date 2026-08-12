@@ -126,11 +126,11 @@ It's the Google-Docs commenting model, built for generated HTML documents and
 wired to your agent:
 
 - **Text**: highlight any sentence (across paragraphs, across bold/links — anchors survive regeneration) → comment popup, cursor ready to type
-- **Artifacts** (img / canvas / svg / video / `<pre>`): hover → "Comment" pill → click
+- **Artifacts** (img / canvas / svg / video / `<pre>`): hover → comment icon → click
 - **Threads**: emoji reactions (👍 ❤️ 🔥 ✅ ❓ + `LGTM`) and replies; hover a reaction to see who reacted
 - **Move / remove anchor**: drag a comment to new text, or detach it entirely — it stays in the thread
 - **Multiplayer**: anyone with the link signs in once with GitHub and comments. Every comment is attributed to its real author, and concurrent commenters never clobber each other (writes are serialized per-doc — see Reliability below).
-- **Status sync**: comments carry a resolved-style status that stays in sync between the web view and your agent — `tdoc-agent` stamps each with ✅ applied / 🟡 partial / ❓ needs clarification when it regenerates, so "what's been addressed" is visible to everyone, live, without re-pinging.
+- **Status sync**: comments carry a resolved-style status that stays in sync between the web view and your agent — the acting agent stamps each with ✅ applied / 🟡 partial / ❓ needs clarification when it regenerates, so "what's been addressed" is visible to everyone, live, without re-pinging.
 
 ## Version history
 

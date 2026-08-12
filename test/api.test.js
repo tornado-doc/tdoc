@@ -123,12 +123,31 @@ function waitReady(port, ms = 5000) {
     if (!r.body.reactions['🔥']) throw new Error('reaction not stored on reply');
   });
 
+  await t('POST /api/agent/reply preserves agent identity', async () => {
+    const r = await req('POST', '/api/agent/reply', {
+      slug: SLUG,
+      parent_id: topId,
+      text: 'Applied the requested edit.',
+      status: 'applied',
+      applied_in: 2,
+      agent_login: 'codex-pm',
+      agent_name: 'Codex PM',
+    });
+    if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
+    if (r.body.author?.login !== 'codex-pm') throw new Error(`wrong agent login ${r.body.author?.login}`);
+    if (r.body.author?.name !== 'Codex PM') throw new Error(`wrong agent name ${r.body.author?.name}`);
+    const after = await req('GET', `/api/comments?slug=${SLUG}`);
+    const c = after.body[0];
+    if (c.agent_actor !== 'codex-pm') throw new Error(`wrong parent agent_actor ${c.agent_actor}`);
+    if (!c.reactions['✅']?.includes('codex-pm')) throw new Error('agent verdict reaction did not use agent login');
+  });
+
   await t('DELETE /api/comments?id=<reply-id> removes the reply, leaves top', async () => {
     const r = await req('DELETE', `/api/comments?slug=${SLUG}&id=${replyId}`);
     if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
     if (after.body.length !== 1) throw new Error('top comment was removed');
-    if (after.body[0].replies.length !== 0) throw new Error('reply not removed');
+    if (after.body[0].replies.some(r => r.id === replyId)) throw new Error('reply not removed');
   });
 
   await t('DELETE /api/comments?id=<top-id> removes the top comment', async () => {

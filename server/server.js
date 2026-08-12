@@ -70,27 +70,43 @@ function isLocalMutation(req) {
 
 // Escape `</script>` and HTML comment terminators so a malicious or stray value
 // inside the JSON payload can't break out of the surrounding <script> block.
-// Replace `tdoc-agent`'s reaction on a comment with the emoji for the new
-// status. Removes any existing tdoc-agent reactions first so old state
+// Replace the acting agent's reaction on a comment with the emoji for the new
+// status. Also removes legacy `tdoc-agent` reactions first so old state
 // can't outlive the new outcome (e.g. an "applied" ✅ after a later
 // "question" outcome on the same comment).
 const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
 // The emoji set the agent uses as a verdict marker — used by the per-version
 // fold to strip a stale verdict off snapshots where the comment reads 'open'.
 const AGENT_VERDICT_EMOJI = new Set(Object.values(AGENT_STATUS_EMOJI));
-function setAgentReaction(target, status) {
+function agentIdentity(body = {}) {
+  const fallbackLogin = process.env.TDOC_AGENT_LOGIN || process.env.USER || 'tdoc-agent';
+  const fallbackName = process.env.TDOC_AGENT_NAME || fallbackLogin;
+  const clean = (v, fallback) => {
+    if (typeof v !== 'string') return fallback;
+    const s = v.trim().slice(0, 80);
+    return s || fallback;
+  };
+  const avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
+    ? body.agent_avatar_url
+    : null;
+  const login = clean(body.agent_login || body.agent_id, fallbackLogin);
+  return { kind: 'agent', login, name: clean(body.agent_name, fallbackName), avatar_url: avatar };
+}
+function setAgentReaction(target, status, actor = 'tdoc-agent') {
   if (!target.reactions) target.reactions = {};
+  const agentUsers = new Set(['tdoc-agent', actor].filter(Boolean));
   for (const emoji of Object.keys(target.reactions)) {
     const users = target.reactions[emoji] || [];
-    const idx = users.indexOf('tdoc-agent');
-    if (idx >= 0) users.splice(idx, 1);
+    for (let i = users.length - 1; i >= 0; i--) {
+      if (agentUsers.has(users[i])) users.splice(i, 1);
+    }
     if (users.length === 0) delete target.reactions[emoji];
     else target.reactions[emoji] = users;
   }
   const next = AGENT_STATUS_EMOJI[status];
   if (!next) return;
   const u = target.reactions[next] || [];
-  if (!u.includes('tdoc-agent')) u.push('tdoc-agent');
+  if (!u.includes(actor)) u.push(actor);
   target.reactions[next] = u;
 }
 
@@ -149,12 +165,13 @@ function foldCommentsAtVersion(comments, version) {
     // would carry the CURRENT reactions — including the agent verdict emoji
     // (✅/🟡/❓ written by setAgentReaction) — onto every past snapshot. On a
     // version where the comment folds to 'open' that's a contradictory
-    // "resolved" emoji, so drop the tdoc-agent verdict there.
+    // "resolved" emoji, so drop the agent verdict there.
     let reactions = c.reactions;
     if (!resolvedByV && reactions) {
       const filtered = {};
       for (const [emoji, users] of Object.entries(reactions)) {
-        const rest = Array.isArray(users) ? users.filter(u => !(u === 'tdoc-agent' && AGENT_VERDICT_EMOJI.has(emoji))) : users;
+        const agentActor = c.agent_actor || 'tdoc-agent';
+        const rest = Array.isArray(users) ? users.filter(u => !((u === 'tdoc-agent' || u === agentActor) && AGENT_VERDICT_EMOJI.has(emoji))) : users;
         if (rest && rest.length) filtered[emoji] = rest;
       }
       reactions = filtered;
@@ -283,7 +300,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, entry);
   }
 
-  // Agent reply: posts a reply attributed to `tdoc-agent`, updates the
+  // Agent reply: posts a reply attributed to the acting agent, updates the
   // parent comment's status, AND drops a status emoji on the parent's
   // reactions row. Each status maps to a different emoji so the user can
   // tell at a glance from the comment list which were addressed:
@@ -303,6 +320,8 @@ const server = http.createServer(async (req, res) => {
     const parent = all.find(c => c.id === parent_id);
     if (!parent) return json(res, 404, { error: 'parent_not_found' });
     if (!Array.isArray(parent.replies)) parent.replies = [];
+    const agent = agentIdentity(body);
+    parent.agent_actor = agent.login;
     const reply = {
       id: `r_${Date.now()}`,
       parent_id,
@@ -310,7 +329,7 @@ const server = http.createServer(async (req, res) => {
       // Scope the agent reply to the version it was applied at (falls back to
       // the request version, then 1) so the fold can hide it on earlier ones.
       version: Number(applied_in != null ? applied_in : body.version) || 1,
-      author: { kind: 'agent', login: 'tdoc-agent', name: 'tdoc-agent', avatar_url: null },
+      author: agent,
       agent_status: ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null,
       created: new Date().toISOString(),
       reactions: {},
@@ -322,7 +341,7 @@ const server = http.createServer(async (req, res) => {
     } else if (agentStatus === 'question' || agentStatus === 'partial') {
       parent.status = 'open';
     }
-    setAgentReaction(parent, agentStatus);
+    setAgentReaction(parent, agentStatus, agent.login);
     writeJson(file, all);
     return json(res, 200, reply);
   }
@@ -345,7 +364,8 @@ const server = http.createServer(async (req, res) => {
     target.anchor = anchor;
     target.status = 'open';
     delete target.applied_in;
-    setAgentReaction(target, null);
+    setAgentReaction(target, null, target.agent_actor || 'tdoc-agent');
+    delete target.agent_actor;
     writeJson(file, all);
     return json(res, 200, target);
   }

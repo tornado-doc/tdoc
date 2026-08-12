@@ -339,11 +339,14 @@ silently is the #1 source of regression complaints.
    curl -sS -X POST "https://${WORKER}.workers.dev/api/agent/reply" \
      -H "Authorization: Bearer $TOKEN" \
      -H "Content-Type: application/json" \
-     -d "{\"slug\":\"<slug>\",\"parent_id\":\"<comment_id>\",\"text\":\"<one or two sentences>\",\"status\":\"applied\",\"applied_in\":<n+1>}"
+     -d "{\"slug\":\"<slug>\",\"parent_id\":\"<comment_id>\",\"text\":\"<one or two sentences>\",\"status\":\"applied\",\"applied_in\":<n+1>,\"agent_login\":\"<your-agent-handle>\",\"agent_name\":\"<your display name>\"}"
    ```
 
    **For local-only docs** — POST to `http://localhost:7878/api/agent/reply`
    (no token needed).
+   Always include `agent_login` and `agent_name` so reviewers can tell which
+   agent applied or questioned a comment. Old callers fall back to
+   `tdoc-agent`, but that generic label is only a compatibility fallback.
 
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading
