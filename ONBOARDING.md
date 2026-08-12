@@ -168,4 +168,4 @@ node --version  # should be v18 or higher
 
 ## Credit
 
-`tdoc` is an open-source project by Tornado. All credit for the original concept and framing goes to Jesse.
+`tdoc` is an open-source project by [Tornado](https://github.com/tornado-doc). The original concept and framing come from [Jesse Pollak](https://x.com/jessepollak)'s [bdocs](https://x.com/jessepollak/status/2054313757543964857) — full credit to him for the idea tdoc builds on.
