@@ -114,7 +114,7 @@ const REQUIRE_FOOTER = process.env.AUDIT_REQUIRE_FOOTER !== '0';
     if (m.hasComments && !m.narrow && m.article) {
       const readerCenter = (m.innerWidth - 360) / 2;
       const articleCenter = (m.article.left + m.article.right) / 2;
-      if (Math.abs(articleCenter - readerCenter) > 24) {
+      if (Math.abs(articleCenter - readerCenter) > 2) {
         errs.push(`article center=${articleCenter.toFixed(0)} not centered in reading area center=${readerCenter.toFixed(0)}`);
       }
       for (const c of m.cards) {
