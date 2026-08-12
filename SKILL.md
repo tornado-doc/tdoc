@@ -152,7 +152,7 @@ triggers:
 
 # tdoc — Prompt-native HTML documents
 
-Open-source, collaborative take on Jesse Pollak's bdocs. Docs are HTML build
+Open-source, collaborative. Docs are HTML build
 artifacts, not files the user maintains. Authoring interface is a prompt.
 Every edit creates a new version. Comments anchor to highlighted text or to
 artifacts (images, SVG, canvas, video) and are used to regenerate the next
@@ -488,7 +488,7 @@ installed, or might be partway through. You **must** drive the flow from
 ### `/tdoc update` — check for updates and pull the latest
 
 Wraps `bin/tdoc-update`. Runs `git fetch + git merge --ff-only` against
-`origin/main` of `serenakeyitan/tdoc`.
+`origin/main` of `tornado-doc/tdoc`.
 
 - `tdoc-update --check` → report-only, prints incoming commits without changing anything
 - `tdoc-update` → apply, with auto-stash of local edits, **auto-restarts the running local server** so new routes / overlay code take effect
@@ -801,7 +801,7 @@ fi
 
 UPGRADE_CHECK_FLAG="$TEL_HOME/.upgrade-checked-$(date +%Y-%m-%d)"
 if [ "$TEL_EFFECTIVE" != "off" ] && [ ! -f "$UPGRADE_CHECK_FLAG" ] && [ "$INSTALLED_VERSION" != "0.0.0" ]; then
-  LATEST=$(curl -s --max-time 3 https://api.github.com/repos/serenakeyitan/tdoc/releases/latest 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
+  LATEST=$(curl -s --max-time 3 https://api.github.com/repos/tornado-doc/tdoc/releases/latest 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
   # Only fire upgrade prompt if installed is STRICTLY OLDER than latest.
   # Use sort -V (version sort): if installed sorts first, installed < latest.
   # If installed == latest or installed > latest (dev build), skip silently.

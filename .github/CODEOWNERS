@@ -8,20 +8,20 @@
 # (Pair this with "Require review from Code Owners" in branch protection.)
 
 # Default owner for everything not matched more specifically below.
-*                       @serenakeyitan
+*                       @serenakeyitan @yayashuxue
 
 # The browser overlay — bundled into the worker and executed in every reader's
 # browser. Highest-risk surface.
-/server/overlay.js      @serenakeyitan
+/server/overlay.js      @serenakeyitan @yayashuxue
 
 # The Cloudflare Worker — handles untrusted request bodies + auth.
-/worker/                @serenakeyitan
+/worker/                @serenakeyitan @yayashuxue
 
 # The CLIs — read Cloudflare OAuth tokens and run on the user's machine.
-/bin/                   @serenakeyitan
+/bin/                   @serenakeyitan @yayashuxue
 
 # CI, security policy, and ownership itself — a PR must not be able to weaken
 # its own gates.
-/.github/               @serenakeyitan
-/SECURITY.md            @serenakeyitan
-/.claude-plugin/        @serenakeyitan
+/.github/               @serenakeyitan @yayashuxue
+/SECURITY.md            @serenakeyitan @yayashuxue
+/.claude-plugin/        @serenakeyitan @yayashuxue

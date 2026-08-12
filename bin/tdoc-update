@@ -32,7 +32,7 @@ done
 if [ ! -d .git ]; then
   echo "[tdoc-update] this skill dir is not a git checkout."
   echo "             to install the latest, clone it instead:"
-  echo "               rm -rf $SKILL_DIR && git clone https://github.com/serenakeyitan/tdoc $SKILL_DIR"
+  echo "               rm -rf $SKILL_DIR && git clone https://github.com/tornado-doc/tdoc $SKILL_DIR"
   exit 1
 fi
 
