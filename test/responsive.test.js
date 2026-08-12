@@ -73,7 +73,10 @@ async function tPub(name, fn) {
     // Read the actual layout state once; assertions derive from it.
     const st = await page.evaluate(() => {
       const vis = (sel) => { const el = document.querySelector(sel); return !!(el && el.offsetWidth > 0 && el.offsetHeight > 0); };
-      const cards = [...document.querySelectorAll('.tdoc-margin-comment')].map(c => {
+      const cards = [...document.querySelectorAll('.tdoc-margin-comment')].filter(c => {
+        const cs = getComputedStyle(c);
+        return cs.display !== 'none' && c.offsetWidth > 0 && c.offsetHeight > 0;
+      }).map(c => {
         const r = c.getBoundingClientRect(); return { left: r.left, right: r.right };
       });
       return {

@@ -82,10 +82,10 @@
   body .tdoc-bar, body .tdoc-bar *, body #tdoc-comment-layer, body #tdoc-comment-layer *, body #tdoc-pin-layer, body #tdoc-pin-layer *, body .tdoc-cluster-pop, body .tdoc-cluster-pop *, body .tdoc-hover-outline, body .tdoc-comment-pill, body .tdoc-emoji-picker, body .tdoc-secondary-menu, body .tdoc-anchor-mark.tdoc-anchor-mark-element, body .tdoc-drag-marquee, body .tdoc-modal, body .tdoc-modal * { -webkit-user-select: none !important; user-select: none !important; }
   body .tdoc-modal .code, body .tdoc-modal textarea, body .tdoc-modal input { -webkit-user-select: text !important; user-select: text !important; }
   /* Reserve the 320px comment column on the right. The article centers
-     itself inside the remaining (viewport - 320px) space via margin auto
-     (applied below in :where()). Adding a left padding keeps it from
-     hugging the screen edge on wide windows. */
-  body.tdoc-has-comments:not(.tdoc-narrow) { padding-right: 360px !important; padding-left: 80px !important; }
+     itself inside the remaining reading area via margin auto (applied below
+     in :where()). Keep only a small left gutter; a larger one visibly pushes
+     the document off-center when comments are open. */
+  body.tdoc-has-comments:not(.tdoc-narrow) { padding-right: 360px !important; padding-left: 24px !important; }
   body.tdoc-narrow { padding-right: 0 !important; }
   /* Center the article container in the reading column. :where() so any
      doc-defined margin wins. Applies only on wide layouts; narrow mode
