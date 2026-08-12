@@ -208,6 +208,7 @@ function indexPage() {
       <td>${escHtml(slug)}</td>
       <td>v${latest}</td>
       <td>${open ? `<b>${open} open</b>` : '—'}</td>
+      <td><button class="del" data-slug="${escHtml(slug)}" data-versions="${latest}" data-comments="${comments.length}">Delete</button></td>
     </tr>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
@@ -221,10 +222,27 @@ function indexPage() {
   a { color: #1652f0; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; }
+  .del { font: 12px system-ui; color: #a52323; background: none; border: 1px solid #e0c9c9; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+  .del:hover { background: #a52323; color: #fff; border-color: #a52323; }
 </style></head><body>
 <h1>tdoc</h1><p class="sub">Prompt-native documents.</p>
 ${slugs.length === 0 ? '<p class="empty">No docs yet. Try <code>/tdoc new &lt;prompt&gt;</code>.</p>' :
-  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th>Comments</th></tr></thead><tbody>${rows}</tbody></table>`}
+  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th>Comments</th><th></th></tr></thead><tbody>${rows}</tbody></table>`}
+<script>
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('.del');
+  if (!b) return;
+  const slug = b.dataset.slug;
+  // Irreversible: name exactly what disappears before acting.
+  const msg = 'Delete "' + slug + '"?\n\nThis permanently removes ' + b.dataset.versions +
+    ' version(s) and ' + b.dataset.comments + ' comment(s) — the local copy AND the published copy (if any). No undo.';
+  if (!confirm(msg)) return;
+  b.disabled = true; b.textContent = 'Deleting…';
+  const r = await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
+  if (r.ok) { b.closest('tr').remove(); }
+  else { const d = await r.json().catch(() => ({})); alert('Delete failed: ' + (d.error || r.status)); b.disabled = false; b.textContent = 'Delete'; }
+});
+</script>
 </body></html>`;
 }
 
@@ -438,6 +456,34 @@ const server = http.createServer(async (req, res) => {
   // first run); the browser modal shows a "this can take a minute" hint.
   // Honor TDOC_DRY_PUBLISH=1 for tests — echoes "would publish <slug>" and
   // returns a fake URL without invoking wrangler.
+  if (p === '/api/delete' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const slug = safeSlug(body.slug);
+    if (!slug) return json(res, 400, { error: 'invalid slug' });
+    if (!fs.existsSync(path.join(ROOT, slug))) return json(res, 404, { error: 'not found' });
+    const bin = path.join(__dirname, '..', 'bin', 'tdoc-delete');
+    if (!fs.existsSync(bin)) return json(res, 500, { error: 'tdoc-delete script not found' });
+    // Same spawn hardening as /api/publish: error listener, hard timeout,
+    // bounded output. Deleting is quick; 60s covers a slow unpublish curl.
+    const args = body.published === false ? [slug, '--local-only'] : [slug];
+    const proc = spawn(bin, args, { env: process.env });
+    let out = '', err = '', settled = false, killed = false;
+    const CAP = 64 * 1024;
+    const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
+    const settle = (status, obj) => { if (settled) return; settled = true; clearTimeout(timer); json(res, status, obj); };
+    const timer = setTimeout(() => { killed = true; proc.kill('SIGTERM'); setTimeout(() => proc.kill('SIGKILL'), 3000); }, 60000);
+    proc.on('error', (e) => settle(500, { error: 'delete_spawn_failed', detail: String(e && e.message || e) }));
+    proc.stdout.on('data', d => { out = append(out, d); });
+    proc.stderr.on('data', d => { err = append(err, d); });
+    proc.on('close', (code) => {
+      if (killed) return settle(504, { error: 'delete_timeout', stdout: out, stderr: err });
+      if (code !== 0) return settle(500, { error: 'delete_failed', code, stdout: out, stderr: err });
+      settle(200, { ok: true, stdout: out });
+    });
+    return;
+  }
+
   if (p === '/api/publish' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
