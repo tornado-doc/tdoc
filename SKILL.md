@@ -644,7 +644,8 @@ Remote storage holds optional `meta.access`:
 - **private**: `TDOC_OWNER` + `allowed_users` only. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
 - **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
 - Legacy meta without `access` stays world-readable + full history (back-compat).
-- Set via `tdoc-publish --visibility|--history|--commenting|--allow-user` (writes local `meta.json` before upload to remote SoT).
+- Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
+- After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
 
 
 ### Comment anchor stability (important for `/tdoc edit`)
