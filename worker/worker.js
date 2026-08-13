@@ -1548,13 +1548,73 @@ async function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(s || '')));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hostedRegistrationEnabled(env) {
+  const v = String(env.TDOC_HOSTED_REGISTRATION || env.TDOC_HOSTED_SIGNUP || '').toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+async function issueHostedToken(env, body = {}) {
+  const token = `tdoc_${rand(24)}`;
+  const tokenHash = await sha256Hex(token);
+  const record = {
+    account_id: `acct_${rand(12)}`,
+    created: new Date().toISOString(),
+  };
+  if (typeof body.label === 'string' && body.label.trim()) {
+    record.label = body.label.trim().slice(0, 80);
+  }
+  await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record));
+  return { token, record };
+}
+
+async function hostedTokenActor(env, token) {
+  const tokenHash = await sha256Hex(token);
+  let record = null;
+  try {
+    const raw = await env.META.get(`hosted-token:${tokenHash}`);
+    if (raw) record = JSON.parse(raw);
+  } catch {}
+  if (!record || typeof record.account_id !== 'string' || !record.account_id) return null;
+  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash };
+}
+
 async function requireUploadAuth(req, env) {
   const auth = req.headers.get('authorization') || '';
   const m = auth.match(/^Bearer\s+(.+)$/);
-  if (!m || !env.TDOC_UPLOAD_TOKEN || !(await timingSafeEqual(m[1], env.TDOC_UPLOAD_TOKEN))) {
-    return json({ error: 'unauthorized' }, { status: 401 });
+  if (!m) return { ok: false, response: json({ error: 'unauthorized' }, { status: 401 }) };
+  const token = m[1];
+  if (env.TDOC_UPLOAD_TOKEN && await timingSafeEqual(token, env.TDOC_UPLOAD_TOKEN)) {
+    return { ok: true, actor: { kind: 'admin' } };
   }
-  return null;
+  const hostedActor = await hostedTokenActor(env, token);
+  if (hostedActor) return { ok: true, actor: hostedActor };
+  return { ok: false, response: json({ error: 'unauthorized' }, { status: 401 }) };
+}
+
+async function requireDocWriteAccess(env, actor, slug) {
+  const meta = await loadDocMeta(env, slug);
+  if (!actor || actor.kind === 'admin') return { ok: true, meta };
+  const accountId = meta && meta.hosted && meta.hosted.account_id;
+  if (!meta) return { ok: true, meta: null };
+  if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+  if (accountId !== actor.account_id) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  return { ok: true, meta };
+}
+
+function stampHostedOwnership(meta, actor) {
+  if (!actor || actor.kind !== 'hosted') return meta;
+  return {
+    ...(meta || {}),
+    hosted: {
+      ...((meta && meta.hosted && typeof meta.hosted === 'object') ? meta.hosted : {}),
+      account_id: actor.account_id,
+    },
+  };
 }
 
 // ===========================================================================
@@ -2095,6 +2155,27 @@ export default {
       return json({ ok: true }, { headers: { 'Set-Cookie': 'tdoc_sid=; Path=/; Max-Age=0' } });
     }
 
+    // ---- hosted publish token bootstrap ----
+    // Hosted/OOB users should not create Cloudflare resources or receive the
+    // provider-wide TDOC_UPLOAD_TOKEN. The central Worker mints an account-
+    // scoped upload token, and server write routes enforce slug ownership for
+    // that token. Registration is provider-gated by env so deployments can
+    // close signup without changing client code.
+    if (p === '/api/hosted/token' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env)) {
+        return json({ error: 'hosted_registration_disabled' }, { status: 403 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const issued = await issueHostedToken(env, body);
+      return json({
+        ok: true,
+        token: issued.token,
+        account_id: issued.record.account_id,
+        base: url.origin,
+      });
+    }
+
     // ---- comments ----
     if (p === '/api/comments' && method === 'GET') {
       const slug = url.searchParams.get('slug');
@@ -2168,14 +2249,17 @@ export default {
 
     // Admin: wipe ALL comments for a slug (doc owner only — uses the same
     // upload token as /api/upload, so it can be invoked from the publish
-    // tooling or an agent that holds the token; the worker's KV is single-
-    // tenant so this is safe). Triggered by ?all=1 on DELETE /api/comments.
+    // tooling or an agent that holds that doc's hosted token). Triggered by
+    // ?all=1 on DELETE /api/comments.
     if (p === '/api/comments' && method === 'DELETE'
         && url.searchParams.get('all') === '1') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
       return json(res.body, { status: res.status });
@@ -2258,13 +2342,16 @@ export default {
     // a visible badge on the reply and also flips the parent comment's
     // status to 'applied' / 'open' so the dashboard reflects it.
     if (p === '/api/agent/reply' && method === 'POST') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, parent_id, text: replyText, status: agentStatus, applied_in,
               bind_anchor_aid } = body;
       if (!slug || !parent_id || !replyText) return json({ error: 'slug, parent_id, text required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
       // Resolve parent + its current anchor up front (the optional rebind needs
       // the folded anchor for label/fallback). agent/reply is upload-token-authed
       // (owner-only), so concurrency here is negligible; the serialized write
@@ -2307,8 +2394,8 @@ export default {
 
     // ---- admin upload (from `tdoc publish`) ----
     if (p === '/api/upload' && method === 'POST') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, version, html: doc, meta, comments: localComments } = body;
@@ -2322,16 +2409,14 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
       // Validate write-side access policy before writing doc bytes. Read paths
       // stay tolerant for legacy/corrupt stored meta; writes must fail closed.
       let incoming = null;
       if (meta) {
         incoming = (meta && typeof meta === 'object') ? { ...meta } : {};
-        let prev = null;
-        try {
-          const prevRaw = await env.META.get(`meta:${slug}`);
-          if (prevRaw) prev = JSON.parse(prevRaw);
-        } catch {}
+        const prev = writeGate.meta;
         if (!incoming.access && prev && prev.access) {
           incoming.access = prev.access;
         }
@@ -2342,6 +2427,7 @@ export default {
           }
           incoming.access = normalizeAccess(validatedAccess.access, { legacy: false });
         }
+        incoming = stampHostedOwnership(incoming, auth.actor);
       }
       // Identity-stamp every commentable artifact with a content-hashed
       // data-tdoc-aid. The SAME artifact in a different version has the
@@ -2407,8 +2493,8 @@ export default {
     // without a local meta.json or full document re-upload. Authenticated with
     // the same upload token as /api/upload and /api/doc DELETE.
     if (p === '/api/doc/access' && method === 'PATCH') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
       const topKeys = Object.keys(body || {});
@@ -2417,9 +2503,10 @@ export default {
       const { slug, access } = body || {};
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const meta = await loadDocMeta(env, slug);
-      if (!meta) return json({ error: 'not_found' }, { status: 404 });
-      const next = applyAccessPatch(meta, access);
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
+      if (!writeGate.meta) return json({ error: 'not_found' }, { status: 404 });
+      const next = applyAccessPatch(writeGate.meta, access);
       if (next.error) {
         return json({ error: next.error, ...(next.field ? { field: next.field } : {}), ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
       }
@@ -2429,10 +2516,13 @@ export default {
 
     // ---- admin delete ----
     if (p === '/api/doc' && method === 'DELETE') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
       // delete all R2 versions
       let cursor;
       do {

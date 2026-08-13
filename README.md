@@ -101,9 +101,10 @@ Publishing has one hosted target and two self-host targets; pick one on your
 first publish and it sticks (saved in `~/.tdoc/published.json`):
 
 - **Hosted** — `/tdoc publish --platform hosted <slug>` uploads to a
-  tdoc-managed host such as `tdoc.dev`. This path skips user deploy setup. In
-  hosted v1, the upload token is configured out-of-band with
-  `TDOC_HOSTED_UPLOAD_TOKEN`; account/token issuance is the next product layer.
+  tdoc-managed host such as `tdoc.dev`. This path skips user deploy setup. On
+  first use, the hosted service issues an account-scoped upload token and the
+  CLI stores it in `~/.tdoc/published.json`; that token can only mutate docs it
+  owns.
 - **Cloudflare (default)** — Worker + R2 + KV, with a Durable Object
   serializing concurrent comment writes. The most battle-tested target.
 - **Vercel** — `/tdoc publish --platform vercel <slug>` deploys a catch-all

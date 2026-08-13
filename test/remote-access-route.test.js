@@ -43,7 +43,7 @@ t('PATCH /api/doc/access authenticates before parsing body or writing meta', () 
 });
 
 t('PATCH /api/doc/access only writes remote meta, never document bytes', () => {
-  assert(route.includes('applyAccessPatch(meta, access)'), 'route must use access-only helper');
+  assert(route.includes('applyAccessPatch(writeGate.meta, access)'), 'route must use access-only helper');
   assert(route.includes('env.META.put(`meta:${slug}`'), 'route must write updated meta');
   assert(!route.includes('env.DOCS.put'), 'route must not write R2 document HTML');
   assert(!route.includes('env.DOCS.delete'), 'route must not delete R2 document HTML');

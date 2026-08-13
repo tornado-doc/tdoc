@@ -398,7 +398,7 @@ echo "tdoc server: http://localhost:7878"
 pkill -f "$SKILL_DIR/server/server.js"
 ```
 
-### `/tdoc publish <slug>` — publish to your Cloudflare Worker (or Vercel)
+### `/tdoc publish <slug>` — publish to hosted tdoc, Cloudflare, or Vercel
 
 Publishes the latest version of `<slug>` to a public URL.
 
@@ -406,6 +406,13 @@ Local always stays $0/anonymous; publishing is opt-in. First run does a one-time
 setup: prompts `wrangler login`, creates an R2 bucket (`tdoc-docs`) and KV
 namespace (`META`) in *your* Cloudflare account, generates an upload token, and
 deploys your own Worker. Config is saved to `~/.tdoc/published.json`.
+
+**Hosted target**: `tdoc-publish --platform hosted <slug>` uploads to the
+tdoc-managed host (default `https://tdoc.dev`) and does not ask the user to
+configure Cloudflare, Vercel, R2, KV, Workers, or an OAuth app. On first use,
+the hosted Worker issues an account-scoped upload token and the CLI stores it
+in `~/.tdoc/published.json`; server routes enforce that token can only mutate
+docs it owns.
 
 **Alternative host — Vercel**: `tdoc-publish --platform vercel <slug>` (first
 publish only; the choice is persisted). Needs the `vercel` CLI (`npm i -g

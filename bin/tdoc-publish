@@ -21,6 +21,11 @@
 #
 # First run (vercel): see first_time_setup_vercel below.
 #
+# First run (hosted):
+#   1. Ask the tdoc-managed host for an account-scoped upload token
+#   2. Save the hosted base + token to ~/.tdoc/published.json
+#   3. Upload the doc. No Cloudflare/Vercel/OAuth app setup.
+#
 # Subsequent runs:
 #   Just upload the requested slug via /api/upload.
 
@@ -201,16 +206,36 @@ require_vercel() {
 
 first_time_setup_hosted() {
   local base="${TDOC_HOSTED_BASE:-https://tdoc.dev}"
-  local token="${TDOC_HOSTED_UPLOAD_TOKEN:-}"
   base="${base%/}"
-  if [ -z "$token" ]; then
-    fail_with_agent_prompt "hosted upload token is not configured" \
-      "Configure hosted publish by setting TDOC_HOSTED_UPLOAD_TOKEN, then run '/tdoc publish --platform hosted $SLUG' again. This uses tdoc's hosted service, so it does not require Cloudflare, Vercel, R2, KV, Workers, or OAuth app setup."
-  fi
   case "$base" in
     http://*|https://*) ;;
     *) echo "[tdoc] TDOC_HOSTED_BASE must start with http:// or https:// (got '$base')." >&2; exit 1 ;;
   esac
+  local resp http payload token account_id
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+    -X POST "$base/api/hosted/token" -H "Content-Type: application/json" \
+    -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\"}" 2>&1)" || {
+      fail_with_agent_prompt "hosted service is unreachable" \
+        "The hosted tdoc service at $base did not respond. Retry '/tdoc publish --platform hosted $SLUG' later, or set TDOC_HOSTED_BASE to the correct hosted URL."
+    }
+  http="${resp##*$'\n'}"
+  payload="${resp%$'\n'*}"
+  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
+    if printf '%s' "$payload" | grep -q 'hosted_registration_disabled'; then
+      fail_with_agent_prompt "hosted registration is not enabled on $base" \
+        "The hosted service exists, but self-serve publish signup is not enabled yet. Ask the tdoc host owner to enable TDOC_HOSTED_REGISTRATION=1, then run '/tdoc publish --platform hosted $SLUG' again."
+    fi
+    echo "[tdoc] hosted token request returned HTTP $http" >&2
+    printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+    exit 1
+  fi
+  token="$(printf '%s' "$payload" | jq -r '.token // empty')"
+  account_id="$(printf '%s' "$payload" | jq -r '.account_id // empty')"
+  if [ -z "$token" ] || [ -z "$account_id" ]; then
+    echo "[tdoc] hosted token response was missing token/account_id." >&2
+    printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+    exit 1
+  fi
   local public_host="${base#http://}"
   public_host="${public_host#https://}"
   cat > "$CONFIG_FILE" <<EOF
@@ -218,6 +243,7 @@ first_time_setup_hosted() {
   "platform": "hosted",
   "base": "$base",
   "public_host": "$public_host",
+  "account_id": "$account_id",
   "upload_token": "$token"
 }
 EOF
