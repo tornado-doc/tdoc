@@ -1585,7 +1585,7 @@ async function hostedTokenActor(env, token) {
 
 async function hostedOwnerOp(env, slug, op) {
   if (!env.COMMENTS) {
-    return { ok: false, response: json({ error: 'hosted_owner_store_unavailable' }, { status: 503 }) };
+    return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
   }
   const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
   const r = await stub.fetch('https://do/owner', {
@@ -1598,9 +1598,9 @@ async function hostedOwnerOp(env, slug, op) {
 async function docBytesExist(env, slug) {
   try {
     const r = await env.DOCS.list({ prefix: `docs/${slug}/` });
-    return Array.isArray(r.objects) && r.objects.length > 0;
-  } catch {
-    return false;
+    return { ok: true, exists: Array.isArray(r.objects) && r.objects.length > 0 };
+  } catch (e) {
+    return { ok: false, response: json({ error: 'doc_bytes_check_failed', message: e.message || String(e) }, { status: 503 }) };
   }
 }
 
@@ -1622,8 +1622,14 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   if (!actor || actor.kind === 'admin') return { ok: true, meta };
   const accountId = meta && meta.hosted && meta.hosted.account_id;
   if (opts.create) {
-    if (!meta && await docBytesExist(env, slug)) {
-      return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+    if (!meta) {
+      const bytes = await docBytesExist(env, slug);
+      if (!bytes.ok) return { ok: false, response: bytes.response };
+      if (bytes.exists) {
+        const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+        if (verified.ok) return { ok: true, meta: null };
+        return { ok: false, response: json({ error: verified.error || 'slug_taken' }, { status: verified.status || 409 }) };
+      }
     }
     if (meta && !accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
     if (accountId && accountId !== actor.account_id) {
@@ -2523,7 +2529,12 @@ export default {
         return json({ error: 'r2_write_lost', message: 'PUT succeeded but the key is not readable. Re-deploy the worker; the R2 binding may be stale.' }, { status: 500 });
       }
       if (incoming) {
-        await env.META.put(`meta:${slug}`, JSON.stringify(incoming));
+        try {
+          await env.META.put(`meta:${slug}`, JSON.stringify(incoming));
+        } catch (e) {
+          console.error('[upload] META put failed:', e.message);
+          return json({ error: 'meta_put_failed', message: e.message || String(e) }, { status: 500 });
+        }
       }
       // Reconcile existing open comments against the new artifact set:
       // bind by aid where possible; mark lost where the artifact is gone

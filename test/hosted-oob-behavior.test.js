@@ -26,9 +26,18 @@ async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 class FakeKV {
-  constructor() { this.map = new Map(); }
+  constructor() {
+    this.map = new Map();
+    this.failPutOnce = new Set();
+  }
   async get(k) { return this.map.has(k) ? this.map.get(k) : null; }
-  async put(k, v) { this.map.set(k, String(v)); }
+  async put(k, v) {
+    if (this.failPutOnce.has(k)) {
+      this.failPutOnce.delete(k);
+      throw new Error(`forced KV put failure: ${k}`);
+    }
+    this.map.set(k, String(v));
+  }
   async delete(k) { this.map.delete(k); }
   async list({ prefix = '' } = {}) {
     return {
@@ -39,8 +48,15 @@ class FakeKV {
 }
 
 class FakeR2 {
-  constructor() { this.map = new Map(); }
-  async put(k, v) { this.map.set(k, String(v)); }
+  constructor() {
+    this.map = new Map();
+    this.throwList = false;
+    this.putCalls = 0;
+  }
+  async put(k, v) {
+    this.putCalls++;
+    this.map.set(k, String(v));
+  }
   async get(k) {
     if (!this.map.has(k)) return null;
     const v = this.map.get(k);
@@ -52,6 +68,7 @@ class FakeR2 {
   }
   async delete(k) { this.map.delete(k); }
   async list({ prefix = '' } = {}) {
+    if (this.throwList) throw new Error('forced R2 list failure');
     return {
       objects: [...this.map.keys()].filter(k => k.startsWith(prefix)).map(key => ({ key })),
       truncated: false,
@@ -152,6 +169,41 @@ async function issue(worker, env, label = 'test') {
     assert(second.status === 403, `second token should be denied, got ${second.status}`);
     const doc = await env.DOCS.get('docs/owned-doc/v1/index.html');
     assert((await doc.text()).includes('A'), 'denied second upload overwrote document bytes');
+  });
+
+  await t('R2 list failure during first claim fails closed before DO claim or R2 put', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'list-fails');
+    env.DOCS.throwList = true;
+    const r = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'list-fails', version: 1, html: '<h1>nope</h1>' },
+    }), env, {});
+    assert(r.status >= 400, `list failure should not succeed, got ${r.status}`);
+    assert(env.DOCS.putCalls === 0, 'R2 put ran despite failed existence check');
+    assert(!env.COMMENTS.stateFor('list-fails').storage.map.has('hostedOwner'), 'DO owner claim was persisted despite failed existence check');
+  });
+
+  await t('same hosted owner can retry after META write failure and repair ownership meta', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'repair');
+    env.META.failPutOnce.add('meta:repair-doc');
+    const first = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'repair-doc', version: 1, html: '<h1>first</h1>' },
+    }), env, {});
+    assert(first.status >= 400, `first upload should report failed meta write, got ${first.status}`);
+    assert(await env.DOCS.head('docs/repair-doc/v1/index.html'), 'first upload did not leave the reproduced partial R2 write');
+    assert(!await env.META.get('meta:repair-doc'), 'test setup expected meta write to fail');
+    assert(env.COMMENTS.stateFor('repair-doc').storage.map.get('hostedOwner') === tok.account_id, 'test setup expected DO claim to persist');
+
+    const retry = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'repair-doc', version: 1, html: '<h1>retry</h1>' },
+    }), env, {});
+    assert(retry.status === 200, `same owner retry should repair meta, got ${retry.status}: ${await retry.text()}`);
+    const repaired = JSON.parse(await env.META.get('meta:repair-doc'));
+    assert(repaired.hosted.account_id === tok.account_id, 'retry did not repair hosted ownership meta');
   });
 
   await t('hosted token cannot delete legacy/orphan R2 doc with no meta/owner', async () => {
