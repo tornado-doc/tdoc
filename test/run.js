@@ -26,6 +26,7 @@ const OFFLINE = [
   'me-management.test.js',    // /me remote SoT management UI guard
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
   'hosted-oob.test.js',       // hosted token bootstrap + scoped writes
+  'hosted-oob-behavior.test.js', // hosted token ownership behavior with fake bindings
   'oldver-strip.test.js',     // old-version banner predicate
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard

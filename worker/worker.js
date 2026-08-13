@@ -1583,6 +1583,27 @@ async function hostedTokenActor(env, token) {
   return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash };
 }
 
+async function hostedOwnerOp(env, slug, op) {
+  if (!env.COMMENTS) {
+    return { ok: false, response: json({ error: 'hosted_owner_store_unavailable' }, { status: 503 }) };
+  }
+  const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+  const r = await stub.fetch('https://do/owner', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, op }),
+  });
+  return r.json();
+}
+
+async function docBytesExist(env, slug) {
+  try {
+    const r = await env.DOCS.list({ prefix: `docs/${slug}/` });
+    return Array.isArray(r.objects) && r.objects.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function requireUploadAuth(req, env) {
   const auth = req.headers.get('authorization') || '';
   const m = auth.match(/^Bearer\s+(.+)$/);
@@ -1596,13 +1617,27 @@ async function requireUploadAuth(req, env) {
   return { ok: false, response: json({ error: 'unauthorized' }, { status: 401 }) };
 }
 
-async function requireDocWriteAccess(env, actor, slug) {
+async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   const meta = await loadDocMeta(env, slug);
   if (!actor || actor.kind === 'admin') return { ok: true, meta };
   const accountId = meta && meta.hosted && meta.hosted.account_id;
-  if (!meta) return { ok: true, meta: null };
+  if (opts.create) {
+    if (!meta && await docBytesExist(env, slug)) {
+      return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+    }
+    if (meta && !accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+    if (accountId && accountId !== actor.account_id) {
+      return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+    }
+    const claimed = await hostedOwnerOp(env, slug, { kind: 'claim_owner', account_id: actor.account_id });
+    if (!claimed.ok) return { ok: false, response: json({ error: claimed.error || 'owner_claim_failed' }, { status: claimed.status || 409 }) };
+    return { ok: true, meta };
+  }
+  if (!meta) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
   if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
   if (accountId !== actor.account_id) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+  if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
   return { ok: true, meta };
 }
 
@@ -1854,6 +1889,42 @@ export class CommentsStore {
     let payload;
     try { payload = await req.json(); } catch { return Response.json({ list: [] }); }
     const { slug, op } = payload;
+
+    // OWNER: atomic hosted slug ownership claim/verification. This intentionally
+    // lives in the same per-slug Durable Object as comments so first hosted
+    // publish claim is strongly serialized; KV is not used as the authority.
+    if (u.pathname === '/owner') {
+      let out = { ok: false, status: 400, error: 'bad_owner_op' };
+      try {
+        await this.state.storage.transaction(async (txn) => {
+          const current = await txn.get('hostedOwner');
+          const accountId = op && typeof op.account_id === 'string' ? op.account_id : '';
+          if (!accountId) {
+            out = { ok: false, status: 400, error: 'account_id_required' };
+            return;
+          }
+          if (op.kind === 'claim_owner') {
+            if (current === undefined) {
+              await txn.put('hostedOwner', accountId);
+              out = { ok: true };
+            } else if (current === accountId) {
+              out = { ok: true };
+            } else {
+              out = { ok: false, status: 403, error: 'not_doc_owner' };
+            }
+            return;
+          }
+          if (op.kind === 'verify_owner') {
+            if (current === accountId) out = { ok: true };
+            else if (current === undefined) out = { ok: false, status: 403, error: 'not_doc_owner' };
+            else out = { ok: false, status: 403, error: 'not_doc_owner' };
+          }
+        });
+      } catch (e) {
+        return Response.json({ ok: false, status: 409, error: 'owner_store_conflict', message: e.message || String(e) });
+      }
+      return Response.json(out);
+    }
 
     // READ: resolve inside a transaction so a concurrent first-touch mutation
     // can't commit between a non-transactional get and a write-back (Codex P1:
@@ -2409,12 +2480,12 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
-      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
       // Validate write-side access policy before writing doc bytes. Read paths
       // stay tolerant for legacy/corrupt stored meta; writes must fail closed.
       let incoming = null;
-      if (meta) {
+      if (meta || (auth.actor && auth.actor.kind === 'hosted')) {
         incoming = (meta && typeof meta === 'object') ? { ...meta } : {};
         const prev = writeGate.meta;
         if (!incoming.access && prev && prev.access) {

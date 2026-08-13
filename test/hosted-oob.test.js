@@ -52,13 +52,21 @@ t('Upload auth accepts either provider admin token or hosted account token', () 
 });
 
 t('Hosted upload stamps remote meta ownership before writing', () => {
-  assert(uploadRoute.includes('requireDocWriteAccess(env, auth.actor, slug)'), 'upload must enforce write access');
+  assert(uploadRoute.includes('requireDocWriteAccess(env, auth.actor, slug, { create: true })'), 'upload must enforce create/claim write access');
   assert(uploadRoute.includes('stampHostedOwnership(incoming, auth.actor)'), 'upload must stamp hosted owner');
-  const gate = uploadRoute.indexOf('requireDocWriteAccess(env, auth.actor, slug)');
+  const gate = uploadRoute.indexOf('requireDocWriteAccess(env, auth.actor, slug, { create: true })');
   const r2 = uploadRoute.indexOf('env.DOCS.put');
   const meta = uploadRoute.indexOf('env.META.put(`meta:${slug}`');
   assert(gate >= 0 && gate < r2, 'upload must enforce owner before R2 write');
   assert(gate < meta, 'upload must enforce owner before META write');
+});
+
+t('Hosted slug ownership claim is backed by per-slug Durable Object storage', () => {
+  assert(worker.includes('hostedOwner'), 'Durable Object owner storage key missing');
+  assert(worker.includes("u.pathname === '/owner'"), 'Durable Object owner endpoint missing');
+  assert(worker.includes("kind: 'claim_owner'"), 'atomic owner claim op missing');
+  assert(worker.includes("kind: 'verify_owner'"), 'owner verify op missing');
+  assert(worker.includes('hostedOwnerOp(env, slug'), 'write gate must use Durable Object owner op');
 });
 
 t('Access mutation and delete are scoped to token-owned docs', () => {
