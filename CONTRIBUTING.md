@@ -63,4 +63,5 @@ The skill ships JS that runs in users' browsers and a worker that runs on Cloudf
 
 ## AGENTS.md
 
-`AGENTS.md` is a **one-line** product rule for agents. Do not expand it into a second architecture doc. Change it only when the source-of-truth model itself changes, and keep it to a single sentence.
+`AGENTS.md` only records what humans and agents have aligned on, and is intentionally kept short.
+
