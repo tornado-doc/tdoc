@@ -76,6 +76,160 @@ function canMutate(record, session, env) {
   const who = record && record.author && record.author.login;
   return !!(who && session && session.login && who === session.login);
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Access policy (JUL-31)
+//
+// Product ladder on published docs:
+//   public   — anyone with the link can read; may appear in future discovery
+//   unlisted — anyone with the link can read; never listed in catalogs
+//   private  — owner + allowlisted GitHub logins only (sign-in required)
+//
+// Pure-publish default for NEW meta written by tdoc-publish:
+//   history_visibility = owner (readers see only the requested version)
+// Missing/legacy meta without `access` stays world-readable for back-compat.
+// ─────────────────────────────────────────────────────────────────────────
+const ACCESS_VISIBILITIES = new Set(['public', 'unlisted', 'private']);
+const ACCESS_COMMENTING = new Set(['owner', 'invited', 'signed_in', 'off']);
+const ACCESS_HISTORY = new Set(['owner', 'invited', 'public']);
+
+function sessionLogin(session) {
+  return session && typeof session.login === 'string' && session.login
+    ? session.login.trim().toLowerCase()
+    : null;
+}
+
+function normalizeGithubLogin(v) {
+  if (typeof v !== 'string') return null;
+  let s = v.trim().toLowerCase();
+  if (!s) return null;
+  if (s.startsWith('github:')) s = s.slice('github:'.length);
+  if (s.startsWith('@')) s = s.slice(1);
+  // GitHub logins: alphanumeric + hyphen
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(s)) return null;
+  return s;
+}
+
+// Normalize meta.access. `legacy` chooses defaults when the field is absent:
+//   true  → back-compat for already-published docs (public + full history)
+//   false → product defaults for newly written policy objects
+function normalizeAccess(raw, { legacy = true } = {}) {
+  const a = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const visibility = ACCESS_VISIBILITIES.has(a.visibility)
+    ? a.visibility
+    : (legacy ? 'public' : 'unlisted');
+  const commenting = ACCESS_COMMENTING.has(a.commenting)
+    ? a.commenting
+    : 'signed_in';
+  const history_visibility = ACCESS_HISTORY.has(a.history_visibility)
+    ? a.history_visibility
+    : (legacy ? 'public' : 'owner');
+  const allowed = [];
+  const seen = new Set();
+  const srcList = Array.isArray(a.allowed_users) ? a.allowed_users : [];
+  for (const item of srcList) {
+    const login = normalizeGithubLogin(item);
+    if (!login || seen.has(login)) continue;
+    seen.add(login);
+    allowed.push(login);
+  }
+  return { visibility, commenting, history_visibility, allowed_users: allowed };
+}
+
+function accessFromMeta(meta) {
+  const has = meta && meta.access && typeof meta.access === 'object';
+  return normalizeAccess(has ? meta.access : null, { legacy: !has });
+}
+
+function isAllowlisted(access, session, env) {
+  if (isOwnerSession(env, session)) return true;
+  const login = sessionLogin(session);
+  if (!login) return false;
+  return (access.allowed_users || []).includes(login);
+}
+
+function canReadDoc(access, session, env) {
+  if (access.visibility === 'public' || access.visibility === 'unlisted') return true;
+  return isAllowlisted(access, session, env);
+}
+
+function canSeeHistory(access, session, env) {
+  if (access.history_visibility === 'public') return true;
+  if (access.history_visibility === 'invited') return isAllowlisted(access, session, env);
+  // owner — TDOC_OWNER only (not every allowlisted reviewer)
+  return isOwnerSession(env, session);
+}
+
+function canCommentOnDoc(access, session, env) {
+  if (access.commenting === 'off') return false;
+  if (!sessionLogin(session)) return false;
+  if (access.commenting === 'signed_in') return true;
+  if (access.commenting === 'owner') return isOwnerSession(env, session);
+  if (access.commenting === 'invited') return isAllowlisted(access, session, env);
+  return false;
+}
+
+async function loadDocMeta(env, slug) {
+  try {
+    const raw = await env.META.get(`meta:${slug}`);
+    if (!raw) return null;
+    const meta = JSON.parse(raw);
+    return meta && typeof meta === 'object' ? meta : null;
+  } catch {
+    return null;
+  }
+}
+
+function accessDeniedHtml({ status, title, body, slug, version }) {
+  const next = slug && version ? `/d/${encodeURIComponent(slug)}/v/${version}` : '/';
+  return html(`<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)} · tdoc</title>
+<style>
+  body{font:15px/1.5 system-ui,-apple-system,sans-serif;margin:0;min-height:100vh;
+    display:flex;align-items:center;justify-content:center;background:#fff;color:#111}
+  .box{max-width:420px;padding:28px 24px;border:1px solid #e5e7eb;border-radius:12px}
+  h1{font-size:18px;margin:0 0 8px}
+  p{margin:0 0 14px;color:#444}
+  a{color:#1652f0}
+  .meta{font-size:12px;color:#888;margin-top:18px}
+</style></head><body><div class="box">
+  <h1>${escapeHtml(title)}</h1>
+  <p>${escapeHtml(body)}</p>
+  <p><a href="${escapeHtml(next)}">Retry this link</a> after signing in from any page on this host that shows the tdoc bar.</p>
+  <p class="meta">tdoc access control</p>
+</div></body></html>`, { status });
+}
+
+async function enforceDocAccess(env, req, slug, version) {
+  const meta = await loadDocMeta(env, slug);
+  // No meta yet (orphan R2 object) — treat as public so legacy uploads still work.
+  const access = accessFromMeta(meta || {});
+  const session = await getSession(env, req);
+  if (canReadDoc(access, session, env)) {
+    return { ok: true, access, session, meta };
+  }
+  if (!sessionLogin(session)) {
+    return {
+      ok: false,
+      response: accessDeniedHtml({
+        status: 401,
+        title: 'Sign in required',
+        body: 'This document is private. Sign in with GitHub, then open the link again. Only allowlisted accounts can read it.',
+        slug, version,
+      }),
+    };
+  }
+  return {
+    ok: false,
+    response: accessDeniedHtml({
+      status: 403,
+      title: 'Access denied',
+      body: `Signed in as ${session.login}, but this private document does not include you on the allowlist.`,
+      slug, version,
+    }),
+  };
+}
 function agentIdentity(body = {}, env = {}) {
   const fallbackLogin = env.TDOC_AGENT_LOGIN || 'tdoc-agent';
   const fallbackName = env.TDOC_AGENT_NAME || fallbackLogin;
@@ -1512,19 +1666,22 @@ export default {
     const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
     if (docMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr] = docMatch;
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
       const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
       if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
       const raw = await obj.text();
-      const session = await getSession(env, req);
+      const session = gate.session;
       const identity = session ? { login: session.login, avatar_url: session.avatar_url, name: session.name } : null;
-      // Pull the full versions array from meta so the bar can render a
-      // version picker. Falls back to single-version if meta is missing.
-      let versions = null;
+      // Pure-publish: version picker only for callers allowed by history_visibility.
+      let versions = [{ n: Number(vStr), created: null }];
       try {
-        const metaRaw = await env.META.get(`meta:${slug}`);
-        if (metaRaw) {
-          const meta = JSON.parse(metaRaw);
-          if (Array.isArray(meta.versions)) versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
+        const meta = gate.meta;
+        if (meta && Array.isArray(meta.versions) && canSeeHistory(gate.access, session, env)) {
+          versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
+        } else if (meta && Array.isArray(meta.versions)) {
+          const hit = meta.versions.find(v => Number(v.n) === Number(vStr));
+          versions = [{ n: Number(vStr), created: (hit && hit.created) || null }];
         }
       } catch {}
       return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwnerSession(env, session)));
@@ -1548,6 +1705,8 @@ export default {
     const exportMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/(export|fork)\/?$/);
     if (exportMatch && method === 'GET') {
       const [, slug, vStr, kind] = exportMatch;
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
       const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
       if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
       let html = await obj.text();
@@ -1729,6 +1888,9 @@ export default {
     if (p === '/api/comments' && method === 'GET') {
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      // Same read gate as the HTML routes: private docs don't leak comments.
+      const gate = await enforceDocAccess(env, req, slug, parseVersionParam(url) || 1);
+      if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
       // Read from the DO (source of truth; it lazily migrates from KV on first
       // touch). Migrate-in-memory for this response only — never persist from a
       // read (writes go through the DO).
@@ -1749,6 +1911,12 @@ export default {
       const { slug, version, anchor, text: commentText, parent_id } = body;
       if (!slug || !commentText) return json({ error: 'slug and text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      {
+        const meta = await loadDocMeta(env, slug);
+        const access = accessFromMeta(meta || {});
+        if (!canReadDoc(access, s, env)) return json({ error: 'access_denied' }, { status: 403 });
+        if (!canCommentOnDoc(access, s, env)) return json({ error: 'commenting_disabled' }, { status: 403 });
+      }
       const author = { login: s.login, avatar_url: s.avatar_url, name: s.name };
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
@@ -1965,7 +2133,25 @@ export default {
         console.error('[upload] R2 write did not persist:', r2Key);
         return json({ error: 'r2_write_lost', message: 'PUT succeeded but the key is not readable. Re-deploy the worker; the R2 binding may be stale.' }, { status: 500 });
       }
-      if (meta) await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+      if (meta) {
+        // Normalize access policy onto every uploaded meta snapshot. If the
+        // payload omits `access`, keep any previously stored policy (so a
+        // partial republish without access flags does not reset private docs
+        // to public). Only brand-new docs fall through to legacy defaults.
+        const incoming = (meta && typeof meta === 'object') ? { ...meta } : {};
+        let prev = null;
+        try {
+          const prevRaw = await env.META.get(`meta:${slug}`);
+          if (prevRaw) prev = JSON.parse(prevRaw);
+        } catch {}
+        if (!incoming.access && prev && prev.access) {
+          incoming.access = prev.access;
+        }
+        if (incoming.access) {
+          incoming.access = normalizeAccess(incoming.access, { legacy: false });
+        }
+        await env.META.put(`meta:${slug}`, JSON.stringify(incoming));
+      }
       // Reconcile existing open comments against the new artifact set:
       // bind by aid where possible; mark lost where the artifact is gone
       // or ambiguous. This is the ENFORCED publish-time invariant — no
