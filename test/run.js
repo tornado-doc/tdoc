@@ -24,6 +24,7 @@ const OFFLINE = [
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'me-management.test.js',    // /me remote SoT management UI guard
+  'runtime-provenance.test.js', // release provenance + content-hash redeploy
   'oldver-strip.test.js',     // old-version banner predicate
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard

@@ -8,12 +8,13 @@
 // Secrets:
 //   TDOC_UPLOAD_TOKEN — shared secret for /api/upload from `tdoc publish`
 //
-// IMPORTANT: This file contains a placeholder string `__TDOC_OVERLAY_JS__`.
-// The publish script reads server/overlay.js and replaces that placeholder
-// inline before deploy, producing worker/_worker.bundled.js. Do not deploy
-// worker.js directly — the overlay would be missing.
+// IMPORTANT: This file contains placeholder strings `__TDOC_OVERLAY_JS__` and
+// `__TDOC_BUILD_INFO__`. The publish script replaces them before deploy,
+// producing worker/_worker.bundled.js. Do not deploy worker.js directly — the
+// overlay/provenance would be missing.
 
 const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;
+const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -38,6 +39,21 @@ function html(body, init = {}) {
     status: init.status || 200,
     headers: { 'Content-Type': 'text/html; charset=utf-8', ...(init.headers || {}) },
   });
+}
+
+function runtimeInfo() {
+  const b = TDOC_BUILD_INFO && typeof TDOC_BUILD_INFO === 'object' ? TDOC_BUILD_INFO : {};
+  return {
+    service: 'tdoc',
+    mode: 'published',
+    source_sha: b.source_sha || null,
+    source_dirty: !!b.source_dirty,
+    worker_sha: b.worker_sha || null,
+    overlay_sha: b.overlay_sha || null,
+    bundle_sha: b.bundle_sha || null,
+    built_at: b.built_at || null,
+    generated_by: b.generated_by || 'unknown',
+  };
 }
 
 function parseCookie(req) {
@@ -794,8 +810,9 @@ function reconcileAnchors(comments, aidsInVersion, V) {
 // the published view and the /fork view (which previously re-implemented this
 // inline, risking drift).
 function injectOverlayCfg(rawHtml, cfg) {
+  const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
   const inject =
-    `<script>window.__TDOC__ = ${safeJsonForScript(cfg)};</script>\n` +
+    `<script>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
     `<script>${OVERLAY_JS}</script>`;
   if (rawHtml.includes('</body>')) return rawHtml.replace('</body>', `${inject}\n</body>`);
   return rawHtml + inject;
@@ -1789,6 +1806,7 @@ export default {
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
     if (p === '/api/ping') return json({ ok: true, service: 'tdoc' });
+    if (p === '/api/runtime') return json({ ok: true, runtime: runtimeInfo() });
 
     // ---- landing (NO public catalog) ----
     // `/` never lists docs. Docs are only reachable via their direct link.

@@ -417,10 +417,12 @@ GitHub sign-in) work identically on either host. Caveats: no per-doc write
 serialization (Cloudflare uses a Durable Object for that) and a ~4.5 MB upload
 cap per doc (Vercel request limit).
 
-Subsequent runs upload the latest version of `<slug>`. The script also detects
-when `server/overlay.js` or `worker/worker.js` is newer than the bundled file
-and redeploys the Worker automatically so users get the latest overlay code.
+Subsequent runs upload the latest version of `<slug>`. The script compares a
+content hash of the Worker/overlay bundle against the last deployed hash in
+`~/.tdoc/published.json` and redeploys automatically when runtime code changed.
 Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch uploads).
+Published pages expose runtime provenance at `/api/runtime` and in
+`window.__TDOC__.runtime`.
 
 On published docs, viewers sign in with GitHub (Device Flow, shared OAuth App
 `Ov23liZ1UAGOchvKPmlS`, scope `read:user`) before commenting.
