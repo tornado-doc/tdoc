@@ -646,6 +646,7 @@ Remote storage holds optional `meta.access`:
 - Legacy meta without `access` stays world-readable + full history (back-compat).
 - Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
 - After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
+- `/me` may list docs through the owner GitHub session, but remote write actions still use the upload token; do not authorize destructive/access changes from the owner cookie while arbitrary published docs share the same origin.
 
 
 ### Comment anchor stability (important for `/tdoc edit`)

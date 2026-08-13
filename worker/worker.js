@@ -853,6 +853,9 @@ async function indexHtml(env, session) {
     let meta = {};
     try { meta = JSON.parse(metaRaw || '{}'); } catch {}
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
+    const access = accessFromMeta(meta);
+    const selected = (value, current) => value === current ? ' selected' : '';
+    const allowlist = (access.allowed_users || []).join(', ');
     // Only list docs whose latest version actually exists in R2 — otherwise
     // the index advertises 404s. (We hit this when R2 writes silently failed
     // while KV meta updates succeeded; defense in depth.)
@@ -862,27 +865,149 @@ async function indexHtml(env, session) {
       <td><a href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(meta.title || slug)}</a></td>
       <td>${escapeHtml(slug)}</td>
       <td>v${latest}</td>
+      <td>
+        <form class="access-form" data-slug="${escapeHtml(slug)}">
+          <label>Visibility
+            <select name="visibility">
+              <option value="unlisted"${selected('unlisted', access.visibility)}>Unlisted</option>
+              <option value="private"${selected('private', access.visibility)}>Private</option>
+              <option value="public"${selected('public', access.visibility)}>Public</option>
+            </select>
+          </label>
+          <label>History
+            <select name="history_visibility">
+              <option value="owner"${selected('owner', access.history_visibility)}>Owner</option>
+              <option value="invited"${selected('invited', access.history_visibility)}>Invited</option>
+              <option value="public"${selected('public', access.history_visibility)}>Public</option>
+            </select>
+          </label>
+          <label>Comments
+            <select name="commenting">
+              <option value="signed_in"${selected('signed_in', access.commenting)}>Signed in</option>
+              <option value="invited"${selected('invited', access.commenting)}>Invited</option>
+              <option value="owner"${selected('owner', access.commenting)}>Owner</option>
+              <option value="off"${selected('off', access.commenting)}>Off</option>
+            </select>
+          </label>
+          <label>Allowed users
+            <input name="allowed_users" value="${escapeHtml(allowlist)}" placeholder="github-login, another-login">
+          </label>
+          <button type="submit">Save</button>
+        </form>
+      </td>
+      <td><button class="delete-doc" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(meta.title || slug)}">Delete</button></td>
     </tr>`);
   }
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
 <style>
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 760px; margin: 60px auto; padding: 0 20px; color: #111; }
+  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 1120px; margin: 48px auto; padding: 0 20px; color: #111; }
   h1 { font-size: 28px; margin: 0 0 4px; color: #1652f0; }
   .sub { color: #666; margin: 0 0 32px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid #eee; }
   th { font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 0.04em; }
   a { color: #1652f0; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; }
   .who { color: #888; font-size: 13px; margin: 0 0 32px; }
   .who b { color: #444; font-weight: 600; }
+  .toolbar { display: flex; gap: 10px; align-items: end; margin: 0 0 18px; }
+  .toolbar label { max-width: 320px; }
+  .toolbar input { min-width: 280px; }
+  .access-form { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)) auto; gap: 8px; align-items: end; min-width: 620px; }
+  label { display: grid; gap: 4px; color: #666; font-size: 12px; }
+  select, input, button { font: inherit; border: 1px solid #d7d7d7; border-radius: 6px; background: #fff; color: #111; padding: 7px 8px; }
+  input { min-width: 180px; }
+  button { cursor: pointer; }
+  button:hover { border-color: #1652f0; }
+  .delete-doc { color: #b42318; border-color: #f1b8b2; }
+  .status { min-height: 20px; margin: 0 0 16px; color: #666; font-size: 13px; }
+  .status[data-kind="error"] { color: #b42318; }
+  .status[data-kind="ok"] { color: #087443; }
+  @media (max-width: 900px) {
+    table, thead, tbody, tr, th, td { display: block; }
+    thead { display: none; }
+    tr { padding: 14px 0; border-bottom: 1px solid #eee; }
+    td { border: 0; padding: 5px 0; }
+    .access-form { min-width: 0; grid-template-columns: 1fr; }
+  }
 </style></head><body>
 <h1>My docs</h1>
 <p class="who">Documents hosted on this worker${session && session.login ? ` · signed in as <b>${escapeHtml(session.login)}</b>` : ''}.</p>
+<div class="toolbar">
+  <label>Admin token
+    <input id="admin-token" type="password" autocomplete="off" placeholder="Required for remote changes">
+  </label>
+</div>
+<p id="status" class="status" aria-live="polite"></p>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
-  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th></tr></thead><tbody>${rows.join('')}</tbody></table>`}
+  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th>Remote access</th><th>Remote delete</th></tr></thead><tbody>${rows.join('')}</tbody></table>`}
+<script>
+(() => {
+  const status = document.getElementById('status');
+  const tokenInput = document.getElementById('admin-token');
+  const say = (message, kind = '') => {
+    status.textContent = message || '';
+    status.dataset.kind = kind;
+  };
+  const authHeaders = () => {
+    const token = tokenInput.value.trim();
+    if (!token) throw new Error('Admin token is required for remote changes.');
+    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+  };
+  const users = (value) => value.split(/[\\s,]+/).map((x) => x.trim()).filter(Boolean);
+  document.querySelectorAll('.access-form').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const slug = form.dataset.slug;
+      const access = {
+        visibility: form.elements.visibility.value,
+        history_visibility: form.elements.history_visibility.value,
+        commenting: form.elements.commenting.value,
+        allowed_users: users(form.elements.allowed_users.value),
+      };
+      say('Saving access...');
+      let headers;
+      try { headers = authHeaders(); } catch (e) { say(e.message, 'error'); return; }
+      const res = await fetch('/api/doc/access', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ slug, access }),
+      });
+      if (!res.ok) {
+        let body = {};
+        try { body = await res.json(); } catch {}
+        say(body.error ? 'Access save failed: ' + body.error : 'Access save failed.', 'error');
+        return;
+      }
+      say('Access saved for ' + slug + '.', 'ok');
+    });
+  });
+  document.querySelectorAll('.delete-doc').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const slug = button.dataset.slug;
+      const title = button.dataset.title || slug;
+      if (!confirm('Delete "' + title + '" from remote storage? This removes all versions and comments.')) return;
+      say('Deleting ' + slug + '...');
+      let headers;
+      try { headers = authHeaders(); } catch (e) { say(e.message, 'error'); return; }
+      const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
+        method: 'DELETE',
+        headers,
+      });
+      if (!res.ok) {
+        let body = {};
+        try { body = await res.json(); } catch {}
+        say(body.error ? 'Delete failed: ' + body.error : 'Delete failed.', 'error');
+        return;
+      }
+      button.closest('tr').remove();
+      say('Deleted ' + slug + ' from remote storage.', 'ok');
+    });
+  });
+})();
+</script>
 </body></html>`;
 }
 
