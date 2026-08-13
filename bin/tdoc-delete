@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# tdoc-delete — delete a doc: the local copy (~/tdocs/<slug>) and, if it was
+# published, the published copy too (all versions + comments, via
+# tdoc-unpublish). The one command behind the "Delete" button.
+#
+# Usage: tdoc-delete <slug> [--local-only|--published-only]
+set -euo pipefail
+
+SLUG="${1:-}"
+MODE="${2:-}"
+if [ -z "$SLUG" ]; then echo "usage: tdoc-delete <slug> [--local-only|--published-only]" >&2; exit 1; fi
+# Same kebab-case rule as tdoc-new/tdoc-unpublish; keeps $SLUG shell/URL-safe
+# and, critically here, safe to splice into an rm -rf path.
+if ! printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
+  echo "[tdoc] invalid slug '$SLUG' — must be lowercase kebab-case (a-z, 0-9, -)." >&2
+  exit 1
+fi
+
+TDOC_DIR="${TDOC_DIR:-$HOME/tdocs}"
+LOCAL_DIR="$TDOC_DIR/$SLUG"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+deleted_something=0
+
+if [ "$MODE" != "--local-only" ]; then
+  # Best-effort: only try the network delete when a publish config exists.
+  if [ -f "$HOME/.tdoc/published.json" ]; then
+    if "$SCRIPT_DIR/tdoc-unpublish" "$SLUG"; then
+      deleted_something=1
+    else
+      # A doc that was never published 404s here — that's fine when we're
+      # also deleting locally, fatal when --published-only was requested.
+      if [ "$MODE" = "--published-only" ]; then exit 1; fi
+      echo "[tdoc] published copy not removed (may never have been published) — continuing with local delete." >&2
+    fi
+  elif [ "$MODE" = "--published-only" ]; then
+    echo "no ~/.tdoc/published.json — nothing published to delete." >&2
+    exit 1
+  fi
+fi
+
+if [ "$MODE" != "--published-only" ]; then
+  if [ -d "$LOCAL_DIR" ]; then
+    rm -rf "$LOCAL_DIR"
+    echo "Deleted local $LOCAL_DIR."
+    deleted_something=1
+  else
+    echo "[tdoc] no local copy at $LOCAL_DIR." >&2
+  fi
+fi
+
+if [ "$deleted_something" = "0" ]; then
+  echo "[tdoc] nothing deleted for '$SLUG'." >&2
+  exit 1
+fi
