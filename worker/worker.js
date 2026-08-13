@@ -17,7 +17,7 @@ const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type,Authorization',
 };
 
@@ -92,6 +92,7 @@ function canMutate(record, session, env) {
 const ACCESS_VISIBILITIES = new Set(['public', 'unlisted', 'private']);
 const ACCESS_COMMENTING = new Set(['owner', 'invited', 'signed_in', 'off']);
 const ACCESS_HISTORY = new Set(['owner', 'invited', 'public']);
+const ACCESS_PATCH_FIELDS = new Set(['visibility', 'commenting', 'history_visibility', 'allowed_users']);
 
 function sessionLogin(session) {
   return session && typeof session.login === 'string' && session.login
@@ -139,6 +140,28 @@ function normalizeAccess(raw, { legacy = true } = {}) {
 function accessFromMeta(meta) {
   const has = meta && meta.access && typeof meta.access === 'object';
   return normalizeAccess(has ? meta.access : null, { legacy: !has });
+}
+
+function applyAccessPatch(meta, patch) {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+    return { error: 'missing_meta' };
+  }
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return { error: 'access object required' };
+  }
+  const keys = Object.keys(patch);
+  if (!keys.length) return { error: 'access patch required' };
+  const unknown = keys.filter((k) => !ACCESS_PATCH_FIELDS.has(k));
+  if (unknown.length) return { error: 'invalid_access_field', fields: unknown };
+
+  // A remote access mutation creates/updates only the access policy. If the doc
+  // has legacy meta without access, switch to product defaults instead of
+  // carrying public-history legacy defaults into a newly managed policy.
+  const base = meta.access && typeof meta.access === 'object'
+    ? normalizeAccess(meta.access, { legacy: false })
+    : normalizeAccess({}, { legacy: false });
+  const next = normalizeAccess({ ...base, ...patch }, { legacy: false });
+  return { meta: { ...meta, access: next }, access: next };
 }
 
 function isAllowlisted(access, session, env) {
@@ -2184,6 +2207,31 @@ export default {
         console.error('[upload] comment merge/reconcile failed (non-fatal):', e.message);
       }
       return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, mergedComments: mergedLocal });
+    }
+
+    // ---- admin access mutation ----
+    // Remote storage is the source of truth: access policy must be mutable
+    // without a local meta.json or full document re-upload. Authenticated with
+    // the same upload token as /api/upload and /api/doc DELETE.
+    if (p === '/api/doc/access' && method === 'PATCH') {
+      const unauth = await requireUploadAuth(req, env);
+      if (unauth) return unauth;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const topKeys = Object.keys(body || {});
+      const unknownTop = topKeys.filter((k) => k !== 'slug' && k !== 'access');
+      if (unknownTop.length) return json({ error: 'invalid_field', fields: unknownTop }, { status: 400 });
+      const { slug, access } = body || {};
+      if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const meta = await loadDocMeta(env, slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      const next = applyAccessPatch(meta, access);
+      if (next.error) {
+        return json({ error: next.error, ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
+      }
+      await env.META.put(`meta:${slug}`, JSON.stringify(next.meta));
+      return json({ ok: true, slug, access: next.access });
     }
 
     // ---- admin delete ----

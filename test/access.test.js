@@ -112,5 +112,48 @@ t('invalid visibility falls back by legacy mode', () => {
   assert(box.normalizeAccess({ visibility: 'nope' }, { legacy: false }).visibility === 'unlisted');
 });
 
+t('remote access patch preserves document meta and mutates only access', () => {
+  const meta = {
+    title: 'Doc',
+    versions: [{ n: 1 }],
+    owner: 'must-not-change',
+    access: {
+      visibility: 'private',
+      history_visibility: 'owner',
+      commenting: 'signed_in',
+      allowed_users: ['alice'],
+    },
+  };
+  const r = box.applyAccessPatch(meta, {
+    visibility: 'public',
+    history_visibility: 'public',
+    allowed_users: ['github:Bob', '@alice'],
+  });
+  assert(!r.error, `unexpected error ${r.error}`);
+  assert(r.meta !== meta, 'must return a new meta object');
+  assert(meta.access.visibility === 'private', 'must not mutate input meta');
+  assert(r.meta.title === 'Doc' && r.meta.versions.length === 1, 'non-access meta was not preserved');
+  assert(r.meta.owner === 'must-not-change', 'non-access fields should pass through unchanged');
+  assert(r.access.visibility === 'public');
+  assert(r.access.history_visibility === 'public');
+  assert(r.access.commenting === 'signed_in');
+  assert(JSON.stringify(r.access.allowed_users) === JSON.stringify(['bob', 'alice']));
+});
+
+t('remote access patch creates product defaults for legacy meta', () => {
+  const r = box.applyAccessPatch({ title: 'Legacy' }, { visibility: 'private' });
+  assert(!r.error, `unexpected error ${r.error}`);
+  assert(r.access.visibility === 'private');
+  assert(r.access.history_visibility === 'owner', 'newly managed access must not inherit legacy public history');
+  assert(r.access.commenting === 'signed_in');
+  assert(JSON.stringify(r.access.allowed_users) === JSON.stringify([]));
+});
+
+t('remote access patch rejects non-access fields', () => {
+  const r = box.applyAccessPatch({ title: 'Doc' }, { visibility: 'private', owner: 'mallory' });
+  assert(r.error === 'invalid_access_field', `expected invalid_access_field, got ${r.error}`);
+  assert(JSON.stringify(r.fields) === JSON.stringify(['owner']), `unexpected fields ${JSON.stringify(r.fields)}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
