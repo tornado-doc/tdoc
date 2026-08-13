@@ -51,6 +51,26 @@ t('doc-view route only builds ownerManage data inside an isOwner guard', () => {
   assert(guard >= 0 && guard > decl, 'ownerManage must only be populated inside `if (isOwner)`');
 });
 
+t('doc-view never leaks private doc metadata (version count) to non-owners via the shared bootCfg', () => {
+  // The reviewer's refined bar: button-label strings live in the shared,
+  // open-source overlay bundle and protect nothing — but a slug's *version
+  // count* is private metadata. `commentCount` and `allowed_users` only ride
+  // inside ownerManage (already forced null for non-owners above), so the one
+  // channel that reaches EVERY viewer is the `versions` array. Its length must
+  // therefore follow the access policy: only callers cleared by canSeeHistory
+  // get the full list; everyone else collapses to just the version they asked
+  // for, so `versions.length` can never betray how many versions exist.
+  const full = docViewRoute.indexOf('meta.versions.map(');
+  const gate = docViewRoute.lastIndexOf('canSeeHistory(', full);
+  const gateStmt = docViewRoute.lastIndexOf('if (', full);
+  assert(full >= 0, 'doc-view must build the version list from meta.versions');
+  assert(gate >= 0 && gate < full && gate > gateStmt,
+    'the full version list must be gated by canSeeHistory(...) in the SAME if — never handed out unconditionally');
+  const collapse = docViewRoute.indexOf('versions = [{ n: Number(vStr)', full);
+  assert(collapse >= 0,
+    'the non-history branch must collapse `versions` to the single viewed version, not the full list');
+});
+
 const injectOverlayStart = worker.indexOf('function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage) {');
 const injectOverlayEnd = worker.indexOf('\n}', injectOverlayStart);
 if (injectOverlayStart < 0) throw new Error('injectOverlay() signature not found — did it change?');
