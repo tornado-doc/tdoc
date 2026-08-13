@@ -19,6 +19,11 @@ const end = worker.indexOf('// ---- admin delete ----', start);
 if (start < 0 || end < 0 || end <= start) throw new Error('/api/doc/access route block missing');
 const route = worker.slice(start, end);
 
+const uploadStart = worker.indexOf("if (p === '/api/upload' && method === 'POST')");
+const uploadEnd = worker.indexOf('// ---- admin access mutation ----', uploadStart);
+if (uploadStart < 0 || uploadEnd < 0 || uploadEnd <= uploadStart) throw new Error('/api/upload route block missing');
+const uploadRoute = worker.slice(uploadStart, uploadEnd);
+
 console.log('remote access mutation route');
 
 t('CORS allows PATCH for remote access mutation', () => {
@@ -48,6 +53,24 @@ t('PATCH /api/doc/access only writes remote meta, never document bytes', () => {
 t('PATCH /api/doc/access rejects top-level fields outside slug/access', () => {
   assert(route.includes("k !== 'slug' && k !== 'access'"), 'route must whitelist top-level fields');
   assert(route.includes("json({ error: 'invalid_field'"), 'route must reject top-level unknown fields');
+});
+
+t('PATCH /api/doc/access returns invalid value details without writing', () => {
+  assert(route.includes("error: next.error"), 'route should surface helper errors');
+  assert(route.includes("field: next.field"), 'route should surface the invalid access field');
+  const error = route.indexOf('if (next.error)');
+  const write = route.indexOf('env.META.put(`meta:${slug}`');
+  assert(error >= 0 && write >= 0 && error < write, 'route must reject invalid access before META write');
+});
+
+t('POST /api/upload validates incoming access before writing document bytes', () => {
+  assert(uploadRoute.includes('validateAccessWrite(incoming.access)'), 'upload route must validate incoming access');
+  const validate = uploadRoute.indexOf('validateAccessWrite(incoming.access)');
+  const r2Write = uploadRoute.indexOf('env.DOCS.put');
+  const metaWrite = uploadRoute.indexOf('env.META.put(`meta:${slug}`');
+  assert(validate >= 0 && r2Write >= 0 && metaWrite >= 0, 'upload route missing validation/R2/meta operations');
+  assert(validate < r2Write, 'upload must reject invalid access before writing R2 document bytes');
+  assert(validate < metaWrite, 'upload must reject invalid access before writing meta');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

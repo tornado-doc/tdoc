@@ -155,5 +155,90 @@ t('remote access patch rejects non-access fields', () => {
   assert(JSON.stringify(r.fields) === JSON.stringify(['owner']), `unexpected fields ${JSON.stringify(r.fields)}`);
 });
 
+t('access write validation keeps legacy read fallback out of write paths', () => {
+  const valid = box.validateAccessWrite({
+    visibility: 'private',
+    commenting: 'owner',
+    history_visibility: 'owner',
+    allowed_users: ['@Alice', 'github:bob'],
+  });
+  assert(!valid.error, `unexpected error ${valid.error}`);
+  assert(JSON.stringify(valid.access.allowed_users) === JSON.stringify(['alice', 'bob']));
+
+  for (const patch of [
+    { visibility: 'privat' },
+    { commenting: 'signedin' },
+    { history_visibility: 'everyone' },
+    { allowed_users: ['not valid!'] },
+  ]) {
+    const r = box.validateAccessWrite(patch);
+    assert(r.error === 'invalid_access_value', `expected invalid_access_value for ${JSON.stringify(patch)}`);
+  }
+});
+
+t('remote access patch rejects invalid enum values instead of silently downgrading', () => {
+  const meta = {
+    title: 'Doc',
+    access: {
+      visibility: 'private',
+      history_visibility: 'owner',
+      commenting: 'owner',
+      allowed_users: ['alice'],
+    },
+  };
+  const r = box.applyAccessPatch(meta, { visibility: 'privat' });
+  assert(r.error === 'invalid_access_value', `expected invalid_access_value, got ${r.error}`);
+  assert(r.field === 'visibility', `unexpected field ${r.field}`);
+  assert(meta.access.visibility === 'private', 'input meta must remain private');
+});
+
+t('remote access patch rejects invalid commenting values instead of broadening writers', () => {
+  const meta = {
+    title: 'Doc',
+    access: { visibility: 'private', history_visibility: 'owner', commenting: 'owner', allowed_users: ['alice'] },
+  };
+  const r = box.applyAccessPatch(meta, { commenting: 'signedin' });
+  assert(r.error === 'invalid_access_value', `expected invalid_access_value, got ${r.error}`);
+  assert(r.field === 'commenting', `unexpected field ${r.field}`);
+  assert(meta.access.commenting === 'owner', 'input meta must remain owner-only');
+});
+
+t('remote access patch rejects invalid history visibility values', () => {
+  const meta = {
+    title: 'Doc',
+    access: { visibility: 'private', history_visibility: 'owner', commenting: 'owner', allowed_users: ['alice'] },
+  };
+  const r = box.applyAccessPatch(meta, { history_visibility: 'everyone' });
+  assert(r.error === 'invalid_access_value', `expected invalid_access_value, got ${r.error}`);
+  assert(r.field === 'history_visibility', `unexpected field ${r.field}`);
+  assert(meta.access.history_visibility === 'owner', 'input meta history policy must not change');
+});
+
+t('remote access patch rejects invalid allowlist entries instead of silently clearing them', () => {
+  const r = box.applyAccessPatch({ title: 'Doc' }, { allowed_users: ['alice', 'not valid!'] });
+  assert(r.error === 'invalid_access_value', `expected invalid_access_value, got ${r.error}`);
+  assert(r.field === 'allowed_users', `unexpected field ${r.field}`);
+});
+
+t('remote access patch treats JSON-present null/empty values as invalid writes', () => {
+  for (const [field, value] of [
+    ['visibility', null],
+    ['commenting', ''],
+    ['history_visibility', ''],
+    ['allowed_users', null],
+  ]) {
+    const patch = JSON.parse(JSON.stringify({ [field]: value }));
+    const r = box.applyAccessPatch({ title: 'Doc' }, patch);
+    assert(r.error === 'invalid_access_value', `${field} should reject ${value}`);
+    assert(r.field === field, `unexpected field for ${field}: ${r.field}`);
+  }
+});
+
+t('remote access patch rejects empty JSON patch after undefined fields are omitted', () => {
+  const patch = JSON.parse(JSON.stringify({ visibility: undefined }));
+  const r = box.applyAccessPatch({ title: 'Doc' }, patch);
+  assert(r.error === 'access patch required', `expected access patch required, got ${r.error}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

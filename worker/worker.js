@@ -158,6 +158,51 @@ function accessFromMeta(meta) {
   return normalizeAccess(has ? meta.access : null, { legacy: !has });
 }
 
+function validateAccessWrite(access) {
+  if (!access || typeof access !== 'object' || Array.isArray(access)) {
+    return { error: 'access object required' };
+  }
+  const keys = Object.keys(access);
+  const unknown = keys.filter((k) => !ACCESS_PATCH_FIELDS.has(k));
+  if (unknown.length) return { error: 'invalid_access_field', fields: unknown };
+
+  const out = {};
+  if ('visibility' in access) {
+    if (!ACCESS_VISIBILITIES.has(access.visibility)) {
+      return { error: 'invalid_access_value', field: 'visibility' };
+    }
+    out.visibility = access.visibility;
+  }
+  if ('commenting' in access) {
+    if (!ACCESS_COMMENTING.has(access.commenting)) {
+      return { error: 'invalid_access_value', field: 'commenting' };
+    }
+    out.commenting = access.commenting;
+  }
+  if ('history_visibility' in access) {
+    if (!ACCESS_HISTORY.has(access.history_visibility)) {
+      return { error: 'invalid_access_value', field: 'history_visibility' };
+    }
+    out.history_visibility = access.history_visibility;
+  }
+  if ('allowed_users' in access) {
+    if (!Array.isArray(access.allowed_users)) {
+      return { error: 'invalid_access_value', field: 'allowed_users' };
+    }
+    const allowed = [];
+    const seen = new Set();
+    for (const item of access.allowed_users) {
+      const login = normalizeGithubLogin(item);
+      if (!login) return { error: 'invalid_access_value', field: 'allowed_users' };
+      if (seen.has(login)) continue;
+      seen.add(login);
+      allowed.push(login);
+    }
+    out.allowed_users = allowed;
+  }
+  return { access: out };
+}
+
 function applyAccessPatch(meta, patch) {
   if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
     return { error: 'missing_meta' };
@@ -167,8 +212,8 @@ function applyAccessPatch(meta, patch) {
   }
   const keys = Object.keys(patch);
   if (!keys.length) return { error: 'access patch required' };
-  const unknown = keys.filter((k) => !ACCESS_PATCH_FIELDS.has(k));
-  if (unknown.length) return { error: 'invalid_access_field', fields: unknown };
+  const validated = validateAccessWrite(patch);
+  if (validated.error) return validated;
 
   // A remote access mutation creates/updates only the access policy. If the doc
   // has legacy meta without access, switch to product defaults instead of
@@ -176,7 +221,7 @@ function applyAccessPatch(meta, patch) {
   const base = meta.access && typeof meta.access === 'object'
     ? normalizeAccess(meta.access, { legacy: false })
     : normalizeAccess({}, { legacy: false });
-  const next = normalizeAccess({ ...base, ...patch }, { legacy: false });
+  const next = normalizeAccess({ ...base, ...validated.access }, { legacy: false });
   return { meta: { ...meta, access: next }, access: next };
 }
 
@@ -2277,6 +2322,27 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      // Validate write-side access policy before writing doc bytes. Read paths
+      // stay tolerant for legacy/corrupt stored meta; writes must fail closed.
+      let incoming = null;
+      if (meta) {
+        incoming = (meta && typeof meta === 'object') ? { ...meta } : {};
+        let prev = null;
+        try {
+          const prevRaw = await env.META.get(`meta:${slug}`);
+          if (prevRaw) prev = JSON.parse(prevRaw);
+        } catch {}
+        if (!incoming.access && prev && prev.access) {
+          incoming.access = prev.access;
+        }
+        if (incoming.access) {
+          const validatedAccess = validateAccessWrite(incoming.access);
+          if (validatedAccess.error) {
+            return json({ error: validatedAccess.error, ...(validatedAccess.field ? { field: validatedAccess.field } : {}), ...(validatedAccess.fields ? { fields: validatedAccess.fields } : {}) }, { status: 400 });
+          }
+          incoming.access = normalizeAccess(validatedAccess.access, { legacy: false });
+        }
+      }
       // Identity-stamp every commentable artifact with a content-hashed
       // data-tdoc-aid. The SAME artifact in a different version has the
       // SAME aid — so a comment anchored by aid resolves identity-first
@@ -2299,23 +2365,7 @@ export default {
         console.error('[upload] R2 write did not persist:', r2Key);
         return json({ error: 'r2_write_lost', message: 'PUT succeeded but the key is not readable. Re-deploy the worker; the R2 binding may be stale.' }, { status: 500 });
       }
-      if (meta) {
-        // Normalize access policy onto every uploaded meta snapshot. If the
-        // payload omits `access`, keep any previously stored policy (so a
-        // partial republish without access flags does not reset private docs
-        // to public). Only brand-new docs fall through to legacy defaults.
-        const incoming = (meta && typeof meta === 'object') ? { ...meta } : {};
-        let prev = null;
-        try {
-          const prevRaw = await env.META.get(`meta:${slug}`);
-          if (prevRaw) prev = JSON.parse(prevRaw);
-        } catch {}
-        if (!incoming.access && prev && prev.access) {
-          incoming.access = prev.access;
-        }
-        if (incoming.access) {
-          incoming.access = normalizeAccess(incoming.access, { legacy: false });
-        }
+      if (incoming) {
         await env.META.put(`meta:${slug}`, JSON.stringify(incoming));
       }
       // Reconcile existing open comments against the new artifact set:
@@ -2371,7 +2421,7 @@ export default {
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
       const next = applyAccessPatch(meta, access);
       if (next.error) {
-        return json({ error: next.error, ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
+        return json({ error: next.error, ...(next.field ? { field: next.field } : {}), ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
       }
       await env.META.put(`meta:${slug}`, JSON.stringify(next.meta));
       return json({ ok: true, slug, access: next.access });
