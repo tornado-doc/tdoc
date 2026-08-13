@@ -153,7 +153,9 @@ triggers:
 # tdoc — Prompt-native HTML documents
 
 Open-source, collaborative. Docs are HTML build
-artifacts, not files the user maintains. Authoring interface is a prompt.
+artifacts, not files the user maintains.
+
+**Source of truth (see `AGENTS.md`):** Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold. Authoring interface is a prompt.
 Every edit creates a new version. Comments anchor to highlighted text or to
 artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
@@ -614,6 +616,36 @@ The overlay applies these as `:where()` defensive defaults so old docs degrade g
 - **Don't use these ids/classes** in your doc — they're reserved by the overlay: `tdoc-*`, `#tdoc-*`, and any class starting with `tdoc-`.
 - **Don't position-fixed elements at the top** — the overlay's 44px top bar lives there.
 - **Don't use a footer at the bottom** — the overlay injects its own.
+
+### Author HTML compatibility contract (invariant)
+
+Agents generate arbitrary HTML. Overlay defaults use **`:where()` zero-specificity** so **author CSS always wins**. That means a bad author rule can also silently break layout (e.g. `padding: 0 24px` on the content root wiped overlay top reading space — fixed in #96). Contract:
+
+- One primary content container: `.wrap` (preferred), `main`, `article`, `.content`, or `.container`.
+- **No** top-level container `padding: 0 ...` / `margin: 0 auto` — overlay owns chrome spacing.
+- Treat `tdoc-*` classes/ids as reserved.
+- Scope document UI rules to the document (never global `button:hover`).
+- Prefer fluid/`max-width` layouts over fixed pixel shells.
+
+### Access policy (published docs — invariant)
+
+Remote storage holds optional `meta.access`:
+
+```json
+{
+  "visibility": "public | unlisted | private",
+  "commenting": "owner | invited | signed_in | off",
+  "history_visibility": "owner | invited | public",
+  "allowed_users": ["github-login"]
+}
+```
+
+- **public / unlisted**: link-readable without login. Unlisted is not catalog-discovery; `/me` still lists owner docs.
+- **private**: `TDOC_OWNER` + `allowed_users` only. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
+- **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
+- Legacy meta without `access` stays world-readable + full history (back-compat).
+- Set via `tdoc-publish --visibility|--history|--commenting|--allow-user` (writes local `meta.json` before upload to remote SoT).
+
 
 ### Comment anchor stability (important for `/tdoc edit`)
 

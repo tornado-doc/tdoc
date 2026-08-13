@@ -107,7 +107,7 @@
      AND the overlay UI goes through these variables — no stray literals, so a
      single place to change a colour instead of hunting literals. These are the
      Classic values — the look is unchanged. Alternate palettes and any picker
-     UI are deliberately out of scope here; see ARCHITECTURE.md. ===== */
+     UI are deliberately out of scope for this CSS block. ===== */
   :root {
     --td-accent: #1652f0;
     --td-accent-hover: #1245d0;

@@ -8,14 +8,15 @@ It creates versioned HTML snapshots, adds Google-Docs-style comments on text
 and artifacts, and lets an agent pull those comments to generate the next
 version with per-comment status replies.
 
+**Source of truth (see [AGENTS.md](AGENTS.md)):** remote storage is source of
+truth; local HTML is disposable; the local skill is authoring/scaffold.
+
 It runs in two modes:
 
-- **Local Studio** for private authoring, preview, and agent iteration on
-  `localhost`.
-- **Published Reader** for stable public sharing and GitHub-authenticated
-  comments on your own Cloudflare Worker or Vercel project.
-
-For the runtime model and release-chain details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+- **Local Studio** — temporary authoring/preview on `localhost`. Not the
+  product source of truth; safe to discard.
+- **Published Reader** — remote snapshots on your Cloudflare Worker or Vercel
+  project. This is the durable document surface.
 
 tdoc is a first-class **Claude Code** skill and also runs under **Codex**. The
 skill auto-detects the host and falls back to plain-text prompts where
@@ -108,17 +109,18 @@ first publish and it sticks (saved in `~/.tdoc/published.json`):
 
 ## Local vs published
 
-Local and published docs serve the same document snapshots, but they are
-different runtimes:
+Same document snapshots; different roles (see [AGENTS.md](AGENTS.md)):
 
-- **Local Studio** reads `~/tdocs` and `server/overlay.js` from disk on each
-  request. It is anonymous, private to the machine, and optimized for fast
-  preview and agent iteration.
-- **Published Reader** serves uploaded snapshots through the deployed runtime.
-  It has public URLs, GitHub identity for comments, and hosted comment storage.
+- **Local Studio** reads `~/tdocs` from disk for fast anonymous preview and
+  agent iteration. **Disposable.** Deleting local copies must never be treated
+  as deleting the product document.
+- **Published / remote storage** holds the durable snapshots, public URLs, and
+  hosted comments. **Source of truth.** Document delete/unpublish/management
+  targets remote storage via skill + API, not a particular local port UI.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full flow, including how overlay
-code is bundled at publish time.
+Overlay code is bundled into the hosted runtime at publish time from the skill
+checkout; local overlay edits only affect Local Studio until the next publish
+redeploy.
 
 ## How comments work
 

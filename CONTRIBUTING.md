@@ -60,3 +60,8 @@ Install the optional browser dep with `npm i -D playwright && npx playwright ins
 ## Hard rule: run tests before every push
 
 The skill ships JS that runs in users' browsers and a worker that runs on Cloudflare, both deployed on every `/tdoc publish`. Run `npm test` before pushing; for overlay or worker changes also run the matching gated suite via `npm run test:all`. Doc-only changes still need a `grep` for stale references (counts, command names, version numbers).
+
+## AGENTS.md
+
+`AGENTS.md` only records what humans and agents have aligned on, and is intentionally kept short.
+
