@@ -15,6 +15,7 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const OFFLINE = [
+  'agent-md.test.js',          // AGENT.md one-line SoT rule; no ARCHITECTURE.md
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
   'comment-history.test.js',  // event-log fold + cross-version pull
   'event-convergence.test.js',// eid dedup convergence + fold ordering

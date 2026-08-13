@@ -60,3 +60,7 @@ Install the optional browser dep with `npm i -D playwright && npx playwright ins
 ## Hard rule: run tests before every push
 
 The skill ships JS that runs in users' browsers and a worker that runs on Cloudflare, both deployed on every `/tdoc publish`. Run `npm test` before pushing; for overlay or worker changes also run the matching gated suite via `npm run test:all`. Doc-only changes still need a `grep` for stale references (counts, command names, version numbers).
+
+## AGENT.md
+
+`AGENT.md` is a **one-line** product rule for agents. Do not expand it into a second architecture doc. Change it only when the source-of-truth model itself changes, and keep it to a single sentence.
