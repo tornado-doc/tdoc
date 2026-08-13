@@ -183,7 +183,10 @@ t('BUNDLE: inlining replaces the placeholder with the real overlay, valid JS', (
     'active OVERLAY_JS placeholder still present after bundle');
   assert(/const OVERLAY_JS = "/.test(replaced), 'overlay was not inlined as a string');
   // bundled output must be syntactically valid JS
-  const tmp = path.join(os.tmpdir(), `tdoc-bundle-${Date.now()}.js`);
+  // The Worker bundle is an ES module (`export default` / exported classes).
+  // Node 18's `--check file.js` parses as CommonJS when package.json has no
+  // `"type": "module"`, so use .mjs here to validate the actual runtime shape.
+  const tmp = path.join(os.tmpdir(), `tdoc-bundle-${Date.now()}.mjs`);
   fs.writeFileSync(tmp, replaced);
   try {
     execFileSync(process.execPath, ['--check', tmp], { stdio: 'pipe' });
