@@ -863,11 +863,14 @@ function injectOverlayCfg(rawHtml, cfg) {
   return rawHtml + inject;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage) {
   return injectOverlayCfg(rawHtml, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
+    // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
+    // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
+    ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
     mode: 'published',
     versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
@@ -923,6 +926,17 @@ async function indexHtml(env, session) {
     // while KV meta updates succeeded; defense in depth.)
     const exists = await env.DOCS.head(`docs/${slug}/v${latest}/index.html`);
     if (!exists) continue;
+    // Honest delete-confirm copy needs a real comment count (JUL-36) — same
+    // fold used by the doc-view route's ownerManage data.
+    let commentCount = 0;
+    try {
+      const list = await readComments(env, slug);
+      ensureMigrated(list);
+      for (const c of historyList(list)) {
+        commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+      }
+    } catch {}
+    const versionCount = Array.isArray(meta.versions) && meta.versions.length ? meta.versions.length : 1;
     rows.push(`<tr>
       <td><a href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(meta.title || slug)}</a></td>
       <td>${escapeHtml(slug)}</td>
@@ -957,19 +971,24 @@ async function indexHtml(env, session) {
           <button type="submit">Save</button>
         </form>
       </td>
-      <td><button class="delete-doc" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(meta.title || slug)}">Delete</button></td>
+      <td><button class="delete-doc" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(meta.title || slug)}" data-versions="${versionCount}" data-comments="${commentCount}">Delete</button></td>
     </tr>`);
   }
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
 <style>
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 1120px; margin: 48px auto; padding: 0 20px; color: #111; }
-  h1 { font-size: 28px; margin: 0 0 4px; color: #1652f0; }
-  .sub { color: #666; margin: 0 0 32px; }
+  :root {
+    --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
+    --td-danger: #b42318; --td-danger-tint: #fdeceb; --td-ok: #087443;
+    --td-ink: #111; --td-muted: #666; --td-line: #eee;
+  }
+  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 1120px; margin: 48px auto; padding: 0 20px; color: var(--td-ink); }
+  h1 { font-size: 28px; margin: 0 0 4px; color: var(--td-accent); }
+  .sub { color: var(--td-muted); margin: 0 0 32px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid #eee; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--td-line); }
   th { font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 0.04em; }
-  a { color: #1652f0; text-decoration: none; }
+  a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; }
   .who { color: #888; font-size: 13px; margin: 0 0 32px; }
@@ -978,19 +997,32 @@ async function indexHtml(env, session) {
   .toolbar label { max-width: 320px; }
   .toolbar input { min-width: 280px; }
   .access-form { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)) auto; gap: 8px; align-items: end; min-width: 620px; }
-  label { display: grid; gap: 4px; color: #666; font-size: 12px; }
-  select, input, button { font: inherit; border: 1px solid #d7d7d7; border-radius: 6px; background: #fff; color: #111; padding: 7px 8px; }
+  label { display: grid; gap: 4px; color: var(--td-muted); font-size: 12px; }
+  select, input, button { font: inherit; border: 1px solid #d7d7d7; border-radius: 6px; background: #fff; color: var(--td-ink); padding: 7px 8px; }
   input { min-width: 180px; }
-  button { cursor: pointer; }
-  button:hover { border-color: #1652f0; }
-  .delete-doc { color: #b42318; border-color: #f1b8b2; }
-  .status { min-height: 20px; margin: 0 0 16px; color: #666; font-size: 13px; }
-  .status[data-kind="error"] { color: #b42318; }
-  .status[data-kind="ok"] { color: #087443; }
+  button { cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
+  button:hover { border-color: var(--td-accent); }
+  .delete-doc { color: var(--td-danger); border-color: #f1b8b2; }
+  .delete-doc:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
+  .status { min-height: 20px; margin: 0 0 16px; color: var(--td-muted); font-size: 13px; }
+  .status[data-kind="error"] { color: var(--td-danger); }
+  .status[data-kind="ok"] { color: var(--td-ok); }
+  /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
+     doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
+     standalone copy here since /me does not load overlay.js. */
+  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
+  .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
+  .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
+  .tdoc-modal .status { color: #888; font-size: 13px; margin: 0 0 8px; }
+  .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  .tdoc-modal button { padding: 8px 16px; border-radius: 6px; }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: #931c14; border-color: #931c14; }
   @media (max-width: 900px) {
     table, thead, tbody, tr, th, td { display: block; }
     thead { display: none; }
-    tr { padding: 14px 0; border-bottom: 1px solid #eee; }
+    tr { padding: 14px 0; border-bottom: 1px solid var(--td-line); }
     td { border: 0; padding: 5px 0; }
     .access-form { min-width: 0; grid-template-columns: 1fr; }
   }
@@ -1019,6 +1051,30 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
   };
   const users = (value) => value.split(/[\\s,]+/).map((x) => x.trim()).filter(Boolean);
+  // Styled confirm — replaces window.confirm(). Resolves true/false; never
+  // silently proceeds (Cancel and the backdrop both resolve false).
+  function showConfirm({ title, body, confirmLabel, danger }) {
+    return new Promise((resolve) => {
+      const bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg';
+      bg.innerHTML = '<div class="tdoc-modal">' +
+        '<h3></h3><p></p>' +
+        '<div class="actions">' +
+          '<button type="button" data-act="cancel">Cancel</button>' +
+          '<button type="button" data-act="go"></button>' +
+        '</div></div>';
+      bg.querySelector('h3').textContent = title;
+      bg.querySelector('p').innerHTML = body;
+      const goBtn = bg.querySelector('[data-act="go"]');
+      goBtn.textContent = confirmLabel;
+      if (danger) goBtn.className = 'danger';
+      const done = (v) => { bg.remove(); resolve(v); };
+      bg.querySelector('[data-act="cancel"]').onclick = () => done(false);
+      bg.addEventListener('click', (e) => { if (e.target === bg) done(false); });
+      goBtn.onclick = () => done(true);
+      document.body.appendChild(bg);
+    });
+  }
   document.querySelectorAll('.access-form').forEach((form) => {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -1050,7 +1106,16 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     button.addEventListener('click', async () => {
       const slug = button.dataset.slug;
       const title = button.dataset.title || slug;
-      if (!confirm('Delete "' + title + '" from remote storage? This removes all versions and comments.')) return;
+      const versions = button.dataset.versions || '1';
+      const comments = button.dataset.comments || '0';
+      const proceed = await showConfirm({
+        title: 'Delete "' + title + '"?',
+        body: 'This permanently removes <b>' + versions + ' version(s)</b> and <b>' + comments +
+          ' comment(s)</b> from remote storage. No undo.',
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!proceed) return;
       say('Deleting ' + slug + '...');
       let headers;
       try { headers = authHeaders(); } catch (e) { say(e.message, 'error'); return; }
@@ -1895,7 +1960,26 @@ export default {
           versions = [{ n: Number(vStr), created: (hit && hit.created) || null }];
         }
       } catch {}
-      return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwnerSession(env, session)));
+      const isOwner = isOwnerSession(env, session);
+      // JUL-36: owner-only manage data (Delete / Unpublish / visibility switch),
+      // computed fresh on THIS request and embedded only for the owner. A
+      // non-owner's bootCfg carries `ownerManage: null` — the overlay's manage
+      // menu never builds a single DOM node without it, so there is nothing to
+      // hide, only nothing rendered. Kept separate from `isOwner` (also still
+      // sent) so the manage UI's data dependency is explicit and single-source.
+      let ownerManage = null;
+      if (isOwner) {
+        let commentCount = 0;
+        try {
+          const list = await readComments(env, slug);
+          ensureMigrated(list);
+          for (const c of historyList(list)) {
+            commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+          }
+        } catch {}
+        ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
+      }
+      return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwner, ownerManage));
     }
 
     // ---- doc export / fork ----
