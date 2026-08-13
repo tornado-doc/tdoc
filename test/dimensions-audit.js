@@ -2,6 +2,8 @@
 // 320 to 1600 and asserts:
 //   - body.tdoc-has-comments && !body.tdoc-narrow  =>  cards sit ENTIRELY to
 //     the right of the doc article (no visual overlap with prose).
+//   - body.tdoc-pins && !body.tdoc-narrow => article stays centered in the
+//     viewport; comment pins are provider chrome and must not shift the doc.
 //   - top bar children all have offsetWidth > 0 (when expected visible).
 //   - no horizontal overflow on documentElement.
 //   - footer (.tdoc-footer) present + within viewport.
@@ -93,6 +95,7 @@ const REQUIRE_FOOTER = process.env.AUDIT_REQUIRE_FOOTER !== '0';
         scrollWidth: docEl.scrollWidth,
         hasComments,
         narrow,
+        pinsMode: body.classList.contains('tdoc-pins'),
         cards,
         article: aRect ? { left: aRect.left, right: aRect.right, width: aRect.width } : null,
         bar: barRect ? { left: barRect.left, right: barRect.right } : null,
@@ -109,13 +112,15 @@ const REQUIRE_FOOTER = process.env.AUDIT_REQUIRE_FOOTER !== '0';
     // legitimately overflow on phone widths; that's the doc author's call, not
     // the overlay's bug. Instead we assert overlay-owned elements stay in bounds.
 
-    // Overlap rule: when has-comments && !narrow, cards must sit to the right
-    // of the article (article.right <= card.left).
+    // Wide comment rules: pinned mode keeps the document centered in the
+    // viewport. If cards are visible, they still must sit to the right of the
+    // article without overlapping prose.
     if (m.hasComments && !m.narrow && m.article) {
-      const readerCenter = (m.innerWidth - 360) / 2;
+      const expectedCenter = m.pinsMode ? (m.innerWidth / 2) : ((m.innerWidth - 360) / 2);
       const articleCenter = (m.article.left + m.article.right) / 2;
-      if (Math.abs(articleCenter - readerCenter) > 2) {
-        errs.push(`article center=${articleCenter.toFixed(0)} not centered in reading area center=${readerCenter.toFixed(0)}`);
+      if (Math.abs(articleCenter - expectedCenter) > 2) {
+        const scope = m.pinsMode ? 'viewport' : 'reading area';
+        errs.push(`article center=${articleCenter.toFixed(0)} not centered in ${scope} center=${expectedCenter.toFixed(0)}`);
       }
       for (const c of m.cards) {
         if (c.right > m.innerWidth + 1) errs.push(`card right=${c.right.toFixed(0)} overflows viewport ${m.innerWidth}`);

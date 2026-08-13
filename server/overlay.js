@@ -81,11 +81,11 @@
   body { padding-top: 44px !important; padding-bottom: 24px; -webkit-user-select: text; user-select: text; }
   body .tdoc-bar, body .tdoc-bar *, body #tdoc-comment-layer, body #tdoc-comment-layer *, body #tdoc-pin-layer, body #tdoc-pin-layer *, body .tdoc-cluster-pop, body .tdoc-cluster-pop *, body .tdoc-hover-outline, body .tdoc-comment-pill, body .tdoc-emoji-picker, body .tdoc-secondary-menu, body .tdoc-anchor-mark.tdoc-anchor-mark-element, body .tdoc-drag-marquee, body .tdoc-modal, body .tdoc-modal * { -webkit-user-select: none !important; user-select: none !important; }
   body .tdoc-modal .code, body .tdoc-modal textarea, body .tdoc-modal input { -webkit-user-select: text !important; user-select: text !important; }
-  /* Reserve the comment rail on the right. The body content box becomes the
-     reader area, so article margin:auto centers content in that area exactly
-     instead of using a compensating left gutter. */
-  body.tdoc-has-comments:not(.tdoc-narrow) { padding-right: 360px !important; padding-left: 0 !important; }
-  body.tdoc-narrow { padding-right: 0 !important; }
+  /* Comment pins/cards are provider chrome, not document layout. Keep the
+     document centered in the viewport; if the comment UI cannot fit beside it,
+     narrow mode switches comments into the drawer. */
+  body.tdoc-pins:not(.tdoc-narrow) { padding-right: 0 !important; padding-left: 0 !important; }
+  body.tdoc-narrow { padding-right: 0 !important; padding-left: 0 !important; }
   /* Center the article container in the reading column. :where() so any
      doc-defined margin wins. Applies only on wide layouts; narrow mode
      uses the full body width via the drawer. */
@@ -93,11 +93,8 @@
     margin-left: auto !important;
     margin-right: auto !important;
   }
-  /* The body right-padding reserves space for the comment column. The
-     article centers itself naturally inside the remaining (viewport minus
-     320px) space via its own margin auto. As the window shrinks, the symmetric
-     margins shrink with it; once they hit the article's min width, narrow-mode
-     takes over and the drawer kicks in. */
+  /* The article stays centered in the viewport. As the window shrinks, narrow
+     mode takes over and the drawer kicks in before comment chrome overlaps it. */
   /* ========== Default doc template (single typography template) ==========
      One canonical look for every tdoc doc: same font stack, sizes, spacing,
      headings, lists, code, tables, quotes. Wrapped in :where() so a doc that
@@ -572,6 +569,8 @@
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
+  body.tdoc-narrow .tdoc-bar #tdoc-fork-btn, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
+  body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle { display: block; width: 36px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 12px; cursor: grab; touch-action: none; user-select: none; }
