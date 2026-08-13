@@ -175,6 +175,17 @@ t('BUNDLE: inlining replaces the placeholder with the real overlay, valid JS', (
   const replaced = worker.replace(
     /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
     'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
+  ).replace(
+    /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,
+    'const TDOC_BUILD_INFO = ' + JSON.stringify({
+      source_sha: 'testsha',
+      source_dirty: false,
+      worker_sha: 'worker123',
+      overlay_sha: 'overlay123',
+      bundle_sha: 'bundle123',
+      built_at: '2026-01-01T00:00:00.000Z',
+      generated_by: 'coverage.test',
+    }) + ';'
   );
   assert(replaced !== worker, 'placeholder not found — bundle would fail');
   // The ACTIVE placeholder (the const declaration) must be gone. A mention in a
@@ -182,6 +193,9 @@ t('BUNDLE: inlining replaces the placeholder with the real overlay, valid JS', (
   assert(!/const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/.test(replaced),
     'active OVERLAY_JS placeholder still present after bundle');
   assert(/const OVERLAY_JS = "/.test(replaced), 'overlay was not inlined as a string');
+  assert(!/const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/.test(replaced),
+    'active TDOC_BUILD_INFO placeholder still present after bundle');
+  assert(/const TDOC_BUILD_INFO = \{/.test(replaced), 'build info was not inlined as an object');
   // bundled output must be syntactically valid JS
   // The Worker bundle is an ES module (`export default` / exported classes).
   // Node 18's `--check file.js` parses as CommonJS when package.json has no

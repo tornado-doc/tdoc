@@ -120,7 +120,8 @@ Same document snapshots; different roles (see [AGENTS.md](AGENTS.md)):
 
 Overlay code is bundled into the hosted runtime at publish time from the skill
 checkout; local overlay edits only affect Local Studio until the next publish
-redeploy.
+redeploy. Published pages also expose the bundled runtime provenance at
+`/api/runtime` and in `window.__TDOC__.runtime`.
 
 ## How comments work
 
