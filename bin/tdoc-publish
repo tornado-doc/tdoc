@@ -25,14 +25,38 @@
 
 set -euo pipefail
 
-usage() { echo "usage: tdoc-publish [--platform cloudflare|vercel] <slug>" >&2; exit 1; }
+usage() {
+  cat >&2 <<'EOF'
+usage: tdoc-publish [options] <slug>
+
+Options:
+  --platform cloudflare|vercel
+  --visibility public|unlisted|private   (default for new access block: unlisted)
+  --history owner|invited|public         (default for new access block: owner)
+  --commenting owner|invited|signed_in|off  (default: signed_in)
+  --allow-user <github-login>            (repeatable; private/shared allowlist)
+EOF
+  exit 1
+}
 
 SLUG=""
 PLATFORM_FLAG="${TDOC_PLATFORM:-}"
+VISIBILITY_FLAG=""
+HISTORY_FLAG=""
+COMMENTING_FLAG=""
+ALLOW_USERS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)   PLATFORM_FLAG="${2:-}"; [ -n "$PLATFORM_FLAG" ] || usage; shift 2 ;;
     --platform=*) PLATFORM_FLAG="${1#--platform=}"; [ -n "$PLATFORM_FLAG" ] || usage; shift ;;
+    --visibility) VISIBILITY_FLAG="${2:-}"; [ -n "$VISIBILITY_FLAG" ] || usage; shift 2 ;;
+    --visibility=*) VISIBILITY_FLAG="${1#--visibility=}"; [ -n "$VISIBILITY_FLAG" ] || usage; shift ;;
+    --history) HISTORY_FLAG="${2:-}"; [ -n "$HISTORY_FLAG" ] || usage; shift 2 ;;
+    --history=*) HISTORY_FLAG="${1#--history=}"; [ -n "$HISTORY_FLAG" ] || usage; shift ;;
+    --commenting) COMMENTING_FLAG="${2:-}"; [ -n "$COMMENTING_FLAG" ] || usage; shift 2 ;;
+    --commenting=*) COMMENTING_FLAG="${1#--commenting=}"; [ -n "$COMMENTING_FLAG" ] || usage; shift ;;
+    --allow-user) [ -n "${2:-}" ] || usage; ALLOW_USERS+=("$2"); shift 2 ;;
+    --allow-user=*) ALLOW_USERS+=("${1#--allow-user=}"); shift ;;
     # Anything else is treated as the slug — including dash-leading junk,
     # which the kebab-case validator below rejects with a precise message.
     *)  [ -z "$SLUG" ] || usage; SLUG="$1"; shift ;;
@@ -606,6 +630,43 @@ META_FILE="$DOC_DIR/meta.json"
 if [ ! -f "$META_FILE" ]; then
   echo "no meta.json at $META_FILE" >&2
   exit 1
+fi
+
+# JUL-31 access policy: merge flags into local meta.json so /api/upload
+# carries them. Defaults for a brand-new access block: unlisted + owner
+# history (pure publish). Existing access blocks keep unspecified fields.
+if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG" ] || [ ${#ALLOW_USERS[@]} -gt 0 ]; then
+  case "${VISIBILITY_FLAG:-}" in
+    ''|public|unlisted|private) ;;
+    *) echo "[tdoc] invalid --visibility '$VISIBILITY_FLAG' (public|unlisted|private)" >&2; exit 1 ;;
+  esac
+  case "${HISTORY_FLAG:-}" in
+    ''|owner|invited|public) ;;
+    *) echo "[tdoc] invalid --history '$HISTORY_FLAG' (owner|invited|public)" >&2; exit 1 ;;
+  esac
+  case "${COMMENTING_FLAG:-}" in
+    ''|owner|invited|signed_in|off) ;;
+    *) echo "[tdoc] invalid --commenting '$COMMENTING_FLAG' (owner|invited|signed_in|off)" >&2; exit 1 ;;
+  esac
+  ALLOW_JSON='[]'
+  if [ ${#ALLOW_USERS[@]} -gt 0 ]; then
+    ALLOW_JSON="$(printf '%s
+' "${ALLOW_USERS[@]}" | jq -R . | jq -s .)"
+  fi
+  tmp_meta="$(mktemp -t tdoc-meta.XXXXXX)"
+  jq     --arg vis "${VISIBILITY_FLAG}"     --arg hist "${HISTORY_FLAG}"     --arg comm "${COMMENTING_FLAG}"     --argjson allow "$ALLOW_JSON"     '
+      .access = (.access // {})
+      | .access.visibility = (if $vis != "" then $vis else (.access.visibility // "unlisted") end)
+      | .access.history_visibility = (if $hist != "" then $hist else (.access.history_visibility // "owner") end)
+      | .access.commenting = (if $comm != "" then $comm else (.access.commenting // "signed_in") end)
+      | .access.allowed_users = (
+          if ($allow|length) > 0 then
+            (((.access.allowed_users // []) + $allow) | map(ascii_downcase|sub("^github:";"")|sub("^@";"")) | unique)
+          else (.access.allowed_users // []) end
+        )
+    ' "$META_FILE" > "$tmp_meta"
+  mv "$tmp_meta" "$META_FILE"
+  echo "[tdoc] access → $(jq -c .access "$META_FILE")"
 fi
 
 VERSION="$(jq -r '.versions | sort_by(.n) | last | .n' "$META_FILE")"

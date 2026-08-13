@@ -20,6 +20,7 @@ const OFFLINE = [
   'event-convergence.test.js',// eid dedup convergence + fold ordering
   'reconcile.test.js',        // anchor reconcile branches + compaction
   'security.test.js',         // injection / authz / CSRF / path-traversal
+  'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'oldver-strip.test.js',     // old-version banner predicate
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard

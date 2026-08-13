@@ -70,6 +70,31 @@ GitHub-backed identity. Published comments live in hosted storage:
 Published overlay behavior comes from the deployed bundle. It does not change
 just because a local checkout changes.
 
+
+## Access Policy (published docs)
+
+Published documents carry an optional `meta.access` object:
+
+```json
+{
+  "visibility": "public | unlisted | private",
+  "commenting": "owner | invited | signed_in | off",
+  "history_visibility": "owner | invited | public",
+  "allowed_users": ["github-login", "..."]
+}
+```
+
+- **public / unlisted**: anyone with the link can read. Unlisted is for
+  pure-link sharing without discovery; the owner catalog at `/me` still lists
+  every doc the owner hosts.
+- **private**: only `TDOC_OWNER` and `allowed_users` (GitHub logins) can read.
+  Gates apply to `/d/.../v/N`, `/export`, `/fork`, and `GET /api/comments`.
+- **history_visibility**: controls whether the overlay version picker shows the
+  full history (pure-publish default for new policies: owner-only).
+- **Legacy docs** without `access` stay world-readable with full history for
+  back-compat. `tdoc-publish --visibility ...` writes the policy into local
+  `meta.json` before upload.
+
 ## Install, Preview, and Publish Checkouts
 
 There are three common code locations:
