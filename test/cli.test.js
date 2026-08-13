@@ -55,6 +55,20 @@ t('tdoc-publish does not let an older-version failure abort the latest', () => {
   assert(/FATAL: latest version/.test(src), 'latest-version hard-fail missing');
 });
 
+t('tdoc-publish exposes hosted as a no-user-deploy platform', () => {
+  const src = readBin('tdoc-publish');
+  assert(/cloudflare\|vercel\|hosted/.test(src), 'usage does not include hosted platform');
+  assert(/first_time_setup_hosted\(\)/.test(src), 'hosted setup function missing');
+  assert(/TDOC_HOSTED_UPLOAD_TOKEN/.test(src), 'hosted setup does not read hosted upload token');
+  assert(/TDOC_HOSTED_BASE:-https:\/\/tdoc\.dev/.test(src), 'hosted setup does not default to tdoc.dev');
+  assert(/platform": "hosted"/.test(src), 'hosted setup does not persist hosted platform');
+  assert(/if \[ "\$PLATFORM" = "hosted" \]/.test(src), 'hosted platform branch missing');
+  assert(/UPLOAD_BASE="\$BASE"/.test(src), 'hosted branch should upload to configured base');
+  assert(/PUBLIC_BASE="\$BASE"/.test(src), 'hosted branch should emit configured hosted base links');
+  assert(/does not require Cloudflare, Vercel, R2, KV, Workers, or OAuth app setup/.test(src),
+    'hosted failure prompt should explain that user deploy setup is not required');
+});
+
 t('tdoc-new fails loudly if the local server never comes up', () => {
   const src = readBin('tdoc-new');
   assert(/SERVER_UP/.test(src) && /failed to start/.test(src),

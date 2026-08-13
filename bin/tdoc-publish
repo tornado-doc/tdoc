@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # tdoc-publish — first-time setup + upload doc to the user's own hosting.
 #
-# Usage: tdoc-publish [--platform cloudflare|vercel] <slug>
+# Usage: tdoc-publish [--platform cloudflare|vercel|hosted] <slug>
 #
 # Two publish targets share one flow (the worker code and the /api/upload
 # contract are identical on both):
 #   cloudflare (default) — wrangler deploy to a Worker + R2 + KV
 #   vercel               — vercel deploy of the vercel/ template + Blob + Upstash KV
+#   hosted               — upload to a tdoc-managed host; no user deploy
 # The platform is chosen ONCE, on the first publish (flag or TDOC_PLATFORM
 # env), then persisted in ~/.tdoc/published.json and read from there.
 #
@@ -30,7 +31,7 @@ usage() {
 usage: tdoc-publish [options] <slug>
 
 Options:
-  --platform cloudflare|vercel
+  --platform cloudflare|vercel|hosted
   --visibility public|unlisted|private   (default for new access block: unlisted)
   --history owner|invited|public         (default for new access block: owner)
   --commenting owner|invited|signed_in|off  (default: signed_in)
@@ -196,6 +197,32 @@ require_vercel() {
     fail_with_agent_prompt "the vercel CLI is not installed" \
       "Install the Vercel CLI globally so tdoc can publish: run 'npm i -g vercel' (or 'pnpm add -g vercel'). After it's installed, run '/tdoc publish $SLUG' again."
   fi
+}
+
+first_time_setup_hosted() {
+  local base="${TDOC_HOSTED_BASE:-https://tdoc.dev}"
+  local token="${TDOC_HOSTED_UPLOAD_TOKEN:-}"
+  base="${base%/}"
+  if [ -z "$token" ]; then
+    fail_with_agent_prompt "hosted upload token is not configured" \
+      "Configure hosted publish by setting TDOC_HOSTED_UPLOAD_TOKEN, then run '/tdoc publish --platform hosted $SLUG' again. This uses tdoc's hosted service, so it does not require Cloudflare, Vercel, R2, KV, Workers, or OAuth app setup."
+  fi
+  case "$base" in
+    http://*|https://*) ;;
+    *) echo "[tdoc] TDOC_HOSTED_BASE must start with http:// or https:// (got '$base')." >&2; exit 1 ;;
+  esac
+  local public_host="${base#http://}"
+  public_host="${public_host#https://}"
+  cat > "$CONFIG_FILE" <<EOF
+{
+  "platform": "hosted",
+  "base": "$base",
+  "public_host": "$public_host",
+  "upload_token": "$token"
+}
+EOF
+  chmod 600 "$CONFIG_FILE"
+  echo "[tdoc] hosted publish configured: $base"
 }
 if ! command -v jq >/dev/null 2>&1; then
   fail_with_agent_prompt "jq is not installed" \
@@ -586,7 +613,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
   case "${PLATFORM_FLAG:-cloudflare}" in
     cloudflare) SKILL_DIR="$SKILL_DIR" first_time_setup ;;
     vercel)     SKILL_DIR="$SKILL_DIR" first_time_setup_vercel ;;
-    *) echo "[tdoc] unknown platform '${PLATFORM_FLAG}' — use 'cloudflare' or 'vercel'." >&2; exit 1 ;;
+    hosted)     first_time_setup_hosted ;;
+    *) echo "[tdoc] unknown platform '${PLATFORM_FLAG}' — use 'cloudflare', 'vercel', or 'hosted'." >&2; exit 1 ;;
   esac
 fi
 
@@ -599,7 +627,20 @@ fi
 
 TOKEN="$(jq -r .upload_token "$CONFIG_FILE")"
 
-if [ "$PLATFORM" = "vercel" ]; then
+if [ "$PLATFORM" = "hosted" ]; then
+  BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
+  PUBLIC_HOST="$(jq -r '.public_host // empty' "$CONFIG_FILE")"
+  for _f in TOKEN:upload_token BASE:base PUBLIC_HOST:public_host; do
+    _var="${_f%%:*}"; _key="${_f##*:}"; _val="$(eval "printf '%s' \"\$$_var\"")"
+    if [ -z "$_val" ] || [ "$_val" = "null" ]; then
+      echo "[tdoc] $CONFIG_FILE is missing or has a null '$_key'. Delete it and re-run /tdoc publish --platform hosted to re-setup." >&2
+      exit 1
+    fi
+  done
+  UPLOAD_BASE="$BASE"
+  PUBLIC_BASE="$BASE"
+  CUSTOM_DOMAIN=""
+elif [ "$PLATFORM" = "vercel" ]; then
   BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
   # Validate like the cloudflare branch below: a corrupt or partial
   # published.json must fail loudly, not publish to "null".

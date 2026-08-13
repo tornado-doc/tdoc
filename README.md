@@ -25,8 +25,8 @@ Claude-specific tools are unavailable. See [Using tdoc with Codex](#using-tdoc-w
 ```
 You:  /tdoc new "an explainer with a slider showing how interest compounds"
 Claude: <generates doc, opens it locally>
-You:  /tdoc publish
-Claude: https://tdoc.yourname.workers.dev/d/compound-interest/v/1
+You:  /tdoc publish --platform hosted
+Claude: https://tdoc.dev/d/compound-interest/v/1
 ```
 
 Anyone with the link reads it instantly and comments on any sentence, image, or
@@ -79,7 +79,7 @@ What is *not* yet first-class on Codex: native slash-command registration (`/tdo
 |---|---|
 | `/tdoc new <prompt>` | Generate a new doc + open locally |
 | `/tdoc edit <slug>` | New version from open comments; replies on each with ✅/🟡/❓ status |
-| `/tdoc publish <slug>` | Deploy to your Cloudflare Worker (or Vercel, `--platform vercel`), get a public URL |
+| `/tdoc publish <slug>` | Publish a doc and get a public URL; hosted service is available with `--platform hosted`, self-host remains Cloudflare/Vercel |
 | `/tdoc pull <slug>` | Sync comments from the published doc back to local |
 | `/tdoc fork <slug>` | Copy a doc to a new slug |
 | `/tdoc unpublish <slug>` | Remove a published doc from your Worker |
@@ -90,13 +90,20 @@ What is *not* yet first-class on Codex: native slash-command registration (`/tdo
 
 ## Cost
 
-**$0 for normal use.** Cloudflare Workers + R2 + KV all have generous free tiers that personal usage will never come close to. The same goes for the Vercel target (Functions + Blob + Upstash Redis free tiers). You own your account; nobody else (including the maintainer) sees your traffic or pays your bills.
+**$0 for normal personal use.** Hosted publishing can use tdoc-managed
+infrastructure, so a first-time user does not need to configure Cloudflare,
+Vercel, R2, KV, Workers, or an OAuth app. Self-host targets still use your own
+Cloudflare or Vercel account.
 
 ## Hosting targets
 
-Publishing deploys the **same worker code** to a host you own; pick one on your
+Publishing has one hosted target and two self-host targets; pick one on your
 first publish and it sticks (saved in `~/.tdoc/published.json`):
 
+- **Hosted** — `/tdoc publish --platform hosted <slug>` uploads to a
+  tdoc-managed host such as `tdoc.dev`. This path skips user deploy setup. In
+  hosted v1, the upload token is configured out-of-band with
+  `TDOC_HOSTED_UPLOAD_TOKEN`; account/token issuance is the next product layer.
 - **Cloudflare (default)** — Worker + R2 + KV, with a Durable Object
   serializing concurrent comment writes. The most battle-tested target.
 - **Vercel** — `/tdoc publish --platform vercel <slug>` deploys a catch-all
