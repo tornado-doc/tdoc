@@ -1,5 +1,5 @@
-// AGENT.md is the durable product rule for agents. Keep it one line; do not
-// reintroduce ARCHITECTURE.md as a second source of truth.
+// AGENTS.md is the durable product rule for agents (auto-loaded by agent hosts).
+// Keep it one line; do not reintroduce ARCHITECTURE.md as a second source of truth.
 const fs = require('fs');
 const path = require('path');
 
@@ -13,21 +13,32 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-console.log('agent.md source-of-truth rule');
+console.log('agents.md source-of-truth rule');
 
-t('AGENT.md exists and is exactly the one-line rule', () => {
-  const body = fs.readFileSync(path.join(root, 'AGENT.md'), 'utf8');
-  assert(body === expected, `AGENT.md must be exactly one line + newline.\nGot:\n${JSON.stringify(body)}`);
+t('AGENTS.md exists and is exactly the one-line rule', () => {
+  const body = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
+  assert(body === expected, `AGENTS.md must be exactly one line + newline.\nGot:\n${JSON.stringify(body)}`);
+});
+
+t('AGENT.md (singular) is not used — hosts auto-read AGENTS.md', () => {
+  assert(!fs.existsSync(path.join(root, 'AGENT.md')), 'use AGENTS.md not AGENT.md');
 });
 
 t('ARCHITECTURE.md is removed (no second architecture doc)', () => {
   assert(!fs.existsSync(path.join(root, 'ARCHITECTURE.md')), 'ARCHITECTURE.md must not exist');
 });
 
-t('README does not link to ARCHITECTURE.md', () => {
+t('README does not link to ARCHITECTURE.md and points at AGENTS.md', () => {
   const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
   assert(!readme.includes('ARCHITECTURE.md'), 'README still references ARCHITECTURE.md');
-  assert(readme.includes('AGENT.md'), 'README should point agents at AGENT.md');
+  assert(readme.includes('AGENTS.md'), 'README should point agents at AGENTS.md');
+});
+
+t('SKILL.md retains author HTML + access policy contracts', () => {
+  const skill = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
+  assert(skill.includes('Author HTML compatibility contract'), 'missing author HTML contract in SKILL.md');
+  assert(skill.includes('Access policy (published docs'), 'missing access policy contract in SKILL.md');
+  assert(skill.includes(':where()'), 'author-wins :where() invariant missing from SKILL.md');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -8,7 +8,7 @@ It creates versioned HTML snapshots, adds Google-Docs-style comments on text
 and artifacts, and lets an agent pull those comments to generate the next
 version with per-comment status replies.
 
-**Source of truth (see [AGENT.md](AGENT.md)):** remote storage is source of
+**Source of truth (see [AGENTS.md](AGENTS.md)):** remote storage is source of
 truth; local HTML is disposable; the local skill is authoring/scaffold.
 
 It runs in two modes:
@@ -109,7 +109,7 @@ first publish and it sticks (saved in `~/.tdoc/published.json`):
 
 ## Local vs published
 
-Same document snapshots; different roles (see [AGENT.md](AGENT.md)):
+Same document snapshots; different roles (see [AGENTS.md](AGENTS.md)):
 
 - **Local Studio** reads `~/tdocs` from disk for fast anonymous preview and
   agent iteration. **Disposable.** Deleting local copies must never be treated
