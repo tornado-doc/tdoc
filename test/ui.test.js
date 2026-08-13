@@ -40,6 +40,17 @@ async function tPub(name, fn) {
 
   await page.goto(URL, { waitUntil: 'networkidle' });
 
+  async function openFirstCommentCard() {
+    const card = await page.$('.tdoc-margin-comment');
+    if (!card) return null;
+    if (await card.isVisible()) return card;
+    const pin = await page.$('.tdoc-pin');
+    if (!pin) return card;
+    await pin.click();
+    await page.waitForSelector('.tdoc-margin-comment.tdoc-floating-open', { timeout: 1000 });
+    return page.$('.tdoc-margin-comment.tdoc-floating-open');
+  }
+
   await t('top bar renders', async () => {
     await page.waitForSelector('.tdoc-bar', { timeout: 5000 });
   });
@@ -252,7 +263,7 @@ async function tPub(name, fn) {
   });
 
   await t('Click on existing comment card adds .active to card + anchor', async () => {
-    const card = await page.$('.tdoc-margin-comment');
+    const card = await openFirstCommentCard();
     if (!card) { console.log('  (no comments to test, skipping)'); return; }
     // Click the author row (text), not the body — avoids hitting reaction chips
     // and other interactive children that stopPropagation.
@@ -292,7 +303,7 @@ async function tPub(name, fn) {
 
   await t('Clicking outside any card / anchor deselects the active card', async () => {
     // Activate a card via its author row (avoid reaction chip stopPropagation)
-    const card = await page.$('.tdoc-margin-comment');
+    const card = await openFirstCommentCard();
     if (!card) { console.log('  (no cards, skipping)'); return; }
     const author = await card.$('.author');
     if (author) await author.click();
@@ -313,14 +324,14 @@ async function tPub(name, fn) {
   });
 
   await t('Comment card renders Reply button', async () => {
-    const card = await page.$('.tdoc-margin-comment, #tdoc-comment-layer .tdoc-margin-comment');
+    const card = await openFirstCommentCard();
     if (!card) { console.log('  (no comments on this doc, skipping)'); return; }
     const reply = await page.$('.tdoc-reply-toggle');
     if (!reply) throw new Error('no Reply button on comment card');
   });
 
   await t('Comment card renders + React button', async () => {
-    const card = await page.$('.tdoc-margin-comment, #tdoc-comment-layer .tdoc-margin-comment');
+    const card = await openFirstCommentCard();
     if (!card) { console.log('  (no comments on this doc, skipping)'); return; }
     const addReact = await page.$('.tdoc-react-add');
     if (!addReact) throw new Error('no + React button on comment card');
@@ -342,6 +353,7 @@ async function tPub(name, fn) {
   });
 
   await t('Clicking replies toggle expands replies', async () => {
+    await openFirstCommentCard();
     const toggle = await page.$('.tdoc-replies-toggle');
     if (!toggle) { console.log('  (no replies in fixture, skipping)'); return; }
     await toggle.click();

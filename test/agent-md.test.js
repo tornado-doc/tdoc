@@ -1,11 +1,12 @@
 // AGENTS.md is the durable product rule for agents (auto-loaded by agent hosts).
-// Keep it one line; do not reintroduce ARCHITECTURE.md as a second source of truth.
+// Keep it short; do not reintroduce ARCHITECTURE.md as a second source of truth.
 const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
 const expected =
-  'Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold.\n';
+  'Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold.\n' +
+  'Published reader invariants are provider-enforced in overlay/worker code and tests, not left only to author HTML or prompts.\n';
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -15,9 +16,9 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 console.log('agents.md source-of-truth rule');
 
-t('AGENTS.md exists and is exactly the one-line rule', () => {
+t('AGENTS.md exists and is exactly the short source-of-truth rule', () => {
   const body = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
-  assert(body === expected, `AGENTS.md must be exactly one line + newline.\nGot:\n${JSON.stringify(body)}`);
+  assert(body === expected, `AGENTS.md must be exactly the guarded short rule.\nGot:\n${JSON.stringify(body)}`);
 });
 
 t('AGENT.md (singular) is not used — hosts auto-read AGENTS.md', () => {
