@@ -112,6 +112,9 @@
     --td-accent-ring-soft: rgba(22,82,240,0.18);
     --td-accent-wash: rgba(22,82,240,0.06);
     --td-accent-tint: #e8eeff;
+    --td-danger: #b42318;
+    --td-danger-hover: #931c14;
+    --td-danger-tint: #fdeceb;
     --td-ground: #fff;
     --td-ink: #1a1a1a;
     --td-heading: #1a1a1a;
@@ -543,6 +546,23 @@
   .tdoc-modal .danger { color: #c33; font-size: 13px; }
   .tdoc-modal code { background: #f5f6f8; padding: 1px 5px; border-radius: 3px; }
 
+  /* Manage-doc modal (JUL-36: Delete / Unpublish / visibility switch). */
+  .tdoc-modal .manage-section { margin: 16px 0; }
+  .tdoc-modal .manage-section:first-of-type { margin-top: 4px; }
+  .tdoc-modal label.field { display: block; font-size: 12px; color: #666; margin: 0 0 4px; font-weight: 600; }
+  .tdoc-modal input[type="password"] { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; }
+  .tdoc-modal input[type="password"]:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-seg { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+  .tdoc-seg button { border: none; border-radius: 0; padding: 7px 14px; background: #fff; color: #444; }
+  .tdoc-seg button + button { border-left: 1px solid #ddd; }
+  .tdoc-seg button.active { background: var(--td-accent); color: #fff; }
+  .tdoc-modal .manage-hint { font-size: 12px; color: #888; margin: 6px 0 0; }
+  .tdoc-modal .manage-action { width: 100%; text-align: left; }
+  .tdoc-modal .manage-action.danger-btn { color: var(--td-danger); border-color: #f1b8b2; }
+  .tdoc-modal .manage-action.danger-btn:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
+
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
      stays elegant at every size.
@@ -883,6 +903,7 @@
           </button>
           <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
             ${isOwner ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
+            ${isOwner && cfg.ownerManage && isPublished ? `<button id="tdoc-manage-doc" role="menuitem">Manage this doc</button>` : ''}
             <button id="tdoc-signout" role="menuitem">Sign out</button>
           </div>
         </div>`;
@@ -896,6 +917,13 @@
       if (isOwner) {
         document.getElementById('tdoc-my-docs').onclick = () => {
           window.open('/me', '_blank', 'noopener');
+        };
+      }
+      if (isOwner && cfg.ownerManage && isPublished) {
+        document.getElementById('tdoc-manage-doc').onclick = (e) => {
+          e.stopPropagation();
+          meMenu.classList.remove('open');
+          showManageModal();
         };
       }
       document.getElementById('tdoc-signout').onclick = async () => {
@@ -2347,6 +2375,187 @@
       navigator.clipboard?.writeText(e.currentTarget.textContent);
     };
   }
+  // ========== Owner manage (Delete / Unpublish / visibility switch) ==========
+  // JUL-36. Gated on cfg.ownerManage, which the worker only populates in the
+  // per-request boot config when THIS request's session passed
+  // isOwnerSession() server-side (worker.js's /d/ route). A non-owner's
+  // config carries cfg.ownerManage === null — every function below bails
+  // before creating any DOM, so there is no hidden button, just nothing
+  // rendered for them.
+  //
+  // A published doc is arbitrary HTML the owner authored, not a fully
+  // trusted execution context on this origin — so, exactly like /me, these
+  // mutations require the admin token (typed fresh here, kept only in this
+  // closure's `mgmtToken` var, never written to storage/cookies) rather than
+  // accepting the owner's session cookie alone. See
+  // test/me-management.test.js for why cookie-only admin writes are rejected.
+  let mgmtToken = '';
+  const VIS_OPTIONS = [['public', 'Public'], ['unlisted', 'Unlisted'], ['private', 'Private']];
+  function closeManageModal() {
+    const m = document.getElementById('tdoc-manage-modal');
+    if (m) m.remove();
+  }
+  function closeManageConfirm() {
+    const m = document.getElementById('tdoc-manage-confirm');
+    if (m) m.remove();
+  }
+  function showManageConfirm({ title, body, confirmLabel, danger, onConfirm }) {
+    closeManageConfirm();
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-manage-confirm';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${body}</p>
+        <div class="status" id="tdoc-manage-confirm-status" style="display:none;"></div>
+        <div class="actions">
+          <button type="button" id="tdoc-manage-confirm-cancel">Cancel</button>
+          <button type="button" id="tdoc-manage-confirm-go" class="${danger ? 'danger' : 'primary'}">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(bg);
+    document.getElementById('tdoc-manage-confirm-cancel').onclick = closeManageConfirm;
+    bg.addEventListener('click', (e) => { if (e.target === bg) closeManageConfirm(); });
+    document.getElementById('tdoc-manage-confirm-go').onclick = async () => {
+      const status = document.getElementById('tdoc-manage-confirm-status');
+      const go = document.getElementById('tdoc-manage-confirm-go');
+      go.disabled = true;
+      status.style.display = 'block';
+      status.textContent = 'Working…';
+      try {
+        await onConfirm(status);
+      } catch (e) {
+        status.textContent = 'Failed: ' + e.message;
+        go.disabled = false;
+      }
+    };
+  }
+  async function mgmtFetch(url, opts) {
+    if (!mgmtToken) throw new Error('Admin token is required.');
+    const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + mgmtToken, ...(opts.headers || {}) };
+    const r = await fetch(url, { ...opts, headers });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || err.message || ('HTTP ' + r.status));
+    }
+    return r.json().catch(() => ({}));
+  }
+  function renderVisSeg(current) {
+    const seg = document.getElementById('tdoc-vis-seg');
+    if (!seg) return;
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.value === current));
+  }
+  function showManageModal() {
+    if (!cfg.ownerManage) return; // no owner data for this request → nothing to render
+    closeAuxModal();
+    const om = cfg.ownerManage;
+    const access = { ...(om.access || { visibility: 'unlisted' }) };
+    const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-manage-modal';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>Manage this doc</h3>
+        <p class="muted">${escapeHtml(slug)} · ${plural(om.versionCount, 'version')} · ${plural(om.commentCount, 'comment')}</p>
+        <label class="field" for="tdoc-mgmt-token">Admin token</label>
+        <input type="password" id="tdoc-mgmt-token" autocomplete="off" placeholder="Required — same token used to publish this doc" value="${escapeHtml(mgmtToken)}">
+        <div class="manage-section">
+          <label class="field">Visibility</label><br>
+          <div class="tdoc-seg" id="tdoc-vis-seg">
+            ${VIS_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          </div>
+          <p class="manage-hint" id="tdoc-vis-status">&nbsp;</p>
+        </div>
+        <div class="manage-section">
+          <button type="button" id="tdoc-mgmt-unpublish" class="manage-action">Unpublish</button>
+          <p class="manage-hint">Sets this doc to Private. Versions and comments are kept — republish anytime.</p>
+        </div>
+        <div class="manage-section">
+          <button type="button" id="tdoc-mgmt-delete" class="manage-action danger-btn">Delete doc…</button>
+          <p class="manage-hint">Permanently removes this doc, every version, and every comment. No undo.</p>
+        </div>
+        <div class="actions"><button type="button" id="tdoc-manage-close">Close</button></div>
+      </div>`;
+    document.body.appendChild(bg);
+    renderVisSeg(access.visibility);
+    document.getElementById('tdoc-manage-close').onclick = closeManageModal;
+    bg.addEventListener('click', (e) => { if (e.target === bg) closeManageModal(); });
+    const tokenInput = document.getElementById('tdoc-mgmt-token');
+    tokenInput.oninput = () => { mgmtToken = tokenInput.value.trim(); };
+
+    document.getElementById('tdoc-vis-seg').querySelectorAll('button').forEach(b => {
+      b.onclick = async () => {
+        const value = b.dataset.value;
+        if (value === access.visibility) return;
+        const status = document.getElementById('tdoc-vis-status');
+        const commit = async () => {
+          status.textContent = 'Saving…';
+          try {
+            await mgmtFetch('/api/doc/access', {
+              method: 'PATCH',
+              body: JSON.stringify({ slug, access: { visibility: value } }),
+            });
+            access.visibility = value;
+            renderVisSeg(value);
+            status.textContent = 'Saved: ' + VIS_OPTIONS.find(([v]) => v === value)[1];
+          } catch (e) {
+            status.textContent = 'Failed: ' + e.message;
+          }
+        };
+        // Switching TO private is the same effect as Unpublish (takes the
+        // doc offline) — worth a confirm even though it's reversible.
+        if (value === 'private') {
+          showManageConfirm({
+            title: 'Switch to Private?',
+            body: 'Only you (and anyone on the allowlist) will be able to open this doc.',
+            confirmLabel: 'Switch to Private',
+            onConfirm: async (confirmStatus) => {
+              await commit();
+              confirmStatus.textContent = 'Done.';
+              closeManageConfirm();
+            },
+          });
+        } else {
+          await commit();
+        }
+      };
+    });
+
+    document.getElementById('tdoc-mgmt-unpublish').onclick = () => {
+      showManageConfirm({
+        title: 'Take this doc offline?',
+        body: 'This sets visibility to <b>Private</b> — only you can open it until you publish again. Comments and version history are kept.',
+        confirmLabel: 'Unpublish',
+        onConfirm: async (status) => {
+          await mgmtFetch('/api/doc/access', {
+            method: 'PATCH',
+            body: JSON.stringify({ slug, access: { visibility: 'private' } }),
+          });
+          access.visibility = 'private';
+          renderVisSeg('private');
+          status.textContent = 'Unpublished.';
+          setTimeout(closeManageConfirm, 700);
+        },
+      });
+    };
+
+    document.getElementById('tdoc-mgmt-delete').onclick = () => {
+      showManageConfirm({
+        title: 'Delete this doc?',
+        body: `This permanently removes <b>${escapeHtml(slug)}</b> — all <b>${plural(om.versionCount, 'version')}</b> and <b>${plural(om.commentCount, 'comment')}</b> are deleted. This cannot be undone.`,
+        confirmLabel: 'Delete',
+        danger: true,
+        onConfirm: async (status) => {
+          await mgmtFetch(`/api/doc?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
+          status.textContent = 'Deleted. Redirecting…';
+          setTimeout(() => { window.location.href = 'https://github.com/tornado-doc/tdoc'; }, 900);
+        },
+      });
+    };
+  }
+
   async function pollDevice(device_code) {
     const status = document.getElementById('tdoc-poll-status');
     pollTimer = null;
