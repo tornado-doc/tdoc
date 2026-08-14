@@ -35,6 +35,7 @@ const OFFLINE = [
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
+  'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)
   'vercel-shim.test.js',      // vercel storage shims (KV/R2 contract, rewrite URL)
   'api.test.js',              // hermetic: spawns its own server in a temp dir
@@ -47,6 +48,7 @@ const GATED = [
   'publish.test.js',     // dry-publish + (gated) real publish
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright
+  'csp-xss.test.js',     // playwright: author <script>/onclick blocked, overlay still works
 ];
 
 const runAll = process.argv.includes('--all');

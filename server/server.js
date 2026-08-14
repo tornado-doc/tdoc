@@ -7,6 +7,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
@@ -114,7 +115,19 @@ function safeJsonForScript(obj) {
   return JSON.stringify(obj).replace(/<\/script>/gi, '<\\/script>').replace(/<!--/g, '<\\!--');
 }
 
-function injectOverlay(html, slug, version) {
+// CSP (owner-manage-via-session hardening, mirrors worker/worker.js).
+//
+// Local docs are anonymous/no-auth by design, so this route isn't guarding a
+// session cookie today — but the local server shares overlay.js with the
+// published worker, and a doc authored locally is the same bytes that later
+// get published. Blocking author <script>/onclick here too means what a doc
+// author sees locally matches what ships (no "worked in dev, XSS in prod"
+// surprise), and costs nothing since 0 published docs use <script>.
+function cspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+}
+
+function injectOverlay(html, slug, version, nonce) {
   const overlay = fs.readFileSync(OVERLAY_PATH, 'utf8');
   // Hand the overlay the full version list so the bar can offer a version
   // picker. Read straight from meta.json; ignore failures and fall back to
@@ -126,10 +139,14 @@ function injectOverlay(html, slug, version) {
       versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
     }
   } catch {}
-  const cfg = `<script>window.__TDOC__ = ${safeJsonForScript({
+  // nonce is stamped onto BOTH injected <script> tags so only they run under
+  // the CSP set by cspHeader() above — author content in `html` has no nonce
+  // and is inert.
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const cfg = `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript({
     slug, version, identity: null, authConfigured: false, mode: 'local', versions,
   })};</script>`;
-  const inject = `${cfg}\n<script>${overlay}</script>`;
+  const inject = `${cfg}\n<script${nonceAttr}>${overlay}</script>`;
   if (html.includes('</body>')) return html.replace('</body>', `${inject}\n</body>`);
   return html + inject;
 }
@@ -310,7 +327,11 @@ const server = http.createServer(async (req, res) => {
     const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
     if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
     const html = fs.readFileSync(file, 'utf8');
-    return send(res, 200, injectOverlay(html, slug, Number(vStr)), { 'Content-Type': 'text/html; charset=utf-8' });
+    const nonce = crypto.randomBytes(16).toString('hex');
+    return send(res, 200, injectOverlay(html, slug, Number(vStr), nonce), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': cspHeader(nonce),
+    });
   }
 
   // --- COMMENTS (anonymous) ---

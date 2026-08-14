@@ -1,20 +1,24 @@
-// JUL-36 — owner manage UX (Delete / Unpublish / visibility switch) guard.
+// JUL-36 — owner manage UX (Delete / Unpublish / Share settings) guard.
 //
 // Product ask: the doc-view top bar exposes owner-only manage controls
 // directly (not just on /me), with a styled confirm modal instead of native
 // confirm(). Security constraint from review: owner gating is SERVER-side
 // (the overlay never render-then-hides a dead button), and every mutation
-// route re-checks auth INSIDE itself — this ticket must not weaken that by
-// adding a cookie-only admin-write path (see test/me-management.test.js,
-// which already forbids `requireAdminAuth` / `isSameOriginRequest`).
+// route re-checks auth INSIDE itself.
+//
+// 2026-08-13 tail: browser owner mutations now authorize off the owner's
+// SESSION COOKIE (no more pasted admin token) via the shared
+// authorizeOwnerMutation() gate, which is safe ONLY because every doc
+// response now carries a CSP (worker.js cspHeader()) that blocks author
+// <script>/onclick content — see test/csp.test.js. The CLI keeps using the
+// upload bearer token unchanged; authorizeOwnerMutation accepts EITHER.
 //
 // Two tests mirror what the reviewer said she'll write herself:
 //   (a) a non-owner's doc-view response can never carry manage data.
 //   (b) the admin mutation gate (shared by DELETE /api/doc and
-//       PATCH /api/doc/access) returns 401 for anonymous/wrong-token calls
-//       and passes for the correct token — i.e. it is NOT satisfied by a
-//       session cookie alone.
-// Plus: owner-succeeds coverage for the same gate.
+//       PATCH /api/doc/access) returns 401 for anonymous/non-owner-no-token
+//       calls, and passes for EITHER an owner session OR the correct
+//       upload token.
 
 const fs = require('fs');
 const path = require('path');
@@ -71,7 +75,7 @@ t('doc-view never leaks private doc metadata (version count) to non-owners via t
     'the non-history branch must collapse `versions` to the single viewed version, not the full list');
 });
 
-const injectOverlayStart = worker.indexOf('function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage) {');
+const injectOverlayStart = worker.indexOf('function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce) {');
 const injectOverlayEnd = worker.indexOf('\n}', injectOverlayStart);
 if (injectOverlayStart < 0) throw new Error('injectOverlay() signature not found — did it change?');
 const injectOverlayFn = worker.slice(injectOverlayStart, injectOverlayEnd);
@@ -101,14 +105,37 @@ t('showManageModal() bails before creating any DOM when cfg.ownerManage is absen
   assert(guardIdx < firstDomWrite, 'the ownerManage guard must run BEFORE any DOM node is created — never render-then-hide');
 });
 
-// ── (b) admin mutation gate: 401 anonymous/wrong token; owner-succeeds ───
+// ── (b) admin mutation gate: session-OR-token, never neither ─────────────
+//
+// 2026-08-13: DELETE /api/doc and PATCH /api/doc/access now authorize via
+// authorizeOwnerMutation (owner session OR upload token), not
+// requireUploadAuth alone. Verify both routes call the shared gate, and unit
+// test the gate itself: anonymous/non-owner-no-token → 401; owner session
+// alone → authorized (the new browser capability); upload token alone →
+// still authorized (CLI unchanged); wrong token + non-owner session → 401.
 
 const uploadAuthStart = worker.indexOf('async function requireUploadAuth(req, env) {');
 const uploadAuthEnd = worker.indexOf('\n}', uploadAuthStart) + 2;
 const timingEqualStart = worker.indexOf('async function timingSafeEqual(a, b) {');
 const timingEqualEnd = worker.indexOf('\n}', timingEqualStart) + 2;
-if (uploadAuthStart < 0 || timingEqualStart < 0) throw new Error('auth helpers not found');
-const authSrc = worker.slice(timingEqualStart, timingEqualEnd) + '\n' + worker.slice(uploadAuthStart, uploadAuthEnd);
+const parseCookieStart = worker.indexOf('function parseCookie(req) {');
+const parseCookieEnd = worker.indexOf('\n}', parseCookieStart) + 2;
+const getSessionStart = worker.indexOf('async function getSession(env, req) {');
+const getSessionEnd = worker.indexOf('\n}', getSessionStart) + 2;
+const isOwnerSessionStart = worker.indexOf('function isOwnerSession(env, session) {');
+const isOwnerSessionEnd = worker.indexOf('\n}', isOwnerSessionStart) + 2;
+const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env) {');
+const authorizeEnd = worker.indexOf('\n}', authorizeStart) + 2;
+if (uploadAuthStart < 0 || timingEqualStart < 0 || parseCookieStart < 0 || getSessionStart < 0
+  || isOwnerSessionStart < 0 || authorizeStart < 0) throw new Error('auth helpers not found');
+const authSrc = [
+  worker.slice(timingEqualStart, timingEqualEnd),
+  worker.slice(uploadAuthStart, uploadAuthEnd),
+  worker.slice(parseCookieStart, parseCookieEnd),
+  worker.slice(getSessionStart, getSessionEnd),
+  worker.slice(isOwnerSessionStart, isOwnerSessionEnd),
+  worker.slice(authorizeStart, authorizeEnd),
+].join('\n');
 
 const deleteStart = worker.indexOf("if (p === '/api/doc' && method === 'DELETE')");
 const deleteEnd = worker.indexOf("return text('Not found'", deleteStart);
@@ -118,14 +145,22 @@ const accessPatchStart = worker.indexOf("if (p === '/api/doc/access' && method =
 const accessPatchEnd = worker.indexOf('// ---- admin delete ----', accessPatchStart);
 const accessPatchRoute = worker.slice(accessPatchStart, accessPatchEnd);
 
-t('DELETE /api/doc and PATCH /api/doc/access are gated ONLY by requireUploadAuth (not a session/cookie path)', () => {
-  assert(deleteRoute.includes('await requireUploadAuth(req, env)'), 'DELETE /api/doc must call requireUploadAuth');
-  assert(accessPatchRoute.includes('await requireUploadAuth(req, env)'), 'PATCH /api/doc/access must call requireUploadAuth');
-  // JUL-36 must not introduce a cookie-only admin-write bypass. A published
-  // doc is arbitrary HTML on this same origin — trusting the owner's session
-  // cookie alone here would let doc content silently trigger admin writes.
-  assert(!worker.includes('requireAdminAuth'), 'worker must not add a cookie-based admin auth path');
+t('DELETE /api/doc and PATCH /api/doc/access both go through the shared authorizeOwnerMutation gate', () => {
+  assert(deleteRoute.includes('await authorizeOwnerMutation(req, env)'), 'DELETE /api/doc must call authorizeOwnerMutation');
+  assert(accessPatchRoute.includes('await authorizeOwnerMutation(req, env)'), 'PATCH /api/doc/access must call authorizeOwnerMutation');
+  // The session path must go through the ONE shared, tested gate — not a
+  // bespoke same-origin/cookie check bolted onto just one route.
+  assert(!worker.includes('requireAdminAuth'), 'worker must not add a separate cookie-based admin-auth function');
   assert(!worker.includes('isSameOriginRequest'), 'same-origin is not sufficient — docs are arbitrary same-origin HTML');
+});
+
+t('authorizeOwnerMutation gate itself calls isOwnerSession, then falls back to requireUploadAuth', () => {
+  const fnSrc = worker.slice(authorizeStart, authorizeEnd);
+  const ownerCheck = fnSrc.indexOf('isOwnerSession(env, session)');
+  const tokenCheck = fnSrc.indexOf('requireUploadAuth(req, env)');
+  assert(ownerCheck >= 0, 'must check isOwnerSession');
+  assert(tokenCheck >= 0, 'must fall back to requireUploadAuth');
+  assert(ownerCheck < tokenCheck, 'owner-session check must come before the token fallback');
 });
 
 const box = { console, TextEncoder, crypto, Response };
@@ -138,6 +173,29 @@ vm.runInContext(`
 
 function fakeReq(bearer) {
   return { headers: { get: (name) => (name.toLowerCase() === 'authorization' && bearer) ? ('Bearer ' + bearer) : null } };
+}
+
+// Fake env + req for authorizeOwnerMutation, which additionally needs a
+// session cookie resolved through env.META.get('session:<sid>').
+function fakeEnv({ owner, token, sessions = {} } = {}) {
+  return {
+    TDOC_OWNER: owner,
+    TDOC_UPLOAD_TOKEN: token,
+    META: { async get(key) {
+      const m = /^session:(.+)$/.exec(key);
+      const s = m && sessions[m[1]];
+      return s ? JSON.stringify(s) : null;
+    } },
+  };
+}
+function fakeSessionReq({ bearer, sid } = {}) {
+  const cookie = sid ? `tdoc_sid=${sid}` : null;
+  return { headers: { get: (name) => {
+    const n = name.toLowerCase();
+    if (n === 'authorization') return bearer ? ('Bearer ' + bearer) : null;
+    if (n === 'cookie') return cookie;
+    return null;
+  } } };
 }
 
 async function main() {
@@ -161,6 +219,41 @@ async function main() {
   await tAsync('requireUploadAuth: correct bearer token → passes (owner-succeeds coverage)', async () => {
     const res = await box.requireUploadAuth(fakeReq('secret-token'), { TDOC_UPLOAD_TOKEN: 'secret-token' });
     assert(res === null, 'a correct token must pass through (return null)');
+  });
+
+  // ── authorizeOwnerMutation: session-OR-token ──────────────────────────
+
+  await tAsync('authorizeOwnerMutation: fully anonymous (no cookie, no bearer) → 401', async () => {
+    const env = fakeEnv({ owner: 'julie', token: 'secret-token' });
+    const res = await box.authorizeOwnerMutation(fakeSessionReq({}), env);
+    assert(res.ok === false, 'must not authorize an anonymous caller');
+    assert(res.response.status === 401, `expected 401, got ${res.response.status}`);
+  });
+
+  await tAsync('authorizeOwnerMutation: signed in as a NON-owner, no token → 401', async () => {
+    const env = fakeEnv({ owner: 'julie', token: 'secret-token', sessions: { deadbeef: { login: 'mallory' } } });
+    const res = await box.authorizeOwnerMutation(fakeSessionReq({ sid: 'deadbeef' }), env);
+    assert(res.ok === false, 'a non-owner session must not authorize');
+    assert(res.response.status === 401, `expected 401, got ${res.response.status}`);
+  });
+
+  await tAsync('authorizeOwnerMutation: OWNER session, NO token → authorized (the new browser capability)', async () => {
+    const env = fakeEnv({ owner: 'julie', token: 'secret-token', sessions: { deadbeef: { login: 'julie' } } });
+    const res = await box.authorizeOwnerMutation(fakeSessionReq({ sid: 'deadbeef' }), env);
+    assert(res.ok === true, 'the configured owner’s session alone must authorize (case-insensitive login match)');
+  });
+
+  await tAsync('authorizeOwnerMutation: no session, correct upload token → authorized (CLI unchanged)', async () => {
+    const env = fakeEnv({ owner: 'julie', token: 'secret-token' });
+    const res = await box.authorizeOwnerMutation(fakeSessionReq({ bearer: 'secret-token' }), env);
+    assert(res.ok === true, 'the CLI token path must keep working with no session at all');
+  });
+
+  await tAsync('authorizeOwnerMutation: non-owner session + WRONG token → 401 (neither credential is valid)', async () => {
+    const env = fakeEnv({ owner: 'julie', token: 'secret-token', sessions: { deadbeef: { login: 'mallory' } } });
+    const res = await box.authorizeOwnerMutation(fakeSessionReq({ sid: 'deadbeef', bearer: 'not-the-token' }), env);
+    assert(res.ok === false, 'a non-owner session plus a wrong token must still be 401');
+    assert(res.response.status === 401, `expected 401, got ${res.response.status}`);
   });
 
   // ── styled confirm modal replaces native confirm() (no native confirm left) ─
