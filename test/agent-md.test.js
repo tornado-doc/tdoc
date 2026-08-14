@@ -40,6 +40,13 @@ t('SKILL.md retains author HTML + access policy contracts', () => {
   assert(skill.includes('Author HTML compatibility contract'), 'missing author HTML contract in SKILL.md');
   assert(skill.includes('Access policy (published docs'), 'missing access policy contract in SKILL.md');
   assert(skill.includes(':where()'), 'author-wins :where() invariant missing from SKILL.md');
+  assert(skill.includes('tdoc-agent-reply'), 'agent replies must go through tdoc-agent-reply so runtime logos auto-detect');
+});
+
+t('plugin-mode SKILL.md matches the root SKILL.md', () => {
+  const rootSkill = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
+  const pluginSkill = fs.readFileSync(path.join(root, 'skills', 'tdoc', 'SKILL.md'), 'utf8');
+  assert(rootSkill === pluginSkill, 'skills/tdoc/SKILL.md drifted from SKILL.md — run: cp SKILL.md skills/tdoc/SKILL.md');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

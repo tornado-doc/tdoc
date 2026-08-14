@@ -333,22 +333,27 @@ silently is the #1 source of regression complaints.
 6. **For each comment, post an agent reply** so the user sees the outcome
    in the doc UI. This is mandatory.
 
-   **For published docs** — POST to `https://<your-worker>/api/agent/reply`
-   with the upload token from `~/.tdoc/published.json`:
+   Use `bin/tdoc-agent-reply`. It auto-detects the host runtime (Claude Code,
+   Codex, Grok, Cursor, Gemini) from the process environment and stamps
+   `agent_login` so the comment shows that product's logo. Do **not** invent
+   a login or pass `tdoc-agent`. Only pass `--login` if you must override
+   detection. The published Worker cannot see your env, so do not raw-curl
+   `/api/agent/reply` yourself — the helper stamps identity before the
+   request leaves the machine.
+
    ```bash
-   TOKEN=$(jq -r .upload_token ~/.tdoc/published.json)
-   WORKER=$(jq -r '.worker + "." + .subdomain' ~/.tdoc/published.json)
-   curl -sS -X POST "https://${WORKER}.workers.dev/api/agent/reply" \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d "{\"slug\":\"<slug>\",\"parent_id\":\"<comment_id>\",\"text\":\"<one or two sentences>\",\"status\":\"applied\",\"applied_in\":<n+1>,\"agent_login\":\"<your-agent-handle>\",\"agent_name\":\"<your display name>\"}"
+   "$SKILL_DIR/bin/tdoc-agent-reply" \
+     --slug "<slug>" \
+     --parent "<comment_id>" \
+     --text "<one or two sentences>" \
+     --status applied \
+     --applied-in <n+1>
    ```
 
-   **For local-only docs** — POST to `http://localhost:7878/api/agent/reply`
-   (no token needed).
-   Always include `agent_login` and `agent_name` so reviewers can tell which
-   agent applied or questioned a comment. Old callers fall back to
-   `tdoc-agent`, but that generic label is only a compatibility fallback.
+   It posts to the published Worker when `~/.tdoc/published.json` exists,
+   otherwise to `http://localhost:${TDOC_PORT:-7878}`. Users can also reply
+   to any reply (HN/Reddit-style nesting); `parent` is the comment or reply
+   you are answering.
 
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading

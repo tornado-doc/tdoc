@@ -41,10 +41,12 @@ const box = { URL };
 vm.createContext(box);
 vm.runInContext([
   'escapeHtml', 'normalizeNeedle', 'normalizeContext', 'normalizeQuery',
-  'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl',
+  'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl', 'agentLogoUrl',
+  'childrenOf',
 ].map(sliceFn).join('\n\n'), box);
 const { escapeHtml, normalizeNeedle, normalizeContext, normalizeQuery,
-        commonPrefixLen, commonSuffixLen, isGithubHttpsUrl } = box;
+        commonPrefixLen, commonSuffixLen, isGithubHttpsUrl, agentLogoUrl,
+        childrenOf } = box;
 
 console.log('overlay-pure (#23 testable surface)');
 
@@ -105,6 +107,29 @@ t('isGithubHttpsUrl rejects non-github / non-https / junk', () => {
   assert(isGithubHttpsUrl('javascript:alert(1)') === false, 'js scheme rejected');
   assert(isGithubHttpsUrl('not a url') === false, 'garbage rejected');
   assert(isGithubHttpsUrl(null) === false, 'null rejected');
+});
+
+t('agentLogoUrl maps grok/claude/codex/cursor/gemini logins to product marks', () => {
+  assert(agentLogoUrl({ login: 'grok' }).includes('xai-org'), 'grok');
+  assert(agentLogoUrl({ login: 'claude-code' }).includes('claude'), 'claude');
+  assert(!agentLogoUrl({ login: 'claude' }).includes('anthropic'), 'claude is not the company mark');
+  assert(agentLogoUrl({ login: 'codex' }).includes('openai'), 'codex');
+  assert(agentLogoUrl({ login: 'cursor' }).includes('cursor'), 'cursor');
+  assert(agentLogoUrl({ login: 'gemini' }).includes('gemini'), 'gemini');
+  assert(agentLogoUrl({ login: 'tdoc-agent' }) === null, 'generic stays badge');
+});
+t('agentLogoUrl prefers an explicit https avatar_url', () => {
+  assert(agentLogoUrl({ login: 'grok', avatar_url: 'https://example.com/me.png' }) === 'https://example.com/me.png');
+});
+t('childrenOf nests replies under their immediate parent', () => {
+  const replies = [
+    { id: 'r1', parent_id: 'c1' },
+    { id: 'r2', parent_id: 'r1' },
+    { id: 'r3', parent_id: 'c1' },
+  ];
+  assert(childrenOf(replies, 'c1', 'c1').map(r => r.id).join() === 'r1,r3', 'tops');
+  assert(childrenOf(replies, 'r1', 'c1').map(r => r.id).join() === 'r2', 'nested');
+  assert(childrenOf(replies, 'r2', 'c1').length === 0, 'leaf');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

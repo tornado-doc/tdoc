@@ -314,19 +314,77 @@ async function enforceDocAccess(env, req, slug, version) {
     }),
   };
 }
+function logoForAgentLogin(login) {
+  const key = String(login || '').toLowerCase();
+  if (!key) return null;
+  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
+  if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
+    return 'https://github.com/openai.png';
+  }
+  if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
+  if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
+  return null;
+}
+
+function isGenericAgentLogin(login) {
+  const k = String(login || '').trim().toLowerCase();
+  return !k || k === 'tdoc-agent' || k === 'agent';
+}
+
+// Infer the host coding-agent from env (Claude Code, Codex, Grok, Cursor, Gemini).
+// The published Worker only sees request JSON, so local server + tdoc-agent-reply
+// run this against process.env and stamp login before the request leaves the machine.
+function detectAgentRuntime(env) {
+  const e = env || {};
+  const present = (names) => names.some((n) => {
+    const v = e[n];
+    return v != null && String(v).trim() !== '';
+  });
+  // Session/host markers only — never API keys. Order is the priority when
+  // more than one host is visible in the same process (rare).
+  if (present(['GROK_AGENT', 'GROK_SESSION_ID', 'GROK_BUILD', 'XAI_AGENT'])) {
+    return { login: 'grok', name: 'Grok' };
+  }
+  if (present(['CLAUDE_CODE', 'CLAUDE_SESSION_ID', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'])) {
+    return { login: 'claude', name: 'Claude' };
+  }
+  if (present(['CODEX_SESSION_ID', 'CODEX_CLI', 'OPENAI_CODEX', 'CODEX_HOME'])) {
+    return { login: 'codex', name: 'Codex' };
+  }
+  if (present(['CURSOR_TRACE_ID', 'CURSOR_AGENT', 'COMPOSER_SESSION'])) {
+    return { login: 'cursor', name: 'Cursor' };
+  }
+  if (present(['GEMINI_CLI', 'GEMINI_SESSION_ID'])) {
+    return { login: 'gemini', name: 'Gemini' };
+  }
+  return null;
+}
+
 function agentIdentity(body = {}, env = {}) {
-  const fallbackLogin = env.TDOC_AGENT_LOGIN || 'tdoc-agent';
-  const fallbackName = env.TDOC_AGENT_NAME || fallbackLogin;
+  const detected = detectAgentRuntime(env);
   const clean = (v, fallback) => {
     if (typeof v !== 'string') return fallback;
     const s = v.trim().slice(0, 80);
     return s || fallback;
   };
-  const avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
+  const rawLogin = typeof (body.agent_login || body.agent_id) === 'string'
+    ? String(body.agent_login || body.agent_id).trim()
+    : '';
+  const rawName = typeof body.agent_name === 'string' ? body.agent_name.trim() : '';
+  const login = (!isGenericAgentLogin(rawLogin) ? rawLogin : '')
+    || (detected && detected.login)
+    || env.TDOC_AGENT_LOGIN
+    || 'tdoc-agent';
+  const name = (!isGenericAgentLogin(rawName) ? rawName : '')
+    || (detected && detected.name)
+    || env.TDOC_AGENT_NAME
+    || login;
+  let avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
     ? body.agent_avatar_url
     : null;
-  const login = clean(body.agent_login || body.agent_id, fallbackLogin);
-  return { kind: 'agent', login, name: clean(body.agent_name, fallbackName), avatar_url: avatar };
+  if (!avatar) avatar = logoForAgentLogin(login);
+  return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
 }
 function rand(n) {
   const a = new Uint8Array(n);
@@ -1350,7 +1408,7 @@ function snapshotAt(c, V) {
       case 'reply_added': {
         if (!e.reply || !e.reply.id) break;
         const r = {
-          id: e.reply.id, parent_id: c.id,
+          id: e.reply.id, parent_id: e.reply.parent_id || c.id,
           author: e.reply.author || null,
           text: e.reply.text || '',
           agent_status: e.reply.agent_status || null,
@@ -1668,6 +1726,20 @@ async function authorizeOwnerMutation(req, env) {
 // before/without the migration — same code path, just not serialized.
 // ===========================================================================
 
+// Resolve a comment id that may be a top-level thread OR a reply inside one.
+// Nested replies still live on the root thread's event log; parent_id on the
+// reply record is the immediate parent (HN/Reddit-style threading).
+function findCommentThread(list, id) {
+  if (!id || !Array.isArray(list)) return null;
+  const top = list.find(c => c && c.id === id);
+  if (top) return { root: top, parentId: id, parentIsRoot: true };
+  for (const c of list) {
+    const ev = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
+    if (ev) return { root: c, parentId: id, parentIsRoot: false };
+  }
+  return null;
+}
+
 // Apply one comment operation to the in-memory list. PURE w.r.t. I/O: it only
 // mutates `list` and returns { status, body }. Both the DO path and the KV
 // fallback call this, so mutation logic is defined exactly once.
@@ -1686,11 +1758,11 @@ function applyCommentOp(list, op) {
       return { status: 200, body: snapshotAt(entry, op.version) };
     }
     case 'reply': {
-      const parent = list.find(c => c.id === op.parent_id);
-      if (!parent) return { status: 404, body: { error: 'parent_not_found' } };
-      appendEvent(parent, { kind: 'reply_added', at_version: op.version, at: now,
-        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null } });
-      return { status: 200, body: { id: op.reply_id, parent_id: op.parent_id, author: op.author, text: op.text, created: now, version: op.version } };
+      const thread = findCommentThread(list, op.parent_id);
+      if (!thread) return { status: 404, body: { error: 'parent_not_found' } };
+      appendEvent(thread.root, { kind: 'reply_added', at_version: op.version, at: now,
+        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null, parent_id: op.parent_id } });
+      return { status: 200, body: { id: op.reply_id, parent_id: op.parent_id, thread_id: thread.root.id, author: op.author, text: op.text, created: now, version: op.version } };
     }
     case 'patch_anchor': {
       // Authorization is enforced UPSTREAM in the worker (canMutate, which needs
@@ -2390,8 +2462,9 @@ export default {
       // still funnels through the DO so it can't clobber a concurrent user write.
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
-      const parent = authList.find(c => c.id === parent_id);
-      if (!parent) return json({ error: 'parent_not_found' }, { status: 404 });
+      const thread = findCommentThread(authList, parent_id);
+      if (!thread) return json({ error: 'parent_not_found' }, { status: 404 });
+      const parent = thread.root;
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
@@ -2401,7 +2474,7 @@ export default {
 
       const events = [{
         kind: 'reply_added', at_version: V, at: now,
-        reply: { id: replyId, author: agent, text: replyText, agent_status: verdict },
+        reply: { id: replyId, author: agent, text: replyText, agent_status: verdict, parent_id },
       }];
       if (verdict === 'applied') {
         events.push({ kind: 'marked_applied', at_version: V, at: now, applied_in: V, by: agent.login, agent_status: 'applied' });
@@ -2418,8 +2491,8 @@ export default {
         });
       }
       const res = await mutateComments(env, slug, {
-        kind: 'raw_events', slug, id: parent_id, events,
-        responseBody: { id: replyId, parent_id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
+        kind: 'raw_events', slug, id: parent.id, events,
+        responseBody: { id: replyId, parent_id, thread_id: parent.id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
       });
       return json(res.body, { status: res.status });
     }

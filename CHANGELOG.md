@@ -4,6 +4,20 @@ All notable changes to tdoc are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow the `VERSION`
 file and `.claude-plugin/plugin.json`.
 
+## [Unreleased]
+
+### Added
+
+- **Nested replies.** You can reply to a reply (and to that reply), the way
+  Reddit and Hacker News do. Each node in the thread has its own Reply.
+- **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /
+  Gemini replies show that product's mark. Claude uses the Claude star, not
+  the Anthropic company logo. Detection reads the host environment
+  (`CLAUDE_SESSION_ID`, `CODEX_HOME`, `GROK_SESSION_ID`, …) so agents do not
+  have to remember to pass `agent_login`. `bin/tdoc-agent-reply` stamps
+  identity before the request leaves the machine (the published Worker cannot
+  see your env).
+
 ## [0.9.0] - 2026-07-13
 
 ### Added — Vercel as a second publish target

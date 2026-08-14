@@ -28,7 +28,7 @@ console.log('cli (Batch D resilience)');
 
 // ---- static checks across all CLIs ----
 t('every curl call carries --max-time (no unbounded hang)', () => {
-  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor']) {
+  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply']) {
     const src = readBin(f);
     const curls = src.split('\n').filter(l => /\bcurl\b/.test(l) && !l.trim().startsWith('#'));
     for (const line of curls) {
@@ -106,6 +106,34 @@ t('publish/pull/unpublish reject traversal + non-kebab slugs', () => {
       assert(/invalid slug/i.test(r.stderr || ''), `${cli} '${slug}': expected 'invalid slug' rejection, got stderr: ${r.stderr}`);
     }
   }
+});
+
+t('tdoc-agent-reply --print-identity detects host runtime from env', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const base = { ...process.env, HOME: '/tmp/tdoc-no-home-' + Date.now() };
+  for (const k of Object.keys(base)) {
+    if (/^(GROK_|CLAUDE_|CLAUDECODE$|CODEX_|CURSOR_|COMPOSER_|GEMINI_|XAI_|TDOC_AGENT_)/.test(k)) delete base[k];
+  }
+  const run = (extra) => spawnSync(bin, ['--print-identity'], {
+    env: { ...base, ...extra }, encoding: 'utf8', timeout: 10000,
+  });
+  const grok = run({ GROK_SESSION_ID: 'sess' });
+  assert(grok.status === 0, `grok exit ${grok.status} ${grok.stderr}`);
+  assert(/"login":"grok"/.test(grok.stdout) && /"name":"Grok"/.test(grok.stdout), grok.stdout);
+
+  const claude = run({ CLAUDE_SESSION_ID: 'sess' });
+  assert(/"login":"claude"/.test(claude.stdout), claude.stdout);
+
+  const codex = run({ CODEX_CLI: '1' });
+  assert(/"login":"codex"/.test(codex.stdout), codex.stdout);
+
+  const empty = run({});
+  assert(/"login":"tdoc-agent"/.test(empty.stdout), empty.stdout);
+
+  const override = spawnSync(bin, ['--print-identity', '--login', 'claude'], {
+    env: { ...base, GROK_SESSION_ID: 'sess' }, encoding: 'utf8', timeout: 10000,
+  });
+  assert(/"login":"claude"/.test(override.stdout), `explicit --login should win: ${override.stdout}`);
 });
 
 t('publish accepts a valid kebab-case slug (passes validation, fails later on missing doc)', () => {
