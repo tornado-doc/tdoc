@@ -133,6 +133,44 @@ function get(port, p) {
     }
   });
 
+  // ── worker.js (PRODUCTION) CSP wiring — hermetic source check ────────────
+  // Everything above runs against server/server.js. Production is the
+  // Cloudflare Worker, which the offline suite can't boot — but the whole
+  // reason browser owner-writes dropped the admin token is that the WORKER
+  // sets this CSP. Without a guard here, renaming/removing the header in
+  // worker.js passes every test while silently reopening the XSS channel the
+  // token removal relies on being closed. Guard it by source: drop the header
+  // on either doc-serving route → this goes red. (小cc PR #110 review.)
+  const workerSrc = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+
+  await t('worker cspHeader() returns the strict nonce policy (no unsafe-inline; object-src/base-uri none)', async () => {
+    const s = workerSrc.indexOf('function cspHeader(nonce)');
+    if (s < 0) throw new Error('worker cspHeader() not found');
+    // Fixed window, not indexOf('}') — the return string contains ${nonce},
+    // whose brace would truncate the slice before 'strict-dynamic'.
+    const body = workerSrc.slice(s, s + 220);
+    if (!body.includes("script-src 'nonce-${nonce}' 'strict-dynamic'")) throw new Error(`cspHeader missing nonce/strict-dynamic: ${body}`);
+    if (!body.includes("object-src 'none'")) throw new Error("cspHeader must set object-src 'none'");
+    if (!body.includes("base-uri 'none'")) throw new Error("cspHeader must set base-uri 'none'");
+    if (body.includes('unsafe-inline')) throw new Error("cspHeader must not include 'unsafe-inline'");
+  });
+
+  await t('worker doc-view route sets the CSP header on its response', async () => {
+    const s = workerSrc.indexOf('// ---- doc view ----');
+    const e = workerSrc.indexOf('// ---- doc export / fork ----', s);
+    if (s < 0 || e < 0) throw new Error('doc-view route block not found');
+    if (!workerSrc.slice(s, e).includes("'Content-Security-Policy': cspHeader(nonce)"))
+      throw new Error("doc-view response must set 'Content-Security-Policy': cspHeader(nonce) — dropping it reopens the XSS channel the token removal relies on being closed");
+  });
+
+  await t('worker export/fork route sets the CSP header too (same author-HTML surface as /d/)', async () => {
+    const s = workerSrc.indexOf('// ---- doc export / fork ----');
+    if (s < 0) throw new Error('export/fork route block not found');
+    const eNext = workerSrc.indexOf('// ---- ', s + 30);
+    if (!workerSrc.slice(s, eNext > s ? eNext : s + 4000).includes("'Content-Security-Policy': cspHeader(nonce)"))
+      throw new Error("export/fork response must set 'Content-Security-Policy': cspHeader(nonce) — else /export bypasses the CSP that /d/ carries");
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   shutdown();
   process.exit(fail ? 1 : 0);
