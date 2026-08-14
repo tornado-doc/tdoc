@@ -125,6 +125,50 @@ function waitReady(port, ms = 5000) {
     await page.waitForSelector('.tdoc-margin-comment', { timeout: 2000 });
   });
 
+  // --- nonce hardening (小cc PR review): a CSP nonce only protects if it is
+  // freshly random PER RESPONSE. If it were constant or derived from
+  // slug/version, an author could embed that exact nonce on their own <script>
+  // and it would run — CSP defeated. The XSS tests above use un-nonced author
+  // scripts (trivially blocked); these two test the real threat model: a nonce
+  // an attacker HAS. ---
+  function fetchCSP(p) {
+    return new Promise((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port: PORT, path: p }, (res) => {
+        res.resume();
+        resolve(res.headers['content-security-policy'] || '');
+      }).on('error', reject);
+    });
+  }
+  const nonceOf = (csp) => { const m = csp.match(/'nonce-([^']+)'/); return m && m[1]; };
+
+  let capturedNonce = null;
+  await t('nonce is freshly random per response — two requests to the same doc get different nonces', async () => {
+    const a = nonceOf(await fetchCSP(`/d/${SLUG}/v/1`));
+    const b = nonceOf(await fetchCSP(`/d/${SLUG}/v/1`));
+    if (!a || !b) throw new Error(`missing nonce in CSP: a=${a} b=${b}`);
+    if (a === b) throw new Error(`nonce reused across responses (${a}) — an author could embed it and bypass CSP`);
+    capturedNonce = a;
+  });
+
+  await t('author <script> carrying a REAL captured nonce is STILL blocked (per-response-random, non-replayable)', async () => {
+    // The insidious case: an author embeds a nonce lifted from a prior response.
+    // With a constant/predictable nonce this <script> would EXECUTE. It must not.
+    const slug2 = 'xss-nonce-replay';
+    const d2 = path.join(TMP_DIR, slug2, 'v1');
+    fs.mkdirSync(d2, { recursive: true });
+    fs.writeFileSync(path.join(d2, 'index.html'), `<!doctype html><html><head><title>replay</title></head><body>
+  <div class="wrap"><h1>replay</h1>
+  <script nonce="${capturedNonce}">window.__XSS_REPLAY__ = 1;</script>
+  <pre id="target">block</pre></div></body></html>`);
+    fs.writeFileSync(path.join(TMP_DIR, slug2, 'meta.json'), JSON.stringify({ title: 'replay', versions: [{ n: 1 }] }));
+    fs.writeFileSync(path.join(TMP_DIR, slug2, 'comments.json'), '[]');
+    const p2 = await browser.newPage();
+    await p2.goto(`http://127.0.0.1:${PORT}/d/${slug2}/v/1`, { waitUntil: 'networkidle' });
+    const v = await p2.evaluate(() => window.__XSS_REPLAY__);
+    await p2.close();
+    if (v !== undefined) throw new Error(`window.__XSS_REPLAY__ = ${v} — author reused a captured nonce and the script RAN; nonce is not per-response-random`);
+  });
+
   await browser.close();
 
   console.log(`\n${pass} passed, ${fail} failed`);
