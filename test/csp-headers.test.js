@@ -109,7 +109,7 @@ function get(port, p) {
   });
 
   await t('both overlay-injected <script> tags carry the CSP nonce', async () => {
-    const scriptTags = [...res.body.matchAll(/<script([^>]*)>/g)];
+    const scriptTags = [...res.body.matchAll(/<script([^>]*)>/gi)];
     // Expect: window.__TDOC__ boot script + the overlay bundle script — both
     // injected by injectOverlay()/injectOverlayCfg(), both nonced.
     const nonced = scriptTags.filter(m => m[1].includes(`nonce="${nonce}"`));
