@@ -987,7 +987,12 @@ async function indexHtml(env, session) {
         <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(meta.title || slug)}</a>
         <div class="doc-meta">${escapeHtml(slug)} · v${latest}</div>
       </div>
-      <button class="delete-doc" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(meta.title || slug)}" data-versions="${versionCount}" data-comments="${commentCount}">Delete</button>
+      <div class="row-actions">
+        <button class="row-menu-btn" aria-label="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>
+        <div class="row-menu" hidden>
+          <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(meta.title || slug)}" data-versions="${versionCount}" data-comments="${commentCount}">Delete…</button>
+        </div>
+      </div>
     </div>`);
   }
 
@@ -1005,14 +1010,22 @@ async function indexHtml(env, session) {
   a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
-  .doc-list { display: flex; flex-direction: column; gap: 8px; }
-  .doc-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--td-line); border-radius: 10px; background: var(--td-surface); }
+  .doc-list { display: flex; flex-direction: column; }
+  .doc-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
   .doc-info { min-width: 0; }
   .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
   button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
-  .delete-doc { flex-shrink: 0; color: var(--td-danger); background: #fff; border: 1px solid #f1b8b2; border-radius: 6px; padding: 7px 12px; }
-  .delete-doc:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
+  /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
+     not a management console. Faint by default, clearer on row hover. */
+  .row-actions { position: relative; flex-shrink: 0; }
+  .row-menu-btn { border: none; background: none; color: #ccc; font-size: 20px; line-height: 1; padding: 2px 8px; border-radius: 6px; }
+  .doc-row:hover .row-menu-btn { color: var(--td-muted); }
+  .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
+  .row-menu { position: absolute; right: 0; top: 100%; margin-top: 4px; min-width: 128px; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 4px; z-index: 10; }
+  .row-menu[hidden] { display: none; }
+  .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
+  .row-delete:hover { background: var(--td-danger-tint); }
   .status { min-height: 20px; margin: 0 0 16px; color: var(--td-muted); font-size: 13px; }
   .status[data-kind="error"] { color: var(--td-danger); }
   .status[data-kind="ok"] { color: var(--td-ok); }
@@ -1065,12 +1078,34 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
       document.body.appendChild(bg);
     });
   }
+  // ⋯ overflow menu — one open at a time; a click anywhere else closes it.
+  function closeMenus(except) {
+    document.querySelectorAll('.row-menu').forEach((m) => {
+      if (m === except) return;
+      m.hidden = true;
+      m.previousElementSibling.setAttribute('aria-expanded', 'false');
+    });
+  }
+  document.querySelectorAll('.row-menu-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = btn.nextElementSibling;
+      const willOpen = menu.hidden;
+      closeMenus(willOpen ? menu : null);
+      menu.hidden = !willOpen;
+      btn.setAttribute('aria-expanded', String(willOpen));
+    });
+  });
+  document.addEventListener('click', () => closeMenus(null));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(null); });
+
   // Delete: no token — the browser is already signed in as the owner (this
   // page 302s away for anyone else), so the session cookie alone authorizes
   // DELETE /api/doc (authorizeOwnerMutation in worker.js). Plain same-origin
   // fetch sends the cookie automatically; no Authorization header needed.
-  document.querySelectorAll('.delete-doc').forEach((button) => {
+  document.querySelectorAll('.row-delete').forEach((button) => {
     button.addEventListener('click', async () => {
+      closeMenus(null);
       const slug = button.dataset.slug;
       const title = button.dataset.title || slug;
       const versions = button.dataset.versions || '1';

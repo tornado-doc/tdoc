@@ -57,10 +57,13 @@ t('/me never computes or emits allowed_users (gate: no access data leaks into th
   assert(!index.includes('accessFromMeta'), '/me must not compute an access policy per row anymore');
 });
 
-t('/me keeps only title, slug, version, and Delete per row', () => {
+t('/me keeps only title, slug, version, and a quiet ⋯ delete per row', () => {
   assert(index.includes('doc-title'), 'missing doc title link');
   assert(index.includes('doc-meta'), 'missing slug/version meta line');
-  assert(index.includes('class="delete-doc"'), 'missing delete button');
+  // Delete is tucked behind a ⋯ overflow menu, not a prominent per-row button.
+  assert(index.includes('class="row-menu-btn"'), 'missing ⋯ overflow trigger');
+  assert(index.includes('class="row-delete"'), 'missing delete item inside the menu');
+  assert(!index.includes('class="delete-doc"'), 'the loud standalone delete button should be gone');
 });
 
 t('/me deletes remote docs through DELETE /api/doc using the session (no token)', () => {
