@@ -1,3 +1,11 @@
 {
-  "shouldUpdateDescription": false
+  "shouldUpdateDescription": false,
+  "triggerOnUpdates": true,
+  "triggerOnDrafts": true,
+  "statusCheck": true,
+  "statusCommentsEnabled": true,
+  "commentTypes": ["logic", "syntax"],
+  "strictness": 2,
+  "excludeAuthors": ["dependabot[bot]", "*-bot"],
+  "instructions": "Audit every PR as a security-and-correctness review. Highest-risk surfaces: server/overlay.js (runs in every reader's browser), worker/ (untrusted request bodies + auth), bin/ (Cloudflare tokens on the user's machine). Flag XSS, authz holes, token leakage, broken comment anchors, and regressions to local/publish/comment flows. Skip style nits and description rewrites. Post the summary as a review comment."
 }
