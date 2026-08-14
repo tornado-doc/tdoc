@@ -24,6 +24,7 @@ const OFFLINE = [
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'me-management.test.js',    // /me remote SoT management UI guard
+  'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
   'oldver-strip.test.js',     // old-version banner predicate
   'cli.test.js',              // CLI resilience (drives bash hermetically)
@@ -34,6 +35,7 @@ const OFFLINE = [
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
+  'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)
   'vercel-shim.test.js',      // vercel storage shims (KV/R2 contract, rewrite URL)
   'api.test.js',              // hermetic: spawns its own server in a temp dir
@@ -46,6 +48,7 @@ const GATED = [
   'publish.test.js',     // dry-publish + (gated) real publish
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright
+  'csp-xss.test.js',     // playwright: author <script>/onclick blocked, overlay still works
 ];
 
 const runAll = process.argv.includes('--all');

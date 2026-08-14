@@ -7,6 +7,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
@@ -114,7 +115,19 @@ function safeJsonForScript(obj) {
   return JSON.stringify(obj).replace(/<\/script>/gi, '<\\/script>').replace(/<!--/g, '<\\!--');
 }
 
-function injectOverlay(html, slug, version) {
+// CSP (owner-manage-via-session hardening, mirrors worker/worker.js).
+//
+// Local docs are anonymous/no-auth by design, so this route isn't guarding a
+// session cookie today — but the local server shares overlay.js with the
+// published worker, and a doc authored locally is the same bytes that later
+// get published. Blocking author <script>/onclick here too means what a doc
+// author sees locally matches what ships (no "worked in dev, XSS in prod"
+// surprise), and costs nothing since 0 published docs use <script>.
+function cspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+}
+
+function injectOverlay(html, slug, version, nonce) {
   const overlay = fs.readFileSync(OVERLAY_PATH, 'utf8');
   // Hand the overlay the full version list so the bar can offer a version
   // picker. Read straight from meta.json; ignore failures and fall back to
@@ -126,10 +139,14 @@ function injectOverlay(html, slug, version) {
       versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
     }
   } catch {}
-  const cfg = `<script>window.__TDOC__ = ${safeJsonForScript({
+  // nonce is stamped onto BOTH injected <script> tags so only they run under
+  // the CSP set by cspHeader() above — author content in `html` has no nonce
+  // and is inert.
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const cfg = `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript({
     slug, version, identity: null, authConfigured: false, mode: 'local', versions,
   })};</script>`;
-  const inject = `${cfg}\n<script>${overlay}</script>`;
+  const inject = `${cfg}\n<script${nonceAttr}>${overlay}</script>`;
   if (html.includes('</body>')) return html.replace('</body>', `${inject}\n</body>`);
   return html + inject;
 }
@@ -201,6 +218,7 @@ function indexPage() {
   const rows = slugs.map(slug => {
     const meta = readJson(path.join(ROOT, slug, 'meta.json'), { title: slug, versions: [] });
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
+    const versionCount = Array.isArray(meta.versions) && meta.versions.length ? meta.versions.length : 1;
     const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
     const open = comments.filter(c => c.status === 'open').length;
     return `<tr>
@@ -208,35 +226,78 @@ function indexPage() {
       <td>${escHtml(slug)}</td>
       <td>v${latest}</td>
       <td>${open ? `<b>${open} open</b>` : '—'}</td>
-      <td><button class="del" data-slug="${escHtml(slug)}" data-versions="${latest}" data-comments="${comments.length}">Delete</button></td>
+      <td><button class="del" data-slug="${escHtml(slug)}" data-versions="${versionCount}" data-comments="${comments.length}">Delete</button></td>
     </tr>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
 <style>
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 760px; margin: 60px auto; padding: 0 20px; color: #111; }
-  h1 { font-size: 28px; margin: 0 0 4px; color: #1652f0; }
-  .sub { color: #666; margin: 0 0 32px; }
+  :root {
+    --td-accent: #1652f0; --td-accent-hover: #1245d0;
+    --td-danger: #b42318; --td-danger-hover: #931c14;
+    --td-ink: #111; --td-muted: #666; --td-line: #eee;
+  }
+  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 760px; margin: 60px auto; padding: 0 20px; color: var(--td-ink); }
+  h1 { font-size: 28px; margin: 0 0 4px; color: var(--td-accent); }
+  .sub { color: var(--td-muted); margin: 0 0 32px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--td-line); }
   th { font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 0.04em; }
-  a { color: #1652f0; text-decoration: none; }
+  a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; }
-  .del { font: 12px system-ui; color: #a52323; background: none; border: 1px solid #e0c9c9; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
-  .del:hover { background: #a52323; color: #fff; border-color: #a52323; }
+  .del { font: 12px system-ui; color: var(--td-danger); background: none; border: 1px solid #e0c9c9; border-radius: 6px; padding: 3px 9px; cursor: pointer; transition: background .12s, color .12s; }
+  .del:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
+  /* Styled confirm modal — replaces window.confirm() (JUL-36). Standalone
+     copy of the doc overlay's .tdoc-modal-bg/.tdoc-modal visual language;
+     this page doesn't load overlay.js. */
+  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
+  .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
+  .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
+  .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  .tdoc-modal button { font: inherit; cursor: pointer; padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
 </style></head><body>
 <h1>tdoc</h1><p class="sub">Prompt-native documents.</p>
 ${slugs.length === 0 ? '<p class="empty">No docs yet. Try <code>/tdoc new &lt;prompt&gt;</code>.</p>' :
   `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th>Comments</th><th></th></tr></thead><tbody>${rows}</tbody></table>`}
 <script>
+function showConfirm({ title, body, confirmLabel, danger }) {
+  return new Promise((resolve) => {
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.innerHTML = '<div class="tdoc-modal">' +
+      '<h3></h3><p></p>' +
+      '<div class="actions">' +
+        '<button type="button" data-act="cancel">Cancel</button>' +
+        '<button type="button" data-act="go"></button>' +
+      '</div></div>';
+    bg.querySelector('h3').textContent = title;
+    bg.querySelector('p').innerHTML = body;
+    const goBtn = bg.querySelector('[data-act="go"]');
+    goBtn.textContent = confirmLabel;
+    if (danger) goBtn.className = 'danger';
+    const done = (v) => { bg.remove(); resolve(v); };
+    bg.querySelector('[data-act="cancel"]').onclick = () => done(false);
+    bg.addEventListener('click', (e) => { if (e.target === bg) done(false); });
+    goBtn.onclick = () => done(true);
+    document.body.appendChild(bg);
+  });
+}
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('.del');
   if (!b) return;
   const slug = b.dataset.slug;
   // Irreversible: name exactly what disappears before acting.
-  const msg = 'Delete "' + slug + '"?\n\nThis permanently removes ' + b.dataset.versions +
-    ' version(s) and ' + b.dataset.comments + ' comment(s) — the local copy AND the published copy (if any). No undo.';
-  if (!confirm(msg)) return;
+  const proceed = await showConfirm({
+    title: 'Delete "' + slug + '"?',
+    body: 'This permanently removes <b>' + b.dataset.versions + ' version(s)</b> and <b>' + b.dataset.comments +
+      ' comment(s)</b> — the local copy AND the published copy (if any). No undo.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!proceed) return;
   b.disabled = true; b.textContent = 'Deleting…';
   const r = await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
   if (r.ok) { b.closest('tr').remove(); }
@@ -266,7 +327,11 @@ const server = http.createServer(async (req, res) => {
     const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
     if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
     const html = fs.readFileSync(file, 'utf8');
-    return send(res, 200, injectOverlay(html, slug, Number(vStr)), { 'Content-Type': 'text/html; charset=utf-8' });
+    const nonce = crypto.randomBytes(16).toString('hex');
+    return send(res, 200, injectOverlay(html, slug, Number(vStr), nonce), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': cspHeader(nonce),
+    });
   }
 
   // --- COMMENTS (anonymous) ---

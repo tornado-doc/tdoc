@@ -850,28 +850,65 @@ function reconcileAnchors(comments, aidsInVersion, V) {
   return comments;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// CSP (owner-manage-via-session hardening)
+//
+// A published doc is arbitrary author HTML served on our own origin. Once
+// owner mutations (delete / access) can be authorized by the owner's SESSION
+// COOKIE alone (see authorizeOwnerMutation below), a malicious <script> or
+// onclick= embedded in a doc's HTML could ride that cookie to silently
+// delete/modify docs (confused-deputy) — the browser sends the cookie on any
+// same-origin fetch/XHR the page's own script issues, no user gesture needed.
+//
+// FIX: every doc-serving response carries a CSP that runs ONLY our own
+// nonced overlay script and blocks everything else — author <script> tags,
+// inline event-handler attributes (onclick=...), and javascript: URLs all
+// lack the nonce and there is no 'unsafe-inline' to fall back to. Verified
+// fact (2026-08): 0 of 36 published doc versions use <script>, so this
+// breaks no known content.
+//
+// 'strict-dynamic' lets the nonced overlay script load further scripts of
+// its own choosing (it doesn't today, but this keeps the policy from being
+// a maintenance trap if it ever needs to). object-src/base-uri are locked
+// down too (classic plugin/base-tag CSP-bypass vectors) — nothing else is
+// restricted, so author CSS/images/fonts/etc. are untouched.
+function cspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+}
+
 // Inject the overlay boot + an arbitrary cfg into a document. Single source of
 // truth for "put window.__TDOC__ + overlay.js before </body>" — used by both
 // the published view and the /fork view (which previously re-implemented this
 // inline, risking drift).
-function injectOverlayCfg(rawHtml, cfg) {
+//
+// `nonce` (when supplied) is stamped onto BOTH injected <script> tags so they
+// — and only they — run under the CSP set by cspHeader() above. Callers that
+// don't pass a nonce (there are none left in this file, but keep the param
+// optional so a future caller can't silently omit CSP without an explicit
+// choice) get unnonced tags, which simply won't execute under a nonce-based
+// CSP — fail closed, not fail open.
+function injectOverlayCfg(rawHtml, cfg, nonce) {
   const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const inject =
-    `<script>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
-    `<script>${OVERLAY_JS}</script>`;
+    `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>${OVERLAY_JS}</script>`;
   if (rawHtml.includes('</body>')) return rawHtml.replace('</body>', `${inject}\n</body>`);
   return rawHtml + inject;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce) {
   return injectOverlayCfg(rawHtml, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
+    // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
+    // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
+    ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
     mode: 'published',
     versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
-  });
+  }, nonce);
 }
 
 // Neutral landing page served at `/`. No catalog, no slug list — just
@@ -897,6 +934,20 @@ function landingHtml() {
 </body></html>`;
 }
 
+// /me — the owner's doc catalog. JUL-36 tail (2026-08-13): this used to be a
+// dense access-control table (visibility/history/commenting/allowed_users
+// dropdowns + Save) gated by an admin-token field. Both are GONE now:
+//   - access controls moved to the doc-page Share panel (overlay.js
+//     showManageModal, PATCH /api/doc/access) — a single doc's own page is
+//     the right place to manage that doc, not a spreadsheet of every doc.
+//   - the admin-token field is gone because DELETE /api/doc now accepts the
+//     owner's session cookie (authorizeOwnerMutation) — safe because of the
+//     CSP set on every doc response (see cspHeader()). /me is only reachable
+//     by the signed-in owner in the first place (isOwnerSession gate in the
+//     route above), so its own fetches are already same-origin + cookied.
+// What's left: title, slug, version, Delete. No access data of any kind is
+// computed or emitted here (gate: response HTML must not contain
+// `allowed_users` — there is nothing here that could).
 async function indexHtml(env, session) {
   // List all `meta:` keys.
   let list = [];
@@ -915,148 +966,162 @@ async function indexHtml(env, session) {
     let meta = {};
     try { meta = JSON.parse(metaRaw || '{}'); } catch {}
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
-    const access = accessFromMeta(meta);
-    const selected = (value, current) => value === current ? ' selected' : '';
-    const allowlist = (access.allowed_users || []).join(', ');
     // Only list docs whose latest version actually exists in R2 — otherwise
     // the index advertises 404s. (We hit this when R2 writes silently failed
     // while KV meta updates succeeded; defense in depth.)
     const exists = await env.DOCS.head(`docs/${slug}/v${latest}/index.html`);
     if (!exists) continue;
-    rows.push(`<tr>
-      <td><a href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(meta.title || slug)}</a></td>
-      <td>${escapeHtml(slug)}</td>
-      <td>v${latest}</td>
-      <td>
-        <form class="access-form" data-slug="${escapeHtml(slug)}">
-          <label>Visibility
-            <select name="visibility">
-              <option value="unlisted"${selected('unlisted', access.visibility)}>Unlisted</option>
-              <option value="private"${selected('private', access.visibility)}>Private</option>
-              <option value="public"${selected('public', access.visibility)}>Public</option>
-            </select>
-          </label>
-          <label>History
-            <select name="history_visibility">
-              <option value="owner"${selected('owner', access.history_visibility)}>Owner</option>
-              <option value="invited"${selected('invited', access.history_visibility)}>Invited</option>
-              <option value="public"${selected('public', access.history_visibility)}>Public</option>
-            </select>
-          </label>
-          <label>Comments
-            <select name="commenting">
-              <option value="signed_in"${selected('signed_in', access.commenting)}>Signed in</option>
-              <option value="invited"${selected('invited', access.commenting)}>Invited</option>
-              <option value="owner"${selected('owner', access.commenting)}>Owner</option>
-              <option value="off"${selected('off', access.commenting)}>Off</option>
-            </select>
-          </label>
-          <label>Allowed users
-            <input name="allowed_users" value="${escapeHtml(allowlist)}" placeholder="github-login, another-login">
-          </label>
-          <button type="submit">Save</button>
-        </form>
-      </td>
-      <td><button class="delete-doc" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(meta.title || slug)}">Delete</button></td>
-    </tr>`);
+    // Honest delete-confirm copy needs a real comment count (JUL-36) — same
+    // fold used by the doc-view route's ownerManage data.
+    let commentCount = 0;
+    try {
+      const list = await readComments(env, slug);
+      ensureMigrated(list);
+      for (const c of historyList(list)) {
+        commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+      }
+    } catch {}
+    const versionCount = Array.isArray(meta.versions) && meta.versions.length ? meta.versions.length : 1;
+    rows.push(`<div class="doc-row">
+      <div class="doc-info">
+        <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(meta.title || slug)}</a>
+        <div class="doc-meta">${escapeHtml(slug)} · v${latest}</div>
+      </div>
+      <div class="row-actions">
+        <button class="row-menu-btn" aria-label="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>
+        <div class="row-menu" hidden>
+          <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(meta.title || slug)}" data-versions="${versionCount}" data-comments="${commentCount}">Delete…</button>
+        </div>
+      </div>
+    </div>`);
   }
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
 <style>
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 1120px; margin: 48px auto; padding: 0 20px; color: #111; }
-  h1 { font-size: 28px; margin: 0 0 4px; color: #1652f0; }
-  .sub { color: #666; margin: 0 0 32px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid #eee; }
-  th { font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 0.04em; }
-  a { color: #1652f0; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .empty { color: #888; padding: 40px 0; text-align: center; }
-  .who { color: #888; font-size: 13px; margin: 0 0 32px; }
-  .who b { color: #444; font-weight: 600; }
-  .toolbar { display: flex; gap: 10px; align-items: end; margin: 0 0 18px; }
-  .toolbar label { max-width: 320px; }
-  .toolbar input { min-width: 280px; }
-  .access-form { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)) auto; gap: 8px; align-items: end; min-width: 620px; }
-  label { display: grid; gap: 4px; color: #666; font-size: 12px; }
-  select, input, button { font: inherit; border: 1px solid #d7d7d7; border-radius: 6px; background: #fff; color: #111; padding: 7px 8px; }
-  input { min-width: 180px; }
-  button { cursor: pointer; }
-  button:hover { border-color: #1652f0; }
-  .delete-doc { color: #b42318; border-color: #f1b8b2; }
-  .status { min-height: 20px; margin: 0 0 16px; color: #666; font-size: 13px; }
-  .status[data-kind="error"] { color: #b42318; }
-  .status[data-kind="ok"] { color: #087443; }
-  @media (max-width: 900px) {
-    table, thead, tbody, tr, th, td { display: block; }
-    thead { display: none; }
-    tr { padding: 14px 0; border-bottom: 1px solid #eee; }
-    td { border: 0; padding: 5px 0; }
-    .access-form { min-width: 0; grid-template-columns: 1fr; }
+  :root {
+    --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
+    --td-danger: #b42318; --td-danger-hover: #931c14; --td-danger-tint: #fdeceb; --td-ok: #087443;
+    --td-ink: #111; --td-muted: #666; --td-line: #eee; --td-surface: #f7f7f7;
   }
+  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 680px; margin: 48px auto; padding: 0 20px; color: var(--td-ink); }
+  h1 { font-size: 28px; margin: 0 0 4px; color: var(--td-accent); }
+  .who { color: var(--td-muted); font-size: 13px; margin: 0 0 28px; }
+  .who b { color: #444; font-weight: 600; }
+  a { color: var(--td-accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
+  .doc-list { display: flex; flex-direction: column; }
+  .doc-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
+  .doc-info { min-width: 0; }
+  .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
+  button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
+  /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
+     not a management console. Faint by default, clearer on row hover. */
+  .row-actions { position: relative; flex-shrink: 0; }
+  .row-menu-btn { border: none; background: none; color: #ccc; font-size: 20px; line-height: 1; padding: 2px 8px; border-radius: 6px; }
+  .doc-row:hover .row-menu-btn { color: var(--td-muted); }
+  .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
+  .row-menu { position: absolute; right: 0; top: 100%; margin-top: 4px; min-width: 128px; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 4px; z-index: 10; }
+  .row-menu[hidden] { display: none; }
+  .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
+  .row-delete:hover { background: var(--td-danger-tint); }
+  .status { min-height: 20px; margin: 0 0 16px; color: var(--td-muted); font-size: 13px; }
+  .status[data-kind="error"] { color: var(--td-danger); }
+  .status[data-kind="ok"] { color: var(--td-ok); }
+  /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
+     doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
+     standalone copy here since /me does not load overlay.js. */
+  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
+  .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
+  .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
+  .tdoc-modal .status { color: #888; font-size: 13px; margin: 0 0 8px; }
+  .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
 </style></head><body>
 <h1>My docs</h1>
 <p class="who">Documents hosted on this worker${session && session.login ? ` · signed in as <b>${escapeHtml(session.login)}</b>` : ''}.</p>
-<div class="toolbar">
-  <label>Admin token
-    <input id="admin-token" type="password" autocomplete="off" placeholder="Required for remote changes">
-  </label>
-</div>
 <p id="status" class="status" aria-live="polite"></p>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
-  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th>Remote access</th><th>Remote delete</th></tr></thead><tbody>${rows.join('')}</tbody></table>`}
+  `<div class="doc-list">${rows.join('')}</div>`}
 <script>
 (() => {
   const status = document.getElementById('status');
-  const tokenInput = document.getElementById('admin-token');
   const say = (message, kind = '') => {
     status.textContent = message || '';
     status.dataset.kind = kind;
   };
-  const authHeaders = () => {
-    const token = tokenInput.value.trim();
-    if (!token) throw new Error('Admin token is required for remote changes.');
-    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
-  };
-  const users = (value) => value.split(/[\\s,]+/).map((x) => x.trim()).filter(Boolean);
-  document.querySelectorAll('.access-form').forEach((form) => {
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const slug = form.dataset.slug;
-      const access = {
-        visibility: form.elements.visibility.value,
-        history_visibility: form.elements.history_visibility.value,
-        commenting: form.elements.commenting.value,
-        allowed_users: users(form.elements.allowed_users.value),
-      };
-      say('Saving access...');
-      let headers;
-      try { headers = authHeaders(); } catch (e) { say(e.message, 'error'); return; }
-      const res = await fetch('/api/doc/access', {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({ slug, access }),
-      });
-      if (!res.ok) {
-        let body = {};
-        try { body = await res.json(); } catch {}
-        say(body.error ? 'Access save failed: ' + body.error : 'Access save failed.', 'error');
-        return;
-      }
-      say('Access saved for ' + slug + '.', 'ok');
+  // Styled confirm — replaces window.confirm(). Resolves true/false; never
+  // silently proceeds (Cancel and the backdrop both resolve false).
+  function showConfirm({ title, body, confirmLabel, danger }) {
+    return new Promise((resolve) => {
+      const bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg';
+      bg.innerHTML = '<div class="tdoc-modal">' +
+        '<h3></h3><p></p>' +
+        '<div class="actions">' +
+          '<button type="button" data-act="cancel">Cancel</button>' +
+          '<button type="button" data-act="go"></button>' +
+        '</div></div>';
+      bg.querySelector('h3').textContent = title;
+      bg.querySelector('p').innerHTML = body;
+      const goBtn = bg.querySelector('[data-act="go"]');
+      goBtn.textContent = confirmLabel;
+      if (danger) goBtn.className = 'danger';
+      const done = (v) => { bg.remove(); resolve(v); };
+      bg.querySelector('[data-act="cancel"]').onclick = () => done(false);
+      bg.addEventListener('click', (e) => { if (e.target === bg) done(false); });
+      goBtn.onclick = () => done(true);
+      document.body.appendChild(bg);
+    });
+  }
+  // ⋯ overflow menu — one open at a time; a click anywhere else closes it.
+  function closeMenus(except) {
+    document.querySelectorAll('.row-menu').forEach((m) => {
+      if (m === except) return;
+      m.hidden = true;
+      m.previousElementSibling.setAttribute('aria-expanded', 'false');
+    });
+  }
+  document.querySelectorAll('.row-menu-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = btn.nextElementSibling;
+      const willOpen = menu.hidden;
+      closeMenus(willOpen ? menu : null);
+      menu.hidden = !willOpen;
+      btn.setAttribute('aria-expanded', String(willOpen));
     });
   });
-  document.querySelectorAll('.delete-doc').forEach((button) => {
+  document.addEventListener('click', () => closeMenus(null));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(null); });
+
+  // Delete: no token — the browser is already signed in as the owner (this
+  // page 302s away for anyone else), so the session cookie alone authorizes
+  // DELETE /api/doc (authorizeOwnerMutation in worker.js). Plain same-origin
+  // fetch sends the cookie automatically; no Authorization header needed.
+  document.querySelectorAll('.row-delete').forEach((button) => {
     button.addEventListener('click', async () => {
+      closeMenus(null);
       const slug = button.dataset.slug;
       const title = button.dataset.title || slug;
-      if (!confirm('Delete "' + title + '" from remote storage? This removes all versions and comments.')) return;
+      const versions = button.dataset.versions || '1';
+      const comments = button.dataset.comments || '0';
+      const proceed = await showConfirm({
+        title: 'Delete "' + title + '"?',
+        body: 'This permanently removes <b>' + versions + ' version(s)</b> and <b>' + comments +
+          ' comment(s)</b> from remote storage. No undo.',
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!proceed) return;
       say('Deleting ' + slug + '...');
-      let headers;
-      try { headers = authHeaders(); } catch (e) { say(e.message, 'error'); return; }
       const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
         method: 'DELETE',
-        headers,
+        credentials: 'same-origin',
       });
       if (!res.ok) {
         let body = {};
@@ -1064,7 +1129,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
         say(body.error ? 'Delete failed: ' + body.error : 'Delete failed.', 'error');
         return;
       }
-      button.closest('tr').remove();
+      button.closest('.doc-row').remove();
       say('Deleted ' + slug + ' from remote storage.', 'ok');
     });
   });
@@ -1557,6 +1622,32 @@ async function requireUploadAuth(req, env) {
   return null;
 }
 
+// Owner-mutation gate for browser-facing admin routes (DELETE /api/doc,
+// PATCH /api/doc/access). EITHER credential authorizes:
+//   - the caller is signed in as the configured TDOC_OWNER (session cookie
+//     set by the GitHub device-flow login) — this is the new browser path,
+//     replacing the admin-token field that used to live on /me and the
+//     doc-page manage modal;
+//   - OR the caller presents the CLI's upload bearer token (requireUploadAuth)
+//     — unchanged, still how `tdoc publish`/`tdoc-delete` authenticate.
+//
+// Trusting the session cookie here is safe ONLY because every doc-serving
+// response now carries the CSP set by cspHeader() above, which stops author
+// <script>/onclick content from running at all — so a doc can't ride the
+// owner's cookie into these routes (the confused-deputy the admin token used
+// to guard against). The two changes ship together; do not relax one without
+// the other.
+//
+// Returns { ok: true } when authorized, or { ok: false, response } (the 401
+// to return as-is) otherwise. Does not read/parse the request body.
+async function authorizeOwnerMutation(req, env) {
+  const session = await getSession(env, req);
+  if (isOwnerSession(env, session)) return { ok: true, session };
+  const unauth = await requireUploadAuth(req, env);
+  if (unauth) return { ok: false, response: unauth };
+  return { ok: true, session: null };
+}
+
 // ===========================================================================
 // #34 — Per-slug write serialization via a Durable Object.
 //
@@ -1895,7 +1986,29 @@ export default {
           versions = [{ n: Number(vStr), created: (hit && hit.created) || null }];
         }
       } catch {}
-      return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwnerSession(env, session)));
+      const isOwner = isOwnerSession(env, session);
+      // JUL-36: owner-only manage data (Delete / Unpublish / visibility switch),
+      // computed fresh on THIS request and embedded only for the owner. A
+      // non-owner's bootCfg carries `ownerManage: null` — the overlay's manage
+      // menu never builds a single DOM node without it, so there is nothing to
+      // hide, only nothing rendered. Kept separate from `isOwner` (also still
+      // sent) so the manage UI's data dependency is explicit and single-source.
+      let ownerManage = null;
+      if (isOwner) {
+        let commentCount = 0;
+        try {
+          const list = await readComments(env, slug);
+          ensureMigrated(list);
+          for (const c of historyList(list)) {
+            commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+          }
+        } catch {}
+        ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
+      }
+      const nonce = rand(16);
+      return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwner, ownerManage, nonce), {
+        headers: { 'Content-Security-Policy': cspHeader(nonce) },
+      });
     }
 
     // ---- doc export / fork ----
@@ -1991,12 +2104,18 @@ export default {
       // The fork route boots the overlay in read-only "fork" mode so the
       // user can SEE what they just downloaded — comments rendered as cards,
       // anchors highlighted — without any backend.
+      // Same confused-deputy surface as the doc-view route (same-origin
+      // cookie, arbitrary author HTML) even though fork/export don't expose
+      // owner-manage UI — a script here could still ride the viewer's session
+      // cookie to hit /api/doc*. Nonce the injected overlay script the same
+      // way; author content stays unnonced and inert under the CSP below.
+      const nonce = rand(16);
       let bodyHtml = html;
       if (kind === 'fork') {
         bodyHtml = injectOverlayCfg(bodyHtml, {
           slug, version: Number(vStr), identity: null,
           authConfigured: false, mode: 'fork', originalSlug: slug,
-        });
+        }, nonce);
       }
 
       const finalHtml = banner + jsonBlock + bodyHtml;
@@ -2005,7 +2124,7 @@ export default {
       // overridden with ?download=1 / ?download=0.
       const defaultAttach = kind === 'export';
       const forceDownload = dl === '1' || (defaultAttach && dl !== '0');
-      const headers = { 'Content-Type': 'text/html; charset=utf-8' };
+      const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': cspHeader(nonce) };
       if (forceDownload) headers['Content-Disposition'] = `attachment; filename="${slug}-v${vStr}-fork.html"`;
       return new Response(finalHtml, { status: 200, headers });
     }
@@ -2404,11 +2523,13 @@ export default {
 
     // ---- admin access mutation ----
     // Remote storage is the source of truth: access policy must be mutable
-    // without a local meta.json or full document re-upload. Authenticated with
-    // the same upload token as /api/upload and /api/doc DELETE.
+    // without a local meta.json or full document re-upload. Authorized by
+    // authorizeOwnerMutation: the owner's session (browser, doc-page Share
+    // panel / /me) OR the upload token (CLI) — see its doc comment for why
+    // the session path is safe (CSP blocks author scripts on every response).
     if (p === '/api/doc/access' && method === 'PATCH') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await authorizeOwnerMutation(req, env);
+      if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
       const topKeys = Object.keys(body || {});
@@ -2428,9 +2549,12 @@ export default {
     }
 
     // ---- admin delete ----
+    // Authorized by authorizeOwnerMutation: the owner's session (browser,
+    // /me or the doc-page Share panel) OR the upload token (CLI's
+    // tdoc-delete) — see its doc comment for why the session path is safe.
     if (p === '/api/doc' && method === 'DELETE') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await authorizeOwnerMutation(req, env);
+      if (!auth.ok) return auth.response;
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
       // delete all R2 versions

@@ -34,6 +34,21 @@
 
   const HIGHLIGHT_API = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
 
+  // Broken-avatar fallback, delegated (CSP-safe). Doc responses now carry a
+  // nonce-based script-src CSP (see worker.js cspHeader()) with no
+  // 'unsafe-inline', so an inline `onerror="..."` attribute — which this used
+  // to be — can never run. `error` events on <img> don't bubble, so this must
+  // be a CAPTURE-phase listener on document, not a delegated bubble listener.
+  // avatarHTML() below marks fallback-eligible images with
+  // data-tdoc-fallback-anon instead of an inline handler.
+  document.addEventListener('error', (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== 'IMG' || !img.dataset || !img.dataset.tdocFallbackAnon) return;
+    const span = document.createElement('span');
+    span.className = img.dataset.tdocFallbackAnon;
+    img.replaceWith(span);
+  }, true);
+
   // Phones need this or they render at a virtual ~980px viewport.
   if (!document.querySelector('meta[name="viewport"]')) {
     const m = document.createElement('meta');
@@ -112,6 +127,9 @@
     --td-accent-ring-soft: rgba(22,82,240,0.18);
     --td-accent-wash: rgba(22,82,240,0.06);
     --td-accent-tint: #e8eeff;
+    --td-danger: #b42318;
+    --td-danger-hover: #931c14;
+    --td-danger-tint: #fdeceb;
     --td-ground: #fff;
     --td-ink: #1a1a1a;
     --td-heading: #1a1a1a;
@@ -526,7 +544,7 @@
 
   /* Modal (sign-in) */
   .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
-  .tdoc-modal { background: #fff; color: #111; border-radius: 12px; padding: 28px; width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .tdoc-modal { background: #fff; color: #111; border-radius: 12px; padding: 28px; width: min(460px, calc(100vw - 48px)); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
   .tdoc-modal h3 { margin: 0 0 8px; font-size: 20px; }
   .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
   .tdoc-modal .code { background: #0a0a0a; color: #fff; padding: 18px; border-radius: 8px; font: 24px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.15em; text-align: center; margin: 0 0 14px; user-select: all; cursor: copy; }
@@ -542,6 +560,24 @@
   .tdoc-modal .divider { border-top: 1px solid #eee; padding-top: 12px; margin-top: 12px; }
   .tdoc-modal .danger { color: #c33; font-size: 13px; }
   .tdoc-modal code { background: #f5f6f8; padding: 1px 5px; border-radius: 3px; }
+
+  /* Share panel (JUL-36, reworked 2026-08-13: visibility/history/commenting/
+     allowed_users + Delete/Unpublish — no admin token, session-authorized). */
+  .tdoc-modal .manage-section { margin: 16px 0; }
+  .tdoc-modal .manage-section:first-of-type { margin-top: 4px; }
+  .tdoc-modal label.field { display: block; font-size: 12px; color: #666; margin: 0 0 4px; font-weight: 600; }
+  .tdoc-modal input[type="password"], .tdoc-modal input[type="text"] { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; }
+  .tdoc-modal input[type="password"]:focus, .tdoc-modal input[type="text"]:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-seg { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+  .tdoc-seg button { border: none; border-radius: 0; padding: 7px 14px; background: #fff; color: #444; }
+  .tdoc-seg button + button { border-left: 1px solid #ddd; }
+  .tdoc-seg button.active { background: var(--td-accent); color: #fff; }
+  .tdoc-modal .manage-hint { font-size: 12px; color: #888; margin: 6px 0 0; }
+  .tdoc-modal .manage-action { width: 100%; text-align: left; }
+  .tdoc-modal .manage-action.danger-btn { color: var(--td-danger); border-color: #f1b8b2; }
+  .tdoc-modal .manage-action.danger-btn:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
 
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
@@ -579,7 +615,7 @@
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
-  body.tdoc-narrow .tdoc-modal { width: calc(100vw - 32px); padding: 20px; }
+  body.tdoc-narrow .tdoc-modal { padding: 20px; }
   body.tdoc-narrow .tdoc-modal .code { font-size: 20px; }
   body.tdoc-narrow .tdoc-hover-outline, body.tdoc-narrow .tdoc-comment-pill, body.tdoc-narrow .tdoc-drag-marquee { display: none; }
   body.tdoc-narrow .tdoc-emoji-picker { grid-template-columns: repeat(6, 36px); }
@@ -883,6 +919,7 @@
           </button>
           <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
             ${isOwner ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
+            ${isOwner && cfg.ownerManage && isPublished ? `<button id="tdoc-manage-doc" role="menuitem">Share settings</button>` : ''}
             <button id="tdoc-signout" role="menuitem">Sign out</button>
           </div>
         </div>`;
@@ -896,6 +933,13 @@
       if (isOwner) {
         document.getElementById('tdoc-my-docs').onclick = () => {
           window.open('/me', '_blank', 'noopener');
+        };
+      }
+      if (isOwner && cfg.ownerManage && isPublished) {
+        document.getElementById('tdoc-manage-doc').onclick = (e) => {
+          e.stopPropagation();
+          meMenu.classList.remove('open');
+          showManageModal();
         };
       }
       document.getElementById('tdoc-signout').onclick = async () => {
@@ -1779,10 +1823,12 @@
 
   function avatarHTML(author, anonClass) {
     const url = author?.avatar_url;
-    // onerror: if the avatar 404s / is CORS-blocked, swap the broken <img> for
-    // the anon placeholder so the pin/row never shows a broken-image glyph.
+    // If the avatar 404s / is CORS-blocked, the document-level capture-phase
+    // 'error' listener installed at boot swaps the broken <img> for the anon
+    // placeholder (data-tdoc-fallback-anon carries which class to use) — no
+    // inline onerror= attribute, which a nonce-based CSP would block anyway.
     return url
-      ? `<img src="${escapeHtml(url)}" alt="" onerror="this.outerHTML='&lt;span class=&quot;${anonClass}&quot;&gt;&lt;/span&gt;'">`
+      ? `<img src="${escapeHtml(url)}" alt="" data-tdoc-fallback-anon="${anonClass}">`
       : `<span class="${anonClass}"></span>`;
   }
 
@@ -2347,6 +2393,235 @@
       navigator.clipboard?.writeText(e.currentTarget.textContent);
     };
   }
+  // ========== Owner manage / Share panel (Delete / Unpublish / access) =====
+  // JUL-36, reworked 2026-08-13 (julie: browser owner management should work
+  // off the GitHub login, like Google Docs — no pasted token). Gated on
+  // cfg.ownerManage, which the worker only populates in the per-request boot
+  // config when THIS request's session passed isOwnerSession() server-side
+  // (worker.js's /d/ route). A non-owner's config carries
+  // cfg.ownerManage === null — every function below bails before creating
+  // any DOM, so there is no hidden button, just nothing rendered for them.
+  //
+  // A published doc is arbitrary HTML the owner authored, so this being
+  // session-authorized (no token) is safe ONLY because the worker now sends
+  // a CSP (see worker.js cspHeader()) on every doc response that blocks
+  // author <script>/onclick content outright — a doc can't ride the owner's
+  // session cookie into these routes anymore. ownerFetch() below relies on
+  // the browser's default same-origin credential behavior (cookie sent
+  // automatically); `credentials: 'same-origin'` is passed explicitly for
+  // clarity, not because it changes behavior here.
+  function closeManageModal() {
+    const m = document.getElementById('tdoc-manage-modal');
+    if (m) m.remove();
+  }
+  function closeManageConfirm() {
+    const m = document.getElementById('tdoc-manage-confirm');
+    if (m) m.remove();
+  }
+  function showManageConfirm({ title, body, confirmLabel, danger, onConfirm }) {
+    closeManageConfirm();
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-manage-confirm';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${body}</p>
+        <div class="status" id="tdoc-manage-confirm-status" style="display:none;"></div>
+        <div class="actions">
+          <button type="button" id="tdoc-manage-confirm-cancel">Cancel</button>
+          <button type="button" id="tdoc-manage-confirm-go" class="${danger ? 'danger' : 'primary'}">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(bg);
+    document.getElementById('tdoc-manage-confirm-cancel').onclick = closeManageConfirm;
+    bg.addEventListener('click', (e) => { if (e.target === bg) closeManageConfirm(); });
+    document.getElementById('tdoc-manage-confirm-go').onclick = async () => {
+      const status = document.getElementById('tdoc-manage-confirm-status');
+      const go = document.getElementById('tdoc-manage-confirm-go');
+      go.disabled = true;
+      status.style.display = 'block';
+      status.textContent = 'Working…';
+      try {
+        await onConfirm(status);
+      } catch (e) {
+        status.textContent = 'Failed: ' + e.message;
+        go.disabled = false;
+      }
+    };
+  }
+  // No Authorization header, no token — the owner's session cookie is sent
+  // automatically on this same-origin request (see doc comment above).
+  async function ownerFetch(url, opts) {
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const r = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || err.message || ('HTTP ' + r.status));
+    }
+    return r.json().catch(() => ({}));
+  }
+  const VIS_OPTIONS = [['public', 'Public'], ['unlisted', 'Unlisted'], ['private', 'Private']];
+  const HISTORY_OPTIONS = [['owner', 'Owner only'], ['invited', 'Invited'], ['public', 'Everyone']];
+  const COMMENTING_OPTIONS = [['signed_in', 'Signed in'], ['invited', 'Invited'], ['owner', 'Owner only'], ['off', 'Off']];
+  function renderSeg(id, current) {
+    const seg = document.getElementById(id);
+    if (!seg) return;
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.value === current));
+  }
+  function showManageModal() {
+    if (!cfg.ownerManage) return; // no owner data for this request → nothing to render
+    closeAuxModal();
+    const om = cfg.ownerManage;
+    const access = {
+      visibility: 'unlisted', history_visibility: 'owner', commenting: 'signed_in', allowed_users: [],
+      ...(om.access || {}),
+    };
+    const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-manage-modal';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>Share settings</h3>
+        <p class="muted">${escapeHtml(slug)} · ${plural(om.versionCount, 'version')} · ${plural(om.commentCount, 'comment')}</p>
+        <div class="manage-section">
+          <label class="field">Visibility</label>
+          <div class="tdoc-seg" id="tdoc-vis-seg">
+            ${VIS_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          </div>
+          <p class="manage-hint" id="tdoc-vis-status">&nbsp;</p>
+        </div>
+        <div class="manage-section">
+          <label class="field">Who can see version history</label>
+          <div class="tdoc-seg" id="tdoc-hist-seg">
+            ${HISTORY_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          </div>
+        </div>
+        <div class="manage-section">
+          <label class="field">Who can comment</label>
+          <div class="tdoc-seg" id="tdoc-comment-seg">
+            ${COMMENTING_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          </div>
+        </div>
+        <div class="manage-section">
+          <label class="field" for="tdoc-mgmt-allowed">Allowed users (private / invited)</label>
+          <input type="text" id="tdoc-mgmt-allowed" autocomplete="off" placeholder="github-login, another-login" value="${escapeHtml((access.allowed_users || []).join(', '))}">
+          <p class="manage-hint" id="tdoc-allowed-status">&nbsp;</p>
+        </div>
+        <div class="manage-section">
+          <button type="button" id="tdoc-mgmt-unpublish" class="manage-action">Unpublish</button>
+          <p class="manage-hint">Sets this doc to Private. Versions and comments are kept — republish anytime.</p>
+        </div>
+        <div class="manage-section">
+          <button type="button" id="tdoc-mgmt-delete" class="manage-action danger-btn">Delete doc…</button>
+          <p class="manage-hint">Permanently removes this doc, every version, and every comment. No undo.</p>
+        </div>
+        <div class="actions"><button type="button" id="tdoc-manage-close">Close</button></div>
+      </div>`;
+    document.body.appendChild(bg);
+    renderSeg('tdoc-vis-seg', access.visibility);
+    renderSeg('tdoc-hist-seg', access.history_visibility);
+    renderSeg('tdoc-comment-seg', access.commenting);
+    document.getElementById('tdoc-manage-close').onclick = closeManageModal;
+    bg.addEventListener('click', (e) => { if (e.target === bg) closeManageModal(); });
+
+    // Shared PATCH /api/doc/access helper — merges `patch` into the local
+    // `access` mirror on success so re-renders (renderSeg) reflect it.
+    async function patchAccess(patch, statusEl, successMsg) {
+      statusEl.textContent = 'Saving…';
+      try {
+        await ownerFetch('/api/doc/access', {
+          method: 'PATCH',
+          body: JSON.stringify({ slug, access: patch }),
+        });
+        Object.assign(access, patch);
+        statusEl.textContent = successMsg;
+      } catch (e) {
+        statusEl.textContent = 'Failed: ' + e.message;
+      }
+    }
+
+    document.getElementById('tdoc-vis-seg').querySelectorAll('button').forEach(b => {
+      b.onclick = async () => {
+        const value = b.dataset.value;
+        if (value === access.visibility) return;
+        const status = document.getElementById('tdoc-vis-status');
+        const commit = async () => {
+          await patchAccess({ visibility: value }, status, 'Saved: ' + VIS_OPTIONS.find(([v]) => v === value)[1]);
+          renderSeg('tdoc-vis-seg', access.visibility);
+        };
+        // Switching TO private is the same effect as Unpublish (takes the
+        // doc offline) — worth a confirm even though it's reversible.
+        if (value === 'private') {
+          showManageConfirm({
+            title: 'Switch to Private?',
+            body: 'Only you (and anyone on the allowlist) will be able to open this doc.',
+            confirmLabel: 'Switch to Private',
+            onConfirm: async (confirmStatus) => {
+              await commit();
+              confirmStatus.textContent = 'Done.';
+              closeManageConfirm();
+            },
+          });
+        } else {
+          await commit();
+        }
+      };
+    });
+
+    document.getElementById('tdoc-hist-seg').querySelectorAll('button').forEach(b => {
+      b.onclick = async () => {
+        const value = b.dataset.value;
+        if (value === access.history_visibility) return;
+        await patchAccess({ history_visibility: value }, document.getElementById('tdoc-vis-status'), 'Saved.');
+        renderSeg('tdoc-hist-seg', access.history_visibility);
+      };
+    });
+
+    document.getElementById('tdoc-comment-seg').querySelectorAll('button').forEach(b => {
+      b.onclick = async () => {
+        const value = b.dataset.value;
+        if (value === access.commenting) return;
+        await patchAccess({ commenting: value }, document.getElementById('tdoc-vis-status'), 'Saved.');
+        renderSeg('tdoc-comment-seg', access.commenting);
+      };
+    });
+
+    const allowedInput = document.getElementById('tdoc-mgmt-allowed');
+    allowedInput.addEventListener('change', async () => {
+      const list = allowedInput.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+      await patchAccess({ allowed_users: list }, document.getElementById('tdoc-allowed-status'), 'Saved.');
+    });
+
+    document.getElementById('tdoc-mgmt-unpublish').onclick = () => {
+      showManageConfirm({
+        title: 'Take this doc offline?',
+        body: 'This sets visibility to <b>Private</b> — only you can open it until you publish again. Comments and version history are kept.',
+        confirmLabel: 'Unpublish',
+        onConfirm: async (status) => {
+          await patchAccess({ visibility: 'private' }, status, 'Unpublished.');
+          renderSeg('tdoc-vis-seg', 'private');
+          setTimeout(closeManageConfirm, 700);
+        },
+      });
+    };
+
+    document.getElementById('tdoc-mgmt-delete').onclick = () => {
+      showManageConfirm({
+        title: 'Delete this doc?',
+        body: `This permanently removes <b>${escapeHtml(slug)}</b> — all <b>${plural(om.versionCount, 'version')}</b> and <b>${plural(om.commentCount, 'comment')}</b> are deleted. This cannot be undone.`,
+        confirmLabel: 'Delete',
+        danger: true,
+        onConfirm: async (status) => {
+          await ownerFetch(`/api/doc?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
+          status.textContent = 'Deleted. Redirecting…';
+          setTimeout(() => { window.location.href = 'https://github.com/tornado-doc/tdoc'; }, 900);
+        },
+      });
+    };
+  }
+
   async function pollDevice(device_code) {
     const status = document.getElementById('tdoc-poll-status');
     pollTimer = null;

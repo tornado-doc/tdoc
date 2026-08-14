@@ -31,11 +31,15 @@ t('CORS allows PATCH for remote access mutation', () => {
     'PATCH missing from Access-Control-Allow-Methods');
 });
 
-t('PATCH /api/doc/access authenticates before parsing body or writing meta', () => {
-  const auth = route.indexOf('await requireUploadAuth(req, env)');
+t('PATCH /api/doc/access authenticates (session-or-token) before parsing body or writing meta', () => {
+  // JUL-36 owner-manage-UX tail (2026-08-13): browser owner mutations now
+  // authorize off the owner's session cookie OR the CLI upload token, via
+  // the shared authorizeOwnerMutation() gate — see jul36-owner-manage.test.js
+  // for the gate's own unit coverage (session-only, token-only, neither).
+  const auth = route.indexOf('await authorizeOwnerMutation(req, env)');
   const body = route.indexOf('await req.json()');
   const write = route.indexOf('env.META.put(`meta:${slug}`');
-  assert(auth >= 0, 'route must call requireUploadAuth');
+  assert(auth >= 0, 'route must call authorizeOwnerMutation');
   assert(body >= 0, 'route should parse request JSON after auth');
   assert(write >= 0, 'route should persist meta after auth');
   assert(auth < body, 'auth must happen before body parse');
