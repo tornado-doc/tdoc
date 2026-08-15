@@ -29,8 +29,9 @@ file and `.claude-plugin/plugin.json`.
   events collapse to one unread row. `#118`.
 - **Notification badge and panel.** The profile chip shows a red unread
   dot; Notifications in the existing profile menu opens the existing modal
-  with the last 20 rows (cluster rows, unread highlighted, each with a
-  timestamp). The page polls every 8s so a new comment/reply/reaction
+  with the last 20 rows (cluster rows, unread highlighted; action on
+  the first line, preview under it, relative time on the right). The
+  page polls every 8s so a new comment/reply/reaction
   updates the dot and the doc without a manual refresh. Clicking a row
   (or the comment in the doc) marks it read and opens that comment. `#118`.
 

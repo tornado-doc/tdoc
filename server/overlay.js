@@ -301,6 +301,11 @@
   .tdoc-chip.signin:hover { background: var(--td-accent-hover); }
   /* Only new inbox chrome: a red dot on the existing identity chip. */
   .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; border: 1.5px solid #fff; pointer-events: none; }
+  /* Inbox rows reuse cluster-row: action + preview stacked, relative time on the right. */
+  #tdoc-inbox-list .tdoc-cluster-row { align-items: flex-start; }
+  #tdoc-inbox-list .tdoc-cluster-snip { white-space: normal; display: block; }
+  #tdoc-inbox-list .tdoc-cluster-snip .muted { display: block; margin-top: 2px; }
+  #tdoc-inbox-list .tdoc-cluster-row > .muted { flex-shrink: 0; white-space: nowrap; font-size: 12px; }
 
   /* Comment cards */
   #tdoc-comment-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; z-index: 999996; }
@@ -928,11 +933,16 @@
     const txt = inboxBadgeText(n);
     return txt ? `Notifications (${txt})` : 'Notifications';
   }
-  function formatCommentTime(iso) {
+  function formatRelativeTime(iso) {
     if (!iso) return '';
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const sec = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+    if (sec < 60) return 'now';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+    if (sec < 86400 * 7) return Math.floor(sec / 86400) + 'd';
+    return d.toLocaleString([], { month: 'short', day: 'numeric' });
   }
   function inboxRowLabel(row) {
     const n = row.count || 1;
@@ -960,13 +970,14 @@
       return;
     }
     const html = items.map(row => {
-      const preview = row.preview ? String(row.preview).slice(0, 60) : '';
-      const when = formatCommentTime(row.at);
-      const snip = [inboxRowLabel(row), preview, when].filter(Boolean).join(' · ');
+      const preview = row.preview ? String(row.preview).slice(0, 80) : (row.emoji || '');
+      const when = formatRelativeTime(row.at);
+      const whenFull = row.at ? new Date(row.at).toLocaleString() : '';
       const cur = row.read ? '' : ' tdoc-cluster-current';
       return `<div class="tdoc-cluster-row${cur}" role="button" tabindex="0" data-id="${escapeHtml(row.id)}">
         ${avatarHTML(row.actor, 'tdoc-cluster-anon')}
-        <span class="tdoc-cluster-snip">${escapeHtml(snip)}</span>
+        <span class="tdoc-cluster-snip">${escapeHtml(inboxRowLabel(row))}${preview ? `<span class="muted">${escapeHtml(preview)}</span>` : ''}</span>
+        ${when ? `<span class="muted" title="${escapeHtml(whenFull)}">${escapeHtml(when)}</span>` : ''}
       </div>`;
     }).join('');
     if (!append) listEl.innerHTML = html;
