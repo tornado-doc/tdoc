@@ -216,7 +216,7 @@ fi
 # vercel path passes its own app dir). Shared with the tdoc.dev CD workflow.
 bundle_worker() {
   local out_dir="${1:-$WORKER_DIR}"
-  SKILL_DIR="$SKILL_DIR" OUT_DIR="$out_dir" TDOC_GENERATED_BY="${TDOC_GENERATED_BY:-tdoc-publish}" \
+  OUT_DIR="$out_dir" TDOC_GENERATED_BY="${TDOC_GENERATED_BY:-tdoc-publish}" \
     node "$SKILL_DIR/bin/tdoc-bundle"
 }
 

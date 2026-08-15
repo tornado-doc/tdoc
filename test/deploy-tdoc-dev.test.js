@@ -62,5 +62,29 @@ t('tdoc-publish reuses tdoc-bundle (no second copy of the inliner)', () => {
     'the overlay inliner must not remain copy-pasted inside tdoc-publish');
 });
 
+t('placeholder guard matches active declarations, not leftover comments', () => {
+  assert(wf.includes('const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;'),
+    'overlay guard must match the live declaration, not any comment mention');
+  assert(wf.includes('const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";'),
+    'build-info guard must match the live declaration, not any comment mention');
+  assert(wf.includes('test -f worker/_worker.bundled.js'),
+    'guard must fail if the bundle file is missing');
+});
+
+t('tdoc-bundle replaces the live placeholders', () => {
+  const { spawnSync } = require('child_process');
+  const outDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'tdoc-bundle-'));
+  const r = spawnSync(process.execPath, [path.join(root, 'bin/tdoc-bundle')], {
+    env: { ...process.env, SKILL_DIR: root, OUT_DIR: outDir, TDOC_GENERATED_BY: 'test' },
+    encoding: 'utf8',
+  });
+  assert(r.status === 0, `tdoc-bundle failed: ${r.stderr || r.stdout}`);
+  const bundled = fs.readFileSync(path.join(outDir, '_worker.bundled.js'), 'utf8');
+  assert(!bundled.includes('const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;'),
+    'bundled worker still has the overlay placeholder declaration');
+  assert(!bundled.includes('const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";'),
+    'bundled worker still has the build-info placeholder declaration');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
