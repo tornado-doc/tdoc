@@ -110,7 +110,11 @@ if [ -f "$CONFIG_FILE" ]; then
   PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
   TOKEN="$(jq -r '.upload_token // empty' "$CONFIG_FILE")"
   if [ "$PLATFORM" = "vercel" ]; then
+    HOST="$(jq -r '.public_host // empty' "$CONFIG_FILE")"
     BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
+    if [ -n "$HOST" ] && [ "$HOST" != "null" ]; then
+      BASE="https://${HOST}"
+    fi
   else
     SUBDOMAIN="$(jq -r .subdomain "$CONFIG_FILE")"
     WORKER="$(jq -r .worker "$CONFIG_FILE")"

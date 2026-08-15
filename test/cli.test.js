@@ -49,6 +49,18 @@ t('tdoc-publish validates published.json fields (no null host/token)', () => {
     'published.json null-field validation missing');
 });
 
+t('vercel upload uses the stable public_host, not a per-deploy URL', () => {
+  const src = readBin('tdoc-publish');
+  assert(/UPLOAD_BASE="\$PUBLIC_BASE"/.test(src),
+    'tdoc-publish must upload to PUBLIC_BASE (tdoc-phi style alias)');
+  assert(!/UPLOAD_BASE="\$BASE"/.test(src),
+    'tdoc-publish must not upload to .base (SSO-protected deploy URL)');
+  for (const f of ['tdoc-pull', 'tdoc-unpublish', 'tdoc-agent-reply']) {
+    const s = readBin(f);
+    assert(/public_host/.test(s), `${f} must prefer public_host on vercel`);
+  }
+});
+
 t('tdoc-publish does not let an older-version failure abort the latest', () => {
   const src = readBin('tdoc-publish');
   assert(/OLDER_FAILED/.test(src), 'older-version best-effort handling missing');

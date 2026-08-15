@@ -573,9 +573,10 @@ first_time_setup_vercel() {
     umask 077
     jq -n \
       --arg tok "$token" \
-      --arg base "$deploy_url" \
+      --arg base "https://${public_host}" \
       --arg host "$public_host" \
-      '{platform:"vercel", upload_token:$tok, base:$base, public_host:$host, created: now | todate}' \
+      --arg deploy "$deploy_url" \
+      '{platform:"vercel", upload_token:$tok, base:$base, public_host:$host, last_deploy:$deploy, created: now | todate}' \
       > "$CONFIG_FILE"
   )
   chmod 600 "$CONFIG_FILE"
@@ -628,18 +629,20 @@ if [ "$PLATFORM" = "vercel" ]; then
       sync_vercel_app
       NEW_BASE="$(vercel_deploy_prod)" || exit 1
       if [ "$NEW_BASE" != "$BASE" ]; then
-        # Persist the fresh deployment URL as the upload base. Old deployment
-        # URLs keep serving, so previously shared links stay live either way.
-        jq --arg base "$NEW_BASE" '.base = $base' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" \
+        # Keep a record of the latest deploy URL, but do not use it as the
+        # API origin. Per-deployment aliases are often behind Vercel SSO
+        # ("Protected Deployment") and 401 curl from localhost.
+        jq --arg base "$NEW_BASE" '.last_deploy = $base' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" \
           && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE" && chmod 600 "$CONFIG_FILE"
-        BASE="$NEW_BASE"
       fi
       jq --arg sha "$DESIRED_BUNDLE_SHA" '.vercel_bundle_sha256 = $sha' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" \
         && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE" && chmod 600 "$CONFIG_FILE"
     fi
   fi
-  UPLOAD_BASE="$BASE"
   PUBLIC_BASE="https://${PUBLIC_HOST}"
+  # Upload through the stable production alias. `.base` used to hold the
+  # per-deployment URL, which Vercel Deployment Protection then 401s.
+  UPLOAD_BASE="$PUBLIC_BASE"
 else
   SUBDOMAIN="$(jq -r .subdomain "$CONFIG_FILE")"
   WORKER_NAME="$(jq -r .worker "$CONFIG_FILE")"

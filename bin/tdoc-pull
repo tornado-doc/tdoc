@@ -30,13 +30,18 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 if ! command -v jq >/dev/null 2>&1; then echo "needs jq" >&2; exit 1; fi
 
-# Resolve the API base for the configured platform: vercel configs store the
-# deployment URL directly in `.base`; cloudflare configs derive workers.dev.
+# Resolve the API base for the configured platform. Vercel: prefer the
+# stable public_host — `.base` may still be a SSO-protected deploy URL.
+# Cloudflare: derive workers.dev.
 PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
 if [ "$PLATFORM" = "vercel" ]; then
+  HOST="$(jq -r '.public_host // empty' "$CONFIG_FILE")"
   BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
+  if [ -n "$HOST" ] && [ "$HOST" != "null" ]; then
+    BASE="https://${HOST}"
+  fi
   if [ -z "$BASE" ] || [ "$BASE" = "null" ]; then
-    echo "[tdoc] $CONFIG_FILE has no '.base' — delete it and re-run /tdoc publish to re-setup." >&2
+    echo "[tdoc] $CONFIG_FILE has no public_host/base — delete it and re-run /tdoc publish to re-setup." >&2
     exit 1
   fi
 else

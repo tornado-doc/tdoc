@@ -2714,7 +2714,11 @@
         });
         const data = await r.json();
         if (!r.ok || data.error) {
-          status.textContent = 'Failed: ' + (data.error || data.message || 'unknown');
+          const raw = String(data.stderr || data.stdout || '').trim();
+          const last = raw.split('\n').filter(Boolean).pop() || '';
+          const detail = last.length > 180 ? last.slice(0, 180) + '…' : last;
+          status.textContent = 'Failed: ' + (data.error || data.message || 'unknown')
+            + (detail ? ' — ' + detail : '');
           go.disabled = false;
           return;
         }
