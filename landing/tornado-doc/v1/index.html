@@ -3,15 +3,243 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>tornado-doc</title>
-  <style>body { background: #fff; }</style>
+
+  <title>tdoc — Google Docs for agent-authored documents</title>
+  <meta name="description" content="Turn a prompt into an interactive HTML doc, share it as a live URL, and let anyone comment on any sentence or chart. Your agent writes the next version.">
+  <link rel="canonical" href="https://tdoc.dev/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tdoc">
+  <meta property="og:url" content="https://tdoc.dev/">
+  <meta property="og:title" content="tdoc — Google Docs for agent-authored documents">
+  <meta property="og:description" content="People comment on any sentence or chart. Your agent reads those comments and writes the next version. Open source, self-hosted, $0.">
+  <meta property="og:image" content="https://tdoc.dev/tdoc_logo.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="tdoc — Google Docs for agent-authored documents">
+  <meta name="twitter:description" content="People comment on any sentence or chart. Your agent reads those comments and writes the next version. Open source, self-hosted, $0.">
+  <meta name="twitter:image" content="https://tdoc.dev/tdoc_logo.png">
+
+  <style>
+    /* No author JavaScript anywhere, on purpose: published tdocs run under a
+       nonce-only CSP, so author scripts never execute. HTML + CSS + SVG only. */
+    :root {
+      --ink: #1a1a1a;
+      --muted: #6b6b6b;
+      --accent: #1652f0;
+      --rule: #e5e5e5;
+      --wash: #f5f6f8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      background: #fff;
+      color: var(--ink);
+      font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 72px 24px 96px;
+    }
+    h1 {
+      font-size: 44px;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin: 0 0 4px;
+      color: var(--accent);
+    }
+    .wordmark { color: var(--muted); font-size: 14px; margin: 0 0 28px; }
+    .lede {
+      font-size: 21px;
+      line-height: 1.45;
+      letter-spacing: -0.01em;
+      margin: 0 0 20px;
+    }
+    p { margin: 0 0 16px; }
+    a { color: var(--accent); }
+    h2 {
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+      margin: 56px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .cta { display: flex; flex-wrap: wrap; gap: 10px; margin: 28px 0 0; }
+    .cta a {
+      display: inline-block;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 15px;
+      text-decoration: none;
+    }
+    .cta .primary { background: var(--accent); color: #fff; }
+    .cta .secondary { border: 1px solid var(--rule); color: var(--ink); }
+    pre {
+      background: var(--wash);
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      margin: 0 0 12px;
+    }
+    .tradeoff { margin: 0 0 16px; padding-left: 18px; border-left: 2px solid var(--rule); color: var(--muted); }
+    .tradeoff b { color: var(--ink); font-weight: 600; }
+    ul { margin: 0; padding: 0; list-style: none; }
+    li { margin: 0 0 14px; padding-left: 20px; position: relative; }
+    li::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 10px;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    li b { font-weight: 600; }
+    figure { margin: 0 0 8px; }
+    figure svg { display: block; width: 100%; height: auto; }
+    figcaption { font-size: 13px; color: var(--muted); text-align: center; }
+    footer {
+      margin-top: 64px;
+      padding-top: 20px;
+      border-top: 1px solid var(--rule);
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .dogfood {
+      background: var(--wash);
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 14px;
+      color: var(--muted);
+      margin: 32px 0 0;
+    }
+    .dogfood b { color: var(--ink); font-weight: 600; }
+    @media (max-width: 560px) {
+      .wrap { padding: 48px 20px 72px; }
+      h1 { font-size: 34px; }
+      .lede { font-size: 19px; }
+    }
+  </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>tornado-doc</h1>
-    <p class="meta">tdoc</p>
-    <p>Turn a prompt into an HTML document. People comment on the sentences and pictures. Your agent reads those comments and writes the next version.</p>
-    <p><a href="https://github.com/tornado-doc/tdoc">GitHub</a> · <a href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Install</a></p>
+
+    <h1>tdoc</h1>
+    <p class="wordmark">tornado-doc · open source</p>
+
+    <p class="lede">Google Docs, but for documents your agent writes.</p>
+
+    <p>Turn a prompt into an interactive HTML document and share it as a live
+    URL. Anyone with the link comments on any sentence, image, or chart. Your
+    agent reads those same comments as structured input and writes the next
+    version — then replies on each thread with what it changed.</p>
+
+    <div class="cta">
+      <a class="primary" href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Install in ~3 minutes</a>
+      <a class="secondary" href="https://github.com/tornado-doc/tdoc">GitHub</a>
+    </div>
+
+    <h2>The problem</h2>
+
+    <p>You are the router between your colleagues' comments and your agent.
+    Every round, by hand.</p>
+
+    <p class="tradeoff"><b>A nice UI for people</b> — Google Docs, a Slack
+    thread, screenshots — means you copy-paste all of it back into the chat
+    yourself.<br>
+    <b>Clean input for the agent</b> — raw JSON, "edit line 47" — means nobody
+    wants to write the feedback.</p>
+
+    <p>And a document generated in a chat window has no history. Every
+    regeneration overwrites the last one.</p>
+
+    <h2>The loop</h2>
+
+    <figure>
+      <svg viewBox="0 0 640 214" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Your prompt creates a live document. People leave anchored comments. Your agent regenerates a new version at the same URL, and the loop repeats.">
+        <defs>
+          <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0aa"/>
+          </marker>
+        </defs>
+        <g font-family="system-ui, -apple-system, sans-serif" font-size="13" text-anchor="middle">
+          <rect x="8" y="30" width="128" height="52" rx="8" fill="#fff" stroke="#d8dade" stroke-dasharray="4 3"/>
+          <text x="72" y="61" fill="#6b6b6b">Your prompt</text>
+
+          <rect x="172" y="30" width="128" height="52" rx="8" fill="#eef3ff" stroke="#1652f0"/>
+          <text x="236" y="61" fill="#1652f0" font-weight="600">Live document</text>
+
+          <rect x="336" y="30" width="128" height="52" rx="8" fill="#f5f6f8" stroke="#d8dade"/>
+          <text x="400" y="55" fill="#1a1a1a">Anchored</text>
+          <text x="400" y="71" fill="#1a1a1a">comments</text>
+
+          <rect x="500" y="30" width="128" height="52" rx="8" fill="#f5f6f8" stroke="#d8dade"/>
+          <text x="564" y="55" fill="#1a1a1a">Agent reads,</text>
+          <text x="564" y="71" fill="#1a1a1a">regenerates</text>
+
+          <path d="M140 56 H166" stroke="#9aa0aa" fill="none" marker-end="url(#a)"/>
+          <path d="M304 56 H330" stroke="#9aa0aa" fill="none" marker-end="url(#a)"/>
+          <path d="M468 56 H494" stroke="#9aa0aa" fill="none" marker-end="url(#a)"/>
+
+          <path d="M564 86 V132 Q564 148 548 148 H252 Q236 148 236 132 V90"
+                stroke="#9aa0aa" fill="none" marker-end="url(#a)"/>
+          <text x="400" y="170" fill="#6b6b6b">new version, same URL, comments carry over</text>
+        </g>
+      </svg>
+      <figcaption>Nobody leaves the document to close the loop.</figcaption>
+    </figure>
+
+    <h2>What you get</h2>
+
+    <ul>
+      <li><b>Comment on anything.</b> Highlight a sentence across paragraphs,
+      bold, and links — or hover an image, SVG, chart, video, or code block and
+      comment on that. Anchors survive regeneration.</li>
+
+      <li><b>Status that syncs both ways.</b> When your agent applies feedback it
+      stamps each thread ✅ applied, 🟡 partial, or ❓ needs clarification, so
+      reviewers see what landed without re-pinging you.</li>
+
+      <li><b>Every version is a full snapshot.</b> Flip back to any past version.
+      Comments on text a later version deleted are preserved, never silently
+      dropped.</li>
+
+      <li><b>Multiplayer that doesn't clobber.</b> Readers sign in once with
+      GitHub. Concurrent comments are serialized per document, so two people
+      commenting at the same instant both land.</li>
+
+      <li><b>Your infrastructure, $0.</b> Publishing deploys to a Cloudflare or
+      Vercel account you own, inside free tiers personal use won't reach. Nobody
+      else — including us — sees your traffic or pays your bills.</li>
+    </ul>
+
+    <h2>Install</h2>
+
+    <p>Paste this into Claude Code or Codex. It clones the repo, runs the
+    doctor, walks you through the couple of browser clicks, and ends on a
+    published URL.</p>
+
+    <pre>Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md</pre>
+
+    <p>Then: <code>/tdoc new "an explainer with a slider showing how interest
+    compounds"</code> → <code>/tdoc publish</code> → send the link.</p>
+
+    <div class="dogfood">
+      <b>This page is a tdoc.</b> Highlight any sentence, or hover the diagram
+      above, and leave a comment — the same way your readers will.
+    </div>
+
+    <footer>
+      <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a>
+      · MIT · a <a href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Claude Code and Codex</a> skill
+    </footer>
+
   </div>
 </body>
 </html>
