@@ -12,6 +12,9 @@ file and `.claude-plugin/plugin.json`.
   used to vanish as soon as you hit Reply (the click never pinned it, then
   the pointer leaving the pin hid the card). Reply now pins the card and
   keeps the thread expanded.
+- **Posting a reply no longer folds the thread.** After submit, refresh
+  used to rebuild the card with replies collapsed. The thread you just
+  replied in stays open.
 
 ### Added
 

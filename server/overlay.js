@@ -657,6 +657,7 @@
     reanchoringId: null,           // comment id awaiting a new selection for re-anchoring
     pinnedId: null,                // comment whose floating card is click-pinned open (wide mode)
     hoverId: null,                 // comment whose card is open via hover (wide mode)
+    openReplyThreads: new Set(),   // top-level comment ids whose reply lists stay expanded
   };
 
   // Highlight API: one shared registry for pending, one per saved comment.
@@ -1500,7 +1501,7 @@
         // so the resolution is visible at a glance; the full agent reply stays
         // folded under "N reply" until the reader expands it. Keeps the margin
         // column quiet instead of stacking long bot replies inline.
-        const autoOpen = false;
+        const autoOpen = state.openReplyThreads.has(comment.id);
         const tops = childrenOf(replies, comment.id, comment.id);
         // Orphans (parent reply deleted) still show under the thread root.
         const ids = new Set(replies.map(r => r.id).concat([comment.id]));
@@ -1523,6 +1524,8 @@
         e.stopPropagation();
         const open = repliesEl.classList.toggle('open');
         repliesToggle.classList.toggle('open', open);
+        if (open) state.openReplyThreads.add(comment.id);
+        else state.openReplyThreads.delete(comment.id);
         requestAnimationFrame(repositionCards);
       };
     }
@@ -1562,6 +1565,7 @@
           // Pin so a hover-opened card does not collapse when the pointer
           // leaves the pin or the form opening shifts layout.
           pinOpenCard(comment.id);
+          state.openReplyThreads.add(comment.id);
           const repliesEl = card.querySelector('.tdoc-replies');
           const repliesToggle = card.querySelector('.tdoc-replies-toggle');
           if (repliesEl && repliesEl.childElementCount) {
@@ -1599,6 +1603,10 @@
         }
         replyTa.value = '';
         replyForm.classList.remove('open');
+        // Keep this thread expanded after refresh — posting a reply must
+        // not fold the list the user was just looking at.
+        state.openReplyThreads.add(comment.id);
+        pinOpenCard(comment.id);
         await refreshComments();
       };
       replyForm.querySelector('.tdoc-reply-submit').onclick = (e) => { e.stopPropagation(); submitReply(); };
