@@ -287,6 +287,7 @@ async function main() {
     const indexPageSrc = serverJs.slice(idxStart, serverJs.indexOf('const server = http.createServer'));
     assert(!nativeConfirmCall.test(stripLineComments(indexPageSrc)), 'local index page must not call the native confirm()');
     assert(indexPageSrc.includes('showConfirm('), 'local index page must use the styled showConfirm() modal');
+    assert(!indexPageSrc.includes('readCommentFile('), 'local catalog must not read comments.json for every row');
   });
 
   t('overlay.js manage flow never uses window.confirm() either', () => {
