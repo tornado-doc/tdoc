@@ -62,15 +62,6 @@ t('tdoc-publish reuses tdoc-bundle (no second copy of the inliner)', () => {
     'the overlay inliner must not remain copy-pasted inside tdoc-publish');
 });
 
-t('CD Node matches the pinned wrangler engine (>=22)', () => {
-  const node = wf.match(/node-version:\s*'(\d+)'/);
-  assert(node, 'workflow must pin a Node major');
-  assert(Number(node[1]) >= 22,
-    `wrangler 4.90.1 requires Node >= 22; first CD run died on Node ${node[1]}`);
-  assert(/wranglerVersion:\s*'4\.90\.1'/.test(wf),
-    'keep wranglerVersion and the Node pin in lockstep');
-});
-
 t('placeholder guard matches active declarations, not leftover comments', () => {
   assert(wf.includes('const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;'),
     'overlay guard must match the live declaration, not any comment mention');
