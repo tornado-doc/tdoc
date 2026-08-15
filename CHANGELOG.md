@@ -8,6 +8,8 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Opening one notification no longer marks siblings in the same thread.**
+  Mark-read matches the exact comment/reply id, not the thread root.
 - **Clicking Reply no longer collapses the comment.** A hover-opened card
   used to vanish as soon as you hit Reply (the click never pinned it, then
   the pointer leaving the pin hid the card). Reply now pins the card and
@@ -20,6 +22,18 @@ file and `.claude-plugin/plugin.json`.
   pin and scrolls away with the page.
 
 ### Added
+
+- **In-app inbox (API).** Signed-in users have a per-host notification inbox.
+  New top-level comments notify the doc owner; replies notify only the
+  direct parent (Reddit); reactions notify the item author. Same-thread
+  events collapse to one unread row. `#118`.
+- **Notification badge and panel.** The profile chip shows a red unread
+  dot; Notifications in the existing profile menu opens the existing modal
+  with the last 20 rows (cluster rows, unread highlighted; one-line
+  action plus relative time). The
+  page polls every 8s so a new comment/reply/reaction
+  updates the dot and the doc without a manual refresh. Clicking a row
+  (or the comment in the doc) marks it read and opens that comment. `#118`.
 
 - **Nested replies.** You can reply to a reply (and to that reply), the way
   Reddit and Hacker News do. Each node in the thread has its own Reply.
