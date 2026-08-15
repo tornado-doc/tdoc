@@ -302,9 +302,6 @@
   /* Only new inbox chrome: a red dot on the existing identity chip. */
   .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; border: 1.5px solid #fff; pointer-events: none; }
   /* Inbox rows reuse cluster-row: action + preview stacked, relative time on the right. */
-  #tdoc-inbox-list .tdoc-cluster-row { align-items: flex-start; }
-  #tdoc-inbox-list .tdoc-cluster-snip { white-space: normal; display: block; }
-  #tdoc-inbox-list .tdoc-cluster-snip .muted { display: block; margin-top: 2px; }
   #tdoc-inbox-list .tdoc-cluster-row > .muted { flex-shrink: 0; white-space: nowrap; font-size: 12px; }
 
   /* Comment cards */
@@ -970,13 +967,12 @@
       return;
     }
     const html = items.map(row => {
-      const preview = row.preview ? String(row.preview).slice(0, 80) : (row.emoji || '');
       const when = formatRelativeTime(row.at);
       const whenFull = row.at ? new Date(row.at).toLocaleString() : '';
       const cur = row.read ? '' : ' tdoc-cluster-current';
       return `<div class="tdoc-cluster-row${cur}" role="button" tabindex="0" data-id="${escapeHtml(row.id)}">
         ${avatarHTML(row.actor, 'tdoc-cluster-anon')}
-        <span class="tdoc-cluster-snip">${escapeHtml(inboxRowLabel(row))}${preview ? `<span class="muted">${escapeHtml(preview)}</span>` : ''}</span>
+        <span class="tdoc-cluster-snip">${escapeHtml(inboxRowLabel(row))}</span>
         ${when ? `<span class="muted" title="${escapeHtml(whenFull)}">${escapeHtml(when)}</span>` : ''}
       </div>`;
     }).join('');
