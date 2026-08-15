@@ -42,7 +42,7 @@ vm.createContext(box);
 vm.runInContext([
   'escapeHtml', 'normalizeNeedle', 'normalizeContext', 'normalizeQuery',
   'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl',
-  'isAnthropicCompanyMark', 'agentLogoUrl', 'childrenOf',
+  'isAnthropicCompanyMark', 'tdocMarkUrl', 'agentLogoUrl', 'childrenOf',
 ].map(sliceFn).join('\n\n'), box);
 const { escapeHtml, normalizeNeedle, normalizeContext, normalizeQuery,
         commonPrefixLen, commonSuffixLen, isGithubHttpsUrl, agentLogoUrl,
@@ -116,7 +116,8 @@ t('agentLogoUrl maps grok/claude/codex/cursor/gemini logins to product marks', (
   assert(agentLogoUrl({ login: 'codex' }).includes('openai'), 'codex');
   assert(agentLogoUrl({ login: 'cursor' }).includes('cursor'), 'cursor');
   assert(agentLogoUrl({ login: 'gemini' }).includes('gemini'), 'gemini');
-  assert(agentLogoUrl({ login: 'tdoc-agent' }) === null, 'generic stays badge');
+  assert(String(agentLogoUrl({ login: 'tdoc-agent' })).startsWith('data:image/svg+xml'), 'tdoc lightning');
+  assert(String(agentLogoUrl({ login: 'mystery-bot' })).startsWith('data:image/svg+xml'), 'unmatched uses tdoc lightning');
 });
 t('agentLogoUrl prefers an explicit https avatar_url', () => {
   assert(agentLogoUrl({ login: 'grok', avatar_url: 'https://example.com/me.png' }) === 'https://example.com/me.png');

@@ -84,7 +84,6 @@ function isAnthropicCompanyMark(url) {
 }
 function logoForAgentLogin(login) {
   const key = String(login || '').toLowerCase();
-  if (!key) return null;
   if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
   if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
   if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
@@ -92,7 +91,8 @@ function logoForAgentLogin(login) {
   }
   if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
   if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
-  return null;
+  // tdoc lightning — tdoc-agent and any login that didn't match a host.
+  return 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Ccircle cx="12" cy="12" r="12" fill="%23111"/%3E%3Cpath fill="%23fff" d="M13.2 3.2 6.4 13.2h5.1l-1 7.6 7.2-11.2h-5l1.5-6.4z"/%3E%3C/svg%3E';
 }
 
 function isGenericAgentLogin(login) {

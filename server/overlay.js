@@ -1359,11 +1359,14 @@
   const REACT_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="19" y1="6" x2="19" y2="10"/><line x1="21" y1="8" x2="17" y2="8"/></svg>`;
 
   // Known coding-agent runtimes → brand mark. Honor an explicit avatar_url
-  // first; otherwise map login/name. Unknown agents keep the ⚡ badge.
+  // first; otherwise map login/name. Unmatched names use the tdoc lightning.
   // Never show github.com/anthropics.png — that is Anthropic's "AI" wordmark,
   // not Claude's product star.
   function isAnthropicCompanyMark(url) {
     return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+  }
+  function tdocMarkUrl() {
+    return 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Ccircle cx="12" cy="12" r="12" fill="%23111"/%3E%3Cpath fill="%23fff" d="M13.2 3.2 6.4 13.2h5.1l-1 7.6 7.2-11.2h-5l1.5-6.4z"/%3E%3C/svg%3E';
   }
   function agentLogoUrl(author) {
     const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))
@@ -1373,14 +1376,13 @@
       return 'https://cdn.simpleicons.org/claude/d97757';
     }
     if (stored) return stored;
-    if (!key) return null;
     if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
     if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
       return 'https://github.com/openai.png';
     }
     if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
     if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
-    return null;
+    return tdocMarkUrl();
   }
   function renderAuthor(author) {
     if (!author) return `<div class="author"><span class="anon">anonymous</span></div>`;
