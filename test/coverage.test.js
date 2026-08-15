@@ -171,7 +171,7 @@ t('FOLD: deleted reply is excluded', () => {
 t('BUNDLE: inlining replaces the placeholder with the real overlay, valid JS', () => {
   const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
-  // same transform as bin/tdoc-bundle
+  // same transform as bin/tdoc-publish bundle_worker
   const replaced = worker.replace(
     /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
     'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
