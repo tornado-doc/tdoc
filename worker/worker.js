@@ -1748,6 +1748,116 @@ function findCommentThread(list, id) {
   return null;
 }
 
+function recordAuthor(list, id) {
+  if (!id || !Array.isArray(list)) return null;
+  const top = list.find(c => c && c.id === id);
+  if (top) return top.author || null;
+  for (const c of list) {
+    const ev = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
+    if (ev) return ev.reply.author || null;
+  }
+  return null;
+}
+
+// Per-user inbox (same host, cross-doc). KV key inbox:<github-login>.
+// Rows are aggregated by group_key so a viral doc does not write 40 lines.
+const INBOX_MAX = 200;
+const INBOX_PAGE = 20;
+
+function inboxKey(login) {
+  const n = normalizeGithubLogin(login);
+  return n ? `inbox:${n}` : null;
+}
+
+function inboxGroupKey(kind, slug, targetId) {
+  if (kind === 'comment') return `comment:${slug}`;
+  if (kind === 'reply') return `reply:${targetId}`;
+  if (kind === 'reaction') return `reaction:${targetId}`;
+  return `other:${slug || 'x'}`;
+}
+
+function emptyInbox() { return { items: [] }; }
+
+function inboxUnread(inbox) {
+  const items = inbox && Array.isArray(inbox.items) ? inbox.items : [];
+  return items.filter(i => i && !i.read).length;
+}
+
+function applyInboxEvent(inbox, ev) {
+  const items = inbox && Array.isArray(inbox.items) ? inbox.items.slice() : [];
+  const gk = inboxGroupKey(ev.kind, ev.slug, ev.target_id || ev.comment_id);
+  const existing = items.find(i => i && !i.read && i.group_key === gk);
+  if (existing) {
+    existing.count = (Number(existing.count) || 1) + 1;
+    existing.at = ev.at;
+    existing.actor = ev.actor || existing.actor;
+    existing.comment_id = ev.comment_id || existing.comment_id;
+    existing.thread_id = ev.thread_id || existing.thread_id;
+    existing.preview = ev.preview != null ? ev.preview : existing.preview;
+    if (ev.emoji) existing.emoji = ev.emoji;
+    existing.version = ev.version || existing.version;
+    const rest = items.filter(i => i !== existing);
+    return { items: [existing, ...rest].slice(0, INBOX_MAX) };
+  }
+  const row = {
+    id: ev.id,
+    kind: ev.kind,
+    group_key: gk,
+    slug: ev.slug,
+    version: ev.version || 1,
+    comment_id: ev.comment_id,
+    thread_id: ev.thread_id || ev.comment_id,
+    actor: ev.actor || null,
+    preview: ev.preview || '',
+    title: ev.title || ev.slug,
+    at: ev.at,
+    read: false,
+    count: 1,
+    emoji: ev.emoji || null,
+  };
+  return { items: [row, ...items].slice(0, INBOX_MAX) };
+}
+
+function markInboxRead(inbox, { ids, comment_id } = {}) {
+  const items = (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
+    if (!i) return i;
+    if (Array.isArray(ids) && ids.includes(i.id)) return { ...i, read: true };
+    if (comment_id && (i.comment_id === comment_id || i.thread_id === comment_id)) return { ...i, read: true };
+    return i;
+  });
+  return { items };
+}
+
+function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE } = {}) {
+  const items = inbox && Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
+  const unread = items.filter(i => !i.read);
+  const read = items.filter(i => i.read);
+  const ordered = unread.concat(read);
+  const off = Math.max(0, Number(offset) || 0);
+  const lim = Math.min(50, Math.max(1, Number(limit) || INBOX_PAGE));
+  return {
+    items: ordered.slice(off, off + lim),
+    unread: unread.length,
+    has_more: off + lim < ordered.length,
+  };
+}
+
+// Reddit-style: top-level comment → doc owner; reply → direct parent author
+// only; reaction → author of that item. Never notify the actor.
+function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targetAuthorLogin }) {
+  const actor = sessionLogin({ login: actorLogin });
+  const out = [];
+  const push = (login) => {
+    const n = sessionLogin({ login });
+    if (!n || n === actor) return;
+    if (!out.includes(n)) out.push(n);
+  };
+  if (kind === 'comment') push(ownerLogin);
+  else if (kind === 'reply') push(parentAuthorLogin);
+  else if (kind === 'reaction') push(targetAuthorLogin);
+  return out;
+}
+
 // Apply one comment operation to the in-memory list. PURE w.r.t. I/O: it only
 // mutates `list` and returns { status, body }. Both the DO path and the KV
 // fallback call this, so mutation logic is defined exactly once.
@@ -1804,7 +1914,7 @@ function applyCommentOp(list, op) {
       appendEvent(host, evt);
       const fresh = snapshotAt(host, op.version);
       const reactions = isReply ? (fresh.replies.find(r => r.id === replyId)?.reactions || {}) : fresh.reactions;
-      return { status: 200, body: { ok: true, reactions } };
+      return { status: 200, body: { ok: true, reactions, added: !had } };
     }
     case 'delete': {
       // Authorization enforced upstream (worker resolves target + canMutate
@@ -1890,6 +2000,40 @@ function safeParseList(raw) {
 // requests, which silently loses updates (the bug a KV-based DO had). With
 // state.storage the get→mutate→put is gated and concurrent same-slug writes
 // serialize correctly.
+async function loadInbox(env, login) {
+  const key = inboxKey(login);
+  if (!key) return { key: null, inbox: emptyInbox() };
+  try {
+    const raw = await env.META.get(key);
+    if (!raw) return { key, inbox: emptyInbox() };
+    const parsed = JSON.parse(raw);
+    return { key, inbox: parsed && Array.isArray(parsed.items) ? parsed : emptyInbox() };
+  } catch {
+    return { key, inbox: emptyInbox() };
+  }
+}
+
+async function deliverInbox(env, recipientLogin, ev) {
+  const recips = inboxRecipients({
+    kind: ev.kind,
+    actorLogin: ev.actor && ev.actor.login,
+    ownerLogin: ev.kind === 'comment' ? recipientLogin : '',
+    parentAuthorLogin: ev.kind === 'reply' ? recipientLogin : '',
+    targetAuthorLogin: ev.kind === 'reaction' ? recipientLogin : '',
+  });
+  const at = ev.at || new Date().toISOString();
+  for (const who of recips) {
+    const { key, inbox } = await loadInbox(env, who);
+    if (!key) continue;
+    const next = applyInboxEvent(inbox, {
+      ...ev,
+      id: ev.id || `n_${Date.now()}_${rand(4)}`,
+      at,
+    });
+    await env.META.put(key, JSON.stringify(next));
+  }
+}
+
 async function mutateComments(env, slug, op) {
   if (env.COMMENTS) {
     const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
@@ -2300,6 +2444,49 @@ export default {
       return json({ ok: true }, { headers: { 'Set-Cookie': 'tdoc_sid=; Path=/; Max-Age=0' } });
     }
 
+    // ---- inbox (signed-in, this host, all docs) ----
+    if (p === '/api/notifications' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      const key = inboxKey(s.login);
+      if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
+      let inbox = emptyInbox();
+      try {
+        const raw = await env.META.get(key);
+        if (raw) inbox = JSON.parse(raw);
+      } catch { inbox = emptyInbox(); }
+      const offset = Number(url.searchParams.get('offset') || 0);
+      return json(pageInbox(inbox, { offset }));
+    }
+    if (p === '/api/notifications/unread' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      const key = inboxKey(s.login);
+      if (!key) return json({ unread: 0 });
+      let inbox = emptyInbox();
+      try {
+        const raw = await env.META.get(key);
+        if (raw) inbox = JSON.parse(raw);
+      } catch { inbox = emptyInbox(); }
+      return json({ unread: inboxUnread(inbox) });
+    }
+    if (p === '/api/notifications/read' && method === 'POST') {
+      const s = await getSession(env, req);
+      if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      const key = inboxKey(s.login);
+      if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      let inbox = emptyInbox();
+      try {
+        const raw = await env.META.get(key);
+        if (raw) inbox = JSON.parse(raw);
+      } catch { inbox = emptyInbox(); }
+      inbox = markInboxRead(inbox, { ids: body.ids, comment_id: body.comment_id });
+      await env.META.put(key, JSON.stringify(inbox));
+      return json({ ok: true, unread: inboxUnread(inbox) });
+    }
+
     // ---- comments ----
     if (p === '/api/comments' && method === 'GET') {
       const slug = url.searchParams.get('slug');
@@ -2343,6 +2530,24 @@ export default {
         ? { kind: 'reply', slug, parent_id, reply_id: `r_${Date.now()}_${rand(4)}`, author, text: commentText, version: V, at: created }
         : { kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author, text: commentText, anchor: anchor || null, version: V, at: created };
       const res = await mutateComments(env, slug, op);
+      if (res.status === 200) {
+        const meta = await loadDocMeta(env, slug);
+        const title = (meta && meta.title) || slug;
+        if (!parent_id) {
+          await deliverInbox(env, env.TDOC_OWNER, {
+            kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
+            actor: author, preview: commentText, title, at: created,
+          });
+        } else {
+          const list = await readComments(env, slug);
+          const parentA = recordAuthor(list, parent_id);
+          await deliverInbox(env, parentA && parentA.login, {
+            kind: 'reply', slug, version: V, comment_id: op.reply_id,
+            thread_id: res.body && res.body.thread_id, target_id: parent_id,
+            actor: author, preview: commentText, title, at: created,
+          });
+        }
+      }
       return json(res.body, { status: res.status });
     }
 
@@ -2451,6 +2656,18 @@ export default {
       const res = await mutateComments(env, slug, {
         kind: 'react', slug, comment_id, emoji, by: s.login, version: V,
       });
+      if (res.status === 200 && res.body && res.body.added) {
+        const list = await readComments(env, slug);
+        const target = recordAuthor(list, comment_id);
+        const thread = findCommentThread(list, comment_id);
+        const meta = await loadDocMeta(env, slug);
+        await deliverInbox(env, target && target.login, {
+          kind: 'reaction', slug, version: V, comment_id,
+          thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
+          actor: { login: s.login, avatar_url: s.avatar_url, name: s.name },
+          title: (meta && meta.title) || slug, emoji,
+        });
+      }
       return json(res.body, { status: res.status });
     }
 

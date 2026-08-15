@@ -35,6 +35,7 @@ const OFFLINE = [
   'pins-layout.test.js',      // v0.8.0 pins clustering/spread/overflow-fold core
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
+  'notifications.test.js',    // inbox aggregation + Reddit recipients
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)

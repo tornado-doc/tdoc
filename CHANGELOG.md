@@ -21,6 +21,11 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **In-app inbox (API).** Signed-in users have a per-host notification inbox.
+  New top-level comments notify the doc owner; replies notify only the
+  direct parent (Reddit); reactions notify the item author. Same-thread
+  events collapse to one unread row. `#118`.
+
 - **Nested replies.** You can reply to a reply (and to that reply), the way
   Reddit and Hacker News do. Each node in the thread has its own Reply.
 - **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /
