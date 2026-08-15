@@ -225,10 +225,10 @@ sleep 1
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
 2. Create `~/tdocs/<slug>/v1/index.html` — a **fully self-contained** HTML file:
-   - All CSS inline in `<style>`, all JS inline in `<script>`.
+   - All CSS inline in `<style>`. **No JavaScript** — author `<script>` tags do not execute (CSP; see "Interactivity: CSS only" under HTML generation rules).
    - No external CDNs unless requested. No build step.
    - Clean reading-typography (system font stack, generous line-height, max-width ~720px for prose) UNLESS the doc is primarily a simulation/diagram, in which case go full-bleed.
-   - Interactive: if the prompt implies a model, simulation, or diagram, build the live thing — don't just describe it.
+   - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, follow the fallbacks in that section; do NOT emit JavaScript, which fails silently and leaves the reader an empty box.
 3. Write `meta.json`:
    ```json
    { "title": "...", "slug": "...", "created": "<iso>", "versions": [{ "n": 1, "created": "<iso>", "prompt": "..." }] }
@@ -530,12 +530,100 @@ When the user reports a problem, check these first:
 
 ## HTML generation rules
 
-- Self-contained: one HTML file. No imports, no external scripts (unless user explicitly wants e.g. D3 CDN).
+- **Author JavaScript does not run — write none.** Every doc is served under a nonce-based CSP (`script-src 'nonce-<n>' 'strict-dynamic'; object-src 'none'; base-uri 'none';`) and the nonce is stamped onto the two injected overlay scripts *only*. Author `<script>` tags (inline or `src`), `onclick=`/`onchange=` attributes, and `javascript:` URLs have no nonce, so the browser refuses them: no error in the page, no visible failure — just a widget that never does anything. This is true on **both** the local server (`server/server.js` → `cspHeader`, `injectOverlay`) and published docs (`worker/worker.js` → `cspHeader`, `injectOverlayCfg`). Build interactivity with CSS instead — see "Interactivity: CSS only" below.
+- Self-contained: one HTML file. No imports. External `<script src>` is blocked by the same CSP, so a CDN library (D3, Chart.js, …) will not load even if the user asks for one — say so rather than shipping a dead reference.
 - Sandboxed-safe: the server serves docs inside an iframe overlay-host, so don't rely on top-level navigation or parent-frame access.
 - The comment overlay is injected by the server — **don't** add commenting UI yourself.
 - Don't add a "made with tdoc" footer, version selector, or share button. The shell handles those.
-- Prefer SVG over canvas for diagrams (commentable text). Use canvas for heavy simulations.
+- Use SVG for diagrams (commentable text, and CSS can animate it). **Don't use `<canvas>`** — nothing can draw to it without JS, so it renders as a blank box.
 - Default font stack: `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`. Mono: `ui-monospace, "SF Mono", Menlo, monospace`.
+
+### Interactivity: CSS only
+
+Author `<script>` never executes (see above), so every moving or switchable part
+of a doc has to be declarative. The patterns below are verified on this runtime;
+a working reference doc using all three is at
+`~/tdocs/agent-gui-integration/v1/index.html`.
+
+**1. Toggles and mode switches — `:checked` + sibling selectors**
+
+A hidden `<input type="radio">` (or checkbox), then `<label for="…">` controls and
+the panes it switches. Everything toggled must be a **sibling that comes after the
+input**: `~` only reaches forward, and only within one parent.
+
+```html
+<div class="fig" data-tdoc-artifact>
+  <input type="radio" name="mode" id="m-a" class="vis-radio" checked>
+  <input type="radio" name="mode" id="m-b" class="vis-radio">
+  <div class="fig-controls"><label for="m-a">Before</label><label for="m-b">After</label></div>
+  <div class="pane pane-a"> … </div>
+  <div class="pane pane-b"> … </div>
+</div>
+```
+```css
+/* off-screen, NOT display:none — that drops it out of the tab order */
+.vis-radio { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.pane-b { display: none; }
+#m-b:checked ~ .pane-a { display: none; }
+#m-b:checked ~ .pane-b { display: block; }
+#m-b:checked ~ .fig-controls label[for="m-b"] { background: #111; border-color: #111; color: #fff; }
+```
+
+**2. Motion — CSS `@keyframes`**
+
+For flow along a route, animate `stroke-dashoffset` on a dashed copy of the path
+drawn over a static base path:
+
+```css
+.flow { stroke-dasharray: 9 22; animation: flowdash 2.2s linear infinite; }
+@keyframes flowdash { to { stroke-dashoffset: -31; } }
+@media (prefers-reduced-motion: reduce) { .flow { animation: none; } }
+```
+
+Always ship the `prefers-reduced-motion` guard.
+
+**3. SVG styling — put `<style>` INSIDE the `<svg>` element**
+
+A `<style>` in `<head>` was observed **not** to reach elements inside inline SVG on
+this runtime. SVG-internal `<style>` is the reliable placement, so make each `<svg>`
+fully self-contained:
+
+```html
+<svg viewBox="0 0 720 400" role="img" aria-label="…">
+  <style>
+    .flow-a { stroke-dasharray: 9 22; animation: flowdash-a 2.2s linear infinite; }
+    @keyframes flowdash-a { to { stroke-dashoffset: -31; } }
+    @media (prefers-reduced-motion: reduce) { .flow-a { animation: none; } }
+  </style>
+  …
+</svg>
+```
+
+Give each SVG its own class names and `@keyframes` names (`flow-a` / `flowdash-a`,
+`flow-b` / `flowdash-b`) so two figures on one page don't collide.
+
+**What does NOT work**
+
+- `<script>` of any kind, `on*=` handler attributes, `javascript:` URLs — all inert.
+- **SMIL** (`<animate>`, `<animateMotion>`, `<animateTransform>`): verified not to
+  run here — the SVG timeline stays frozen at `getCurrentTime() === 0`. Use CSS
+  animation instead.
+- `<canvas>`: a blank box without JS.
+- Anything with computed state — simulations, a slider that recalculates a model,
+  live data, sorting or filtering a table, form validation.
+
+**When the prompt wants something CSS can't express**
+
+Game of Life, a Monte Carlo model, a parameter sweep. Don't write the JS anyway: it
+fails silently and the reader gets an empty rectangle where the point of the doc was.
+Pick one:
+
+- Pre-compute the interesting states and switch between them with `:checked`.
+- Render the outcome as a static SVG chart or diagram with the numbers baked in.
+- Show a short CSS-animated loop of the phenomenon.
+
+Then note in the doc what was simplified, so the reader isn't misled about what
+they're looking at.
 
 ### Default styling — DO NOT re-style the doc
 
@@ -566,10 +654,9 @@ What to write:
     <h1>{title}</h1>
     <p class="meta">{subtitle or attribution}</p>
     <!-- content here using plain <h2>, <h3>, <p>, <ul>, <pre>, <table>, etc. -->
+    <!-- interactivity goes in <style>, not <script>: author scripts are
+         blocked by CSP. See "Interactivity: CSS only" above. -->
   </div>
-  <script>
-    /* any interactivity, inline */
-  </script>
 </body></html>
 ```
 
@@ -602,10 +689,11 @@ Every doc must work on mobile out of the box. The overlay injects defensive CSS 
 
 - **Always include** `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`. (The overlay injects this if you forget, but include it.)
 - **Use fluid widths**, not hardcoded pixels. Container: `max-width: 720px;` (no `margin: 0 auto`; no top-level `padding: 0 ...` — overlay handles margins and top/bottom reading space). If you need custom inner spacing, put it on a child element inside the container.
-- **Canvas / SVG / images**: do NOT hardcode width=N height=M. Either:
+- **SVG / images**: do NOT hardcode width=N height=M. Either:
   - Use `width="100%"` + CSS aspect-ratio (`aspect-ratio: 16/9`), or
   - Use a wrapper with `max-width: 100%` and let the artifact scale.
-  - For canvas, set `width` and `height` attributes for the drawing buffer but ALSO `style="max-width:100%;height:auto"` so it scales down on narrow screens. Recompute the drawing buffer on resize if needed.
+  - For SVG, give the `<svg>` a `viewBox` and size it in CSS (`width: 100%; height: auto`). If the drawing needs more room than a phone gives it, put the `<svg>` in a wrapper with `overflow-x: auto` and a `min-width` on the SVG so it scrolls rather than squashing.
+  - (Canvas isn't an option — see "Interactivity: CSS only". Without JS there is nothing to draw into the buffer.)
 - **Tables**: wrap in `<div style="overflow-x:auto">` so they scroll instead of overflowing.
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
 - **Test at 375px wide** in your head before claiming done. If anything overflows the viewport on a phone, fix it before writing meta.json.
