@@ -25,7 +25,8 @@
 
 set -euo pipefail
 # BYOK: tell the user immediately when this checkout is behind origin/main.
-"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" || true
+# Human nag on stderr; discard the machine line (skill preamble / doctor).
+"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
 
 usage() {
   cat >&2 <<'EOF'

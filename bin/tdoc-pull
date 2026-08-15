@@ -9,7 +9,7 @@
 # absent on the worker, e.g. created before publish) are merged in rather than
 # clobbered.
 set -euo pipefail
-"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" || true
+"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
 
 SLUG="${1:-}"
 if [ -z "$SLUG" ]; then echo "usage: tdoc-pull <slug>" >&2; exit 1; fi

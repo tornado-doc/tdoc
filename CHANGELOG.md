@@ -21,6 +21,11 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **BYOK update nag.** User-facing CLIs and the skill preamble compare this
+  checkout to `origin/main` and point at `/tdoc update --yes` when main is
+  ahead. Ahead-only feature branches stay silent; a true diverge does not
+  print a destroy/re-clone command. `tdoc-doctor` reports the same state as
+  `.update` (not a `missing_step`).
 - **Nested replies.** You can reply to a reply (and to that reply), the way
   Reddit and Hacker News do. Each node in the thread has its own Reply.
 - **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /

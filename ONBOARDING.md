@@ -82,9 +82,20 @@ The JSON has these fields you care about:
   "ready_to_publish": true/false,
   "missing_steps": [
     { "id": "...", "label": "...", "kind": "install|login|click", "cmd": "..." }
-  ]
+  ],
+  "update": {
+    "ok": true/false,
+    "checked": true/false,
+    "behind": 0,
+    "diverged": true/false,
+    "cmd": "…/bin/tdoc-update --yes"
+  }
 }
 ```
+
+`.update` is informational (this skill checkout vs `origin/main`), not a
+`missing_step`. If `ok` is false and the checkout has not diverged, suggest
+`/tdoc update --yes`. Do not treat a stale overlay as a Cloudflare dep.
 
 ## Step 4 — Walk the user through `missing_steps`
 

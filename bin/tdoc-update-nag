@@ -33,8 +33,7 @@ nag_human() {
   local behind="$1" diverged="$2"
   if [ "$diverged" = "1" ]; then
     echo "[tdoc] this checkout has diverged from origin/main — tdoc-update cannot fast-forward." >&2
-    echo "       Commit or stash local work, or re-clone:" >&2
-    echo "         rm -rf $REPO && git clone https://github.com/tornado-doc/tdoc $REPO" >&2
+    echo "       Commit or stash local work, or re-clone from scratch." >&2
   else
     echo "[tdoc] $behind newer commit(s) on origin/main." >&2
     echo "       Published docs keep the old overlay until you update." >&2
@@ -94,13 +93,19 @@ if [ "$LOCAL" = "$REMOTE" ]; then
   exit 0
 fi
 
-BASE="$(git -C "$REPO" merge-base "$LOCAL" "$REMOTE" 2>/dev/null || true)"
 BEHIND="$(git -C "$REPO" rev-list --count "$LOCAL..$REMOTE" 2>/dev/null || echo 0)"
+AHEAD="$(git -C "$REPO" rev-list --count "$REMOTE..$LOCAL" 2>/dev/null || echo 0)"
 case "$BEHIND" in
   ''|*[!0-9]*) BEHIND=0 ;;
 esac
+case "$AHEAD" in
+  ''|*[!0-9]*) AHEAD=0 ;;
+esac
 
-if [ -n "$BASE" ] && [ "$BASE" != "$LOCAL" ]; then
+# Ahead-only (feature branch whose ancestor is current origin/main) is not
+# diverged and is not behind — stay silent. Nag only when origin/main has
+# commits this checkout lacks. True diverge is both sides unique.
+if [ "$BEHIND" -gt 0 ] && [ "$AHEAD" -gt 0 ]; then
   nag_human "$BEHIND" 1
   nag_stdout "$BEHIND" 1
   exit 0

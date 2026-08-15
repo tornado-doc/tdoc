@@ -847,7 +847,7 @@ fi
 [ -z "$INSTALLED_VERSION" ] && INSTALLED_VERSION="0.0.0"
 
 if [ -x "$TDOC_DIR/bin/tdoc-update-nag" ]; then
-  NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" || true)"
+  NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" 2>/dev/null || true)"
   if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
     echo "$NAG_LINE"
     if [ "$TEL_EFFECTIVE" != "off" ]; then
