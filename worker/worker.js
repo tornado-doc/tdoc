@@ -1822,7 +1822,7 @@ function markInboxRead(inbox, { ids, comment_id } = {}) {
   const items = (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
     if (!i) return i;
     if (Array.isArray(ids) && ids.includes(i.id)) return { ...i, read: true };
-    if (comment_id && (i.comment_id === comment_id || i.thread_id === comment_id)) return { ...i, read: true };
+    if (comment_id && i.comment_id === comment_id) return { ...i, read: true };
     return i;
   });
   return { items };

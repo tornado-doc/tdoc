@@ -972,7 +972,7 @@
       if (root) {
         state.openReplyThreads.add(root);
         pinOpenCard(root);
-        setActiveComment(root);
+        if (target === root) setActiveComment(root);
       }
       const el = document.querySelector(`[data-comment-id="${CSS.escape(target || '')}"]`);
       if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
@@ -2406,7 +2406,10 @@
           || state.activeComments.find(c => (c.replies || []).some(r => r.id === want));
         const root = hit ? hit.id : want;
         state.openReplyThreads.add(root);
-        if (state.cardEls.has(root)) setActiveComment(root);
+        // Opening a reply must not activate the root — that would mark the
+        // root's own notifications (e.g. a reaction) as read.
+        if (want === root && state.cardEls.has(root)) setActiveComment(root);
+        else if (state.cardEls.has(root)) pinOpenCard(root);
         const el = document.querySelector(`[data-comment-id="${CSS.escape(want)}"]`);
         if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
         markInboxSeen(want);

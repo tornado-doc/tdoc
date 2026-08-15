@@ -467,7 +467,7 @@ const server = http.createServer(async (req, res) => {
     const items = (Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
       if (!i) return i;
       if (Array.isArray(body.ids) && body.ids.includes(i.id)) return { ...i, read: true };
-      if (body.comment_id && (i.comment_id === body.comment_id || i.thread_id === body.comment_id)) return { ...i, read: true };
+      if (body.comment_id && i.comment_id === body.comment_id) return { ...i, read: true };
       return i;
     });
     writeJson(file, { items });

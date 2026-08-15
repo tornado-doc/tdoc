@@ -8,6 +8,8 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Opening one notification no longer marks siblings in the same thread.**
+  Mark-read matches the exact comment/reply id, not the thread root.
 - **Clicking Reply no longer collapses the comment.** A hover-opened card
   used to vanish as soon as you hit Reply (the click never pinned it, then
   the pointer leaving the pin hid the card). Reply now pins the card and
