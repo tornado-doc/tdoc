@@ -6,6 +6,13 @@ file and `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Clicking Reply no longer collapses the comment.** A hover-opened card
+  used to vanish as soon as you hit Reply (the click never pinned it, then
+  the pointer leaving the pin hid the card). Reply now pins the card and
+  keeps the thread expanded.
+
 ### Added
 
 - **Nested replies.** You can reply to a reply (and to that reply), the way

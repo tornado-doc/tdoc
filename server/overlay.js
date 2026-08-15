@@ -1559,13 +1559,23 @@
       const toggle = card.querySelector(`.tdoc-reply-toggle[data-id="${CSS.escape(parentId)}"]`);
       if (toggle) {
         toggle.onclick = (e) => {
+          e.preventDefault();
           e.stopPropagation();
           if (isPublished && !identity) { startDeviceFlow(); return; }
+          // Pin so a hover-opened card does not collapse when the pointer
+          // leaves the pin or the form opening shifts layout.
+          pinOpenCard(comment.id);
+          const repliesEl = card.querySelector('.tdoc-replies');
+          const repliesToggle = card.querySelector('.tdoc-replies-toggle');
+          if (repliesEl && repliesEl.childElementCount) {
+            repliesEl.classList.add('open');
+            repliesToggle?.classList.add('open');
+          }
           card.querySelectorAll('.tdoc-reply-form.open').forEach(f => { if (f !== replyForm) f.classList.remove('open'); });
           replyForm.classList.toggle('open');
           if (replyForm.classList.contains('open')) {
             replyForm.querySelector('textarea').focus();
-            requestAnimationFrame(repositionCards);
+            requestAnimationFrame(() => positionFloatingCard(comment.id));
           }
         };
       }
@@ -1935,7 +1945,17 @@
   function hideCardIfIdle(id) {
     if (state.pinnedId === id || state.hoverId === id) return;
     const card = state.cardEls.get(id);
+    // A Reply form in progress must keep the card up — clicking Reply used
+    // to close a hover-opened card as soon as the cursor left the pin.
+    if (card && card.querySelector('.tdoc-reply-form.open')) return;
     if (card) card.classList.remove('tdoc-floating-open');
+  }
+  function pinOpenCard(id) {
+    if (state.narrow || !id) return;
+    state.pinnedId = id;
+    state.hoverId = id;
+    showCard(id);
+    markPinActive(id, true);
   }
   function positionFloatingCard(id) {
     const card = state.cardEls.get(id);
@@ -2028,7 +2048,12 @@
   }, true);
   commentLayer.addEventListener('mouseleave', (e) => {
     const card = e.target.closest?.('.tdoc-margin-comment.tdoc-floating-open');
-    if (card) { const id = [...state.cardEls.entries()].find(([, el]) => el === card)?.[0]; if (id) hoverClose(id); }
+    if (!card) return;
+    // Capture-phase mouseleave fires for every child. Ignore moves that stay
+    // inside the same card (Reply → textarea, layout shift, etc.).
+    if (e.relatedTarget && card.contains(e.relatedTarget)) return;
+    const id = [...state.cardEls.entries()].find(([, el]) => el === card)?.[0];
+    if (id) hoverClose(id);
   }, true);
 
   function renderGhostMarker(commentId, pageY) {
