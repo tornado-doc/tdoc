@@ -15,6 +15,9 @@ file and `.claude-plugin/plugin.json`.
 - **Posting a reply no longer folds the thread.** After submit, refresh
   used to rebuild the card with replies collapsed. The thread you just
   replied in stays open.
+- **Open comment cards no longer follow the viewport.** An expanded card
+  used to clamp itself to the camera on scroll. It now stays next to its
+  pin and scrolls away with the page.
 
 ### Added
 

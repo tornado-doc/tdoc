@@ -1784,7 +1784,8 @@
     // its Y; pins within SAME_LINE_GAP px merge into one count badge. The floating
     // card (hover/click) is positioned separately by openFloatingCard().
     renderPins();
-    // Keep any currently-open floating card glued to its pin on scroll/resize.
+    // Re-place an open card next to its pin. Do not lock it to the viewport —
+    // the card is document-absolute and should scroll away with the page.
     if (state.pinnedId) positionFloatingCard(state.pinnedId);
     else if (state.hoverId) positionFloatingCard(state.hoverId);
   }
@@ -1967,18 +1968,11 @@
     if (!card) return;
     const geo = gutterGeometry();
     const row = commentY(state.activeComments.find(c => c.id === id), geo);
-    let y = row ? row.y : geo.articleTop;
+    const y = row ? row.y : geo.articleTop;
     card.style.left = geo.cardLeft + 'px';
-    // Flip up if the card would run past the bottom of the viewport.
+    // Park at the pin's document Y. Do not clamp to the viewport — that made
+    // an expanded card stick to the camera as the user scrolled.
     card.style.top = y + 'px';
-    requestAnimationFrame(() => {
-      const h = card.offsetHeight;
-      const vpBottom = window.scrollY + window.innerHeight - 12;
-      // Top floor must clear the fixed bar (and the old-version strip when shown)
-      // so a flipped-up card isn't occluded by them.
-      const topFloor = window.scrollY + (document.body.classList.contains('tdoc-has-oldver-strip') ? 84 : 56);
-      if (y + h > vpBottom) card.style.top = Math.max(topFloor, vpBottom - h) + 'px';
-    });
   }
   function hoverOpen(id) {
     state.hoverId = id;
