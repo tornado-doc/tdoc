@@ -93,7 +93,7 @@ t('TDOC_AGENT_LOGIN is the last fallback before tdoc-agent', () => {
   assert(a.login === 'cursor' && a.name === 'Cursor', JSON.stringify(a));
   const bare = agentIdentity({}, {});
   assert(bare.login === 'tdoc-agent', JSON.stringify(bare));
-  assert(String(bare.avatar_url).startsWith('data:image/svg+xml'), JSON.stringify(bare));
+  assert(String(bare.avatar_url).includes('tornado-doc'), JSON.stringify(bare));
 });
 
 t('logoForAgentLogin maps each product, Claude is not Anthropic', () => {
@@ -103,8 +103,8 @@ t('logoForAgentLogin maps each product, Claude is not Anthropic', () => {
   assert(logoForAgentLogin('codex').includes('openai'));
   assert(logoForAgentLogin('cursor').includes('cursor'));
   assert(logoForAgentLogin('gemini').includes('gemini'));
-  assert(String(logoForAgentLogin('tdoc-agent')).startsWith('data:image/svg+xml'), 'tdoc lightning');
-  assert(String(logoForAgentLogin('mystery-bot')).startsWith('data:image/svg+xml'), 'unmatched');
+  assert(logoForAgentLogin('tdoc-agent').includes('tornado-doc'), 'tdoc logo');
+  assert(logoForAgentLogin('mystery-bot').includes('tornado-doc'), 'unmatched');
 });
 
 t('agentIdentity drops a stored Anthropic company mark', () => {

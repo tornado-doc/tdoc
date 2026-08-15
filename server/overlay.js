@@ -46,7 +46,6 @@
     if (!img || img.tagName !== 'IMG' || !img.dataset || !img.dataset.tdocFallbackAnon) return;
     const span = document.createElement('span');
     span.className = img.dataset.tdocFallbackAnon;
-    if (/\btdoc-agent-badge\b/.test(span.className)) span.textContent = '⚡';
     img.replaceWith(span);
   }, true);
 
@@ -354,9 +353,9 @@
   .tdoc-margin-comment .author .login { font-weight: 600; color: #111; font-size: 13px; }
   .tdoc-margin-comment .author .anon { color: #888; font-style: italic; }
   /* Agent identity — runtime logo when we know the host (Grok / Claude /
-     Codex / …), otherwise the ⚡ badge. Status chips still carry applied /
-     partial / question. */
-  .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #111; color: #fff; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+     Codex / …), otherwise the tdoc project mark. Status chips still carry
+     applied / partial / question. */
+  .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #f2f2f2; flex-shrink: 0; }
   .tdoc-agent-author img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; background: #f2f2f2; flex-shrink: 0; }
   .tdoc-agent-reply { background: #fafafb; border-left: 3px solid #111; padding-left: 8px; }
   .tdoc-agent-status { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; margin: 0 0 6px; font-weight: 600; }
@@ -1359,14 +1358,14 @@
   const REACT_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="19" y1="6" x2="19" y2="10"/><line x1="21" y1="8" x2="17" y2="8"/></svg>`;
 
   // Known coding-agent runtimes → brand mark. Honor an explicit avatar_url
-  // first; otherwise map login/name. Unmatched names use the tdoc lightning.
-  // Never show github.com/anthropics.png — that is Anthropic's "AI" wordmark,
-  // not Claude's product star.
+  // first; otherwise map login/name. Unmatched names use the tdoc project
+  // mark (not a lightning bolt). Never show github.com/anthropics.png —
+  // that is Anthropic's "AI" wordmark, not Claude's product star.
   function isAnthropicCompanyMark(url) {
     return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
   }
-  function tdocMarkUrl() {
-    return 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Ccircle cx="12" cy="12" r="12" fill="%23111"/%3E%3Cpath fill="%23fff" d="M13.2 3.2 6.4 13.2h5.1l-1 7.6 7.2-11.2h-5l1.5-6.4z"/%3E%3C/svg%3E';
+  function tdocLogoUrl() {
+    return 'https://github.com/tornado-doc.png';
   }
   function agentLogoUrl(author) {
     const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))
@@ -1382,7 +1381,7 @@
     }
     if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
     if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
-    return tdocMarkUrl();
+    return tdocLogoUrl();
   }
   function renderAuthor(author) {
     if (!author) return `<div class="author"><span class="anon">anonymous</span></div>`;
@@ -1390,9 +1389,7 @@
       const label = author.name || author.login || 'tdoc-agent';
       const title = author.login && author.name && author.login !== author.name ? author.login : label;
       const logo = agentLogoUrl(author);
-      const mark = logo
-        ? `<img src="${escapeHtml(logo)}" alt="" data-tdoc-fallback-anon="tdoc-agent-badge">`
-        : `<span class="tdoc-agent-badge">⚡</span>`;
+      const mark = `<img src="${escapeHtml(logo)}" alt="" data-tdoc-fallback-anon="tdoc-agent-badge">`;
       return `<div class="author tdoc-agent-author" title="${escapeHtml(title)}">${mark}<span class="login">${escapeHtml(label)}</span></div>`;
     }
     const avatar = author.avatar_url ? `<img src="${escapeHtml(author.avatar_url)}" alt="">` : '';

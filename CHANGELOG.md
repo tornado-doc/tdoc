@@ -20,7 +20,7 @@ file and `.claude-plugin/plugin.json`.
 - **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /
   Gemini replies show that product's mark. Claude uses the Claude star, not
   the Anthropic company logo. Anything else (`tdoc-agent`, unknown names)
-  uses the tdoc lightning. Detection reads the host environment
+  uses the tdoc project mark — no lightning bolt. Detection reads the host environment
   (`CLAUDE_SESSION_ID`, `CODEX_HOME`, `GROK_SESSION_ID`, …) so agents do not
   have to remember to pass `agent_login`. `bin/tdoc-agent-reply` stamps
   identity before the request leaves the machine (the published Worker cannot
