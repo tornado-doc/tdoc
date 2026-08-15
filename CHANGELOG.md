@@ -4,6 +4,34 @@ All notable changes to tdoc are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow the `VERSION`
 file and `.claude-plugin/plugin.json`.
 
+## [Unreleased]
+
+### Fixed
+
+- **Clicking Reply no longer collapses the comment.** A hover-opened card
+  used to vanish as soon as you hit Reply (the click never pinned it, then
+  the pointer leaving the pin hid the card). Reply now pins the card and
+  keeps the thread expanded.
+- **Posting a reply no longer folds the thread.** After submit, refresh
+  used to rebuild the card with replies collapsed. The thread you just
+  replied in stays open.
+- **Open comment cards no longer follow the viewport.** An expanded card
+  used to clamp itself to the camera on scroll. It now stays next to its
+  pin and scrolls away with the page.
+
+### Added
+
+- **Nested replies.** You can reply to a reply (and to that reply), the way
+  Reddit and Hacker News do. Each node in the thread has its own Reply.
+- **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /
+  Gemini replies show that product's mark. Claude uses the Claude star, not
+  the Anthropic company logo. Anything else (`tdoc-agent`, unknown names)
+  uses `tdoc_logo.png` (the tdoc dinosaur), not a lightning bolt. Detection reads the host environment
+  (`CLAUDE_SESSION_ID`, `CODEX_HOME`, `GROK_SESSION_ID`, …) so agents do not
+  have to remember to pass `agent_login`. `bin/tdoc-agent-reply` stamps
+  identity before the request leaves the machine (the published Worker cannot
+  see your env).
+
 ## [0.9.0] - 2026-07-13
 
 ### Added — Vercel as a second publish target

@@ -153,7 +153,9 @@ triggers:
 # tdoc — Prompt-native HTML documents
 
 Open-source, collaborative. Docs are HTML build
-artifacts, not files the user maintains. Authoring interface is a prompt.
+artifacts, not files the user maintains.
+
+**Source of truth (see `AGENTS.md`):** Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold. Authoring interface is a prompt.
 Every edit creates a new version. Comments anchor to highlighted text or to
 artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
@@ -331,22 +333,27 @@ silently is the #1 source of regression complaints.
 6. **For each comment, post an agent reply** so the user sees the outcome
    in the doc UI. This is mandatory.
 
-   **For published docs** — POST to `https://<your-worker>/api/agent/reply`
-   with the upload token from `~/.tdoc/published.json`:
+   Use `bin/tdoc-agent-reply`. It auto-detects the host runtime (Claude Code,
+   Codex, Grok, Cursor, Gemini) from the process environment and stamps
+   `agent_login` so the comment shows that product's logo. Do **not** invent
+   a login or pass `tdoc-agent`. Only pass `--login` if you must override
+   detection. The published Worker cannot see your env, so do not raw-curl
+   `/api/agent/reply` yourself — the helper stamps identity before the
+   request leaves the machine.
+
    ```bash
-   TOKEN=$(jq -r .upload_token ~/.tdoc/published.json)
-   WORKER=$(jq -r '.worker + "." + .subdomain' ~/.tdoc/published.json)
-   curl -sS -X POST "https://${WORKER}.workers.dev/api/agent/reply" \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d "{\"slug\":\"<slug>\",\"parent_id\":\"<comment_id>\",\"text\":\"<one or two sentences>\",\"status\":\"applied\",\"applied_in\":<n+1>,\"agent_login\":\"<your-agent-handle>\",\"agent_name\":\"<your display name>\"}"
+   "$SKILL_DIR/bin/tdoc-agent-reply" \
+     --slug "<slug>" \
+     --parent "<comment_id>" \
+     --text "<one or two sentences>" \
+     --status applied \
+     --applied-in <n+1>
    ```
 
-   **For local-only docs** — POST to `http://localhost:7878/api/agent/reply`
-   (no token needed).
-   Always include `agent_login` and `agent_name` so reviewers can tell which
-   agent applied or questioned a comment. Old callers fall back to
-   `tdoc-agent`, but that generic label is only a compatibility fallback.
+   It posts to the published Worker when `~/.tdoc/published.json` exists,
+   otherwise to `http://localhost:${TDOC_PORT:-7878}`. Users can also reply
+   to any reply (HN/Reddit-style nesting); `parent` is the comment or reply
+   you are answering.
 
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading
@@ -616,6 +623,38 @@ The overlay applies these as `:where()` defensive defaults so old docs degrade g
 - **Don't use these ids/classes** in your doc — they're reserved by the overlay: `tdoc-*`, `#tdoc-*`, and any class starting with `tdoc-`.
 - **Don't position-fixed elements at the top** — the overlay's 44px top bar lives there.
 - **Don't use a footer at the bottom** — the overlay injects its own.
+
+### Author HTML compatibility contract (invariant)
+
+Agents generate arbitrary HTML. Overlay defaults use **`:where()` zero-specificity** so **author CSS always wins**. That means a bad author rule can also silently break layout (e.g. `padding: 0 24px` on the content root wiped overlay top reading space — fixed in #96). Contract:
+
+- One primary content container: `.wrap` (preferred), `main`, `article`, `.content`, or `.container`.
+- **No** top-level container `padding: 0 ...` / `margin: 0 auto` — overlay owns chrome spacing.
+- Treat `tdoc-*` classes/ids as reserved.
+- Scope document UI rules to the document (never global `button:hover`).
+- Prefer fluid/`max-width` layouts over fixed pixel shells.
+
+### Access policy (published docs — invariant)
+
+Remote storage holds optional `meta.access`:
+
+```json
+{
+  "visibility": "public | unlisted | private",
+  "commenting": "owner | invited | signed_in | off",
+  "history_visibility": "owner | invited | public",
+  "allowed_users": ["github-login"]
+}
+```
+
+- **public / unlisted**: link-readable without login. Unlisted is not catalog-discovery; `/me` still lists owner docs.
+- **private**: `TDOC_OWNER` + `allowed_users` only. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
+- **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
+- Legacy meta without `access` stays world-readable + full history (back-compat).
+- Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
+- After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
+- `/me` may list docs through the owner GitHub session, but remote write actions still use the upload token; do not authorize destructive/access changes from the owner cookie while arbitrary published docs share the same origin.
+
 
 ### Comment anchor stability (important for `/tdoc edit`)
 

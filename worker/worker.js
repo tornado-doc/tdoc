@@ -314,19 +314,82 @@ async function enforceDocAccess(env, req, slug, version) {
     }),
   };
 }
+const TDOC_LOGO_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAeGVYSWZNTQAqAAAACAAEARoABQAAAAEAAAA+ARsABQAAAAEAAABGASgAAwAAAAEAAgAAh2kABAAAAAEAAABOAAAAAAAAAEgAAAABAAAASAAAAAEAA6ABAAMAAAABAAEAAKACAAQAAAABAAABAKADAAQAAAABAAABAAAAAABUZS5+AAAACXBIWXMAAAsTAAALEwEAmpwYAAABWWlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNi4wLjAiPgogICA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogICAgICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgICAgICAgICB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iPgogICAgICAgICA8eG1wOkNyZWF0b3JUb29sPkZpZ21hPC94bXA6Q3JlYXRvclRvb2w+CiAgICAgIDwvcmRmOkRlc2NyaXB0aW9uPgogICA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgoE/1zIAAAmzUlEQVR4Ae2dB7xlNbXGA6JixYIVFBTFNsLYFREEUeyiiAq2AREFFBtWlEFEimIXFUYURVHEQreMOjBiB0Xsoij23nvLW//1Xvbb59x9+sk5OXd/+f3O3fvukmR/Sb4kK2utbBAtBAUhIARaicCGrfxqfbQQEAKOgAhAFUEItBgBEUCLC1+fLgREAKoDQqDFCIgAWlz4+nQhIAJQHRACLUZABNDiwtenCwERgOqAEGgxAiKAFhe+Pl0IiABUB4RAixEQAbS48PXpQkAEoDogBFqMgAigxYWvTxcCIgDVASHQYgREAC0ufH26EBABqA4IgRYjIAJoceHr04WACEB1QAi0GAERQIsLX58uBEQAqgNCoMUIiABaXPj6dCEgAlAdEAItRkAE0OLC16cLARGA6oAQaDECIoAWF74+XQiIAFQHhECLERABtLjw9elCQASgOiAEWoyACKDFha9PFwIiANUBIdBiBEQALS58fboQEAGoDgiBFiMgAmhx4evThYAIQHVACLQYARFAiwtfny4ERACqA0KgxQiIAFpc+Pp0ISACUB0QAi1GQATQ4sLXpwsBEYDqgBBoMQIigBYXvj5dCIgAVAeEQIsREAG0uPD16UJABKA6IARajIAIoMWFr08XAiIA1QEh0GIERAAtLnx9uhAQAagOCIEWIyACaHHh69OFgAhAdUAItBgBEUCLC1+fLgREAKoDQqDFCIgAWlz4+nQhIAJQHRACLUZABNDiwtenCwERgOqAEGgxAiKAFhe+Pl0IiABUB4RAixEQAbS48PXpQkAEoDogBFqMgAigxYWvTxcCIgDVASHQYgREAC0ufH26EBABqA4IgRYjIAJoceHr04WACEB1QAi0GAERQIsLX58uBEQAqgNCoMUIiABaXPj6dCEgAlAdEAItRkAE0OLC16cLARGA6oAQaDECIoAWF74+XQiIAFQHhECLERABtLjw9elCQASgOiAEWozARi3+9r6f/q9//Sv85z//CRtttJH/+j6sm0JgQREQAfxfwX3nO98JF1xwQbjooovC17/+9fCnP/0p/Pvf/w5XvOIVw6abbhrucIc7hO222y5sv/324drXvvaCFreyLQQ6EdggWui81J7//vGPf4Szzz47vOMd7wjr168Pf/jDHwZ+/K1udavwuMc9Luy7777hhje84cDn9YAQKBmB1hLAhz/84XDUUUeFT33qU43lc41rXCNc6UpX8mkAowGmA/Ww1VZbhZe+9KXhsY99bP2yzoXAQiGwrAngz3/+sw/nf/jDH4Zf/epXPqRn+P7pT386nHjiif5/Kq2rXe1q4W53u1vYZZddwooVK8KWW24Zrn71qwdGCT/96U/DN77xjXDOOeeE888/P/ztb3/z1zbYYIPw9Kc/PRx99NHhKle5SopKRyGwOAgwBVhu4cc//nFcvXp1tIYcbQ7PFKfn7zrXuU58xjOeEb/85S/H//73vwOh+NznPhcf+chHdsS3xx57xN///vcD39UDQqA0BEJpGZo0P2eddVa04XlHA+1FAI9+9KPj1772tbGSNLlBvP71r1+l85CHPCT+8Y9/HCsuvSQE5oXAspoCvPe9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';
+function isAnthropicCompanyMark(url) {
+  return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+}
+function logoForAgentLogin(login) {
+  const key = String(login || '').toLowerCase();
+  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
+  if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
+    return 'https://github.com/openai.png';
+  }
+  if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
+  if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
+  // tdoc project mark (assets/tdoc_logo.png, served at /tdoc_logo.png).
+  return '/tdoc_logo.png';
+}
+
+function isGenericAgentLogin(login) {
+  const k = String(login || '').trim().toLowerCase();
+  return !k || k === 'tdoc-agent' || k === 'agent';
+}
+
+// Infer the host coding-agent from env (Claude Code, Codex, Grok, Cursor, Gemini).
+// The published Worker only sees request JSON, so local server + tdoc-agent-reply
+// run this against process.env and stamp login before the request leaves the machine.
+function detectAgentRuntime(env) {
+  const e = env || {};
+  const present = (names) => names.some((n) => {
+    const v = e[n];
+    return v != null && String(v).trim() !== '';
+  });
+  // Session/host markers only — never API keys. Order is the priority when
+  // more than one host is visible in the same process (rare).
+  if (present(['GROK_AGENT', 'GROK_SESSION_ID', 'GROK_BUILD', 'XAI_AGENT'])) {
+    return { login: 'grok', name: 'Grok' };
+  }
+  if (present(['CLAUDE_CODE', 'CLAUDE_SESSION_ID', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'])) {
+    return { login: 'claude', name: 'Claude' };
+  }
+  if (present(['CODEX_SESSION_ID', 'CODEX_CLI', 'OPENAI_CODEX', 'CODEX_HOME'])) {
+    return { login: 'codex', name: 'Codex' };
+  }
+  if (present(['CURSOR_TRACE_ID', 'CURSOR_AGENT', 'COMPOSER_SESSION'])) {
+    return { login: 'cursor', name: 'Cursor' };
+  }
+  if (present(['GEMINI_CLI', 'GEMINI_SESSION_ID'])) {
+    return { login: 'gemini', name: 'Gemini' };
+  }
+  return null;
+}
+
 function agentIdentity(body = {}, env = {}) {
-  const fallbackLogin = env.TDOC_AGENT_LOGIN || 'tdoc-agent';
-  const fallbackName = env.TDOC_AGENT_NAME || fallbackLogin;
+  const detected = detectAgentRuntime(env);
   const clean = (v, fallback) => {
     if (typeof v !== 'string') return fallback;
     const s = v.trim().slice(0, 80);
     return s || fallback;
   };
-  const avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
+  const rawLogin = typeof (body.agent_login || body.agent_id) === 'string'
+    ? String(body.agent_login || body.agent_id).trim()
+    : '';
+  const rawName = typeof body.agent_name === 'string' ? body.agent_name.trim() : '';
+  const login = (!isGenericAgentLogin(rawLogin) ? rawLogin : '')
+    || (detected && detected.login)
+    || env.TDOC_AGENT_LOGIN
+    || 'tdoc-agent';
+  const name = (!isGenericAgentLogin(rawName) ? rawName : '')
+    || (detected && detected.name)
+    || env.TDOC_AGENT_NAME
+    || login;
+  let avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
     ? body.agent_avatar_url
     : null;
-  const login = clean(body.agent_login || body.agent_id, fallbackLogin);
-  return { kind: 'agent', login, name: clean(body.agent_name, fallbackName), avatar_url: avatar };
+  if (isAnthropicCompanyMark(avatar)) avatar = null;
+  if (!avatar) avatar = logoForAgentLogin(login);
+  return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
 }
 function rand(n) {
   const a = new Uint8Array(n);
@@ -1350,7 +1413,7 @@ function snapshotAt(c, V) {
       case 'reply_added': {
         if (!e.reply || !e.reply.id) break;
         const r = {
-          id: e.reply.id, parent_id: c.id,
+          id: e.reply.id, parent_id: e.reply.parent_id || c.id,
           author: e.reply.author || null,
           text: e.reply.text || '',
           agent_status: e.reply.agent_status || null,
@@ -1668,6 +1731,20 @@ async function authorizeOwnerMutation(req, env) {
 // before/without the migration — same code path, just not serialized.
 // ===========================================================================
 
+// Resolve a comment id that may be a top-level thread OR a reply inside one.
+// Nested replies still live on the root thread's event log; parent_id on the
+// reply record is the immediate parent (HN/Reddit-style threading).
+function findCommentThread(list, id) {
+  if (!id || !Array.isArray(list)) return null;
+  const top = list.find(c => c && c.id === id);
+  if (top) return { root: top, parentId: id, parentIsRoot: true };
+  for (const c of list) {
+    const ev = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
+    if (ev) return { root: c, parentId: id, parentIsRoot: false };
+  }
+  return null;
+}
+
 // Apply one comment operation to the in-memory list. PURE w.r.t. I/O: it only
 // mutates `list` and returns { status, body }. Both the DO path and the KV
 // fallback call this, so mutation logic is defined exactly once.
@@ -1686,11 +1763,11 @@ function applyCommentOp(list, op) {
       return { status: 200, body: snapshotAt(entry, op.version) };
     }
     case 'reply': {
-      const parent = list.find(c => c.id === op.parent_id);
-      if (!parent) return { status: 404, body: { error: 'parent_not_found' } };
-      appendEvent(parent, { kind: 'reply_added', at_version: op.version, at: now,
-        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null } });
-      return { status: 200, body: { id: op.reply_id, parent_id: op.parent_id, author: op.author, text: op.text, created: now, version: op.version } };
+      const thread = findCommentThread(list, op.parent_id);
+      if (!thread) return { status: 404, body: { error: 'parent_not_found' } };
+      appendEvent(thread.root, { kind: 'reply_added', at_version: op.version, at: now,
+        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null, parent_id: op.parent_id } });
+      return { status: 200, body: { id: op.reply_id, parent_id: op.parent_id, thread_id: thread.root.id, author: op.author, text: op.text, created: now, version: op.version } };
     }
     case 'patch_anchor': {
       // Authorization is enforced UPSTREAM in the worker (canMutate, which needs
@@ -1943,6 +2020,12 @@ export default {
 
     if (p === '/api/ping') return json({ ok: true, service: 'tdoc' });
     if (p === '/api/runtime') return json({ ok: true, runtime: runtimeInfo() });
+    if (p === '/tdoc_logo.png' && method === 'GET') {
+      const bin = Uint8Array.from(atob(TDOC_LOGO_PNG_B64), (c) => c.charCodeAt(0));
+      return new Response(bin, {
+        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' },
+      });
+    }
 
     // ---- landing (NO public catalog) ----
     // `/` never lists docs. Docs are only reachable via their direct link.
@@ -2390,8 +2473,9 @@ export default {
       // still funnels through the DO so it can't clobber a concurrent user write.
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
-      const parent = authList.find(c => c.id === parent_id);
-      if (!parent) return json({ error: 'parent_not_found' }, { status: 404 });
+      const thread = findCommentThread(authList, parent_id);
+      if (!thread) return json({ error: 'parent_not_found' }, { status: 404 });
+      const parent = thread.root;
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
@@ -2401,7 +2485,7 @@ export default {
 
       const events = [{
         kind: 'reply_added', at_version: V, at: now,
-        reply: { id: replyId, author: agent, text: replyText, agent_status: verdict },
+        reply: { id: replyId, author: agent, text: replyText, agent_status: verdict, parent_id },
       }];
       if (verdict === 'applied') {
         events.push({ kind: 'marked_applied', at_version: V, at: now, applied_in: V, by: agent.login, agent_status: 'applied' });
@@ -2418,8 +2502,8 @@ export default {
         });
       }
       const res = await mutateComments(env, slug, {
-        kind: 'raw_events', slug, id: parent_id, events,
-        responseBody: { id: replyId, parent_id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
+        kind: 'raw_events', slug, id: parent.id, events,
+        responseBody: { id: replyId, parent_id, thread_id: parent.id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
       });
       return json(res.body, { status: res.status });
     }

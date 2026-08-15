@@ -352,10 +352,11 @@
   .tdoc-margin-comment .author img { width: 24px; height: 24px; border-radius: 50%; }
   .tdoc-margin-comment .author .login { font-weight: 600; color: #111; font-size: 13px; }
   .tdoc-margin-comment .author .anon { color: #888; font-style: italic; }
-  /* Agent identity — a simple "⚡ tdoc-agent" badge in place of an avatar.
-     The status chip on agent replies (applied / partial / question) lets
-     the user tell at a glance whether their comment was addressed. */
-  .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #111; color: #fff; align-items: center; justify-content: center; font-size: 13px; }
+  /* Agent identity — runtime logo when we know the host (Grok / Claude /
+     Codex / …), otherwise the tdoc project mark. Status chips still carry
+     applied / partial / question. */
+  .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #f2f2f2; flex-shrink: 0; }
+  .tdoc-agent-author img { width: 24px; height: 24px; border-radius: 50%; object-fit: contain; background: #fff; flex-shrink: 0; }
   .tdoc-agent-reply { background: #fafafb; border-left: 3px solid #111; padding-left: 8px; }
   .tdoc-agent-status { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; margin: 0 0 6px; font-weight: 600; }
   .tdoc-agent-status-applied { background: #e8f5ed; color: #1a7340; }
@@ -464,6 +465,10 @@
   .tdoc-replies { display: none; flex-direction: column; gap: 10px; margin-top: 10px; }
   .tdoc-replies.open { display: flex; }
   .tdoc-reply { padding-left: 12px; border-left: 2px solid #e5e5e5; }
+  .tdoc-reply-kids { margin: 8px 0 0 10px; display: flex; flex-direction: column; gap: 10px; }
+  .tdoc-reply .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
+  .tdoc-reply .tdoc-reply-toggle:hover { text-decoration: underline; }
+  .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
   .tdoc-reply .author { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
   .tdoc-reply .author .login { font-weight: 600; font-size: 12px; color: #111; }
@@ -652,6 +657,7 @@
     reanchoringId: null,           // comment id awaiting a new selection for re-anchoring
     pinnedId: null,                // comment whose floating card is click-pinned open (wide mode)
     hoverId: null,                 // comment whose card is open via hover (wide mode)
+    openReplyThreads: new Set(),   // top-level comment ids whose reply lists stay expanded
   };
 
   // Highlight API: one shared registry for pending, one per saved comment.
@@ -1344,12 +1350,40 @@
   const QUICK_TEXT_REACTIONS = ['LGTM'];
   const REACT_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="19" y1="6" x2="19" y2="10"/><line x1="21" y1="8" x2="17" y2="8"/></svg>`;
 
+  // Known coding-agent runtimes → brand mark. Honor an explicit avatar_url
+  // first; otherwise map login/name. Unmatched names use the tdoc project
+  // mark (not a lightning bolt). Never show github.com/anthropics.png —
+  // that is Anthropic's "AI" wordmark, not Claude's product star.
+  function isAnthropicCompanyMark(url) {
+    return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+  }
+  function tdocLogoUrl() {
+    return '/tdoc_logo.png';
+  }
+  function agentLogoUrl(author) {
+    const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))
+      ? author.avatar_url : null;
+    const key = String((author && (author.login || author.name)) || '').toLowerCase();
+    if (key.includes('claude') || key.includes('anthropic') || isAnthropicCompanyMark(stored)) {
+      return 'https://cdn.simpleicons.org/claude/d97757';
+    }
+    if (stored) return stored;
+    if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+    if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
+      return 'https://github.com/openai.png';
+    }
+    if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
+    if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
+    return tdocLogoUrl();
+  }
   function renderAuthor(author) {
     if (!author) return `<div class="author"><span class="anon">anonymous</span></div>`;
     if (author.kind === 'agent') {
       const label = author.name || author.login || 'tdoc-agent';
       const title = author.login && author.name && author.login !== author.name ? author.login : label;
-      return `<div class="author tdoc-agent-author" title="${escapeHtml(title)}"><span class="tdoc-agent-badge">⚡</span><span class="login">${escapeHtml(label)}</span></div>`;
+      const logo = agentLogoUrl(author);
+      const mark = `<img src="${escapeHtml(logo)}" alt="" data-tdoc-fallback-anon="tdoc-agent-badge">`;
+      return `<div class="author tdoc-agent-author" title="${escapeHtml(title)}">${mark}<span class="login">${escapeHtml(label)}</span></div>`;
     }
     const avatar = author.avatar_url ? `<img src="${escapeHtml(author.avatar_url)}" alt="">` : '';
     return `<div class="author">${avatar}<span class="login">${escapeHtml(author.login || 'anonymous')}</span></div>`;
@@ -1370,7 +1404,21 @@
   function renderReactInline(target) {
     return `<button class="tdoc-react-add inline" data-target-id="${escapeHtml(target.id)}" title="Add reaction" aria-label="Add reaction">${REACT_ICON_SVG}</button>`;
   }
-  function renderReply(reply) {
+  function childrenOf(replies, parentId, rootId) {
+    return (replies || []).filter(r => (r.parent_id || rootId) === parentId);
+  }
+  function replyFormHTML(parentId, hint) {
+    if (isFork) return '';
+    return `<div class="tdoc-reply-form" data-parent-id="${escapeHtml(parentId)}">
+      ${hint ? `<div class="tdoc-reply-to">${escapeHtml(hint)}</div>` : ''}
+      <textarea placeholder="Reply…"></textarea>
+      <div class="tdoc-reply-form-foot">
+        <span class="hint">⌘+Enter to submit · Esc to cancel</span>
+        <button class="tdoc-reply-submit">Reply</button>
+      </div>
+    </div>`;
+  }
+  function renderReply(reply, allReplies, rootId, depth) {
     const canDelete = !isFork && (!isPublished || (identity && reply.author && identity.login === reply.author.login));
     const hasReactions = reply.reactions && Object.values(reply.reactions).some(u => u && u.length > 0);
     const isAgent = reply.author?.kind === 'agent';
@@ -1383,7 +1431,10 @@
           '? question'
         }</span>`
       : '';
-    return `<div class="tdoc-reply${isAgent ? ' tdoc-agent-reply' : ''}" data-comment-id="${escapeHtml(reply.id)}">
+    const kids = childrenOf(allReplies, reply.id, rootId);
+    const who = reply.author?.login || reply.author?.name || 'this reply';
+    const hint = reply.id !== rootId ? `Replying to @${who}` : '';
+    return `<div class="tdoc-reply${isAgent ? ' tdoc-agent-reply' : ''}" data-comment-id="${escapeHtml(reply.id)}" data-depth="${depth}">
       ${renderAuthor(reply.author)}
       ${statusChip}
       <div class="text">${escapeHtml(reply.text)}</div>
@@ -1392,9 +1443,12 @@
         <span>${new Date(reply.created).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
         <span class="actions">
           ${!hasReactions && !isFork ? renderReactInline(reply) : ''}
+          ${isFork ? '' : `<span class="tdoc-reply-toggle" data-id="${escapeHtml(reply.id)}">Reply</span>`}
           ${canDelete ? `<span class="del" data-id="${escapeHtml(reply.id)}">delete</span>` : ''}
         </span>
       </div>
+      ${replyFormHTML(reply.id, hint)}
+      ${kids.length ? `<div class="tdoc-reply-kids">${kids.map(k => renderReply(k, allReplies, rootId, depth + 1)).join('')}</div>` : ''}
     </div>`;
   }
   function buildCard(comment) {
@@ -1439,21 +1493,20 @@
         // so the resolution is visible at a glance; the full agent reply stays
         // folded under "N reply" until the reader expands it. Keeps the margin
         // column quiet instead of stacking long bot replies inline.
-        const autoOpen = false;
+        const autoOpen = state.openReplyThreads.has(comment.id);
+        const tops = childrenOf(replies, comment.id, comment.id);
+        // Orphans (parent reply deleted) still show under the thread root.
+        const ids = new Set(replies.map(r => r.id).concat([comment.id]));
+        const orphans = replies.filter(r => r.parent_id && !ids.has(r.parent_id));
+        const roots = tops.concat(orphans.filter(o => !tops.includes(o)));
         return `
         <div class="tdoc-replies-toggle${autoOpen ? ' open' : ''}" data-id="${escapeHtml(comment.id)}">
           <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}
         </div>
-        <div class="tdoc-replies${autoOpen ? ' open' : ''}">${replies.map(r => renderReply(r)).join('')}</div>
+        <div class="tdoc-replies${autoOpen ? ' open' : ''}">${roots.map(r => renderReply(r, replies, comment.id, 1)).join('')}</div>
       `; })() : ''}
-      ${isFork ? '' : `<div class="tdoc-reply-form" data-parent-id="${escapeHtml(comment.id)}">
-        <textarea placeholder="Reply…"></textarea>
-        <div class="tdoc-reply-form-foot">
-          <span class="hint">⌘+Enter to submit · Esc to cancel</span>
-          <button class="tdoc-reply-submit">Reply</button>
-        </div>
-      </div>`}
+      ${replyFormHTML(comment.id, '')}
     `;
 
     const repliesToggle = card.querySelector('.tdoc-replies-toggle');
@@ -1463,6 +1516,8 @@
         e.stopPropagation();
         const open = repliesEl.classList.toggle('open');
         repliesToggle.classList.toggle('open', open);
+        if (open) state.openReplyThreads.add(comment.id);
+        else state.openReplyThreads.delete(comment.id);
         requestAnimationFrame(repositionCards);
       };
     }
@@ -1491,18 +1546,32 @@
       };
     });
 
-    const replyToggle = card.querySelector('.tdoc-reply-toggle');
-    const replyForm = card.querySelector('.tdoc-reply-form');
-    if (replyToggle && replyForm) {
-      replyToggle.onclick = (e) => {
-        e.stopPropagation();
-        if (isPublished && !identity) { startDeviceFlow(); return; }
-        replyForm.classList.toggle('open');
-        if (replyForm.classList.contains('open')) {
-          replyForm.querySelector('textarea').focus();
-          requestAnimationFrame(repositionCards);
-        }
-      };
+    const wireReplyForm = (replyForm) => {
+      const parentId = replyForm.dataset.parentId;
+      const toggle = card.querySelector(`.tdoc-reply-toggle[data-id="${CSS.escape(parentId)}"]`);
+      if (toggle) {
+        toggle.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (isPublished && !identity) { startDeviceFlow(); return; }
+          // Pin so a hover-opened card does not collapse when the pointer
+          // leaves the pin or the form opening shifts layout.
+          pinOpenCard(comment.id);
+          state.openReplyThreads.add(comment.id);
+          const repliesEl = card.querySelector('.tdoc-replies');
+          const repliesToggle = card.querySelector('.tdoc-replies-toggle');
+          if (repliesEl && repliesEl.childElementCount) {
+            repliesEl.classList.add('open');
+            repliesToggle?.classList.add('open');
+          }
+          card.querySelectorAll('.tdoc-reply-form.open').forEach(f => { if (f !== replyForm) f.classList.remove('open'); });
+          replyForm.classList.toggle('open');
+          if (replyForm.classList.contains('open')) {
+            replyForm.querySelector('textarea').focus();
+            requestAnimationFrame(() => positionFloatingCard(comment.id));
+          }
+        };
+      }
       const replyTa = replyForm.querySelector('textarea');
       const submitReply = async () => {
         const text = replyTa.value.trim();
@@ -1512,7 +1581,7 @@
           r = await fetch('/api/comments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug, parent_id: comment.id, text, version })
+            body: JSON.stringify({ slug, parent_id: parentId, text, version })
           });
         } catch (e) {
           alert('Could not post reply: network error'); // keep the text — don't clear
@@ -1526,6 +1595,10 @@
         }
         replyTa.value = '';
         replyForm.classList.remove('open');
+        // Keep this thread expanded after refresh — posting a reply must
+        // not fold the list the user was just looking at.
+        state.openReplyThreads.add(comment.id);
+        pinOpenCard(comment.id);
         await refreshComments();
       };
       replyForm.querySelector('.tdoc-reply-submit').onclick = (e) => { e.stopPropagation(); submitReply(); };
@@ -1533,7 +1606,8 @@
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitReply(); }
         if (e.key === 'Escape') { replyForm.classList.remove('open'); requestAnimationFrame(repositionCards); }
       });
-    }
+    };
+    card.querySelectorAll('.tdoc-reply-form').forEach(wireReplyForm);
 
     card.querySelectorAll('.tdoc-react-chip').forEach(chip => {
       chip.onclick = async (e) => {
@@ -1702,7 +1776,8 @@
     // its Y; pins within SAME_LINE_GAP px merge into one count badge. The floating
     // card (hover/click) is positioned separately by openFloatingCard().
     renderPins();
-    // Keep any currently-open floating card glued to its pin on scroll/resize.
+    // Re-place an open card next to its pin. Do not lock it to the viewport —
+    // the card is document-absolute and should scroll away with the page.
     if (state.pinnedId) positionFloatingCard(state.pinnedId);
     else if (state.hoverId) positionFloatingCard(state.hoverId);
   }
@@ -1814,7 +1889,7 @@
   }
 
   function avatarHTML(author, anonClass) {
-    const url = author?.avatar_url;
+    const url = (author && author.kind === 'agent') ? agentLogoUrl(author) : author?.avatar_url;
     // If the avatar 404s / is CORS-blocked, the document-level capture-phase
     // 'error' listener installed at boot swaps the broken <img> for the anon
     // placeholder (data-tdoc-fallback-anon carries which class to use) — no
@@ -1868,25 +1943,28 @@
   function hideCardIfIdle(id) {
     if (state.pinnedId === id || state.hoverId === id) return;
     const card = state.cardEls.get(id);
+    // A Reply form in progress must keep the card up — clicking Reply used
+    // to close a hover-opened card as soon as the cursor left the pin.
+    if (card && card.querySelector('.tdoc-reply-form.open')) return;
     if (card) card.classList.remove('tdoc-floating-open');
+  }
+  function pinOpenCard(id) {
+    if (state.narrow || !id) return;
+    state.pinnedId = id;
+    state.hoverId = id;
+    showCard(id);
+    markPinActive(id, true);
   }
   function positionFloatingCard(id) {
     const card = state.cardEls.get(id);
     if (!card) return;
     const geo = gutterGeometry();
     const row = commentY(state.activeComments.find(c => c.id === id), geo);
-    let y = row ? row.y : geo.articleTop;
+    const y = row ? row.y : geo.articleTop;
     card.style.left = geo.cardLeft + 'px';
-    // Flip up if the card would run past the bottom of the viewport.
+    // Park at the pin's document Y. Do not clamp to the viewport — that made
+    // an expanded card stick to the camera as the user scrolled.
     card.style.top = y + 'px';
-    requestAnimationFrame(() => {
-      const h = card.offsetHeight;
-      const vpBottom = window.scrollY + window.innerHeight - 12;
-      // Top floor must clear the fixed bar (and the old-version strip when shown)
-      // so a flipped-up card isn't occluded by them.
-      const topFloor = window.scrollY + (document.body.classList.contains('tdoc-has-oldver-strip') ? 84 : 56);
-      if (y + h > vpBottom) card.style.top = Math.max(topFloor, vpBottom - h) + 'px';
-    });
   }
   function hoverOpen(id) {
     state.hoverId = id;
@@ -1961,7 +2039,12 @@
   }, true);
   commentLayer.addEventListener('mouseleave', (e) => {
     const card = e.target.closest?.('.tdoc-margin-comment.tdoc-floating-open');
-    if (card) { const id = [...state.cardEls.entries()].find(([, el]) => el === card)?.[0]; if (id) hoverClose(id); }
+    if (!card) return;
+    // Capture-phase mouseleave fires for every child. Ignore moves that stay
+    // inside the same card (Reply → textarea, layout shift, etc.).
+    if (e.relatedTarget && card.contains(e.relatedTarget)) return;
+    const id = [...state.cardEls.entries()].find(([, el]) => el === card)?.[0];
+    if (id) hoverClose(id);
   }, true);
 
   function renderGhostMarker(commentId, pageY) {

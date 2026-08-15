@@ -79,19 +79,78 @@ const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
 // The emoji set the agent uses as a verdict marker — used by the per-version
 // fold to strip a stale verdict off snapshots where the comment reads 'open'.
 const AGENT_VERDICT_EMOJI = new Set(Object.values(AGENT_STATUS_EMOJI));
-function agentIdentity(body = {}) {
-  const fallbackLogin = process.env.TDOC_AGENT_LOGIN || process.env.USER || 'tdoc-agent';
-  const fallbackName = process.env.TDOC_AGENT_NAME || fallbackLogin;
+function isAnthropicCompanyMark(url) {
+  return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+}
+function logoForAgentLogin(login) {
+  const key = String(login || '').toLowerCase();
+  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
+  if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
+    return 'https://github.com/openai.png';
+  }
+  if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
+  if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
+  // tdoc project mark (assets/tdoc_logo.png, served at /tdoc_logo.png).
+  return '/tdoc_logo.png';
+}
+
+function isGenericAgentLogin(login) {
+  const k = String(login || '').trim().toLowerCase();
+  return !k || k === 'tdoc-agent' || k === 'agent';
+}
+
+function detectAgentRuntime(env) {
+  const e = env || {};
+  const present = (names) => names.some((n) => {
+    const v = e[n];
+    return v != null && String(v).trim() !== '';
+  });
+  // Session/host markers only — never API keys. Order is the priority when
+  // more than one host is visible in the same process (rare).
+  if (present(['GROK_AGENT', 'GROK_SESSION_ID', 'GROK_BUILD', 'XAI_AGENT'])) {
+    return { login: 'grok', name: 'Grok' };
+  }
+  if (present(['CLAUDE_CODE', 'CLAUDE_SESSION_ID', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'])) {
+    return { login: 'claude', name: 'Claude' };
+  }
+  if (present(['CODEX_SESSION_ID', 'CODEX_CLI', 'OPENAI_CODEX', 'CODEX_HOME'])) {
+    return { login: 'codex', name: 'Codex' };
+  }
+  if (present(['CURSOR_TRACE_ID', 'CURSOR_AGENT', 'COMPOSER_SESSION'])) {
+    return { login: 'cursor', name: 'Cursor' };
+  }
+  if (present(['GEMINI_CLI', 'GEMINI_SESSION_ID'])) {
+    return { login: 'gemini', name: 'Gemini' };
+  }
+  return null;
+}
+
+function agentIdentity(body = {}, env = {}) {
+  const detected = detectAgentRuntime(env);
   const clean = (v, fallback) => {
     if (typeof v !== 'string') return fallback;
     const s = v.trim().slice(0, 80);
     return s || fallback;
   };
-  const avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
+  const rawLogin = typeof (body.agent_login || body.agent_id) === 'string'
+    ? String(body.agent_login || body.agent_id).trim()
+    : '';
+  const rawName = typeof body.agent_name === 'string' ? body.agent_name.trim() : '';
+  const login = (!isGenericAgentLogin(rawLogin) ? rawLogin : '')
+    || (detected && detected.login)
+    || env.TDOC_AGENT_LOGIN
+    || 'tdoc-agent';
+  const name = (!isGenericAgentLogin(rawName) ? rawName : '')
+    || (detected && detected.name)
+    || env.TDOC_AGENT_NAME
+    || login;
+  let avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
     ? body.agent_avatar_url
     : null;
-  const login = clean(body.agent_login || body.agent_id, fallbackLogin);
-  return { kind: 'agent', login, name: clean(body.agent_name, fallbackName), avatar_url: avatar };
+  if (isAnthropicCompanyMark(avatar)) avatar = null;
+  if (!avatar) avatar = logoForAgentLogin(login);
+  return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
 }
 function setAgentReaction(target, status, actor = 'tdoc-agent') {
   if (!target.reactions) target.reactions = {};
@@ -317,6 +376,15 @@ const server = http.createServer(async (req, res) => {
   // wild: a daemon from another product bound 7878).
   if (p === '/api/ping') return json(res, 200, { ok: true, service: 'tdoc' });
 
+  if (p === '/tdoc_logo.png') {
+    const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
+    if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(logoPath), {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=86400',
+    });
+  }
+
   if (p === '/') return send(res, 200, indexPage(), { 'Content-Type': 'text/html; charset=utf-8' });
 
   const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
@@ -355,15 +423,17 @@ const server = http.createServer(async (req, res) => {
     const comments = readCommentFile(file);
     const created = new Date().toISOString();
     if (parent_id) {
-      const parent = comments.find(c => c.id === parent_id);
-      if (!parent) return json(res, 404, { error: 'parent_not_found' });
-      if (!Array.isArray(parent.replies)) parent.replies = [];
+      const thread = comments.find(c => c.id === parent_id)
+        || comments.find(c => (c.replies || []).some(r => r.id === parent_id));
+      if (!thread) return json(res, 404, { error: 'parent_not_found' });
+      if (!Array.isArray(thread.replies)) thread.replies = [];
       // Persist the version the reply was made at so foldCommentsAtVersion can
       // scope it — without this the reply record has no `version` and the fold's
       // `r.version` check falls back to the parent's created_in, so replies were
       // never hidden on older versions (diverging from the worker).
+      // parent_id is the immediate parent (top-level or another reply).
       const reply = { id: `r_${Date.now()}`, parent_id, text, version: Number(version) || 1, author: null, created, reactions: {} };
-      parent.replies.push(reply);
+      thread.replies.push(reply);
       writeJson(file, comments);
       return json(res, 200, reply);
     }
@@ -400,10 +470,11 @@ const server = http.createServer(async (req, res) => {
     if (!slug || !parent_id || !text) return json(res, 400, { error: 'invalid slug or missing parent_id/text' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
-    const parent = all.find(c => c.id === parent_id);
+    const parent = all.find(c => c.id === parent_id)
+      || all.find(c => (c.replies || []).some(r => r.id === parent_id));
     if (!parent) return json(res, 404, { error: 'parent_not_found' });
     if (!Array.isArray(parent.replies)) parent.replies = [];
-    const agent = agentIdentity(body);
+    const agent = agentIdentity(body, process.env);
     parent.agent_actor = agent.login;
     const reply = {
       id: `r_${Date.now()}`,
