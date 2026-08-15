@@ -8,6 +8,10 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Dark mode no longer recolors reaction emoji.** The page invert was
+  turning ❤️ / 👍 into off-hue bitmaps. Color emoji in chips and the
+  picker are wrapped and inverted back to native colors. Text reactions
+  like LGTM still invert with the page so they stay readable.
 - **Opening one notification no longer marks siblings in the same thread.**
   Mark-read matches the exact comment/reply id, not the thread root.
 - **Clicking Reply no longer collapses the comment.** A hover-opened card

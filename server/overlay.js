@@ -686,9 +686,13 @@
   html[data-tdoc-theme="dark"] img,
   html[data-tdoc-theme="dark"] video,
   html[data-tdoc-theme="dark"] canvas,
-  html[data-tdoc-theme="dark"] iframe {
+  html[data-tdoc-theme="dark"] iframe,
+  html[data-tdoc-theme="dark"] .tdoc-emoji {
     filter: invert(1) hue-rotate(180deg);
   }
+  /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
+     them in .tdoc-emoji so they get the same restore as photos. */
+  .tdoc-emoji { display: inline-block; line-height: 1; }
 
   /* Footer */
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
@@ -1613,6 +1617,13 @@
   // ========== Reactions + comment cards ==========
   const QUICK_EMOJIS = ['👍', '❤️', '🔥', '🎉', '😂', '🤔', '👀', '🚀', '✅', '❌', '❓', '❗'];
   const QUICK_TEXT_REACTIONS = ['LGTM'];
+  // Text reactions (LGTM) must invert with the page so they stay readable.
+  // Color emoji are bitmaps — wrap them so dark mode can restore native colors.
+  function renderReactionGlyph(s) {
+    const safe = escapeHtml(s);
+    if (QUICK_TEXT_REACTIONS.includes(s)) return safe;
+    return `<span class="tdoc-emoji">${safe}</span>`;
+  }
   const REACT_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="19" y1="6" x2="19" y2="10"/><line x1="21" y1="8" x2="17" y2="8"/></svg>`;
 
   // Known coding-agent runtimes → brand mark. Honor an explicit avatar_url
@@ -1662,7 +1673,7 @@
       const mine = users.includes(me);
       const hasAgent = users.some(u => u === 'tdoc-agent' || /agent|codex|claude/i.test(u));
       const cls = [`tdoc-react-chip`, mine ? 'mine' : '', hasAgent ? 'agent' : ''].filter(Boolean).join(' ');
-      return `<span class="${cls}" data-emoji="${escapeHtml(emoji)}" data-target-id="${escapeHtml(target.id)}" data-users="${users.map(escapeHtml).join('\n')}">${escapeHtml(emoji)} ${users.length}</span>`;
+      return `<span class="${cls}" data-emoji="${escapeHtml(emoji)}" data-target-id="${escapeHtml(target.id)}" data-users="${users.map(escapeHtml).join('\n')}">${renderReactionGlyph(emoji)} ${users.length}</span>`;
     }).join('');
     return `<div class="tdoc-reactions" data-target-id="${escapeHtml(target.id)}">${chips}<button class="tdoc-react-add" data-target-id="${escapeHtml(target.id)}" title="Add reaction" aria-label="Add reaction">${REACT_ICON_SVG}</button></div>`;
   }
@@ -1926,7 +1937,7 @@
     emojiPicker = document.createElement('div');
     emojiPicker.className = 'tdoc-emoji-picker';
     emojiPicker.innerHTML =
-      QUICK_EMOJIS.map(e => `<button data-emoji="${e}">${e}</button>`).join('') +
+      QUICK_EMOJIS.map(e => `<button data-emoji="${e}">${renderReactionGlyph(e)}</button>`).join('') +
       QUICK_TEXT_REACTIONS.map(t => `<button class="tdoc-emoji-text" data-emoji="${t}">${t}</button>`).join('');
     document.body.appendChild(emojiPicker);
     const r = anchorBtn.getBoundingClientRect();
