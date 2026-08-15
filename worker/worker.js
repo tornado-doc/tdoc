@@ -1012,7 +1012,11 @@ function landingHtml() {
 // computed or emitted here (gate: response HTML must not contain
 // `allowed_users` — there is nothing here that could).
 async function indexHtml(env, session) {
-  // List all `meta:` keys.
+  // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
+  // comment logs here — that was N serial Durable-Object + R2 round trips
+  // per page load (the HTML bodies were never downloaded, but the comment
+  // event log for every slug was). Comment counts for the delete confirm
+  // load lazily on click via GET /api/comments.
   let list = [];
   let cursor;
   do {
@@ -1022,42 +1026,28 @@ async function indexHtml(env, session) {
     if (r.list_complete) break;
   } while (cursor);
 
-  const rows = [];
-  for (const k of list) {
+  const docs = await Promise.all(list.map(async (k) => {
     const slug = k.name.slice('meta:'.length);
     const metaRaw = await env.META.get(k.name);
     let meta = {};
     try { meta = JSON.parse(metaRaw || '{}'); } catch {}
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
-    // Only list docs whose latest version actually exists in R2 — otherwise
-    // the index advertises 404s. (We hit this when R2 writes silently failed
-    // while KV meta updates succeeded; defense in depth.)
-    const exists = await env.DOCS.head(`docs/${slug}/v${latest}/index.html`);
-    if (!exists) continue;
-    // Honest delete-confirm copy needs a real comment count (JUL-36) — same
-    // fold used by the doc-view route's ownerManage data.
-    let commentCount = 0;
-    try {
-      const list = await readComments(env, slug);
-      ensureMigrated(list);
-      for (const c of historyList(list)) {
-        commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
-      }
-    } catch {}
     const versionCount = Array.isArray(meta.versions) && meta.versions.length ? meta.versions.length : 1;
-    rows.push(`<div class="doc-row">
+    return { slug, title: meta.title || slug, latest, versionCount };
+  }));
+
+  const rows = docs.map(({ slug, title, latest, versionCount }) => `<div class="doc-row">
       <div class="doc-info">
-        <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(meta.title || slug)}</a>
+        <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(title)}</a>
         <div class="doc-meta">${escapeHtml(slug)} · v${latest}</div>
       </div>
       <div class="row-actions">
         <button class="row-menu-btn" aria-label="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>
         <div class="row-menu" hidden>
-          <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(meta.title || slug)}" data-versions="${versionCount}" data-comments="${commentCount}">Delete…</button>
+          <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}" data-versions="${versionCount}">Delete…</button>
         </div>
       </div>
     </div>`);
-  }
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
 <style>
@@ -1166,13 +1156,26 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   // page 302s away for anyone else), so the session cookie alone authorizes
   // DELETE /api/doc (authorizeOwnerMutation in worker.js). Plain same-origin
   // fetch sends the cookie automatically; no Authorization header needed.
+  async function countComments(slug) {
+    try {
+      const r = await fetch('/api/comments?slug=' + encodeURIComponent(slug) + '&version=all', { credentials: 'same-origin' });
+      if (!r.ok) return 0;
+      const list = await r.json();
+      if (!Array.isArray(list)) return 0;
+      let n = 0;
+      for (const c of list) n += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+      return n;
+    } catch { return 0; }
+  }
   document.querySelectorAll('.row-delete').forEach((button) => {
     button.addEventListener('click', async () => {
       closeMenus(null);
       const slug = button.dataset.slug;
       const title = button.dataset.title || slug;
       const versions = button.dataset.versions || '1';
-      const comments = button.dataset.comments || '0';
+      say('Checking ' + slug + '…');
+      const comments = await countComments(slug);
+      say('');
       const proceed = await showConfirm({
         title: 'Delete "' + title + '"?',
         body: 'This permanently removes <b>' + versions + ' version(s)</b> and <b>' + comments +

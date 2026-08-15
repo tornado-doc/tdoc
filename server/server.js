@@ -278,14 +278,11 @@ function indexPage() {
     const meta = readJson(path.join(ROOT, slug, 'meta.json'), { title: slug, versions: [] });
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
     const versionCount = Array.isArray(meta.versions) && meta.versions.length ? meta.versions.length : 1;
-    const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
-    const open = comments.filter(c => c.status === 'open').length;
     return `<tr>
       <td><a href="/d/${encodeURIComponent(slug)}/v/${latest}">${escHtml(meta.title || slug)}</a></td>
       <td>${escHtml(slug)}</td>
       <td>v${latest}</td>
-      <td>${open ? `<b>${open} open</b>` : '—'}</td>
-      <td><button class="del" data-slug="${escHtml(slug)}" data-versions="${versionCount}" data-comments="${comments.length}">Delete</button></td>
+      <td><button class="del" data-slug="${escHtml(slug)}" data-versions="${versionCount}">Delete</button></td>
     </tr>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
@@ -320,7 +317,7 @@ function indexPage() {
 </style></head><body>
 <h1>tdoc</h1><p class="sub">Prompt-native documents.</p>
 ${slugs.length === 0 ? '<p class="empty">No docs yet. Try <code>/tdoc new &lt;prompt&gt;</code>.</p>' :
-  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th>Comments</th><th></th></tr></thead><tbody>${rows}</tbody></table>`}
+  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th></th></tr></thead><tbody>${rows}</tbody></table>`}
 <script>
 function showConfirm({ title, body, confirmLabel, danger }) {
   return new Promise((resolve) => {
@@ -348,10 +345,20 @@ document.addEventListener('click', async (e) => {
   const b = e.target.closest('.del');
   if (!b) return;
   const slug = b.dataset.slug;
+  let comments = 0;
+  try {
+    const r = await fetch('/api/comments?slug=' + encodeURIComponent(slug));
+    if (r.ok) {
+      const list = await r.json();
+      if (Array.isArray(list)) {
+        for (const c of list) comments += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+      }
+    }
+  } catch {}
   // Irreversible: name exactly what disappears before acting.
   const proceed = await showConfirm({
     title: 'Delete "' + slug + '"?',
-    body: 'This permanently removes <b>' + b.dataset.versions + ' version(s)</b> and <b>' + b.dataset.comments +
+    body: 'This permanently removes <b>' + b.dataset.versions + ' version(s)</b> and <b>' + comments +
       ' comment(s)</b> — the local copy AND the published copy (if any). No undo.',
     confirmLabel: 'Delete',
     danger: true,

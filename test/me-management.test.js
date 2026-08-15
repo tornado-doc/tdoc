@@ -79,7 +79,17 @@ t('/me still uses the styled confirm modal, never native confirm()', () => {
   const stripped = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
   assert(!nativeConfirmCall.test(stripped), '/me must not call the native confirm()');
   assert(index.includes('showConfirm('), '/me must use the styled showConfirm() modal');
-  assert(index.includes('dataset.versions'), 'delete confirm copy should be built from data-versions/data-comments (honest N/M copy)');
+  assert(index.includes('dataset.versions'), 'delete confirm copy should include version count from meta');
+  assert(index.includes("'/api/comments?slug='"), 'comment count for delete confirm must load lazily, not at catalog render');
+});
+
+t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
+  // The slow /me load: N serial readComments (full event-log fold) + N R2 HEADs
+  // just to paint titles. Catalog reads KV meta only; comment counts wait until
+  // Delete is clicked.
+  assert(!index.includes('readComments('), '/me must not call readComments while rendering the catalog');
+  assert(!index.includes('DOCS.head'), '/me must not HEAD R2 objects while rendering the catalog');
+  assert(index.includes('Promise.all'), '/me should fetch meta rows in parallel');
 });
 
 t('/me does not introduce a bespoke cookie-only admin-auth path', () => {
