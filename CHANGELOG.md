@@ -25,6 +25,9 @@ file and `.claude-plugin/plugin.json`.
   New top-level comments notify the doc owner; replies notify only the
   direct parent (Reddit); reactions notify the item author. Same-thread
   events collapse to one unread row. `#118`.
+- **Notification badge and panel.** The profile chip shows unread count;
+  Notifications in the menu opens the last 20 rows. Clicking a row (or the
+  comment in the doc) marks it read and opens that comment. `#118`.
 
 - **Nested replies.** You can reply to a reply (and to that reply), the way
   Reddit and Hacker News do. Each node in the thread has its own Reply.
