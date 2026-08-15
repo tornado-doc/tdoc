@@ -83,6 +83,7 @@ file and `.claude-plugin/plugin.json`.
   updates the dot and the doc without a manual refresh. Clicking a row
   (or the comment in the doc) marks it read and opens that comment. `#118`.
 - **Dark mode switch in the top bar.** One icon in the menu bar flips light/dark via a page invert (so author colors, artifacts, and replies flip together). After you switch, the choice is stored in `localStorage` on that host and restored on later visits. Default stays light until you switch. `#120`.
+- **Tornado Dog landing page.** A one-screen tdoc (`landing/tornado-dog`) that names the product and links to GitHub / install. Draft for later publish on tdoc.dev. `#127`.
 - **Nested replies.** You can reply to a reply (and to that reply), the way
   Reddit and Hacker News do. Each node in the thread has its own Reply.
 - **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /
