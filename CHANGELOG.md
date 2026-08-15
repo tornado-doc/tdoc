@@ -83,7 +83,15 @@ file and `.claude-plugin/plugin.json`.
   updates the dot and the doc without a manual refresh. Clicking a row
   (or the comment in the doc) marks it read and opens that comment. `#118`.
 - **Dark mode switch in the top bar.** One icon in the menu bar flips light/dark via a page invert (so author colors, artifacts, and replies flip together). After you switch, the choice is stored in `localStorage` on that host and restored on later visits. Default stays light until you switch. `#120`.
-- **tornado-doc landing page.** A one-screen tdoc (`landing/tornado-doc`) that names the product and links to GitHub / install. Draft for later publish on tdoc.dev. `#127`.
+- **tdoc.dev's homepage is itself a tdoc.** `/` renders the `tornado-doc`
+  landing doc (`landing/tornado-doc`) at its latest version instead of a
+  hardcoded page, so the homepage is authored, reviewed, and versioned through
+  tdoc — and publishing v2 changes what it says without changing the URL that
+  inbound links and search engines point at. The page carries a full SEO head
+  (title, description, canonical, Open Graph, Twitter card) and doubles as the
+  artifact demo: its diagram and install block are commentable like any other
+  tdoc. `/` falls back to the previous neutral page when the landing doc is
+  unpublished or access-gated, so self-hosted workers are unaffected. `#127`.
 - **Nested replies.** You can reply to a reply (and to that reply), the way
   Reddit and Hacker News do. Each node in the thread has its own Reply.
 - **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /

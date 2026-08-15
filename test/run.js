@@ -31,7 +31,7 @@ const OFFLINE = [
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
-  'tornado-dog-landing.test.js', // #127 Tornado Dog landing page
+  'tornado-doc-landing.test.js', // #127 tornado-doc landing page (tdoc.dev /)
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard
   'coverage.test.js',         // migration, bundle inlining, pull-merge, rich fold
