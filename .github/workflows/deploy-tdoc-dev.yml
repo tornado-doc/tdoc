@@ -1,0 +1,97 @@
+name: deploy tdoc.dev
+
+# Hosted-runtime CD for the ONE Worker we operate (custom domain tdoc.dev).
+# Merge to main deploys overlay + worker to that Worker only.
+#
+# This does NOT roll out to BYOK publishers (their own Cloudflare/Vercel apps).
+# Those stay pull-based: /tdoc update --yes or the next tdoc-publish that sees
+# an overlay hash change.
+#
+# Required GitHub secrets (repo Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN  — token with Workers Scripts Edit on the tdoc.dev account
+#   CLOUDFLARE_ACCOUNT_ID — that Cloudflare account id
+#   TDOC_DEV_KV_ID        — META KV namespace id (jq -r .kv_id ~/.tdoc/published.json)
+#   TDOC_DEV_OWNER        — GitHub login that should see /me on tdoc.dev
+#
+# Does not touch TDOC_UPLOAD_TOKEN. That secret stays on the Worker from the
+# original tdoc-publish setup; rotating it here would break CLI uploads.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy tdoc.dev worker
+    if: github.repository == 'tornado-doc/tdoc' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Require tdoc.dev deploy secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TDOC_DEV_KV_ID: ${{ secrets.TDOC_DEV_KV_ID }}
+          TDOC_DEV_OWNER: ${{ secrets.TDOC_DEV_OWNER }}
+        run: |
+          missing=
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          [ -n "$TDOC_DEV_KV_ID" ] || missing="$missing TDOC_DEV_KV_ID"
+          [ -n "$TDOC_DEV_OWNER" ] || missing="$missing TDOC_DEV_OWNER"
+          if [ -n "$missing" ]; then
+            echo "tdoc.dev CD is missing GitHub secrets:$missing" >&2
+            echo "Add them under Settings → Secrets and variables → Actions, then re-run this workflow." >&2
+            exit 1
+          fi
+
+      - name: Materialize wrangler.toml for tdoc.dev
+        env:
+          TDOC_DEV_KV_ID: ${{ secrets.TDOC_DEV_KV_ID }}
+          TDOC_DEV_OWNER: ${{ secrets.TDOC_DEV_OWNER }}
+        run: |
+          sed \
+            -e "s/PLACEHOLDER_KV_ID/${TDOC_DEV_KV_ID}/g" \
+            -e "s/PLACEHOLDER_OWNER/${TDOC_DEV_OWNER}/g" \
+            worker/wrangler.toml.template > worker/wrangler.toml
+
+      - name: Bundle overlay into the worker
+        env:
+          SKILL_DIR: ${{ github.workspace }}
+          OUT_DIR: ${{ github.workspace }}/worker
+          TDOC_GENERATED_BY: tdoc-cd
+          TDOC_SOURCE_SHA: ${{ github.sha }}
+        run: node bin/tdoc-bundle
+
+      - name: Offline test suite
+        run: npm test
+
+      - name: Guard against an unbundled placeholder
+        run: |
+          test -f worker/_worker.bundled.js || { echo "bundle missing" >&2; exit 1; }
+          if grep -q 'const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;' worker/_worker.bundled.js; then
+            echo "bundle still contains the overlay placeholder" >&2
+            exit 1
+          fi
+          if grep -q 'const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";' worker/_worker.bundled.js; then
+            echo "bundle still contains the build-info placeholder" >&2
+            exit 1
+          fi
+
+      - name: Deploy Worker tdoc (tdoc.dev)
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy
+          packageManager: npm
+          wranglerVersion: '4.90.1'
