@@ -704,8 +704,9 @@ const server = http.createServer(async (req, res) => {
       let title = slug;
       try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
       const thread = all.find(c => c.id === comment_id || (c.replies || []).some(r => r.id === comment_id));
+      const V = Number(body.version) || Number(target.version) || Number(thread && thread.version) || 1;
       localDeliver(target.author.login, {
-        kind: 'reaction', slug, version: 1, comment_id, thread_id: thread && thread.id,
+        kind: 'reaction', slug, version: V, comment_id, thread_id: thread && thread.id,
         target_id: comment_id, actor: e2eIdentity(), title, emoji,
       });
     }
