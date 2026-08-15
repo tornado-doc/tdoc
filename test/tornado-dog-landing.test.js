@@ -30,7 +30,14 @@ t('names tornado-doc and tdoc', () => {
 });
 
 t('links to the GitHub repo', () => {
-  assert(html.includes('https://github.com/tornado-doc/tdoc'), 'missing GitHub URL');
+  // Exact href match — not html.includes(url), which CodeQL flags as
+  // incomplete URL-substring sanitization (js/incomplete-url-substring-sanitization).
+  const hrefs = [];
+  const re = /\bhref="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(html))) hrefs.push(m[1]);
+  assert(hrefs.some((href) => href === 'https://github.com/tornado-doc/tdoc'), 'missing GitHub repo href');
+  assert(hrefs.some((href) => href === 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md'), 'missing Install href');
 });
 
 t('stays a short page', () => {
