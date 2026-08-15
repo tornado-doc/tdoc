@@ -41,8 +41,9 @@ function waitForServer(port, timeoutMs = 5000) {
 
 // Resolve the target URL + (if local) a started server handle.
 // Returns { url, stop } — stop() is a no-op when an external/live URL is used.
-async function resolveTarget({ port = 7991 } = {}) {
+async function resolveTarget({ port = 7991, slug = FIXTURE_SLUG, version = 2 } = {}) {
   // Explicit override (live deploy or a custom server) — don't boot anything.
+  // slug/version only apply to the local fixture server; TDOC_TEST_URL wins.
   if (process.env.TDOC_TEST_URL) {
     return { url: process.env.TDOC_TEST_URL, stop: async () => {} };
   }
@@ -54,8 +55,8 @@ async function resolveTarget({ port = 7991 } = {}) {
   });
   await waitForServer(port);
   return {
-    url: `http://127.0.0.1:${port}/d/${FIXTURE_SLUG}/v/2`,
-    olderUrl: `http://127.0.0.1:${port}/d/${FIXTURE_SLUG}/v/1`,
+    url: `http://127.0.0.1:${port}/d/${slug}/v/${version}`,
+    olderUrl: `http://127.0.0.1:${port}/d/${slug}/v/1`,
     stop: async () => { try { child.kill('SIGTERM'); } catch {} },
   };
 }

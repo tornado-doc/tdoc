@@ -8,6 +8,9 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Tables in an overflow wrapper no longer lose the first column.** The
+  default overlay used `margin-left: -14px`, which sits outside the
+  containing block and gets clipped. Tables now sit flush. `#79`.
 - **Opening one notification no longer marks siblings in the same thread.**
   Mark-read matches the exact comment/reply id, not the thread root.
 - **Clicking Reply no longer collapses the comment.** A hover-opened card

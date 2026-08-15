@@ -52,6 +52,7 @@ const GATED = [
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright
   'csp-xss.test.js',     // playwright: author <script>/onclick blocked, overlay still works
+  'table-clip.test.js',  // playwright — table not clipped in overflow wrapper
 ];
 
 const runAll = process.argv.includes('--all');

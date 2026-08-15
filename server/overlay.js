@@ -201,8 +201,11 @@
   :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: var(--td-surface-2); color: var(--td-pre-ink); border: 1px solid var(--td-line); border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
   :where(body pre code) { background: transparent; color: inherit; padding: 0; border-radius: 0; }
   :where(body hr) { border: 0; border-top: 1px solid var(--td-line); margin: 36px 0; }
-  /* Tables: rounded cells with gutters — header tint comes from the theme. */
-  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px -14px; font-size: 16px; }
+  /* Tables: rounded cells with gutters — header tint comes from the theme.
+     No negative left margin: it pulls the table outside its containing block
+     and clips the first column inside overflow:auto wrappers (SKILL.md, and
+     the @media rule below). */
+  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
   :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
   :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
   :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
