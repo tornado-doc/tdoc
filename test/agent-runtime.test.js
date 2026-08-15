@@ -34,13 +34,14 @@ function fn(name) {
 const box = {};
 vm.createContext(box);
 vm.runInContext([
+  fn('isAnthropicCompanyMark'),
   fn('logoForAgentLogin'),
   fn('isGenericAgentLogin'),
   fn('detectAgentRuntime'),
   fn('agentIdentity'),
 ].join('\n\n'), box);
 
-const { logoForAgentLogin, isGenericAgentLogin, detectAgentRuntime, agentIdentity } = box;
+const { isAnthropicCompanyMark, logoForAgentLogin, isGenericAgentLogin, detectAgentRuntime, agentIdentity } = box;
 
 console.log('agent-runtime (auto-detect host logos)');
 
@@ -102,6 +103,16 @@ t('logoForAgentLogin maps each product, Claude is not Anthropic', () => {
   assert(logoForAgentLogin('cursor').includes('cursor'));
   assert(logoForAgentLogin('gemini').includes('gemini'));
   assert(logoForAgentLogin('tdoc-agent') == null);
+});
+
+t('agentIdentity drops a stored Anthropic company mark', () => {
+  assert(isAnthropicCompanyMark('https://github.com/anthropics.png'));
+  const a = agentIdentity({
+    agent_login: 'claude',
+    agent_avatar_url: 'https://github.com/anthropics.png',
+  }, {});
+  assert(a.login === 'claude', JSON.stringify(a));
+  assert(a.avatar_url === 'https://cdn.simpleicons.org/claude/d97757', a.avatar_url);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -79,6 +79,9 @@ const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
 // The emoji set the agent uses as a verdict marker — used by the per-version
 // fold to strip a stale verdict off snapshots where the comment reads 'open'.
 const AGENT_VERDICT_EMOJI = new Set(Object.values(AGENT_STATUS_EMOJI));
+function isAnthropicCompanyMark(url) {
+  return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+}
 function logoForAgentLogin(login) {
   const key = String(login || '').toLowerCase();
   if (!key) return null;
@@ -145,6 +148,7 @@ function agentIdentity(body = {}, env = {}) {
   let avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
     ? body.agent_avatar_url
     : null;
+  if (isAnthropicCompanyMark(avatar)) avatar = null;
   if (!avatar) avatar = logoForAgentLogin(login);
   return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
 }

@@ -1360,14 +1360,21 @@
 
   // Known coding-agent runtimes → brand mark. Honor an explicit avatar_url
   // first; otherwise map login/name. Unknown agents keep the ⚡ badge.
+  // Never show github.com/anthropics.png — that is Anthropic's "AI" wordmark,
+  // not Claude's product star.
+  function isAnthropicCompanyMark(url) {
+    return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+  }
   function agentLogoUrl(author) {
-    if (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url)) {
-      return author.avatar_url;
-    }
+    const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))
+      ? author.avatar_url : null;
     const key = String((author && (author.login || author.name)) || '').toLowerCase();
+    if (key.includes('claude') || key.includes('anthropic') || isAnthropicCompanyMark(stored)) {
+      return 'https://cdn.simpleicons.org/claude/d97757';
+    }
+    if (stored) return stored;
     if (!key) return null;
     if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
-    if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
     if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
       return 'https://github.com/openai.png';
     }

@@ -41,8 +41,8 @@ const box = { URL };
 vm.createContext(box);
 vm.runInContext([
   'escapeHtml', 'normalizeNeedle', 'normalizeContext', 'normalizeQuery',
-  'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl', 'agentLogoUrl',
-  'childrenOf',
+  'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl',
+  'isAnthropicCompanyMark', 'agentLogoUrl', 'childrenOf',
 ].map(sliceFn).join('\n\n'), box);
 const { escapeHtml, normalizeNeedle, normalizeContext, normalizeQuery,
         commonPrefixLen, commonSuffixLen, isGithubHttpsUrl, agentLogoUrl,
@@ -120,6 +120,14 @@ t('agentLogoUrl maps grok/claude/codex/cursor/gemini logins to product marks', (
 });
 t('agentLogoUrl prefers an explicit https avatar_url', () => {
   assert(agentLogoUrl({ login: 'grok', avatar_url: 'https://example.com/me.png' }) === 'https://example.com/me.png');
+});
+t('agentLogoUrl never shows the Anthropic company AI mark for Claude', () => {
+  const star = 'https://cdn.simpleicons.org/claude/d97757';
+  const company = 'https://github.com/anthropics.png';
+  assert(agentLogoUrl({ login: 'claude', avatar_url: company }) === star, 'stored company mark ignored');
+  assert(agentLogoUrl({ login: 'claude-code', avatar_url: company }) === star, 'claude-code');
+  assert(agentLogoUrl({ login: 'tdoc-agent', avatar_url: company }) === star, 'orphan company mark remapped');
+  assert(!String(agentLogoUrl({ login: 'claude' }) || '').includes('anthropics'), 'mapped url is not anthropics');
 });
 t('childrenOf nests replies under their immediate parent', () => {
   const replies = [
