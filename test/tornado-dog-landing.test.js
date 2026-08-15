@@ -1,4 +1,4 @@
-// Tornado Dog landing page (#127). Keep this a one-screen tdoc, not a site.
+// tornado-doc landing page (#127). Keep this a one-screen tdoc, not a site.
 const fs = require('fs');
 const path = require('path');
 
@@ -8,12 +8,12 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-const htmlPath = path.join(__dirname, '..', 'landing', 'tornado-dog', 'v1', 'index.html');
-const metaPath = path.join(__dirname, '..', 'landing', 'tornado-dog', 'meta.json');
+const htmlPath = path.join(__dirname, '..', 'landing', 'tornado-doc', 'v1', 'index.html');
+const metaPath = path.join(__dirname, '..', 'landing', 'tornado-doc', 'meta.json');
 const html = fs.readFileSync(htmlPath, 'utf8');
 const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
 
-console.log('tornado-dog landing (#127)');
+console.log('tornado-doc landing (#127)');
 
 t('is a tdoc-shaped page', () => {
   assert(html.includes('<div class="wrap">'), 'missing .wrap');
@@ -21,11 +21,12 @@ t('is a tdoc-shaped page', () => {
   assert(/body\s*\{\s*background:\s*#fff/.test(html), 'missing body background');
 });
 
-t('names Tornado Dog and tdoc', () => {
-  assert(html.includes('<h1>Tornado Dog</h1>'), 'missing h1 Tornado Dog');
+t('names tornado-doc and tdoc', () => {
+  assert(html.includes('<h1>tornado-doc</h1>'), 'missing h1 tornado-doc');
+  assert(!html.includes('Tornado Dog'), 'old Tornado Dog name still present');
   assert(html.includes('tdoc'), 'does not mention tdoc');
-  assert(meta.title === 'Tornado Dog', `meta title was ${meta.title}`);
-  assert(meta.slug === 'tornado-dog', `meta slug was ${meta.slug}`);
+  assert(meta.title === 'tornado-doc', `meta title was ${meta.title}`);
+  assert(meta.slug === 'tornado-doc', `meta slug was ${meta.slug}`);
 });
 
 t('links to the GitHub repo', () => {
