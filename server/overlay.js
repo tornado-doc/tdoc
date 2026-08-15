@@ -299,14 +299,8 @@
   .tdoc-chip .name { font-size: 13px; font-weight: 500; }
   .tdoc-chip.signin { padding: 7px 14px; background: var(--td-accent); color: #fff; font-weight: 600; }
   .tdoc-chip.signin:hover { background: var(--td-accent-hover); }
-  .tdoc-unread-badge { position: absolute; top: -4px; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: #e11d48; color: #fff; font: 700 10px/16px system-ui, sans-serif; text-align: center; }
-  .tdoc-inbox-count { color: #888; font-size: 12px; }
-  .tdoc-inbox-row { display: block; width: 100%; text-align: left; padding: 10px 8px; border: none; border-bottom: 1px solid #f0f1f4; background: #fff; cursor: pointer; font: 13px/1.4 system-ui, sans-serif; }
-  .tdoc-inbox-row.unread { background: #f4f7ff; }
-  .tdoc-inbox-row:hover { background: #f0f1f4; }
-  .tdoc-inbox-row .who { font-weight: 600; color: #111; }
-  .tdoc-inbox-row .meta { font-size: 12px; color: #888; margin-top: 2px; }
-  .tdoc-inbox-empty { padding: 20px 8px; color: #888; font-size: 13px; text-align: center; }
+  /* Only new inbox chrome: a red dot on the existing identity chip. */
+  .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; border: 1.5px solid #fff; pointer-events: none; }
 
   /* Comment cards */
   #tdoc-comment-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; z-index: 999996; }
@@ -927,6 +921,10 @@
     if (!n) return '';
     return n > 99 ? '99+' : String(n);
   }
+  function inboxMenuLabel(n) {
+    const txt = inboxBadgeText(n);
+    return txt ? `Notifications (${txt})` : 'Notifications';
+  }
   function inboxRowLabel(row) {
     const n = row.count || 1;
     const title = row.title || row.slug || 'a doc';
@@ -934,6 +932,12 @@
     if (row.kind === 'reply') return n > 1 ? `${n} new replies to your comment` : `New reply to your comment`;
     if (row.kind === 'reaction') return n > 1 ? `${n} people reacted to your comment` : `Someone reacted to your comment`;
     return 'Notification';
+  }
+  function paintInboxChrome() {
+    const dot = document.getElementById('tdoc-inbox-dot');
+    if (dot) dot.hidden = !inboxUnreadN;
+    const menu = document.getElementById('tdoc-inbox-open');
+    if (menu) menu.textContent = inboxMenuLabel(inboxUnreadN);
   }
   async function refreshInboxBadge() {
     if (!identity) return;
@@ -943,14 +947,7 @@
       const body = await r.json();
       inboxUnreadN = Number(body.unread) || 0;
     } catch { return; }
-    const badge = document.getElementById('tdoc-inbox-badge');
-    const menuN = document.getElementById('tdoc-inbox-menu-count');
-    const txt = inboxBadgeText(inboxUnreadN);
-    if (badge) {
-      badge.textContent = txt;
-      badge.hidden = !txt;
-    }
-    if (menuN) menuN.textContent = txt ? `(${txt})` : '';
+    paintInboxChrome();
   }
   async function markInboxSeen(commentId) {
     if (!identity || !commentId) return;
@@ -987,10 +984,10 @@
     bg.className = 'tdoc-modal-bg';
     bg.id = 'tdoc-aux-modal';
     bg.innerHTML = `
-      <div class="tdoc-modal" style="max-width:420px">
+      <div class="tdoc-modal">
         <h3>Notifications</h3>
-        <div id="tdoc-inbox-list"><p class="tdoc-inbox-empty">Loading…</p></div>
-        <div class="actions"><button id="tdoc-inbox-more" hidden>Load more</button><button id="tdoc-inbox-close">Close</button></div>
+        <div id="tdoc-inbox-list"><p class="muted">Loading…</p></div>
+        <div class="actions"><button type="button" id="tdoc-inbox-more" hidden>Load more</button><button type="button" id="tdoc-inbox-close">Close</button></div>
       </div>`;
     document.body.appendChild(bg);
     document.getElementById('tdoc-inbox-close').onclick = closeAuxModal;
@@ -1000,21 +997,26 @@
       const more = document.getElementById('tdoc-inbox-more');
       try {
         const r = await fetch(`/api/notifications?offset=${offset}`, { credentials: 'same-origin' });
-        if (!r.ok) { listEl.innerHTML = '<p class="tdoc-inbox-empty">Could not load notifications.</p>'; return; }
+        if (!r.ok) { listEl.innerHTML = '<p class="muted">Could not load notifications.</p>'; return; }
         const body = await r.json();
         const items = Array.isArray(body.items) ? body.items : [];
         if (offset === 0 && !items.length) {
-          listEl.innerHTML = '<p class="tdoc-inbox-empty">No notifications yet.</p>';
+          listEl.innerHTML = '<p class="muted">No notifications yet.</p>';
         } else {
-          const html = items.map(row => `
-            <button type="button" class="tdoc-inbox-row${row.read ? '' : ' unread'}" data-id="${escapeHtml(row.id)}">
-              <div class="who">${escapeHtml(inboxRowLabel(row))}</div>
-              <div class="meta">${escapeHtml((row.actor && row.actor.login) || '')}${row.preview ? ' · ' + escapeHtml(String(row.preview).slice(0, 80)) : ''}</div>
-            </button>`).join('');
+          const html = items.map(row => {
+            const who = (row.actor && row.actor.login) || '';
+            const extra = row.preview ? `${who ? who + ' · ' : ''}${String(row.preview).slice(0, 60)}` : who;
+            const snip = extra ? `${inboxRowLabel(row)} · ${extra}` : inboxRowLabel(row);
+            const cur = row.read ? '' : ' tdoc-cluster-current';
+            return `<div class="tdoc-cluster-row${cur}" role="button" tabindex="0" data-id="${escapeHtml(row.id)}">
+              ${avatarHTML(row.actor, 'tdoc-cluster-anon')}
+              <span class="tdoc-cluster-snip">${escapeHtml(snip)}</span>
+            </div>`;
+          }).join('');
           if (offset === 0) listEl.innerHTML = html;
           else listEl.insertAdjacentHTML('beforeend', html);
           items.forEach(row => {
-            const btn = listEl.querySelector(`.tdoc-inbox-row[data-id="${CSS.escape(row.id)}"]`);
+            const btn = listEl.querySelector(`.tdoc-cluster-row[data-id="${CSS.escape(row.id)}"]`);
             if (!btn) return;
             btn.dataset.slug = row.slug || '';
             btn.dataset.version = String(row.version || 1);
@@ -1022,27 +1024,25 @@
             btn.dataset.thread = row.thread_id || '';
             if (btn._bound) return;
             btn._bound = true;
-            btn.onclick = () => {
+            const go = () => {
               openInboxTarget({
                 slug: btn.dataset.slug, version: btn.dataset.version,
                 comment_id: btn.dataset.comment, thread_id: btn.dataset.thread,
               });
               closeAuxModal();
             };
+            btn.onclick = go;
+            btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
           });
         }
         more.hidden = !body.has_more;
         more.onclick = () => { offset += items.length; paint(); };
         if (typeof body.unread === 'number') {
           inboxUnreadN = body.unread;
-          const badge = document.getElementById('tdoc-inbox-badge');
-          const menuN = document.getElementById('tdoc-inbox-menu-count');
-          const txt = inboxBadgeText(inboxUnreadN);
-          if (badge) { badge.textContent = txt; badge.hidden = !txt; }
-          if (menuN) menuN.textContent = txt ? `(${txt})` : '';
+          paintInboxChrome();
         }
       } catch {
-        listEl.innerHTML = '<p class="tdoc-inbox-empty">Could not load notifications.</p>';
+        listEl.innerHTML = '<p class="muted">Could not load notifications.</p>';
       }
     };
     paint();
@@ -1052,15 +1052,14 @@
     if (!slot) return;
     if (!isPublished && !identity) { slot.innerHTML = ''; return; }
     if (identity) {
-      const txt = inboxBadgeText(inboxUnreadN);
       slot.innerHTML =
         `<div class="tdoc-menu-wrap">
           <button class="tdoc-chip" id="tdoc-me" aria-haspopup="menu" aria-expanded="false">
             <img src="${escapeHtml(identity.avatar_url || '')}" alt=""><span class="name">${escapeHtml(identity.login)}</span>
-            <span class="tdoc-unread-badge" id="tdoc-inbox-badge" ${txt ? '' : 'hidden'}>${escapeHtml(txt)}</span>
+            <span class="tdoc-unread-dot" id="tdoc-inbox-dot" ${inboxUnreadN ? '' : 'hidden'}></span>
           </button>
           <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
-            <button id="tdoc-inbox-open" role="menuitem">Notifications <span class="tdoc-inbox-count" id="tdoc-inbox-menu-count">${txt ? '(' + escapeHtml(txt) + ')' : ''}</span></button>
+            <button id="tdoc-inbox-open" role="menuitem">${escapeHtml(inboxMenuLabel(inboxUnreadN))}</button>
             ${isOwner ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
             <button id="tdoc-signout" role="menuitem">Sign out</button>
           </div>
