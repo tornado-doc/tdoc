@@ -33,6 +33,11 @@ t('applies html[data-tdoc-theme]', () => {
   assert(src.includes('html[data-tdoc-theme="dark"]'), 'no dark CSS');
 });
 
+t('dark mode is a page invert, not a per-color palette', () => {
+  assert(src.includes('invert(1) hue-rotate(180deg)'), 'missing invert transform');
+  assert(!src.includes('--td-ground: #111111'), 'old per-token dark palette came back');
+});
+
 t('default is light — only dark if storage says dark', () => {
   assert(
     /getItem\(THEME_KEY\) === 'dark' \? 'dark' : 'light'/.test(src),

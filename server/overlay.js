@@ -674,73 +674,21 @@
   html[data-tdoc-theme="dark"] .tdoc-theme-icon-moon { display: none; }
   html[data-tdoc-theme="dark"] .tdoc-theme-icon-sun { display: block; }
 
-  /* Dark mode. Tokens flip the default doc template; chrome surfaces that
-     still use literals get explicit overrides. Author CSS on widgets is
-     left alone except body bg/color so agent-authored body { background:#fff }
-     does not pin the page to white. */
+  /* Dark mode: invert the painted page (Dark Reader / "filter" style).
+     One transform hits author CSS, artifacts, replies, and chrome — no
+     per-color list. hue-rotate keeps blues roughly blue. Photos / video /
+     canvas / iframes are inverted back so they don't look like negatives. */
   html[data-tdoc-theme="dark"] {
     color-scheme: dark;
-    --td-ground: #111111;
-    --td-ink: #e8e8e6;
-    --td-heading: #f4f4f2;
-    --td-muted: #a3a29c;
-    --td-line: #2c2c2a;
-    --td-surface: #1c1c1b;
-    --td-surface-2: #181817;
-    --td-pre-ink: #e8e8e6;
-    --td-th-bg: #242422;
-    --td-th-ink: #f4f4f2;
-    --td-check: #e8e8e6;
-    --td-selection: #2a3f6e;
-    --td-quote: #3a3a36;
-    --td-accent-tint: #1a2744;
-    --td-accent-wash: rgba(22,82,240,0.18);
-    --td-danger-tint: #3a1816;
+    background: #fff;
+    filter: invert(1) hue-rotate(180deg);
   }
-  html[data-tdoc-theme="dark"] body { background: var(--td-ground); color: var(--td-ink); }
-  html[data-tdoc-theme="dark"] .tdoc-bar { background: #161616; color: #e8e8e6; border-bottom-color: #2c2c2a; box-shadow: none; }
-  html[data-tdoc-theme="dark"] .tdoc-bar .crumb { color: #b0b0aa; }
-  html[data-tdoc-theme="dark"] .tdoc-bar .crumb-sep { color: #555; }
-  html[data-tdoc-theme="dark"] .tdoc-bar .doc-title { color: #f4f4f2; }
-  html[data-tdoc-theme="dark"] .tdoc-bar button { color: #b0b0aa; }
-  html[data-tdoc-theme="dark"] .tdoc-bar button:hover { background: #2a2a28; color: #f4f4f2; }
-  html[data-tdoc-theme="dark"] .tdoc-version-toggle { background: #2a2a28 !important; color: #f4f4f2 !important; }
-  html[data-tdoc-theme="dark"] .tdoc-version-toggle:hover { background: #333331 !important; }
-  html[data-tdoc-theme="dark"] .tdoc-menu,
-  html[data-tdoc-theme="dark"] .tdoc-secondary-menu,
-  html[data-tdoc-theme="dark"] .tdoc-version-menu { background: #1c1c1b; border-color: #2c2c2a; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
-  html[data-tdoc-theme="dark"] .tdoc-menu button,
-  html[data-tdoc-theme="dark"] .tdoc-secondary-menu button,
-  html[data-tdoc-theme="dark"] .tdoc-version-menu button { color: #e8e8e6; }
-  html[data-tdoc-theme="dark"] .tdoc-menu button:hover,
-  html[data-tdoc-theme="dark"] .tdoc-secondary-menu button:hover,
-  html[data-tdoc-theme="dark"] .tdoc-version-menu button:hover { background: #2a2a28; }
-  html[data-tdoc-theme="dark"] .tdoc-chip { background: #2a2a28; color: #f4f4f2; }
-  html[data-tdoc-theme="dark"] .tdoc-chip:hover { background: #333331; }
-  html[data-tdoc-theme="dark"] .tdoc-margin-comment,
-  html[data-tdoc-theme="dark"] .tdoc-cluster-pop,
-  html[data-tdoc-theme="dark"] .tdoc-emoji-picker { background: #1c1c1b; border-color: #2c2c2a; color: #e8e8e6; }
-  html[data-tdoc-theme="dark"] .tdoc-margin-comment .author .login,
-  html[data-tdoc-theme="dark"] .tdoc-margin-comment .text,
-  html[data-tdoc-theme="dark"] .tdoc-reply .author .login { color: #f4f4f2; }
-  html[data-tdoc-theme="dark"] .tdoc-agent-author img { background: #1c1c1b; }
-  html[data-tdoc-theme="dark"] .tdoc-pin { background: #1c1c1b; border-color: #3a3a38; }
-  html[data-tdoc-theme="dark"] .tdoc-modal { background: #1c1c1b; color: #e8e8e6; }
-  html[data-tdoc-theme="dark"] .tdoc-modal p,
-  html[data-tdoc-theme="dark"] .tdoc-modal .step { color: #b0b0aa; }
-  html[data-tdoc-theme="dark"] .tdoc-modal button { background: #1c1c1b; color: #e8e8e6; border-color: #3a3a38; }
-  html[data-tdoc-theme="dark"] .tdoc-modal button.primary { background: var(--td-accent); border-color: var(--td-accent); color: #fff; }
-  html[data-tdoc-theme="dark"] .tdoc-modal input[type="password"],
-  html[data-tdoc-theme="dark"] .tdoc-modal input[type="text"] { background: #161616; color: #e8e8e6; border-color: #3a3a38; }
-  html[data-tdoc-theme="dark"] .tdoc-modal code { background: #2a2a28; }
-  html[data-tdoc-theme="dark"] .tdoc-modal .divider { border-top-color: #2c2c2a; }
-  html[data-tdoc-theme="dark"] .tdoc-seg button { background: #1c1c1b; color: #b0b0aa; }
-  html[data-tdoc-theme="dark"] body.tdoc-narrow #tdoc-comment-layer { background: #161616; border-top-color: #2c2c2a; }
-  html[data-tdoc-theme="dark"] .tdoc-footer { color: #888; border-top-color: #2c2c2a; }
-  html[data-tdoc-theme="dark"] .tdoc-footer a { color: #a3a29c; }
-  html[data-tdoc-theme="dark"] .tdoc-comment-pill { background: rgba(28,28,27,0.96) !important; border-color: #3a3a38 !important; }
-  html[data-tdoc-theme="dark"] .tdoc-oldver-strip { background: #2a2414; color: #e6d7a8; border-bottom-color: #3d3520; }
-  html[data-tdoc-theme="dark"] .tdoc-oldver-strip a { color: #f0d78c; }
+  html[data-tdoc-theme="dark"] img,
+  html[data-tdoc-theme="dark"] video,
+  html[data-tdoc-theme="dark"] canvas,
+  html[data-tdoc-theme="dark"] iframe {
+    filter: invert(1) hue-rotate(180deg);
+  }
 
   /* Footer */
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
