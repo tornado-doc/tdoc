@@ -59,6 +59,34 @@
     document.head.appendChild(m);
   }
 
+  // Theme: light until the user flips the bar switch. After a switch, persist
+  // on this origin via localStorage and restore on later visits. No OS follow.
+  const THEME_KEY = 'tdoc-theme';
+  function readStoredTheme() {
+    try {
+      return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+    } catch (e) {
+      return 'light';
+    }
+  }
+  function currentTheme() {
+    return document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light';
+  }
+  function persistTheme(theme) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* private mode */ }
+  }
+  function paintTheme(theme) {
+    document.documentElement.setAttribute('data-tdoc-theme', theme);
+    document.documentElement.style.colorScheme = theme;
+    const btn = document.getElementById('tdoc-theme-btn');
+    if (!btn) return;
+    const dark = theme === 'dark';
+    btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.title = dark ? 'Light mode' : 'Dark mode';
+  }
+  paintTheme(readStoredTheme());
+
   // ========== UI selector registry ==========
   // One source of truth for "is this part of the tdoc overlay UI?".
   //   UI_CONTAINERS — top-level overlay regions: bar, popups, comment column,
@@ -640,6 +668,80 @@
     .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 5; }
   }
 
+  /* Theme toggle — icon-only, lives in the bar's right cluster. */
+  .tdoc-theme-btn { flex-shrink: 0; }
+  .tdoc-theme-icon-sun { display: none; }
+  html[data-tdoc-theme="dark"] .tdoc-theme-icon-moon { display: none; }
+  html[data-tdoc-theme="dark"] .tdoc-theme-icon-sun { display: block; }
+
+  /* Dark mode. Tokens flip the default doc template; chrome surfaces that
+     still use literals get explicit overrides. Author CSS on widgets is
+     left alone except body bg/color so agent-authored body { background:#fff }
+     does not pin the page to white. */
+  html[data-tdoc-theme="dark"] {
+    color-scheme: dark;
+    --td-ground: #111111;
+    --td-ink: #e8e8e6;
+    --td-heading: #f4f4f2;
+    --td-muted: #a3a29c;
+    --td-line: #2c2c2a;
+    --td-surface: #1c1c1b;
+    --td-surface-2: #181817;
+    --td-pre-ink: #e8e8e6;
+    --td-th-bg: #242422;
+    --td-th-ink: #f4f4f2;
+    --td-check: #e8e8e6;
+    --td-selection: #2a3f6e;
+    --td-quote: #3a3a36;
+    --td-accent-tint: #1a2744;
+    --td-accent-wash: rgba(22,82,240,0.18);
+    --td-danger-tint: #3a1816;
+  }
+  html[data-tdoc-theme="dark"] body { background: var(--td-ground); color: var(--td-ink); }
+  html[data-tdoc-theme="dark"] .tdoc-bar { background: #161616; color: #e8e8e6; border-bottom-color: #2c2c2a; box-shadow: none; }
+  html[data-tdoc-theme="dark"] .tdoc-bar .crumb { color: #b0b0aa; }
+  html[data-tdoc-theme="dark"] .tdoc-bar .crumb-sep { color: #555; }
+  html[data-tdoc-theme="dark"] .tdoc-bar .doc-title { color: #f4f4f2; }
+  html[data-tdoc-theme="dark"] .tdoc-bar button { color: #b0b0aa; }
+  html[data-tdoc-theme="dark"] .tdoc-bar button:hover { background: #2a2a28; color: #f4f4f2; }
+  html[data-tdoc-theme="dark"] .tdoc-version-toggle { background: #2a2a28 !important; color: #f4f4f2 !important; }
+  html[data-tdoc-theme="dark"] .tdoc-version-toggle:hover { background: #333331 !important; }
+  html[data-tdoc-theme="dark"] .tdoc-menu,
+  html[data-tdoc-theme="dark"] .tdoc-secondary-menu,
+  html[data-tdoc-theme="dark"] .tdoc-version-menu { background: #1c1c1b; border-color: #2c2c2a; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+  html[data-tdoc-theme="dark"] .tdoc-menu button,
+  html[data-tdoc-theme="dark"] .tdoc-secondary-menu button,
+  html[data-tdoc-theme="dark"] .tdoc-version-menu button { color: #e8e8e6; }
+  html[data-tdoc-theme="dark"] .tdoc-menu button:hover,
+  html[data-tdoc-theme="dark"] .tdoc-secondary-menu button:hover,
+  html[data-tdoc-theme="dark"] .tdoc-version-menu button:hover { background: #2a2a28; }
+  html[data-tdoc-theme="dark"] .tdoc-chip { background: #2a2a28; color: #f4f4f2; }
+  html[data-tdoc-theme="dark"] .tdoc-chip:hover { background: #333331; }
+  html[data-tdoc-theme="dark"] .tdoc-margin-comment,
+  html[data-tdoc-theme="dark"] .tdoc-cluster-pop,
+  html[data-tdoc-theme="dark"] .tdoc-emoji-picker { background: #1c1c1b; border-color: #2c2c2a; color: #e8e8e6; }
+  html[data-tdoc-theme="dark"] .tdoc-margin-comment .author .login,
+  html[data-tdoc-theme="dark"] .tdoc-margin-comment .text,
+  html[data-tdoc-theme="dark"] .tdoc-reply .author .login { color: #f4f4f2; }
+  html[data-tdoc-theme="dark"] .tdoc-agent-author img { background: #1c1c1b; }
+  html[data-tdoc-theme="dark"] .tdoc-pin { background: #1c1c1b; border-color: #3a3a38; }
+  html[data-tdoc-theme="dark"] .tdoc-modal { background: #1c1c1b; color: #e8e8e6; }
+  html[data-tdoc-theme="dark"] .tdoc-modal p,
+  html[data-tdoc-theme="dark"] .tdoc-modal .step { color: #b0b0aa; }
+  html[data-tdoc-theme="dark"] .tdoc-modal button { background: #1c1c1b; color: #e8e8e6; border-color: #3a3a38; }
+  html[data-tdoc-theme="dark"] .tdoc-modal button.primary { background: var(--td-accent); border-color: var(--td-accent); color: #fff; }
+  html[data-tdoc-theme="dark"] .tdoc-modal input[type="password"],
+  html[data-tdoc-theme="dark"] .tdoc-modal input[type="text"] { background: #161616; color: #e8e8e6; border-color: #3a3a38; }
+  html[data-tdoc-theme="dark"] .tdoc-modal code { background: #2a2a28; }
+  html[data-tdoc-theme="dark"] .tdoc-modal .divider { border-top-color: #2c2c2a; }
+  html[data-tdoc-theme="dark"] .tdoc-seg button { background: #1c1c1b; color: #b0b0aa; }
+  html[data-tdoc-theme="dark"] body.tdoc-narrow #tdoc-comment-layer { background: #161616; border-top-color: #2c2c2a; }
+  html[data-tdoc-theme="dark"] .tdoc-footer { color: #888; border-top-color: #2c2c2a; }
+  html[data-tdoc-theme="dark"] .tdoc-footer a { color: #a3a29c; }
+  html[data-tdoc-theme="dark"] .tdoc-comment-pill { background: rgba(28,28,27,0.96) !important; border-color: #3a3a38 !important; }
+  html[data-tdoc-theme="dark"] .tdoc-oldver-strip { background: #2a2414; color: #e6d7a8; border-bottom-color: #3d3520; }
+  html[data-tdoc-theme="dark"] .tdoc-oldver-strip a { color: #f0d78c; }
+
   /* Footer */
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
   .tdoc-footer .tdoc-footer-row { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; row-gap: 4px; }
@@ -746,7 +848,14 @@
     ? '<button id="tdoc-fork-btn">Fork</button>'
     : (isFork ? '<button id="tdoc-saveas-btn">Save As New Local Doc</button>' : '');
 
+  const themeBtnHtml = `
+    <button type="button" id="tdoc-theme-btn" class="tdoc-theme-btn" aria-pressed="false" title="Dark mode" aria-label="Switch to dark mode">
+      <svg class="tdoc-theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 7 7 0 0 0 21 14.5z"/></svg>
+      <svg class="tdoc-theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>`;
+
   const rightHtml = `
+    ${themeBtnHtml}
     ${copyMenuHtml}
     <div class="tdoc-menu-wrap">
     </div>
@@ -806,6 +915,13 @@
   // chip menu instead.
   document.getElementById('tdoc-bar-mark').onclick = () =>
     window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
+
+  paintTheme(currentTheme());
+  document.getElementById('tdoc-theme-btn').onclick = () => {
+    const next = currentTheme() === 'dark' ? 'light' : 'dark';
+    persistTheme(next);
+    paintTheme(next);
+  };
 
   // Fork: opens the renderable /fork view in a new tab AND triggers a download
   // (one click, both happen). We use a hidden iframe to fire the download so
