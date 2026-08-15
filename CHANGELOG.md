@@ -34,7 +34,7 @@ file and `.claude-plugin/plugin.json`.
   page polls every 8s so a new comment/reply/reaction
   updates the dot and the doc without a manual refresh. Clicking a row
   (or the comment in the doc) marks it read and opens that comment. `#118`.
-
+- **Dark mode switch in the top bar.** One icon in the menu bar flips light/dark via a page invert (so author colors, artifacts, and replies flip together). After you switch, the choice is stored in `localStorage` on that host and restored on later visits. Default stays light until you switch. `#120`.
 - **Nested replies.** You can reply to a reply (and to that reply), the way
   Reddit and Hacker News do. Each node in the thread has its own Reply.
 - **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /

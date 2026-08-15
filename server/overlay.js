@@ -59,6 +59,34 @@
     document.head.appendChild(m);
   }
 
+  // Theme: light until the user flips the bar switch. After a switch, persist
+  // on this origin via localStorage and restore on later visits. No OS follow.
+  const THEME_KEY = 'tdoc-theme';
+  function readStoredTheme() {
+    try {
+      return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
+    } catch (e) {
+      return 'light';
+    }
+  }
+  function currentTheme() {
+    return document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light';
+  }
+  function persistTheme(theme) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* private mode */ }
+  }
+  function paintTheme(theme) {
+    document.documentElement.setAttribute('data-tdoc-theme', theme);
+    document.documentElement.style.colorScheme = theme;
+    const btn = document.getElementById('tdoc-theme-btn');
+    if (!btn) return;
+    const dark = theme === 'dark';
+    btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.title = dark ? 'Light mode' : 'Dark mode';
+  }
+  paintTheme(readStoredTheme());
+
   // ========== UI selector registry ==========
   // One source of truth for "is this part of the tdoc overlay UI?".
   //   UI_CONTAINERS — top-level overlay regions: bar, popups, comment column,
@@ -640,6 +668,28 @@
     .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 5; }
   }
 
+  /* Theme toggle — icon-only, lives in the bar's right cluster. */
+  .tdoc-theme-btn { flex-shrink: 0; }
+  .tdoc-theme-icon-sun { display: none; }
+  html[data-tdoc-theme="dark"] .tdoc-theme-icon-moon { display: none; }
+  html[data-tdoc-theme="dark"] .tdoc-theme-icon-sun { display: block; }
+
+  /* Dark mode: invert the painted page (Dark Reader / "filter" style).
+     One transform hits author CSS, artifacts, replies, and chrome — no
+     per-color list. hue-rotate keeps blues roughly blue. Photos / video /
+     canvas / iframes are inverted back so they don't look like negatives. */
+  html[data-tdoc-theme="dark"] {
+    color-scheme: dark;
+    background: #fff;
+    filter: invert(1) hue-rotate(180deg);
+  }
+  html[data-tdoc-theme="dark"] img,
+  html[data-tdoc-theme="dark"] video,
+  html[data-tdoc-theme="dark"] canvas,
+  html[data-tdoc-theme="dark"] iframe {
+    filter: invert(1) hue-rotate(180deg);
+  }
+
   /* Footer */
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
   .tdoc-footer .tdoc-footer-row { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; row-gap: 4px; }
@@ -746,7 +796,14 @@
     ? '<button id="tdoc-fork-btn">Fork</button>'
     : (isFork ? '<button id="tdoc-saveas-btn">Save As New Local Doc</button>' : '');
 
+  const themeBtnHtml = `
+    <button type="button" id="tdoc-theme-btn" class="tdoc-theme-btn" aria-pressed="false" title="Dark mode" aria-label="Switch to dark mode">
+      <svg class="tdoc-theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 7 7 0 0 0 21 14.5z"/></svg>
+      <svg class="tdoc-theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>`;
+
   const rightHtml = `
+    ${themeBtnHtml}
     ${copyMenuHtml}
     <div class="tdoc-menu-wrap">
     </div>
@@ -806,6 +863,13 @@
   // chip menu instead.
   document.getElementById('tdoc-bar-mark').onclick = () =>
     window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
+
+  paintTheme(currentTheme());
+  document.getElementById('tdoc-theme-btn').onclick = () => {
+    const next = currentTheme() === 'dark' ? 'light' : 'dark';
+    persistTheme(next);
+    paintTheme(next);
+  };
 
   // Fork: opens the renderable /fork view in a new tab AND triggers a download
   // (one click, both happen). We use a hidden iframe to fire the download so

@@ -55,6 +55,47 @@ async function tPub(name, fn) {
     await page.waitForSelector('.tdoc-bar', { timeout: 5000 });
   });
 
+  await t('Dark mode switch is in the top bar', async () => {
+    const btn = await page.$('#tdoc-theme-btn');
+    if (!btn) throw new Error('no #tdoc-theme-btn');
+    const inBar = await page.$('.tdoc-bar #tdoc-theme-btn');
+    if (!inBar) throw new Error('theme button is not inside .tdoc-bar');
+  });
+
+  await t('Default theme is light and storage is empty until switch', async () => {
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme && theme !== 'light') throw new Error(`expected light, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== null) throw new Error(`storage should be empty before switch, got "${stored}"`);
+  });
+
+  await t('Clicking the switch turns dark and remembers', async () => {
+    await page.click('#tdoc-theme-btn');
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'dark') throw new Error(`expected dark after click, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'dark') throw new Error(`storage should be dark, got "${stored}"`);
+    const pressed = await page.getAttribute('#tdoc-theme-btn', 'aria-pressed');
+    if (pressed !== 'true') throw new Error(`aria-pressed should be true, got "${pressed}"`);
+  });
+
+  await t('Reload restores the remembered dark theme', async () => {
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('#tdoc-theme-btn', { timeout: 5000 });
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'dark') throw new Error(`expected dark after reload, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'dark') throw new Error(`storage lost on reload: "${stored}"`);
+  });
+
+  await t('Clicking again returns to light and remembers', async () => {
+    await page.click('#tdoc-theme-btn');
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'light') throw new Error(`expected light after second click, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'light') throw new Error(`storage should be light, got "${stored}"`);
+  });
+
   await t('Copy button exists with icon + label', async () => {
     const btn = await page.$('#tdoc-copy-md-btn');
     if (!btn) throw new Error('no #tdoc-copy-md-btn');
