@@ -927,10 +927,11 @@
   }
   function inboxRowLabel(row) {
     const n = row.count || 1;
+    const who = (row.actor && (row.actor.login || row.actor.name)) || 'someone';
     const title = row.title || row.slug || 'a doc';
-    if (row.kind === 'comment') return n > 1 ? `${n} new comments on ${title}` : `New comment on ${title}`;
-    if (row.kind === 'reply') return n > 1 ? `${n} new replies to your comment` : `New reply to your comment`;
-    if (row.kind === 'reaction') return n > 1 ? `${n} people reacted to your comment` : `Someone reacted to your comment`;
+    if (row.kind === 'comment') return n > 1 ? `${n} new comments on ${title}` : `${who} commented on ${title}`;
+    if (row.kind === 'reply') return n > 1 ? `${n} new replies to your comment` : `${who} replied to your comment`;
+    if (row.kind === 'reaction') return n > 1 ? `${n} people reacted to your comment` : `${who} reacted to your comment`;
     return 'Notification';
   }
   function paintInboxChrome() {
@@ -1004,9 +1005,8 @@
           listEl.innerHTML = '<p class="muted">No notifications yet.</p>';
         } else {
           const html = items.map(row => {
-            const who = (row.actor && row.actor.login) || '';
-            const extra = row.preview ? `${who ? who + ' · ' : ''}${String(row.preview).slice(0, 60)}` : who;
-            const snip = extra ? `${inboxRowLabel(row)} · ${extra}` : inboxRowLabel(row);
+            const preview = row.preview ? String(row.preview).slice(0, 60) : '';
+            const snip = preview ? `${inboxRowLabel(row)} · ${preview}` : inboxRowLabel(row);
             const cur = row.read ? '' : ' tdoc-cluster-current';
             return `<div class="tdoc-cluster-row${cur}" role="button" tabindex="0" data-id="${escapeHtml(row.id)}">
               ${avatarHTML(row.actor, 'tdoc-cluster-anon')}
