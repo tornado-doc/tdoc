@@ -917,6 +917,9 @@
 
 
   let inboxUnreadN = 0;
+  let inboxSig = '';
+  let inboxPollTimer = null;
+  const INBOX_POLL_MS = 8000;
   function inboxBadgeText(n) {
     if (!n) return '';
     return n > 99 ? '99+' : String(n);
@@ -924,6 +927,12 @@
   function inboxMenuLabel(n) {
     const txt = inboxBadgeText(n);
     return txt ? `Notifications (${txt})` : 'Notifications';
+  }
+  function formatCommentTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   }
   function inboxRowLabel(row) {
     const n = row.count || 1;
@@ -934,11 +943,53 @@
     if (row.kind === 'reaction') return n > 1 ? `${n} people reacted to your comment` : `${who} reacted to your comment`;
     return 'Notification';
   }
+  function inboxFingerprint(body) {
+    const items = (body && Array.isArray(body.items)) ? body.items : [];
+    return `${body && body.unread}|${items.map(i => [i.id, i.count, i.at, i.read].join(':')).join(',')}`;
+  }
   function paintInboxChrome() {
     const dot = document.getElementById('tdoc-inbox-dot');
     if (dot) dot.hidden = !inboxUnreadN;
     const menu = document.getElementById('tdoc-inbox-open');
     if (menu) menu.textContent = inboxMenuLabel(inboxUnreadN);
+  }
+  function writeInboxRows(listEl, items, append) {
+    if (!listEl) return;
+    if (!items.length && !append) {
+      listEl.innerHTML = '<p class="muted">No notifications yet.</p>';
+      return;
+    }
+    const html = items.map(row => {
+      const preview = row.preview ? String(row.preview).slice(0, 60) : '';
+      const when = formatCommentTime(row.at);
+      const snip = [inboxRowLabel(row), preview, when].filter(Boolean).join(' · ');
+      const cur = row.read ? '' : ' tdoc-cluster-current';
+      return `<div class="tdoc-cluster-row${cur}" role="button" tabindex="0" data-id="${escapeHtml(row.id)}">
+        ${avatarHTML(row.actor, 'tdoc-cluster-anon')}
+        <span class="tdoc-cluster-snip">${escapeHtml(snip)}</span>
+      </div>`;
+    }).join('');
+    if (!append) listEl.innerHTML = html;
+    else listEl.insertAdjacentHTML('beforeend', html);
+    items.forEach(row => {
+      const btn = listEl.querySelector(`.tdoc-cluster-row[data-id="${CSS.escape(row.id)}"]`);
+      if (!btn) return;
+      btn.dataset.slug = row.slug || '';
+      btn.dataset.version = String(row.version || 1);
+      btn.dataset.comment = row.comment_id || '';
+      btn.dataset.thread = row.thread_id || '';
+      if (btn._bound) return;
+      btn._bound = true;
+      const go = () => {
+        openInboxTarget({
+          slug: btn.dataset.slug, version: btn.dataset.version,
+          comment_id: btn.dataset.comment, thread_id: btn.dataset.thread,
+        });
+        closeAuxModal();
+      };
+      btn.onclick = go;
+      btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+    });
   }
   async function refreshInboxBadge() {
     if (!identity) return;
@@ -950,6 +1001,36 @@
     } catch { return; }
     paintInboxChrome();
   }
+  async function tickInbox() {
+    if (!identity || document.hidden) return;
+    if (document.querySelector('.tdoc-reply-form.open, .tdoc-popup, textarea:focus')) return;
+    try {
+      const r = await fetch('/api/notifications?offset=0', { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const body = await r.json();
+      const sig = inboxFingerprint(body);
+      const first = !inboxSig;
+      const changed = sig !== inboxSig;
+      if (typeof body.unread === 'number') inboxUnreadN = body.unread;
+      inboxSig = sig;
+      paintInboxChrome();
+      if (!first && changed) refreshComments({ deepLink: false });
+      const listEl = document.getElementById('tdoc-inbox-list');
+      if (listEl && changed) {
+        const more = document.getElementById('tdoc-inbox-more');
+        if (more) { more.dataset.offset = '0'; more.hidden = !body.has_more; }
+        writeInboxRows(listEl, Array.isArray(body.items) ? body.items : [], false);
+      }
+    } catch {}
+  }
+  function startInboxPoll() {
+    if (inboxPollTimer) return;
+    inboxPollTimer = setInterval(tickInbox, INBOX_POLL_MS);
+  }
+  function stopInboxPoll() {
+    if (inboxPollTimer) { clearInterval(inboxPollTimer); inboxPollTimer = null; }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tickInbox(); });
   async function markInboxSeen(commentId) {
     if (!identity || !commentId) return;
     try {
@@ -992,53 +1073,22 @@
       </div>`;
     document.body.appendChild(bg);
     document.getElementById('tdoc-inbox-close').onclick = closeAuxModal;
-    let offset = 0;
+    const more = document.getElementById('tdoc-inbox-more');
+    more.dataset.offset = '0';
     const paint = async () => {
       const listEl = document.getElementById('tdoc-inbox-list');
-      const more = document.getElementById('tdoc-inbox-more');
+      const offset = Number(more.dataset.offset) || 0;
       try {
         const r = await fetch(`/api/notifications?offset=${offset}`, { credentials: 'same-origin' });
         if (!r.ok) { listEl.innerHTML = '<p class="muted">Could not load notifications.</p>'; return; }
         const body = await r.json();
         const items = Array.isArray(body.items) ? body.items : [];
-        if (offset === 0 && !items.length) {
-          listEl.innerHTML = '<p class="muted">No notifications yet.</p>';
-        } else {
-          const html = items.map(row => {
-            const preview = row.preview ? String(row.preview).slice(0, 60) : '';
-            const snip = preview ? `${inboxRowLabel(row)} · ${preview}` : inboxRowLabel(row);
-            const cur = row.read ? '' : ' tdoc-cluster-current';
-            return `<div class="tdoc-cluster-row${cur}" role="button" tabindex="0" data-id="${escapeHtml(row.id)}">
-              ${avatarHTML(row.actor, 'tdoc-cluster-anon')}
-              <span class="tdoc-cluster-snip">${escapeHtml(snip)}</span>
-            </div>`;
-          }).join('');
-          if (offset === 0) listEl.innerHTML = html;
-          else listEl.insertAdjacentHTML('beforeend', html);
-          items.forEach(row => {
-            const btn = listEl.querySelector(`.tdoc-cluster-row[data-id="${CSS.escape(row.id)}"]`);
-            if (!btn) return;
-            btn.dataset.slug = row.slug || '';
-            btn.dataset.version = String(row.version || 1);
-            btn.dataset.comment = row.comment_id || '';
-            btn.dataset.thread = row.thread_id || '';
-            if (btn._bound) return;
-            btn._bound = true;
-            const go = () => {
-              openInboxTarget({
-                slug: btn.dataset.slug, version: btn.dataset.version,
-                comment_id: btn.dataset.comment, thread_id: btn.dataset.thread,
-              });
-              closeAuxModal();
-            };
-            btn.onclick = go;
-            btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
-          });
-        }
+        writeInboxRows(listEl, items, offset > 0);
         more.hidden = !body.has_more;
-        more.onclick = () => { offset += items.length; paint(); };
+        more.onclick = () => { more.dataset.offset = String(offset + items.length); paint(); };
         if (typeof body.unread === 'number') {
           inboxUnreadN = body.unread;
+          inboxSig = inboxFingerprint(body);
           paintInboxChrome();
         }
       } catch {
@@ -1082,10 +1132,13 @@
         identity = null;
         isOwner = false;
         inboxUnreadN = 0;
+        inboxSig = '';
+        stopInboxPoll();
         renderIdentity();
         refreshComments();
       };
-      refreshInboxBadge();
+      tickInbox();
+      startInboxPoll();
     } else if (isPublished) {
       slot.innerHTML = `<button class="tdoc-chip signin" id="tdoc-signin">Sign in with GitHub</button>`;
       document.getElementById('tdoc-signin').onclick = startDeviceFlow;
@@ -2295,7 +2348,8 @@
   }
 
   // ========== refreshComments ==========
-  async function refreshComments() {
+  async function refreshComments(opts) {
+    const allowDeepLink = !opts || opts.deepLink !== false;
     // Preserve which comment had its floating card pinned open (wide mode) so a
     // reply/react/re-anchor that triggers a refresh doesn't make the card the
     // user is interacting with vanish. resetAnchors() nulls state.pinnedId, so
@@ -2399,7 +2453,9 @@
         // and lost the card's .active state (+ the "move anchor" affordance).
         setActiveComment(keepPinnedId);
       }
-      const want = (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })();
+      const want = allowDeepLink
+        ? (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })()
+        : null;
       if (want) {
         const hit = state.activeComments.find(c => c.id === want)
           || state.activeComments.find(c => (c.replies || []).some(r => r.id === want));
