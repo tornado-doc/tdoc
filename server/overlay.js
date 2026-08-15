@@ -356,7 +356,7 @@
      Codex / …), otherwise the tdoc project mark. Status chips still carry
      applied / partial / question. */
   .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #f2f2f2; flex-shrink: 0; }
-  .tdoc-agent-author img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; background: #f2f2f2; flex-shrink: 0; }
+  .tdoc-agent-author img { width: 24px; height: 24px; border-radius: 50%; object-fit: contain; background: #fff; flex-shrink: 0; }
   .tdoc-agent-reply { background: #fafafb; border-left: 3px solid #111; padding-left: 8px; }
   .tdoc-agent-status { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; margin: 0 0 6px; font-weight: 600; }
   .tdoc-agent-status-applied { background: #e8f5ed; color: #1a7340; }
@@ -1365,7 +1365,7 @@
     return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
   }
   function tdocLogoUrl() {
-    return 'https://github.com/tornado-doc.png';
+    return '/tdoc_logo.png';
   }
   function agentLogoUrl(author) {
     const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))

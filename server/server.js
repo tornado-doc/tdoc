@@ -91,8 +91,8 @@ function logoForAgentLogin(login) {
   }
   if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
   if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
-  // tdoc project mark — tdoc-agent and any login that didn't match a host.
-  return 'https://github.com/tornado-doc.png';
+  // tdoc project mark (assets/tdoc_logo.png, served at /tdoc_logo.png).
+  return '/tdoc_logo.png';
 }
 
 function isGenericAgentLogin(login) {
@@ -375,6 +375,15 @@ const server = http.createServer(async (req, res) => {
   // process answering 200 on this port must not pass as tdoc (seen in the
   // wild: a daemon from another product bound 7878).
   if (p === '/api/ping') return json(res, 200, { ok: true, service: 'tdoc' });
+
+  if (p === '/tdoc_logo.png') {
+    const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
+    if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(logoPath), {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=86400',
+    });
+  }
 
   if (p === '/') return send(res, 200, indexPage(), { 'Content-Type': 'text/html; charset=utf-8' });
 
