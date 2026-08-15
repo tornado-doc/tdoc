@@ -65,7 +65,7 @@ t('tdoc-new fails loudly if the local server never comes up', () => {
 t('tdoc-new --force preserves the existing doc when new HTML is INVALID [the bug]', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cli-'));
   try {
-    const env = { ...process.env, TDOC_DIR: dir, TDOC_PORT: '0' };
+    const env = { ...process.env, TDOC_DIR: dir, TDOC_PORT: '0', TDOC_SKIP_UPDATE_CHECK: '1' };
     // seed an existing doc with a real comment we must not lose
     const docDir = path.join(dir, 'mydoc');
     fs.mkdirSync(path.join(docDir, 'v1'), { recursive: true });
@@ -97,7 +97,7 @@ t('tdoc-new --force preserves the existing doc when new HTML is INVALID [the bug
 // without validation, so a `..` slug escaped TDOC_DIR. Each must now reject a
 // non-kebab-case slug BEFORE any side effect.
 t('publish/pull/unpublish reject traversal + non-kebab slugs', () => {
-  const env = { ...process.env, TDOC_DIR: '/tmp/tdoc-slugtest-nonexistent', HOME: '/tmp/tdoc-slugtest-home' };
+  const env = { ...process.env, TDOC_DIR: '/tmp/tdoc-slugtest-nonexistent', HOME: '/tmp/tdoc-slugtest-home', TDOC_SKIP_UPDATE_CHECK: '1' };
   const bad = ['../private', 'a/../b', 'UPPER', 'has space', 'trailing-', '-leading', 'with/slash'];
   for (const cli of ['tdoc-publish', 'tdoc-pull', 'tdoc-unpublish']) {
     for (const slug of bad) {
@@ -137,11 +137,55 @@ t('tdoc-agent-reply --print-identity detects host runtime from env', () => {
 });
 
 t('publish accepts a valid kebab-case slug (passes validation, fails later on missing doc)', () => {
-  const env = { ...process.env, TDOC_DIR: '/tmp/tdoc-slugtest-nonexistent' };
+  const env = { ...process.env, TDOC_DIR: '/tmp/tdoc-slugtest-nonexistent', TDOC_SKIP_UPDATE_CHECK: '1' };
   const r = spawnSync(path.join(BIN, 'tdoc-publish'), ['valid-slug-123'], { env, encoding: 'utf8', timeout: 15000 });
   // It should get PAST slug validation (no 'invalid slug') and fail on the
   // missing doc instead — proving valid slugs aren't over-rejected.
   assert(!/invalid slug/i.test(r.stderr || ''), `valid slug was wrongly rejected: ${r.stderr}`);
+});
+
+t('user-facing CLIs invoke tdoc-update-nag', () => {
+  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-unpublish', 'tdoc-new', 'tdoc-doctor']) {
+    const src = readBin(f);
+    assert(/tdoc-update-nag/.test(src), `${f} must call tdoc-update-nag so BYOK users see origin/main drift`);
+  }
+  assert(!/tdoc-update-nag/.test(readBin('tdoc-update')),
+    'tdoc-update must not nag (it IS the update)');
+});
+
+t('tdoc-update-nag is silent when skipped or current (mock: skip)', () => {
+  const nag = path.join(BIN, 'tdoc-update-nag');
+  const r = spawnSync(nag, [], { env: { ...process.env, TDOC_SKIP_UPDATE_CHECK: '1' }, encoding: 'utf8' });
+  assert(r.status === 0, `skip path must exit 0, got ${r.status}`);
+  assert(!r.stdout, `skip path must be silent on stdout, got: ${r.stdout}`);
+  assert(!r.stderr, `skip path must be silent on stderr, got: ${r.stderr}`);
+});
+
+t('tdoc-update-nag prints TDOC_UPDATE_AVAILABLE when behind (mock)', () => {
+  const nag = path.join(BIN, 'tdoc-update-nag');
+  const r = spawnSync(nag, [], { env: { ...process.env, TDOC_MOCK_UPDATE_BEHIND: '3' }, encoding: 'utf8' });
+  assert(r.status === 0, `behind path must exit 0, got ${r.status}`);
+  assert(/TDOC_UPDATE_AVAILABLE: 3/.test(r.stdout), `stdout machine line missing: ${r.stdout}`);
+  assert(/tdoc-update --yes/.test(r.stderr), `stderr must encourage tdoc-update --yes, got: ${r.stderr}`);
+  assert(/3 newer commit/.test(r.stderr), `stderr must mention commit count, got: ${r.stderr}`);
+});
+
+t('tdoc-update-nag --json is parseable and used by doctor', () => {
+  const nag = path.join(BIN, 'tdoc-update-nag');
+  const r = spawnSync(nag, ['--json'], { env: { ...process.env, TDOC_MOCK_UPDATE_BEHIND: '2' }, encoding: 'utf8' });
+  assert(r.status === 0, `json path must exit 0, got ${r.status}`);
+  const j = JSON.parse(r.stdout);
+  assert(j.ok === false && j.behind === 2 && j.checked === true, `json body: ${r.stdout}`);
+  assert(/tdoc-update --yes/.test(j.cmd), `cmd should be tdoc-update --yes: ${j.cmd}`);
+});
+
+t('tdoc-update-nag diverged mock does not tell the user to --yes', () => {
+  const nag = path.join(BIN, 'tdoc-update-nag');
+  const r = spawnSync(nag, [], { env: { ...process.env, TDOC_MOCK_UPDATE_DIVERGED: '1' }, encoding: 'utf8' });
+  assert(r.status === 0);
+  assert(/TDOC_UPDATE_DIVERGED/.test(r.stdout), `stdout: ${r.stdout}`);
+  assert(/cannot fast-forward/.test(r.stderr), `stderr: ${r.stderr}`);
+  assert(!/--yes/.test(r.stderr), 'diverged nag must not recommend --yes');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

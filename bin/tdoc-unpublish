@@ -3,6 +3,7 @@
 #
 # Usage: tdoc-unpublish <slug>
 set -euo pipefail
+"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" || true
 
 SLUG="${1:-}"
 if [ -z "$SLUG" ]; then echo "usage: tdoc-unpublish <slug>" >&2; exit 1; fi

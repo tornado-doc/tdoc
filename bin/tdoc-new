@@ -42,6 +42,7 @@
 #   - With --publish: also prints the published URL on a second line.
 
 set -euo pipefail
+"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" || true
 
 # ─────────────────────────────── arg parsing ──────────────────────────────
 SLUG=""
