@@ -561,8 +561,8 @@
   .tdoc-modal .danger { color: #c33; font-size: 13px; }
   .tdoc-modal code { background: #f5f6f8; padding: 1px 5px; border-radius: 3px; }
 
-  /* Share panel (JUL-36, reworked 2026-08-13: visibility/history/commenting/
-     allowed_users + Delete/Unpublish — no admin token, session-authorized). */
+  /* Share panel (copy link for everyone; owners also get visibility/history/
+     commenting/allowed_users + Delete/Unpublish — session-authorized). */
   .tdoc-modal .manage-section { margin: 16px 0; }
   .tdoc-modal .manage-section:first-of-type { margin-top: 4px; }
   .tdoc-modal label.field { display: block; font-size: 12px; color: #666; margin: 0 0 4px; font-weight: 600; }
@@ -720,7 +720,7 @@
     </div>`;
 
   const primaryCtaHtml = isFork ? '' : (isPublished
-    ? `<button id="tdoc-share-btn" class="primary" title="Share link" aria-label="Share">
+    ? `<button id="tdoc-share-btn" class="primary" title="Share" aria-label="Share">
          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
          <span>Share</span>
        </button>`
@@ -919,7 +919,6 @@
           </button>
           <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
             ${isOwner ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
-            ${isOwner && cfg.ownerManage && isPublished ? `<button id="tdoc-manage-doc" role="menuitem">Share settings</button>` : ''}
             <button id="tdoc-signout" role="menuitem">Sign out</button>
           </div>
         </div>`;
@@ -933,13 +932,6 @@
       if (isOwner) {
         document.getElementById('tdoc-my-docs').onclick = () => {
           window.open('/me', '_blank', 'noopener');
-        };
-      }
-      if (isOwner && cfg.ownerManage && isPublished) {
-        document.getElementById('tdoc-manage-doc').onclick = (e) => {
-          e.stopPropagation();
-          meMenu.classList.remove('open');
-          showManageModal();
         };
       }
       document.getElementById('tdoc-signout').onclick = async () => {
@@ -2365,6 +2357,9 @@
     };
   }
   function showShareModal() {
+    // One Share button: owners get copy-link + access settings in the same
+    // panel; everyone else gets copy-link only. No separate "Share settings".
+    if (cfg.ownerManage) { showManageModal(); return; }
     closeAuxModal();
     const url = `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
     const bg = document.createElement('div');
@@ -2372,35 +2367,29 @@
     bg.id = 'tdoc-aux-modal';
     bg.innerHTML = `
       <div class="tdoc-modal">
-        <h3>Share this doc</h3>
+        <h3>Share</h3>
         <div class="code" id="tdoc-share-url" style="font-size:14px;letter-spacing:0;text-align:left;cursor:copy;">${escapeHtml(url)}</div>
         <div class="actions" style="justify-content:flex-start;gap:8px;margin-top:0;margin-bottom:10px;">
           <button class="primary" id="tdoc-share-copy">Copy link</button>
         </div>
         <p class="muted">Anyone with this link can read. To comment, they sign in with GitHub.</p>
-        <div class="divider">
-          <p class="danger" style="margin:0 0 6px;"><b>Unpublish</b></p>
-          <p class="muted" style="margin:0 0 6px;font-size:12px;">Unpublish requires the upload token, which only lives on your laptop. Run this locally:</p>
-          <div class="code" style="font-size:13px;letter-spacing:0;text-align:left;cursor:copy;" id="tdoc-share-unpub">/tdoc unpublish ${escapeHtml(slug)}</div>
-        </div>
         <div class="actions"><button id="tdoc-share-close">Close</button></div>
       </div>`;
     document.body.appendChild(bg);
     document.getElementById('tdoc-share-close').onclick = closeAuxModal;
     document.getElementById('tdoc-share-copy').onclick = () => navigator.clipboard?.writeText(url);
     document.getElementById('tdoc-share-url').onclick = () => navigator.clipboard?.writeText(url);
-    document.getElementById('tdoc-share-unpub').onclick = (e) => {
-      navigator.clipboard?.writeText(e.currentTarget.textContent);
-    };
   }
   // ========== Owner manage / Share panel (Delete / Unpublish / access) =====
   // JUL-36, reworked 2026-08-13 (julie: browser owner management should work
-  // off the GitHub login, like Google Docs — no pasted token). Gated on
-  // cfg.ownerManage, which the worker only populates in the per-request boot
-  // config when THIS request's session passed isOwnerSession() server-side
-  // (worker.js's /d/ route). A non-owner's config carries
-  // cfg.ownerManage === null — every function below bails before creating
-  // any DOM, so there is no hidden button, just nothing rendered for them.
+  // off the GitHub login, like Google Docs — no pasted token). Opened from
+  // the single Share button (showShareModal dispatches here when
+  // cfg.ownerManage is set). Gated on cfg.ownerManage, which the worker only
+  // populates in the per-request boot config when THIS request's session
+  // passed isOwnerSession() server-side (worker.js's /d/ route). A
+  // non-owner's config carries cfg.ownerManage === null — every function
+  // below bails before creating any DOM, so there is no hidden button, just
+  // nothing rendered for them.
   //
   // A published doc is arbitrary HTML the owner authored, so this being
   // session-authorized (no token) is safe ONLY because the worker now sends
@@ -2473,6 +2462,7 @@
     if (!cfg.ownerManage) return; // no owner data for this request → nothing to render
     closeAuxModal();
     const om = cfg.ownerManage;
+    const url = `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
     const access = {
       visibility: 'unlisted', history_visibility: 'owner', commenting: 'signed_in', allowed_users: [],
       ...(om.access || {}),
@@ -2483,7 +2473,11 @@
     bg.id = 'tdoc-manage-modal';
     bg.innerHTML = `
       <div class="tdoc-modal">
-        <h3>Share settings</h3>
+        <h3>Share</h3>
+        <div class="code" id="tdoc-share-url" style="font-size:14px;letter-spacing:0;text-align:left;cursor:copy;">${escapeHtml(url)}</div>
+        <div class="actions" style="justify-content:flex-start;gap:8px;margin-top:0;margin-bottom:4px;">
+          <button type="button" class="primary" id="tdoc-share-copy">Copy link</button>
+        </div>
         <p class="muted">${escapeHtml(slug)} · ${plural(om.versionCount, 'version')} · ${plural(om.commentCount, 'comment')}</p>
         <div class="manage-section">
           <label class="field">Visibility</label>
@@ -2517,13 +2511,15 @@
           <button type="button" id="tdoc-mgmt-delete" class="manage-action danger-btn">Delete doc…</button>
           <p class="manage-hint">Permanently removes this doc, every version, and every comment. No undo.</p>
         </div>
-        <div class="actions"><button type="button" id="tdoc-manage-close">Close</button></div>
+        <div class="actions"><button type="button" id="tdoc-share-close">Close</button></div>
       </div>`;
     document.body.appendChild(bg);
     renderSeg('tdoc-vis-seg', access.visibility);
     renderSeg('tdoc-hist-seg', access.history_visibility);
     renderSeg('tdoc-comment-seg', access.commenting);
-    document.getElementById('tdoc-manage-close').onclick = closeManageModal;
+    document.getElementById('tdoc-share-close').onclick = closeManageModal;
+    document.getElementById('tdoc-share-copy').onclick = () => navigator.clipboard?.writeText(url);
+    document.getElementById('tdoc-share-url').onclick = () => navigator.clipboard?.writeText(url);
     bg.addEventListener('click', (e) => { if (e.target === bg) closeManageModal(); });
 
     // Shared PATCH /api/doc/access helper — merges `patch` into the local
