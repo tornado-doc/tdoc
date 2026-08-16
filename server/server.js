@@ -256,7 +256,7 @@ function forceWidgetSandbox(html) {
     const srcM = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
     if (!srcM) return full;
     const src = srcM[1] || srcM[2] || srcM[3] || '';
-    if (!/\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(src.split('?')[0])) return full;
+    if (!/\/d\/[a-z0-9][a-z0-9-]{0,63}\/v\/\d+\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(src.split('?')[0])) return full;
     const stripped = attrs.replace(/\s*sandbox\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
     return '<iframe sandbox="allow-scripts"' + stripped + '>';
   });
@@ -514,6 +514,9 @@ const server = http.createServer(async (req, res) => {
 
   const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
   if (widgetMatch) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return send(res, 405, 'method not allowed', { Allow: 'GET, HEAD' });
+    }
     const [, rawSlug, vStr, rawName] = widgetMatch;
     const slug = safeSlug(rawSlug);
     if (!slug || !isValidWidgetName(rawName)) return send(res, 400, 'invalid slug or widget');
@@ -521,7 +524,8 @@ const server = http.createServer(async (req, res) => {
     if (!isWidgetFrameRequest(dest)) return send(res, 403, 'widget must be framed');
     const file = path.join(ROOT, slug, `v${vStr}`, 'widgets', `${rawName}.html`);
     if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr} widget ${rawName}`);
-    return send(res, 200, fs.readFileSync(file, 'utf8'), {
+    const body = req.method === 'HEAD' ? '' : fs.readFileSync(file, 'utf8');
+    return send(res, 200, body, {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': widgetCspHeader(),
       'X-Content-Type-Options': 'nosniff',

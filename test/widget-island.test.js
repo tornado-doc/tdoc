@@ -33,14 +33,19 @@ function waitReady(port, ms = 5000) {
     })();
   });
 }
-function get(port, p, headers = {}) {
+function request(port, p, { method = 'GET', headers = {} } = {}) {
   return new Promise((resolve, reject) => {
-    http.get({ host: '127.0.0.1', port, path: p, headers }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port, path: p, method, headers }, (res) => {
       let buf = '';
       res.on('data', d => buf += d);
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: buf }));
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.end();
   });
+}
+function get(port, p, headers = {}) {
+  return request(port, p, { headers });
 }
 
 (async () => {
@@ -67,6 +72,7 @@ function get(port, p, headers = {}) {
     '<p>Host copy.</p>' +
     '<iframe src="/d/island-fixture/v/1/widget/compound-interest" sandbox="allow-scripts allow-same-origin"></iframe>' +
     '<iframe id="third-party-chart" src="https://example.com/chart" sandbox="allow-scripts"></iframe>' +
+    '<iframe id="foreign-widget-path" src="https://cdn.invalid/widget/compound-interest" sandbox="allow-scripts allow-same-origin"></iframe>' +
     '</body></html>');
   fs.writeFileSync(path.join(docDir, 'v1', 'widgets', 'compound-interest.html'),
     '<!doctype html><html><body><script>window.__WIDGET__=1;</script><p>widget</p></body></html>');
@@ -119,13 +125,26 @@ function get(port, p, headers = {}) {
   await t('host doc rewrites widget iframe sandbox to allow-scripts only', async () => {
     const res = await get(PORT, `/d/${SLUG}/v/1`);
     const iframes = [...res.body.matchAll(/<iframe\b([^>]*)>/gi)].map(m => m[0]);
-    const widgetIframe = iframes.find(t => t.includes('compound-interest'));
+    const widgetIframe = iframes.find(t => t.includes('/d/island-fixture/v/1/widget/'));
     if (!widgetIframe) throw new Error(`widget iframe missing from host doc: ${iframes.join(' | ')}`);
     if (!/sandbox="allow-scripts"/.test(widgetIframe)) throw new Error(`sandbox not forced: ${widgetIframe}`);
     if (/allow-same-origin/.test(widgetIframe)) throw new Error(`allow-same-origin survived: ${widgetIframe}`);
     const other = iframes.find(t => t.includes('id="third-party-chart"'));
     if (!other) throw new Error('non-widget iframe missing');
-    if (other.includes('compound-interest')) throw new Error('confused widget with third-party iframe');
+    if (other.includes('/d/island-fixture/')) throw new Error('confused widget with third-party iframe');
+    const foreign = iframes.find(t => t.includes('id="foreign-widget-path"'));
+    if (!foreign) throw new Error('foreign /widget/ iframe missing');
+    if (!/allow-same-origin/.test(foreign)) throw new Error(`foreign iframe sandbox was rewritten: ${foreign}`);
+  });
+
+  await t('widget POST is 405; HEAD is framed-only with empty body', async () => {
+    const post = await request(PORT, widgetPath, { method: 'POST', headers: { 'Sec-Fetch-Dest': 'iframe' } });
+    if (post.status !== 405) throw new Error(`POST status ${post.status}, expected 405`);
+    const headBare = await request(PORT, widgetPath, { method: 'HEAD' });
+    if (headBare.status !== 403) throw new Error(`HEAD without dest ${headBare.status}, expected 403`);
+    const head = await request(PORT, widgetPath, { method: 'HEAD', headers: { 'Sec-Fetch-Dest': 'iframe' } });
+    if (head.status !== 200) throw new Error(`HEAD status ${head.status}`);
+    if (head.body) throw new Error('HEAD must not send a body');
   });
 
   await t('invalid widget name is 400', async () => {

@@ -959,7 +959,7 @@ function forceWidgetSandbox(html) {
     const srcM = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
     if (!srcM) return full;
     const src = srcM[1] || srcM[2] || srcM[3] || '';
-    if (!/\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(src.split('?')[0])) return full;
+    if (!/\/d\/[a-z0-9][a-z0-9-]{0,63}\/v\/\d+\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(src.split('?')[0])) return full;
     const stripped = attrs.replace(/\s*sandbox\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
     return '<iframe sandbox="allow-scripts"' + stripped + '>';
   });
