@@ -310,7 +310,11 @@
         },
         "agent_status": "applied",
         "created": "2026-08-16T03:35:15.410Z",
-        "reactions": {}
+        "reactions": {
+          "❤️": [
+            "anon"
+          ]
+        }
       }
     ],
     "reactions": {

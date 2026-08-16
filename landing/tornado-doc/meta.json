@@ -122,6 +122,11 @@
       "n": 24,
       "created": "2026-08-16T12:05:00Z",
       "prompt": "Four features rewritten so each one breaks if you swap in Notion, with titles that name the feature outright"
+    },
+    {
+      "n": 25,
+      "created": "2026-08-16T12:25:00Z",
+      "prompt": "One sentence per line in the sub; brand mark large enough to read"
     }
   ]
 }
