@@ -1148,9 +1148,9 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     requestAnimationFrame(() => t.classList.add('is-in'));
     toastTimer = setTimeout(() => {
       t.classList.remove('is-in');
-      setTimeout(() => t.remove(), 200);
+      setTimeout(() => t.remove(), 220);
       toastTimer = null;
-    }, 1800);
+    }, 2600);
   }
   // Styled confirm — replaces window.confirm(). Resolves true/false; never
   // silently proceeds (Cancel and the backdrop both resolve false).
