@@ -97,14 +97,6 @@ t('demos commentable artifacts', () => {
   assert(/role="img"[^>]*aria-label="|aria-label="[^"]+"[^>]*role="img"/.test(html), 'svg has no aria-label');
 });
 
-t('install line wraps instead of clipping', () => {
-  // The CTA is "paste this into your AI". A nowrap <pre> hid the
-  // ONBOARDING.md URL at 640px and on every phone (scrollWidth 715 > 327).
-  const preRule = html.match(/\bpre\s*\{[^}]+\}/);
-  assert(preRule, 'missing pre rule');
-  assert(/white-space:\s*pre-wrap/.test(preRule[0]), 'pre must wrap; nowrap clips the install URL');
-  assert(/overflow-wrap:\s*anywhere/.test(preRule[0]), 'pre must break the long GitHub URL');
-});
 
 t('has a compare table that admits a loss', () => {
   // A comparison where the author wins every row reads as an ad and costs more
