@@ -345,8 +345,9 @@
     .hint { font-size:13px; color:var(--muted); margin:10px 0 0; }
 
     /* the four-beat loop */
-    .beats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:0 0 18px; }
-    @media (max-width:840px) { .beats { grid-template-columns:1fr 1fr; } }
+    .beats { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:0 0 18px; }
+    @media (max-width:980px) { .beats { grid-template-columns:repeat(3,1fr); } }
+    @media (max-width:700px) { .beats { grid-template-columns:1fr 1fr; } }
     @media (max-width:480px) { .beats { grid-template-columns:1fr; } }
     .beat { border:1px solid var(--rule); border-radius:12px; padding:14px; background:#fff; }
     .beat b { display:block; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin:0 0 6px; }
@@ -439,19 +440,20 @@
       </article>
 
       <article class="step-card">
-        <div class="step-hd"><span class="step-num">3</span><div><h3>Watch a comment fix itself.</h3><p>On a real doc, not a mockup. Four actions, about a minute.</p></div></div>
+        <div class="step-hd"><span class="step-num">3</span><div><h3>Watch a comment fix itself.</h3><p>On a real doc, not a mockup. Five actions, about a minute.</p></div></div>
         <div class="step-bd">
           <div class="beats">
             <div class="beat"><b>01</b><p>Fork the example</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="18" y="20" width="120" height="7" rx="3.5" fill="#d3d8e3"/><rect x="18" y="38" width="150" height="18" rx="5" fill="#ffd84d" stroke="#10121a" stroke-width="1.6"/><path d="M150 52l18 13-7 2 5 10-5 2-5-10-6 4z" fill="#10121a"/></svg><p class="hint" style="margin-top:8px">It becomes your copy, comments and all.</p></div>
-            <div class="beat"><b>02</b><p>Ask your AI to fix a comment</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="30" y="26" width="140" height="38" rx="10" fill="#fff" stroke="#1652f0" stroke-width="1.8"/><svg x="44" y="36" width="18" height="18" viewBox="0 0 24 24" fill="#d97757"><use href="#i-claude"/></svg><rect x="72" y="41" width="76" height="7" rx="3.5" fill="#d3d8e3"/></svg><p class="hint" style="margin-top:8px">Point at it and say so.</p></div>
-            <div class="beat"><b>03</b><p>A new version appears</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="24" y="30" width="60" height="30" rx="7" fill="#fff" stroke="#10121a" stroke-width="1.6"/><rect x="116" y="30" width="60" height="30" rx="7" fill="#eef3ff" stroke="#1652f0" stroke-width="1.8"/><path d="M90 45h18" stroke="#10121a" stroke-width="1.6"/><path d="M104 41l5 4-5 4" fill="none" stroke="#10121a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text x="54" y="49" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#10121a">v1</text><text x="146" y="49" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#1652f0">v2</text></svg><p class="hint" style="margin-top:8px">The old one stays where it was.</p></div>
-            <div class="beat"><b>04</b><p>Everyone gets an answer</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="22" y="24" width="156" height="42" rx="9" fill="#f4faf6" stroke="#1a7340" stroke-width="1.6"/><circle cx="42" cy="45" r="9" fill="#D97757"/><svg x="35" y="38" width="14" height="14" viewBox="0 0 24 24" fill="#fff"><use href="#i-claude"/></svg><rect x="58" y="36" width="70" height="6" rx="3" fill="#cfe0d6"/><rect x="58" y="48" width="48" height="6" rx="3" fill="#cfe0d6"/><path d="M150 42l4 4 8-9" fill="none" stroke="#1a7340" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><p class="hint" style="margin-top:8px">Signed by the agent that made the change.</p></div>
+            <div class="beat"><b>02</b><p>Sign in with GitHub</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="40" y="28" width="120" height="34" rx="17" fill="#10121a"/><svg x="56" y="37" width="16" height="16" viewBox="0 0 24 24" fill="#fff"><use href="#i-github"/></svg><text x="112" y="50" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#fff">Sign in</text></svg><p class="hint" style="margin-top:8px">Once, so your comments carry your name.</p></div>
+            <div class="beat"><b>03</b><p>Ask your AI to fix a comment</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="30" y="26" width="140" height="38" rx="10" fill="#fff" stroke="#1652f0" stroke-width="1.8"/><svg x="44" y="36" width="18" height="18" viewBox="0 0 24 24" fill="#d97757"><use href="#i-claude"/></svg><rect x="72" y="41" width="76" height="7" rx="3.5" fill="#d3d8e3"/></svg><p class="hint" style="margin-top:8px">Point at it and say so.</p></div>
+            <div class="beat"><b>04</b><p>A new version appears</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="24" y="30" width="60" height="30" rx="7" fill="#fff" stroke="#10121a" stroke-width="1.6"/><rect x="116" y="30" width="60" height="30" rx="7" fill="#eef3ff" stroke="#1652f0" stroke-width="1.8"/><path d="M90 45h18" stroke="#10121a" stroke-width="1.6"/><path d="M104 41l5 4-5 4" fill="none" stroke="#10121a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text x="54" y="49" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#10121a">v1</text><text x="146" y="49" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#1652f0">v2</text></svg><p class="hint" style="margin-top:8px">The old one stays where it was.</p></div>
+            <div class="beat"><b>05</b><p>Everyone gets an answer</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="22" y="24" width="156" height="42" rx="9" fill="#f4faf6" stroke="#1a7340" stroke-width="1.6"/><circle cx="42" cy="45" r="9" fill="#D97757"/><svg x="35" y="38" width="14" height="14" viewBox="0 0 24 24" fill="#fff"><use href="#i-claude"/></svg><rect x="58" y="36" width="70" height="6" rx="3" fill="#cfe0d6"/><rect x="58" y="48" width="48" height="6" rx="3" fill="#cfe0d6"/><path d="M150 42l4 4 8-9" fill="none" stroke="#1a7340" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><p class="hint" style="margin-top:8px">Signed by the agent that made the change.</p></div>
           </div>
           <div class="cta">
             <a class="btn btn-primary" href="https://tdoc.dev/d/conway-life/v/2">Open the example</a>
             <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg>Star<span class="btn-long">&nbsp;on GitHub</span> <span class="pill">102</span></a>
           </div>
-          <p class="hint">The example is a Conway board that runs on CSS alone. Fork it and it is yours to break.</p>
+          <p class="hint">Forking needs nothing. Commenting asks for a one time GitHub sign in, so every note carries a name.</p>
         </div>
       </article>
 

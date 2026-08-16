@@ -32,7 +32,9 @@ t('teaches the loop on the real published doc', () => {
   while ((m = re.exec(html))) hrefs.push(m[1]);
   assert(hrefs.some((h) => h === 'https://tdoc.dev/d/conway-life/v/2'),
     'step 3 must link the real conway-life doc, not a mockup');
-  for (const beat of ['Fork the example', 'A new version appears']) {
+  // The comment gate is real: canCommentOnDoc returns false without a
+  // session, so a walkthrough that omits sign-in walks the user into a wall.
+  for (const beat of ['Fork the example', 'Sign in with GitHub', 'A new version appears']) {
     assert(html.includes(beat), `missing loop beat: ${beat}`);
   }
 });
