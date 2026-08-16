@@ -29,7 +29,15 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 function fnBody(src, name) {
   const start = src.indexOf(`function ${name}(`);
   if (start === -1) return null;
-  let i = src.indexOf('{', start), depth = 0;
+  // Skip the parameter list so default values like `body = {}` don't
+  // get treated as the function body.
+  let i = src.indexOf('(', start), depth = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === '(') depth++;
+    else if (src[i] === ')') { depth--; if (depth === 0) { i++; break; } }
+  }
+  while (i < src.length && src[i] !== '{') i++;
+  depth = 0;
   for (; i < src.length; i++) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}') { depth--; if (depth === 0) { i++; break; } }
@@ -57,6 +65,15 @@ t('cyrb53 algorithm body is identical in worker.js and overlay.js (modulo indent
   assert(a && b, 'cyrb53 missing from one of the files');
   assert(a === b, `cyrb53 has DRIFTED between worker.js and overlay.js:\n      worker: ${a}\n      overlay: ${b}`);
 });
+
+for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAgentLogin', 'detectAgentRuntime', 'agentIdentity']) {
+  t(`${name} is identical in worker.js and server.js`, () => {
+    const a = norm(fnBody(worker, name));
+    const b = norm(fnBody(server, name));
+    assert(a && b, `${name} missing from one of the files`);
+    assert(a === b, `${name} has DRIFTED between worker.js and server.js:\n      worker: ${a}\n      server: ${b}`);
+  });
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

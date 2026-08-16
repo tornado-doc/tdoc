@@ -42,9 +42,11 @@ vm.createContext(box);
 vm.runInContext([
   'escapeHtml', 'normalizeNeedle', 'normalizeContext', 'normalizeQuery',
   'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl',
+  'isAnthropicCompanyMark', 'tdocLogoUrl', 'agentLogoUrl', 'childrenOf',
 ].map(sliceFn).join('\n\n'), box);
 const { escapeHtml, normalizeNeedle, normalizeContext, normalizeQuery,
-        commonPrefixLen, commonSuffixLen, isGithubHttpsUrl } = box;
+        commonPrefixLen, commonSuffixLen, isGithubHttpsUrl, agentLogoUrl,
+        childrenOf } = box;
 
 console.log('overlay-pure (#23 testable surface)');
 
@@ -105,6 +107,39 @@ t('isGithubHttpsUrl rejects non-github / non-https / junk', () => {
   assert(isGithubHttpsUrl('javascript:alert(1)') === false, 'js scheme rejected');
   assert(isGithubHttpsUrl('not a url') === false, 'garbage rejected');
   assert(isGithubHttpsUrl(null) === false, 'null rejected');
+});
+
+t('agentLogoUrl maps grok/claude/codex/cursor/gemini logins to product marks', () => {
+  assert(agentLogoUrl({ login: 'grok' }).includes('xai-org'), 'grok');
+  assert(agentLogoUrl({ login: 'claude-code' }).includes('claude'), 'claude');
+  assert(!agentLogoUrl({ login: 'claude' }).includes('anthropic'), 'claude is not the company mark');
+  assert(agentLogoUrl({ login: 'codex' }).includes('openai'), 'codex');
+  assert(agentLogoUrl({ login: 'cursor' }).includes('cursor'), 'cursor');
+  assert(agentLogoUrl({ login: 'gemini' }).includes('gemini'), 'gemini');
+  assert(agentLogoUrl({ login: 'tdoc-agent' }).includes('tdoc_logo.png'), 'tdoc logo');
+  assert(agentLogoUrl({ login: 'mystery-bot' }).includes('tdoc_logo.png'), 'unmatched uses tdoc logo');
+  assert(!String(agentLogoUrl({ login: 'tdoc-agent' })).includes('⚡'), 'no lightning');
+});
+t('agentLogoUrl prefers an explicit https avatar_url', () => {
+  assert(agentLogoUrl({ login: 'grok', avatar_url: 'https://example.com/me.png' }) === 'https://example.com/me.png');
+});
+t('agentLogoUrl never shows the Anthropic company AI mark for Claude', () => {
+  const star = 'https://cdn.simpleicons.org/claude/d97757';
+  const company = 'https://github.com/anthropics.png';
+  assert(agentLogoUrl({ login: 'claude', avatar_url: company }) === star, 'stored company mark ignored');
+  assert(agentLogoUrl({ login: 'claude-code', avatar_url: company }) === star, 'claude-code');
+  assert(agentLogoUrl({ login: 'tdoc-agent', avatar_url: company }) === star, 'orphan company mark remapped');
+  assert(!String(agentLogoUrl({ login: 'claude' }) || '').includes('anthropics'), 'mapped url is not anthropics');
+});
+t('childrenOf nests replies under their immediate parent', () => {
+  const replies = [
+    { id: 'r1', parent_id: 'c1' },
+    { id: 'r2', parent_id: 'r1' },
+    { id: 'r3', parent_id: 'c1' },
+  ];
+  assert(childrenOf(replies, 'c1', 'c1').map(r => r.id).join() === 'r1,r3', 'tops');
+  assert(childrenOf(replies, 'r1', 'c1').map(r => r.id).join() === 'r2', 'nested');
+  assert(childrenOf(replies, 'r2', 'c1').length === 0, 'leaf');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

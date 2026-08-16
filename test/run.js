@@ -26,14 +26,19 @@ const OFFLINE = [
   'me-management.test.js',    // /me remote SoT management UI guard
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
+  'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
+  'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard
   'coverage.test.js',         // migration, bundle inlining, pull-merge, rich fold
   'overlay-pure.test.js',     // overlay pure helpers (escape/normalize/prefix)
+  'reader-overflow.test.js',  // tables/diagrams must not clip in the reader
+  'agent-runtime.test.js',    // host-runtime detect + agent logos
   'pins-layout.test.js',      // v0.8.0 pins clustering/spread/overflow-fold core
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
+  'notifications.test.js',    // inbox aggregation + Reddit recipients
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)

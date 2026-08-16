@@ -88,12 +88,15 @@ t('injectOverlay re-checks isOwner itself before embedding ownerManage (defense 
     'injectOverlay must force ownerManage to null whenever isOwner is falsy');
 });
 
-t('overlay renderIdentity() only emits the manage menu item behind isOwner && cfg.ownerManage', () => {
-  const idx = overlay.indexOf('id="tdoc-manage-doc"');
-  assert(idx >= 0, 'manage menu item markup not found in overlay.js');
-  const templateStart = overlay.lastIndexOf('${isOwner && cfg.ownerManage', idx);
-  assert(templateStart >= 0 && templateStart < idx,
-    'the manage-doc button must be gated by `${isOwner && cfg.ownerManage ...}` — never unconditional');
+t('overlay has no separate Share settings menu item — Share is the single owner entry', () => {
+  assert(!overlay.includes('id="tdoc-manage-doc"'),
+    'the identity-menu Share settings item must be gone; the bar Share button is the only entry');
+  const fnStart = overlay.indexOf('function showShareModal() {');
+  assert(fnStart >= 0, 'showShareModal not found');
+  const fnEnd = overlay.indexOf('function showManageModal()', fnStart);
+  const body = overlay.slice(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 600);
+  assert(body.includes('if (cfg.ownerManage)') && body.includes('showManageModal()'),
+    'showShareModal must dispatch to showManageModal for owners before rendering the copy-link-only panel');
 });
 
 t('showManageModal() bails before creating any DOM when cfg.ownerManage is absent', () => {
@@ -284,6 +287,7 @@ async function main() {
     const indexPageSrc = serverJs.slice(idxStart, serverJs.indexOf('const server = http.createServer'));
     assert(!nativeConfirmCall.test(stripLineComments(indexPageSrc)), 'local index page must not call the native confirm()');
     assert(indexPageSrc.includes('showConfirm('), 'local index page must use the styled showConfirm() modal');
+    assert(!indexPageSrc.includes('readCommentFile('), 'local catalog must not read comments.json for every row');
   });
 
   t('overlay.js manage flow never uses window.confirm() either', () => {

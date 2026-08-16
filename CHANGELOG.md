@@ -4,6 +4,62 @@ All notable changes to tdoc are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow the `VERSION`
 file and `.claude-plugin/plugin.json`.
 
+## [Unreleased]
+
+### Fixed
+
+- **Tables and wide diagrams are no longer clipped in the reader.** Overlay
+  table styles used a -14px left margin that cropped the first column inside
+  any `overflow-x:auto` wrapper, and `display:block` on `<table>` broke row
+  layout on narrow viewports. Tables now keep real table layout and scroll in
+  a wrapper; document SVGs keep their viewBox aspect ratio with overflow
+  visible.
+- **Dark mode no longer erases document button labels.** `color-scheme: dark`
+  plus page invert made unselected chips like "Differences only" paint
+  light-on-light, so the text vanished. Form controls stay in the light
+  scheme and invert with the rest of the page.
+- **Dark mode no longer recolors reaction emoji.** The page invert was
+  turning ❤️ / 👍 into off-hue bitmaps. Color emoji in chips and the
+  picker are wrapped and inverted back to native colors. Text reactions
+  like LGTM still invert with the page so they stay readable.
+- **Opening one notification no longer marks siblings in the same thread.**
+  Mark-read matches the exact comment/reply id, not the thread root.
+- **Clicking Reply no longer collapses the comment.** A hover-opened card
+  used to vanish as soon as you hit Reply (the click never pinned it, then
+  the pointer leaving the pin hid the card). Reply now pins the card and
+  keeps the thread expanded.
+- **Posting a reply no longer folds the thread.** After submit, refresh
+  used to rebuild the card with replies collapsed. The thread you just
+  replied in stays open.
+- **Open comment cards no longer follow the viewport.** An expanded card
+  used to clamp itself to the camera on scroll. It now stays next to its
+  pin and scrolls away with the page.
+
+### Added
+
+- **In-app inbox (API).** Signed-in users have a per-host notification inbox.
+  New top-level comments notify the doc owner; replies notify only the
+  direct parent (Reddit); reactions notify the item author. Same-thread
+  events collapse to one unread row. `#118`.
+- **Notification badge and panel.** The profile chip shows a red unread
+  dot; Notifications in the existing profile menu opens the existing modal
+  with the last 20 rows (cluster rows, unread highlighted; one-line
+  action plus relative time). The
+  page polls every 8s so a new comment/reply/reaction
+  updates the dot and the doc without a manual refresh. Clicking a row
+  (or the comment in the doc) marks it read and opens that comment. `#118`.
+- **Dark mode switch in the top bar.** One icon in the menu bar flips light/dark via a page invert (so author colors, artifacts, and replies flip together). After you switch, the choice is stored in `localStorage` on that host and restored on later visits. Default stays light until you switch. `#120`.
+- **Nested replies.** You can reply to a reply (and to that reply), the way
+  Reddit and Hacker News do. Each node in the thread has its own Reply.
+- **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /
+  Gemini replies show that product's mark. Claude uses the Claude star, not
+  the Anthropic company logo. Anything else (`tdoc-agent`, unknown names)
+  uses `tdoc_logo.png` (the tdoc dinosaur), not a lightning bolt. Detection reads the host environment
+  (`CLAUDE_SESSION_ID`, `CODEX_HOME`, `GROK_SESSION_ID`, …) so agents do not
+  have to remember to pass `agent_login`. `bin/tdoc-agent-reply` stamps
+  identity before the request leaves the machine (the published Worker cannot
+  see your env).
+
 ## [0.9.0] - 2026-07-13
 
 ### Added — Vercel as a second publish target

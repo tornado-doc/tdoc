@@ -63,8 +63,12 @@ function waitReady(port, ms = 5000) {
   const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-api-'));
   PORT = await freePort();
   const serverPath = path.join(__dirname, '..', 'server', 'server.js');
+  const hermetic = { ...process.env, TDOC_DIR: TMP_DIR, TDOC_PORT: String(PORT), TDOC_HOST: '127.0.0.1' };
+  for (const k of Object.keys(hermetic)) {
+    if (/^(GROK_|CLAUDE_|CLAUDECODE$|CODEX_|CURSOR_|COMPOSER_|GEMINI_|XAI_|TDOC_AGENT_)/.test(k)) delete hermetic[k];
+  }
   const srv = spawn(process.execPath, [serverPath], {
-    env: { ...process.env, TDOC_DIR: TMP_DIR, TDOC_PORT: String(PORT), TDOC_HOST: '127.0.0.1' },
+    env: hermetic,
     stdio: 'ignore',
   });
   const shutdown = () => { try { srv.kill('SIGKILL'); } catch {} try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch {} };
@@ -104,6 +108,17 @@ function waitReady(port, ms = 5000) {
     if (!Array.isArray(list) || list.length !== 1) throw new Error(`expected 1 top, got ${list?.length}`);
     if (!Array.isArray(list[0].replies) || list[0].replies.length !== 1) throw new Error('reply not nested');
     if (list[0].replies[0].id !== replyId) throw new Error('reply id mismatch');
+  });
+
+  await t('POST /api/comments with parent_id of a reply nests under that reply', async () => {
+    const r = await req('POST', '/api/comments', { slug: SLUG, parent_id: replyId, text: 'a nested reply' });
+    if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
+    if (r.body.parent_id !== replyId) throw new Error(`nested parent_id ${r.body.parent_id}`);
+    const after = await req('GET', `/api/comments?slug=${SLUG}`);
+    const replies = after.body[0].replies || [];
+    if (replies.length !== 2) throw new Error(`expected 2 replies, got ${replies.length}`);
+    const nested = replies.find(x => x.id === r.body.id);
+    if (!nested || nested.parent_id !== replyId) throw new Error('nested reply missing or wrong parent');
   });
 
   await t('POST /api/reactions adds 👍 to top comment', async () => {
