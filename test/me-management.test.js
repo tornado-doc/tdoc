@@ -102,18 +102,21 @@ t('/me still uses the styled confirm modal, never native confirm()', () => {
   const stripped = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
   assert(!nativeConfirmCall.test(stripped), '/me must not call the native confirm()');
   assert(index.includes('showConfirm('), '/me must use the styled showConfirm() modal');
-  // Quiet Toastify feedback — no inline status row, no "remote storage" jargon.
+  // Quiet Toastify feedback — vendored (no CDN), no inline status row.
   assert(index.includes("This can't be undone."), 'confirm body should be short and plain');
   const userFacing = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
   assert(!/remote storage/i.test(userFacing), '/me copy must not say "remote storage"');
   assert(!index.includes("'/api/comments?slug='"), 'delete confirm must not pre-flight comment counts');
-  assert(index.includes('toastify-js@1.12.0'), '/me must load toastify-js from the pinned CDN');
+  assert(index.includes('${TOASTIFY_JS}'), '/me must inline vendored toastify-js (not a third-party CDN)');
+  assert(index.includes('${TOASTIFY_CSS}'), '/me must inline vendored toastify CSS');
+  assert(!index.includes('cdn.jsdelivr.net'), '/me must not load toastify from a CDN');
   assert(index.includes('Toastify('), '/me must call Toastify() for feedback');
   assert(!index.includes('id="status"'), 'inline status row should be gone — toast replaces it');
   assert(index.includes("toast('Deleted')"), 'success feedback should be a quiet toast("Deleted")');
   assert(index.includes("position: 'right'"), 'use Toastify top-right placement (library default feel)');
   assert(index.includes('linear-gradient'), 'toast should use a gradient skin, not a flat DIY pill');
-  assert(!/5477f5|73a5ff/.test(index), 'must not keep Toastify stock purple stops');
+  assert(!index.includes('data-versions'), 'unused data-versions should be gone from /me rows');
+  assert(index.includes('applySearch();'), 'single-row delete must re-run applySearch so empty/filter state stays consistent');
 });
 
 t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
