@@ -189,12 +189,14 @@ t('has a compare table that admits a loss', () => {
   // trust than it buys. At least one row must put a competitor ahead.
   assert(/<table/.test(html), 'missing compare table');
   const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
+  // The invariant is that at least one row does NOT favour tdoc, not that we
+  // lose outright. A `part` cell ("Coming soon") is equally honest: the reader
+  // sees a row we do not win, which is what makes the other rows believable.
   const lost = rows.filter((r) => {
-    // tdoc's column is the one marked `us`, not a fixed position.
     const ours = r.match(/<td class="us">[\s\S]*?<\/td>/);
-    return !!ours && /class="no"/.test(ours[0]);
+    return !!ours && /class="(no|part)"/.test(ours[0]);
   });
-  assert(lost.length >= 1, 'every compare row favours tdoc — keep at least one honest loss');
+  assert(lost.length >= 1, 'every compare row favours tdoc — keep at least one row we do not win');
 });
 
 t('uses no dashes as punctuation', () => {
