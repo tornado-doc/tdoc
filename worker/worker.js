@@ -1078,6 +1078,7 @@ async function indexHtml(env, session) {
   .batch-delete:hover { background: var(--td-danger); color: #fff; }
   .batch-delete:disabled { opacity: 0.5; cursor: default; }
   .doc-list { display: flex; flex-direction: column; }
+  .doc-list[hidden], .doc-row[hidden], .empty[hidden] { display: none !important; }
   .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
   .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
   .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }

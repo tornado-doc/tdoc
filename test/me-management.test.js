@@ -76,6 +76,10 @@ t('/me search is client-side over title/slug (no extra catalog round-trips)', ()
   assert(index.includes('dataset.title'), 'search must read title from the rendered row');
   assert(index.includes('dataset.slug'), 'search must read slug from the rendered row');
   assert(index.includes('No docs match that search'), 'missing empty search state');
+  // `.doc-row { display:flex }` would otherwise override the UA [hidden] rule
+  // and leave "filtered" rows visible — pin the !important hide.
+  assert(/\.doc-row\[hidden\][^}]*display:\s*none\s*!important/.test(index),
+    'filtered rows must force display:none !important so search actually hides them');
 });
 
 t('/me batch delete reuses session DELETE /api/doc (no token, no access forms)', () => {
