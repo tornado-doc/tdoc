@@ -1008,15 +1008,17 @@ function landingHtml() {
 //     CSP set on every doc response (see cspHeader()). /me is only reachable
 //     by the signed-in owner in the first place (isOwnerSession gate in the
 //     route above), so its own fetches are already same-origin + cookied.
-// What's left: title, slug, version, Delete. No access data of any kind is
-// computed or emitted here (gate: response HTML must not contain
-// `allowed_users` — there is nothing here that could).
+// What's left: title, slug, version, search, multi-select batch delete, and
+// a quiet ⋯ Delete. No access data of any kind is computed or emitted here
+// (gate: response HTML must not contain `allowed_users` — there is nothing
+// here that could).
 async function indexHtml(env, session) {
   // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
   // comment logs here — that was N serial Durable-Object + R2 round trips
   // per page load (the HTML bodies were never downloaded, but the comment
   // event log for every slug was). Comment counts for the delete confirm
-  // load lazily on click via GET /api/comments.
+  // load lazily on click via GET /api/comments. Search + batch select are
+  // client-side over the rendered rows (no extra KV/R2 work).
   let list = [];
   let cursor;
   do {
@@ -1036,7 +1038,10 @@ async function indexHtml(env, session) {
     return { slug, title: meta.title || slug, latest, versionCount };
   }));
 
-  const rows = docs.map(({ slug, title, latest, versionCount }) => `<div class="doc-row">
+  const rows = docs.map(({ slug, title, latest, versionCount }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}" data-versions="${versionCount}">
+      <label class="row-check">
+        <input type="checkbox" class="doc-check" aria-label="Select ${escapeHtml(title)}">
+      </label>
       <div class="doc-info">
         <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(title)}</a>
         <div class="doc-meta">${escapeHtml(slug)} · v${latest}</div>
@@ -1058,20 +1063,32 @@ async function indexHtml(env, session) {
   }
   body { font: 15px system-ui, -apple-system, sans-serif; max-width: 680px; margin: 48px auto; padding: 0 20px; color: var(--td-ink); }
   h1 { font-size: 28px; margin: 0 0 4px; color: var(--td-accent); }
-  .who { color: var(--td-muted); font-size: 13px; margin: 0 0 28px; }
+  .who { color: var(--td-muted); font-size: 13px; margin: 0 0 20px; }
   .who b { color: #444; font-weight: 600; }
   a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
+  .toolbar input[type="search"] { flex: 1 1 220px; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
+  .toolbar input[type="search"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
+  .batch-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin: 0 0 8px; min-height: 32px; }
+  .select-all { display: inline-flex; align-items: center; gap: 8px; color: var(--td-muted); font-size: 13px; cursor: pointer; user-select: none; }
+  .batch-delete { display: none; font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-danger); background: #fff; color: var(--td-danger); }
+  .batch-delete.is-visible { display: inline-block; }
+  .batch-delete:hover { background: var(--td-danger); color: #fff; }
+  .batch-delete:disabled { opacity: 0.5; cursor: default; }
   .doc-list { display: flex; flex-direction: column; }
-  .doc-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
-  .doc-info { min-width: 0; }
+  .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
+  .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
+  .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+  .row-check input, .select-all input { width: 15px; height: 15px; accent-color: var(--td-accent); cursor: pointer; }
+  .doc-info { min-width: 0; flex: 1 1 auto; }
   .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
   button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
   /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
      not a management console. Faint by default, clearer on row hover. */
-  .row-actions { position: relative; flex-shrink: 0; }
+  .row-actions { position: relative; flex-shrink: 0; margin-left: auto; }
   .row-menu-btn { border: none; background: none; color: #ccc; font-size: 20px; line-height: 1; padding: 2px 8px; border-radius: 6px; }
   .doc-row:hover .row-menu-btn { color: var(--td-muted); }
   .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
@@ -1099,7 +1116,15 @@ async function indexHtml(env, session) {
 <p class="who">Documents hosted on this worker${session && session.login ? ` · signed in as <b>${escapeHtml(session.login)}</b>` : ''}.</p>
 <p id="status" class="status" aria-live="polite"></p>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
-  `<div class="doc-list">${rows.join('')}</div>`}
+  `<div class="toolbar">
+    <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
+  </div>
+  <div class="batch-bar">
+    <label class="select-all"><input type="checkbox" id="select-all"> <span id="select-all-label">Select all</span></label>
+    <button type="button" id="batch-delete" class="batch-delete">Delete selected</button>
+  </div>
+  <div class="doc-list">${rows.join('')}</div>
+  <p id="no-match" class="empty" hidden>No docs match that search.</p>`}
 <script>
 (() => {
   const status = document.getElementById('status');
@@ -1167,6 +1192,17 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
       return n;
     } catch { return 0; }
   }
+  async function deleteDoc(slug) {
+    const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (!res.ok) {
+      let body = {};
+      try { body = await res.json(); } catch {}
+      throw new Error(body.error || ('HTTP ' + res.status));
+    }
+  }
   document.querySelectorAll('.row-delete').forEach((button) => {
     button.addEventListener('click', async () => {
       closeMenus(null);
@@ -1185,20 +1221,133 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
       });
       if (!proceed) return;
       say('Deleting ' + slug + '...');
-      const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
-        method: 'DELETE',
-        credentials: 'same-origin',
-      });
-      if (!res.ok) {
-        let body = {};
-        try { body = await res.json(); } catch {}
-        say(body.error ? 'Delete failed: ' + body.error : 'Delete failed.', 'error');
+      try {
+        await deleteDoc(slug);
+      } catch (err) {
+        say('Delete failed: ' + (err && err.message ? err.message : 'unknown'), 'error');
         return;
       }
       button.closest('.doc-row').remove();
+      syncBatchUi();
       say('Deleted ' + slug + ' from remote storage.', 'ok');
     });
   });
+
+  // Search + batch select — client-side only over the already-rendered rows.
+  // No access data, no extra KV/R2; keep the catalog fast (#115).
+  const listEl = document.querySelector('.doc-list');
+  if (!listEl) return;
+  const search = document.getElementById('doc-search');
+  const selectAll = document.getElementById('select-all');
+  const selectAllLabel = document.getElementById('select-all-label');
+  const batchDelete = document.getElementById('batch-delete');
+  const noMatch = document.getElementById('no-match');
+
+  function visibleRows() {
+    return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => !row.hidden);
+  }
+  function selectedRows() {
+    return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+  }
+  function syncBatchUi() {
+    const visible = visibleRows();
+    const selected = selectedRows();
+    const n = selected.length;
+    selected.forEach((row) => row.classList.add('is-selected'));
+    listEl.querySelectorAll('.doc-row').forEach((row) => {
+      const box = row.querySelector('.doc-check');
+      if (!(box && box.checked)) row.classList.remove('is-selected');
+    });
+    batchDelete.classList.toggle('is-visible', n > 0);
+    batchDelete.textContent = n === 1 ? 'Delete 1 selected' : ('Delete ' + n + ' selected');
+    const allVisibleChecked = visible.length > 0 && visible.every((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+    const someVisibleChecked = visible.some((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+    selectAll.checked = allVisibleChecked;
+    selectAll.indeterminate = someVisibleChecked && !allVisibleChecked;
+    selectAllLabel.textContent = allVisibleChecked ? 'Deselect all' : 'Select all';
+    selectAll.disabled = visible.length === 0;
+    if (!listEl.querySelector('.doc-row')) {
+      search.closest('.toolbar').hidden = true;
+      selectAll.closest('.batch-bar').hidden = true;
+      listEl.insertAdjacentHTML('afterend', '<p class="empty">No published docs yet.</p>');
+      listEl.remove();
+      if (noMatch) noMatch.hidden = true;
+    }
+  }
+  function applySearch() {
+    const q = (search.value || '').trim().toLowerCase();
+    let shown = 0;
+    listEl.querySelectorAll('.doc-row').forEach((row) => {
+      const hay = ((row.dataset.title || '') + ' ' + (row.dataset.slug || '')).toLowerCase();
+      const match = !q || hay.includes(q);
+      row.hidden = !match;
+      if (match) shown += 1;
+      else {
+        const box = row.querySelector('.doc-check');
+        if (box) box.checked = false;
+      }
+    });
+    if (noMatch) noMatch.hidden = shown > 0;
+    listEl.hidden = shown === 0;
+    syncBatchUi();
+  }
+
+  search.addEventListener('input', applySearch);
+  listEl.addEventListener('change', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('doc-check')) syncBatchUi();
+  });
+  selectAll.addEventListener('change', () => {
+    const on = selectAll.checked;
+    visibleRows().forEach((row) => {
+      const box = row.querySelector('.doc-check');
+      if (box) box.checked = on;
+    });
+    syncBatchUi();
+  });
+  batchDelete.addEventListener('click', async () => {
+    const rows = selectedRows();
+    if (!rows.length) return;
+    const versions = rows.reduce((sum, row) => sum + (Number(row.dataset.versions) || 1), 0);
+    say('Checking ' + rows.length + ' doc(s)…');
+    const counts = await Promise.all(rows.map((row) => countComments(row.dataset.slug)));
+    const comments = counts.reduce((a, b) => a + b, 0);
+    say('');
+    const proceed = await showConfirm({
+      title: rows.length === 1 ? ('Delete "' + (rows[0].dataset.title || rows[0].dataset.slug) + '"?') : ('Delete ' + rows.length + ' docs?'),
+      body: 'This permanently removes <b>' + rows.length + ' doc(s)</b>, <b>' + versions +
+        ' version(s)</b>, and <b>' + comments + ' comment(s)</b> from remote storage. No undo.',
+      confirmLabel: rows.length === 1 ? 'Delete' : ('Delete ' + rows.length),
+      danger: true,
+    });
+    if (!proceed) return;
+    batchDelete.disabled = true;
+    let ok = 0, failed = 0;
+    for (const row of rows) {
+      const slug = row.dataset.slug;
+      say('Deleting ' + slug + '…');
+      try {
+        await deleteDoc(slug);
+        row.remove();
+        ok += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    batchDelete.disabled = false;
+    applySearch();
+    if (failed) say('Deleted ' + ok + '; ' + failed + ' failed.', 'error');
+    else say('Deleted ' + ok + ' doc(s) from remote storage.', 'ok');
+  });
+  syncBatchUi();
 })();
 </script>
 </body></html>`;

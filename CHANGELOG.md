@@ -51,6 +51,12 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Search and batch delete on My docs (`/me`).** Filter the owner catalog by
+  title or slug, multi-select rows, and delete the selection in one confirm.
+  Still client-side over the KV title list (no extra R2/comment work at render);
+  access policy stays on the doc Share panel. Feedback is a tiny inline
+  top-right toast (`Deleted`) — no third-party toast library on the owner
+  session surface.
 - **BYOK update nag.** User-facing CLIs and the skill preamble compare this
   checkout to `origin/main` and point at `/tdoc update --yes` when main is
   ahead. Ahead-only feature branches stay silent; a true diverge does not

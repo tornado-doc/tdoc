@@ -1,15 +1,15 @@
 // Owner catalog (/me) guard.
 //
 // 2026-08-13 rework (julie: "删改实在是太丑了 uiux 请improve。而且不能只在/me page"):
-// /me is now a clean delete-only catalog — title/slug/version + Delete. The
-// per-row visibility/history/commenting/allowed_users dropdowns and the
-// admin-token input are GONE: access controls moved to the doc-page Share
-// panel (overlay.js showManageModal, see jul36-owner-manage.test.js), and
-// Delete now authorizes off the owner's session cookie instead of a pasted
-// token (safe only because of the CSP on every doc response — see
-// csp.test.js). /me is reachable only by the signed-in owner (route-level
-// isOwnerSession redirect), so its own same-origin fetches are already
-// cookied.
+// /me is a clean catalog — title/slug/version + search + multi-select batch
+// delete + quiet ⋯ Delete. The per-row visibility/history/commenting/
+// allowed_users dropdowns and the admin-token input are GONE: access
+// controls moved to the doc-page Share panel (overlay.js showManageModal,
+// see jul36-owner-manage.test.js), and Delete now authorizes off the owner's
+// session cookie instead of a pasted token (safe only because of the CSP on
+// every doc response — see csp.test.js). /me is reachable only by the
+// signed-in owner (route-level isOwnerSession redirect), so its own
+// same-origin fetches are already cookied.
 //
 // Gate (小cc review #2): the /me HTML response must not contain access data
 // of any kind — especially `allowed_users` — since none of that is rendered
@@ -57,13 +57,32 @@ t('/me never computes or emits allowed_users (gate: no access data leaks into th
   assert(!index.includes('accessFromMeta'), '/me must not compute an access policy per row anymore');
 });
 
-t('/me keeps only title, slug, version, and a quiet ⋯ delete per row', () => {
+t('/me keeps title, slug, version, search, batch select, and a quiet ⋯ delete per row', () => {
   assert(index.includes('doc-title'), 'missing doc title link');
   assert(index.includes('doc-meta'), 'missing slug/version meta line');
   // Delete is tucked behind a ⋯ overflow menu, not a prominent per-row button.
   assert(index.includes('class="row-menu-btn"'), 'missing ⋯ overflow trigger');
   assert(index.includes('class="row-delete"'), 'missing delete item inside the menu');
   assert(!index.includes('class="delete-doc"'), 'the loud standalone delete button should be gone');
+  // Search + multi-select batch delete (still no access forms).
+  assert(index.includes('id="doc-search"'), 'missing catalog search input');
+  assert(index.includes('class="doc-check"'), 'missing per-row select checkbox');
+  assert(index.includes('id="batch-delete"'), 'missing batch delete control');
+  assert(index.includes('id="select-all"'), 'missing select-all control');
+});
+
+t('/me search is client-side over title/slug (no extra catalog round-trips)', () => {
+  assert(index.includes('applySearch'), 'missing search apply helper');
+  assert(index.includes('dataset.title'), 'search must read title from the rendered row');
+  assert(index.includes('dataset.slug'), 'search must read slug from the rendered row');
+  assert(index.includes('No docs match that search'), 'missing empty search state');
+});
+
+t('/me batch delete reuses session DELETE /api/doc (no token, no access forms)', () => {
+  assert(index.includes('batchDelete.addEventListener'), 'batch delete must be wired');
+  assert(index.includes('selectedRows'), 'batch delete must operate on the selected set');
+  // Still no access-policy batching — JUL-36 keeps policy on the doc Share panel.
+  assert(!index.includes('/api/doc/access'), '/me must not batch-patch access policy');
 });
 
 t('/me deletes remote docs through DELETE /api/doc using the session (no token)', () => {
