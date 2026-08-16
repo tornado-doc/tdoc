@@ -32,6 +32,11 @@
       "n": 6,
       "created": "2026-08-16T05:10:00Z",
       "prompt": "Real tdoc comment card styling in the hero, host logos beside runtimes, table gap and style, equal CTA grid, tighter social proof cards"
+    },
+    {
+      "n": 7,
+      "created": "2026-08-16T06:25:00Z",
+      "prompt": "Phone: headline actually shrinks (h1.tagline beats 56px), CTA grid stacks so 216+216 cannot overflow 375, close the browser wrapper"
     }
   ]
 }
