@@ -1,1 +1,761 @@
-[]
+[
+  {
+    "id": "c_1786849762647",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "Star\n102",
+      "context_before": "ge and answers every note.\n\n    \n      Make one, free\n      ",
+      "context_after": "One line in your AI. Your readers install nothing.\n\n    \n   ",
+      "fallback": {
+        "ratio": 0.05960090361445783,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fixthemselves."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2abutton\u4e5f\u592a\u4e11\u4e86",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:09:22.647Z",
+    "replies": [
+      {
+        "id": "r_1786851704863",
+        "parent_id": "c_1786849762647",
+        "text": "Restyled the Star control as a ghost GitHub button with the count in a small pill. Still a star CTA, not a custom mark.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:44.863Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786849845691",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "Docs that fix\nthemselves.",
+      "context_before": "\n\n  \n  \n  \n  \n  \n  \n  \n  \n  \n  \n  \n\n\n\n\n  \n  \n    ttdoc\n\n    ",
+      "context_after": "\n    People comment. Your AI rewrites the page and answers e",
+      "fallback": {
+        "ratio": 0.02575301204819277,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fixthemselves."
+        }
+      }
+    },
+    "text": "\u6709\u70b9\u4e11 \u4e3a\u4ec0\u4e48\u8981\u6362\u884c\uff1f\u7136\u540e\u8fd9\u4e2ahero\u4e0d\u592a\u597d",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:10:45.691Z",
+    "replies": [
+      {
+        "id": "r_1786851704878",
+        "parent_id": "c_1786849845691",
+        "text": "Headline is now one line on desktop (nowrap) and 30px on a phone so it no longer breaks as Docs that fix / themselves.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:44.878Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786849860529",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "People comment. Your AI rewrites the page and answers every note.",
+      "context_before": "  \n  \n\n\n\n\n  \n  \n    ttdoc\n\n    Docs that fixthemselves.\n    ",
+      "context_after": "\n\n    \n      Make one, free\n      Star 102\n    \n    One line",
+      "fallback": {
+        "ratio": 0.0411144578313253,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fixthemselves."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2a\u4e5f\u4e0d\u7528\u6362\u884c\uff0c\u6700\u597d\u5199\u51faopensource",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:11:00.529Z",
+    "replies": [
+      {
+        "id": "r_1786851704891",
+        "parent_id": "c_1786849860529",
+        "text": "The lede is one paragraph and now says it is open source.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:44.891Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786849899082",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "Make one, free",
+      "context_before": "ur AI rewrites the page and answers every note.\n\n    \n      ",
+      "context_after": "\n      Star 102\n    \n    One line in your AI. Your readers i",
+      "fallback": {
+        "ratio": 0.055346385542168676,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fixthemselves."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2abutton \u4e0d\u592a\u597d",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:11:39.082Z",
+    "replies": [
+      {
+        "id": "r_1786851704904",
+        "parent_id": "c_1786849899082",
+        "text": "Primary button copy is now Create your first doc, not Make one, free.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:44.904Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786849925788",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "One line in your AI. Your readers install nothing.",
+      "context_before": "ry note.\n\n    \n      Make one, free\n      Star 102\n    \n    ",
+      "context_after": "\n\n    \n    \n      tdoc.dev/d/conway-life/v/2\n      tdocv2 of",
+      "fallback": {
+        "ratio": 0.06430722891566265,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fixthemselves."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2a\u4e0d\u592a\u597d\uff0c\u6700\u597d\u662fopensource, or \nOPEN SOURCED\nFREE \u00b7 NO CARD",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:12:05.788Z",
+    "replies": [
+      {
+        "id": "r_1786851704917",
+        "parent_id": "c_1786849925788",
+        "text": "Replaced that line with OPEN SOURCE \u00b7 FREE \u00b7 NO CARD under both CTAs.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:44.917Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786849945154",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "People comment. Your AI rewrites the page and answers every note.",
+      "context_before": "  \n  \n\n\n\n\n  \n  \n    ttdoc\n\n    Docs that fixthemselves.\n    ",
+      "context_after": "\n\n    \n      Make one, free\n      Star 102\n    \n    One line",
+      "fallback": {
+        "ratio": 0.0411144578313253,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fixthemselves."
+        }
+      }
+    },
+    "text": "Support all agents, all models. \u53ef\u4ee5\u5305\u542b\u8fd9\u53e5\u8bdd",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:12:25.153Z",
+    "replies": [
+      {
+        "id": "r_1786851704935",
+        "parent_id": "c_1786849945154",
+        "text": "The lede now includes that it supports all agents and all models.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:44.935Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786850007020",
+    "version": 1,
+    "anchor": {
+      "kind": "element",
+      "selector": "div:nth-of-type(1) > section:nth-of-type(1)",
+      "label": "section",
+      "aid": null,
+      "fingerprint": {
+        "tag": "section",
+        "text": "ttdoc Docs that fixthemselves. People comment. Your AI rewrites the page and answers every note. Make one, free Star 102 One line in your AI. Your readers install nothing. tdoc.dev/d/conway-life/v/2 tdocv2 of 2 What if a doc could think? Most documents are static. They sit there. This one runs Conway's Game of Life, a tiny universe with two rules, evolving in your browser as you read. Live cell wi",
+        "kids": "div,h1,p,div,p,div",
+        "meta": "||",
+        "h": "qmewl8phap"
+      },
+      "fallback": {
+        "ratio": 0.09979292168674699,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fixthemselves."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2aartifact \u8fd9\u4e2ademo\u6700\u597d\u662f\u5de6\u53f3\u5c4f\u5c55\u5f00\u7684\uff0c\u5e76\u4e14\u8981\u548c\u771f\u5b9e\u7684\u4e00\u81f4\uff0c\u73b0\u5728\u8fd9\u4e2acomment\u4e0d\u4e00\u81f4\uff0c\u8981\u73b0\u5b9e\u7535\u8111\u7aef\u5168\u90e8\u5c55\u5f00\u7684",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:13:27.020Z",
+    "replies": [
+      {
+        "id": "r_1786851704948",
+        "parent_id": "c_1786850007020",
+        "text": "The hero demo is now a desktop split: Conway board on the left, comment cards in the right margin. Earlier the notes were nested inside the board column, so they stacked instead of sitting beside it.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:44.948Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786850030644",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "102\nstars\n8\nforks\nMIT\n$0\nto run",
+      "context_before": "e published page.\n        \n      \n    \n  \n\n  \n  \n    \n      ",
+      "context_after": "\n    \n  \n\n  \n  \n    \n      Not just documents\n      If it ca",
+      "fallback": {
+        "ratio": 0.20862198795180723,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fixthemselves."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2a\u5e94\u8be5\u6362\u6210 trusted by users from xxx + \u6eda\u8f6e",
+    "author": null,
+    "status": "open",
+    "created": "2026-08-16T03:13:50.644Z",
+    "replies": [
+      {
+        "id": "r_1786851704962",
+        "parent_id": "c_1786850030644",
+        "text": "Trusted by users from is a scrolling marquee. The company names are still borrowed from OpenTag pending confirmation they are actually tdoc users. Do not treat them as a real customer list yet.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "partial",
+        "created": "2026-08-16T03:41:44.962Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\ud83d\udfe1": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok"
+  },
+  {
+    "id": "c_1786850043845",
+    "version": 1,
+    "anchor": {
+      "kind": "element",
+      "selector": "div:nth-of-type(1) > section:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(3) > svg",
+      "label": "A live Conway grid with a moving glider",
+      "aid": null,
+      "fingerprint": {
+        "tag": "svg",
+        "text": "",
+        "kids": "rect,g,g,g",
+        "meta": "0 0 240 140||A live Conway grid with a moving glider",
+        "h": "1qy6o2e0t4k"
+      },
+      "fallback": {
+        "ratio": 0.26519790097891566,
+        "nearestHeading": {
+          "id": null,
+          "text": "If it can be a web page, it can be a tdoc."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2asimulation\u4e0d\u592a\u5bf9",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:14:03.845Z",
+    "replies": [
+      {
+        "id": "r_1786851704976",
+        "parent_id": "c_1786850043845",
+        "text": "Simulation tile is a 12px lattice with two correct five-cell gliders, not scattered dots.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:44.976Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786850077360",
+    "version": 1,
+    "anchor": {
+      "kind": "element",
+      "selector": "div:nth-of-type(1) > section:nth-of-type(3)",
+      "label": "section",
+      "aid": null,
+      "fingerprint": {
+        "tag": "section",
+        "text": "Not just documents If it can be a web page, it can be a tdoc. Your AI writes plain HTML. Nobody's block editor in the way. Report Dashboard Simulation Spec Post mortem One pager",
+        "kids": "div,div",
+        "meta": "||",
+        "h": "1v85uf9xw8w"
+      },
+      "fallback": {
+        "ratio": 0.27787321159638556,
+        "nearestHeading": {
+          "id": null,
+          "text": "If it can be a web page, it can be a tdoc."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e9bvisual \u4e0d\u592a\u597d\uff0c\u8be6\u89c1 A teammate you can read the source of. \u8fd9\u4e2asection\u7684visual\u5728opentag\u91cc",
+    "author": null,
+    "status": "open",
+    "created": "2026-08-16T03:14:37.360Z",
+    "replies": [
+      {
+        "id": "r_1786851704992",
+        "parent_id": "c_1786850077360",
+        "text": "Feature cards use the OpenTag grammar (2px black stroke, 8 percent grid, labelled pills). These six page-type thumbs are still simpler. Happy to redraw them to the same card treatment.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "partial",
+        "created": "2026-08-16T03:41:44.992Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\ud83d\udfe1": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok"
+  },
+  {
+    "id": "c_1786850088971",
+    "version": 1,
+    "anchor": {
+      "kind": "element",
+      "selector": "div:nth-of-type(1) > section:nth-of-type(4)",
+      "label": "section",
+      "aid": null,
+      "fingerprint": {
+        "tag": "section",
+        "text": "How it works Three steps. Nobody leaves the page. 1 They comment In the browser, on any sentence or picture. No install. 2 You say fix it Your AI pulls every note at once, and what each one points at. v3 3 Everyone hears back New version, and a reply on every note saying what changed.",
+        "kids": "div,div",
+        "meta": "||",
+        "h": "qsjoqd0fdq"
+      },
+      "fallback": {
+        "ratio": 0.38052404932228917,
+        "nearestHeading": {
+          "id": null,
+          "text": "Three steps. Nobody leaves the page."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2avisual\u4e5f\u540c\u4e0a",
+    "author": null,
+    "status": "open",
+    "created": "2026-08-16T03:14:48.971Z",
+    "replies": [
+      {
+        "id": "r_1786851705011",
+        "parent_id": "c_1786850088971",
+        "text": "The three loop steps are drawn (highlight, converge, replies stamped done) but they are not yet the same card visuals as the OpenTag teammate section.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "partial",
+        "created": "2026-08-16T03:41:45.011Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\ud83d\udfe1": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok"
+  },
+  {
+    "id": "c_1786850121530",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "Claude\nCodex\nGrok\nGemini\nCursor",
+      "context_before": "y reply is signed by the one that wrote it.\n    \n    \n      ",
+      "context_after": "\n    \n  \n\n  \n  \n    \n      What you get\n      The boring par",
+      "fallback": {
+        "ratio": 0.46460137424698794,
+        "nearestHeading": {
+          "id": null,
+          "text": "tdoc has no model, and no subscription."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e9bvisual \u53ea\u8981\u5927logo\uff0c\u5728You already pay for this. Pay for it once. \u8fd9\u4e2asection\u91cc\u7684\u540c\u6b3e",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:15:21.530Z",
+    "replies": [
+      {
+        "id": "r_1786851705025",
+        "parent_id": "c_1786850121530",
+        "text": "Runtimes are now 84px app tiles with the vendor marks only, plus a trailing more tile. Word chips are gone.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:45.025Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786850133819",
+    "version": 1,
+    "anchor": {
+      "kind": "element",
+      "selector": "div:nth-of-type(1) > section:nth-of-type(6)",
+      "label": "section",
+      "aid": null,
+      "fingerprint": {
+        "tag": "section",
+        "text": "What you get The boring parts, handled. 01 / READERS They install nothing. Click the link, highlight a sentence, type. One sign in puts their name on it. That is the whole ask. point at the thing, not at where it is 02 / ARTIFACTS Comment on the picture. Charts, diagrams, images, tables, code. Not just the words around them. v1 v2 the note moves with its sentence 03 / REWRITES Nothing gets lost. C",
+        "kids": "div,div",
+        "meta": "||",
+        "h": "wolrh723qr"
+      },
+      "fallback": {
+        "ratio": 0.5891895707831325,
+        "nearestHeading": {
+          "id": null,
+          "text": "Comment on the picture."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e9bvisual\u4e5f\u540c\u4e0a",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:15:33.819Z",
+    "replies": [
+      {
+        "id": "r_1786851705038",
+        "parent_id": "c_1786850133819",
+        "text": "The six What you get cards are redrawn in that idiom: grid, bold 2px strokes, labelled pills, caption inside the SVG.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:45.038Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786850149873",
+    "version": 1,
+    "anchor": {
+      "kind": "element",
+      "selector": "div:nth-of-type(1) > section:nth-of-type(8) > div:nth-of-type(2) > table",
+      "label": "table",
+      "aid": null,
+      "fingerprint": {
+        "tag": "table",
+        "text": "tdoc Google Docs Notion Mintlify Your AI reads the comments All at once You copy them out You copy them out Your AI replies to each one Signed by the agent What you can make Any web page Text documents Docs and databases A docs site Comment on a chart or image Whole image Whole block Live co editing One version at a time Runs on your own account Cloudflare or Vercel Open source MIT Price Free Free",
+        "kids": "thead,tbody",
+        "meta": "||",
+        "h": "1ueygngkeo0"
+      },
+      "fallback": {
+        "ratio": 0.8462325865963856,
+        "nearestHeading": {
+          "id": null,
+          "text": "Where tdoc wins, and where it doesn't."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2a\u592a\u4e11\u4e86\uff0c\u8981\u548copentag\u91cc\u7684table\u540c\u6b3e",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:15:49.873Z",
+    "replies": [
+      {
+        "id": "r_1786851705052",
+        "parent_id": "c_1786850149873",
+        "text": "Compare table now uses the yes / no / partial marks instead of bare text cells.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:45.052Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786850162296",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "Send the next one as a tdoc.",
+      "context_before": "at\n          \n        \n      \n    \n  \n\n  \n\n  \n  \n    \n      ",
+      "context_after": "\n      Paste this into your AI. It sets everything up and ha",
+      "fallback": {
+        "ratio": 0.9251482492469879,
+        "nearestHeading": {
+          "id": null,
+          "text": "Send the next one as a tdoc."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2a\u611f\u89c9\u4e0d\u591f\u5438\u5f15\u4eba",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:16:02.296Z",
+    "replies": [
+      {
+        "id": "r_1786851705065",
+        "parent_id": "c_1786850162296",
+        "text": "Closing line is now Stop being the middleman, with the install paste block removed.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:45.065Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  },
+  {
+    "id": "c_1786850182230",
+    "version": 1,
+    "anchor": {
+      "kind": "text",
+      "text": "Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md",
+      "context_before": "ink.\n    \n    \n      Make one, free\n      Star 102\n    \n    ",
+      "context_after": "\n  \n\n  \n    github.com/tornado-doc/tdoc\n    \u00a0\u00b7\u00a0 MIT \u00a0\u00b7\u00a0 a Cl",
+      "fallback": {
+        "ratio": 0.9557205384036145,
+        "nearestHeading": {
+          "id": null,
+          "text": "Send the next one as a tdoc."
+        }
+      }
+    },
+    "text": "\u8fd9\u4e2a\u611f\u89c9\u6ca1\u5565\u7528\u56e0\u4e3a\u6211\u4eectarget\u662f\u6280\u672f\u5c0f\u767d",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:16:22.230Z",
+    "replies": [
+      {
+        "id": "r_1786851705082",
+        "parent_id": "c_1786850182230",
+        "text": "Removed the install snippet. A shell line is the wrong close for someone who does not write code.",
+        "version": 2,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T03:41:45.082Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "\u2705": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 2
+  }
+]

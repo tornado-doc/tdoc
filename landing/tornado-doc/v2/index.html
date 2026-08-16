@@ -35,7 +35,7 @@
       --cell: #1652f0;
     }
     * { box-sizing: border-box; }
-    body { background:#fff; color:var(--body); font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; margin:0; -webkit-font-smoothing:antialiased; }
+    body { background:#fff; color:var(--body); font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; margin:0; overflow-x:hidden; -webkit-font-smoothing:antialiased; }
     .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
     h1,h2,h3 { color:var(--ink); letter-spacing:-.022em; }
     h2 { font-size:32px; line-height:1.15; margin:0 0 8px; }
@@ -203,13 +203,16 @@
     footer a { display:inline-flex; align-items:center; gap:6px; }
 
     @media (max-width:840px) {
-      .tiles,.loop,.sm-grid,.hosts,.proof-wall { grid-template-columns:1fr; }
+      .tiles,.loop,.sm-grid,.hosts { grid-template-columns:1fr; }
       .stage { grid-template-columns:1fr; }
       .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
-      .tagline { font-size:38px; }
+      h1.tagline { font-size:30px; }
       h2 { font-size:25px; }
       section { padding:56px 0; }
       .doc { padding:20px; }
+    }
+    @media (min-width:841px) {
+      h1.tagline { white-space: nowrap; }
     }
   </style>
 </head>
@@ -1186,6 +1189,7 @@ Everything else dies.</div>
         <div class="controls"><label for="play"><span class="when-paused">Play</span><span class="when-playing">Pause</span></label></div>
         <p class="lifenote">Published tdoc pages cannot run a document's own JavaScript, so this board is drawn in SVG and CSS instead of a scripted canvas.</p>
       </div>
+      </div>
       <aside class="stage-notes">
         <p class="lbl-n">2 comments</p>
         <div class="note">
@@ -1624,67 +1628,6 @@ Everything else dies.</div>
           </tr>
         </tbody>
       </table>
-    </div>
-  </section>
-
-  <!-- ══ SOCIAL PROOF ══
-       The people, roles, and avatars are real and verified. The quotes are
-       PLACEHOLDERS: the wording on the OpenTag site is about OpenTag, so it
-       cannot be attributed to them here. Swap in one real tdoc line each. -->
-  <section>
-    <div class="sec-head ctr">
-      <p class="eyebrow">Social proof</p>
-      <h2>What builders say.</h2>
-    </div>
-    <div class="proof-wall">
-      <figure class="proof-card">
-        <blockquote>PLACEHOLDER, awaiting a real line from Josh about tdoc.</blockquote>
-        <figcaption>
-          <span class="av" style="background:#3f6ab4;width:32px;height:32px;font-size:13px">J</span>
-          <span><span class="pname">Josh<svg class="badge" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 1.8 3 .2.9 2.9 2.2 2-1.1 2.8 1.1 2.8-2.2 2-.9 2.9-3 .2L12 22l-2.4-1.8-3-.2-.9-2.9-2.2-2L4.6 12 3.5 9.2l2.2-2 .9-2.9 3-.2z"/><path d="M10.4 14.6l-2-2-1.1 1.1 3.1 3.1 5.3-5.3-1.1-1.1z" fill="#fff"/></svg></span>
-          <span class="prole">Platform Engineer, Adobe</span></span>
-        </figcaption>
-      </figure>
-      <figure class="proof-card">
-        <blockquote>PLACEHOLDER, awaiting a real line from Brandon about tdoc.</blockquote>
-        <figcaption>
-          <span class="av" style="background:#c3452f;width:32px;height:32px;font-size:13px">B</span>
-          <span><span class="pname">Brandon<svg class="badge" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 1.8 3 .2.9 2.9 2.2 2-1.1 2.8 1.1 2.8-2.2 2-.9 2.9-3 .2L12 22l-2.4-1.8-3-.2-.9-2.9-2.2-2L4.6 12 3.5 9.2l2.2-2 .9-2.9 3-.2z"/><path d="M10.4 14.6l-2-2-1.1 1.1 3.1 3.1 5.3-5.3-1.1-1.1z" fill="#fff"/></svg></span>
-          <span class="prole">Software Engineer, Reddit</span></span>
-        </figcaption>
-      </figure>
-      <figure class="proof-card">
-        <blockquote>PLACEHOLDER, awaiting a real line from Angela F about tdoc.</blockquote>
-        <figcaption>
-          <span class="av" style="background:#8a5ba8;width:32px;height:32px;font-size:13px">A</span>
-          <span><span class="pname">Angela F<svg class="badge" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 1.8 3 .2.9 2.9 2.2 2-1.1 2.8 1.1 2.8-2.2 2-.9 2.9-3 .2L12 22l-2.4-1.8-3-.2-.9-2.9-2.2-2L4.6 12 3.5 9.2l2.2-2 .9-2.9 3-.2z"/><path d="M10.4 14.6l-2-2-1.1 1.1 3.1 3.1 5.3-5.3-1.1-1.1z" fill="#fff"/></svg></span>
-          <span class="prole">UI/UX Designer, Figma</span></span>
-        </figcaption>
-      </figure>
-      <figure class="proof-card">
-        <blockquote>PLACEHOLDER, awaiting a real line from Bruce Z about tdoc.</blockquote>
-        <figcaption>
-          <span class="av" style="background:#1a7340;width:32px;height:32px;font-size:13px">B</span>
-          <span><span class="pname">Bruce Z<svg class="badge" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 1.8 3 .2.9 2.9 2.2 2-1.1 2.8 1.1 2.8-2.2 2-.9 2.9-3 .2L12 22l-2.4-1.8-3-.2-.9-2.9-2.2-2L4.6 12 3.5 9.2l2.2-2 .9-2.9 3-.2z"/><path d="M10.4 14.6l-2-2-1.1 1.1 3.1 3.1 5.3-5.3-1.1-1.1z" fill="#fff"/></svg></span>
-          <span class="prole">Serial Entrepreneur</span></span>
-        </figcaption>
-      </figure>
-      <figure class="proof-card">
-        <blockquote>PLACEHOLDER, awaiting a real line from Sam H about tdoc.</blockquote>
-        <figcaption>
-          <span class="av" style="background:#b4732f;width:32px;height:32px;font-size:13px">S</span>
-          <span><span class="pname">Sam H<svg class="badge" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 1.8 3 .2.9 2.9 2.2 2-1.1 2.8 1.1 2.8-2.2 2-.9 2.9-3 .2L12 22l-2.4-1.8-3-.2-.9-2.9-2.2-2L4.6 12 3.5 9.2l2.2-2 .9-2.9 3-.2z"/><path d="M10.4 14.6l-2-2-1.1 1.1 3.1 3.1 5.3-5.3-1.1-1.1z" fill="#fff"/></svg></span>
-          <span class="prole">Open Source Maintainer</span></span>
-        </figcaption>
-      </figure>
-      <figure class="proof-card">
-        <blockquote>PLACEHOLDER, awaiting a real line from Sammy about tdoc.</blockquote>
-        <figcaption>
-          <span class="av" style="background:#4a8560;width:32px;height:32px;font-size:13px">S</span>
-          <span><span class="pname">Sammy<svg class="badge" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 1.8 3 .2.9 2.9 2.2 2-1.1 2.8 1.1 2.8-2.2 2-.9 2.9-3 .2L12 22l-2.4-1.8-3-.2-.9-2.9-2.2-2L4.6 12 3.5 9.2l2.2-2 .9-2.9 3-.2z"/><path d="M10.4 14.6l-2-2-1.1 1.1 3.1 3.1 5.3-5.3-1.1-1.1z" fill="#fff"/></svg></span>
-          <span class="prole">Software Engineer, Meta</span></span>
-        </figcaption>
-      </figure>
     </div>
   </section>
 
