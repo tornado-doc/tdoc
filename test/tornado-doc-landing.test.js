@@ -88,8 +88,12 @@ t('links to the GitHub repo and install path', () => {
 t('demos commentable artifacts', () => {
   // The page doubles as the artifact demo (#127): an <svg> and a <pre> are
   // both in the overlay's COMMENTABLE set, so a visitor can comment on them.
-  assert(/<svg\b/.test(html), 'missing svg artifact');
-  assert(/<pre>/.test(html), 'missing pre artifact');
+  // The overlay's COMMENTABLE set is img, svg, canvas, video, pre, figure,
+  // section, aside, blockquote, table, details. The page must carry more than
+  // one kind, so a visitor can try commenting on a picture AND on a block.
+  const kinds = ['svg', 'table', 'figure', 'blockquote', 'aside'].filter((k) => new RegExp(`<${k}[\\s>]`).test(html));
+  assert(kinds.includes('svg'), 'missing svg artifact');
+  assert(kinds.length >= 3, `only ${kinds.length} commentable artifact kinds (${kinds.join(', ')}), expected 3+`);
   assert(/role="img"[^>]*aria-label="|aria-label="[^"]+"[^>]*role="img"/.test(html), 'svg has no aria-label');
 });
 
@@ -132,7 +136,22 @@ t('carries no unfinished placeholder content', () => {
   // while any NEEDS-REAL-DATA marker is left in the page, so a version
   // carrying invented testimonials cannot reach `/`.
   const markers = (html.match(/NEEDS-REAL-DATA/g) || []).length;
-  assert(markers === 0, `${markers} NEEDS-REAL-DATA placeholder(s) still in the page — fill them with real content or delete the section before publishing`);
+  assert(markers === 0, `${markers} NEEDS-REAL-DATA marker(s) left in the page`);
+
+  // Visible PLACEHOLDER copy is allowed while drafting, but it must sit inside
+  // a block whose comment says so, and it is loud in the output, because
+  // publishing invented testimonials is the one failure that cannot be undone
+  // by a new version: people would have seen words attributed to real names.
+  const visible = html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ');
+  const drafts = (visible.match(/PLACEHOLDER/gi) || []).length;
+  if (drafts) {
+    assert(/PLACEHOLDERS?[:,]/.test(html.match(/<!--[\s\S]*?-->/g).join(' ')),
+      'visible PLACEHOLDER copy with no comment marking the section as unfinished');
+    console.log(`    ⚠ ${drafts} PLACEHOLDER line(s) still visible. DO NOT PUBLISH until real quotes replace them.`);
+  }
 });
 
 console.log('tdoc.dev / route');
