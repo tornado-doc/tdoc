@@ -112,6 +112,11 @@
       "n": 22,
       "created": "2026-08-16T11:20:00Z",
       "prompt": "Compare table trimmed to five rows, AI identity row replaces the replies row"
+    },
+    {
+      "n": 23,
+      "created": "2026-08-16T11:45:00Z",
+      "prompt": "Drop the artifact tile section; its examples were mostly Notion-native and it restated the ANYTHING card"
     }
   ]
 }
