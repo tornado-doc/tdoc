@@ -116,6 +116,14 @@ t('phone rules actually override the desktop headline and CTA grid', () => {
   // has 327px. The grid has to restack or shrink.
   assert(/\.cta\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1]),
     '640px breakpoint must restack .cta; 232+232 overflows 375');
+  // v28: loop stayed 3 col (98px, one word per line), proof-wall stayed
+  // 3 col (min-content 164px, page scrollWidth 545), feature cards stayed
+  // 2 col (156px). All three must become one column with the CTAs.
+  assert(/\.loop,\s*\.sm-grid,\s*\.proof-wall\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1])
+      || (/\.loop\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1])
+        && /\.sm-grid\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1])
+        && /\.proof-wall\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1])),
+    '640px breakpoint must restack .loop, .sm-grid and .proof-wall to 1fr');
   // v12 lengthened the ghost label to "Star on GitHub 102". The v7 216px
   // cap wraps that label (77px vs 52px). Phone max-width must match the
   // desktop track (232px), or be absent so 1fr uses the wrap.
