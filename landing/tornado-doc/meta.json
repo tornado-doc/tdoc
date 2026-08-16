@@ -42,6 +42,11 @@
       "n": 8,
       "created": "2026-08-16T05:55:00Z",
       "prompt": "Override the overlay rules breaking table seams, avatar alignment and runtime/host balance; keep the 375px CTA stack"
+    },
+    {
+      "n": 9,
+      "created": "2026-08-16T06:20:00Z",
+      "prompt": "Fix the six UI defects found by screenshotting each section, plus rebalance runtimes and hosts"
     }
   ]
 }
