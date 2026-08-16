@@ -147,6 +147,11 @@
       "n": 29,
       "created": "2026-08-16T13:40:00Z",
       "prompt": "Phone: restack the loop, feature cards, and quote wall. Three 164px quote columns overflowed 375 to 545; the loop was 98px, one word per line."
+    },
+    {
+      "n": 30,
+      "created": "2026-08-16T14:10:00Z",
+      "prompt": "Hero spacing reduced to two values: 12 inside a group, 40 between groups"
     }
   ]
 }
