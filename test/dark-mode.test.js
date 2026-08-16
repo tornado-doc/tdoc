@@ -38,6 +38,18 @@ t('dark mode is a page invert, not a per-color palette', () => {
   assert(!src.includes('--td-ground: #111111'), 'old per-token dark palette came back');
 });
 
+t('dark mode keeps form-control labels visible under invert', () => {
+  assert(src.includes('color-scheme: dark'), 'html still sets color-scheme dark');
+  assert(
+    /html\[data-tdoc-theme="dark"\] button[\s\S]*?color-scheme:\s*light/.test(src),
+    'buttons must stay color-scheme light so UA does not paint light text on a light chip'
+  );
+  assert(
+    /html\[data-tdoc-theme="dark"\] input[\s\S]*?color-scheme:\s*light/.test(src),
+    'inputs must stay color-scheme light too'
+  );
+});
+
 t('dark mode restores native emoji colors (not inverted)', () => {
   assert(
     /html\[data-tdoc-theme="dark"\][\s\S]*?\.tdoc-emoji/.test(src),
