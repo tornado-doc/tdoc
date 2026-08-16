@@ -68,7 +68,12 @@ t('carries share-card tags', () => {
 });
 
 t('names tdoc and tornado-doc', () => {
-  assert(/<h1>tdoc<\/h1>/.test(html), 'missing h1 tdoc');
+  // Exactly one h1, carrying the value proposition. The brand sits in the
+  // wordmark and <title>; an h1 that is only the product name wastes the
+  // strongest heading on a word nobody searches for yet.
+  const h1s = html.match(/<h1[^>]*>/g) || [];
+  assert(h1s.length === 1, `expected exactly 1 <h1>, found ${h1s.length}`);
+  assert(/tdoc/.test(html), 'does not mention tdoc');
   assert(html.includes('tornado-doc'), 'does not mention tornado-doc');
   assert(!html.includes('Tornado Dog'), 'old Tornado Dog name still present');
   assert(meta.title === 'tornado-doc', `meta title was ${meta.title}`);
@@ -94,11 +99,23 @@ t('has a compare table that admits a loss', () => {
   assert(/<table/.test(html), 'missing compare table');
   const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
   const lost = rows.filter((r) => {
-    const cells = r.match(/<td[^>]*>[\s\S]*?<\/td>/g) || [];
-    if (!cells.length) return false;
-    return /class="no"/.test(cells[0]);  // first td is tdoc's column
+    // tdoc's column is the one marked `us`, not a fixed position.
+    const ours = r.match(/<td class="us">[\s\S]*?<\/td>/);
+    return !!ours && /class="no"/.test(ours[0]);
   });
   assert(lost.length >= 1, 'every compare row favours tdoc — keep at least one honest loss');
+});
+
+t('uses no dashes as punctuation', () => {
+  // House style for this page: no em dash, en dash, or " - " as a connector.
+  // Checked against visible text only, so hyphenated words and CSS/SVG values
+  // (stroke-width, viewBox coords, -apple-system) are not false positives.
+  const text = html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ');
+  const hits = text.match(/[–—]|\s-\s|&mdash;|&ndash;/g) || [];
+  assert(hits.length === 0, `${hits.length} dash(es) in visible copy: ${[...new Set(hits)].join(' ')}`);
 });
 
 t('carries no unfinished placeholder content', () => {
