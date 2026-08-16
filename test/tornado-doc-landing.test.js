@@ -103,6 +103,21 @@ t('hero stage-notes is a sibling of stage-doc', () => {
   assert(closes === opens + 1, `stage-doc still open when notes start (div net ${opens - closes})`);
 });
 
+t('phone rules actually override the desktop headline and CTA grid', () => {
+  // Desktop is `h1.tagline { font-size:56px }` (specificity 0,1,1). A
+  // `@media { .tagline { font-size:38px } }` rule never wins, so v6
+  // wrapped to three lines at 375px. The phone override must target
+  // `h1.tagline`.
+  const phone = html.match(/@media \(max-width:640px\)\s*\{([\s\S]*?)\n    \}/);
+  assert(phone, 'missing @media (max-width:640px)');
+  assert(/h1\.tagline\s*\{[^}]*font-size:\s*\d+px/.test(phone[1]),
+    '640px breakpoint must set h1.tagline font-size, not just .tagline');
+  // Fixed 216+216 tracks are 444px. A 375px phone with 24px wrap padding
+  // has 327px. The grid has to restack or shrink.
+  assert(/\.cta\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1]),
+    '640px breakpoint must restack .cta; 216+216 overflows 375');
+});
+
 t('demos commentable artifacts', () => {
   // The page doubles as the artifact demo (#127): an <svg> and a <pre> are
   // both in the overlay's COMMENTABLE set, so a visitor can comment on them.
