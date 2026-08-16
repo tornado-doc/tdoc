@@ -66,7 +66,7 @@ function get(port, p, headers = {}) {
     '<!doctype html><html><head><title>Island fixture</title></head><body>' +
     '<p>Host copy.</p>' +
     '<iframe src="/d/island-fixture/v/1/widget/compound-interest" sandbox="allow-scripts allow-same-origin"></iframe>' +
-    '<iframe src="https://example.com/chart" sandbox="allow-scripts"></iframe>' +
+    '<iframe id="third-party-chart" src="https://example.com/chart" sandbox="allow-scripts"></iframe>' +
     '</body></html>');
   fs.writeFileSync(path.join(docDir, 'v1', 'widgets', 'compound-interest.html'),
     '<!doctype html><html><body><script>window.__WIDGET__=1;</script><p>widget</p></body></html>');
@@ -118,20 +118,13 @@ function get(port, p, headers = {}) {
 
   await t('host doc rewrites widget iframe sandbox to allow-scripts only', async () => {
     const res = await get(PORT, `/d/${SLUG}/v/1`);
-    const widgetTag = (res.body.match(/<iframe[^>]*compound-interest[^>]*>/i) || [])[0]
-      || (res.body.match(/<iframe[^>]*sandbox="allow-scripts"[^>]*compound-interest[^>]*>/i) || [])[0];
-    // Attribute order may put sandbox first after rewrite.
     const iframes = [...res.body.matchAll(/<iframe\b([^>]*)>/gi)].map(m => m[0]);
     const widgetIframe = iframes.find(t => t.includes('compound-interest'));
     if (!widgetIframe) throw new Error(`widget iframe missing from host doc: ${iframes.join(' | ')}`);
     if (!/sandbox="allow-scripts"/.test(widgetIframe)) throw new Error(`sandbox not forced: ${widgetIframe}`);
     if (/allow-same-origin/.test(widgetIframe)) throw new Error(`allow-same-origin survived: ${widgetIframe}`);
-    const other = iframes.find(t => t.includes('example.com'));
+    const other = iframes.find(t => t.includes('id="third-party-chart"'));
     if (!other) throw new Error('non-widget iframe missing');
-    if (!other.includes('example.com')) throw new Error('rewrote the wrong iframe');
-    if (!other.includes('sandbox="allow-scripts"') || other.includes('allow-same-origin')) {
-      // third-party iframe is left as authored
-    }
     if (other.includes('compound-interest')) throw new Error('confused widget with third-party iframe');
   });
 
