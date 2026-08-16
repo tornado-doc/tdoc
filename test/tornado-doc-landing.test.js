@@ -115,7 +115,18 @@ t('phone rules actually override the desktop headline and CTA grid', () => {
   // Fixed 216+216 tracks are 444px. A 375px phone with 24px wrap padding
   // has 327px. The grid has to restack or shrink.
   assert(/\.cta\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1]),
-    '640px breakpoint must restack .cta; 216+216 overflows 375');
+    '640px breakpoint must restack .cta; 232+232 overflows 375');
+  // v12 lengthened the ghost label to "Star on GitHub 102". The v7 216px
+  // cap wraps that label (77px vs 52px). Phone max-width must match the
+  // desktop track (232px), or be absent so 1fr uses the wrap.
+  const ctaRule = phone[1].match(/\.cta\s*\{[^}]*\}/);
+  const maxW = ctaRule && ctaRule[0].match(/max-width:\s*(\d+)px/);
+  assert(!maxW || Number(maxW[1]) >= 232,
+    `640px .cta max-width is ${maxW && maxW[1]}px; "Star on GitHub 102" wraps below 232`);
+  // The GitHub mark is a <use> of a 24x24 symbol. Without a viewBox the
+  // used path overflows the 1em box and the grid row grows to ~77px.
+  assert(/btn-ghost[^>]*>\s*<svg[^>]*viewBox="0 0 24 24"/.test(html),
+    'Star button icon must set viewBox so the used mark cannot stretch the pill');
   // Same class of bug as the original .tagline vs h1.tagline miss: an
   // earlier 640px size is a no-op if a later 840px block also sets
   // h1.tagline. The last media query that sets h1.tagline must be 640.
@@ -141,6 +152,17 @@ t('hero comment count matches the mock thread', () => {
   assert(!/class="lbl-n"/.test(notes[0]), 'the real margin has no comment-count header');
   assert(/move anchor/i.test(notes[0]), 'real cards lead with the move-anchor row');
   assert(/mc-meta/.test(notes[0]), 'real cards carry a version and date meta row');
+});
+
+t('agent avatar is a filled Claude disc, not a small glyph', () => {
+  // The sunburst path is hollow in the middle. v11/v12 put an 18–20px
+  // terracotta mark on a transparent disc; at 22px that reads as a broken
+  // image. The runtime tiles already use a filled disc.
+  assert(/mc-av mc-logo/.test(html), 'missing agent logo avatar');
+  assert(/\.mc-av\.mc-logo\s*\{[^}]*background:\s*#D97757/i.test(html),
+    'agent avatar disc must be Claude terracotta, not transparent');
+  assert(/\.mc-logo svg\s*\{[^}]*fill:\s*#fff/i.test(html),
+    'agent mark must be white on the terracotta disc');
 });
 
 t('demos commentable artifacts', () => {
