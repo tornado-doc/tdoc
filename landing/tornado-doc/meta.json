@@ -117,6 +117,11 @@
       "n": 23,
       "created": "2026-08-16T11:45:00Z",
       "prompt": "Drop the artifact tile section; its examples were mostly Notion-native and it restated the ANYTHING card"
+    },
+    {
+      "n": 24,
+      "created": "2026-08-16T12:05:00Z",
+      "prompt": "Four features rewritten so each one breaks if you swap in Notion, with titles that name the feature outright"
     }
   ]
 }
