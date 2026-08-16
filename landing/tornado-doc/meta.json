@@ -72,6 +72,11 @@
       "n": 14,
       "created": "2026-08-16T08:40:00Z",
       "prompt": "Four features led by replies, no margin panel, aligned card grid, header-weight compare label column"
+    },
+    {
+      "n": 15,
+      "created": "2026-08-16T09:00:00Z",
+      "prompt": "Hero direction C: the doc your AI can actually edit, with a shorter sub anchored to Google Docs"
     }
   ]
 }
