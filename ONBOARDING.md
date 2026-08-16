@@ -6,7 +6,7 @@
 
 `tdoc` is a Claude Code skill that gives the user prompt-native HTML documents with text- and artifact-anchored comments. After install + onboarding, the user can:
 
-- `/tdoc new <prompt>` → generate an interactive HTML doc
+- `/tdoc new <prompt>` → generate a commentable HTML doc
 - `/tdoc publish <slug>` → publish (default target is hosted tdoc.dev; signup may be closed, so onboarding uses `--platform cloudflare` below)
 - Share the live URL; commenters sign in with GitHub
 
@@ -156,7 +156,7 @@ If the user says they only want local docs (no publishing, no Cloudflare), stop 
 ```bash
 # Test that local works
 node --version  # should be v18 or higher
-/tdoc new "a doc that explains compound interest with a slider"
+/tdoc new "a doc that explains compound interest with a stepped diagram"
 ```
 
 ## Failure modes you might hit

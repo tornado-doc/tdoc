@@ -682,6 +682,16 @@
     background: #fff;
     filter: invert(1) hue-rotate(180deg);
   }
+  /* Native buttons/inputs follow color-scheme. Dark UA styles paint light
+     text onto an author light fill; invert then makes the label vanish
+     (e.g. "Differences only" on a white chip). Keep form controls in the
+     light scheme so invert can flip their author colors as a unit. */
+  html[data-tdoc-theme="dark"] button,
+  html[data-tdoc-theme="dark"] input,
+  html[data-tdoc-theme="dark"] select,
+  html[data-tdoc-theme="dark"] textarea {
+    color-scheme: light;
+  }
   html[data-tdoc-theme="dark"] img,
   html[data-tdoc-theme="dark"] video,
   html[data-tdoc-theme="dark"] canvas,
