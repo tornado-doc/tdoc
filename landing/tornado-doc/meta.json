@@ -157,6 +157,11 @@
       "n": 31,
       "created": "2026-08-16T14:30:00Z",
       "prompt": "Four feature titles reworded: babysits, own identity, version control, agent native HTML"
+    },
+    {
+      "n": 32,
+      "created": "2026-08-16T14:50:00Z",
+      "prompt": "Version control card states what it survives instead of what it is not"
     }
   ]
 }
