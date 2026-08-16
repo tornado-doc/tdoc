@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>tdoc, get started in three steps</title>
+  <meta name="description" content="Install tdoc into the AI you already use, say what you want, and share the link. Then fork a real doc and watch a comment fix itself.">
+  <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAeGVYSWZNTQAqAAAACAAEARoABQAAAAEAAAA+ARsABQAAAAEAAABGASgAAwAAAAEAAgAAh2kABAAAAAEAAABOAAAAAAAAAEgAAAABAAAASAAAAAEAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAtKADAAQAAAABAAAAtAAAAABlWqJOAAAACXBIWXMAAAsTAAALEwEAmpwYAAABWWlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNi4wLjAiPgogICA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogICAgICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgICAgICAgICB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iPgogICAgICAgICA8eG1wOkNyZWF0b3JUb29sPkZpZ21hPC94bXA6Q3JlYXRvclRvb2w+CiAgICAgIDwvcmRmOkRlc2NyaXB0aW9uPgogICA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgoE/1zIAAAXpElEQVR4Ae2dBfQctRPHUyju7u7ubsXd3Xl4KVAo0oc93N3d5eFuRYs7FHeKuxR38p/PtNn/3XXvfqf93SWT9+63+9vNZpPJdyeTmcmkh5fkLBkFIqHASJG0w5phFFAKGKANCFFRwAAdVXdaYwzQhoGoKGCAjqo7rTEGaMNAVBQwQEfVndYYA7RhICoKGKCj6k5rjAHaMBAVBQzQUXWnNcYAbRiIigIG6Ki60xpjgDYMREUBA3RU3WmNMUAbBqKigAE6qu60xhigDQNRUcAAHVV3WmMM0IaBqChggI6qO60xBmjDQFQUMEBH1Z3WGAO0YSAqChigo+pOa4wB2jAQFQUM0FF1pzXGAG0YiIoCBuioutMaY4A2DERFAQN0VN1pjTFAGwaiooABOqrutMYYoA0DUVHAAB1Vd1pjDNCGgagoYICOqjutMQZow0BUFDBAR9Wd1hgDtGEgKgoYoKPqTmuMAdowEBUFDNBRdac1xgBtGIiKAgboqLrTGmOANgxERQEDdFTdaY0xQBsGoqKAATqq7rTGGKANA1FRwAAdVXdaYwzQhoGoKGCAjqo7rTE9O50Ef/zxh/v111/dv//+60YbbTQ33njjdXqTrP4NUKAjAf3DDz+4AQMGuLvvvtsNGjTIff311+6ff/5xY445ppt11lndSiut5DbeeGM300wzNUAae7QTKdDDS+qUisOJL7jgAnf22We7999/P6s2nJnf77//7v7++2+9PsEEE7g+ffq4/v37u7HHHjvLaydxU6BtAf3VV1+5gQMHutdff919//33bvTRR3dPPvmke+qpp7RHZpxxRrfOOuu4FVZYQTkxoP3xxx/dm2++6W6++Wb9Ae5ll13WXX755W766aePuyetdUMpAIdupySysD/11FP9NNNMw8gx3G/yySfX+999913Fagv4/ZJLLqnPzzXXXP6dd96pmN9uxkGBtuLQ//33n+vXr587/fTT9WtbZJFFlAMLiN1vv/2mk79tttnGzTbbbFXxo59++sntsssu7tprr3ULLrigu+eee9ykk05a1bOWqUMp0E7f5RVXXKEcVcQLL3Ky//PPPxuunmhB/CabbKLlbrrppp4RwFK8FOhWDo2cPHjwYPfpp5+6jz76yJ155pl6PPLII93BBx/cNBaBbI3m4/nnn3dXX32122KLLZpWthXUXhQYoYD+66+/3NNPP+3uvfde98QTT7g33njDffvtt0UUQbx47bXX3EQTTeQQGQ477DA3ZMgQB8inmmqqory1/PPMM8+4Xr16uWmnndY999xzbtxxx63lccvbKRQYEYOPaBv8pZde6hdddNGiSZ5oJvzcc8/tRVvh99xzT3/88cf7hx9+OKvSZZddluU/4IADsuv1nvTu3VvLu/jii+stwp5rcwq4VtdPdMce2VU+cP2J+szvtttu/qabbvIffPCBF91x2So8+uijHtD37NnTX3nllWXzVXtDRgSPfL7UUkt5McRU+5jl6yAKtBzQe++9twJ5kkkm8SIj+67UbaW0e+mll7yIJ6WX6/5/rbXW0g9ELIx1l2EPti8FWgroZ5991osFz4u86h977LG2oELQpBx+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">
+  <link rel="canonical" href="https://tdoc.dev/start">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tdoc">
+  <meta property="og:url" content="https://tdoc.dev/start">
+  <meta property="og:title" content="tdoc, get started in three steps">
+  <meta property="og:description" content="Install it into the AI you already use, say what you want, and share the link.">
+  <meta property="og:image" content="https://tdoc.dev/tdoc_logo.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="tdoc, get started in three steps">
+  <meta name="twitter:description" content="Install it into the AI you already use, say what you want, and share the link.">
+  <meta name="twitter:image" content="https://tdoc.dev/tdoc_logo.png">
+
+  <style>
+    /* No author JavaScript anywhere, on purpose: published tdocs run under a
+       nonce-only CSP, so author scripts never execute. Every moving thing on
+       this page is CSS, the same technique the Conway doc uses. See #138. */
+    :root {
+      --ink: #10121a;
+      --body: #454a58;
+      --muted: #767c8b;
+      --accent: #1652f0;
+      --soft: #eef3ff;
+      --rule: #e4e7ee;
+      --wash: #f7f8fb;
+      --good: #1a7340;
+      --cell: #1652f0;
+    }
+    * { box-sizing: border-box; }
+    body { background:#fff; color:var(--body); font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; margin:0; -webkit-font-smoothing:antialiased; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+    h1,h2,h3 { color:var(--ink); letter-spacing:-.022em; }
+    h2 { font-size:32px; line-height:1.15; margin:0 0 8px; }
+    h3 { font-size:17px; margin:0 0 5px; }
+    p { margin:0 0 13px; }
+    a { color:var(--accent); }
+    section { padding:78px 0; border-top:1px solid var(--rule); }
+    .eyebrow { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:0 0 9px; }
+    .sec-head { max-width:560px; margin:0 0 34px; }
+    .sec-head p { font-size:16px; margin:0; color:var(--muted); }
+    .sec-head p span { display:block; }
+    .ctr { margin-left:auto; margin-right:auto; text-align:center; }
+
+    /* icons */
+    .i { width:1em; height:1em; fill:currentColor; flex:none; vertical-align:-.125em; }
+
+    /* hero */
+    .hero { padding:56px 0 70px; border-top:0; }
+    .brand { display:flex; align-items:center; gap:10px; margin:0 0 40px; }
+    img.brand-mark { width:76px; height:76px; display:block !important; margin:0 !important; }
+    .brand-name { font-weight:700; color:var(--ink); font-size:26px; letter-spacing:-.02em; }
+    h1.tagline { font-size:56px; line-height:1.05; font-weight:700; color:var(--ink); margin:0 0 12px; letter-spacing:-.04em; }
+    .sub span { display:block; }
+    .sub { font-size:19px; max-width:680px; margin:0 0 40px; color:var(--body); }
+    .cta { display:grid; grid-template-columns:repeat(2,232px); gap:12px; justify-content:start; }
+    .btn { display:flex; align-items:center; justify-content:center; gap:9px; width:100%; height:52px; padding:0 18px; border-radius:999px; font-weight:650; font-size:15px; white-space:nowrap; text-decoration:none; letter-spacing:-.01em; transition:transform .12s, box-shadow .12s; }
+    .btn:hover { transform:translateY(-1px); }
+    .btn-primary:hover { box-shadow:0 8px 20px rgba(22,82,240,.28); }
+    .btn-primary { background:var(--accent); color:#fff; }
+    .btn-ghost { border:1px solid #d8dce5; color:var(--ink); background:#fff; }
+    .btn-ghost:hover { border-color:#b9c0cd; }
+    .pill { background:rgba(16,18,26,.06); border-radius:999px; padding:1px 8px; font-size:12.5px; font-weight:700; }
+    .trustline { display:flex; flex-wrap:wrap; gap:20px; align-items:center; margin:0 0 12px; font-size:11.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+    .trustline span { display:inline-flex; align-items:center; gap:7px; }
+    .trustline svg { width:14px; height:14px; }
+
+    /* browser chrome */
+    .browser { border:1px solid var(--rule); border-radius:13px; background:#fff; overflow:hidden; box-shadow:0 12px 34px rgba(16,18,26,.07); }
+    .chrome { display:flex; align-items:center; gap:6px; padding:10px 13px; border-bottom:1px solid var(--rule); background:var(--wash); }
+    .dot { width:9px; height:9px; border-radius:50%; background:#d6dae3; }
+    .addr { margin-left:8px; font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
+    .tbar { display:flex; align-items:center; gap:8px; padding:7px 13px; border-bottom:1px solid var(--rule); background:#fff; }
+    .tbar-mark { background:var(--accent); color:#fff; font-weight:700; font-size:11px; border-radius:999px; padding:3px 10px; }
+    .tbar-v { font-size:11px; color:var(--muted); }
+
+    /* the real conway doc */
+    .doc { padding:26px 30px 22px; }
+    .doc h4 { font-size:23px; line-height:1.2; margin:0 0 12px; color:var(--ink); letter-spacing:-.02em; }
+    .doc p { font-size:14px; margin:0 0 11px; color:var(--body); }
+    .rules { background:var(--wash); border-left:3px solid var(--ink); padding:11px 15px; margin:15px 0; font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; color:var(--ink); }
+    .life { width:100%; height:auto; display:block; border:1px solid var(--rule); border-radius:7px; background:#fff; }
+    .glider { animation: glide 2.4s steps(6) infinite; animation-play-state:paused; }
+    #play:checked ~ .life .glider { animation-play-state:running; }
+    .controls { display:flex; justify-content:center; margin-top:10px; }
+    .controls label { background:var(--accent); color:#fff; border:1px solid var(--accent); padding:5px 14px; border-radius:6px; font:13px system-ui,sans-serif; cursor:pointer; }
+    #play { position:absolute; opacity:0; pointer-events:none; }
+    #play:checked ~ .controls label { background:#fff; color:var(--ink); border-color:var(--rule); }
+    #play:checked ~ .controls label .when-paused { display:none; }
+    #play:not(:checked) ~ .controls label .when-playing { display:none; }
+    @keyframes glide { from { transform:translate(0,0); } to { transform:translate(48px,48px); } }
+    @media (prefers-reduced-motion: reduce) { .glider { animation:none; } }
+
+    /* comment cards */
+    .note { border:1px solid var(--rule); border-radius:9px; padding:10px 12px; background:#fff; box-shadow:0 1px 3px rgba(16,18,26,.05); }
+    .note + .note { margin-top:8px; }
+    .nhead { display:flex; align-items:center; gap:7px; margin:0 0 4px; }
+    .av { width:19px; height:19px; border-radius:50%; flex:none; display:grid; place-items:center; font-size:9.5px; font-weight:700; color:#fff; }
+    .av svg { width:12px; height:12px; }
+    .who { font-size:12.5px; font-weight:650; color:var(--ink); }
+    .ntext { font-size:12.5px; line-height:1.5; margin:0; color:var(--body); }
+    .agent { border-color:#cfe0d6; background:#f4faf6; }
+    .done { margin-left:auto; font-size:10.5px; font-weight:700; color:var(--good); }
+    .margin-notes { padding:0 30px 24px; }
+
+    /* Replicates the real .tdoc-margin-comment: 13px system-ui on #111,
+       white, 1px #e5e5e5, 10px radius, 12px padding, and the same row order
+       (move anchor, author, text, reactions, meta, replies). */
+    .mc { width:100%; background:#fff; border:1px solid #e5e5e5; border-radius:10px; padding:12px; box-shadow:0 2px 8px rgba(0,0,0,.05); font:13px system-ui,sans-serif; color:#111; }
+    .mc-anchor { font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:#9aa0aa; margin:0 0 8px; }
+    .mc-author { display:flex; align-items:center; gap:7px; margin:0 0 6px; min-height:22px; }
+    .mc-av { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; color:#fff; font-size:10px; font-weight:700; flex:none; }
+    /* the reader builds agent avatars from agentLogoUrl(): the full colour
+       mark filling the slot, not a glyph inset on a white disc */
+    
+    .mc-av.mc-logo { background:#D97757; border:0; }
+    .mc-logo svg { width:14px; height:14px; fill:#fff; display:block; }
+    .mc-text { color:#111; line-height:1.5; }
+    .mc-state { display:inline-block; font-size:11px; font-weight:700; color:#1a7340; background:#e8f5ed; border:1px solid #cfe0d6; border-radius:999px; padding:1px 8px; margin:0 0 7px; }
+    .mc-login { font-weight:650; color:#111; font-size:13px; }
+    .mc-reply .mc-login { font-weight:700; }
+    .mc-reply { margin:10px 0 0; padding:10px 12px; border-left:2px solid #e5e5e5; background:#fafbfa; border-radius:0 8px 8px 0; }
+    .mc-r.on { background:#e8f5ed; border-color:#cfe0d6; }
+    .mc-r.on.red { background:#fdeaea; border-color:#f2cccc; }
+    .mc-r.add { color:#9aa0aa; }
+    .mc-actions { display:inline-flex; gap:10px; }
+    .mc-actions .a { color:#1652f0; font-weight:600; }
+    .mc-actions .del { color:#c3452f; font-weight:600; }
+    .mc-reacts { display:flex; flex-wrap:wrap; gap:5px; margin:9px 0 0; }
+
+    .mc-r { font-size:11.5px; background:#f5f6f8; border:1px solid #e5e5e5; border-radius:999px; padding:2px 8px; }
+    .mc-meta { display:flex; justify-content:space-between; align-items:center; margin:9px 0 0; font-size:11px; color:#9aa0aa; }
+    .mc-replies { margin:9px 0 0; font-size:12px; color:var(--accent); font-weight:600; }
+    .mc-row { display:flex; align-items:flex-start; gap:9px; }
+    .mc-row.collapsed { margin-top:16px; align-items:center; }
+    .pin { width:26px; height:26px; border-radius:50%; flex:none; display:grid; place-items:center; background:#fff; border:2px solid var(--accent); box-shadow:0 1px 4px rgba(16,18,26,.12); }
+    .pin-av { width:100%; height:100%; border-radius:50%; display:grid; place-items:center; color:#fff; font-size:11px; font-weight:700; }
+    .pin-cluster { background:var(--accent); border-color:var(--accent); color:#fff; font-size:12px; font-weight:700; }
+    .pin-hint { font-size:11.5px; color:var(--muted); line-height:1.4; }
+    /* proof band */
+    .band { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:13px; font-size:14px; color:var(--muted); }
+    .band b { color:var(--ink); font-weight:650; }
+    .band span { display:inline-flex; align-items:center; gap:6px; }
+    .bsep { width:3px; height:3px; border-radius:50%; background:#ccd1db; }
+
+    /* artifact tiles */
+                
+    /* loop */
+    .loop { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+    .step { border:1px solid var(--rule); border-radius:12px; overflow:hidden; background:#fff; }
+    .step-viz { background:var(--wash); border-bottom:1px solid var(--rule); }
+    .step-viz svg { display:block; width:100%; height:auto; }
+
+    .step-txt { padding:14px 16px 16px; }
+    .step-n { display:inline-grid; place-items:center; width:20px; height:20px; border-radius:50%; background:var(--accent); color:#fff; font-size:11px; font-weight:700; margin:0 0 8px; }
+    .step h3 { font-size:15px; }
+    .step p { font-size:13px; margin:0; color:var(--muted); }
+
+    .pain-viz { border:1px solid var(--rule); border-radius:13px; overflow:hidden; background:var(--wash); max-width:640px; margin:0 auto; }
+    .pain-viz svg { display:block; width:100%; height:auto; }
+
+    /* runtime logos */
+    .runtimes { display:flex; flex-wrap:wrap; gap:11px; justify-content:center; }
+    .rt { display:inline-flex; align-items:center; gap:9px; border:1px solid var(--rule); border-radius:11px; padding:12px 19px; background:#fff; font-weight:600; font-size:15px; color:var(--ink); }
+    .rt svg { width:19px; height:19px; }
+
+    .rt-split { display:flex; justify-content:center; align-items:stretch; gap:40px; }
+    .rt-split > div { display:flex; flex-direction:column; align-items:center; }
+    .rt-hosts { display:flex; flex-direction:row; gap:14px; padding-left:40px; border-left:1px solid var(--rule); }
+    .rt-cap { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:0 0 16px; text-align:center; }
+    .logorow { justify-content:center; }
+    @media (max-width:840px) { .rt-split { flex-direction:column; gap:28px; } .rt-hosts { padding-left:0; border-left:0; } }
+
+    /* feature cards, opentag layout */
+        /* rows stretch so the four bottoms line up. align-items:start hugs the
+       content and leaves a ragged edge in a 2x2, which reads worse than the
+       even padding stretching produces. */
+    .sm-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:stretch; }
+    .sm-card { border:1px solid var(--rule); border-radius:13px; overflow:hidden; background:#fff; display:flex; flex-direction:column; }
+    .sm-txt { flex:1; }
+    .sm-viz { background:var(--wash); border-bottom:1px solid var(--rule); }
+    .sm-viz svg { display:block; width:100%; height:auto; }
+    .sm-txt { padding:17px 19px 20px; }
+    .sm-label { font-size:11px; font-weight:700; letter-spacing:.11em; color:var(--accent); margin:0 0 6px; }
+    .sm-body { font-size:13.5px; margin:0; color:var(--muted); }
+
+    /* deploy */
+    .hosts { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .host { border:1px solid var(--rule); border-radius:13px; padding:28px; background:#fff; text-align:center; }
+    .host svg { width:52px; height:52px; display:block; margin:0 auto 14px; }
+    .host h3 { font-size:18px; }
+    .host p { font-size:13.5px; margin:0; color:var(--muted); }
+
+    /* compare, opentag marks */
+    .tablewrap { overflow-x:auto; border:1px solid var(--rule); border-radius:13px; }
+    /* The overlay styles author tables with `margin: 0 0 18px -14px`, which
+       pulls the table out of its own scroll wrapper and leaves a gap on the
+       right and bottom. Neutralised here with a more specific selector so the
+       homepage renders correctly today; the real fix is PR #128. */
+    .tablewrap table { margin:0; border-radius:13px; overflow:hidden; }
+    table { border-collapse:collapse; border-spacing:0; width:100%; min-width:840px; font-size:14px; background:#fff; table-layout:fixed; }
+    th, td { padding:12px 14px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:middle; }
+    tbody tr:hover td { background:#fbfcfe; }
+    tbody tr:hover td.us { background:#eaf0fe; }
+    thead th { font-size:11.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); font-weight:700; background:var(--wash); }
+    thead th:first-child { background:#eef0f5; }
+    thead th.us { background:var(--soft); color:var(--accent); }
+    td.us { background:#fafbff; }
+    .lbl { font-weight:700; color:var(--ink); width:27%; background:#f2f4f8; font-size:14px; }
+    tbody tr:last-child td { border-bottom:0; }
+    .yes,.no,.part { display:inline-flex; align-items:center; gap:7px; font-weight:500; }
+    .yes { color:var(--ink); }
+    .no { color:#5b6070; }
+    .part { color:var(--body); }
+    .yes svg,.no svg,.part svg { width:18px; height:18px; flex:none; border-radius:50%; padding:2.5px; }
+    .yes svg { background:var(--good); color:#fff; }
+    .no svg { background:#8a90a0; color:#fff; }
+    .part svg { background:#c9a227; color:#fff; }
+
+    /* hero split: doc left, comments in the right margin, as on desktop */
+    .stage { display:grid; grid-template-columns:1fr 300px; }
+    .stage-doc { }
+    .stage-notes { padding:22px 16px 22px 0; }
+    .stage-notes .lbl-n { font-size:10.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
+
+    /* trusted by marquee */
+    .trust-label { margin:0 0 22px; text-align:center; font:700 11.5px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+    .marquee { overflow:hidden; -webkit-mask-image:linear-gradient(90deg,transparent,#000 14%,#000 86%,transparent); mask-image:linear-gradient(90deg,transparent,#000 14%,#000 86%,transparent); }
+    .track { display:flex; width:max-content; animation:scroll 30s linear infinite; }
+    .marquee:hover .track { animation-play-state:paused; }
+    @keyframes scroll { from { transform:translateX(0); } to { transform:translateX(-50%); } }
+    .tlogo { flex:0 0 auto; display:inline-flex; align-items:center; gap:11px; margin-right:70px; font-size:17px; font-weight:700; white-space:nowrap; color:var(--ink); opacity:.5; }
+    .tlogo svg { width:21px; height:21px; fill:currentColor; flex:none; }
+    .tlogo-img { gap:0; }
+    .tlogo-img img { height:24px; width:auto; display:block !important; margin:0 !important; }
+    @media (prefers-reduced-motion: reduce) { .track { animation:none; } }
+
+    /* big runtime tiles, opentag apptile treatment */
+    .logorow { display:flex; flex-wrap:wrap; gap:14px; justify-content:center; }
+    .apptile { width:84px; height:84px; border-radius:20px; display:grid; place-items:center; border:1px solid rgba(0,0,0,.1); }
+    .apptile svg { width:42px; height:42px; }
+    .apptile.more { font-size:30px; font-weight:700; color:var(--muted); background:var(--wash); }
+
+    /* social proof wall */
+    .proof-wall { display:grid; grid-template-columns:repeat(3,1fr); gap:15px; align-items:start; }
+    .proof-card { margin:0; border:1px solid var(--rule); border-radius:12px; padding:16px; background:#fff; }
+    .proof-card blockquote { margin:0 0 13px; font-size:14.5px; line-height:1.55; color:var(--ink); }
+    .proof-card figcaption { display:flex; align-items:center; gap:10px; }
+    .proof-card img { width:32px; height:32px; border-radius:50%; flex:none; background:var(--wash); }
+    .pname { font-size:13.5px; font-weight:650; color:var(--ink); display:flex; align-items:center; gap:5px; }
+    .prole { font-size:12.5px; color:var(--muted); }
+    .badge { width:13px; height:13px; color:var(--accent); }
+
+    /* ── overlay overrides ─────────────────────────────────────────────
+       The reader's overlay restyles author content, and three of its rules
+       fight this page. Scoped overrides rather than blanket !important, so
+       the overlay keeps winning everywhere it should.
+       1. `table { border-collapse:separate; border-spacing:3px }` opened
+          visible seams between every cell and made the compare table read
+          as loose tiles.
+       2. `table { margin:0 0 18px -14px }` pulled the table out of its own
+          scroll wrapper (PR #128 is the real fix).
+       3. author `img { display:block; margin:16px auto }` centred every
+          avatar and added 16px of vertical air, which is what pushed the
+          names and roles away from their faces. */
+    .tablewrap table { border-collapse:collapse; border-spacing:0; margin:0; border-radius:13px; overflow:hidden; }
+    /* The overlay's author-image rule is a long :not() chain, so it outranks
+       a plain selector. Narrowly scoped !important is the honest tool here:
+       margin:16px auto was resolving to 34px of side air and shoving every
+       name away from its face. */
+    .proof-card img, .mc img, .mc svg, .mc-av svg { display:inline-block !important; margin:0 !important; }
+    .proof-card img, .mc img { border-radius:50% !important; }
+
+    /* social proof caption: face, then name, then role, all left aligned */
+    .proof-card figcaption { display:flex; align-items:center; gap:11px; }
+    .proof-card figcaption > span { display:flex; flex-direction:column; align-items:flex-start; gap:2px; min-width:0; }
+    .pname { display:inline-flex; align-items:center; gap:5px; font-size:13.5px; font-weight:650; color:var(--ink); }
+    .prole { font-size:12.5px; color:var(--muted); text-align:left; }
+    .proof-card img { width:32px; height:32px; object-fit:cover; flex:none; }
+
+    /* runtimes and hosts sit on one baseline instead of leaving a well
+       under the shorter column */
+    .rt-split { align-items:center; }
+    .rt-hosts { align-self:center; }
+
+    /* final */
+    footer { padding:28px 0 64px; font-size:13px; color:var(--muted); text-align:center; }
+    footer a { display:inline-flex; align-items:center; gap:6px; }
+
+    /* the split is the product's real desktop layout, so hold it as long as
+       the margin column stays usable rather than collapsing at tablet width */
+    @media (max-width:840px) {
+            .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
+      h1.tagline { font-size:38px; }
+      h2 { font-size:25px; }
+      section { padding:56px 0; }
+      .doc { padding:20px; }
+    }
+    @media (max-width:640px) {
+      h1.tagline { font-size:34px; }
+      /* 342px of usable width at 375, so two 232px tracks cannot sit side by
+         side. Share the row instead of stacking, and drop the two words that
+         do not fit rather than the second button. */
+      .cta { grid-template-columns:1fr 1fr; max-width:none; gap:10px; }
+      .btn { font-size:14px; padding:0 12px; }
+      .btn-long { display:none; }
+      .stage { grid-template-columns:1fr; }
+      .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
+      /* v28 left these on desktop tracks. At 375 the loop is 98px
+         (one word per line), the quote wall is three 164px columns
+         (scrollWidth 545), and the feature cards are 156px. */
+      .loop, .sm-grid, .proof-wall { grid-template-columns:1fr; }
+    }
+
+    /* ── onboarding ─────────────────────────────────────────────────────
+       Interactive without a line of author JavaScript, which published
+       tdocs cannot run: every picker below is a radio input driving a
+       sibling selector. See #138. */
+    .steps { display:grid; gap:18px; }
+    .step-card { border:1px solid var(--rule); border-radius:14px; background:#fff; overflow:hidden; }
+    .step-hd { display:flex; align-items:flex-start; gap:14px; padding:22px 24px 0; }
+    .step-num { flex:none; width:30px; height:30px; border-radius:50%; background:var(--accent); color:#fff; display:grid; place-items:center; font-size:14px; font-weight:700; }
+    .step-hd h3 { font-size:20px; margin:2px 0 4px; }
+    .step-hd p { font-size:15px; color:var(--muted); margin:0; }
+    .step-bd { padding:18px 24px 24px 68px; }
+    @media (max-width:640px) { .step-bd { padding:16px 20px 22px; } .step-hd { padding:20px 20px 0; } }
+
+    /* radio-driven tabs */
+    .picker input { position:absolute; opacity:0; pointer-events:none; }
+    .tabs { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px; }
+    .tabs label { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--rule); border-radius:999px; padding:7px 14px; font-size:13.5px; font-weight:600; color:var(--body); cursor:pointer; background:#fff; }
+    .tabs label svg { width:15px; height:15px; }
+    .panel { display:none; }
+    .cmd { background:#0f1220; color:#e8ecf7; border-radius:10px; padding:14px 16px; font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-x:auto; white-space:pre-wrap; overflow-wrap:anywhere; -webkit-user-select:all; user-select:all; }
+    .cmd .c { color:#8b93a8; }
+    .say { border:1px solid var(--rule); border-left:3px solid var(--accent); border-radius:0 10px 10px 0; background:var(--wash); padding:12px 15px; font-size:14.5px; color:var(--ink); margin:0 0 10px; -webkit-user-select:all; user-select:all; }
+    .hint { font-size:13px; color:var(--muted); margin:10px 0 0; }
+
+    /* the four-beat loop */
+    .beats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:0 0 18px; }
+    @media (max-width:840px) { .beats { grid-template-columns:1fr 1fr; } }
+    @media (max-width:480px) { .beats { grid-template-columns:1fr; } }
+    .beat { border:1px solid var(--rule); border-radius:12px; padding:14px; background:#fff; }
+    .beat b { display:block; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin:0 0 6px; }
+    .beat p { font-size:13.5px; margin:0; color:var(--body); }
+    .beat svg { display:block; width:100%; height:auto; margin:10px 0 0; }
+
+    details.more { border-top:1px solid var(--rule); margin:18px 0 0; padding:14px 0 0; }
+    details.more summary { cursor:pointer; font-size:14px; font-weight:650; color:var(--accent); list-style:none; }
+    details.more summary::-webkit-details-marker { display:none; }
+    details.more summary::before { content:"+"; font-weight:700; margin-right:7px; display:inline-block; }
+    details.more[open] summary::before { content:"\2212"; }
+    details.more .inner { padding:14px 0 0; }
+    #rt-claude:checked ~ .panels .p-claude { display:block; }
+    #rt-claude:checked ~ .tabs label[for="rt-claude"] { border-color:var(--accent); background:var(--soft); color:var(--accent); }
+    #rt-codex:checked ~ .panels .p-codex { display:block; }
+    #rt-codex:checked ~ .tabs label[for="rt-codex"] { border-color:var(--accent); background:var(--soft); color:var(--accent); }
+    #rt-cursor:checked ~ .panels .p-cursor { display:block; }
+    #rt-cursor:checked ~ .tabs label[for="rt-cursor"] { border-color:var(--accent); background:var(--soft); color:var(--accent); }
+    #rt-gemini:checked ~ .panels .p-gemini { display:block; }
+    #rt-gemini:checked ~ .tabs label[for="rt-gemini"] { border-color:var(--accent); background:var(--soft); color:var(--accent); }
+    #rt-grok:checked ~ .panels .p-grok { display:block; }
+    #rt-grok:checked ~ .tabs label[for="rt-grok"] { border-color:var(--accent); background:var(--soft); color:var(--accent); }
+    #h-dev:checked ~ .panels .hp-dev { display:block; }
+    #h-dev:checked ~ .tabs label[for="h-dev"] { border-color:var(--accent); background:var(--soft); color:var(--accent); }
+    #h-cf:checked ~ .panels .hp-cf { display:block; }
+    #h-cf:checked ~ .tabs label[for="h-cf"] { border-color:var(--accent); background:var(--soft); color:var(--accent); }
+    #h-vc:checked ~ .panels .hp-vc { display:block; }
+    #h-vc:checked ~ .tabs label[for="h-vc"] { border-color:var(--accent); background:var(--soft); color:var(--accent); }
+  </style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
+  <symbol id="i-claude" viewBox="0 0 24 24"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></symbol>
+  <symbol id="i-openai" viewBox="0 0 24 24"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></symbol>
+  <symbol id="i-cursor" viewBox="0 0 24 24"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></symbol>
+  <symbol id="i-gemini" viewBox="0 0 24 24"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/></symbol>
+  <symbol id="i-cloudflare" viewBox="0 0 24 24"><path d="M16.5088 16.8447c.1475-.5068.0908-.9707-.1553-1.3154-.2246-.3164-.6045-.499-1.0615-.5205l-8.6592-.1123a.1559.1559 0 0 1-.1333-.0713c-.0283-.042-.0351-.0986-.021-.1553.0278-.084.1123-.1484.2036-.1562l8.7359-.1123c1.0351-.0489 2.1601-.8868 2.5537-1.9136l.499-1.3013c.0215-.0561.0293-.1128.0147-.168-.5625-2.5463-2.835-4.4453-5.5499-4.4453-2.5039 0-4.6284 1.6177-5.3876 3.8614-.4927-.3658-1.1187-.5625-1.794-.499-1.2026.119-2.1665 1.083-2.2861 2.2856-.0283.31-.0069.6128.0635.894C1.5683 13.171 0 14.7754 0 16.752c0 .1748.0142.3515.0352.5273.0141.083.0844.1475.1689.1475h15.9814c.0909 0 .1758-.0645.2032-.1553l.12-.4268zm2.7568-5.5634c-.0771 0-.1611 0-.2383.0112-.0566 0-.1054.0415-.127.0976l-.3378 1.1744c-.1475.5068-.0918.9707.1543 1.3164.2256.3164.6055.498 1.0625.5195l1.8437.1133c.0557 0 .1055.0263.1329.0703.0283.043.0351.1074.0214.1562-.0283.084-.1132.1485-.204.1553l-1.921.1123c-1.041.0488-2.1582.8867-2.5527 1.914l-.1406.3585c-.0283.0713.0215.1416.0986.1416h6.5977c.0771 0 .1474-.0489.169-.126.1122-.4082.1757-.837.1757-1.2803 0-2.6025-2.125-4.727-4.7344-4.727"/></symbol>
+  <symbol id="i-vercel" viewBox="0 0 24 24"><path d="m12 1.608 12 20.784H0Z"/></symbol>
+  <symbol id="i-google" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></symbol>
+  <symbol id="i-coinbase" viewBox="0 0 24 24"><path d="M22.35 9.7A10.6 10.6 0 1 0 22.35 14.3L15.63 14.3A4.3 4.3 0 1 1 15.63 9.7Z"/></symbol>
+  <symbol id="i-bytedance" viewBox="0 0 24 24"><path d="M19.8772 1.4685L24 2.5326v18.9426l-4.1228 1.0563V1.4685zm-13.3481 9.428l4.115 1.0641v8.9786l-4.115 1.0642v-11.107zM0 2.572l4.115 1.0642v16.7354L0 21.428V2.572zm17.4553 5.6205v11.107l-4.1228-1.0642V9.2568l4.1228-1.0642z"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="m8 6-6 6 6 6M16 6l6 6-6 6"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M2 10h20" stroke="currentColor" stroke-width="2.2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-cross" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-dash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" d="M6 12h12"/></symbol>
+</svg>
+
+<div class="wrap">
+
+  <section class="hero" style="padding-bottom:0">
+    <div class="brand"><img class="brand-mark" src="data:image/png;base64,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" alt="" width="26" height="26"><span class="brand-name">tdoc</span></div>
+    <h1 class="tagline">Three steps, then it runs itself.</h1>
+    <p class="sub"><span>Install it into the AI you already use, say what you want, and share the link.</span><span>Everything below is real. The example at step 3 is a live doc you can fork.</span></p>
+  </section>
+
+  <section>
+    <div class="steps">
+
+      <article class="step-card">
+        <div class="step-hd"><span class="step-num">1</span><div><h3>Install it where your AI already lives.</h3><p>Pick your runtime. Same line either way.</p></div></div>
+        <div class="step-bd picker">
+          <input type="radio" name="rt" id="rt-claude" checked><input type="radio" name="rt" id="rt-codex"><input type="radio" name="rt" id="rt-cursor"><input type="radio" name="rt" id="rt-gemini"><input type="radio" name="rt" id="rt-grok">
+          <div class="tabs"><label for="rt-claude"><svg style="color:#d97757" aria-hidden="true"><use href="#i-claude"/></svg>Claude Code</label><label for="rt-codex"><svg style="color:#000" aria-hidden="true"><use href="#i-openai"/></svg>Codex</label><label for="rt-cursor"><svg style="color:#000" aria-hidden="true"><use href="#i-cursor"/></svg>Cursor</label><label for="rt-gemini"><svg style="color:#8e75b2" aria-hidden="true"><use href="#i-gemini"/></svg>Gemini</label><label for="rt-grok"><svg style="color:#000" aria-hidden="true"><use href="#i-x"/></svg>Grok</label></div>
+          <div class="panels"><div class="panel p-claude"><div class="cmd"><span class="c"># in Claude Code</span>
+/plugin marketplace add tornado-doc/tdoc</div><p class="hint">Or paste this instead: <code>Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md</code></p></div><div class="panel p-codex"><div class="cmd"><span class="c"># in Codex</span>
+/plugin marketplace add tornado-doc/tdoc</div><p class="hint">Or paste this instead: <code>Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md</code></p></div><div class="panel p-cursor"><div class="cmd"><span class="c"># in Cursor</span>
+/plugin marketplace add tornado-doc/tdoc</div><p class="hint">Or paste this instead: <code>Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md</code></p></div><div class="panel p-gemini"><div class="cmd"><span class="c"># in Gemini</span>
+/plugin marketplace add tornado-doc/tdoc</div><p class="hint">Or paste this instead: <code>Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md</code></p></div><div class="panel p-grok"><div class="cmd"><span class="c"># in Grok</span>
+/plugin marketplace add tornado-doc/tdoc</div><p class="hint">Or paste this instead: <code>Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md</code></p></div></div>
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-hd"><span class="step-num">2</span><div><h3>Tell it what you want.</h3><p>No commands to remember. Say it the way you would to a person.</p></div></div>
+        <div class="step-bd">
+          <div class="say">Make me a one page summary of this quarter, with a chart of weekly signups.</div>
+          <div class="say">Turn my notes into an explainer with a diagram, then publish it.</div>
+          <p class="hint">It writes the page, opens it, and hands you a link.</p>
+          <details class="more"><summary>Where does it get published?</summary><div class="inner picker">
+            <input type="radio" name="host" id="h-dev" checked><input type="radio" name="host" id="h-cf"><input type="radio" name="host" id="h-vc">
+            <div class="tabs"><label for="h-dev">tdoc.dev</label><label for="h-cf">Your Cloudflare</label><label for="h-vc">Your Vercel</label></div>
+            <div class="panels"><div class="panel hp-dev"><p class="hint" style="margin:0 0 10px">Nothing to set up. Your doc gets a link the moment you publish.</p><div class="say">Publish it.</div></div><div class="panel hp-cf"><p class="hint" style="margin:0 0 10px">Workers, R2 and KV in an account you own.</p><div class="say">Publish it to my own Cloudflare.</div></div><div class="panel hp-vc"><p class="hint" style="margin:0 0 10px">Functions with Blob and Upstash Redis.</p><div class="say">Publish it to my own Vercel.</div></div></div>
+            <p class="hint">Say it once and it sticks. You never type a deploy command.</p>
+          </div></details>
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-hd"><span class="step-num">3</span><div><h3>Watch a comment fix itself.</h3><p>On a real doc, not a mockup. Four actions, about a minute.</p></div></div>
+        <div class="step-bd">
+          <div class="beats">
+            <div class="beat"><b>01</b><p>Fork the example</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="18" y="20" width="120" height="7" rx="3.5" fill="#d3d8e3"/><rect x="18" y="38" width="150" height="18" rx="5" fill="#ffd84d" stroke="#10121a" stroke-width="1.6"/><path d="M150 52l18 13-7 2 5 10-5 2-5-10-6 4z" fill="#10121a"/></svg><p class="hint" style="margin-top:8px">It becomes your copy, comments and all.</p></div>
+            <div class="beat"><b>02</b><p>Ask your AI to fix a comment</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="30" y="26" width="140" height="38" rx="10" fill="#fff" stroke="#1652f0" stroke-width="1.8"/><svg x="44" y="36" width="18" height="18" viewBox="0 0 24 24" fill="#d97757"><use href="#i-claude"/></svg><rect x="72" y="41" width="76" height="7" rx="3.5" fill="#d3d8e3"/></svg><p class="hint" style="margin-top:8px">Point at it and say so.</p></div>
+            <div class="beat"><b>03</b><p>A new version appears</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="24" y="30" width="60" height="30" rx="7" fill="#fff" stroke="#10121a" stroke-width="1.6"/><rect x="116" y="30" width="60" height="30" rx="7" fill="#eef3ff" stroke="#1652f0" stroke-width="1.8"/><path d="M90 45h18" stroke="#10121a" stroke-width="1.6"/><path d="M104 41l5 4-5 4" fill="none" stroke="#10121a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text x="54" y="49" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#10121a">v1</text><text x="146" y="49" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#1652f0">v2</text></svg><p class="hint" style="margin-top:8px">The old one stays where it was.</p></div>
+            <div class="beat"><b>04</b><p>Everyone gets an answer</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="22" y="24" width="156" height="42" rx="9" fill="#f4faf6" stroke="#1a7340" stroke-width="1.6"/><circle cx="42" cy="45" r="9" fill="#D97757"/><svg x="35" y="38" width="14" height="14" viewBox="0 0 24 24" fill="#fff"><use href="#i-claude"/></svg><rect x="58" y="36" width="70" height="6" rx="3" fill="#cfe0d6"/><rect x="58" y="48" width="48" height="6" rx="3" fill="#cfe0d6"/><path d="M150 42l4 4 8-9" fill="none" stroke="#1a7340" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><p class="hint" style="margin-top:8px">Signed by the agent that made the change.</p></div>
+          </div>
+          <div class="cta">
+            <a class="btn btn-primary" href="https://tdoc.dev/d/conway-life/v/2">Open the example</a>
+            <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg>Star<span class="btn-long">&nbsp;on GitHub</span> <span class="pill">102</span></a>
+          </div>
+          <p class="hint">The example is a Conway board that runs on CSS alone. Fork it and it is yours to break.</p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/tornado-doc/tdoc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg>github.com/tornado-doc/tdoc</a>
+    &nbsp;&middot;&nbsp; MIT &nbsp;&middot;&nbsp; <a href="/">back to the start</a>
+    <br><br>
+    This page is a tdoc. Highlight a sentence and leave a comment.
+  </footer>
+
+</div>
+</body>
+</html>

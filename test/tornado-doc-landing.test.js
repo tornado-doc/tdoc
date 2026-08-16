@@ -87,7 +87,10 @@ t('names tdoc and tornado-doc', () => {
 
 t('links to the GitHub repo and install path', () => {
   assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc'), 'missing GitHub repo href');
-  assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md'), 'missing Install href');
+  // #142: the primary CTA goes to the onboarding page now, not straight to
+  // ONBOARDING.md. A raw markdown file was the wrong destination for a reader
+  // who does not write code.
+  assert(hrefs.some((h) => h === '/start'), 'primary CTA must point at the onboarding page');
 });
 
 t('hero stage-notes is a sibling of stage-doc', () => {

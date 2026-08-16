@@ -1015,6 +1015,11 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
 // page is authored, reviewed, and versioned through tdoc itself.
 const LANDING_SLUG = 'tornado-doc';
 
+// The onboarding page behind the homepage's primary CTA (#142). Same shape as
+// LANDING_SLUG: a published tdoc, so it is commentable and versioned like any
+// other doc rather than a hardcoded page nobody can leave a note on.
+const START_SLUG = 'tdoc-start';
+
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
 // gate, version picker, owner-manage payload, nonce + CSP — instead of the
@@ -1080,12 +1085,12 @@ async function serveDocVersion(env, req, slug, version) {
 // than a 404 or a sign-in wall. Every worker deployed from this repo runs this
 // code, but only tdoc.dev has the doc — everyone else's `/` keeps the neutral
 // page with no configuration.
-async function landingResponse(env, req) {
+async function landingResponse(env, req, slug = LANDING_SLUG) {
   try {
-    const meta = await loadDocMeta(env, LANDING_SLUG);
+    const meta = await loadDocMeta(env, slug);
     const latest = meta?.versions?.[meta.versions.length - 1]?.n;
     if (!latest) return html(landingHtml());
-    const res = await serveDocVersion(env, req, LANDING_SLUG, Number(latest));
+    const res = await serveDocVersion(env, req, slug, Number(latest));
     return res.ok ? res.response : html(landingHtml());
   } catch {
     return html(landingHtml());
@@ -2608,6 +2613,12 @@ export default {
     // The homepage itself is a published tdoc (see landingResponse), falling
     // back to a neutral branded page pointing at the open-source project.
     if (p === '/' && (method === 'GET' || method === 'HEAD')) return landingResponse(env, req);
+
+    // ---- onboarding ----
+    // `/start` is the homepage CTA's destination. Same fail-safe as `/`: if the
+    // doc is not published on this worker the visitor gets the neutral page
+    // rather than a 404, so self-hosted workers are unaffected.
+    if (p === '/start' && (method === 'GET' || method === 'HEAD')) return landingResponse(env, req, START_SLUG);
 
     // ---- owner-only doc catalog ----
     // `/me` returns the list of every doc hosted on THIS worker, but only
