@@ -1,8 +1,8 @@
 ---
 name: tdoc
 description: |
-  Prompt-native interactive HTML docs. Generate a self-contained HTML
-  document from a prompt (interactive models, SVG diagrams, simulations,
+  Prompt-native HTML docs. Generate a self-contained HTML
+  document from a prompt (SVG diagrams, CSS-toggled models, explainers,
   strategy docs, research write-ups, product specs, explainer pages,
   design docs, RFCs, case studies, post-mortems, technical proposals,
   vision docs, one-pagers, decision frameworks), serve it at localhost
@@ -44,7 +44,7 @@ description: |
 
   Use this INSTEAD of generating raw markdown / Google Docs / Notion-style
   content when the user wants:
-    - something interactive (charts, simulations, sliders, live demos)
+    - something interactive (charts, diagrams, CSS toggles — author JS does not run)
     - something shareable via URL with commenting
     - something that benefits from being a real HTML page rather than text
     - any document where the artifacts (images, diagrams, code blocks, video)
@@ -227,7 +227,7 @@ sleep 1
 2. Create `~/tdocs/<slug>/v1/index.html` — a **fully self-contained** HTML file:
    - All CSS inline in `<style>`. **No JavaScript** — author `<script>` tags do not execute (CSP; see "Interactivity: CSS only" under HTML generation rules).
    - No external CDNs unless requested. No build step.
-   - Clean reading-typography (system font stack, generous line-height, max-width ~720px for prose) UNLESS the doc is primarily a simulation/diagram, in which case go full-bleed.
+   - Clean reading-typography (system font stack, generous line-height, max-width ~720px for prose) UNLESS the doc is primarily a diagram, in which case go full-bleed.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, follow the fallbacks in that section; do NOT emit JavaScript, which fails silently and leaves the reader an empty box.
 3. Write `meta.json`:
    ```json
@@ -623,7 +623,8 @@ Pick one:
 - Show a short CSS-animated loop of the phenomenon.
 
 Then note in the doc what was simplified, so the reader isn't misled about what
-they're looking at.
+they're looking at. Do not invent a `/widget/` iframe or a sandboxed island —
+that route does not exist yet (issue #138).
 
 ### Default styling — DO NOT re-style the doc
 

@@ -1,6 +1,6 @@
 # tdoc — agent-native document review
 
-**Turn a prompt into an interactive HTML document, share it as a live URL, and
+**Turn a prompt into a commentable HTML document, share it as a live URL, and
 bring anchored comments back into your agent workflow.**
 
 tdoc is a prompt-native document surface for agent-assisted writing and review.
@@ -23,7 +23,7 @@ skill auto-detects the host and falls back to plain-text prompts where
 Claude-specific tools are unavailable. See [Using tdoc with Codex](#using-tdoc-with-codex).
 
 ```
-You:  /tdoc new "an explainer with a slider showing how interest compounds"
+You:  /tdoc new "an explainer of compound interest with a diagram of principal vs interest over time"
 Claude: <generates doc, opens it locally>
 You:  /tdoc publish
 Claude: https://tdoc.yourname.workers.dev/d/compound-interest/v/1
