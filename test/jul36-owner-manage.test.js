@@ -118,7 +118,6 @@ t('showManageModal() bails before creating any DOM when cfg.ownerManage is absen
 // still authorized (CLI unchanged); wrong token + non-owner session → 401.
 
 const uploadAuthStart = worker.indexOf('async function requireUploadAuth(req, env) {');
-const uploadAuthEnd = worker.indexOf('\n}', uploadAuthStart) + 2;
 const timingEqualStart = worker.indexOf('async function timingSafeEqual(a, b) {');
 const timingEqualEnd = worker.indexOf('\n}', timingEqualStart) + 2;
 const parseCookieStart = worker.indexOf('function parseCookie(req) {');
@@ -127,17 +126,19 @@ const getSessionStart = worker.indexOf('async function getSession(env, req) {');
 const getSessionEnd = worker.indexOf('\n}', getSessionStart) + 2;
 const isOwnerSessionStart = worker.indexOf('function isOwnerSession(env, session) {');
 const isOwnerSessionEnd = worker.indexOf('\n}', isOwnerSessionStart) + 2;
-const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env) {');
-const authorizeEnd = worker.indexOf('\n}', authorizeStart) + 2;
+const hostedHelpersStart = worker.indexOf('async function sha256Hex(s) {');
+const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env, slug) {');
+const hostedHelpersEnd = worker.indexOf('// #34 — Per-slug write serialization', hostedHelpersStart);
 if (uploadAuthStart < 0 || timingEqualStart < 0 || parseCookieStart < 0 || getSessionStart < 0
-  || isOwnerSessionStart < 0 || authorizeStart < 0) throw new Error('auth helpers not found');
+  || isOwnerSessionStart < 0 || authorizeStart < 0 || hostedHelpersStart < 0 || hostedHelpersEnd < 0) {
+  throw new Error('auth helpers not found');
+}
 const authSrc = [
   worker.slice(timingEqualStart, timingEqualEnd),
-  worker.slice(uploadAuthStart, uploadAuthEnd),
   worker.slice(parseCookieStart, parseCookieEnd),
   worker.slice(getSessionStart, getSessionEnd),
   worker.slice(isOwnerSessionStart, isOwnerSessionEnd),
-  worker.slice(authorizeStart, authorizeEnd),
+  worker.slice(hostedHelpersStart, hostedHelpersEnd),
 ].join('\n');
 
 const deleteStart = worker.indexOf("if (p === '/api/doc' && method === 'DELETE')");
@@ -149,8 +150,8 @@ const accessPatchEnd = worker.indexOf('// ---- admin delete ----', accessPatchSt
 const accessPatchRoute = worker.slice(accessPatchStart, accessPatchEnd);
 
 t('DELETE /api/doc and PATCH /api/doc/access both go through the shared authorizeOwnerMutation gate', () => {
-  assert(deleteRoute.includes('await authorizeOwnerMutation(req, env)'), 'DELETE /api/doc must call authorizeOwnerMutation');
-  assert(accessPatchRoute.includes('await authorizeOwnerMutation(req, env)'), 'PATCH /api/doc/access must call authorizeOwnerMutation');
+  assert(deleteRoute.includes('await authorizeOwnerMutation(req, env, slug)'), 'DELETE /api/doc must call authorizeOwnerMutation');
+  assert(accessPatchRoute.includes('await authorizeOwnerMutation(req, env, slug)'), 'PATCH /api/doc/access must call authorizeOwnerMutation');
   // The session path must go through the ONE shared, tested gate — not a
   // bespoke same-origin/cookie check bolted onto just one route.
   assert(!worker.includes('requireAdminAuth'), 'worker must not add a separate cookie-based admin-auth function');
@@ -158,12 +159,14 @@ t('DELETE /api/doc and PATCH /api/doc/access both go through the shared authoriz
 });
 
 t('authorizeOwnerMutation gate itself calls isOwnerSession, then falls back to requireUploadAuth', () => {
-  const fnSrc = worker.slice(authorizeStart, authorizeEnd);
+  const fnSrc = worker.slice(authorizeStart, hostedHelpersEnd);
   const ownerCheck = fnSrc.indexOf('isOwnerSession(env, session)');
   const tokenCheck = fnSrc.indexOf('requireUploadAuth(req, env)');
   assert(ownerCheck >= 0, 'must check isOwnerSession');
   assert(tokenCheck >= 0, 'must fall back to requireUploadAuth');
   assert(ownerCheck < tokenCheck, 'owner-session check must come before the token fallback');
+  assert(fnSrc.includes('requireDocWriteAccess(env, auth.actor, slug)'),
+    'hosted tokens must be slug-scoped inside the shared gate, not treated as global owners');
 });
 
 const box = { console, TextEncoder, crypto, Response };
@@ -204,24 +207,25 @@ function fakeSessionReq({ bearer, sid } = {}) {
 async function main() {
   await tAsync('requireUploadAuth: anonymous request (no Authorization header) → 401', async () => {
     const res = await box.requireUploadAuth({ headers: { get: () => null } }, { TDOC_UPLOAD_TOKEN: 'secret-token' });
-    assert(res !== null, 'must not pass through');
-    assert(res.status === 401, `expected 401, got ${res.status}`);
+    assert(res && res.ok === false, 'must not pass through');
+    assert(res.response.status === 401, `expected 401, got ${res.response && res.response.status}`);
   });
 
   await tAsync('requireUploadAuth: wrong bearer token → 401', async () => {
     const res = await box.requireUploadAuth(fakeReq('not-the-token'), { TDOC_UPLOAD_TOKEN: 'secret-token' });
-    assert(res !== null, 'must not pass through');
-    assert(res.status === 401, `expected 401, got ${res.status}`);
+    assert(res && res.ok === false, 'must not pass through');
+    assert(res.response.status === 401, `expected 401, got ${res.response && res.response.status}`);
   });
 
-  await tAsync('requireUploadAuth: no TDOC_UPLOAD_TOKEN configured → always 401 (fail closed)', async () => {
+  await tAsync('requireUploadAuth: no TDOC_UPLOAD_TOKEN configured → unknown bearer is 401 (fail closed)', async () => {
     const res = await box.requireUploadAuth(fakeReq('anything'), {});
-    assert(res !== null && res.status === 401, 'must fail closed when no token is configured');
+    assert(res && res.ok === false && res.response.status === 401, 'must fail closed when no token is configured');
   });
 
-  await tAsync('requireUploadAuth: correct bearer token → passes (owner-succeeds coverage)', async () => {
+  await tAsync('requireUploadAuth: correct bearer token → passes as admin actor', async () => {
     const res = await box.requireUploadAuth(fakeReq('secret-token'), { TDOC_UPLOAD_TOKEN: 'secret-token' });
-    assert(res === null, 'a correct token must pass through (return null)');
+    assert(res && res.ok === true && res.actor && res.actor.kind === 'admin',
+      'a correct provider token must pass as an admin actor');
   });
 
   // ── authorizeOwnerMutation: session-OR-token ──────────────────────────

@@ -33,3 +33,5 @@ GITHUB_CLIENT_ID = "Ov23liZ1UAGOchvKPmlS"
 TDOC_OWNER = "PLACEHOLDER_OWNER"
 
 # Secret: TDOC_UPLOAD_TOKEN — set via `wrangler secret put TDOC_UPLOAD_TOKEN`
+# TDOC_HOSTED_REGISTRATION — leave unset. /api/hosted/token stays closed.
+# Do not set this on tdoc.dev until hosted signup is intentionally opened.
