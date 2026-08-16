@@ -37,6 +37,11 @@
       "n": 7,
       "created": "2026-08-16T06:25:00Z",
       "prompt": "Phone: headline actually shrinks (h1.tagline beats 56px), CTA grid stacks so 216+216 cannot overflow 375, close the browser wrapper"
+    },
+    {
+      "n": 8,
+      "created": "2026-08-16T05:55:00Z",
+      "prompt": "Override the overlay rules breaking table seams, avatar alignment and runtime/host balance; keep the 375px CTA stack"
     }
   ]
 }
