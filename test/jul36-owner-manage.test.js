@@ -282,8 +282,9 @@ async function main() {
     const indexHtmlSrc = worker.slice(idxStart, idxEnd);
     assert(!nativeConfirmCall.test(stripLineComments(indexHtmlSrc)), '/me must not call the native confirm()');
     assert(indexHtmlSrc.includes('showConfirm('), '/me must use the styled showConfirm() modal');
-    assert(indexHtmlSrc.includes('dataset.versions'),
-      'delete confirm copy should be built from data-versions/data-comments (honest N/M copy)');
+    // Quiet confirm — title + "This can't be undone.", no version/comment inventory.
+    assert(indexHtmlSrc.includes("This can't be undone."), 'delete confirm copy should stay short and plain');
+    assert(!/remote storage/i.test(stripLineComments(indexHtmlSrc)), '/me must not say "remote storage" to the user');
   });
 
   t('local server index page no longer uses window.confirm() for delete', () => {

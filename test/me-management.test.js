@@ -75,7 +75,7 @@ t('/me search is client-side over title/slug (no extra catalog round-trips)', ()
   assert(index.includes('applySearch'), 'missing search apply helper');
   assert(index.includes('dataset.title'), 'search must read title from the rendered row');
   assert(index.includes('dataset.slug'), 'search must read slug from the rendered row');
-  assert(index.includes('No docs match that search'), 'missing empty search state');
+  assert(index.includes('No matches.'), 'missing empty search state');
   // `.doc-row { display:flex }` would otherwise override the UA [hidden] rule
   // and leave "filtered" rows visible — pin the !important hide.
   assert(/\.doc-row\[hidden\][^}]*display:\s*none\s*!important/.test(index),
@@ -102,14 +102,17 @@ t('/me still uses the styled confirm modal, never native confirm()', () => {
   const stripped = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
   assert(!nativeConfirmCall.test(stripped), '/me must not call the native confirm()');
   assert(index.includes('showConfirm('), '/me must use the styled showConfirm() modal');
-  assert(index.includes('dataset.versions'), 'delete confirm copy should include version count from meta');
-  assert(index.includes("'/api/comments?slug='"), 'comment count for delete confirm must load lazily, not at catalog render');
+  // Quiet copy — no infra jargon / version-comment inventory / status chatter.
+  assert(index.includes("This can't be undone."), 'confirm body should be short and plain');
+  const userFacing = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+  assert(!/remote storage/i.test(userFacing), '/me copy must not say "remote storage"');
+  assert(!index.includes("'/api/comments?slug='"), 'delete confirm must not pre-flight comment counts');
+  assert(index.includes("'Deleted.'"), 'success status should be a quiet "Deleted."');
 });
 
 t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
   // The slow /me load: N serial readComments (full event-log fold) + N R2 HEADs
-  // just to paint titles. Catalog reads KV meta only; comment counts wait until
-  // Delete is clicked.
+  // just to paint titles. Catalog reads KV meta only.
   assert(!index.includes('readComments('), '/me must not call readComments while rendering the catalog');
   assert(!index.includes('DOCS.head'), '/me must not HEAD R2 objects while rendering the catalog');
   assert(index.includes('Promise.all'), '/me should fetch meta rows in parallel');

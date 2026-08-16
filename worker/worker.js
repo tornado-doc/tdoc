@@ -1015,10 +1015,9 @@ function landingHtml() {
 async function indexHtml(env, session) {
   // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
   // comment logs here — that was N serial Durable-Object + R2 round trips
-  // per page load (the HTML bodies were never downloaded, but the comment
-  // event log for every slug was). Comment counts for the delete confirm
-  // load lazily on click via GET /api/comments. Search + batch select are
-  // client-side over the rendered rows (no extra KV/R2 work).
+  // per page load. Search + batch select are client-side over the rendered
+  // rows (no extra KV/R2 work). Delete confirm is immediate (no comment
+  // pre-flight) so the catalog stays snappy.
   let list = [];
   let cursor;
   do {
@@ -1114,7 +1113,7 @@ async function indexHtml(env, session) {
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
 </style></head><body>
 <h1>My docs</h1>
-<p class="who">Documents hosted on this worker${session && session.login ? ` · signed in as <b>${escapeHtml(session.login)}</b>` : ''}.</p>
+<p class="who">${session && session.login ? `Signed in as <b>${escapeHtml(session.login)}</b>` : 'Your published docs'}.</p>
 <p id="status" class="status" aria-live="polite"></p>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   `<div class="toolbar">
@@ -1125,7 +1124,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     <button type="button" id="batch-delete" class="batch-delete">Delete selected</button>
   </div>
   <div class="doc-list">${rows.join('')}</div>
-  <p id="no-match" class="empty" hidden>No docs match that search.</p>`}
+  <p id="no-match" class="empty" hidden>No matches.</p>`}
 <script>
 (() => {
   const status = document.getElementById('status');
@@ -1182,17 +1181,8 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   // page 302s away for anyone else), so the session cookie alone authorizes
   // DELETE /api/doc (authorizeOwnerMutation in worker.js). Plain same-origin
   // fetch sends the cookie automatically; no Authorization header needed.
-  async function countComments(slug) {
-    try {
-      const r = await fetch('/api/comments?slug=' + encodeURIComponent(slug) + '&version=all', { credentials: 'same-origin' });
-      if (!r.ok) return 0;
-      const list = await r.json();
-      if (!Array.isArray(list)) return 0;
-      let n = 0;
-      for (const c of list) n += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
-      return n;
-    } catch { return 0; }
-  }
+  // Confirm copy stays quiet ("This can't be undone.") — no version/comment
+  // inventory, no infra jargon, no pre-flight comment fetch.
   async function deleteDoc(slug) {
     const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
       method: 'DELETE',
@@ -1209,28 +1199,22 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
       closeMenus(null);
       const slug = button.dataset.slug;
       const title = button.dataset.title || slug;
-      const versions = button.dataset.versions || '1';
-      say('Checking ' + slug + '…');
-      const comments = await countComments(slug);
-      say('');
       const proceed = await showConfirm({
         title: 'Delete "' + title + '"?',
-        body: 'This permanently removes <b>' + versions + ' version(s)</b> and <b>' + comments +
-          ' comment(s)</b> from remote storage. No undo.',
+        body: "This can't be undone.",
         confirmLabel: 'Delete',
         danger: true,
       });
       if (!proceed) return;
-      say('Deleting ' + slug + '...');
       try {
         await deleteDoc(slug);
-      } catch (err) {
-        say('Delete failed: ' + (err && err.message ? err.message : 'unknown'), 'error');
+      } catch {
+        say("Couldn't delete.", 'error');
         return;
       }
       button.closest('.doc-row').remove();
       syncBatchUi();
-      say('Deleted ' + slug + ' from remote storage.', 'ok');
+      say('Deleted.', 'ok');
     });
   });
 
@@ -1263,7 +1247,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
       if (!(box && box.checked)) row.classList.remove('is-selected');
     });
     batchDelete.classList.toggle('is-visible', n > 0);
-    batchDelete.textContent = n === 1 ? 'Delete 1 selected' : ('Delete ' + n + ' selected');
+    batchDelete.textContent = n <= 1 ? 'Delete' : ('Delete ' + n);
     const allVisibleChecked = visible.length > 0 && visible.every((row) => {
       const box = row.querySelector('.doc-check');
       return box && box.checked;
@@ -1317,15 +1301,11 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   batchDelete.addEventListener('click', async () => {
     const rows = selectedRows();
     if (!rows.length) return;
-    const versions = rows.reduce((sum, row) => sum + (Number(row.dataset.versions) || 1), 0);
-    say('Checking ' + rows.length + ' doc(s)…');
-    const counts = await Promise.all(rows.map((row) => countComments(row.dataset.slug)));
-    const comments = counts.reduce((a, b) => a + b, 0);
-    say('');
     const proceed = await showConfirm({
-      title: rows.length === 1 ? ('Delete "' + (rows[0].dataset.title || rows[0].dataset.slug) + '"?') : ('Delete ' + rows.length + ' docs?'),
-      body: 'This permanently removes <b>' + rows.length + ' doc(s)</b>, <b>' + versions +
-        ' version(s)</b>, and <b>' + comments + ' comment(s)</b> from remote storage. No undo.',
+      title: rows.length === 1
+        ? ('Delete "' + (rows[0].dataset.title || rows[0].dataset.slug) + '"?')
+        : ('Delete ' + rows.length + ' docs?'),
+      body: "This can't be undone.",
       confirmLabel: rows.length === 1 ? 'Delete' : ('Delete ' + rows.length),
       danger: true,
     });
@@ -1333,10 +1313,8 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     batchDelete.disabled = true;
     let ok = 0, failed = 0;
     for (const row of rows) {
-      const slug = row.dataset.slug;
-      say('Deleting ' + slug + '…');
       try {
-        await deleteDoc(slug);
+        await deleteDoc(row.dataset.slug);
         row.remove();
         ok += 1;
       } catch {
@@ -1345,8 +1323,9 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     }
     batchDelete.disabled = false;
     applySearch();
-    if (failed) say('Deleted ' + ok + '; ' + failed + ' failed.', 'error');
-    else say('Deleted ' + ok + ' doc(s) from remote storage.', 'ok');
+    if (failed && ok) say("Deleted " + ok + ". Couldn't delete " + failed + '.', 'error');
+    else if (failed) say("Couldn't delete.", 'error');
+    else say(ok === 1 ? 'Deleted.' : ('Deleted ' + ok + '.'), 'ok');
   });
   syncBatchUi();
 })();
