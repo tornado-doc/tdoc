@@ -6,6 +6,7 @@ on:
     branches: [feat/tornado-dog-landing]
     paths:
       - scripts/apply-landing-v37.py
+      - .github/workflows/apply-landing-v37.yml
 
 permissions:
   contents: write
@@ -29,14 +30,5 @@ jobs:
             echo "nothing to commit"
             exit 0
           fi
-          git commit -m "$(cat <<'EOF'
-landing v37: tdoc quotes, drop OpenTag trusted-by leftovers
-
-Fill the six PLACEHOLDER quotes with same-length tdoc lines.
-People, roles, and avatars stay. Trusted-by leftover companies
-from OpenTag become agents and hosts tdoc actually runs on.
-
-#127 #129
-EOF
-)"
+          git commit -m "landing v37: tdoc quotes, drop OpenTag trusted-by leftovers"
           git push origin HEAD:feat/tornado-dog-landing
