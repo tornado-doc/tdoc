@@ -1096,9 +1096,6 @@ async function indexHtml(env, session) {
   .row-menu[hidden] { display: none; }
   .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
   .row-delete:hover { background: var(--td-danger-tint); }
-  /* Toastify skin — override the library's default purple gradient with
-     tdoc accent / danger. Library CSS still owns layout + animation. */
-  .toastify.tdoc-toast { box-shadow: 0 8px 24px rgba(0,0,0,0.14); border-radius: 8px; font: 500 14px/1.35 system-ui, -apple-system, sans-serif; padding: 12px 18px; }
   /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
      doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
      standalone copy here since /me does not load overlay.js. */
@@ -1128,19 +1125,26 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
 <script src="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js"></script>
 <script>
 (() => {
-  // toastify-js (CDN) — /me has no CSP, so the library can load. Skin via
-  // className + style; never the stock purple gradient.
+  // toastify-js (CDN) — /me has no CSP, so the library can load. Use the
+  // library's own layout/animation (top-right, rounded, close). Only swap
+  // the stock purple gradient for tdoc accent / danger.
   function toast(message, kind = '') {
     if (!message || typeof Toastify !== 'function') return;
     Toastify({
       text: message,
-      duration: 4500,
+      duration: 4000,
       gravity: 'top',
-      position: 'center',
+      position: 'right',
       stopOnFocus: true,
-      className: 'tdoc-toast',
+      close: true,
       style: {
-        background: kind === 'error' ? '#b42318' : '#1652f0',
+        background: kind === 'error'
+          ? 'linear-gradient(135deg, #b42318, #931c14)'
+          : 'linear-gradient(135deg, #1652f0, #1245d0)',
+        borderRadius: '8px',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        fontSize: '14px',
+        boxShadow: '0 3px 6px -1px rgba(0,0,0,.12), 0 10px 28px -4px rgba(22,82,240,.35)',
       },
     }).showToast();
   }

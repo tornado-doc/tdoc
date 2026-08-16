@@ -111,9 +111,9 @@ t('/me still uses the styled confirm modal, never native confirm()', () => {
   assert(index.includes('Toastify('), '/me must call Toastify() for feedback');
   assert(!index.includes('id="status"'), 'inline status row should be gone — toast replaces it');
   assert(index.includes("toast('Deleted')"), 'success feedback should be a quiet toast("Deleted")');
-  // Don't ship Toastify's stock purple gradient as the default skin.
-  assert(index.includes("background: kind === 'error' ? '#b42318' : '#1652f0'"),
-    'toast skin must use tdoc accent/danger, not the library purple gradient');
+  assert(index.includes("position: 'right'"), 'use Toastify top-right placement (library default feel)');
+  assert(index.includes('linear-gradient'), 'toast should use a gradient skin, not a flat DIY pill');
+  assert(!/5477f5|73a5ff/.test(index), 'must not keep Toastify stock purple stops');
 });
 
 t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
