@@ -14,6 +14,10 @@ file and `.claude-plugin/plugin.json`.
   layout on narrow viewports. Tables now keep real table layout and scroll in
   a wrapper; document SVGs keep their viewBox aspect ratio with overflow
   visible.
+- **Dark mode no longer erases document button labels.** `color-scheme: dark`
+  plus page invert made unselected chips like "Differences only" paint
+  light-on-light, so the text vanished. Form controls stay in the light
+  scheme and invert with the rest of the page.
 - **Dark mode no longer recolors reaction emoji.** The page invert was
   turning ❤️ / 👍 into off-hue bitmaps. Color emoji in chips and the
   picker are wrapped and inverted back to native colors. Text reactions
