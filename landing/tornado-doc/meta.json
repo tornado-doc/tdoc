@@ -152,6 +152,11 @@
       "n": 30,
       "created": "2026-08-16T14:10:00Z",
       "prompt": "Hero spacing reduced to two values: 12 inside a group, 40 between groups"
+    },
+    {
+      "n": 31,
+      "created": "2026-08-16T14:30:00Z",
+      "prompt": "Four feature titles reworded: babysits, own identity, version control, agent native HTML"
     }
   ]
 }
