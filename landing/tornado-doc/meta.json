@@ -47,6 +47,11 @@
       "n": 9,
       "created": "2026-08-16T06:20:00Z",
       "prompt": "Fix the six UI defects found by screenshotting each section, plus rebalance runtimes and hosts"
+    },
+    {
+      "n": 10,
+      "created": "2026-08-16T07:00:00Z",
+      "prompt": "Replicate the real published comment card from tdoc.dev/d/conway-life/v/2 exactly"
     }
   ]
 }

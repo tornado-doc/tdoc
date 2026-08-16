@@ -135,8 +135,12 @@ t('hero comment count matches the mock thread', () => {
   const replies = (notes[0].match(/<div class="mc-reply">/g) || []).length;
   assert(threads === 1, `expected 1 mock thread, found ${threads}`);
   assert(replies === 1, `expected Claude's answer as a reply, found ${replies}`);
-  assert(/1 comment/.test(notes[0]), 'notes label must say 1 comment now that Claude is a reply');
-  assert(!/2 comments/.test(notes[0]), 'notes label still says 2 comments');
+  // v10: checked against the published conway-life doc. The real reader has
+  // no "N comments" header at all; the margin holds pins, and a pin opens the
+  // card. The mock follows that, so there is no label left to count.
+  assert(!/class="lbl-n"/.test(notes[0]), 'the real margin has no comment-count header');
+  assert(/move anchor/i.test(notes[0]), 'real cards lead with the move-anchor row');
+  assert(/mc-meta/.test(notes[0]), 'real cards carry a version and date meta row');
 });
 
 t('demos commentable artifacts', () => {
