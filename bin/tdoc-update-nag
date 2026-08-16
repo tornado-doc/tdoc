@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# tdoc-update-nag — BYOK notice when this skill checkout is behind origin/main.
+#
+# Always exits 0. Network/git failures are silent (never block a CLI).
+# Human message → stderr. Machine line → stdout (so agents can grep it).
+#
+# Usage:
+#   tdoc-update-nag           # stderr nag + "TDOC_UPDATE_AVAILABLE: N commits"
+#   tdoc-update-nag --json    # stdout JSON only (for tdoc-doctor)
+#
+# Env:
+#   TDOC_SKIP_UPDATE_CHECK=1     skip entirely
+#   TDOC_MOCK_UPDATE_BEHIND=N    test hook: pretend N commits behind
+#   TDOC_MOCK_UPDATE_DIVERGED=1  test hook: pretend the checkout diverged
+set -u
+
+JSON=0
+[ "${1:-}" = "--json" ] && JSON=1
+
+emit_json() {
+  printf '%s\n' "$1"
+}
+
+if [ "${TDOC_SKIP_UPDATE_CHECK:-0}" = "1" ]; then
+  [ "$JSON" = "1" ] && emit_json '{"ok":true,"checked":false,"behind":0}'
+  exit 0
+fi
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+CMD="$REPO/bin/tdoc-update --yes"
+
+nag_human() {
+  local behind="$1" diverged="$2"
+  if [ "$diverged" = "1" ]; then
+    echo "[tdoc] this checkout has diverged from origin/main — tdoc-update cannot fast-forward." >&2
+    echo "       Commit or stash local work, or re-clone from scratch." >&2
+  else
+    echo "[tdoc] $behind newer commit(s) on origin/main." >&2
+    echo "       Published docs keep the old overlay until you update." >&2
+    echo "       Run: /tdoc update --yes" >&2
+    echo "       (or: $CMD)" >&2
+  fi
+}
+
+nag_stdout() {
+  local behind="$1" diverged="$2"
+  if [ "$JSON" = "1" ]; then
+    if [ "$diverged" = "1" ]; then
+      emit_json "{\"ok\":false,\"checked\":true,\"behind\":$behind,\"diverged\":true,\"cmd\":\"$CMD\"}"
+    else
+      emit_json "{\"ok\":false,\"checked\":true,\"behind\":$behind,\"diverged\":false,\"cmd\":\"$CMD\"}"
+    fi
+  else
+    if [ "$diverged" = "1" ]; then
+      echo "TDOC_UPDATE_DIVERGED: $behind commit(s)  (cannot fast-forward; stash or re-clone)"
+    else
+      echo "TDOC_UPDATE_AVAILABLE: $behind commit(s)  (run $CMD)"
+    fi
+  fi
+}
+
+# ── test hooks (no git, no network) ──────────────────────────────────────
+if [ -n "${TDOC_MOCK_UPDATE_DIVERGED:-}" ]; then
+  nag_human "${TDOC_MOCK_UPDATE_BEHIND:-1}" 1
+  nag_stdout "${TDOC_MOCK_UPDATE_BEHIND:-1}" 1
+  exit 0
+fi
+if [ -n "${TDOC_MOCK_UPDATE_BEHIND:-}" ]; then
+  nag_human "$TDOC_MOCK_UPDATE_BEHIND" 0
+  nag_stdout "$TDOC_MOCK_UPDATE_BEHIND" 0
+  exit 0
+fi
+
+if [ ! -d "$REPO/.git" ]; then
+  [ "$JSON" = "1" ] && emit_json '{"ok":true,"checked":false,"behind":0}'
+  exit 0
+fi
+
+# Best-effort fetch. Abort if the connection is stalled (~2s of <1KB/s).
+# Never prompt for credentials; never fail the caller.
+GIT_TERMINAL_PROMPT=0 \
+  git -C "$REPO" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=2 \
+  fetch origin main --quiet >/dev/null 2>&1 || true
+
+LOCAL="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)"
+REMOTE="$(git -C "$REPO" rev-parse origin/main 2>/dev/null || true)"
+if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
+  [ "$JSON" = "1" ] && emit_json '{"ok":true,"checked":false,"behind":0}'
+  exit 0
+fi
+if [ "$LOCAL" = "$REMOTE" ]; then
+  [ "$JSON" = "1" ] && emit_json '{"ok":true,"checked":true,"behind":0}'
+  exit 0
+fi
+
+BEHIND="$(git -C "$REPO" rev-list --count "$LOCAL..$REMOTE" 2>/dev/null || echo 0)"
+AHEAD="$(git -C "$REPO" rev-list --count "$REMOTE..$LOCAL" 2>/dev/null || echo 0)"
+case "$BEHIND" in
+  ''|*[!0-9]*) BEHIND=0 ;;
+esac
+case "$AHEAD" in
+  ''|*[!0-9]*) AHEAD=0 ;;
+esac
+
+# Ahead-only (feature branch whose ancestor is current origin/main) is not
+# diverged and is not behind — stay silent. Nag only when origin/main has
+# commits this checkout lacks. True diverge is both sides unique.
+if [ "$BEHIND" -gt 0 ] && [ "$AHEAD" -gt 0 ]; then
+  nag_human "$BEHIND" 1
+  nag_stdout "$BEHIND" 1
+  exit 0
+fi
+
+if [ "$BEHIND" -gt 0 ]; then
+  nag_human "$BEHIND" 0
+  nag_stdout "$BEHIND" 0
+  exit 0
+fi
+
+[ "$JSON" = "1" ] && emit_json '{"ok":true,"checked":true,"behind":0}'
+exit 0

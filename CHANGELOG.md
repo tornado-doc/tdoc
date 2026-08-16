@@ -51,6 +51,11 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **BYOK update nag.** User-facing CLIs and the skill preamble compare this
+  checkout to `origin/main` and point at `/tdoc update --yes` when main is
+  ahead. Ahead-only feature branches stay silent; a true diverge does not
+  print a destroy/re-clone command. `tdoc-doctor` reports the same state as
+  `.update` (not a `missing_step`).
 - **In-app inbox (API).** Signed-in users have a per-host notification inbox.
   New top-level comments notify the doc owner; replies notify only the
   direct parent (Reddit); reactions notify the item author. Same-thread

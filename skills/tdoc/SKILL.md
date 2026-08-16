@@ -514,7 +514,11 @@ Wraps `bin/tdoc-update`. Runs `git fetch + git merge --ff-only` against
 
 - `tdoc-update --check` → report-only, prints incoming commits without changing anything
 - `tdoc-update` → apply, with auto-stash of local edits, **auto-restarts the running local server** so new routes / overlay code take effect
-- `tdoc-update --yes` → also redeploy the Worker so users see new overlay code
+- `tdoc-update --yes` → also redeploy the Worker so users get the new overlay
+
+BYOK CLIs (`tdoc-publish` / `pull` / `unpublish` / `new`) and every skill
+run also check origin/main and nag immediately when this checkout is
+behind. `tdoc-doctor` reports the same as `.update` (not a missing_step).
 
 ```bash
 "$SKILL_DIR/bin/tdoc-update" --check    # see what's new
@@ -925,11 +929,10 @@ if [ "$TEL_EFFECTIVE" != "off" ]; then
   done
 fi
 
-# ─── Upgrade check (gstack-style lifecycle event) ───────────
-# Check installed version against latest release. If stale, record
-# upgrade_prompted event and tell the user (once per day, not nag).
-# TDOC_DIR is substituted at install time by postinstall-telemetry.sh
-# so this works no matter where tdoc is cloned.
+# ─── Upgrade check (BYOK: origin/main, every run) ───────────
+# GitHub releases lag (v0.9.0 sat while overlay kept shipping on main).
+# Compare this skill checkout to origin/main the same way tdoc-update does.
+# TDOC_DIR is substituted at install time by postinstall-telemetry.sh.
 TDOC_DIR="__TDOC_DIR__"
 
 # Resolve installed version, trying multiple sources in order:
@@ -942,26 +945,22 @@ if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_DIR/.git" ]; then
 fi
 [ -z "$INSTALLED_VERSION" ] && INSTALLED_VERSION="0.0.0"
 
-UPGRADE_CHECK_FLAG="$TEL_HOME/.upgrade-checked-$(date +%Y-%m-%d)"
-if [ "$TEL_EFFECTIVE" != "off" ] && [ ! -f "$UPGRADE_CHECK_FLAG" ] && [ "$INSTALLED_VERSION" != "0.0.0" ]; then
-  LATEST=$(curl -s --max-time 3 https://api.github.com/repos/tornado-doc/tdoc/releases/latest 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
-  # Only fire upgrade prompt if installed is STRICTLY OLDER than latest.
-  # Use sort -V (version sort): if installed sorts first, installed < latest.
-  # If installed == latest or installed > latest (dev build), skip silently.
-  if [ -n "$LATEST" ] && [ "$LATEST" != "$INSTALLED_VERSION" ]; then
-    FIRST_VERSION=$(printf '%s\n%s\n' "$INSTALLED_VERSION" "$LATEST" | sort -V | head -1)
-    if [ "$FIRST_VERSION" = "$INSTALLED_VERSION" ]; then
+if [ -x "$TDOC_DIR/bin/tdoc-update-nag" ]; then
+  NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" 2>/dev/null || true)"
+  if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
+    echo "$NAG_LINE"
+    if [ "$TEL_EFFECTIVE" != "off" ]; then
       "$TDOC_DIR/telemetry/bin/telemetry-log" \
         --skill tdoc \
         --event-type upgrade_prompted \
         --outcome unknown \
         --skill-version "$INSTALLED_VERSION" \
-        --step "v$INSTALLED_VERSION→v$LATEST" \
+        --step "origin/main" \
         --session-id "$TEL_SESSION_ID" 2>/dev/null || true
-      echo "TDOC_UPGRADE_AVAILABLE: $INSTALLED_VERSION → $LATEST  (cd $TDOC_DIR && git pull && bin/postinstall-telemetry.sh)"
     fi
+  elif printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_DIVERGED:'; then
+    echo "$NAG_LINE"
   fi
-  touch "$UPGRADE_CHECK_FLAG" 2>/dev/null || true
 fi
 
 echo "TEL_PROMPTED: $TEL_PROMPTED"
@@ -1002,6 +1001,19 @@ TEL_EFFECTIVE="$(cat "$TEL_CONFIG_FILE")"
 ```
 
 **If `TEL_PROMPTED` is `yes`**, do NOT ask again. Proceed silently.
+
+**If the preamble printed `TDOC_UPDATE_AVAILABLE`**, tell the user
+immediately (before the rest of the tdoc work). Do not wait until the
+end, and do not swallow it. Example:
+
+> tdoc on origin/main is newer than this skill checkout. Published docs
+> still serve the old overlay until we update. I can run `/tdoc update
+> --yes` now (pulls the skill and redeploys your worker).
+
+Encourage them to update. If they say no, continue with what they asked.
+If the line was `TDOC_UPDATE_DIVERGED`, tdoc-update cannot fast-forward —
+tell them to stash/commit local skill edits or re-clone; do not run
+`--yes`.
 
 ---
 
