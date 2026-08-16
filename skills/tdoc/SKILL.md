@@ -403,44 +403,54 @@ echo "tdoc server: http://localhost:7878"
 pkill -f "$SKILL_DIR/server/server.js"
 ```
 
-### `/tdoc publish <slug>` — publish to your Cloudflare Worker (or Vercel)
+### `/tdoc publish <slug>` — publish to hosted tdoc (default), or self-host
 
 Publishes the latest version of `<slug>` to a public URL.
 
-Local always stays $0/anonymous; publishing is opt-in. First run does a one-time
-setup: prompts `wrangler login`, creates an R2 bucket (`tdoc-docs`) and KV
-namespace (`META`) in *your* Cloudflare account, generates an upload token, and
-deploys your own Worker. Config is saved to `~/.tdoc/published.json`.
+Default target is **hosted** (`https://tdoc.dev`). First run asks the host for
+an account-scoped upload token and stores it in `~/.tdoc/published.json`. That
+token can only mutate docs it owns. If hosted signup is not open, the CLI fails
+with a clear prompt to self-host instead — do **not** tell the user to flip a
+Worker env flag.
 
-**Alternative host — Vercel**: `tdoc-publish --platform vercel <slug>` (first
-publish only; the choice is persisted). Needs the `vercel` CLI (`npm i -g
-vercel`). First run links a Vercel project named `tdoc`, then asks you (via an
-agent prompt) to connect a **Blob** store and an **Upstash Redis** store in the
-Vercel dashboard's Storage tab — both free tier, ~2 clicks each — and deploys.
-Subsequent publishes and all other commands (`pull`, `unpublish`, comments,
-GitHub sign-in) work identically on either host. Caveats: no per-doc write
-serialization (Cloudflare uses a Durable Object for that) and a ~4.5 MB upload
-cap per doc (Vercel request limit).
+**Self-host — Cloudflare**: `tdoc-publish --platform cloudflare <slug>`.
+First run (or an explicit switch onto cloudflare) prompts `wrangler login`,
+creates an R2 bucket (`tdoc-docs`) and KV namespace (`META`) in *your*
+Cloudflare account, generates an upload token, and deploys your own Worker.
+The choice is persisted in `~/.tdoc/published.json` as the default.
 
-Subsequent runs upload the latest version of `<slug>`. The script compares a
-content hash of the Worker/overlay bundle against the last deployed hash in
-`~/.tdoc/published.json` and redeploys automatically when runtime code changed.
-Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch uploads).
-Published pages expose runtime provenance at `/api/runtime` and in
+**Self-host — Vercel**: `tdoc-publish --platform vercel <slug>`. First run
+(or an explicit switch onto vercel) needs the `vercel` CLI (`npm i -g vercel`),
+links a Vercel project named `tdoc`, then asks you (via an agent prompt) to
+connect a **Blob** store and an **Upstash Redis** store in the Vercel
+dashboard's Storage tab — both free tier, ~2 clicks each — and deploys.
+Caveats: no per-doc write serialization (Cloudflare uses a Durable Object for
+that) and a ~4.5 MB upload cap per doc (Vercel request limit).
+
+Subsequent runs upload the latest version of `<slug>` using the saved default.
+Pass a different `--platform` any time to switch: full re-setup rewrites
+`published.json` (previous file kept as `published.json.bak.switch`). A custom
+domain and `*.workers.dev` on the same Worker are two hostnames, not two
+platforms. Self-host targets
+compare a content hash of the Worker/overlay bundle against the last deployed
+hash in `~/.tdoc/published.json` and redeploy automatically when runtime code
+changed. Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch
+uploads). Published pages expose runtime provenance at `/api/runtime` and in
 `window.__TDOC__.runtime`.
 
 On published docs, viewers sign in with GitHub (Device Flow, shared OAuth App
 `Ov23liZ1UAGOchvKPmlS`, scope `read:user`) before commenting.
 
-Requires `jq`, plus `wrangler` (`npm i -g wrangler`) for the Cloudflare
-target or `vercel` (`npm i -g vercel`) for the Vercel target.
+Requires `jq`. Hosted needs no extra CLI. Cloudflare needs `wrangler`
+(`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
 
 ```bash
 "$SKILL_DIR/bin/tdoc-publish" <slug>
 ```
 
-Prints the published URL: `https://<worker>.<subdomain>.workers.dev/d/<slug>/v/<N>`
-(Cloudflare) or `https://tdoc-<scope>.vercel.app/d/<slug>/v/<N>` (Vercel).
+Prints the published URL: `https://tdoc.dev/d/<slug>/v/<N>` (hosted),
+`https://<worker>.<subdomain>.workers.dev/d/<slug>/v/<N>` (Cloudflare), or
+`https://tdoc-<scope>.vercel.app/d/<slug>/v/<N>` (Vercel).
 
 ### `/tdoc pull <slug>` — pull comments from the published doc
 

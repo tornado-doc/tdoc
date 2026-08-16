@@ -71,7 +71,7 @@ t('/me deletes remote docs through DELETE /api/doc using the session (no token)'
   assert(index.includes("method: 'DELETE'"), 'delete button must use DELETE');
   assert(index.includes("credentials: 'same-origin'"), 'delete fetch should be explicit about sending the session cookie');
   assert(!index.includes("'Authorization': 'Bearer'"), 'delete must not send a bearer token');
-  assert(deleteRoute.includes('await authorizeOwnerMutation(req, env)'), 'remote delete must accept session-or-token auth');
+  assert(deleteRoute.includes('await authorizeOwnerMutation(req, env, slug)'), 'remote delete must accept session-or-token auth');
 });
 
 t('/me still uses the styled confirm modal, never native confirm()', () => {

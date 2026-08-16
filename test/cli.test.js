@@ -55,6 +55,44 @@ t('tdoc-publish does not let an older-version failure abort the latest', () => {
   assert(/FATAL: latest version/.test(src), 'latest-version hard-fail missing');
 });
 
+t('tdoc-publish defaults to hosted and treats Cloudflare/Vercel as self-host flags', () => {
+  const src = readBin('tdoc-publish');
+  assert(/hosted\|cloudflare\|vercel/.test(src), 'usage does not include hosted platform');
+  assert(/PLATFORM_FLAG:-hosted/.test(src), 'first publish must default to hosted');
+  assert(/first_time_setup_hosted\(\)/.test(src), 'hosted setup function missing');
+  assert(/\/api\/hosted\/token/.test(src), 'hosted setup does not request a provider-issued token');
+  assert(!/TDOC_HOSTED_UPLOAD_TOKEN/.test(src), 'hosted setup must not require an out-of-band upload token');
+  assert(/TDOC_HOSTED_BASE:-https:\/\/tdoc\.dev/.test(src), 'hosted setup does not default to tdoc.dev');
+  assert(/platform:"hosted"/.test(src), 'hosted setup does not persist hosted platform');
+  assert(/account_id:\$acct/.test(src), 'hosted setup does not persist account_id');
+  assert(/if \[ "\$PLATFORM" = "hosted" \]/.test(src), 'hosted platform branch missing');
+  assert(/UPLOAD_BASE="\$BASE"/.test(src), 'hosted branch should upload to configured base');
+  assert(/PUBLIC_BASE="\$BASE"/.test(src), 'hosted branch should emit configured hosted base links');
+  assert(/hosted_registration_disabled/.test(src),
+    'hosted setup should detect closed provider registration');
+  assert(/--platform cloudflare/.test(src) && /--platform vercel/.test(src),
+    'closed hosted signup must point at --platform cloudflare|vercel');
+  assert(!/enable TDOC_HOSTED_REGISTRATION/.test(src),
+    'CLI must not tell users to flip TDOC_HOSTED_REGISTRATION on tdoc.dev');
+  assert(/platform:"cloudflare"/.test(src),
+    'cloudflare setup must persist platform:"cloudflare"');
+  assert(/switching publish platform/.test(src),
+    'conflicting --platform must switch (rewrite config), not ignore');
+  assert(!/ignoring '--platform/.test(src),
+    'must not swallow a conflicting --platform flag');
+  assert(/published\.json\.bak\.switch/.test(src),
+    'platform switch must keep a previous-config backup');
+});
+
+t('pull/unpublish read hosted base from published.json', () => {
+  for (const f of ['tdoc-pull', 'tdoc-unpublish']) {
+    const src = readBin(f);
+    assert(/PLATFORM="\$\(jq -r '\.platform \/\/ "cloudflare"'/.test(src), `${f}: platform detection missing`);
+    assert(/"\$PLATFORM" = "hosted"/.test(src), `${f}: hosted platform branch missing`);
+    assert(/BASE="\$\(jq -r '\.base \/\/ empty'/.test(src), `${f}: hosted/vercel branch should read .base`);
+  }
+});
+
 t('tdoc-new fails loudly if the local server never comes up', () => {
   const src = readBin('tdoc-new');
   assert(/SERVER_UP/.test(src) && /failed to start/.test(src),
