@@ -92,6 +92,11 @@
       "n": 18,
       "created": "2026-08-16T10:05:00Z",
       "prompt": "Hero: a doc that answers its own comments. Compare against ChatGPT and Claude artifacts instead of Mintlify"
+    },
+    {
+      "n": 19,
+      "created": "2026-08-16T10:25:00Z",
+      "prompt": "Sub fits two lines; the overlay image margin was also pushing the agent mark out of its disc"
     }
   ]
 }
