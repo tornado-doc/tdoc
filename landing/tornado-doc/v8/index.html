@@ -111,6 +111,12 @@
     .mc-av svg { width:12px; height:12px; }
     .mc-text { color:var(--body); line-height:1.5; }
     .mc-react { margin-top:9px; }
+    .mc-reply { margin:11px 0 0 11px; padding:10px 0 0 12px; border-left:2px solid #e5e5e5; }
+    /* the Claude mark is an intricate sunburst; below ~16px it reads as a
+       smudge, so the reply avatar is larger than the human one */
+    .mc-av.mc-logo { width:24px; height:24px; background:#fff !important; border:1px solid var(--rule); padding:0; }
+    .mc-logo svg { width:16px; height:16px; fill:#d97757; display:block; }
+    .mc-ver { margin-left:auto; font-size:10.5px; font-weight:700; color:var(--muted); }
     .mc-chip-r { font-size:12px; background:var(--wash); border:1px solid var(--rule); border-radius:999px; padding:2px 9px; }
     .mc-chip-r.agent { background:#e8f5ed; border-color:#cfe0d6; }
     /* proof band */
@@ -144,10 +150,6 @@
     .rt-hosts { display:flex; flex-direction:column; gap:14px; padding-left:34px; border-left:1px solid var(--rule); }
     .rt-cap { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:0 0 14px; text-align:center; }
     .logorow { justify-content:flex-start; }
-    /* below the two 216px tracks plus gap, the grid overflows a 375px
-       screen; stack instead of clipping (breeze, v7) */
-    @media (max-width:520px) { .cta { grid-template-columns:1fr; max-width:216px; } }
-
     @media (max-width:840px) { .rt-split { grid-template-columns:1fr; } .rt-hosts { flex-direction:row; padding-left:0; border-left:0; border-top:1px solid var(--rule); padding-top:24px; justify-content:center; } }
 
     /* feature cards, opentag layout */
@@ -264,13 +266,15 @@
     /* the split is the product's real desktop layout, so hold it as long as
        the margin column stays usable rather than collapsing at tablet width */
     @media (max-width:640px) {
+      h1.tagline { font-size:34px; }
+      .cta { grid-template-columns:1fr; max-width:216px; }
       .stage { grid-template-columns:1fr; }
       .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
     }
     @media (max-width:840px) {
       .tiles,.loop,.sm-grid,.hosts,.proof-wall { grid-template-columns:1fr; }
       .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
-      .tagline { font-size:38px; }
+      h1.tagline { font-size:38px; }
       h2 { font-size:25px; }
       section { padding:56px 0; }
       .doc { padding:20px; }
@@ -1258,13 +1262,13 @@ Everything else dies.</div>
           <div class="mc-author"><span class="mc-av" style="background:#b4732f">A</span>Ann</div>
           <div class="mc-text">Can the grid keep moving without a play button?</div>
           <div class="mc-react"><span class="mc-chip-r">&#128077; 1</span></div>
+          <div class="mc-reply">
+            <div class="mc-author"><span class="mc-av mc-logo"><svg aria-hidden="true"><use href="#i-claude"/></svg></span>Claude<span class="mc-ver">v2</span></div>
+            <div class="mc-text">Runs on load now. Still pure CSS, so it works on the published page.</div>
+            <div class="mc-react"><span class="mc-chip-r agent">&#9989; 1</span></div>
+          </div>
         </div>
-        <div class="mc">
-          <span class="mc-chip">&#10003; fixed &middot; v2</span>
-          <div class="mc-author"><span class="mc-av" style="background:#d97757">C</span>Claude</div>
-          <div class="mc-text">Runs on load now. Still pure CSS, so it works on the published page.</div>
-          <div class="mc-react"><span class="mc-chip-r agent">&#9989; 1</span></div>
-        </div>
+
       </aside>
     </div>
   </section>
