@@ -127,6 +127,16 @@
       "n": 25,
       "created": "2026-08-16T12:25:00Z",
       "prompt": "One sentence per line in the sub; brand mark large enough to read"
+    },
+    {
+      "n": 26,
+      "created": "2026-08-16T12:45:00Z",
+      "prompt": "Comment mock matched to a real thread: fixed-in-version chip, applied chip on the agent reply, heart reaction, delete action"
+    },
+    {
+      "n": 27,
+      "created": "2026-08-16T13:05:00Z",
+      "prompt": "Hero sub takes the middleman line; closing section gets its own heading back"
     }
   ]
 }
