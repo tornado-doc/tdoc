@@ -438,8 +438,12 @@ changed. Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch
 uploads). Published pages expose runtime provenance at `/api/runtime` and in
 `window.__TDOC__.runtime`.
 
-On published docs, viewers sign in with GitHub (Device Flow, shared OAuth App
-`Ov23liZ1UAGOchvKPmlS`, scope `read:user`) before commenting.
+Local preview (`tdoc serve`) does not need GitHub login. Published docs —
+hosted (`tdoc.dev`) and BYOK remote (your Cloudflare/Vercel worker) — use
+GitHub Device Flow for commenter sign-in via the org-owned OAuth App in
+`shared/github-oauth.js` (scope `read:user`). Viewers authorize that shared
+app; they do not register their own. Set the OAuth App callback URL to
+`https://<host>/auth/done` so GitHub's post-approve redirect is not a 404.
 
 Requires `jq`. Hosted needs no extra CLI. Cloudflare needs `wrangler`
 (`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
@@ -504,8 +508,9 @@ installed, or might be partway through. You **must** drive the flow from
 - ALWAYS show the user what you're running. Print the JSON status if helpful.
 - If a "click" step doesn't take effect after the user says "done", offer to
   re-check after waiting 10s (Cloudflare API can be slow to reflect changes).
-- The shared OAuth App client ID (`Ov23liZ1UAGOchvKPmlS`) is already baked
-  into the Worker — users do NOT register their own.
+- Published/BYOK remotes bake in the shared org OAuth client ID from
+  `shared/github-oauth.js` — users do NOT register their own. Local preview
+  never needs that login path.
 
 ### `/tdoc update` — check for updates and pull the latest
 

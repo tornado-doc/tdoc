@@ -49,8 +49,37 @@ const norm = (s) => s == null ? null : s.replace(/\s+/g, ' ').trim();
 const worker = read('worker/worker.js');
 const server = read('server/server.js');
 const overlay = read('server/overlay.js');
+const githubOauth = require(path.join(root, 'shared/github-oauth.js'));
 
 console.log('no-drift (duplicated helper guard)');
+
+t('GITHUB_CLIENT_ID has a single SoT (shared/github-oauth.js)', () => {
+  const id = githubOauth.GITHUB_CLIENT_ID;
+  assert(typeof id === 'string' && /^Ov[\w]+$/.test(id), `bad SoT client id: ${id}`);
+  const template = read('worker/wrangler.toml.template');
+  assert(template.includes(`GITHUB_CLIENT_ID = "${id}"`),
+    'wrangler.toml.template must ship the SoT client id for CD/BYOK defaults');
+  const vercelApi = read('vercel/api/tdoc.js');
+  assert(vercelApi.includes('githubOauth.GITHUB_CLIENT_ID'),
+    'vercel/api/tdoc.js must read the client id from github-oauth SoT');
+  assert(!vercelApi.includes(id),
+    'vercel/api/tdoc.js must not hardcode the client id');
+  assert(!read('SKILL.md').includes('Ov23liZ1UAGOchvKPmlS'),
+    'SKILL.md still mentions the old personal-account OAuth client id');
+  for (const rel of [
+    'vercel/api/tdoc.js',
+    'shared/github-oauth.js',
+  ]) {
+    // shared owns the literal; vercel must not duplicate it
+  }
+  assert(read('shared/github-oauth.js').includes(id), 'SoT module missing its own id');
+  assert(!read('vercel/api/tdoc.js').includes('Ov23liZ1UAGOchvKPmlS'),
+    'vercel still hardcodes the retired personal OAuth client id');
+  assert(!template.includes('Ov23liZ1UAGOchvKPmlS'),
+    'wrangler.toml.template still hardcodes the retired personal OAuth client id');
+  assert(read('bin/tdoc-publish').includes('shared/github-oauth.js'),
+    'tdoc-publish must read GITHUB_CLIENT_ID from shared/github-oauth.js (BYOK backfill)');
+});
 
 t('safeJsonForScript is identical in worker.js and server.js', () => {
   const a = norm(fnBody(worker, 'safeJsonForScript'));

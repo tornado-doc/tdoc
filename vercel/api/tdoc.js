@@ -17,10 +17,14 @@
 // Uses the Node runtime's web handler signature (Request → Response), so the
 // worker's fetch handler runs unmodified.
 
+import { createRequire } from 'module';
 import worker from '../_worker.bundled.js';
 import { createDocsStore } from '../lib/blob-r2.js';
 import { createKvStore } from '../lib/upstash-kv.js';
 import { originalRequestUrl } from '../lib/request-url.js';
+
+// CJS SoT (shared/github-oauth.js); createRequire keeps this ESM file simple.
+const githubOauth = createRequire(import.meta.url)('../lib/github-oauth.js');
 
 function json(obj, status) {
   return new Response(JSON.stringify(obj), {
@@ -59,9 +63,9 @@ async function buildEnv() {
       META: createKvStore({ url: kvUrl, token: kvToken }),
       TDOC_UPLOAD_TOKEN: process.env.TDOC_UPLOAD_TOKEN,
       TDOC_OWNER: process.env.TDOC_OWNER || '',
-      // Same public GitHub Device Flow app the wrangler template ships —
-      // device flow has no redirect URI, so it works from any host.
-      GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID || 'Ov23liZ1UAGOchvKPmlS',
+      // Same public GitHub Device Flow app as Cloudflare (shared/github-oauth.js).
+      // Device flow has no redirect URI, so it works from any host.
+      GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID || githubOauth.GITHUB_CLIENT_ID,
       TDOC_DEBUG: process.env.TDOC_DEBUG || '',
     },
   };

@@ -26,7 +26,10 @@ tag = "v1-comments-do"
 new_sqlite_classes = ["CommentsStore"]
 
 [vars]
-GITHUB_CLIENT_ID = "Ov23liZ1UAGOchvKPmlS"
+# Filled from shared/github-oauth.js (single source of truth). Keep in sync —
+# test/no-drift.test.js fails if this drifts from the SoT module.
+GITHUB_CLIENT_ID = "Ov23li1jJiBkS23x4O07"
+
 # The worker owner's GitHub login. Only this signed-in viewer sees the
 # "My docs" catalog (profile chip → My docs). Empty = catalog stays fully
 # private (no one can enumerate docs; they're reachable only by direct link).
