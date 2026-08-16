@@ -42,6 +42,15 @@ t('PATCH /api/doc/access authenticates (session-or-token) before writing meta', 
   assert(auth < write, 'auth must happen before META write');
 });
 
+t('PATCH /api/doc/access rejects oversized Content-Length before req.json', () => {
+  const guard = route.indexOf('ACCESS_PATCH_MAX_BYTES');
+  const parse = route.indexOf('await req.json()');
+  assert(guard >= 0, 'route must define an access-patch size cap');
+  assert(route.includes("error: 'payload_too_large'"), 'route must return payload_too_large');
+  assert(route.includes('status: 413'), 'route must use HTTP 413');
+  assert(parse >= 0 && guard < parse, 'Content-Length guard must run before req.json()');
+});
+
 t('PATCH /api/doc/access only writes remote meta, never document bytes', () => {
   assert(route.includes('applyAccessPatch(meta, access)'), 'route must use access-only helper');
   assert(route.includes('env.META.put(`meta:${slug}`'), 'route must write updated meta');

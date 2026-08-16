@@ -3047,6 +3047,17 @@ export default {
     // panel / /me) OR the upload token (CLI) — see its doc comment for why
     // the session path is safe (CSP blocks author scripts on every response).
     if (p === '/api/doc/access' && method === 'PATCH') {
+      // Body is parsed before auth so we can pass slug into the hosted ACL
+      // gate. Cap Content-Length first — an access patch is always tiny; do
+      // not buffer an arbitrary JSON body for an anonymous caller.
+      const ACCESS_PATCH_MAX_BYTES = 16 * 1024;
+      const clRaw = req.headers.get('content-length');
+      if (clRaw != null && clRaw !== '') {
+        const cl = Number(clRaw);
+        if (!Number.isFinite(cl) || cl < 0 || cl > ACCESS_PATCH_MAX_BYTES) {
+          return json({ error: 'payload_too_large' }, { status: 413 });
+        }
+      }
       let body = {};
       try { body = await req.json(); } catch {}
       const topKeys = Object.keys(body || {});
