@@ -88,9 +88,25 @@ t('demos commentable artifacts', () => {
   assert(/role="img"[^>]*aria-label="|aria-label="[^"]+"[^>]*role="img"/.test(html), 'svg has no aria-label');
 });
 
-t('stays one page, not a marketing site', () => {
-  const text = html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  assert(text.length < 3000, `page text too long (${text.length} chars)`);
+t('has a compare table that admits a loss', () => {
+  // A comparison where the author wins every row reads as an ad and costs more
+  // trust than it buys. At least one row must put a competitor ahead.
+  assert(/<table/.test(html), 'missing compare table');
+  const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
+  const lost = rows.filter((r) => {
+    const cells = r.match(/<td[^>]*>[\s\S]*?<\/td>/g) || [];
+    if (!cells.length) return false;
+    return /class="no"/.test(cells[0]);  // first td is tdoc's column
+  });
+  assert(lost.length >= 1, 'every compare row favours tdoc — keep at least one honest loss');
+});
+
+t('carries no unfinished placeholder content', () => {
+  // The social-proof quotes and trusted-by logos must be real. This fails
+  // while any NEEDS-REAL-DATA marker is left in the page, so a version
+  // carrying invented testimonials cannot reach `/`.
+  const markers = (html.match(/NEEDS-REAL-DATA/g) || []).length;
+  assert(markers === 0, `${markers} NEEDS-REAL-DATA placeholder(s) still in the page — fill them with real content or delete the section before publishing`);
 });
 
 console.log('tdoc.dev / route');
