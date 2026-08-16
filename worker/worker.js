@@ -14,6 +14,8 @@
 // overlay/provenance would be missing.
 
 const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;
+
+
 const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";
 
 const CORS = {
@@ -1042,15 +1044,16 @@ function landingHtml() {
 //     CSP set on every doc response (see cspHeader()). /me is only reachable
 //     by the signed-in owner in the first place (isOwnerSession gate in the
 //     route above), so its own fetches are already same-origin + cookied.
-// What's left: title, slug, version, Delete. No access data of any kind is
-// computed or emitted here (gate: response HTML must not contain
-// `allowed_users` — there is nothing here that could).
+// What's left: title, slug, version, search, multi-select batch delete, and
+// a quiet ⋯ Delete. No access data of any kind is computed or emitted here
+// (gate: response HTML must not contain `allowed_users` — there is nothing
+// here that could).
 async function indexHtml(env, session) {
   // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
   // comment logs here — that was N serial Durable-Object + R2 round trips
-  // per page load (the HTML bodies were never downloaded, but the comment
-  // event log for every slug was). Comment counts for the delete confirm
-  // load lazily on click via GET /api/comments.
+  // per page load. Search + batch select are client-side over the rendered
+  // rows (no extra KV/R2 work). Delete confirm is immediate (no comment
+  // pre-flight) so the catalog stays snappy.
   let list = [];
   let cursor;
   do {
@@ -1066,11 +1069,13 @@ async function indexHtml(env, session) {
     let meta = {};
     try { meta = JSON.parse(metaRaw || '{}'); } catch {}
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
-    const versionCount = Array.isArray(meta.versions) && meta.versions.length ? meta.versions.length : 1;
-    return { slug, title: meta.title || slug, latest, versionCount };
+    return { slug, title: meta.title || slug, latest };
   }));
 
-  const rows = docs.map(({ slug, title, latest, versionCount }) => `<div class="doc-row">
+  const rows = docs.map(({ slug, title, latest }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">
+      <label class="row-check">
+        <input type="checkbox" class="doc-check" aria-label="Select ${escapeHtml(title)}">
+      </label>
       <div class="doc-info">
         <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(title)}</a>
         <div class="doc-meta">${escapeHtml(slug)} · v${latest}</div>
@@ -1078,12 +1083,12 @@ async function indexHtml(env, session) {
       <div class="row-actions">
         <button class="row-menu-btn" aria-label="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>
         <div class="row-menu" hidden>
-          <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}" data-versions="${versionCount}">Delete…</button>
+          <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">Delete…</button>
         </div>
       </div>
     </div>`);
 
-  return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>tdoc</title>
 <style>
   :root {
     --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
@@ -1092,20 +1097,33 @@ async function indexHtml(env, session) {
   }
   body { font: 15px system-ui, -apple-system, sans-serif; max-width: 680px; margin: 48px auto; padding: 0 20px; color: var(--td-ink); }
   h1 { font-size: 28px; margin: 0 0 4px; color: var(--td-accent); }
-  .who { color: var(--td-muted); font-size: 13px; margin: 0 0 28px; }
+  .who { color: var(--td-muted); font-size: 13px; margin: 0 0 20px; }
   .who b { color: #444; font-weight: 600; }
   a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
+  .toolbar input[type="search"] { flex: 1 1 220px; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
+  .toolbar input[type="search"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
+  .batch-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin: 0 0 8px; min-height: 32px; }
+  .select-all { display: inline-flex; align-items: center; gap: 8px; color: var(--td-muted); font-size: 13px; cursor: pointer; user-select: none; }
+  .batch-delete { display: none; font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-danger); background: #fff; color: var(--td-danger); }
+  .batch-delete.is-visible { display: inline-block; }
+  .batch-delete:hover { background: var(--td-danger); color: #fff; }
+  .batch-delete:disabled { opacity: 0.5; cursor: default; }
   .doc-list { display: flex; flex-direction: column; }
-  .doc-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
-  .doc-info { min-width: 0; }
+  .doc-list[hidden], .doc-row[hidden], .empty[hidden] { display: none !important; }
+  .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
+  .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
+  .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+  .row-check input, .select-all input { width: 15px; height: 15px; accent-color: var(--td-accent); cursor: pointer; }
+  .doc-info { min-width: 0; flex: 1 1 auto; }
   .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
   button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
   /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
      not a management console. Faint by default, clearer on row hover. */
-  .row-actions { position: relative; flex-shrink: 0; }
+  .row-actions { position: relative; flex-shrink: 0; margin-left: auto; }
   .row-menu-btn { border: none; background: none; color: #ccc; font-size: 20px; line-height: 1; padding: 2px 8px; border-radius: 6px; }
   .doc-row:hover .row-menu-btn { color: var(--td-muted); }
   .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
@@ -1113,9 +1131,6 @@ async function indexHtml(env, session) {
   .row-menu[hidden] { display: none; }
   .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
   .row-delete:hover { background: var(--td-danger-tint); }
-  .status { min-height: 20px; margin: 0 0 16px; color: var(--td-muted); font-size: 13px; }
-  .status[data-kind="error"] { color: var(--td-danger); }
-  .status[data-kind="ok"] { color: var(--td-ok); }
   /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
      doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
      standalone copy here since /me does not load overlay.js. */
@@ -1123,24 +1138,40 @@ async function indexHtml(env, session) {
   .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
   .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
   .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
-  .tdoc-modal .status { color: #888; font-size: 13px; margin: 0 0 8px; }
   .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
   .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
   .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
-</style></head><body>
+</style>
+</head><body>
 <h1>My docs</h1>
-<p class="who">Documents hosted on this worker${session && session.login ? ` · signed in as <b>${escapeHtml(session.login)}</b>` : ''}.</p>
-<p id="status" class="status" aria-live="polite"></p>
+<p class="who">${session && session.login ? `Signed in as <b>${escapeHtml(session.login)}</b>` : 'Your published docs'}.</p>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
-  `<div class="doc-list">${rows.join('')}</div>`}
+  `<div class="toolbar">
+    <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
+  </div>
+  <div class="batch-bar">
+    <label class="select-all"><input type="checkbox" id="select-all"> <span id="select-all-label">Select all</span></label>
+    <button type="button" id="batch-delete" class="batch-delete">Delete selected</button>
+  </div>
+  <div class="doc-list">${rows.join('')}</div>
+  <p id="no-match" class="empty" hidden>No matches.</p>`}
 <script>
 (() => {
-  const status = document.getElementById('status');
-  const say = (message, kind = '') => {
-    status.textContent = message || '';
-    status.dataset.kind = kind;
-  };
+  // Tiny top-right toast — no third-party runtime on the privileged /me page.
+  function toast(message, kind = '') {
+    if (!message) return;
+    document.querySelectorAll('.tdoc-toast').forEach((n) => n.remove());
+    const t = document.createElement('div');
+    t.className = 'tdoc-toast';
+    t.textContent = message;
+    t.setAttribute('role', 'status');
+    t.style.cssText = 'position:fixed;top:18px;right:18px;z-index:2000;background:' +
+      (kind === 'error' ? '#b42318' : '#1652f0') +
+      ';color:#fff;padding:12px 16px;border-radius:8px;font:14px system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.18)';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+  }
   // Styled confirm — replaces window.confirm(). Resolves true/false; never
   // silently proceeds (Cancel and the backdrop both resolve false).
   function showConfirm({ title, body, confirmLabel, danger }) {
@@ -1190,49 +1221,153 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   // page 302s away for anyone else), so the session cookie alone authorizes
   // DELETE /api/doc (authorizeOwnerMutation in worker.js). Plain same-origin
   // fetch sends the cookie automatically; no Authorization header needed.
-  async function countComments(slug) {
-    try {
-      const r = await fetch('/api/comments?slug=' + encodeURIComponent(slug) + '&version=all', { credentials: 'same-origin' });
-      if (!r.ok) return 0;
-      const list = await r.json();
-      if (!Array.isArray(list)) return 0;
-      let n = 0;
-      for (const c of list) n += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
-      return n;
-    } catch { return 0; }
+  // Confirm copy stays quiet ("This can't be undone.") — no version/comment
+  // inventory, no infra jargon, no pre-flight comment fetch.
+  async function deleteDoc(slug) {
+    const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (!res.ok) {
+      let body = {};
+      try { body = await res.json(); } catch {}
+      throw new Error(body.error || ('HTTP ' + res.status));
+    }
   }
   document.querySelectorAll('.row-delete').forEach((button) => {
     button.addEventListener('click', async () => {
       closeMenus(null);
       const slug = button.dataset.slug;
       const title = button.dataset.title || slug;
-      const versions = button.dataset.versions || '1';
-      say('Checking ' + slug + '…');
-      const comments = await countComments(slug);
-      say('');
       const proceed = await showConfirm({
         title: 'Delete "' + title + '"?',
-        body: 'This permanently removes <b>' + versions + ' version(s)</b> and <b>' + comments +
-          ' comment(s)</b> from remote storage. No undo.',
+        body: "This can't be undone.",
         confirmLabel: 'Delete',
         danger: true,
       });
       if (!proceed) return;
-      say('Deleting ' + slug + '...');
-      const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
-        method: 'DELETE',
-        credentials: 'same-origin',
-      });
-      if (!res.ok) {
-        let body = {};
-        try { body = await res.json(); } catch {}
-        say(body.error ? 'Delete failed: ' + body.error : 'Delete failed.', 'error');
+      try {
+        await deleteDoc(slug);
+      } catch {
+        toast("Couldn't delete", 'error');
         return;
       }
       button.closest('.doc-row').remove();
-      say('Deleted ' + slug + ' from remote storage.', 'ok');
+      applySearch();
+      toast('Deleted');
     });
   });
+
+  // Search + batch select — client-side only over the already-rendered rows.
+  // No access data, no extra KV/R2; keep the catalog fast (#115).
+  const listEl = document.querySelector('.doc-list');
+  if (!listEl) return;
+  const search = document.getElementById('doc-search');
+  const selectAll = document.getElementById('select-all');
+  const selectAllLabel = document.getElementById('select-all-label');
+  const batchDelete = document.getElementById('batch-delete');
+  const noMatch = document.getElementById('no-match');
+
+  function visibleRows() {
+    return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => !row.hidden);
+  }
+  function selectedRows() {
+    return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+  }
+  function syncBatchUi() {
+    const visible = visibleRows();
+    const selected = selectedRows();
+    const n = selected.length;
+    selected.forEach((row) => row.classList.add('is-selected'));
+    listEl.querySelectorAll('.doc-row').forEach((row) => {
+      const box = row.querySelector('.doc-check');
+      if (!(box && box.checked)) row.classList.remove('is-selected');
+    });
+    batchDelete.classList.toggle('is-visible', n > 0);
+    batchDelete.textContent = n <= 1 ? 'Delete' : ('Delete ' + n);
+    const allVisibleChecked = visible.length > 0 && visible.every((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+    const someVisibleChecked = visible.some((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+    selectAll.checked = allVisibleChecked;
+    selectAll.indeterminate = someVisibleChecked && !allVisibleChecked;
+    selectAllLabel.textContent = allVisibleChecked ? 'Deselect all' : 'Select all';
+    selectAll.disabled = visible.length === 0;
+    if (!listEl.querySelector('.doc-row')) {
+      search.closest('.toolbar').hidden = true;
+      selectAll.closest('.batch-bar').hidden = true;
+      listEl.insertAdjacentHTML('afterend', '<p class="empty">No published docs yet.</p>');
+      listEl.remove();
+      if (noMatch) noMatch.hidden = true;
+    }
+  }
+  function applySearch() {
+    const q = (search.value || '').trim().toLowerCase();
+    let shown = 0;
+    listEl.querySelectorAll('.doc-row').forEach((row) => {
+      const hay = ((row.dataset.title || '') + ' ' + (row.dataset.slug || '')).toLowerCase();
+      const match = !q || hay.includes(q);
+      row.hidden = !match;
+      if (match) shown += 1;
+      else {
+        const box = row.querySelector('.doc-check');
+        if (box) box.checked = false;
+      }
+    });
+    if (noMatch) noMatch.hidden = shown > 0;
+    listEl.hidden = shown === 0;
+    syncBatchUi();
+  }
+
+  search.addEventListener('input', applySearch);
+  listEl.addEventListener('change', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('doc-check')) syncBatchUi();
+  });
+  selectAll.addEventListener('change', () => {
+    const on = selectAll.checked;
+    visibleRows().forEach((row) => {
+      const box = row.querySelector('.doc-check');
+      if (box) box.checked = on;
+    });
+    syncBatchUi();
+  });
+  batchDelete.addEventListener('click', async () => {
+    const rows = selectedRows();
+    if (!rows.length) return;
+    const proceed = await showConfirm({
+      title: rows.length === 1
+        ? ('Delete "' + (rows[0].dataset.title || rows[0].dataset.slug) + '"?')
+        : ('Delete ' + rows.length + ' docs?'),
+      body: "This can't be undone.",
+      confirmLabel: rows.length === 1 ? 'Delete' : ('Delete ' + rows.length),
+      danger: true,
+    });
+    if (!proceed) return;
+    batchDelete.disabled = true;
+    let ok = 0, failed = 0;
+    for (const row of rows) {
+      try {
+        await deleteDoc(row.dataset.slug);
+        row.remove();
+        ok += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    batchDelete.disabled = false;
+    applySearch();
+    if (failed && ok) toast("Deleted " + ok + " · couldn't delete " + failed, 'error');
+    else if (failed) toast("Couldn't delete", 'error');
+    else toast('Deleted');
+  });
+  syncBatchUi();
 })();
 </script>
 </body></html>`;
@@ -1713,39 +1848,175 @@ async function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(s || '')));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hostedRegistrationEnabled(env) {
+  const v = String(env.TDOC_HOSTED_REGISTRATION || env.TDOC_HOSTED_SIGNUP || '').toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+async function issueHostedToken(env, body = {}) {
+  const token = `tdoc_${rand(24)}`;
+  const tokenHash = await sha256Hex(token);
+  const record = {
+    account_id: `acct_${rand(12)}`,
+    created: new Date().toISOString(),
+  };
+  if (typeof body.label === 'string' && body.label.trim()) {
+    record.label = body.label.trim().slice(0, 80);
+  }
+  await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record));
+  return { token, record };
+}
+
+async function hostedTokenActor(env, token) {
+  if (!env || !env.META) return null;
+  const tokenHash = await sha256Hex(token);
+  let record = null;
+  try {
+    const raw = await env.META.get(`hosted-token:${tokenHash}`);
+    if (raw) record = JSON.parse(raw);
+  } catch {}
+  if (!record || typeof record.account_id !== 'string' || !record.account_id) return null;
+  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash };
+}
+
+async function hostedOwnerOp(env, slug, op) {
+  if (!env.COMMENTS) {
+    return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
+  }
+  try {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+    const r = await stub.fetch('https://do/owner', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, op }),
+    });
+    let body;
+    try {
+      body = await r.json();
+    } catch {
+      return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
+    }
+    if (!body || typeof body !== 'object') {
+      return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
+    }
+    return body;
+  } catch (e) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'hosted_owner_store_unavailable',
+      message: e.message || String(e),
+    };
+  }
+}
+
+async function docBytesExist(env, slug) {
+  try {
+    const r = await env.DOCS.list({ prefix: `docs/${slug}/` });
+    return { ok: true, exists: Array.isArray(r.objects) && r.objects.length > 0 };
+  } catch (e) {
+    return { ok: false, response: json({ error: 'doc_bytes_check_failed', message: e.message || String(e) }, { status: 503 }) };
+  }
+}
+
+// Returns { ok, actor, response }. Admin = the provider-wide TDOC_UPLOAD_TOKEN
+// (self-host CLI). Hosted = an account-scoped token minted at /api/hosted/token.
+// Hosted success here is identity only — slug ACL is requireDocWriteAccess /
+// authorizeOwnerMutation. Do not treat a hosted actor as a global owner.
 async function requireUploadAuth(req, env) {
   const auth = req.headers.get('authorization') || '';
   const m = auth.match(/^Bearer\s+(.+)$/);
-  if (!m || !env.TDOC_UPLOAD_TOKEN || !(await timingSafeEqual(m[1], env.TDOC_UPLOAD_TOKEN))) {
-    return json({ error: 'unauthorized' }, { status: 401 });
-  }
-  return null;
+  if (!m) return { ok: false, response: json({ error: 'unauthorized' }, { status: 401 }) };
+  const token = m[1];
+  if (env.TDOC_UPLOAD_TOKEN && await timingSafeEqual(token, env.TDOC_UPLOAD_TOKEN)) return { ok: true, actor: { kind: 'admin' } };
+  const hostedActor = await hostedTokenActor(env, token);
+  if (hostedActor) return { ok: true, actor: hostedActor };
+  return { ok: false, response: json({ error: 'unauthorized' }, { status: 401 }) };
 }
 
-// Owner-mutation gate for browser-facing admin routes (DELETE /api/doc,
-// PATCH /api/doc/access). EITHER credential authorizes:
-//   - the caller is signed in as the configured TDOC_OWNER (session cookie
-//     set by the GitHub device-flow login) — this is the new browser path,
-//     replacing the admin-token field that used to live on /me and the
-//     doc-page manage modal;
-//   - OR the caller presents the CLI's upload bearer token (requireUploadAuth)
-//     — unchanged, still how `tdoc publish`/`tdoc-delete` authenticate.
+// Slug-scoped write ACL for a hosted account token. Admin actors skip it.
+// opts.create: first publish / retry. Does NOT claim an empty slug — the
+// upload route claims after validation so a 400 cannot park the slug forever.
+async function requireDocWriteAccess(env, actor, slug, opts = {}) {
+  const meta = await loadDocMeta(env, slug);
+  if (!actor || actor.kind === 'admin') return { ok: true, meta };
+  const accountId = meta && meta.hosted && meta.hosted.account_id;
+  if (opts.create) {
+    if (!meta) {
+      const bytes = await docBytesExist(env, slug);
+      if (!bytes.ok) return { ok: false, response: bytes.response };
+      if (bytes.exists) {
+        const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+        if (verified.ok) return { ok: true, meta: null };
+        // Orphan / other-owner bytes are "slug taken" (409), not "not doc
+        // owner" (403). Preserve DO/store failures as 503 so callers fail closed.
+        if (
+          verified.status === 503
+          || verified.error === 'hosted_owner_store_unavailable'
+          || verified.error === 'owner_store_conflict'
+        ) {
+          return {
+            ok: false,
+            response: json(
+              { error: verified.error || 'hosted_owner_store_unavailable' },
+              { status: verified.status || 503 },
+            ),
+          };
+        }
+        return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+      }
+      return { ok: true, meta: null };
+    }
+    if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+    if (accountId !== actor.account_id) {
+      return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+    }
+    const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+    if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
+    return { ok: true, meta };
+  }
+  if (!meta) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
+  if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+  if (accountId !== actor.account_id) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+  if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
+  return { ok: true, meta };
+}
+
+function stampHostedOwnership(meta, actor) {
+  if (!actor || actor.kind !== 'hosted') return meta;
+  return {
+    ...(meta || {}),
+    hosted: {
+      ...((meta && meta.hosted && typeof meta.hosted === 'object') ? meta.hosted : {}),
+      account_id: actor.account_id,
+    },
+  };
+}
+
+// Combined write gate for browser-facing admin routes (DELETE /api/doc,
+// PATCH /api/doc/access). One of:
+//   - signed in as TDOC_OWNER (session cookie; CSP makes this safe);
+//   - provider-wide upload token (self-host CLI, global admin);
+//   - hosted account token AND requireDocWriteAccess for `slug`.
 //
-// Trusting the session cookie here is safe ONLY because every doc-serving
-// response now carries the CSP set by cspHeader() above, which stops author
-// <script>/onclick content from running at all — so a doc can't ride the
-// owner's cookie into these routes (the confused-deputy the admin token used
-// to guard against). The two changes ship together; do not relax one without
-// the other.
-//
-// Returns { ok: true } when authorized, or { ok: false, response } (the 401
-// to return as-is) otherwise. Does not read/parse the request body.
-async function authorizeOwnerMutation(req, env) {
+// Hosted tokens are NOT global owners. `slug` must be known before this
+// runs whenever a hosted token might be in play. Returns { ok: true, actor,
+// session, meta? } or { ok: false, response }.
+async function authorizeOwnerMutation(req, env, slug) {
   const session = await getSession(env, req);
-  if (isOwnerSession(env, session)) return { ok: true, session };
-  const unauth = await requireUploadAuth(req, env);
-  if (unauth) return { ok: false, response: unauth };
-  return { ok: true, session: null };
+  if (isOwnerSession(env, session)) return { ok: true, session, actor: { kind: 'owner_session' } };
+  const auth = await requireUploadAuth(req, env);
+  if (!auth.ok) return { ok: false, response: auth.response };
+  if (auth.actor.kind === 'admin') return { ok: true, session: null, actor: auth.actor };
+  if (!slug) return { ok: false, response: json({ error: 'slug required' }, { status: 400 }) };
+  const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+  if (!writeGate.ok) return writeGate;
+  return { ok: true, session: null, actor: auth.actor, meta: writeGate.meta };
 }
 
 // ===========================================================================
@@ -2143,6 +2414,47 @@ export class CommentsStore {
     let payload;
     try { payload = await req.json(); } catch { return Response.json({ list: [] }); }
     const { slug, op } = payload;
+
+    // OWNER: atomic hosted slug ownership claim/verify/release. Lives in the
+    // same per-slug Durable Object as comments so first-publish claim is
+    // strongly serialized; KV is not the authority. release_owner runs from
+    // DELETE /api/doc so a deleted slug can be republished.
+    if (u.pathname === '/owner') {
+      let out = { ok: false, status: 400, error: 'bad_owner_op' };
+      try {
+        await this.state.storage.transaction(async (txn) => {
+          const current = await txn.get('hostedOwner');
+          if (op && op.kind === 'release_owner') {
+            await txn.delete('hostedOwner');
+            out = { ok: true };
+            return;
+          }
+          const accountId = op && typeof op.account_id === 'string' ? op.account_id : '';
+          if (!accountId) {
+            out = { ok: false, status: 400, error: 'account_id_required' };
+            return;
+          }
+          if (op.kind === 'claim_owner') {
+            if (current === undefined) {
+              await txn.put('hostedOwner', accountId);
+              out = { ok: true };
+            } else if (current === accountId) {
+              out = { ok: true };
+            } else {
+              out = { ok: false, status: 403, error: 'not_doc_owner' };
+            }
+            return;
+          }
+          if (op.kind === 'verify_owner') {
+            if (current === accountId) out = { ok: true };
+            else out = { ok: false, status: 403, error: 'not_doc_owner' };
+          }
+        });
+      } catch (e) {
+        return Response.json({ ok: false, status: 409, error: 'owner_store_conflict', message: e.message || String(e) });
+      }
+      return Response.json(out);
+    }
 
     // READ: resolve inside a transaction so a concurrent first-touch mutation
     // can't commit between a non-transactional get and a write-back (Codex P1:
@@ -2551,6 +2863,28 @@ export default {
       return json({ ok: true, unread: inboxUnread(inbox) });
     }
 
+    // ---- hosted publish token bootstrap ----
+    // Hosted/OOB users should not create Cloudflare resources or receive the
+    // provider-wide TDOC_UPLOAD_TOKEN. The central Worker mints an account-
+    // scoped upload token, and write routes enforce slug ownership for that
+    // token. Registration is provider-gated by env so tdoc.dev can stay
+    // closed without changing client code. Do not set TDOC_HOSTED_REGISTRATION
+    // on tdoc.dev until signup is intentionally opened.
+    if (p === '/api/hosted/token' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env)) {
+        return json({ error: 'hosted_registration_disabled' }, { status: 403 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const issued = await issueHostedToken(env, body);
+      return json({
+        ok: true,
+        token: issued.token,
+        account_id: issued.record.account_id,
+        base: url.origin,
+      });
+    }
+
     // ---- comments ----
     if (p === '/api/comments' && method === 'GET') {
       const slug = url.searchParams.get('slug');
@@ -2642,14 +2976,18 @@ export default {
 
     // Admin: wipe ALL comments for a slug (doc owner only — uses the same
     // upload token as /api/upload, so it can be invoked from the publish
-    // tooling or an agent that holds the token; the worker's KV is single-
-    // tenant so this is safe). Triggered by ?all=1 on DELETE /api/comments.
+    // tooling or an agent that holds the token). Hosted tokens are
+    // slug-scoped via requireDocWriteAccess below; the provider admin
+    // token remains global. Triggered by ?all=1 on DELETE /api/comments.
     if (p === '/api/comments' && method === 'DELETE'
         && url.searchParams.get('all') === '1') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
       return json(res.body, { status: res.status });
@@ -2744,13 +3082,16 @@ export default {
     // a visible badge on the reply and also flips the parent comment's
     // status to 'applied' / 'open' so the dashboard reflects it.
     if (p === '/api/agent/reply' && method === 'POST') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, parent_id, text: replyText, status: agentStatus, applied_in,
               bind_anchor_aid } = body;
       if (!slug || !parent_id || !replyText) return json({ error: 'slug, parent_id, text required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
       // Resolve parent + its current anchor up front (the optional rebind needs
       // the folded anchor for label/fallback). agent/reply is upload-token-authed
       // (owner-only), so concurrency here is negligible; the serialized write
@@ -2794,8 +3135,8 @@ export default {
 
     // ---- admin upload (from `tdoc publish`) ----
     if (p === '/api/upload' && method === 'POST') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, version, html: doc, meta, comments: localComments } = body;
@@ -2809,16 +3150,15 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
+      if (!writeGate.ok) return writeGate.response;
       // Validate write-side access policy before writing doc bytes. Read paths
       // stay tolerant for legacy/corrupt stored meta; writes must fail closed.
+      // Hosted claim happens AFTER this so a 400 cannot park the slug.
       let incoming = null;
-      if (meta) {
+      if (meta || (auth.actor && auth.actor.kind === 'hosted')) {
         incoming = (meta && typeof meta === 'object') ? { ...meta } : {};
-        let prev = null;
-        try {
-          const prevRaw = await env.META.get(`meta:${slug}`);
-          if (prevRaw) prev = JSON.parse(prevRaw);
-        } catch {}
+        const prev = writeGate.meta;
         if (!incoming.access && prev && prev.access) {
           incoming.access = prev.access;
         }
@@ -2829,6 +3169,11 @@ export default {
           }
           incoming.access = normalizeAccess(validatedAccess.access, { legacy: false });
         }
+        incoming = stampHostedOwnership(incoming, auth.actor);
+      }
+      if (auth.actor && auth.actor.kind === 'hosted') {
+        const claimed = await hostedOwnerOp(env, slug, { kind: 'claim_owner', account_id: auth.actor.account_id });
+        if (!claimed.ok) return json({ error: claimed.error || 'owner_claim_failed' }, { status: claimed.status || 409 });
       }
       // Identity-stamp every commentable artifact with a content-hashed
       // data-tdoc-aid. The SAME artifact in a different version has the
@@ -2876,7 +3221,12 @@ export default {
         }
       }
       if (incoming) {
-        await env.META.put(`meta:${slug}`, JSON.stringify(incoming));
+        try {
+          await env.META.put(`meta:${slug}`, JSON.stringify(incoming));
+        } catch (e) {
+          console.error('[upload] META put failed:', e.message);
+          return json({ error: 'meta_put_failed', message: e.message || String(e) }, { status: 500 });
+        }
       }
       // Reconcile existing open comments against the new artifact set:
       // bind by aid where possible; mark lost where the artifact is gone
@@ -2919,8 +3269,17 @@ export default {
     // panel / /me) OR the upload token (CLI) — see its doc comment for why
     // the session path is safe (CSP blocks author scripts on every response).
     if (p === '/api/doc/access' && method === 'PATCH') {
-      const auth = await authorizeOwnerMutation(req, env);
-      if (!auth.ok) return auth.response;
+      // Body is parsed before auth so we can pass slug into the hosted ACL
+      // gate. Cap Content-Length first — an access patch is always tiny; do
+      // not buffer an arbitrary JSON body for an anonymous caller.
+      const ACCESS_PATCH_MAX_BYTES = 16 * 1024;
+      const clRaw = req.headers.get('content-length');
+      if (clRaw != null && clRaw !== '') {
+        const cl = Number(clRaw);
+        if (!Number.isFinite(cl) || cl < 0 || cl > ACCESS_PATCH_MAX_BYTES) {
+          return json({ error: 'payload_too_large' }, { status: 413 });
+        }
+      }
       let body = {};
       try { body = await req.json(); } catch {}
       const topKeys = Object.keys(body || {});
@@ -2929,7 +3288,10 @@ export default {
       const { slug, access } = body || {};
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const meta = await loadDocMeta(env, slug);
+      // Slug must be known before the hosted ACL check inside the shared gate.
+      const auth = await authorizeOwnerMutation(req, env, slug);
+      if (!auth.ok) return auth.response;
+      const meta = auth.meta || await loadDocMeta(env, slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
       const next = applyAccessPatch(meta, access);
       if (next.error) {
@@ -2944,10 +3306,11 @@ export default {
     // /me or the doc-page Share panel) OR the upload token (CLI's
     // tdoc-delete) — see its doc comment for why the session path is safe.
     if (p === '/api/doc' && method === 'DELETE') {
-      const auth = await authorizeOwnerMutation(req, env);
-      if (!auth.ok) return auth.response;
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const auth = await authorizeOwnerMutation(req, env, slug);
+      if (!auth.ok) return auth.response;
       // delete all R2 versions
       let cursor;
       do {
@@ -2962,6 +3325,18 @@ export default {
       // state.storage; the legacy KV value is removed too as cleanup.
       await mutateComments(env, slug, { kind: 'wipe' });
       await env.META.delete(`comments:${slug}`);
+      // Free the hosted slug reservation so the original owner (or anyone)
+      // can republish. Data is already gone; do this last. If COMMENTS is
+      // absent (Vercel), there was never a hostedOwner key — ignore the 503.
+      // If the DO is present and release fails, do not report success: the
+      // slug would stay parked while the API lied.
+      const released = await hostedOwnerOp(env, slug, { kind: 'release_owner' });
+      if (env.COMMENTS && released && released.ok === false) {
+        return json(
+          { error: released.error || 'owner_release_failed' },
+          { status: released.status || 503 },
+        );
+      }
       return json({ ok: true });
     }
 

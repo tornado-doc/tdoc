@@ -1,15 +1,15 @@
 // Owner catalog (/me) guard.
 //
 // 2026-08-13 rework (julie: "删改实在是太丑了 uiux 请improve。而且不能只在/me page"):
-// /me is now a clean delete-only catalog — title/slug/version + Delete. The
-// per-row visibility/history/commenting/allowed_users dropdowns and the
-// admin-token input are GONE: access controls moved to the doc-page Share
-// panel (overlay.js showManageModal, see jul36-owner-manage.test.js), and
-// Delete now authorizes off the owner's session cookie instead of a pasted
-// token (safe only because of the CSP on every doc response — see
-// csp.test.js). /me is reachable only by the signed-in owner (route-level
-// isOwnerSession redirect), so its own same-origin fetches are already
-// cookied.
+// /me is a clean catalog — title/slug/version + search + multi-select batch
+// delete + quiet ⋯ Delete. The per-row visibility/history/commenting/
+// allowed_users dropdowns and the admin-token input are GONE: access
+// controls moved to the doc-page Share panel (overlay.js showManageModal,
+// see jul36-owner-manage.test.js), and Delete now authorizes off the owner's
+// session cookie instead of a pasted token (safe only because of the CSP on
+// every doc response — see csp.test.js). /me is reachable only by the
+// signed-in owner (route-level isOwnerSession redirect), so its own
+// same-origin fetches are already cookied.
 //
 // Gate (小cc review #2): the /me HTML response must not contain access data
 // of any kind — especially `allowed_users` — since none of that is rendered
@@ -57,13 +57,36 @@ t('/me never computes or emits allowed_users (gate: no access data leaks into th
   assert(!index.includes('accessFromMeta'), '/me must not compute an access policy per row anymore');
 });
 
-t('/me keeps only title, slug, version, and a quiet ⋯ delete per row', () => {
+t('/me keeps title, slug, version, search, batch select, and a quiet ⋯ delete per row', () => {
   assert(index.includes('doc-title'), 'missing doc title link');
   assert(index.includes('doc-meta'), 'missing slug/version meta line');
   // Delete is tucked behind a ⋯ overflow menu, not a prominent per-row button.
   assert(index.includes('class="row-menu-btn"'), 'missing ⋯ overflow trigger');
   assert(index.includes('class="row-delete"'), 'missing delete item inside the menu');
   assert(!index.includes('class="delete-doc"'), 'the loud standalone delete button should be gone');
+  // Search + multi-select batch delete (still no access forms).
+  assert(index.includes('id="doc-search"'), 'missing catalog search input');
+  assert(index.includes('class="doc-check"'), 'missing per-row select checkbox');
+  assert(index.includes('id="batch-delete"'), 'missing batch delete control');
+  assert(index.includes('id="select-all"'), 'missing select-all control');
+});
+
+t('/me search is client-side over title/slug (no extra catalog round-trips)', () => {
+  assert(index.includes('applySearch'), 'missing search apply helper');
+  assert(index.includes('dataset.title'), 'search must read title from the rendered row');
+  assert(index.includes('dataset.slug'), 'search must read slug from the rendered row');
+  assert(index.includes('No matches.'), 'missing empty search state');
+  // `.doc-row { display:flex }` would otherwise override the UA [hidden] rule
+  // and leave "filtered" rows visible — pin the !important hide.
+  assert(/\.doc-row\[hidden\][^}]*display:\s*none\s*!important/.test(index),
+    'filtered rows must force display:none !important so search actually hides them');
+});
+
+t('/me batch delete reuses session DELETE /api/doc (no token, no access forms)', () => {
+  assert(index.includes('batchDelete.addEventListener'), 'batch delete must be wired');
+  assert(index.includes('selectedRows'), 'batch delete must operate on the selected set');
+  // Still no access-policy batching — JUL-36 keeps policy on the doc Share panel.
+  assert(!index.includes('/api/doc/access'), '/me must not batch-patch access policy');
 });
 
 t('/me deletes remote docs through DELETE /api/doc using the session (no token)', () => {
@@ -71,7 +94,7 @@ t('/me deletes remote docs through DELETE /api/doc using the session (no token)'
   assert(index.includes("method: 'DELETE'"), 'delete button must use DELETE');
   assert(index.includes("credentials: 'same-origin'"), 'delete fetch should be explicit about sending the session cookie');
   assert(!index.includes("'Authorization': 'Bearer'"), 'delete must not send a bearer token');
-  assert(deleteRoute.includes('await authorizeOwnerMutation(req, env)'), 'remote delete must accept session-or-token auth');
+  assert(deleteRoute.includes('await authorizeOwnerMutation(req, env, slug)'), 'remote delete must accept session-or-token auth');
 });
 
 t('/me still uses the styled confirm modal, never native confirm()', () => {
@@ -79,14 +102,23 @@ t('/me still uses the styled confirm modal, never native confirm()', () => {
   const stripped = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
   assert(!nativeConfirmCall.test(stripped), '/me must not call the native confirm()');
   assert(index.includes('showConfirm('), '/me must use the styled showConfirm() modal');
-  assert(index.includes('dataset.versions'), 'delete confirm copy should include version count from meta');
-  assert(index.includes("'/api/comments?slug='"), 'comment count for delete confirm must load lazily, not at catalog render');
+  // Quiet inline toast feedback — no third-party script, no inline status row.
+  assert(index.includes("This can't be undone."), 'confirm body should be short and plain');
+  const userFacing = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+  assert(!/remote storage/i.test(userFacing), '/me copy must not say "remote storage"');
+  assert(!index.includes("'/api/comments?slug='"), 'delete confirm must not pre-flight comment counts');
+  assert(!/<script\s+src=/i.test(index), '/me must not load third-party <script src=>');
+  assert(index.includes("function toast("), '/me must use a tiny inline toast for feedback');
+  assert(!index.includes('id="status"'), 'inline status row should be gone — toast replaces it');
+  assert(index.includes("toast('Deleted')"), 'success feedback should be a quiet toast("Deleted")');
+  assert(!index.includes('data-versions'), 'unused data-versions should be gone from /me rows');
+  assert(index.includes('applySearch();'), 'single-row delete must re-run applySearch so empty/filter state stays consistent');
+  assert(index.includes('name="viewport"'), '/me must send a mobile viewport meta');
 });
 
 t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
   // The slow /me load: N serial readComments (full event-log fold) + N R2 HEADs
-  // just to paint titles. Catalog reads KV meta only; comment counts wait until
-  // Delete is clicked.
+  // just to paint titles. Catalog reads KV meta only.
   assert(!index.includes('readComments('), '/me must not call readComments while rendering the catalog');
   assert(!index.includes('DOCS.head'), '/me must not HEAD R2 objects while rendering the catalog');
   assert(index.includes('Promise.all'), '/me should fetch meta rows in parallel');

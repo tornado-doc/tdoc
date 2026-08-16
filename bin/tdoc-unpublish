@@ -3,6 +3,7 @@
 #
 # Usage: tdoc-unpublish <slug>
 set -euo pipefail
+"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
 
 SLUG="${1:-}"
 if [ -z "$SLUG" ]; then echo "usage: tdoc-unpublish <slug>" >&2; exit 1; fi
@@ -21,10 +22,10 @@ fi
 if ! command -v jq >/dev/null 2>&1; then echo "needs jq" >&2; exit 1; fi
 
 TOKEN="$(jq -r .upload_token "$CONFIG_FILE")"
-# Resolve the API base for the configured platform: vercel configs store the
-# deployment URL directly in `.base`; cloudflare configs derive workers.dev.
+# Resolve the API base for the configured platform: hosted/vercel configs store
+# the URL directly in `.base`; cloudflare configs derive workers.dev.
 PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
-if [ "$PLATFORM" = "vercel" ]; then
+if [ "$PLATFORM" = "hosted" ] || [ "$PLATFORM" = "vercel" ]; then
   BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
   if [ -z "$BASE" ] || [ "$BASE" = "null" ]; then
     echo "[tdoc] $CONFIG_FILE has no '.base' — delete it and re-run /tdoc publish to re-setup." >&2

@@ -405,44 +405,54 @@ echo "tdoc server: http://localhost:7878"
 pkill -f "$SKILL_DIR/server/server.js"
 ```
 
-### `/tdoc publish <slug>` — publish to your Cloudflare Worker (or Vercel)
+### `/tdoc publish <slug>` — publish to hosted tdoc (default), or self-host
 
 Publishes the latest version of `<slug>` to a public URL.
 
-Local always stays $0/anonymous; publishing is opt-in. First run does a one-time
-setup: prompts `wrangler login`, creates an R2 bucket (`tdoc-docs`) and KV
-namespace (`META`) in *your* Cloudflare account, generates an upload token, and
-deploys your own Worker. Config is saved to `~/.tdoc/published.json`.
+Default target is **hosted** (`https://tdoc.dev`). First run asks the host for
+an account-scoped upload token and stores it in `~/.tdoc/published.json`. That
+token can only mutate docs it owns. If hosted signup is not open, the CLI fails
+with a clear prompt to self-host instead — do **not** tell the user to flip a
+Worker env flag.
 
-**Alternative host — Vercel**: `tdoc-publish --platform vercel <slug>` (first
-publish only; the choice is persisted). Needs the `vercel` CLI (`npm i -g
-vercel`). First run links a Vercel project named `tdoc`, then asks you (via an
-agent prompt) to connect a **Blob** store and an **Upstash Redis** store in the
-Vercel dashboard's Storage tab — both free tier, ~2 clicks each — and deploys.
-Subsequent publishes and all other commands (`pull`, `unpublish`, comments,
-GitHub sign-in) work identically on either host. Caveats: no per-doc write
-serialization (Cloudflare uses a Durable Object for that) and a ~4.5 MB upload
-cap per doc (Vercel request limit).
+**Self-host — Cloudflare**: `tdoc-publish --platform cloudflare <slug>`.
+First run (or an explicit switch onto cloudflare) prompts `wrangler login`,
+creates an R2 bucket (`tdoc-docs`) and KV namespace (`META`) in *your*
+Cloudflare account, generates an upload token, and deploys your own Worker.
+The choice is persisted in `~/.tdoc/published.json` as the default.
 
-Subsequent runs upload the latest version of `<slug>`. The script compares a
-content hash of the Worker/overlay bundle against the last deployed hash in
-`~/.tdoc/published.json` and redeploys automatically when runtime code changed.
-Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch uploads).
-Published pages expose runtime provenance at `/api/runtime` and in
+**Self-host — Vercel**: `tdoc-publish --platform vercel <slug>`. First run
+(or an explicit switch onto vercel) needs the `vercel` CLI (`npm i -g vercel`),
+links a Vercel project named `tdoc`, then asks you (via an agent prompt) to
+connect a **Blob** store and an **Upstash Redis** store in the Vercel
+dashboard's Storage tab — both free tier, ~2 clicks each — and deploys.
+Caveats: no per-doc write serialization (Cloudflare uses a Durable Object for
+that) and a ~4.5 MB upload cap per doc (Vercel request limit).
+
+Subsequent runs upload the latest version of `<slug>` using the saved default.
+Pass a different `--platform` any time to switch: full re-setup rewrites
+`published.json` (previous file kept as `published.json.bak.switch`). A custom
+domain and `*.workers.dev` on the same Worker are two hostnames, not two
+platforms. Self-host targets
+compare a content hash of the Worker/overlay bundle against the last deployed
+hash in `~/.tdoc/published.json` and redeploy automatically when runtime code
+changed. Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch
+uploads). Published pages expose runtime provenance at `/api/runtime` and in
 `window.__TDOC__.runtime`.
 
 On published docs, viewers sign in with GitHub (Device Flow, shared OAuth App
 `Ov23liZ1UAGOchvKPmlS`, scope `read:user`) before commenting.
 
-Requires `jq`, plus `wrangler` (`npm i -g wrangler`) for the Cloudflare
-target or `vercel` (`npm i -g vercel`) for the Vercel target.
+Requires `jq`. Hosted needs no extra CLI. Cloudflare needs `wrangler`
+(`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
 
 ```bash
 "$SKILL_DIR/bin/tdoc-publish" <slug>
 ```
 
-Prints the published URL: `https://<worker>.<subdomain>.workers.dev/d/<slug>/v/<N>`
-(Cloudflare) or `https://tdoc-<scope>.vercel.app/d/<slug>/v/<N>` (Vercel).
+Prints the published URL: `https://tdoc.dev/d/<slug>/v/<N>` (hosted),
+`https://<worker>.<subdomain>.workers.dev/d/<slug>/v/<N>` (Cloudflare), or
+`https://tdoc-<scope>.vercel.app/d/<slug>/v/<N>` (Vercel).
 
 ### `/tdoc pull <slug>` — pull comments from the published doc
 
@@ -506,7 +516,11 @@ Wraps `bin/tdoc-update`. Runs `git fetch + git merge --ff-only` against
 
 - `tdoc-update --check` → report-only, prints incoming commits without changing anything
 - `tdoc-update` → apply, with auto-stash of local edits, **auto-restarts the running local server** so new routes / overlay code take effect
-- `tdoc-update --yes` → also redeploy the Worker so users see new overlay code
+- `tdoc-update --yes` → also redeploy the Worker so users get the new overlay
+
+BYOK CLIs (`tdoc-publish` / `pull` / `unpublish` / `new`) and every skill
+run also check origin/main and nag immediately when this checkout is
+behind. `tdoc-doctor` reports the same as `.update` (not a missing_step).
 
 ```bash
 "$SKILL_DIR/bin/tdoc-update" --check    # see what's new
@@ -943,11 +957,10 @@ if [ "$TEL_EFFECTIVE" != "off" ]; then
   done
 fi
 
-# ─── Upgrade check (gstack-style lifecycle event) ───────────
-# Check installed version against latest release. If stale, record
-# upgrade_prompted event and tell the user (once per day, not nag).
-# TDOC_DIR is substituted at install time by postinstall-telemetry.sh
-# so this works no matter where tdoc is cloned.
+# ─── Upgrade check (BYOK: origin/main, every run) ───────────
+# GitHub releases lag (v0.9.0 sat while overlay kept shipping on main).
+# Compare this skill checkout to origin/main the same way tdoc-update does.
+# TDOC_DIR is substituted at install time by postinstall-telemetry.sh.
 TDOC_DIR="__TDOC_DIR__"
 
 # Resolve installed version, trying multiple sources in order:
@@ -960,26 +973,22 @@ if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_DIR/.git" ]; then
 fi
 [ -z "$INSTALLED_VERSION" ] && INSTALLED_VERSION="0.0.0"
 
-UPGRADE_CHECK_FLAG="$TEL_HOME/.upgrade-checked-$(date +%Y-%m-%d)"
-if [ "$TEL_EFFECTIVE" != "off" ] && [ ! -f "$UPGRADE_CHECK_FLAG" ] && [ "$INSTALLED_VERSION" != "0.0.0" ]; then
-  LATEST=$(curl -s --max-time 3 https://api.github.com/repos/tornado-doc/tdoc/releases/latest 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
-  # Only fire upgrade prompt if installed is STRICTLY OLDER than latest.
-  # Use sort -V (version sort): if installed sorts first, installed < latest.
-  # If installed == latest or installed > latest (dev build), skip silently.
-  if [ -n "$LATEST" ] && [ "$LATEST" != "$INSTALLED_VERSION" ]; then
-    FIRST_VERSION=$(printf '%s\n%s\n' "$INSTALLED_VERSION" "$LATEST" | sort -V | head -1)
-    if [ "$FIRST_VERSION" = "$INSTALLED_VERSION" ]; then
+if [ -x "$TDOC_DIR/bin/tdoc-update-nag" ]; then
+  NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" 2>/dev/null || true)"
+  if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
+    echo "$NAG_LINE"
+    if [ "$TEL_EFFECTIVE" != "off" ]; then
       "$TDOC_DIR/telemetry/bin/telemetry-log" \
         --skill tdoc \
         --event-type upgrade_prompted \
         --outcome unknown \
         --skill-version "$INSTALLED_VERSION" \
-        --step "v$INSTALLED_VERSION→v$LATEST" \
+        --step "origin/main" \
         --session-id "$TEL_SESSION_ID" 2>/dev/null || true
-      echo "TDOC_UPGRADE_AVAILABLE: $INSTALLED_VERSION → $LATEST  (cd $TDOC_DIR && git pull && bin/postinstall-telemetry.sh)"
     fi
+  elif printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_DIVERGED:'; then
+    echo "$NAG_LINE"
   fi
-  touch "$UPGRADE_CHECK_FLAG" 2>/dev/null || true
 fi
 
 echo "TEL_PROMPTED: $TEL_PROMPTED"
@@ -1020,6 +1029,19 @@ TEL_EFFECTIVE="$(cat "$TEL_CONFIG_FILE")"
 ```
 
 **If `TEL_PROMPTED` is `yes`**, do NOT ask again. Proceed silently.
+
+**If the preamble printed `TDOC_UPDATE_AVAILABLE`**, tell the user
+immediately (before the rest of the tdoc work). Do not wait until the
+end, and do not swallow it. Example:
+
+> tdoc on origin/main is newer than this skill checkout. Published docs
+> still serve the old overlay until we update. I can run `/tdoc update
+> --yes` now (pulls the skill and redeploys your worker).
+
+Encourage them to update. If they say no, continue with what they asked.
+If the line was `TDOC_UPDATE_DIVERGED`, tdoc-update cannot fast-forward —
+tell them to stash/commit local skill edits or re-clone; do not run
+`--yes`.
 
 ---
 

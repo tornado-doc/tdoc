@@ -26,6 +26,8 @@ const OFFLINE = [
   'me-management.test.js',    // /me remote SoT management UI guard
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
+  'hosted-oob.test.js',       // hosted token bootstrap + scoped writes
+  'hosted-oob-behavior.test.js', // hosted token ownership behavior with fake bindings
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage

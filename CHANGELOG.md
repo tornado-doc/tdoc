@@ -15,8 +15,22 @@ file and `.claude-plugin/plugin.json`.
   (unique origin even if the host iframe rewrite misses). Overlay comments
   on the iframe as one artifact.
 
+### Changed
+
+- **Default `/tdoc publish` target is hosted tdoc.dev** (Cloudflare/Vercel via
+  `--platform`). Closed signup fails clearly and points at self-host flags;
+  onboarding’s sample publish uses `--platform cloudflare`.
+- **`--platform` after first setup switches for real.** A conflicting flag
+  rewrites `~/.tdoc/published.json` via full re-setup (previous config kept as
+  `published.json.bak.switch` and restored if setup fails). Cloudflare setup
+  now persists `platform:"cloudflare"`. Same Worker custom domain vs
+  `*.workers.dev` remains two hostnames, not a platform switch.
+
 ### Fixed
 
+- **`DELETE /api/doc` fails closed when hosted `release_owner` fails** and the
+  Durable Object binding is present, so a 200 cannot leave the slug parked.
+  Vercel (no `COMMENTS`) still returns 200 — there was never a reservation.
 - **Tables and wide diagrams are no longer clipped in the reader.** Overlay
   table styles used a -14px left margin that cropped the first column inside
   any `overflow-x:auto` wrapper, and `display:block` on `<table>` broke row
@@ -46,6 +60,17 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Search and batch delete on My docs (`/me`).** Filter the owner catalog by
+  title or slug, multi-select rows, and delete the selection in one confirm.
+  Still client-side over the KV title list (no extra R2/comment work at render);
+  access policy stays on the doc Share panel. Feedback is a tiny inline
+  top-right toast (`Deleted`) — no third-party toast library on the owner
+  session surface.
+- **BYOK update nag.** User-facing CLIs and the skill preamble compare this
+  checkout to `origin/main` and point at `/tdoc update --yes` when main is
+  ahead. Ahead-only feature branches stay silent; a true diverge does not
+  print a destroy/re-clone command. `tdoc-doctor` reports the same state as
+  `.update` (not a `missing_step`).
 - **In-app inbox (API).** Signed-in users have a per-host notification inbox.
   New top-level comments notify the doc owner; replies notify only the
   direct parent (Reddit); reactions notify the item author. Same-thread

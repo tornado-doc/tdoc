@@ -7,7 +7,7 @@
 `tdoc` is a Claude Code skill that gives the user prompt-native HTML documents with text- and artifact-anchored comments. After install + onboarding, the user can:
 
 - `/tdoc new <prompt>` → generate a commentable HTML doc
-- `/tdoc publish <slug>` → publish to their own Cloudflare Worker (free, always-on)
+- `/tdoc publish <slug>` → publish (default target is hosted tdoc.dev; signup may be closed, so onboarding uses `--platform cloudflare` below)
 - Share the live URL; commenters sign in with GitHub
 
 Install + onboarding takes ~3 minutes on a clean machine. Most steps are automatic. The user only has to click ~2 things in a browser.
@@ -82,9 +82,20 @@ The JSON has these fields you care about:
   "ready_to_publish": true/false,
   "missing_steps": [
     { "id": "...", "label": "...", "kind": "install|login|click", "cmd": "..." }
-  ]
+  ],
+  "update": {
+    "ok": true/false,
+    "checked": true/false,
+    "behind": 0,
+    "diverged": true/false,
+    "cmd": "…/bin/tdoc-update --yes"
+  }
 }
 ```
+
+`.update` is informational (this skill checkout vs `origin/main`), not a
+`missing_step`. If `ok` is false and the checkout has not diverged, suggest
+`/tdoc update --yes`. Do not treat a stale overlay as a Cloudflare dep.
 
 ## Step 4 — Walk the user through `missing_steps`
 
@@ -128,8 +139,10 @@ cat > ~/tdocs/$SLUG/meta.json <<EOF
 {"title":"Hello tdoc","slug":"$SLUG","versions":[{"n":1,"created":"$(date -Iseconds)"}]}
 EOF
 echo '[]' > ~/tdocs/$SLUG/comments.json
-# Publish
-~/.claude/skills/tdoc/bin/tdoc-publish $SLUG
+# Publish to the user's own Cloudflare Worker. Hosted tdoc.dev is the
+# default for `/tdoc publish`, but self-serve signup is closed — use an
+# explicit self-host flag here.
+~/.claude/skills/tdoc/bin/tdoc-publish --platform cloudflare $SLUG
 ```
 
 The script prints the live URL. Show it to the user.
