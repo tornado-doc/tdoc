@@ -127,6 +127,12 @@ t('phone rules actually override the desktop headline and CTA grid', () => {
   // used path overflows the 1em box and the grid row grows to ~77px.
   assert(/btn-ghost[^>]*>\s*<svg[^>]*viewBox="0 0 24 24"/.test(html),
     'Star button icon must set viewBox so the used mark cannot stretch the pill');
+  // v14 dropped height/nowrap. The used mark then overflowed 1em and the
+  // Star pill measured 77px (Create stretched with it on desktop). Lock both.
+  assert(/\.btn\s*\{[^}]*height:\s*52px/.test(html),
+    'CTA pills must lock height:52px; without it the used GitHub mark stretches Star to ~77px');
+  assert(/\.btn\s*\{[^}]*white-space:\s*nowrap/.test(html),
+    'CTA pills must nowrap so Star on GitHub 102 stays one line');
   // Same class of bug as the original .tagline vs h1.tagline miss: an
   // earlier 640px size is a no-op if a later 840px block also sets
   // h1.tagline. The last media query that sets h1.tagline must be 640.

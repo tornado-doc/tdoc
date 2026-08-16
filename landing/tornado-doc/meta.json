@@ -82,6 +82,11 @@
       "n": 16,
       "created": "2026-08-16T09:20:00Z",
       "prompt": "Hero leads with the chore being removed: stop babysitting comments"
+    },
+    {
+      "n": 17,
+      "created": "2026-08-16T09:40:00Z",
+      "prompt": "Restore the 52px CTA pill lock v14 dropped; the used GitHub mark overflowed its 1em box and stretched Star to 77px"
     }
   ]
 }
