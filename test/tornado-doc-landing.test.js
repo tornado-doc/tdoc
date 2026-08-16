@@ -11,8 +11,13 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const root = path.join(__dirname, '..');
-const html = fs.readFileSync(path.join(root, 'landing', 'tornado-doc', 'v1', 'index.html'), 'utf8');
 const meta = JSON.parse(fs.readFileSync(path.join(root, 'landing', 'tornado-doc', 'meta.json'), 'utf8'));
+// Read the LATEST version, not v1. `/` serves meta.versions[last], so pinning
+// this to v1 would keep asserting an archived version while the homepage
+// silently drifted. Older versions stay on disk on purpose: comments are
+// anchored to them, and a reader can flip back.
+const latest = meta.versions[meta.versions.length - 1].n;
+const html = fs.readFileSync(path.join(root, 'landing', 'tornado-doc', `v${latest}`, 'index.html'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 
 // Exact-href extraction — not html.includes(url), which CodeQL flags as
