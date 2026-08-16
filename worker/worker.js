@@ -1719,12 +1719,30 @@ async function hostedOwnerOp(env, slug, op) {
   if (!env.COMMENTS) {
     return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
   }
-  const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
-  const r = await stub.fetch('https://do/owner', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slug, op }),
-  });
-  return r.json();
+  try {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+    const r = await stub.fetch('https://do/owner', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, op }),
+    });
+    let body;
+    try {
+      body = await r.json();
+    } catch {
+      return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
+    }
+    if (!body || typeof body !== 'object') {
+      return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
+    }
+    return body;
+  } catch (e) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'hosted_owner_store_unavailable',
+      message: e.message || String(e),
+    };
+  }
 }
 
 async function docBytesExist(env, slug) {
@@ -1765,7 +1783,22 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
       if (bytes.exists) {
         const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
         if (verified.ok) return { ok: true, meta: null };
-        return { ok: false, response: json({ error: verified.error || 'slug_taken' }, { status: verified.status || 409 }) };
+        // Orphan / other-owner bytes are "slug taken" (409), not "not doc
+        // owner" (403). Preserve DO/store failures as 503 so callers fail closed.
+        if (
+          verified.status === 503
+          || verified.error === 'hosted_owner_store_unavailable'
+          || verified.error === 'owner_store_conflict'
+        ) {
+          return {
+            ok: false,
+            response: json(
+              { error: verified.error || 'hosted_owner_store_unavailable' },
+              { status: verified.status || 503 },
+            ),
+          };
+        }
+        return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
       }
       return { ok: true, meta: null };
     }

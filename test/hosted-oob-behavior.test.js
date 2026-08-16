@@ -186,6 +186,38 @@ async function issue(worker, env, label = 'test') {
     assert((await doc.text()).includes('A'), 'denied second upload overwrote document bytes');
   });
 
+  await t('create against orphan R2 bytes (no hostedOwner) returns slug_taken 409', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'orphan-claimer');
+    await env.DOCS.put('docs/orphan-bytes/v1/index.html', '<h1>legacy</h1>');
+    assert(!env.COMMENTS.stateFor('orphan-bytes').storage.map.has('hostedOwner'),
+      'test setup expected no hostedOwner');
+    const r = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'orphan-bytes', version: 1, html: '<h1>takeover</h1>' },
+    }), env, {});
+    assert(r.status === 409, `orphan bytes should be slug_taken 409, got ${r.status}`);
+    const body = await r.json();
+    assert(body.error === 'slug_taken', `expected slug_taken, got ${JSON.stringify(body)}`);
+    assert((await (await env.DOCS.get('docs/orphan-bytes/v1/index.html')).text()).includes('legacy'),
+      'denied orphan claim must not overwrite bytes');
+  });
+
+  await t('hostedOwnerOp DO fetch failure returns controlled 503 shape (no throw)', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'do-down');
+    env.COMMENTS.get = () => ({
+      fetch: async () => { throw new Error('forced DO down'); },
+    });
+    const r = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'do-down-doc', version: 1, html: '<h1>x</h1>' },
+    }), env, {});
+    assert(r.status === 503, `DO failure should be 503, got ${r.status}: ${await r.clone().text()}`);
+    const body = await r.json();
+    assert(body.error === 'hosted_owner_store_unavailable', `unexpected body ${JSON.stringify(body)}`);
+  });
+
   await t('invalid access on first hosted upload does not park the slug', async () => {
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env, 'bad-access');

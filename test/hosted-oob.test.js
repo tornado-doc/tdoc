@@ -94,6 +94,14 @@ t('Hosted slug ownership claim is backed by per-slug Durable Object storage', ()
   assert(worker.includes("kind: 'verify_owner'"), 'owner verify op missing');
   assert(worker.includes("kind: 'release_owner'"), 'owner release op missing');
   assert(worker.includes('hostedOwnerOp(env, slug'), 'write gate must use Durable Object owner op');
+  const opFn = worker.slice(
+    worker.indexOf('async function hostedOwnerOp(env, slug, op) {'),
+    worker.indexOf('\nasync function docBytesExist'),
+  );
+  assert(/try\s*\{/.test(opFn) && /hosted_owner_store_unavailable/.test(opFn),
+    'hostedOwnerOp must catch DO/JSON failures as hosted_owner_store_unavailable');
+  assert(/error: 'slug_taken'/.test(worker) && /status: 409/.test(worker),
+    'create-against-orphan-bytes path must map to slug_taken/409');
 });
 
 t('Access mutation and delete go through the shared gate with the slug', () => {
