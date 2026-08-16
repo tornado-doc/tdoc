@@ -216,57 +216,11 @@ fi
 
 # --- bundle overlay.js into worker source ---
 # Writes _worker.bundled.js into $1 (defaults to the wrangler worker dir; the
-# vercel path passes its own app dir).
+# vercel path passes its own app dir). Shared with the tdoc.dev CD workflow.
 bundle_worker() {
   local out_dir="${1:-$WORKER_DIR}"
-  local out="$out_dir/_worker.bundled.js"
-  OUT_DIR="$out_dir" node -e '
-    const fs = require("fs");
-    const path = require("path");
-    const crypto = require("crypto");
-    const cp = require("child_process");
-    const skill = process.env.SKILL_DIR;
-    const worker = fs.readFileSync(path.join(skill, "worker/worker.js"), "utf8");
-    const overlay = fs.readFileSync(path.join(skill, "server/overlay.js"), "utf8");
-    const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
-    const git = (...args) => {
-      try { return cp.execFileSync("git", ["-C", skill, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
-      catch { return ""; }
-    };
-    const sourceSha = git("rev-parse", "--short=12", "HEAD") || null;
-    const sourceDirty = !!git("status", "--porcelain", "--untracked-files=no");
-    const bundleSha = sha(worker + "\0" + overlay);
-    const build = {
-      source_sha: sourceSha,
-      source_dirty: sourceDirty,
-      worker_sha: sha(worker).slice(0, 12),
-      overlay_sha: sha(overlay).slice(0, 12),
-      bundle_sha: bundleSha.slice(0, 12),
-      built_at: new Date().toISOString(),
-      generated_by: "tdoc-publish",
-    };
-    // Replace whole declarations so JSON.stringify safely escapes everything.
-    let replaced = worker.replace(
-      /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
-      "const OVERLAY_JS = " + JSON.stringify(overlay) + ";"
-    );
-    if (replaced === worker) {
-      console.error("bundle: failed to find OVERLAY_JS placeholder");
-      process.exit(1);
-    }
-    const withBuild = replaced.replace(
-      /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,
-      "const TDOC_BUILD_INFO = " + JSON.stringify(build) + ";"
-    );
-    if (withBuild === replaced) {
-      console.error("bundle: failed to find TDOC_BUILD_INFO placeholder");
-      process.exit(1);
-    }
-    replaced = withBuild;
-    fs.writeFileSync(path.join(process.env.OUT_DIR, "_worker.bundled.js"), replaced);
-    fs.writeFileSync(path.join(process.env.OUT_DIR, "_worker.bundled.sha256"), bundleSha + "\n");
-  '
-  echo "bundled: $out"
+  OUT_DIR="$out_dir" TDOC_GENERATED_BY="${TDOC_GENERATED_BY:-tdoc-publish}" \
+    node "$SKILL_DIR/bin/tdoc-bundle"
 }
 
 worker_bundle_sha() {

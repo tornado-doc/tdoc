@@ -13,6 +13,9 @@ const { spawn } = require('child_process');
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
+// Optional two-person local inbox (browser e2e). Off unless TDOC_E2E_USER is set.
+const E2E_USER = String(process.env.TDOC_E2E_USER || '').trim();
+const E2E_OWNER = String(process.env.TDOC_E2E_OWNER || E2E_USER || '').trim();
 
 fs.mkdirSync(ROOT, { recursive: true });
 
@@ -27,6 +30,53 @@ function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
 }
 function writeJson(p, obj) { fs.writeFileSync(p, JSON.stringify(obj, null, 2)); }
+function e2eIdentity() {
+  if (!E2E_USER) return null;
+  return { login: E2E_USER, name: E2E_USER, avatar_url: '' };
+}
+function inboxFile(login) {
+  return path.join(ROOT, `.inbox-${String(login).toLowerCase()}.json`);
+}
+function localRecordAuthor(comments, id) {
+  for (const c of comments) {
+    if (c.id === id) return c.author || null;
+    for (const r of (c.replies || [])) if (r.id === id) return r.author || null;
+  }
+  return null;
+}
+function localDeliver(recipient, ev) {
+  const who = recipient && String(recipient).trim().toLowerCase();
+  const actor = ev.actor && ev.actor.login && String(ev.actor.login).trim().toLowerCase();
+  if (!who || who === actor) return;
+  const file = inboxFile(who);
+  const inbox = readJson(file, { items: [] });
+  const items = Array.isArray(inbox.items) ? inbox.items : [];
+  const gk = ev.kind === 'comment' ? `comment:${ev.slug}`
+    : ev.kind === 'reply' ? `reply:${ev.target_id}`
+    : ev.kind === 'reaction' ? `reaction:${ev.target_id}`
+    : `other:${ev.slug}`;
+  const existing = items.find(i => i && !i.read && i.group_key === gk);
+  if (existing) {
+    existing.count = (Number(existing.count) || 1) + 1;
+    existing.at = ev.at;
+    existing.actor = ev.actor;
+    existing.comment_id = ev.comment_id || existing.comment_id;
+    existing.thread_id = ev.thread_id || existing.thread_id;
+    existing.preview = ev.preview != null ? ev.preview : existing.preview;
+    existing.version = ev.version || existing.version;
+    const rest = items.filter(i => i !== existing);
+    writeJson(file, { items: [existing, ...rest].slice(0, 200) });
+    return;
+  }
+  items.unshift({
+    id: ev.id || `n_${Date.now()}`,
+    kind: ev.kind, group_key: gk, slug: ev.slug, version: ev.version || 1,
+    comment_id: ev.comment_id, thread_id: ev.thread_id || ev.comment_id,
+    actor: ev.actor || null, preview: ev.preview || '', title: ev.title || ev.slug,
+    at: ev.at || new Date().toISOString(), read: false, count: 1, emoji: ev.emoji || null,
+  });
+  writeJson(file, { items: items.slice(0, 200) });
+}
 // Cap request bodies so a hostile/buggy client can't OOM the local server.
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — comments are small
 function readBody(req) {
@@ -202,8 +252,12 @@ function injectOverlay(html, slug, version, nonce) {
   // the CSP set by cspHeader() above — author content in `html` has no nonce
   // and is inert.
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const ident = e2eIdentity();
   const cfg = `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript({
-    slug, version, identity: null, authConfigured: false, mode: 'local', versions,
+    slug, version,
+    identity: ident,
+    isOwner: !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase()),
+    authConfigured: !!ident, mode: 'local', versions,
   })};</script>`;
   const inject = `${cfg}\n<script${nonceAttr}>${overlay}</script>`;
   if (html.includes('</body>')) return html.replace('</body>', `${inject}\n</body>`);
@@ -278,14 +332,11 @@ function indexPage() {
     const meta = readJson(path.join(ROOT, slug, 'meta.json'), { title: slug, versions: [] });
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
     const versionCount = Array.isArray(meta.versions) && meta.versions.length ? meta.versions.length : 1;
-    const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
-    const open = comments.filter(c => c.status === 'open').length;
     return `<tr>
       <td><a href="/d/${encodeURIComponent(slug)}/v/${latest}">${escHtml(meta.title || slug)}</a></td>
       <td>${escHtml(slug)}</td>
       <td>v${latest}</td>
-      <td>${open ? `<b>${open} open</b>` : '—'}</td>
-      <td><button class="del" data-slug="${escHtml(slug)}" data-versions="${versionCount}" data-comments="${comments.length}">Delete</button></td>
+      <td><button class="del" data-slug="${escHtml(slug)}" data-versions="${versionCount}">Delete</button></td>
     </tr>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
@@ -320,7 +371,7 @@ function indexPage() {
 </style></head><body>
 <h1>tdoc</h1><p class="sub">Prompt-native documents.</p>
 ${slugs.length === 0 ? '<p class="empty">No docs yet. Try <code>/tdoc new &lt;prompt&gt;</code>.</p>' :
-  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th>Comments</th><th></th></tr></thead><tbody>${rows}</tbody></table>`}
+  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th></th></tr></thead><tbody>${rows}</tbody></table>`}
 <script>
 function showConfirm({ title, body, confirmLabel, danger }) {
   return new Promise((resolve) => {
@@ -348,10 +399,20 @@ document.addEventListener('click', async (e) => {
   const b = e.target.closest('.del');
   if (!b) return;
   const slug = b.dataset.slug;
+  let comments = 0;
+  try {
+    const r = await fetch('/api/comments?slug=' + encodeURIComponent(slug));
+    if (r.ok) {
+      const list = await r.json();
+      if (Array.isArray(list)) {
+        for (const c of list) comments += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+      }
+    }
+  } catch {}
   // Irreversible: name exactly what disappears before acting.
   const proceed = await showConfirm({
     title: 'Delete "' + slug + '"?',
-    body: 'This permanently removes <b>' + b.dataset.versions + ' version(s)</b> and <b>' + b.dataset.comments +
+    body: 'This permanently removes <b>' + b.dataset.versions + ' version(s)</b> and <b>' + comments +
       ' comment(s)</b> — the local copy AND the published copy (if any). No undo.',
     confirmLabel: 'Delete',
     danger: true,
@@ -375,6 +436,43 @@ const server = http.createServer(async (req, res) => {
   // process answering 200 on this port must not pass as tdoc (seen in the
   // wild: a daemon from another product bound 7878).
   if (p === '/api/ping') return json(res, 200, { ok: true, service: 'tdoc' });
+
+  if (p === '/api/notifications' && req.method === 'GET') {
+    const ident = e2eIdentity();
+    if (!ident) return json(res, 401, { error: 'sign_in_required' });
+    const inbox = readJson(inboxFile(ident.login), { items: [] });
+    const items = Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
+    const unread = items.filter(i => !i.read);
+    const ordered = unread.concat(items.filter(i => i.read));
+    const offset = Math.max(0, Number(url.searchParams.get('offset') || 0));
+    return json(res, 200, {
+      items: ordered.slice(offset, offset + 20),
+      unread: unread.length,
+      has_more: offset + 20 < ordered.length,
+    });
+  }
+  if (p === '/api/notifications/unread' && req.method === 'GET') {
+    const ident = e2eIdentity();
+    if (!ident) return json(res, 401, { error: 'sign_in_required' });
+    const inbox = readJson(inboxFile(ident.login), { items: [] });
+    const items = Array.isArray(inbox.items) ? inbox.items : [];
+    return json(res, 200, { unread: items.filter(i => i && !i.read).length });
+  }
+  if (p === '/api/notifications/read' && req.method === 'POST') {
+    const ident = e2eIdentity();
+    if (!ident) return json(res, 401, { error: 'sign_in_required' });
+    const body = await readBody(req);
+    const file = inboxFile(ident.login);
+    const inbox = readJson(file, { items: [] });
+    const items = (Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
+      if (!i) return i;
+      if (Array.isArray(body.ids) && body.ids.includes(i.id)) return { ...i, read: true };
+      if (body.comment_id && i.comment_id === body.comment_id) return { ...i, read: true };
+      return i;
+    });
+    writeJson(file, { items });
+    return json(res, 200, { ok: true, unread: items.filter(i => i && !i.read).length });
+  }
 
   if (p === '/tdoc_logo.png') {
     const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
@@ -432,9 +530,18 @@ const server = http.createServer(async (req, res) => {
       // `r.version` check falls back to the parent's created_in, so replies were
       // never hidden on older versions (diverging from the worker).
       // parent_id is the immediate parent (top-level or another reply).
-      const reply = { id: `r_${Date.now()}`, parent_id, text, version: Number(version) || 1, author: null, created, reactions: {} };
+      const reply = { id: `r_${Date.now()}`, parent_id, text, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
       thread.replies.push(reply);
       writeJson(file, comments);
+      if (E2E_USER) {
+        const parentA = localRecordAuthor(comments, parent_id);
+        let title = slug;
+        try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
+        localDeliver(parentA && parentA.login, {
+          kind: 'reply', slug, version: Number(version) || 1, comment_id: reply.id,
+          thread_id: thread.id, target_id: parent_id, actor: reply.author, preview: text, title, at: created,
+        });
+      }
       return json(res, 200, reply);
     }
     const entry = {
@@ -442,7 +549,7 @@ const server = http.createServer(async (req, res) => {
       version: version || 1,
       anchor: anchor || null,
       text,
-      author: null,
+      author: e2eIdentity(),
       status: 'open',
       created,
       replies: [],
@@ -450,6 +557,14 @@ const server = http.createServer(async (req, res) => {
     };
     comments.push(entry);
     writeJson(file, comments);
+    if (E2E_USER && E2E_OWNER) {
+      let title = slug;
+      try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
+      localDeliver(E2E_OWNER, {
+        kind: 'comment', slug, version: Number(version) || 1, comment_id: entry.id,
+        thread_id: entry.id, actor: entry.author, preview: text, title, at: created,
+      });
+    }
     return json(res, 200, entry);
   }
 
@@ -577,13 +692,24 @@ const server = http.createServer(async (req, res) => {
     if (!target) return json(res, 404, { error: 'not_found' });
     if (!target.reactions) target.reactions = {};
     const users = target.reactions[emoji] || [];
-    const me = 'anon';
+    const me = E2E_USER || 'anon';
     const idx = users.indexOf(me);
+    const added = idx < 0;
     if (idx >= 0) users.splice(idx, 1);
     else users.push(me);
     if (users.length === 0) delete target.reactions[emoji];
     else target.reactions[emoji] = users;
     writeJson(file, all);
+    if (added && E2E_USER && target.author && target.author.login) {
+      let title = slug;
+      try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
+      const thread = all.find(c => c.id === comment_id || (c.replies || []).some(r => r.id === comment_id));
+      const V = Number(body.version) || Number(target.version) || Number(thread && thread.version) || 1;
+      localDeliver(target.author.login, {
+        kind: 'reaction', slug, version: V, comment_id, thread_id: thread && thread.id,
+        target_id: comment_id, actor: e2eIdentity(), title, emoji,
+      });
+    }
     return json(res, 200, { ok: true, reactions: target.reactions });
   }
 

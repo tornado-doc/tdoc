@@ -55,6 +55,104 @@ async function tPub(name, fn) {
     await page.waitForSelector('.tdoc-bar', { timeout: 5000 });
   });
 
+  await t('Dark mode switch is in the top bar', async () => {
+    const btn = await page.$('#tdoc-theme-btn');
+    if (!btn) throw new Error('no #tdoc-theme-btn');
+    const inBar = await page.$('.tdoc-bar #tdoc-theme-btn');
+    if (!inBar) throw new Error('theme button is not inside .tdoc-bar');
+  });
+
+  await t('Default theme is light and storage is empty until switch', async () => {
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme && theme !== 'light') throw new Error(`expected light, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== null) throw new Error(`storage should be empty before switch, got "${stored}"`);
+  });
+
+  await t('Clicking the switch turns dark and remembers', async () => {
+    await page.click('#tdoc-theme-btn');
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'dark') throw new Error(`expected dark after click, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'dark') throw new Error(`storage should be dark, got "${stored}"`);
+    const pressed = await page.getAttribute('#tdoc-theme-btn', 'aria-pressed');
+    if (pressed !== 'true') throw new Error(`aria-pressed should be true, got "${pressed}"`);
+  });
+
+  await t('Reload restores the remembered dark theme', async () => {
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('#tdoc-theme-btn', { timeout: 5000 });
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'dark') throw new Error(`expected dark after reload, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'dark') throw new Error(`storage lost on reload: "${stored}"`);
+  });
+
+  await t('Clicking again returns to light and remembers', async () => {
+    await page.click('#tdoc-theme-btn');
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'light') throw new Error(`expected light after second click, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'light') throw new Error(`storage should be light, got "${stored}"`);
+  });
+
+  await t('Table in overflow-x:auto wrapper is not clipped on the left', async () => {
+    const m = await page.evaluate(() => {
+      const table = document.querySelector('.wrap table');
+      const wrap = table && table.parentElement;
+      const th = table && table.querySelector('th');
+      if (!table || !wrap || !th) return { missing: true };
+      const t = table.getBoundingClientRect();
+      const w = wrap.getBoundingClientRect();
+      const h = th.getBoundingClientRect();
+      return {
+        tableLeft: t.left,
+        wrapLeft: w.left,
+        thLeft: h.left,
+        thText: th.textContent.trim(),
+        tableMarginLeft: getComputedStyle(table).marginLeft,
+        wrapOverflowX: getComputedStyle(wrap).overflowX,
+      };
+    });
+    if (m.missing) throw new Error('fixture table/wrapper missing');
+    if (m.wrapOverflowX !== 'auto' && m.wrapOverflowX !== 'scroll') {
+      throw new Error(`expected overflow-x auto wrapper, got ${m.wrapOverflowX}`);
+    }
+    if (m.tableLeft < m.wrapLeft - 1) {
+      throw new Error(`table left ${m.tableLeft.toFixed(1)} is clipped inside wrapper ${m.wrapLeft.toFixed(1)}`);
+    }
+    if (m.thLeft < m.wrapLeft - 1) {
+      throw new Error(`first th left ${m.thLeft.toFixed(1)} is clipped inside wrapper ${m.wrapLeft.toFixed(1)}`);
+    }
+    if (parseFloat(m.tableMarginLeft) < 0) {
+      throw new Error(`table still has negative margin-left ${m.tableMarginLeft}`);
+    }
+    if (m.thText !== 'Key') throw new Error(`first th text was "${m.thText}"`);
+  });
+
+  await t('Doc SVG keeps viewBox aspect ratio and is not overflow-clipped', async () => {
+    const m = await page.evaluate(() => {
+      const svg = document.querySelector('.wrap svg[viewBox]');
+      if (!svg) return { missing: true };
+      const r = svg.getBoundingClientRect();
+      const parts = svg.getAttribute('viewBox').trim().split(/[\s,]+/).map(Number);
+      const vw = parts[2], vh = parts[3];
+      return {
+        w: r.width, h: r.height, vw, vh,
+        overflow: getComputedStyle(svg).overflow,
+        aspect: svg.style.aspectRatio,
+      };
+    });
+    if (m.missing) throw new Error('fixture svg missing');
+    if (m.overflow !== 'visible') throw new Error(`svg overflow is ${m.overflow}, expected visible`);
+    if (!(m.w > 8 && m.h > 8)) throw new Error(`svg collapsed to ${m.w}x${m.h}`);
+    const used = m.w / m.h;
+    const box = m.vw / m.vh;
+    if (Math.abs(used - box) / box > 0.05) {
+      throw new Error(`svg ratio ${used.toFixed(3)} != viewBox ${box.toFixed(3)}`);
+    }
+  });
+
   await t('Copy button exists with icon + label', async () => {
     const btn = await page.$('#tdoc-copy-md-btn');
     if (!btn) throw new Error('no #tdoc-copy-md-btn');

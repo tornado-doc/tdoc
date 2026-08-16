@@ -15,6 +15,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 const root = path.join(__dirname, '..');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
+const bundle = fs.readFileSync(path.join(root, 'bin', 'tdoc-bundle'), 'utf8');
 const RUNTIME_PUBLIC_KEYS = [
   'service',
   'mode',
@@ -63,10 +64,11 @@ t('/api/runtime exposes only the intended public provenance fields', () => {
 
 t('publish bundles deterministic provenance fields', () => {
   for (const field of ['source_sha', 'source_dirty', 'worker_sha', 'overlay_sha', 'bundle_sha', 'generated_by']) {
-    assert(publish.includes(field), `bundle build info missing ${field}`);
+    assert(bundle.includes(field), `bundle build info missing ${field} in tdoc-bundle`);
   }
-  assert(publish.includes('const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";'),
-    'publish must replace the TDOC_BUILD_INFO declaration');
+  assert(bundle.includes('const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";'),
+    'tdoc-bundle must replace the TDOC_BUILD_INFO declaration');
+  assert(publish.includes('bin/tdoc-bundle'), 'tdoc-publish must call tdoc-bundle');
 });
 
 t('publish redeploys by stored content hash, not mtimes', () => {
