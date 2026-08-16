@@ -1134,7 +1134,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     if (!message || typeof Toastify !== 'function') return;
     Toastify({
       text: message,
-      duration: 3000,
+      duration: 4500,
       gravity: 'top',
       position: 'center',
       stopOnFocus: true,
