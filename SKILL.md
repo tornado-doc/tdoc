@@ -413,20 +413,25 @@ token can only mutate docs it owns. If hosted signup is not open, the CLI fails
 with a clear prompt to self-host instead — do **not** tell the user to flip a
 Worker env flag.
 
-**Self-host — Cloudflare**: `tdoc-publish --platform cloudflare <slug>` (first
-publish only; the choice is persisted). Prompts `wrangler login`, creates an R2
-bucket (`tdoc-docs`) and KV namespace (`META`) in *your* Cloudflare account,
-generates an upload token, and deploys your own Worker.
+**Self-host — Cloudflare**: `tdoc-publish --platform cloudflare <slug>`.
+First run (or an explicit switch onto cloudflare) prompts `wrangler login`,
+creates an R2 bucket (`tdoc-docs`) and KV namespace (`META`) in *your*
+Cloudflare account, generates an upload token, and deploys your own Worker.
+The choice is persisted in `~/.tdoc/published.json` as the default.
 
-**Self-host — Vercel**: `tdoc-publish --platform vercel <slug>` (first publish
-only; the choice is persisted). Needs the `vercel` CLI (`npm i -g vercel`).
-First run links a Vercel project named `tdoc`, then asks you (via an agent
-prompt) to connect a **Blob** store and an **Upstash Redis** store in the
-Vercel dashboard's Storage tab — both free tier, ~2 clicks each — and deploys.
+**Self-host — Vercel**: `tdoc-publish --platform vercel <slug>`. First run
+(or an explicit switch onto vercel) needs the `vercel` CLI (`npm i -g vercel`),
+links a Vercel project named `tdoc`, then asks you (via an agent prompt) to
+connect a **Blob** store and an **Upstash Redis** store in the Vercel
+dashboard's Storage tab — both free tier, ~2 clicks each — and deploys.
 Caveats: no per-doc write serialization (Cloudflare uses a Durable Object for
 that) and a ~4.5 MB upload cap per doc (Vercel request limit).
 
-Subsequent runs upload the latest version of `<slug>`. Self-host targets
+Subsequent runs upload the latest version of `<slug>` using the saved default.
+Pass a different `--platform` any time to switch: full re-setup rewrites
+`published.json` (previous file kept as `published.json.bak.switch`). A custom
+domain and `*.workers.dev` on the same Worker are two hostnames, not two
+platforms. Self-host targets
 compare a content hash of the Worker/overlay bundle against the last deployed
 hash in `~/.tdoc/published.json` and redeploy automatically when runtime code
 changed. Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch

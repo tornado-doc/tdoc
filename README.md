@@ -99,8 +99,12 @@ bills.
 
 ## Hosting targets
 
-Publishing has one hosted target and two self-host targets; pick one on your
-first publish and it sticks (saved in `~/.tdoc/published.json`):
+Publishing has one hosted target and two self-host targets. First publish
+picks the default (hosted unless you pass `--platform`); that choice is saved
+in `~/.tdoc/published.json` and reused. Pass a different `--platform` later to
+switch — the CLI rewrites the config via full re-setup (previous file kept as
+`published.json.bak.switch`). A custom domain and `*.workers.dev` on the same
+Worker are two hostnames, not two platforms.
 
 - **Hosted (default)** — `/tdoc publish <slug>` uploads to a tdoc-managed host
   such as `tdoc.dev`. This path skips user deploy setup. On first use, the

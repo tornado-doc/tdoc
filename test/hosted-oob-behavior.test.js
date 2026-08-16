@@ -22,7 +22,9 @@ if (typeof Response !== 'undefined' && !Response.json) {
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
-function bad(n, e) { console.log(`  ✗ ${n}\n    ${e.stack || e.message || e}`); fail++; }
+// Message only — avoid e.stack so CodeQL does not flag this test helper as
+// "information exposure through a stack trace".
+function bad(n, e) { console.log(`  ✗ ${n}\n    ${e && e.message ? e.message : e}`); fail++; }
 async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
@@ -270,6 +272,61 @@ async function issue(worker, env, label = 'test') {
     assert(republish.status === 200, `original owner republish ${republish.status}: ${await republish.text()}`);
     const meta = JSON.parse(await env.META.get('meta:reclaim-doc'));
     assert(meta.hosted.account_id === a.account_id, 'republish did not restore hosted owner');
+  });
+
+  await t('DELETE fails closed when release_owner fails and COMMENTS exists', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env, 'release-fail');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'parked-on-bad-release', version: 1, html: '<h1>v1</h1>' },
+    }), env, {});
+    assert(up.status === 200, `upload ${up.status}`);
+    assert(env.COMMENTS.stateFor('parked-on-bad-release').storage.map.get('hostedOwner') === a.account_id,
+      'expected hostedOwner before delete');
+
+    const origGet = env.COMMENTS.get.bind(env.COMMENTS);
+    env.COMMENTS.get = (id) => {
+      const stub = origGet(id);
+      const origFetch = stub.fetch.bind(stub);
+      return {
+        fetch: async (url, init = {}) => {
+          const href = typeof url === 'string' ? url : String(url);
+          if (href.includes('/owner') && init.body) {
+            const payload = JSON.parse(init.body);
+            if (payload.op && payload.op.kind === 'release_owner') {
+              return Response.json({ ok: false, status: 503, error: 'forced_release_fail' });
+            }
+          }
+          return origFetch(url, init);
+        },
+      };
+    };
+
+    const del = await worker.fetch(req('/api/doc?slug=parked-on-bad-release', {
+      method: 'DELETE', token: a.token,
+    }), env, {});
+    assert(del.status !== 200, `DELETE must not succeed when release fails, got ${del.status}`);
+    const body = await del.json();
+    assert(body.error === 'forced_release_fail' || body.error === 'owner_release_failed',
+      `unexpected error body ${JSON.stringify(body)}`);
+    assert(env.COMMENTS.stateFor('parked-on-bad-release').storage.map.has('hostedOwner'),
+      'failed release must leave hostedOwner set');
+  });
+
+  await t('DELETE without COMMENTS still succeeds (no hosted reservation)', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    env.TDOC_UPLOAD_TOKEN = 'admin-token';
+    await env.META.put('meta:vercel-style', JSON.stringify({
+      title: 'x', slug: 'vercel-style', versions: [{ n: 1 }],
+    }));
+    await env.DOCS.put('docs/vercel-style/v1/index.html', '<h1>v1</h1>');
+    delete env.COMMENTS;
+    const del = await worker.fetch(req('/api/doc?slug=vercel-style', {
+      method: 'DELETE', token: 'admin-token',
+    }), env, {});
+    assert(del.status === 200, `Vercel-style delete should 200, got ${del.status}: ${await del.text()}`);
+    assert(!await env.META.get('meta:vercel-style'), 'meta should be wiped');
   });
 
   await t('hosted token cannot delete legacy/orphan R2 doc with no meta/owner', async () => {

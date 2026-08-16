@@ -74,6 +74,14 @@ t('tdoc-publish defaults to hosted and treats Cloudflare/Vercel as self-host fla
     'closed hosted signup must point at --platform cloudflare|vercel');
   assert(!/enable TDOC_HOSTED_REGISTRATION/.test(src),
     'CLI must not tell users to flip TDOC_HOSTED_REGISTRATION on tdoc.dev');
+  assert(/platform:"cloudflare"/.test(src),
+    'cloudflare setup must persist platform:"cloudflare"');
+  assert(/switching publish platform/.test(src),
+    'conflicting --platform must switch (rewrite config), not ignore');
+  assert(!/ignoring '--platform/.test(src),
+    'must not swallow a conflicting --platform flag');
+  assert(/published\.json\.bak\.switch/.test(src),
+    'platform switch must keep a previous-config backup');
 });
 
 t('pull/unpublish read hosted base from published.json', () => {

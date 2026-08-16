@@ -114,6 +114,10 @@ t('DELETE releases hosted slug ownership after wiping storage', () => {
   assert(release >= 0, 'DELETE must call release_owner');
   assert(metaDel >= 0 && wipe >= 0 && metaDel < release && wipe < release,
     'release_owner must run after meta/comment wipe so a failed delete cannot free a live slug');
+  assert(deleteRoute.includes('released.ok === false'),
+    'DELETE must fail closed when COMMENTS is present and release_owner fails');
+  assert(deleteRoute.includes("error: released.error || 'owner_release_failed'"),
+    'failed release must surface owner_release_failed (or DO error)');
 });
 
 t('Admin comment wipe and agent reply are also token-owned-doc scoped', () => {

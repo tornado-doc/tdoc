@@ -6,8 +6,22 @@ file and `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Default `/tdoc publish` target is hosted tdoc.dev** (Cloudflare/Vercel via
+  `--platform`). Closed signup fails clearly and points at self-host flags;
+  onboarding’s sample publish uses `--platform cloudflare`.
+- **`--platform` after first setup switches for real.** A conflicting flag
+  rewrites `~/.tdoc/published.json` via full re-setup (previous config kept as
+  `published.json.bak.switch` and restored if setup fails). Cloudflare setup
+  now persists `platform:"cloudflare"`. Same Worker custom domain vs
+  `*.workers.dev` remains two hostnames, not a platform switch.
+
 ### Fixed
 
+- **`DELETE /api/doc` fails closed when hosted `release_owner` fails** and the
+  Durable Object binding is present, so a 200 cannot leave the slug parked.
+  Vercel (no `COMMENTS`) still returns 200 — there was never a reservation.
 - **Tables and wide diagrams are no longer clipped in the reader.** Overlay
   table styles used a -14px left margin that cropped the first column inside
   any `overflow-x:auto` wrapper, and `display:block` on `<table>` broke row

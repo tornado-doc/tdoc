@@ -2744,8 +2744,9 @@ export default {
 
     // Admin: wipe ALL comments for a slug (doc owner only — uses the same
     // upload token as /api/upload, so it can be invoked from the publish
-    // tooling or an agent that holds the token; the worker's KV is single-
-    // tenant so this is safe). Triggered by ?all=1 on DELETE /api/comments.
+    // tooling or an agent that holds the token). Hosted tokens are
+    // slug-scoped via requireDocWriteAccess below; the provider admin
+    // token remains global. Triggered by ?all=1 on DELETE /api/comments.
     if (p === '/api/comments' && method === 'DELETE'
         && url.searchParams.get('all') === '1') {
       const auth = await requireUploadAuth(req, env);
@@ -3059,8 +3060,17 @@ export default {
       await mutateComments(env, slug, { kind: 'wipe' });
       await env.META.delete(`comments:${slug}`);
       // Free the hosted slug reservation so the original owner (or anyone)
-      // can republish. Data is already gone; do this last.
-      await hostedOwnerOp(env, slug, { kind: 'release_owner' });
+      // can republish. Data is already gone; do this last. If COMMENTS is
+      // absent (Vercel), there was never a hostedOwner key — ignore the 503.
+      // If the DO is present and release fails, do not report success: the
+      // slug would stay parked while the API lied.
+      const released = await hostedOwnerOp(env, slug, { kind: 'release_owner' });
+      if (env.COMMENTS && released && released.ok === false) {
+        return json(
+          { error: released.error || 'owner_release_failed' },
+          { status: released.status || 503 },
+        );
+      }
       return json({ ok: true });
     }
 
