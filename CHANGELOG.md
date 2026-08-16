@@ -8,6 +8,12 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Tables and wide diagrams are no longer clipped in the reader.** Overlay
+  table styles used a -14px left margin that cropped the first column inside
+  any `overflow-x:auto` wrapper, and `display:block` on `<table>` broke row
+  layout on narrow viewports. Tables now keep real table layout and scroll in
+  a wrapper; document SVGs keep their viewBox aspect ratio with overflow
+  visible.
 - **Dark mode no longer recolors reaction emoji.** The page invert was
   turning ❤️ / 👍 into off-hue bitmaps. Color emoji in chips and the
   picker are wrapped and inverted back to native colors. Text reactions

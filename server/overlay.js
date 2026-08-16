@@ -201,8 +201,10 @@
   :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: var(--td-surface-2); color: var(--td-pre-ink); border: 1px solid var(--td-line); border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
   :where(body pre code) { background: transparent; color: inherit; padding: 0; border-radius: 0; }
   :where(body hr) { border: 0; border-top: 1px solid var(--td-line); margin: 36px 0; }
-  /* Tables: rounded cells with gutters — header tint comes from the theme. */
-  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px -14px; font-size: 16px; }
+  /* Tables: rounded cells with gutters — header tint comes from the theme.
+     No negative horizontal margin: that clips the first column inside any
+     overflow-x:auto wrapper (author skill tells agents to wrap tables). */
+  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
   :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
   :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
   :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
@@ -223,7 +225,7 @@
   }
   /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
      buttons / cards keep their inline layout instead of stacking to 16px tall. */
-  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; }
+  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
   /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
      column, wrapper or not. Two halves: (a) recognized wrappers get max-width
      AND margin:auto (previously margin was missing, so wrapped docs without
@@ -258,16 +260,13 @@
   /* Canvas needs special handling: scaling its CSS size doesn't change its
      drawing-buffer size, but at least the box won't overflow. */
   :where(body canvas) { display: block; }
-  /* Wide tables: keep TRUE table layout on desktop — display:block on a
-     table element discards real table layout for anonymous-box fixup, which
-     some engines render with uneven row heights and gaps (seen on published
-     docs). Only degrade to a scrollable block on narrow viewports, where
-     horizontal overflow is the bigger evil. NOTE: no backticks in comments
-     here — this CSS lives inside a JS template literal. */
+  /* Wide tables: keep TRUE table layout always — display:block on a table
+     discards real table layout for anonymous-box fixup (uneven row heights).
+     Scroll a wrapper instead of the table element. NOTE: no backticks in
+     comments here — this CSS lives inside a JS template literal. */
   :where(body table) { max-width: 100%; }
-  @media (max-width: 760px) {
-    :where(body table) { display: block; overflow-x: auto; }
-  }
+  .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tdoc-table-scroll > table { max-width: none; }
   /* Pre/code blocks scroll horizontally instead of breaking the layout. */
   :where(body pre) { max-width: 100%; overflow-x: auto; }
 
@@ -3978,6 +3977,38 @@
     } else if (!ok) flashToast('Copy failed');
   };
 
+  // Document tables/SVGs must stay fully visible in the 720px reading column.
+  // Negative-margin table styles used to clip the first column inside author
+  // overflow-x:auto wrappers; display:block on <table> broke row layout.
+  // Wrap remaining tables so wide ones scroll instead of overflowing or clipping.
+  function wrapScrollableTables() {
+    document.querySelectorAll('body table').forEach(table => {
+      if (table.closest(UI_CONTAINERS)) return;
+      if (table.parentElement && table.parentElement.closest('table')) return;
+      const parent = table.parentElement;
+      if (!parent) return;
+      if (parent.classList.contains('tdoc-table-scroll')) return;
+      const ox = getComputedStyle(parent).overflowX;
+      if (ox === 'auto' || ox === 'scroll') return;
+      const wrap = document.createElement('div');
+      wrap.className = 'tdoc-table-scroll';
+      parent.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    });
+  }
+  function preserveSvgAspect() {
+    document.querySelectorAll('body svg[viewBox]').forEach(svg => {
+      if (svg.closest(UI_CONTAINERS)) return;
+      const parts = String(svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/);
+      if (parts.length !== 4) return;
+      const w = parseFloat(parts[2]), h = parseFloat(parts[3]);
+      if (!(w > 0 && h > 0)) return;
+      if (!svg.style.aspectRatio) svg.style.aspectRatio = w + ' / ' + h;
+    });
+  }
+
   // ========== Wire it up ==========
+  wrapScrollableTables();
+  preserveSvgAspect();
   refreshComments();
 })();
