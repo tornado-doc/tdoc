@@ -1096,9 +1096,18 @@ async function indexHtml(env, session) {
   .row-menu[hidden] { display: none; }
   .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
   .row-delete:hover { background: var(--td-danger-tint); }
-  .status { min-height: 20px; margin: 0 0 16px; color: var(--td-muted); font-size: 13px; }
-  .status[data-kind="error"] { color: var(--td-danger); }
-  .status[data-kind="ok"] { color: var(--td-ok); }
+  /* Floating toast — replaces the old inline status line. Same spirit as
+     overlay flashToast; kept inline because /me does not load overlay.js. */
+  .tdoc-toast {
+    position: fixed; left: 50%; bottom: 28px; z-index: 1100;
+    transform: translateX(-50%) translateY(10px); opacity: 0;
+    transition: opacity .18s ease, transform .18s ease;
+    background: #111; color: #fff; padding: 10px 16px; border-radius: 10px;
+    font: 13px/1.35 system-ui, -apple-system, sans-serif;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.22); pointer-events: none;
+  }
+  .tdoc-toast.is-in { opacity: 0.96; transform: translateX(-50%) translateY(0); }
+  .tdoc-toast-error { background: var(--td-danger); }
   /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
      doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
      standalone copy here since /me does not load overlay.js. */
@@ -1106,7 +1115,6 @@ async function indexHtml(env, session) {
   .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
   .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
   .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
-  .tdoc-modal .status { color: #888; font-size: 13px; margin: 0 0 8px; }
   .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
   .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
   .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
@@ -1114,7 +1122,6 @@ async function indexHtml(env, session) {
 </style></head><body>
 <h1>My docs</h1>
 <p class="who">${session && session.login ? `Signed in as <b>${escapeHtml(session.login)}</b>` : 'Your published docs'}.</p>
-<p id="status" class="status" aria-live="polite"></p>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
@@ -1127,11 +1134,24 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   <p id="no-match" class="empty" hidden>No matches.</p>`}
 <script>
 (() => {
-  const status = document.getElementById('status');
-  const say = (message, kind = '') => {
-    status.textContent = message || '';
-    status.dataset.kind = kind;
-  };
+  // Floating toast — quiet feedback, no inline status row eating layout.
+  let toastTimer = null;
+  function toast(message, kind = '') {
+    if (!message) return;
+    document.querySelectorAll('.tdoc-toast').forEach((n) => n.remove());
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+    const t = document.createElement('div');
+    t.className = 'tdoc-toast' + (kind === 'error' ? ' tdoc-toast-error' : '');
+    t.setAttribute('role', 'status');
+    t.textContent = message;
+    document.body.appendChild(t);
+    requestAnimationFrame(() => t.classList.add('is-in'));
+    toastTimer = setTimeout(() => {
+      t.classList.remove('is-in');
+      setTimeout(() => t.remove(), 200);
+      toastTimer = null;
+    }, 1800);
+  }
   // Styled confirm — replaces window.confirm(). Resolves true/false; never
   // silently proceeds (Cancel and the backdrop both resolve false).
   function showConfirm({ title, body, confirmLabel, danger }) {
@@ -1209,12 +1229,12 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
       try {
         await deleteDoc(slug);
       } catch {
-        say("Couldn't delete.", 'error');
+        toast("Couldn't delete", 'error');
         return;
       }
       button.closest('.doc-row').remove();
       syncBatchUi();
-      say('Deleted.', 'ok');
+      toast('Deleted');
     });
   });
 
@@ -1323,9 +1343,9 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     }
     batchDelete.disabled = false;
     applySearch();
-    if (failed && ok) say("Deleted " + ok + ". Couldn't delete " + failed + '.', 'error');
-    else if (failed) say("Couldn't delete.", 'error');
-    else say(ok === 1 ? 'Deleted.' : ('Deleted ' + ok + '.'), 'ok');
+    if (failed && ok) toast("Deleted " + ok + " · couldn't delete " + failed, 'error');
+    else if (failed) toast("Couldn't delete", 'error');
+    else toast('Deleted');
   });
   syncBatchUi();
 })();
