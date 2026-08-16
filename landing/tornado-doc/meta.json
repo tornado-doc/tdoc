@@ -62,6 +62,11 @@
       "n": 12,
       "created": "2026-08-16T07:45:00Z",
       "prompt": "CTA reworked toward the OpenTag treatment: pill buttons, icon trust line above, explicit secondary label"
+    },
+    {
+      "n": 13,
+      "created": "2026-08-16T07:35:00Z",
+      "prompt": "Agent avatar is a terracotta disc. Phone CTA max-width matches the new 232px pills so Star on GitHub does not wrap."
     }
   ]
 }
