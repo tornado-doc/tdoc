@@ -112,10 +112,14 @@ t('phone rules actually override the desktop headline and CTA grid', () => {
   assert(phone, 'missing @media (max-width:640px)');
   assert(/h1\.tagline\s*\{[^}]*font-size:\s*\d+px/.test(phone[1]),
     '640px breakpoint must set h1.tagline font-size, not just .tagline');
-  // Fixed 216+216 tracks are 444px. A 375px phone with 24px wrap padding
-  // has 327px. The grid has to restack or shrink.
-  assert(/\.cta\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1]),
-    '640px breakpoint must restack .cta; 232+232 overflows 375');
+  // v35: share the row. Two 232px tracks still overflow 375, so the
+  // columns become 1fr 1fr and ".btn-long" ("on GitHub") hides, leaving
+  // "Star 102". A lone 1fr restack is also overflow-safe but drops the
+  // second button under the first; lock the two-column share.
+  assert(/\.cta\s*\{[^}]*grid-template-columns:\s*1fr\s+1fr/.test(phone[1]),
+    '640px breakpoint must share the CTA row (1fr 1fr); 232+232 overflows 375');
+  assert(/\.btn-long\s*\{[^}]*display:\s*none/.test(phone[1]),
+    '640px must hide .btn-long so Star 102 fits the half-width track');
   // v28: loop stayed 3 col (98px, one word per line), proof-wall stayed
   // 3 col (min-content 164px, page scrollWidth 545), feature cards stayed
   // 2 col (156px). All three must become one column with the CTAs.
@@ -177,6 +181,20 @@ t('agent avatar is a filled Claude disc, not a small glyph', () => {
     'agent avatar disc must be Claude terracotta, not transparent');
   assert(/\.mc-logo svg\s*\{[^}]*fill:\s*#fff/i.test(html),
     'agent mark must be white on the terracotta disc');
+});
+
+t('loop step 2 svg is well-formed', () => {
+  // v30 closed the step-2 svg after "fix them all", then left two <rect>s
+  // and a second </svg> in the markup. Browsers drop the orphans, so the
+  // card still drew, but the file was 2 opens / 3 closes. Count tags
+  // inside the second .step-viz only.
+  const vizs = [...html.matchAll(/<div class="step-viz">([\s\S]*?)<\/div>/g)].map((m) => m[1]);
+  assert(vizs.length === 3, `expected 3 step-viz, found ${vizs.length}`);
+  const opens = (vizs[1].match(/<svg\b/g) || []).length;
+  const closes = (vizs[1].match(/<\/svg>/g) || []).length;
+  assert(opens === closes, `step 2 svg open/close mismatch (${opens} vs ${closes}); leftover orphan markup`);
+  assert(!/<rect[\s\S]*<\/svg>\s*$/.test(vizs[1].trim()) || opens === closes,
+    'step 2 still has markup after the svg closed');
 });
 
 t('demos commentable artifacts', () => {

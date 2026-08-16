@@ -177,6 +177,11 @@
       "n": 35,
       "created": "2026-08-16T15:50:00Z",
       "prompt": "Phone CTAs share one row instead of stacking"
+    },
+    {
+      "n": 36,
+      "created": "2026-08-16T16:10:00Z",
+      "prompt": "Loop step 2: drop the orphan rects left outside the svg after the early close"
     }
   ]
 }
