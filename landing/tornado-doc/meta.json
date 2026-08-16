@@ -57,6 +57,11 @@
       "n": 11,
       "created": "2026-08-16T07:20:00Z",
       "prompt": "Agent avatar renders the full Claude mark like the real reader, not a glyph on a white disc"
+    },
+    {
+      "n": 12,
+      "created": "2026-08-16T07:45:00Z",
+      "prompt": "CTA reworked toward the OpenTag treatment: pill buttons, icon trust line above, explicit secondary label"
     }
   ]
 }
