@@ -760,5 +760,499 @@
     },
     "agent_actor": "claude",
     "applied_in": 2
+  },
+  {
+    "id": "c_1786851932405",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "Can the grid keep moving without a play button?",
+      "context_before": "2 comments\n        AAnn\n          ",
+      "context_after": "\n        \n          \n            Claude\n            ✓ done\n          \n          Runs on load now.",
+      "fallback": {
+        "ratio": 0.12,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fix themselves."
+        }
+      }
+    },
+    "text": "为什么这些comment在下面，我想要全屏的version，comment在右侧",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:45:32.405Z",
+    "replies": [
+      {
+        "id": "r_1786853100001",
+        "parent_id": "c_1786851932405",
+        "text": "The split now holds down to 640px instead of collapsing at 840, and the demo runs full bleed at 1240px, wider than the text column. Measured: 970px document, 268px comment margin.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.001Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
+  },
+  {
+    "id": "c_1786851953779",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "If it can be a web page, it can be a tdoc.",
+      "context_before": "Not just documents\n      ",
+      "context_after": "\n      Your AI writes plain HTML. Nobody's block editor in the way.",
+      "fallback": {
+        "ratio": 0.28,
+        "nearestHeading": {
+          "id": null,
+          "text": "If it can be a web page, it can be a tdoc."
+        }
+      }
+    },
+    "text": "这个visual也要和opentag一致",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:45:53.779Z",
+    "replies": [
+      {
+        "id": "r_1786853100002",
+        "parent_id": "c_1786851953779",
+        "text": "Redrawn in the OpenTag grammar: 8 percent grid, 2px strokes, labelled pills. Same treatment as the feature cards.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.002Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
+  },
+  {
+    "id": "c_1786851972798",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "Three steps. Nobody leaves the page.",
+      "context_before": "How it works\n      ",
+      "context_after": "\n    \n      \n        \n          1\n          They comment",
+      "fallback": {
+        "ratio": 0.36,
+        "nearestHeading": {
+          "id": null,
+          "text": "Three steps. Nobody leaves the page."
+        }
+      }
+    },
+    "text": "这个visual也要和opentag的一致",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:46:12.798Z",
+    "replies": [
+      {
+        "id": "r_1786853100003",
+        "parent_id": "c_1786851972798",
+        "text": "Same treatment on the three loop steps.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.003Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
+  },
+  {
+    "id": "c_1786852012110",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "The boring parts, handled.",
+      "context_before": "What you get\n      ",
+      "context_after": "\n    \n      \n        \n          01 / READERS",
+      "fallback": {
+        "ratio": 0.52,
+        "nearestHeading": {
+          "id": null,
+          "text": "They install nothing."
+        }
+      }
+    },
+    "text": "这个Card的大小要一致，上吗好像又多出来，要match the inside photo.",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:46:52.110Z",
+    "replies": [
+      {
+        "id": "r_1786853100004",
+        "parent_id": "c_1786852012110",
+        "text": "You were right, they were uneven: 373, 373, 394, 394, 373. The text block now flexes and the grid uses auto-rows 1fr, so all five measure 416.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.004Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
+  },
+  {
+    "id": "c_1786852035085",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "point at the thing, not at where it is",
+      "context_before": "Comment on the picture.\n          Charts, diagrams, images, tables, code. Not just the words around them.\n          ",
+      "context_after": "",
+      "fallback": {
+        "ratio": 0.56,
+        "nearestHeading": {
+          "id": null,
+          "text": "Comment on the picture."
+        }
+      }
+    },
+    "text": "把这些字去掉， on all visuals",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:47:15.085Z",
+    "replies": [
+      {
+        "id": "r_1786853100005",
+        "parent_id": "c_1786852035085",
+        "text": "Every caption line inside the visuals is gone, on all of them.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.005Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
+  },
+  {
+    "id": "c_1786852072549",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "The boring parts, handled.",
+      "context_before": "What you get\n      ",
+      "context_after": "\n    \n      \n        \n          01 / READERS",
+      "fallback": {
+        "ratio": 0.52,
+        "nearestHeading": {
+          "id": null,
+          "text": "They install nothing."
+        }
+      }
+    },
+    "text": "这些visual尽量是真实的demo screenshot, 而不是concept arts",
+    "author": null,
+    "status": "open",
+    "created": "2026-08-16T03:47:52.549Z",
+    "replies": [
+      {
+        "id": "r_1786853100006",
+        "parent_id": "c_1786852072549",
+        "text": "Agreed, and not done. A live overlay capture came back blank at 694 bytes because the margin cards render collapsed. Real UI screenshots mean driving the overlay to open a card first. Flagging rather than shipping more concept art dressed up as real.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "partial",
+        "created": "2026-08-16T04:05:00.006Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "🟡": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok"
+  },
+  {
+    "id": "c_1786852157394",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "03 / REWRITES",
+      "context_before": "",
+      "context_after": "\n          Nothing gets lost.",
+      "fallback": {
+        "ratio": 0.58,
+        "nearestHeading": {
+          "id": null,
+          "text": "Nothing gets lost."
+        }
+      }
+    },
+    "text": "03 04是一个意思，只要一个，01去掉，可以换成有一个html over everything. 这些都要真实的demo pic.",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:49:17.394Z",
+    "replies": [
+      {
+        "id": "r_1786853100007",
+        "parent_id": "c_1786852157394",
+        "text": "03 and 04 were the same idea, now merged into one VERSIONS card. 01 READERS is gone, replaced by ANYTHING: plain HTML over everything. Five cards instead of six. The real screenshot part is still open, see the reply above.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.007Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
+  },
+  {
+    "id": "c_1786852179524",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "Publishes to your own account.",
+      "context_before": "Where it lives\n      ",
+      "context_after": "\n      Pick one on your first publish. Same URLs, same commenting, either way.",
+      "fallback": {
+        "ratio": 0.72,
+        "nearestHeading": {
+          "id": null,
+          "text": "Publishes to your own account."
+        }
+      }
+    },
+    "text": "这里变成you have option to self host",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:49:39.524Z",
+    "replies": [
+      {
+        "id": "r_1786853100008",
+        "parent_id": "c_1786852179524",
+        "text": "Now reads You have the option to self host, and the body says publish to an account you own.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.008Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
+  },
+  {
+    "id": "c_1786852190980",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "You copy them out",
+      "context_before": "Your AI reads the comments\n            All at once\n            ",
+      "context_after": "\n            You copy them out",
+      "fallback": {
+        "ratio": 0.78,
+        "nearestHeading": {
+          "id": null,
+          "text": "Where tdoc wins, and where it doesn't."
+        }
+      }
+    },
+    "text": "这个字都看不见",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:49:50.980Z",
+    "replies": [
+      {
+        "id": "r_1786853100009",
+        "parent_id": "c_1786852190980",
+        "text": "It was rgb(169,174,187) on white, about 2.2:1, under half the WCAG minimum. Now rgb(91,96,112), about 6.4:1.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.009Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
+  },
+  {
+    "id": "c_1786852206343",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "Ann",
+      "context_before": "2 comments\n        A",
+      "context_after": "\n          Can the grid keep moving without a play button?",
+      "fallback": {
+        "ratio": 0.13,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fix themselves."
+        }
+      }
+    },
+    "text": "那些头像都要复用",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:50:06.343Z",
+    "replies": [
+      {
+        "id": "r_1786853100010",
+        "parent_id": "c_1786852206343",
+        "text": "Did not import the OpenTag headshots. Those names are real people from another product; v3 briefly put them next to PLACEHOLDER quotes, which is the one mistake a later version cannot undo. v4 keeps that wall off. The in-product faces (Ann / Claude in the hero notes) stay and are reused there.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.010Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 4
+  },
+  {
+    "id": "c_1786852251379",
+    "version": 2,
+    "anchor": {
+      "kind": "text",
+      "text": "Create your first doc",
+      "context_before": "\n    \n      ",
+      "context_after": "\n      Star 102\n    \n    OPEN SOURCE",
+      "fallback": {
+        "ratio": 0.08,
+        "nearestHeading": {
+          "id": null,
+          "text": "Docs that fix themselves."
+        }
+      }
+    },
+    "text": "这个两个CTA的宽度要一致，统一上面的CYA as well",
+    "author": null,
+    "status": "applied",
+    "created": "2026-08-16T03:50:51.379Z",
+    "replies": [
+      {
+        "id": "r_1786853100011",
+        "parent_id": "c_1786852251379",
+        "text": "Both buttons now have min-width 210px and centre their content. All four across both CTA blocks measure 210.",
+        "version": 3,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://github.com/xai-org.png"
+        },
+        "agent_status": "applied",
+        "created": "2026-08-16T04:05:00.011Z",
+        "reactions": {}
+      }
+    ],
+    "reactions": {
+      "✅": [
+        "grok"
+      ]
+    },
+    "agent_actor": "grok",
+    "applied_in": 3
   }
 ]

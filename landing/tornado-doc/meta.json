@@ -17,6 +17,11 @@
       "n": 3,
       "created": "2026-08-16T04:05:00Z",
       "prompt": "Apply the 11 comments left on v2: real avatars, no viz captions, equal card and CTA sizing, readable compare cells, self-host wording, fewer feature cards, wider stage"
+    },
+    {
+      "n": 4,
+      "created": "2026-08-16T04:10:00Z",
+      "prompt": "v4: restore the 11 v2 comments that v3 wiped, and drop the social-proof wall v3 put back (real names from another product next to PLACEHOLDER quotes)."
     }
   ]
 }

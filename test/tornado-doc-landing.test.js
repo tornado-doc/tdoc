@@ -90,6 +90,19 @@ t('links to the GitHub repo and install path', () => {
   assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md'), 'missing Install href');
 });
 
+t('hero stage-notes is a sibling of stage-doc', () => {
+  // Nesting the notes inside .stage-doc makes the two-column grid a no-op:
+  // the grid has one child, so the cards stack under the board. v2 and v3
+  // both shipped that bug. stage-doc must be closed before the aside.
+  const iDoc = html.indexOf('<div class="stage-doc">');
+  const iAside = html.indexOf('<aside class="stage-notes">');
+  assert(iDoc >= 0 && iAside > iDoc, 'missing stage-doc or stage-notes');
+  const mid = html.slice(iDoc + '<div class="stage-doc">'.length, iAside);
+  const opens = (mid.match(/<div\b/g) || []).length;
+  const closes = (mid.match(/<\/div>/g) || []).length;
+  assert(closes === opens + 1, `stage-doc still open when notes start (div net ${opens - closes})`);
+});
+
 t('demos commentable artifacts', () => {
   // The page doubles as the artifact demo (#127): an <svg> and a <pre> are
   // both in the overlay's COMMENTABLE set, so a visitor can comment on them.
@@ -149,6 +162,11 @@ t('carries no unfinished placeholder content', () => {
       'visible PLACEHOLDER copy with no comment marking the section as unfinished');
     console.log(`    ⚠ ${drafts} PLACEHOLDER line(s) still visible. DO NOT PUBLISH until real quotes replace them.`);
   }
+
+  // v2 dropped the testimonial wall; v3 put it back with real names from
+  // another product next to invented quotes. That cannot reach `/`.
+  assert(!/What builders say/.test(html), 'social-proof wall came back');
+  assert(!/PLACEHOLDER, awaiting a real line/.test(html), 'placeholder testimonials came back');
 });
 
 console.log('tdoc.dev / route');
