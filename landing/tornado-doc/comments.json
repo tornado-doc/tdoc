@@ -15,7 +15,7 @@
         }
       }
     },
-    "text": "这个button也太丑了",
+    "text": "\u8fd9\u4e2abutton\u4e5f\u592a\u4e11\u4e86",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:09:22.647Z",
@@ -37,7 +37,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -60,7 +60,7 @@
         }
       }
     },
-    "text": "有点丑 为什么要换行？然后这个hero不太好",
+    "text": "\u6709\u70b9\u4e11 \u4e3a\u4ec0\u4e48\u8981\u6362\u884c\uff1f\u7136\u540e\u8fd9\u4e2ahero\u4e0d\u592a\u597d",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:10:45.691Z",
@@ -82,7 +82,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -105,7 +105,7 @@
         }
       }
     },
-    "text": "这个也不用换行，最好写出opensource",
+    "text": "\u8fd9\u4e2a\u4e5f\u4e0d\u7528\u6362\u884c\uff0c\u6700\u597d\u5199\u51faopensource",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:11:00.529Z",
@@ -127,7 +127,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -150,7 +150,7 @@
         }
       }
     },
-    "text": "这个button 不太好",
+    "text": "\u8fd9\u4e2abutton \u4e0d\u592a\u597d",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:11:39.082Z",
@@ -172,7 +172,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -195,7 +195,7 @@
         }
       }
     },
-    "text": "这个不太好，最好是opensource, or \nOPEN SOURCED\nFREE · NO CARD",
+    "text": "\u8fd9\u4e2a\u4e0d\u592a\u597d\uff0c\u6700\u597d\u662fopensource, or \nOPEN SOURCED\nFREE \u00b7 NO CARD",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:12:05.788Z",
@@ -217,7 +217,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -240,7 +240,7 @@
         }
       }
     },
-    "text": "Support all agents, all models. 可以包含这句话",
+    "text": "Support all agents, all models. \u53ef\u4ee5\u5305\u542b\u8fd9\u53e5\u8bdd",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:12:25.153Z",
@@ -262,7 +262,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -292,7 +292,7 @@
         }
       }
     },
-    "text": "这个artifact 这个demo最好是左右屏展开的，并且要和真实的一致，现在这个comment不一致，要现实电脑端全部展开的",
+    "text": "\u8fd9\u4e2aartifact \u8fd9\u4e2ademo\u6700\u597d\u662f\u5de6\u53f3\u5c4f\u5c55\u5f00\u7684\uff0c\u5e76\u4e14\u8981\u548c\u771f\u5b9e\u7684\u4e00\u81f4\uff0c\u73b0\u5728\u8fd9\u4e2acomment\u4e0d\u4e00\u81f4\uff0c\u8981\u73b0\u5b9e\u7535\u8111\u7aef\u5168\u90e8\u5c55\u5f00\u7684",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:13:27.020Z",
@@ -311,14 +311,14 @@
         "agent_status": "applied",
         "created": "2026-08-16T03:35:15.410Z",
         "reactions": {
-          "❤️": [
+          "\u2764\ufe0f": [
             "anon"
           ]
         }
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -341,7 +341,7 @@
         }
       }
     },
-    "text": "这个应该换成 trusted by users from xxx + 滚轮",
+    "text": "\u8fd9\u4e2a\u5e94\u8be5\u6362\u6210 trusted by users from xxx + \u6eda\u8f6e",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:13:50.644Z",
@@ -363,7 +363,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -393,7 +393,7 @@
         }
       }
     },
-    "text": "这个simulation不太对",
+    "text": "\u8fd9\u4e2asimulation\u4e0d\u592a\u5bf9",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:14:03.845Z",
@@ -415,7 +415,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -445,7 +445,7 @@
         }
       }
     },
-    "text": "这些visual 不太好，详见 A teammate you can read the source of. 这个section的visual在opentag里",
+    "text": "\u8fd9\u4e9bvisual \u4e0d\u592a\u597d\uff0c\u8be6\u89c1 A teammate you can read the source of. \u8fd9\u4e2asection\u7684visual\u5728opentag\u91cc",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:14:37.360Z",
@@ -467,7 +467,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -497,7 +497,7 @@
         }
       }
     },
-    "text": "这个visual也同上",
+    "text": "\u8fd9\u4e2avisual\u4e5f\u540c\u4e0a",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:14:48.971Z",
@@ -519,7 +519,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -542,7 +542,7 @@
         }
       }
     },
-    "text": "这些visual 只要大logo，在You already pay for this. Pay for it once. 这个section里的同款",
+    "text": "\u8fd9\u4e9bvisual \u53ea\u8981\u5927logo\uff0c\u5728You already pay for this. Pay for it once. \u8fd9\u4e2asection\u91cc\u7684\u540c\u6b3e",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:15:21.530Z",
@@ -564,7 +564,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -594,7 +594,7 @@
         }
       }
     },
-    "text": "这些visual也同上",
+    "text": "\u8fd9\u4e9bvisual\u4e5f\u540c\u4e0a",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:15:33.819Z",
@@ -616,7 +616,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -646,7 +646,7 @@
         }
       }
     },
-    "text": "这个太丑了，要和opentag里的table同款",
+    "text": "\u8fd9\u4e2a\u592a\u4e11\u4e86\uff0c\u8981\u548copentag\u91cc\u7684table\u540c\u6b3e",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:15:49.873Z",
@@ -668,7 +668,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -691,7 +691,7 @@
         }
       }
     },
-    "text": "这个感觉不够吸引人",
+    "text": "\u8fd9\u4e2a\u611f\u89c9\u4e0d\u591f\u5438\u5f15\u4eba",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:16:02.296Z",
@@ -713,7 +713,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -727,7 +727,7 @@
       "kind": "text",
       "text": "Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md",
       "context_before": "ink.\n    \n    \n      Make one, free\n      Star 102\n    \n    ",
-      "context_after": "\n  \n\n  \n    github.com/tornado-doc/tdoc\n     ·  MIT  ·  a Cl",
+      "context_after": "\n  \n\n  \n    github.com/tornado-doc/tdoc\n    \u00a0\u00b7\u00a0 MIT \u00a0\u00b7\u00a0 a Cl",
       "fallback": {
         "ratio": 0.9557205384036145,
         "nearestHeading": {
@@ -736,7 +736,7 @@
         }
       }
     },
-    "text": "这个感觉没啥用因为我们target是技术小白",
+    "text": "\u8fd9\u4e2a\u611f\u89c9\u6ca1\u5565\u7528\u56e0\u4e3a\u6211\u4eectarget\u662f\u6280\u672f\u5c0f\u767d",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:16:22.230Z",
@@ -758,7 +758,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "claude"
       ]
     },
@@ -772,7 +772,7 @@
       "kind": "text",
       "text": "Can the grid keep moving without a play button?",
       "context_before": "2 comments\n        AAnn\n          ",
-      "context_after": "\n        \n          \n            Claude\n            ✓ done\n          \n          Runs on load now.",
+      "context_after": "\n        \n          \n            Claude\n            \u2713 done\n          \n          Runs on load now.",
       "fallback": {
         "ratio": 0.12,
         "nearestHeading": {
@@ -781,7 +781,7 @@
         }
       }
     },
-    "text": "为什么这些comment在下面，我想要全屏的version，comment在右侧",
+    "text": "\u4e3a\u4ec0\u4e48\u8fd9\u4e9bcomment\u5728\u4e0b\u9762\uff0c\u6211\u60f3\u8981\u5168\u5c4f\u7684version\uff0ccomment\u5728\u53f3\u4fa7",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:45:32.405Z",
@@ -803,7 +803,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -826,7 +826,7 @@
         }
       }
     },
-    "text": "这个visual也要和opentag一致",
+    "text": "\u8fd9\u4e2avisual\u4e5f\u8981\u548copentag\u4e00\u81f4",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:45:53.779Z",
@@ -848,7 +848,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -871,7 +871,7 @@
         }
       }
     },
-    "text": "这个visual也要和opentag的一致",
+    "text": "\u8fd9\u4e2avisual\u4e5f\u8981\u548copentag\u7684\u4e00\u81f4",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:46:12.798Z",
@@ -893,7 +893,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -916,7 +916,7 @@
         }
       }
     },
-    "text": "这个Card的大小要一致，上吗好像又多出来，要match the inside photo.",
+    "text": "\u8fd9\u4e2aCard\u7684\u5927\u5c0f\u8981\u4e00\u81f4\uff0c\u4e0a\u5417\u597d\u50cf\u53c8\u591a\u51fa\u6765\uff0c\u8981match the inside photo.",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:46:52.110Z",
@@ -938,7 +938,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -961,7 +961,7 @@
         }
       }
     },
-    "text": "把这些字去掉， on all visuals",
+    "text": "\u628a\u8fd9\u4e9b\u5b57\u53bb\u6389\uff0c on all visuals",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:47:15.085Z",
@@ -983,7 +983,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -1006,7 +1006,7 @@
         }
       }
     },
-    "text": "这些visual尽量是真实的demo screenshot, 而不是concept arts",
+    "text": "\u8fd9\u4e9bvisual\u5c3d\u91cf\u662f\u771f\u5b9e\u7684demo screenshot, \u800c\u4e0d\u662fconcept arts",
     "author": null,
     "status": "open",
     "created": "2026-08-16T03:47:52.549Z",
@@ -1025,10 +1025,25 @@
         "agent_status": "partial",
         "created": "2026-08-16T04:05:00.006Z",
         "reactions": {}
+      },
+      {
+        "id": "r_1786924050000",
+        "parent_id": "c_1786852072549",
+        "text": "Not this version. v37 only fills the six quote slots and swaps the OpenTag trusted-by leftovers. Feature-card visuals are still concept-art SVGs, same partial as before.",
+        "version": 37,
+        "author": {
+          "kind": "agent",
+          "login": "grok",
+          "name": "Grok",
+          "avatar_url": "https://cdn.simpleicons.org/x/000000"
+        },
+        "agent_status": "partial",
+        "created": "2026-08-16T23:47:00.000Z",
+        "reactions": {}
       }
     ],
     "reactions": {
-      "🟡": [
+      "\ud83d\udfe1": [
         "grok"
       ]
     },
@@ -1050,7 +1065,7 @@
         }
       }
     },
-    "text": "03 04是一个意思，只要一个，01去掉，可以换成有一个html over everything. 这些都要真实的demo pic.",
+    "text": "03 04\u662f\u4e00\u4e2a\u610f\u601d\uff0c\u53ea\u8981\u4e00\u4e2a\uff0c01\u53bb\u6389\uff0c\u53ef\u4ee5\u6362\u6210\u6709\u4e00\u4e2ahtml over everything. \u8fd9\u4e9b\u90fd\u8981\u771f\u5b9e\u7684demo pic.",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:49:17.394Z",
@@ -1072,7 +1087,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -1095,7 +1110,7 @@
         }
       }
     },
-    "text": "这里变成you have option to self host",
+    "text": "\u8fd9\u91cc\u53d8\u6210you have option to self host",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:49:39.524Z",
@@ -1117,7 +1132,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -1140,7 +1155,7 @@
         }
       }
     },
-    "text": "这个字都看不见",
+    "text": "\u8fd9\u4e2a\u5b57\u90fd\u770b\u4e0d\u89c1",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:49:50.980Z",
@@ -1162,7 +1177,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -1185,7 +1200,7 @@
         }
       }
     },
-    "text": "那些头像都要复用",
+    "text": "\u90a3\u4e9b\u5934\u50cf\u90fd\u8981\u590d\u7528",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:50:06.343Z",
@@ -1207,7 +1222,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },
@@ -1230,7 +1245,7 @@
         }
       }
     },
-    "text": "这个两个CTA的宽度要一致，统一上面的CYA as well",
+    "text": "\u8fd9\u4e2a\u4e24\u4e2aCTA\u7684\u5bbd\u5ea6\u8981\u4e00\u81f4\uff0c\u7edf\u4e00\u4e0a\u9762\u7684CYA as well",
     "author": null,
     "status": "applied",
     "created": "2026-08-16T03:50:51.379Z",
@@ -1252,7 +1267,7 @@
       }
     ],
     "reactions": {
-      "✅": [
+      "\u2705": [
         "grok"
       ]
     },

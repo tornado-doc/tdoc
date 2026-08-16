@@ -182,6 +182,11 @@
       "n": 36,
       "created": "2026-08-16T16:10:00Z",
       "prompt": "Loop step 2: drop the orphan rects left outside the svg after the early close"
+    },
+    {
+      "n": 37,
+      "created": "2026-08-16T23:47:00Z",
+      "prompt": "v37: replace the six PLACEHOLDER quotes with same-length tdoc lines; keep the six people; swap OpenTag trusted-by leftovers for agents and hosts tdoc runs on"
     }
   ]
 }

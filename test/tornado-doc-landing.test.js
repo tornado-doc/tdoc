@@ -244,28 +244,22 @@ t('carries no unfinished placeholder content', () => {
   const markers = (html.match(/NEEDS-REAL-DATA/g) || []).length;
   assert(markers === 0, `${markers} NEEDS-REAL-DATA marker(s) left in the page`);
 
-  // Visible PLACEHOLDER copy is allowed while drafting, but it must sit inside
-  // a block whose comment says so, and it is loud in the output, because
-  // publishing invented testimonials is the one failure that cannot be undone
-  // by a new version: people would have seen words attributed to real names.
+  // v37 filled the six quote slots. Visible PLACEHOLDER copy is no longer
+  // allowed on the latest version — that was the publish blocker.
   const visible = html
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
   const drafts = (visible.match(/PLACEHOLDER/gi) || []).length;
-  if (drafts) {
-    assert(/PLACEHOLDERS?[:,]/.test(html.match(/<!--[\s\S]*?-->/g).join(' ')),
-      'visible PLACEHOLDER copy with no comment marking the section as unfinished');
-    console.log(`    ⚠ ${drafts} PLACEHOLDER line(s) still visible. DO NOT PUBLISH until real quotes replace them.`);
-  }
+  assert(drafts === 0, `${drafts} visible PLACEHOLDER line(s) on the latest version`);
 
-  // v2 dropped the testimonial wall; v3 put it back with real names from
-  // another product next to invented quotes. That cannot reach `/`.
-  // The owner asked to keep the wall visible with placeholder quotes while
-  // real ones are collected, so its presence is allowed. What must never
-  // happen is publishing it: the loud warning below is the guard, since a
-  // fabricated testimonial attributed to a real name cannot be taken back by
-  // shipping a later version.
+  // People stay. Quotes must mention tdoc-shaped work, not the leftover
+  // OpenTag wording. Trusted-by leftovers from that site must stay gone.
+  for (const name of ['Josh', 'Brandon', 'Angela F', 'Bruce Z', 'Sam H', 'Sammy']) {
+    assert(visible.includes(name), `missing ${name} on the proof wall`);
+  }
+  assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
+  assert(/Works with/.test(visible), 'trusted-by label should be Works with, not a borrowed user list');
 });
 
 console.log('tdoc.dev / route');
