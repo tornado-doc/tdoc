@@ -947,19 +947,26 @@ function isValidWidgetName(name) {
   return typeof name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
 }
 function widgetCspHeader() {
-  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'";
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
 }
 function isWidgetFrameRequest(dest) {
-  const d = String(dest || '').toLowerCase();
-  return d === 'iframe' || d === 'embed' || d === 'frame';
+  return String(dest || '').toLowerCase() === 'iframe';
 }
 function forceWidgetSandbox(html) {
   if (typeof html !== 'string') return html;
   return html.replace(/<iframe\b([^>]*?)>/gi, (full, attrs) => {
     const srcM = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
     if (!srcM) return full;
-    const src = srcM[1] || srcM[2] || srcM[3] || '';
-    if (!/\/d\/[a-z0-9][a-z0-9-]{0,63}\/v\/\d+\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(src.split('?')[0])) return full;
+    const src = String(srcM[1] || srcM[2] || srcM[3] || '').trim();
+    let path;
+    try {
+      const u = new URL(src, 'https://tdoc-widget-src.invalid');
+      if (u.hostname !== 'tdoc-widget-src.invalid') return full;
+      path = u.pathname;
+    } catch {
+      return full;
+    }
+    if (!/^\/d\/[a-z0-9][a-z0-9-]{0,63}\/v\/\d+\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(path)) return full;
     const stripped = attrs.replace(/\s*sandbox\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
     return '<iframe sandbox="allow-scripts"' + stripped + '>';
   });
@@ -2223,8 +2230,9 @@ export default {
 
     // ---- interactive island (sandboxed widget) ----
     // Separate HTML resource so author JS can run without inheriting the host
-    // document CSP (srcdoc/blob cannot). Must be framed: top-level loads are
-    // 403 so this URL cannot become a same-origin script gadget. No overlay.
+    // document CSP (srcdoc/blob cannot). Must be Dest=iframe: top-level,
+    // embed, and frame loads are 403 so this URL cannot become a same-origin
+    // script gadget. Unique origin is also on the widget CSP (sandbox). No overlay.
     const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
     if (widgetMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr, name] = widgetMatch;
@@ -2244,6 +2252,8 @@ export default {
         headers: {
           'Content-Security-Policy': widgetCspHeader(),
           'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'no-store',
+          'Vary': 'Sec-Fetch-Dest',
         },
       });
     }

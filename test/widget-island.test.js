@@ -71,8 +71,11 @@ function get(port, p, headers = {}) {
     '<!doctype html><html><head><title>Island fixture</title></head><body>' +
     '<p>Host copy.</p>' +
     '<iframe src="/d/island-fixture/v/1/widget/compound-interest" sandbox="allow-scripts allow-same-origin"></iframe>' +
+    '<iframe id="widget-hash" src="/d/island-fixture/v/1/widget/compound-interest#frag" sandbox="allow-scripts allow-same-origin"></iframe>' +
+    '<iframe id="widget-trail" src="/d/island-fixture/v/1/widget/compound-interest " sandbox="allow-scripts allow-same-origin"></iframe>' +
     '<iframe id="third-party-chart" src="https://example.com/chart" sandbox="allow-scripts"></iframe>' +
     '<iframe id="foreign-widget-path" src="https://cdn.invalid/widget/compound-interest" sandbox="allow-scripts allow-same-origin"></iframe>' +
+    '<iframe id="cross-origin-widget-path" src="https://cdn.invalid/d/island-fixture/v/1/widget/compound-interest" sandbox="allow-scripts allow-same-origin"></iframe>' +
     '</body></html>');
   fs.writeFileSync(path.join(docDir, 'v1', 'widgets', 'compound-interest.html'),
     '<!doctype html><html><body><script>window.__WIDGET__=1;</script><p>widget</p></body></html>');
@@ -88,6 +91,16 @@ function get(port, p, headers = {}) {
 
   await t('top-level widget GET with Dest=document is 403', async () => {
     const res = await get(PORT, widgetPath, { 'Sec-Fetch-Dest': 'document' });
+    if (res.status !== 403) throw new Error(`status ${res.status}, expected 403`);
+  });
+
+  await t('widget GET with Dest=embed is 403', async () => {
+    const res = await get(PORT, widgetPath, { 'Sec-Fetch-Dest': 'embed' });
+    if (res.status !== 403) throw new Error(`status ${res.status}, expected 403`);
+  });
+
+  await t('widget GET with Dest=frame is 403', async () => {
+    const res = await get(PORT, widgetPath, { 'Sec-Fetch-Dest': 'frame' });
     if (res.status !== 403) throw new Error(`status ${res.status}, expected 403`);
   });
 
@@ -107,9 +120,18 @@ function get(port, p, headers = {}) {
     if (!csp.includes("default-src 'none'")) throw new Error(`missing default-src none: ${csp}`);
     if (!csp.includes("frame-ancestors 'self'")) throw new Error(`missing frame-ancestors: ${csp}`);
     if (!csp.includes("worker-src 'none'")) throw new Error(`missing worker-src none: ${csp}`);
+    if (!csp.includes('sandbox allow-scripts')) throw new Error(`missing CSP sandbox allow-scripts: ${csp}`);
+    if (/sandbox[^;]*allow-same-origin/.test(csp)) throw new Error(`CSP sandbox must not allow-same-origin: ${csp}`);
     if (csp.includes('strict-dynamic') || csp.includes('nonce-')) {
       throw new Error(`widget must not use the host nonce CSP: ${csp}`);
     }
+  });
+
+  await t('framed widget is not stored and varies on Sec-Fetch-Dest', async () => {
+    const cc = framed.headers['cache-control'] || '';
+    if (!/\bno-store\b/.test(cc)) throw new Error(`Cache-Control missing no-store: ${cc}`);
+    const vary = framed.headers['vary'] || '';
+    if (!/Sec-Fetch-Dest/i.test(vary)) throw new Error(`Vary missing Sec-Fetch-Dest: ${vary}`);
   });
 
   await t('host doc CSP is still the nonce policy (no unsafe-inline)', async () => {
@@ -135,6 +157,16 @@ function get(port, p, headers = {}) {
     const foreign = iframes.find(t => t.includes('id="foreign-widget-path"'));
     if (!foreign) throw new Error('foreign /widget/ iframe missing');
     if (!/allow-same-origin/.test(foreign)) throw new Error(`foreign iframe sandbox was rewritten: ${foreign}`);
+    const hashed = iframes.find(t => t.includes('id="widget-hash"'));
+    if (!hashed) throw new Error('hash widget iframe missing');
+    if (!/sandbox="allow-scripts"/.test(hashed)) throw new Error(`hash src sandbox not forced: ${hashed}`);
+    if (/allow-same-origin/.test(hashed)) throw new Error(`hash src allow-same-origin survived: ${hashed}`);
+    const trailed = iframes.find(t => t.includes('id="widget-trail"'));
+    if (!trailed) throw new Error('trailing-space widget iframe missing');
+    if (/allow-same-origin/.test(trailed)) throw new Error(`trailing-space src allow-same-origin survived: ${trailed}`);
+    const cross = iframes.find(t => t.includes('id="cross-origin-widget-path"'));
+    if (!cross) throw new Error('cross-origin widget-path iframe missing');
+    if (!/allow-same-origin/.test(cross)) throw new Error(`cross-origin iframe sandbox was rewritten: ${cross}`);
   });
 
   await t('widget POST is 405; HEAD is framed-only with empty body', async () => {
@@ -162,6 +194,17 @@ function get(port, p, headers = {}) {
     if (!body.includes('widgetCspHeader()')) throw new Error('widget route must set widgetCspHeader()');
     if (body.includes('injectOverlay')) throw new Error('widget route must not inject overlay');
     if (!body.includes('isWidgetFrameRequest')) throw new Error('widget route must reject non-frame Dest');
+    if (!body.includes('enforceDocAccess')) throw new Error('widget route must use enforceDocAccess');
+    if (!body.includes("'Cache-Control': 'no-store'")) throw new Error('widget route must set Cache-Control no-store');
+    if (!body.includes("'Vary': 'Sec-Fetch-Dest'")) throw new Error('widget route must Vary on Sec-Fetch-Dest');
+  });
+
+  await t('worker widgetCspHeader unique-origins the widget document', async () => {
+    const s = workerSrc.indexOf('function widgetCspHeader');
+    if (s < 0) throw new Error('widgetCspHeader missing');
+    const body = workerSrc.slice(s, s + 400);
+    if (!body.includes('sandbox allow-scripts')) throw new Error('widgetCspHeader must include sandbox allow-scripts');
+    if (/sandbox[^"]*allow-same-origin/.test(body)) throw new Error('widget CSP sandbox must not allow-same-origin');
   });
 
   await t('worker upload writes docs/<slug>/v<n>/widgets/<name>.html', async () => {

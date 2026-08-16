@@ -9,9 +9,11 @@ file and `.claude-plugin/plugin.json`.
 ### Added
 
 - **Sandboxed interactive widgets.** Author JS still does not run in the host
-  document. Computation lives in `/d/:slug/v/:n/widget/:name`, framed with
-  `sandbox="allow-scripts"` (no `allow-same-origin`). Top-level widget URLs
-  403. Overlay comments on the iframe as one artifact.
+  document. Computation lives in `/d/:slug/v/:n/widget/:name`, loaded only as
+  `Sec-Fetch-Dest: iframe`, with `sandbox="allow-scripts"` on the iframe and
+  `Content-Security-Policy: sandbox allow-scripts` on the widget response
+  (unique origin even if the host iframe rewrite misses). Overlay comments
+  on the iframe as one artifact.
 
 ### Fixed
 

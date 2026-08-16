@@ -226,9 +226,9 @@ sleep 1
 ### `/tdoc new <prompt>` — create a new doc
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. Create `~/tdocs/<slug>/v1/index.html` — a **fully self-contained** HTML file:
-   - All CSS inline in `<style>`. **No JavaScript** — author `<script>` tags do not execute (CSP; see "Interactivity: CSS only" under HTML generation rules).
-   - No external CDNs unless requested. No build step.
+2. Create `~/tdocs/<slug>/v1/index.html` — the host document:
+   - All host CSS inline in `<style>`. **No JavaScript in the host** — those tags do not execute (CSP; see HTML generation rules). If the idea needs computation, also write `v1/widgets/<name>.html` and iframe it.
+   - No external CDNs in the host unless requested. No build step.
    - Clean reading-typography (system font stack, generous line-height, max-width ~720px for prose) UNLESS the doc is primarily a diagram, in which case go full-bleed.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
 3. Write `meta.json`:
@@ -537,20 +537,22 @@ When the user reports a problem, check these first:
 
 ## HTML generation rules
 
-- **Author JavaScript does not run — write none.** Every doc is served under a nonce-based CSP (`script-src 'nonce-<n>' 'strict-dynamic'; object-src 'none'; base-uri 'none';`) and the nonce is stamped onto the two injected overlay scripts *only*. Author `<script>` tags (inline or `src`), `onclick=`/`onchange=` attributes, and `javascript:` URLs have no nonce, so the browser refuses them: no error in the page, no visible failure — just a widget that never does anything. This is true on **both** the local server (`server/server.js` → `cspHeader`, `injectOverlay`) and published docs (`worker/worker.js` → `cspHeader`, `injectOverlayCfg`). Build interactivity with CSS instead — see "Interactivity: CSS only" below.
-- Self-contained: one HTML file. No imports. External `<script src>` is blocked by the same CSP, so a CDN library (D3, Chart.js, …) will not load even if the user asks for one — say so rather than shipping a dead reference.
+- **Host HTML does not run author JavaScript.** Every host document is served under a nonce-based CSP (`script-src 'nonce-<n>' 'strict-dynamic'; object-src 'none'; base-uri 'none';`) and the nonce is stamped onto the two injected overlay scripts *only*. Host `<script>` tags (inline or `src`), `onclick=`/`onchange=` attributes, and `javascript:` URLs have no nonce, so the browser refuses them: no error in the page, no visible failure — just a control that never does anything. This is true on **both** the local server (`server/server.js` → `cspHeader`, `injectOverlay`) and published docs (`worker/worker.js` → `cspHeader`, `injectOverlayCfg`).
+  **Exception — sandboxed island:** if the doc needs computation, write `v<n>/widgets/<name>.html` and embed `<iframe sandbox="allow-scripts" src="/d/<slug>/v/<n>/widget/<name>">`. Inline `<script>` in that widget file **does** run. Never put author JS in the host document. See "When the prompt wants something CSS can't express" below.
+- Host document is one HTML file (no imports). Optional islands are extra files under `v<n>/widgets/`. External `<script src>` in the host is blocked by the same CSP, so a CDN library (D3, Chart.js, …) will not load in the host — put it in a widget island or say so rather than shipping a dead reference.
 - Sandboxed-safe: the server serves docs inside an iframe overlay-host, so don't rely on top-level navigation or parent-frame access.
 - The comment overlay is injected by the server — **don't** add commenting UI yourself.
 - Don't add a "made with tdoc" footer, version selector, or share button. The shell handles those.
-- Use SVG for diagrams (commentable text, and CSS can animate it). **Don't use `<canvas>`** — nothing can draw to it without JS, so it renders as a blank box.
+- Use SVG for diagrams (commentable text, and CSS can animate it). **Don't use `<canvas>` in the host** — nothing can draw to it without JS. Draw inside a widget island if needed.
 - Default font stack: `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`. Mono: `ui-monospace, "SF Mono", Menlo, monospace`.
 
 ### Interactivity: CSS only
 
-Author `<script>` never executes (see above), so every moving or switchable part
-of a doc has to be declarative. The patterns below are verified on this runtime;
-a working reference doc using all three is at
-`~/tdocs/agent-gui-integration/v1/index.html`.
+Author `<script>` in the **host** document never executes (see above), so every
+moving or switchable part of the host has to be declarative. The patterns below
+are verified on this runtime; a working reference doc using all three is at
+`~/tdocs/agent-gui-integration/v1/index.html`. Computed state belongs in a
+sandboxed island, not in the host.
 
 **1. Toggles and mode switches — `:checked` + sibling selectors**
 
@@ -609,15 +611,16 @@ fully self-contained:
 Give each SVG its own class names and `@keyframes` names (`flow-a` / `flowdash-a`,
 `flow-b` / `flowdash-b`) so two figures on one page don't collide.
 
-**What does NOT work**
+**What does NOT work in the host document**
 
-- `<script>` of any kind, `on*=` handler attributes, `javascript:` URLs — all inert.
+- `<script>` of any kind, `on*=` handler attributes, `javascript:` URLs — all inert
+  in the host. The same tags **do** run inside `v<n>/widgets/<name>.html`.
 - **SMIL** (`<animate>`, `<animateMotion>`, `<animateTransform>`): verified not to
   run here — the SVG timeline stays frozen at `getCurrentTime() === 0`. Use CSS
   animation instead.
-- `<canvas>`: a blank box without JS.
-- Anything with computed state — simulations, a slider that recalculates a model,
-  live data, sorting or filtering a table, form validation.
+- `<canvas>` in the host: a blank box without JS. Draw inside a widget island if needed.
+- Computed state in the host — simulations, a slider that recalculates a model,
+  live data, sorting or filtering a table, form validation. Use a sandboxed island.
 
 **When the prompt wants something CSS can't express**
 
@@ -685,8 +688,8 @@ What to write:
     <h1>{title}</h1>
     <p class="meta">{subtitle or attribution}</p>
     <!-- content here using plain <h2>, <h3>, <p>, <ul>, <pre>, <table>, etc. -->
-    <!-- interactivity goes in <style>, not <script>: author scripts are
-         blocked by CSP. See "Interactivity: CSS only" above. -->
+    <!-- host interactivity goes in <style>, not <script>. Computation
+         belongs in v1/widgets/<name>.html. See HTML generation rules. -->
   </div>
 </body></html>
 ```
