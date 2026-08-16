@@ -4,242 +4,649 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <title>tdoc — Google Docs for agent-authored documents</title>
-  <meta name="description" content="Turn a prompt into an interactive HTML doc, share it as a live URL, and let anyone comment on any sentence or chart. Your agent writes the next version.">
+  <title>tdoc — comment on any HTML page, your AI fixes it</title>
+  <meta name="description" content="Publish any HTML page as a link. Your team leaves comments. Your AI reads every one, rewrites the page, and replies to each person. Open source, free.">
   <link rel="canonical" href="https://tdoc.dev/">
 
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="tdoc">
   <meta property="og:url" content="https://tdoc.dev/">
-  <meta property="og:title" content="tdoc — Google Docs for agent-authored documents">
-  <meta property="og:description" content="People comment on any sentence or chart. Your agent reads those comments and writes the next version. Open source, self-hosted, $0.">
+  <meta property="og:title" content="tdoc — comment on any HTML page, your AI fixes it">
+  <meta property="og:description" content="Your team leaves comments. Your AI reads every one, rewrites the page, and replies to each person. Open source, free.">
   <meta property="og:image" content="https://tdoc.dev/tdoc_logo.png">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="tdoc — Google Docs for agent-authored documents">
-  <meta name="twitter:description" content="People comment on any sentence or chart. Your agent reads those comments and writes the next version. Open source, self-hosted, $0.">
+  <meta name="twitter:title" content="tdoc — comment on any HTML page, your AI fixes it">
+  <meta name="twitter:description" content="Your team leaves comments. Your AI reads every one, rewrites the page, and replies to each person. Open source, free.">
   <meta name="twitter:image" content="https://tdoc.dev/tdoc_logo.png">
 
   <style>
     /* No author JavaScript anywhere, on purpose: published tdocs run under a
-       nonce-only CSP, so author scripts never execute. HTML + CSS + SVG only. */
+       nonce-only CSP, so author scripts never execute. HTML + CSS + SVG only.
+       Every "interactive" thing here is CSS. See issue #138. */
     :root {
-      --ink: #1a1a1a;
-      --muted: #6b6b6b;
+      --ink: #10121a;
+      --body: #414654;
+      --muted: #757b8a;
       --accent: #1652f0;
-      --rule: #e5e5e5;
-      --wash: #f5f6f8;
+      --accent-soft: #eef3ff;
+      --rule: #e4e7ee;
+      --wash: #f7f8fb;
+      --good: #1a7340;
+      --card: #fff;
     }
     * { box-sizing: border-box; }
     body {
       background: #fff;
-      color: var(--ink);
-      font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: var(--body);
+      font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
       margin: 0;
       -webkit-font-smoothing: antialiased;
     }
-    .wrap {
-      max-width: 680px;
-      margin: 0 auto;
-      padding: 72px 24px 96px;
-    }
-    h1 {
-      font-size: 44px;
-      line-height: 1.1;
-      letter-spacing: -0.03em;
-      margin: 0 0 4px;
-      color: var(--accent);
-    }
-    .wordmark { color: var(--muted); font-size: 14px; margin: 0 0 28px; }
-    .lede {
-      font-size: 21px;
-      line-height: 1.45;
-      letter-spacing: -0.01em;
-      margin: 0 0 20px;
-    }
-    p { margin: 0 0 16px; }
+    .wrap { max-width: 940px; margin: 0 auto; padding: 0 24px; }
+    .narrow { max-width: 660px; }
+
+    h1, h2, h3 { color: var(--ink); letter-spacing: -0.022em; }
+    h2 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; }
+    h3 { font-size: 16px; margin: 0 0 4px; }
+    p { margin: 0 0 14px; }
     a { color: var(--accent); }
-    h2 {
-      font-size: 13px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--muted);
-      font-weight: 600;
-      margin: 56px 0 16px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--rule);
+    .eyebrow {
+      font-size: 12px; font-weight: 650; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted); margin: 0 0 10px;
     }
-    .cta { display: flex; flex-wrap: wrap; gap: 10px; margin: 28px 0 0; }
-    .cta a {
-      display: inline-block;
-      padding: 10px 18px;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 15px;
-      text-decoration: none;
-    }
-    .cta .primary { background: var(--accent); color: #fff; }
-    .cta .secondary { border: 1px solid var(--rule); color: var(--ink); }
-    pre {
-      background: var(--wash);
-      border: 1px solid var(--rule);
-      border-radius: 8px;
-      padding: 14px 16px;
-      overflow-x: auto;
-      font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-      margin: 0 0 12px;
-    }
-    .tradeoff { margin: 0 0 16px; padding-left: 18px; border-left: 2px solid var(--rule); color: var(--muted); }
-    .tradeoff b { color: var(--ink); font-weight: 600; }
-    ul { margin: 0; padding: 0; list-style: none; }
-    li { margin: 0 0 14px; padding-left: 20px; position: relative; }
-    li::before {
-      content: "";
-      position: absolute;
-      left: 0; top: 10px;
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: var(--accent);
-    }
-    li b { font-weight: 600; }
-    figure { margin: 0 0 8px; }
-    figure svg { display: block; width: 100%; height: auto; }
-    figcaption { font-size: 13px; color: var(--muted); text-align: center; }
-    footer {
-      margin-top: 64px;
-      padding-top: 20px;
-      border-top: 1px solid var(--rule);
-      font-size: 14px;
-      color: var(--muted);
-    }
-    .dogfood {
-      background: var(--wash);
-      border-radius: 8px;
-      padding: 14px 16px;
-      font-size: 14px;
-      color: var(--muted);
-      margin: 32px 0 0;
-    }
-    .dogfood b { color: var(--ink); font-weight: 600; }
-    @media (max-width: 560px) {
-      .wrap { padding: 48px 20px 72px; }
-      h1 { font-size: 34px; }
-      .lede { font-size: 19px; }
+    section { padding: 74px 0; border-top: 1px solid var(--rule); }
+    .sec-head { max-width: 620px; margin: 0 0 36px; }
+    .sec-head p { font-size: 17px; margin: 0; }
+
+    /* ---------- hero ---------- */
+    .hero { padding: 60px 0 74px; border-top: 0; }
+    .hero h1 { font-size: 30px; margin: 0 0 22px; color: var(--accent); font-weight: 700; }
+    .tagline { font-size: 40px; line-height: 1.12; font-weight: 700; color: var(--ink); margin: 0 0 16px; letter-spacing: -0.03em; }
+    .sub { font-size: 18px; max-width: 560px; margin: 0 0 26px; }
+    .cta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; border-radius: 9px; font-weight: 600; font-size: 15px; text-decoration: none; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost { border: 1px solid var(--rule); color: var(--ink); background: var(--card); }
+    .star-count { background: var(--wash); border-radius: 5px; padding: 1px 7px; font-size: 13px; color: var(--body); }
+    .cta-note { font-size: 13px; color: var(--muted); margin: 12px 0 0; }
+
+    /* ---------- shared doc mock ---------- */
+    .mock { border: 1px solid var(--rule); border-radius: 12px; background: var(--card); overflow: hidden; }
+    .mock-bar { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--rule); background: var(--wash); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #d6dae3; }
+    .mock-url { margin-left: 6px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+    .mock-body { padding: 18px; }
+    .line { height: 8px; border-radius: 4px; background: #eceff5; margin: 0 0 9px; }
+    .hl { background: #fff2b8; box-shadow: 0 0 0 3px #fff2b8; border-radius: 2px; }
+
+    .note { border: 1px solid var(--rule); border-radius: 9px; padding: 11px 13px; background: var(--card); box-shadow: 0 1px 3px rgba(16,18,26,.05); }
+    .note + .note { margin-top: 9px; }
+    .note-head { display: flex; align-items: center; gap: 7px; margin: 0 0 5px; }
+    .av { width: 20px; height: 20px; border-radius: 50%; flex: 0 0 20px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; }
+    .who { font-size: 13px; font-weight: 600; color: var(--ink); }
+    .note-text { font-size: 13px; line-height: 1.5; margin: 0; color: var(--body); }
+    .agent-note { border-color: #cfe0d6; background: #f4faf6; }
+    .done { margin-left: auto; font-size: 11px; font-weight: 650; color: var(--good); white-space: nowrap; }
+
+    /* ---------- proof band ---------- */
+    .proof-band { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px; font-size: 14px; color: var(--muted); }
+    .proof-stat b { color: var(--ink); font-weight: 650; }
+    .proof-sep { width: 3px; height: 3px; border-radius: 50%; background: #ccd1db; }
+
+    /* ---------- what you can make ---------- */
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .tile { border: 1px solid var(--rule); border-radius: 11px; padding: 14px; background: var(--card); }
+    .tile svg { display: block; width: 100%; height: auto; border-radius: 5px; background: var(--wash); }
+    .tile-label { font-size: 13px; font-weight: 600; color: var(--ink); margin: 10px 0 0; }
+    .tile-sub { font-size: 12px; color: var(--muted); margin: 1px 0 0; }
+
+    /* ---------- loop ---------- */
+    .loop { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .step { border: 1px solid var(--rule); border-radius: 12px; padding: 16px; background: var(--card); }
+    .step-n { display: inline-grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; margin: 0 0 10px; }
+    .step h3 { font-size: 15px; }
+    .step p { font-size: 13px; margin: 0; color: var(--muted); }
+    .step-art { margin: 12px 0 0; }
+
+    /* ---------- problem ---------- */
+    .pain { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+    .pain-card { border: 1px solid var(--rule); border-radius: 12px; padding: 18px; }
+    .pain-bad { background: var(--wash); }
+    .pain-good { background: var(--accent-soft); border-color: #cfdcfb; }
+    .pain-card h3 { font-size: 14px; margin: 0 0 12px; }
+    .pain-card p { font-size: 13px; margin: 12px 0 0; color: var(--muted); }
+
+    /* ---------- runtimes ---------- */
+    .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+    .chip { border: 1px solid var(--rule); border-radius: 999px; padding: 8px 16px; font-size: 14px; font-weight: 600; color: var(--ink); background: var(--card); }
+
+    /* ---------- features ---------- */
+    .feats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .feat { border: 1px solid var(--rule); border-radius: 11px; padding: 16px; background: var(--card); }
+    .feat h3 { font-size: 15px; }
+    .feat p { font-size: 13px; margin: 0; color: var(--muted); }
+    .feat svg { display: block; margin: 12px 0 0; width: 100%; height: auto; }
+
+    /* ---------- open source ---------- */
+    .os { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 0 0 20px; }
+    .os-card { border: 1px solid var(--rule); border-radius: 11px; padding: 16px; background: var(--card); }
+    .os-card h3 { font-size: 15px; }
+    .os-card p { font-size: 13px; margin: 0; color: var(--muted); }
+    .os-list { display: grid; gap: 9px; }
+    .os-item { display: flex; gap: 9px; font-size: 14px; }
+    .tick { color: var(--good); font-weight: 700; flex: 0 0 auto; }
+
+    /* ---------- compare ---------- */
+    .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 12px; }
+    table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; background: var(--card); }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--rule); }
+    thead th { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); font-weight: 650; background: var(--wash); }
+    thead th:first-child { width: 30%; }
+    .col-us { background: var(--accent-soft); color: var(--ink); font-weight: 650; }
+    tbody th { font-weight: 600; color: var(--ink); }
+    tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
+    .no { color: var(--muted); }
+
+    /* ---------- final ---------- */
+    .final { text-align: center; }
+    .final .cta { justify-content: center; }
+    pre { background: var(--wash); border: 1px solid var(--rule); border-radius: 9px; padding: 13px 15px; overflow-x: auto; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 22px 0 0; text-align: left; color: var(--ink); }
+    footer { padding: 26px 0 60px; font-size: 13px; color: var(--muted); text-align: center; }
+
+    @media (max-width: 820px) {
+      .grid, .loop, .feats, .os, .pain { grid-template-columns: 1fr; }
+      .tagline { font-size: 30px; }
+      h2 { font-size: 24px; }
+      section { padding: 54px 0; }
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
+<div class="wrap">
 
+  <!-- ══ HERO ══════════════════════════════════════════════ -->
+  <section class="hero">
     <h1>tdoc</h1>
-    <p class="wordmark">tornado-doc · open source</p>
-
-    <p class="lede">Google Docs, but for documents your agent writes.</p>
-
-    <p>Turn a prompt into an interactive HTML document and share it as a live
-    URL. Anyone with the link comments on any sentence, image, or chart. Your
-    agent reads those same comments as structured input and writes the next
-    version — then replies on each thread with what it changed.</p>
+    <p class="tagline">Leave comments.<br>Your AI fixes them all &mdash; and replies to every one.</p>
+    <p class="sub">Publish any HTML page as a link: a report, a dashboard, an explainer.
+      Your team comments on it like a Google Doc. Your AI reads every note, rewrites the
+      page, and answers each person.</p>
 
     <div class="cta">
-      <a class="primary" href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Install in ~3 minutes</a>
-      <a class="secondary" href="https://github.com/tornado-doc/tdoc">GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Create your first doc &mdash; free</a>
+      <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc">Star on GitHub <span class="star-count">102</span></a>
+    </div>
+    <p class="cta-note">One line pasted into Claude Code or Codex. Your reviewers install nothing.</p>
+
+    <div class="mock" style="margin-top:34px">
+      <div class="mock-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="mock-url">tdoc.dev/d/q3-report/v/2</span></div>
+      <div class="mock-body">
+        <div class="line" style="width:82%"></div>
+        <div class="line hl" style="width:56%"></div>
+        <div class="line" style="width:74%"></div>
+        <div class="line" style="width:38%;margin-bottom:16px"></div>
+
+        <div class="note">
+          <div class="note-head"><span class="av" style="background:#b4732f">A</span><span class="who">Ann</span></div>
+          <p class="note-text">This paragraph is too technical for the board. Can we say it plainly?</p>
+        </div>
+        <div class="note agent-note">
+          <div class="note-head"><span class="av" style="background:#d97757">C</span><span class="who">Claude</span><span class="done">&#10003; done</span></div>
+          <p class="note-text">Rewrote it without the jargon and moved the metric into the chart above.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ PROOF BAND ════════════════════════════════════════
+       Real, checkable numbers only. A "trusted by <logos>" band goes here once
+       we can name companies whose people actually use tdoc — the OpenTag list
+       is proof for OpenTag, not for this. -->
+  <section style="padding:34px 0">
+    <div class="proof-band">
+      <span class="proof-stat"><b>102</b> stars on GitHub</span>
+      <span class="proof-sep"></span>
+      <span class="proof-stat"><b>8</b> forks</span>
+      <span class="proof-sep"></span>
+      <span class="proof-stat"><b>MIT</b> licensed</span>
+      <span class="proof-sep"></span>
+      <span class="proof-stat">Runs on <b>your</b> Cloudflare or Vercel</span>
+    </div>
+  </section>
+
+  <!-- ══ NOT JUST DOCS ═════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Not just documents</p>
+      <h2>If it can be a web page, it can be a tdoc.</h2>
+      <p>Your AI writes plain HTML, so you are not stuck inside somebody else's
+        block editor. Anything you would normally send as a link works here.</p>
     </div>
 
-    <h2>The problem</h2>
+    <div class="grid">
+      <div class="tile">
+        <svg viewBox="0 0 200 120" role="img" aria-label="A weekly report with a bar chart">
+          <rect width="200" height="120" fill="#f7f8fb"/>
+          <rect x="16" y="16" width="80" height="7" rx="3.5" fill="#d3d8e3"/>
+          <rect x="16" y="31" width="150" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="16" y="42" width="130" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="16" y="64" width="22" height="38" rx="3" fill="#1652f0" opacity=".85"/>
+          <rect x="46" y="76" width="22" height="26" rx="3" fill="#1652f0" opacity=".5"/>
+          <rect x="76" y="58" width="22" height="44" rx="3" fill="#1652f0" opacity=".7"/>
+          <rect x="106" y="84" width="22" height="18" rx="3" fill="#1652f0" opacity=".35"/>
+          <rect x="136" y="70" width="22" height="32" rx="3" fill="#1652f0" opacity=".6"/>
+        </svg>
+        <p class="tile-label">Weekly report</p>
+        <p class="tile-sub">Numbers your team argues with in the margin</p>
+      </div>
 
-    <p>You are the router between your colleagues' comments and your agent.
-    Every round, by hand.</p>
+      <div class="tile">
+        <svg viewBox="0 0 200 120" role="img" aria-label="A dashboard of statistics with a trend line">
+          <rect width="200" height="120" fill="#f7f8fb"/>
+          <rect x="16" y="16" width="52" height="30" rx="5" fill="#fff" stroke="#e4e7ee"/>
+          <rect x="74" y="16" width="52" height="30" rx="5" fill="#fff" stroke="#e4e7ee"/>
+          <rect x="132" y="16" width="52" height="30" rx="5" fill="#fff" stroke="#e4e7ee"/>
+          <rect x="23" y="25" width="24" height="6" rx="3" fill="#1652f0"/>
+          <rect x="81" y="25" width="30" height="6" rx="3" fill="#d3d8e3"/>
+          <rect x="139" y="25" width="20" height="6" rx="3" fill="#d3d8e3"/>
+          <rect x="16" y="56" width="168" height="48" rx="5" fill="#fff" stroke="#e4e7ee"/>
+          <polyline points="26,92 52,80 78,86 104,66 130,72 156,60 174,64" fill="none" stroke="#1652f0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p class="tile-label">Dashboard</p>
+        <p class="tile-sub">A snapshot you can hand to someone</p>
+      </div>
 
-    <p class="tradeoff"><b>A nice UI for people</b> — Google Docs, a Slack
-    thread, screenshots — means you copy-paste all of it back into the chat
-    yourself.<br>
-    <b>Clean input for the agent</b> — raw JSON, "edit line 47" — means nobody
-    wants to write the feedback.</p>
+      <div class="tile">
+        <svg viewBox="0 0 200 120" role="img" aria-label="An explainer diagram with connected boxes">
+          <rect width="200" height="120" fill="#f7f8fb"/>
+          <rect x="18" y="46" width="44" height="28" rx="5" fill="#fff" stroke="#c9d6f8"/>
+          <rect x="78" y="46" width="44" height="28" rx="5" fill="#eef3ff" stroke="#1652f0"/>
+          <rect x="138" y="46" width="44" height="28" rx="5" fill="#fff" stroke="#c9d6f8"/>
+          <path d="M64 60 H74" stroke="#9aa0aa" stroke-width="1.6"/>
+          <path d="M124 60 H134" stroke="#9aa0aa" stroke-width="1.6"/>
+          <circle cx="76" cy="60" r="2" fill="#9aa0aa"/>
+          <circle cx="136" cy="60" r="2" fill="#9aa0aa"/>
+          <rect x="18" y="22" width="60" height="6" rx="3" fill="#d3d8e3"/>
+          <rect x="18" y="92" width="120" height="5" rx="2.5" fill="#e6e9f0"/>
+        </svg>
+        <p class="tile-label">Explainer</p>
+        <p class="tile-sub">A diagram people can point at</p>
+      </div>
 
-    <p>And a document generated in a chat window has no history. Every
-    regeneration overwrites the last one.</p>
+      <div class="tile">
+        <svg viewBox="0 0 200 120" role="img" aria-label="A product spec with a checklist">
+          <rect width="200" height="120" fill="#f7f8fb"/>
+          <rect x="16" y="16" width="70" height="7" rx="3.5" fill="#d3d8e3"/>
+          <g fill="none" stroke="#1652f0" stroke-width="2" stroke-linecap="round">
+            <path d="M18 42 l4 4 l7 -8"/><path d="M18 62 l4 4 l7 -8"/>
+          </g>
+          <rect x="18" y="80" width="11" height="11" rx="3" fill="none" stroke="#c8cdd8" stroke-width="2"/>
+          <rect x="38" y="41" width="120" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="38" y="61" width="140" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="38" y="81" width="96" height="5" rx="2.5" fill="#e6e9f0"/>
+        </svg>
+        <p class="tile-label">Product spec</p>
+        <p class="tile-sub">Decisions, with the debate attached</p>
+      </div>
 
-    <h2>The loop</h2>
+      <div class="tile">
+        <svg viewBox="0 0 200 120" role="img" aria-label="A post-mortem laid out as a timeline">
+          <rect width="200" height="120" fill="#f7f8fb"/>
+          <path d="M28 30 V100" stroke="#e0e4ec" stroke-width="2"/>
+          <circle cx="28" cy="42" r="5" fill="#1652f0"/>
+          <circle cx="28" cy="66" r="5" fill="#c9d6f8"/>
+          <circle cx="28" cy="90" r="5" fill="#c9d6f8"/>
+          <rect x="44" y="38" width="100" height="6" rx="3" fill="#d3d8e3"/>
+          <rect x="44" y="62" width="130" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="44" y="86" width="112" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="16" y="14" width="56" height="7" rx="3.5" fill="#d3d8e3"/>
+        </svg>
+        <p class="tile-label">Post-mortem</p>
+        <p class="tile-sub">What happened, in order</p>
+      </div>
 
-    <figure>
-      <svg viewBox="0 0 640 214" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Your prompt creates a live document. People leave anchored comments. Your agent regenerates a new version at the same URL, and the loop repeats.">
-        <defs>
-          <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="#9aa0aa"/>
-          </marker>
-        </defs>
-        <g font-family="system-ui, -apple-system, sans-serif" font-size="13" text-anchor="middle">
-          <rect x="8" y="30" width="128" height="52" rx="8" fill="#fff" stroke="#d8dade" stroke-dasharray="4 3"/>
-          <text x="72" y="61" fill="#6b6b6b">Your prompt</text>
+      <div class="tile">
+        <svg viewBox="0 0 200 120" role="img" aria-label="A one-page summary in two columns">
+          <rect width="200" height="120" fill="#f7f8fb"/>
+          <rect x="16" y="16" width="112" height="9" rx="4.5" fill="#1652f0" opacity=".8"/>
+          <rect x="16" y="34" width="76" height="5" rx="2.5" fill="#d3d8e3"/>
+          <rect x="16" y="56" width="78" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="16" y="68" width="78" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="16" y="80" width="60" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="106" y="56" width="78" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="106" y="68" width="78" height="5" rx="2.5" fill="#e6e9f0"/>
+          <rect x="106" y="80" width="52" height="5" rx="2.5" fill="#e6e9f0"/>
+        </svg>
+        <p class="tile-label">One-pager</p>
+        <p class="tile-sub">The thing you actually send</p>
+      </div>
+    </div>
+  </section>
 
-          <rect x="172" y="30" width="128" height="52" rx="8" fill="#eef3ff" stroke="#1652f0"/>
-          <text x="236" y="61" fill="#1652f0" font-weight="600">Live document</text>
+  <!-- ══ THE LOOP ══════════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">How it works</p>
+      <h2>Three steps, and nobody leaves the page.</h2>
+      <p>The part that usually costs you an afternoon &mdash; collecting notes, redoing the
+        page, telling everyone what changed &mdash; happens on its own.</p>
+    </div>
 
-          <rect x="336" y="30" width="128" height="52" rx="8" fill="#f5f6f8" stroke="#d8dade"/>
-          <text x="400" y="55" fill="#1a1a1a">Anchored</text>
-          <text x="400" y="71" fill="#1a1a1a">comments</text>
+    <div class="loop">
+      <div class="step">
+        <span class="step-n">1</span>
+        <h3>You send a link</h3>
+        <p>They open it in a browser and highlight anything &mdash; a sentence, a chart, a
+          number. No account setup, no app to install.</p>
+        <div class="step-art mock">
+          <div class="mock-body" style="padding:13px">
+            <div class="line" style="width:88%"></div>
+            <div class="line hl" style="width:62%"></div>
+            <div class="line" style="width:46%;margin:0"></div>
+          </div>
+        </div>
+      </div>
 
-          <rect x="500" y="30" width="128" height="52" rx="8" fill="#f5f6f8" stroke="#d8dade"/>
-          <text x="564" y="55" fill="#1a1a1a">Agent reads,</text>
-          <text x="564" y="71" fill="#1a1a1a">regenerates</text>
+      <div class="step">
+        <span class="step-n">2</span>
+        <h3>You tell your AI to fix it</h3>
+        <p>It pulls every comment at once &mdash; who said what, and exactly which sentence
+          or picture they meant.</p>
+        <div class="step-art mock">
+          <div class="mock-body" style="padding:13px">
+            <div class="note" style="padding:8px 10px">
+              <div class="note-head" style="margin:0"><span class="av" style="background:#b4732f">A</span><span class="who">Ann</span></div>
+            </div>
+            <div class="note" style="padding:8px 10px">
+              <div class="note-head" style="margin:0"><span class="av" style="background:#3f6ab4">M</span><span class="who">Marco</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-          <path d="M140 56 H166" stroke="#9aa0aa" fill="none" marker-end="url(#a)"/>
-          <path d="M304 56 H330" stroke="#9aa0aa" fill="none" marker-end="url(#a)"/>
-          <path d="M468 56 H494" stroke="#9aa0aa" fill="none" marker-end="url(#a)"/>
+      <div class="step">
+        <span class="step-n">3</span>
+        <h3>Everyone gets an answer</h3>
+        <p>A new version of the page, and a reply on every single comment saying what
+          changed. You are not the one relaying it.</p>
+        <div class="step-art mock">
+          <div class="mock-body" style="padding:13px">
+            <div class="note agent-note" style="padding:8px 10px">
+              <div class="note-head" style="margin:0"><span class="av" style="background:#d97757">C</span><span class="who">Claude</span><span class="done">&#10003;</span></div>
+            </div>
+            <div class="note agent-note" style="padding:8px 10px">
+              <div class="note-head" style="margin:0"><span class="av" style="background:#d97757">C</span><span class="who">Claude</span><span class="done">&#10003;</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-          <path d="M564 86 V132 Q564 148 548 148 H252 Q236 148 236 132 V90"
-                stroke="#9aa0aa" fill="none" marker-end="url(#a)"/>
-          <text x="400" y="170" fill="#6b6b6b">new version, same URL, comments carry over</text>
-        </g>
-      </svg>
-      <figcaption>Nobody leaves the document to close the loop.</figcaption>
-    </figure>
+  <!-- ══ THE PROBLEM ═══════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Why this is annoying today</p>
+      <h2>Every doc tool was built for people talking to people.</h2>
+      <p>Your AI is not in the room. It is a window you paste into and paste back out
+        of &mdash; and every round of feedback, you are the one carrying it.</p>
+    </div>
 
-    <h2>What you get</h2>
+    <div class="pain">
+      <div class="pain-card pain-bad">
+        <h3>A document + a chat window</h3>
+        <svg viewBox="0 0 320 150" role="img" aria-label="Comments being copied by hand from a document into a chat window and back again, four times">
+          <rect x="6" y="20" width="130" height="112" rx="8" fill="#fff" stroke="#e4e7ee"/>
+          <rect x="18" y="34" width="72" height="6" rx="3" fill="#d3d8e3"/>
+          <rect x="18" y="48" width="104" height="4" rx="2" fill="#eceff5"/>
+          <rect x="18" y="58" width="88" height="4" rx="2" fill="#eceff5"/>
+          <rect x="18" y="74" width="94" height="20" rx="4" fill="#fff8dd" stroke="#f0dfa0"/>
+          <rect x="18" y="102" width="94" height="20" rx="4" fill="#fff8dd" stroke="#f0dfa0"/>
+          <text x="71" y="146" font-size="10" fill="#757b8a" text-anchor="middle" font-family="system-ui, sans-serif">the doc</text>
 
-    <ul>
-      <li><b>Comment on anything.</b> Highlight a sentence across paragraphs,
-      bold, and links — or hover an image, SVG, chart, video, or code block and
-      comment on that. Anchors survive regeneration.</li>
+          <rect x="184" y="20" width="130" height="112" rx="8" fill="#fff" stroke="#e4e7ee"/>
+          <rect x="196" y="34" width="86" height="14" rx="6" fill="#f0f1f4"/>
+          <rect x="222" y="54" width="80" height="14" rx="6" fill="#eef3ff"/>
+          <rect x="196" y="74" width="94" height="14" rx="6" fill="#f0f1f4"/>
+          <rect x="212" y="94" width="90" height="14" rx="6" fill="#eef3ff"/>
+          <text x="249" y="146" font-size="10" fill="#757b8a" text-anchor="middle" font-family="system-ui, sans-serif">the chat</text>
 
-      <li><b>Status that syncs both ways.</b> When your agent applies feedback it
-      stamps each thread ✅ applied, 🟡 partial, or ❓ needs clarification, so
-      reviewers see what landed without re-pinging you.</li>
+          <g stroke="#c3452f" fill="none" stroke-width="1.5" stroke-dasharray="4 3">
+            <path d="M138 52 C158 44, 166 40, 182 36"/>
+            <path d="M182 62 C166 66, 158 70, 138 76"/>
+            <path d="M138 88 C158 82, 166 80, 182 78"/>
+            <path d="M182 100 C166 104, 158 108, 138 112"/>
+          </g>
+          <text x="160" y="14" font-size="10" fill="#c3452f" text-anchor="middle" font-family="system-ui, sans-serif">you, every round</text>
+        </svg>
+        <p>You copy the comments out. You paste the answer back. You remember who asked
+          what. Nobody can see whether their note was handled.</p>
+      </div>
 
-      <li><b>Every version is a full snapshot.</b> Flip back to any past version.
-      Comments on text a later version deleted are preserved, never silently
-      dropped.</li>
+      <div class="pain-card pain-good">
+        <h3>One page</h3>
+        <svg viewBox="0 0 320 150" role="img" aria-label="One document where a comment and the AI's reply live together on the page">
+          <rect x="70" y="20" width="180" height="112" rx="8" fill="#fff" stroke="#c9d6f8"/>
+          <rect x="84" y="34" width="72" height="6" rx="3" fill="#d3d8e3"/>
+          <rect x="84" y="48" width="152" height="4" rx="2" fill="#eceff5"/>
+          <rect x="84" y="58" width="120" height="4" rx="2" fill="#eceff5"/>
+          <rect x="84" y="74" width="152" height="22" rx="5" fill="#fff8dd" stroke="#f0dfa0"/>
+          <circle cx="96" cy="85" r="6" fill="#b4732f"/>
+          <rect x="108" y="82" width="88" height="5" rx="2.5" fill="#e8dcc0"/>
+          <rect x="84" y="102" width="152" height="22" rx="5" fill="#f4faf6" stroke="#cfe0d6"/>
+          <circle cx="96" cy="113" r="6" fill="#d97757"/>
+          <rect x="108" y="110" width="72" height="5" rx="2.5" fill="#cfe0d6"/>
+          <path d="M214 110 l4 4 l7 -8" stroke="#1a7340" stroke-width="2" fill="none" stroke-linecap="round"/>
+          <text x="160" y="146" font-size="10" fill="#757b8a" text-anchor="middle" font-family="system-ui, sans-serif">comment and answer, same place</text>
+        </svg>
+        <p>The note and the reply sit on the same sentence. Anyone can see what was
+          asked, what changed, and who did it.</p>
+      </div>
+    </div>
+  </section>
 
-      <li><b>Multiplayer that doesn't clobber.</b> Readers sign in once with
-      GitHub. Concurrent comments are serialized per document, so two people
-      commenting at the same instant both land.</li>
+  <!-- ══ RUNTIMES ══════════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Works with what you already use</p>
+      <h2>Bring the AI you already pay for.</h2>
+      <p>tdoc has no AI of its own and no subscription. It runs on your existing agent,
+        and every reply on the page is signed by the one that wrote it &mdash; so you can
+        always see who changed what.</p>
+    </div>
+    <!-- Word chips, not logos: inlining vendor marks means shipping SVG paths
+         we cannot verify are the real trademarks, and hotlinking a logo CDN
+         puts the homepage's rendering at someone else's uptime. Swap in real
+         asset files when we have them. -->
+    <div class="chips">
+      <span class="chip">Claude</span>
+      <span class="chip">Codex</span>
+      <span class="chip">Grok</span>
+      <span class="chip">Gemini</span>
+      <span class="chip">Cursor</span>
+    </div>
+  </section>
 
-      <li><b>Your infrastructure, $0.</b> Publishing deploys to a Cloudflare or
-      Vercel account you own, inside free tiers personal use won't reach. Nobody
-      else — including us — sees your traffic or pays your bills.</li>
-    </ul>
+  <!-- ══ FEATURES ══════════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">What you get</p>
+      <h2>The boring parts, handled.</h2>
+    </div>
 
-    <h2>Install</h2>
+    <div class="feats">
+      <div class="feat">
+        <h3>Your readers install nothing</h3>
+        <p>They click the link and comment in the browser. One sign-in, and their name is
+          on it. That is the whole ask.</p>
+      </div>
+      <div class="feat">
+        <h3>Comment on the picture, not just the words</h3>
+        <p>Charts, diagrams, images, tables, code. Point at the thing you mean instead of
+          describing where it is.</p>
+      </div>
+      <div class="feat">
+        <h3>Nothing is lost when the AI rewrites</h3>
+        <p>Comments follow their sentence into the new version. If the text really is gone,
+          the note is shown as unattached &mdash; never quietly moved onto the wrong line.</p>
+      </div>
+      <div class="feat">
+        <h3>Go back to any version</h3>
+        <p>Every version is a full copy, not a patch. Flip between them, and comments on
+          deleted text are still there.</p>
+      </div>
+      <div class="feat">
+        <h3>You decide who gets in</h3>
+        <p>Public, unlisted, or invite-only &mdash; and separately, who may comment and who may
+          see the history.</p>
+      </div>
+      <div class="feat">
+        <h3>Free, and it stays yours</h3>
+        <p>Publishing goes to a Cloudflare or Vercel account you own, inside free tiers
+          normal use will not reach.</p>
+      </div>
+    </div>
+  </section>
 
-    <p>Paste this into Claude Code or Codex. It clones the repo, runs the
-    doctor, walks you through the couple of browser clicks, and ends on a
-    published URL.</p>
+  <!-- ══ OPEN SOURCE ═══════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Open source</p>
+      <h2>Own your documents.</h2>
+      <p>There is no tdoc server holding your pages. Publishing deploys to infrastructure
+        in your own account, on a domain you control.</p>
+    </div>
+
+    <div class="os">
+      <div class="os-card">
+        <h3>Cloudflare</h3>
+        <p>Workers, R2, and KV. The default, and the most tested path.</p>
+      </div>
+      <div class="os-card">
+        <h3>Vercel</h3>
+        <p>Functions with Blob and Upstash Redis. Same URLs, same commenting.</p>
+      </div>
+    </div>
+
+    <div class="os-list">
+      <div class="os-item"><span class="tick">&#10003;</span><span>MIT licensed, and it stays that way.</span></div>
+      <div class="os-item"><span class="tick">&#10003;</span><span>Bring your own plan or API key &mdash; no seat pricing, no per-document fee.</span></div>
+      <div class="os-item"><span class="tick">&#10003;</span><span>Nobody else, us included, sees your traffic or pays your bills.</span></div>
+    </div>
+  </section>
+
+  <!-- ══ SOCIAL PROOF ══════════════════════════════════════
+       Deliberately absent, not forgotten. The reviewers on the OpenTag site
+       are real and verified people, but their quotes are about OpenTag ("git
+       worktree", "agents open PRs") — moving that wording onto a document
+       product would be attributing words to them they never said about it.
+       Drops in here as a .proof-wall of .proof-card, same markup as OpenTag,
+       as soon as we have one real tdoc line per person. -->
+
+  <!-- ══ COMPARE ═══════════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <p class="eyebrow">Compare</p>
+      <h2>Where tdoc wins, and where it doesn't.</h2>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <caption class="sr-only" style="position:absolute;left:-9999px">How tdoc compares with Google Docs, Notion, and Mintlify</caption>
+        <thead>
+          <tr>
+            <th scope="col">&nbsp;</th>
+            <th scope="col" class="col-us">tdoc</th>
+            <th scope="col">Google Docs</th>
+            <th scope="col">Notion</th>
+            <th scope="col">Mintlify</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">What you can make</th>
+            <td class="col-us">Any web page</td>
+            <td>Text documents</td>
+            <td>Docs and databases</td>
+            <td>A docs site</td>
+          </tr>
+          <tr>
+            <th scope="row">AI reads the comments</th>
+            <td class="col-us">Yes, all of them at once</td>
+            <td class="no">You copy them out</td>
+            <td class="no">You copy them out</td>
+            <td class="no">&mdash;</td>
+          </tr>
+          <tr>
+            <th scope="row">AI replies to each comment</th>
+            <td class="col-us">Yes, signed by the agent</td>
+            <td class="no">&mdash;</td>
+            <td class="no">&mdash;</td>
+            <td class="no">&mdash;</td>
+          </tr>
+          <tr>
+            <th scope="row">Comment on a chart or image</th>
+            <td class="col-us">Yes</td>
+            <td class="no">Whole image only</td>
+            <td class="no">Whole block only</td>
+            <td class="no">&mdash;</td>
+          </tr>
+          <tr>
+            <th scope="row">Live co-editing</th>
+            <td class="no">&mdash; one version at a time</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td class="no">&mdash;</td>
+          </tr>
+          <tr>
+            <th scope="row">Runs on your own account</th>
+            <td class="col-us">Cloudflare or Vercel</td>
+            <td class="no">&mdash;</td>
+            <td class="no">&mdash;</td>
+            <td class="no">&mdash;</td>
+          </tr>
+          <tr>
+            <th scope="row">Open source</th>
+            <td class="col-us">MIT</td>
+            <td class="no">&mdash;</td>
+            <td class="no">&mdash;</td>
+            <td class="no">&mdash;</td>
+          </tr>
+          <tr>
+            <th scope="row">Price</th>
+            <td class="col-us">Free</td>
+            <td>Free / paid tiers</td>
+            <td>Per seat</td>
+            <td>Per seat</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══ FINAL CTA ═════════════════════════════════════════ -->
+  <section class="final">
+    <div class="sec-head narrow" style="margin:0 auto 26px">
+      <h2>Send the next one as a tdoc.</h2>
+      <p>Paste this into Claude Code or Codex. It sets everything up and hands you a
+        published link.</p>
+    </div>
+
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Create your first doc &mdash; free</a>
+      <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc">Star on GitHub <span class="star-count">102</span></a>
+    </div>
 
     <pre>Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md</pre>
+  </section>
 
-    <p>Then: <code>/tdoc new "an explainer with a slider showing how interest
-    compounds"</code> → <code>/tdoc publish</code> → send the link.</p>
+  <footer>
+    <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a> &middot; MIT
+    &middot; a Claude Code and Codex skill
+    <br><br>
+    This page is a tdoc. Highlight a sentence, or hover any diagram, and leave a comment.
+  </footer>
 
-    <div class="dogfood">
-      <b>This page is a tdoc.</b> Highlight any sentence, or hover the diagram
-      above, and leave a comment — the same way your readers will.
-    </div>
-
-    <footer>
-      <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a>
-      · MIT · a <a href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Claude Code and Codex</a> skill
-    </footer>
-
-  </div>
+</div>
 </body>
 </html>
