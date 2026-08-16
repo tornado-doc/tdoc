@@ -142,6 +142,11 @@
       "n": 28,
       "created": "2026-08-16T13:25:00Z",
       "prompt": "Unframed logo at double size, hero spacing regrouped, embeds aside dropped from the table"
+    },
+    {
+      "n": 29,
+      "created": "2026-08-16T13:40:00Z",
+      "prompt": "Phone: restack the loop, feature cards, and quote wall. Three 164px quote columns overflowed 375 to 545; the loop was 98px, one word per line."
     }
   ]
 }
