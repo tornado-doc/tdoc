@@ -102,15 +102,18 @@ t('/me still uses the styled confirm modal, never native confirm()', () => {
   const stripped = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
   assert(!nativeConfirmCall.test(stripped), '/me must not call the native confirm()');
   assert(index.includes('showConfirm('), '/me must use the styled showConfirm() modal');
-  // Quiet floating toast — no inline status row, no "remote storage" jargon.
+  // Quiet Toastify feedback — no inline status row, no "remote storage" jargon.
   assert(index.includes("This can't be undone."), 'confirm body should be short and plain');
   const userFacing = index.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
   assert(!/remote storage/i.test(userFacing), '/me copy must not say "remote storage"');
   assert(!index.includes("'/api/comments?slug='"), 'delete confirm must not pre-flight comment counts');
-  assert(index.includes("function toast("), '/me must use a floating toast for feedback');
-  assert(index.includes('tdoc-toast'), 'missing toast styles/markup class');
+  assert(index.includes('toastify-js@1.12.0'), '/me must load toastify-js from the pinned CDN');
+  assert(index.includes('Toastify('), '/me must call Toastify() for feedback');
   assert(!index.includes('id="status"'), 'inline status row should be gone — toast replaces it');
   assert(index.includes("toast('Deleted')"), 'success feedback should be a quiet toast("Deleted")');
+  // Don't ship Toastify's stock purple gradient as the default skin.
+  assert(index.includes("background: kind === 'error' ? '#b42318' : '#1652f0'"),
+    'toast skin must use tdoc accent/danger, not the library purple gradient');
 });
 
 t('/me catalog does not fold comment logs or HEAD R2 per row', () => {

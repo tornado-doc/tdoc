@@ -1096,20 +1096,9 @@ async function indexHtml(env, session) {
   .row-menu[hidden] { display: none; }
   .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
   .row-delete:hover { background: var(--td-danger-tint); }
-  /* Floating toast — top-center so it stays in the content viewport
-     (bottom placement sat under the OS dock / recording crop). */
-  .tdoc-toast {
-    position: fixed; left: 50%; top: 72px; z-index: 2000;
-    transform: translateX(-50%) translateY(-8px); opacity: 0;
-    transition: opacity .2s ease, transform .2s ease;
-    background: #111; color: #fff; padding: 12px 20px; border-radius: 10px;
-    font: 14px/1.35 system-ui, -apple-system, sans-serif; font-weight: 500;
-    letter-spacing: 0.01em;
-    box-shadow: 0 12px 32px rgba(0,0,0,0.28); pointer-events: none;
-    min-width: 120px; text-align: center;
-  }
-  .tdoc-toast.is-in { opacity: 1; transform: translateX(-50%) translateY(0); }
-  .tdoc-toast-error { background: var(--td-danger); }
+  /* Toastify skin — override the library's default purple gradient with
+     tdoc accent / danger. Library CSS still owns layout + animation. */
+  .toastify.tdoc-toast { box-shadow: 0 8px 24px rgba(0,0,0,0.14); border-radius: 8px; font: 500 14px/1.35 system-ui, -apple-system, sans-serif; padding: 12px 18px; }
   /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
      doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
      standalone copy here since /me does not load overlay.js. */
@@ -1121,7 +1110,9 @@ async function indexHtml(env, session) {
   .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
   .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
-</style></head><body>
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.css">
+</head><body>
 <h1>My docs</h1>
 <p class="who">${session && session.login ? `Signed in as <b>${escapeHtml(session.login)}</b>` : 'Your published docs'}.</p>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
@@ -1134,28 +1125,24 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   </div>
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
+<script src="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js"></script>
 <script>
 (() => {
-  // Floating toast — top-center, forced reflow so the fade-in actually paints.
-  let toastTimer = null;
+  // toastify-js (CDN) — /me has no CSP, so the library can load. Skin via
+  // className + style; never the stock purple gradient.
   function toast(message, kind = '') {
-    if (!message) return;
-    document.querySelectorAll('.tdoc-toast').forEach((n) => n.remove());
-    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
-    const t = document.createElement('div');
-    t.className = 'tdoc-toast' + (kind === 'error' ? ' tdoc-toast-error' : '');
-    t.setAttribute('role', 'status');
-    t.textContent = message;
-    document.body.appendChild(t);
-    // Double rAF: first paint at opacity 0, then add .is-in so the transition runs.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => { t.classList.add('is-in'); });
-    });
-    toastTimer = setTimeout(() => {
-      t.classList.remove('is-in');
-      setTimeout(() => t.remove(), 250);
-      toastTimer = null;
-    }, 3200);
+    if (!message || typeof Toastify !== 'function') return;
+    Toastify({
+      text: message,
+      duration: 3000,
+      gravity: 'top',
+      position: 'center',
+      stopOnFocus: true,
+      className: 'tdoc-toast',
+      style: {
+        background: kind === 'error' ? '#b42318' : '#1652f0',
+      },
+    }).showToast();
   }
   // Styled confirm — replaces window.confirm(). Resolves true/false; never
   // silently proceeds (Cancel and the backdrop both resolve false).
