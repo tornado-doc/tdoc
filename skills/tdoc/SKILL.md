@@ -168,6 +168,7 @@ sharing, with GitHub auth gating comments.
   <slug>/
     meta.json          # { title, created, versions: [...] }
     v1/index.html
+    v1/widgets/<name>.html  # optional; sandboxed JS island, served at /widget/<name>
     v2/index.html
     comments.json      # [{ id, version, anchor, text, status }]
 ```
@@ -175,6 +176,7 @@ sharing, with GitHub auth gating comments.
 Server runs at `http://localhost:7878` (override with `TDOC_PORT`) and serves:
 - `/` — index of all docs
 - `/d/<slug>/v/<n>` — a specific version (injects comment overlay)
+- `/d/<slug>/v/<n>/widget/<name>` — sandboxed interactive island (no overlay)
 - `/api/comments` GET/POST — comment persistence
 - `/api/ping` — health check; responds `{"ok":true,"service":"tdoc"}`. The
   `service` field is the identity marker — a foreign service answering 200 on
@@ -228,7 +230,7 @@ sleep 1
    - All CSS inline in `<style>`. **No JavaScript** — author `<script>` tags do not execute (CSP; see "Interactivity: CSS only" under HTML generation rules).
    - No external CDNs unless requested. No build step.
    - Clean reading-typography (system font stack, generous line-height, max-width ~720px for prose) UNLESS the doc is primarily a diagram, in which case go full-bleed.
-   - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, follow the fallbacks in that section; do NOT emit JavaScript, which fails silently and leaves the reader an empty box.
+   - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
 3. Write `meta.json`:
    ```json
    { "title": "...", "slug": "...", "created": "<iso>", "versions": [{ "n": 1, "created": "<iso>", "prompt": "..." }] }
@@ -619,17 +621,40 @@ Give each SVG its own class names and `@keyframes` names (`flow-a` / `flowdash-a
 
 **When the prompt wants something CSS can't express**
 
-Game of Life, a Monte Carlo model, a parameter sweep. Don't write the JS anyway: it
-fails silently and the reader gets an empty rectangle where the point of the doc was.
-Pick one:
+Game of Life, a live calculator, a parameter sweep. Do **not** put `<script>` in
+the host document — it is inert under CSP. Two options:
 
-- Pre-compute the interesting states and switch between them with `:checked`.
-- Render the outcome as a static SVG chart or diagram with the numbers baked in.
-- Show a short CSS-animated loop of the phenomenon.
+1. **Sandboxed island (preferred when it must compute).** Write a second HTML
+   file and embed it as an iframe. Overlay comments on the iframe as one
+   artifact (`iframe[src]` is already commentable). Do not walk into the frame.
 
-Then note in the doc what was simplified, so the reader isn't misled about what
-they're looking at. Do not invent a `/widget/` iframe or a sandboxed island —
-that route does not exist yet (issue #138).
+   ```
+   ~/tdocs/<slug>/v1/index.html
+   ~/tdocs/<slug>/v1/widgets/compound-interest.html
+   ```
+
+   Host document:
+
+   ```html
+   <iframe
+     sandbox="allow-scripts"
+     src="/d/<slug>/v/1/widget/compound-interest"
+     title="Compound interest"
+     style="width:100%;height:320px;border:0">
+   </iframe>
+   ```
+
+   The `sandbox` attribute must be `allow-scripts` only — never add
+   `allow-same-origin`. The server rewrites matching widget iframes to that
+   value even if the author HTML forgets or adds extra flags. Widget HTML is a
+   full document; inline `<script>` there **does** run. Do not use `srcdoc`,
+   `data:`, or `blob:` — those inherit the host CSP and the script stays dead.
+
+2. **Precompute** if an island is overkill: `:checked` panels, a static SVG, or
+   a CSS loop, and note in the doc what was simplified.
+
+Fork/export of a doc with islands is not supported in v1 (the downloaded file
+cannot fetch `/widget/` URLs).
 
 ### Default styling — DO NOT re-style the doc
 

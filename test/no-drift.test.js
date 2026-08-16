@@ -66,7 +66,7 @@ t('cyrb53 algorithm body is identical in worker.js and overlay.js (modulo indent
   assert(a === b, `cyrb53 has DRIFTED between worker.js and overlay.js:\n      worker: ${a}\n      overlay: ${b}`);
 });
 
-for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAgentLogin', 'detectAgentRuntime', 'agentIdentity']) {
+for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAgentLogin', 'detectAgentRuntime', 'agentIdentity', 'isValidWidgetName', 'widgetCspHeader', 'isWidgetFrameRequest', 'forceWidgetSandbox']) {
   t(`${name} is identical in worker.js and server.js`, () => {
     const a = norm(fnBody(worker, name));
     const b = norm(fnBody(server, name));

@@ -41,6 +41,7 @@ const OFFLINE = [
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
+  'widget-island.test.js',    // #138 sandboxed widget route + host iframe rewrite
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)
   'vercel-shim.test.js',      // vercel storage shims (KV/R2 contract, rewrite URL)
   'api.test.js',              // hermetic: spawns its own server in a temp dir

@@ -236,7 +236,34 @@ function cspHeader(nonce) {
   return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
 }
 
+// Interactive islands (#138). Host documents keep cspHeader(); computation
+// lives in a separately served HTML resource framed with sandbox="allow-scripts"
+// (never allow-same-origin). srcdoc/blob inherit the parent CSP and cannot
+// run author JS — these must be real URLs.
+function isValidWidgetName(name) {
+  return typeof name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
+}
+function widgetCspHeader() {
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'";
+}
+function isWidgetFrameRequest(dest) {
+  const d = String(dest || '').toLowerCase();
+  return d === 'iframe' || d === 'embed' || d === 'frame';
+}
+function forceWidgetSandbox(html) {
+  if (typeof html !== 'string') return html;
+  return html.replace(/<iframe\b([^>]*?)>/gi, (full, attrs) => {
+    const srcM = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
+    if (!srcM) return full;
+    const src = srcM[1] || srcM[2] || srcM[3] || '';
+    if (!/\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(src.split('?')[0])) return full;
+    const stripped = attrs.replace(/\s*sandbox\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    return '<iframe sandbox="allow-scripts"' + stripped + '>';
+  });
+}
+
 function injectOverlay(html, slug, version, nonce) {
+  html = forceWidgetSandbox(html);
   const overlay = fs.readFileSync(OVERLAY_PATH, 'utf8');
   // Hand the overlay the full version list so the bar can offer a version
   // picker. Read straight from meta.json; ignore failures and fall back to
@@ -484,6 +511,22 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/') return send(res, 200, indexPage(), { 'Content-Type': 'text/html; charset=utf-8' });
+
+  const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
+  if (widgetMatch) {
+    const [, rawSlug, vStr, rawName] = widgetMatch;
+    const slug = safeSlug(rawSlug);
+    if (!slug || !isValidWidgetName(rawName)) return send(res, 400, 'invalid slug or widget');
+    const dest = req.headers['sec-fetch-dest'];
+    if (!isWidgetFrameRequest(dest)) return send(res, 403, 'widget must be framed');
+    const file = path.join(ROOT, slug, `v${vStr}`, 'widgets', `${rawName}.html`);
+    if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr} widget ${rawName}`);
+    return send(res, 200, fs.readFileSync(file, 'utf8'), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': widgetCspHeader(),
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
 
   const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
   if (docMatch) {
