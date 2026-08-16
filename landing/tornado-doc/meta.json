@@ -22,6 +22,11 @@
       "n": 4,
       "created": "2026-08-16T04:10:00Z",
       "prompt": "v4: restore the 11 v2 comments that v3 wiped, and drop the social-proof wall v3 put back (real names from another product next to PLACEHOLDER quotes)."
+    },
+    {
+      "n": 5,
+      "created": "2026-08-16T04:50:00Z",
+      "prompt": "Real tdoc screenshots for the artifact tiles, collaboration and replies cards, equal CTAs, demo inside the page width, self host merged into bring-your-own-agent"
     }
   ]
 }
