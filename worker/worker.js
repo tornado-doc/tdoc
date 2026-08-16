@@ -1096,17 +1096,19 @@ async function indexHtml(env, session) {
   .row-menu[hidden] { display: none; }
   .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
   .row-delete:hover { background: var(--td-danger-tint); }
-  /* Floating toast — replaces the old inline status line. Same spirit as
-     overlay flashToast; kept inline because /me does not load overlay.js. */
+  /* Floating toast — top-center so it stays in the content viewport
+     (bottom placement sat under the OS dock / recording crop). */
   .tdoc-toast {
-    position: fixed; left: 50%; bottom: 28px; z-index: 1100;
-    transform: translateX(-50%) translateY(10px); opacity: 0;
-    transition: opacity .18s ease, transform .18s ease;
-    background: #111; color: #fff; padding: 10px 16px; border-radius: 10px;
-    font: 13px/1.35 system-ui, -apple-system, sans-serif;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.22); pointer-events: none;
+    position: fixed; left: 50%; top: 72px; z-index: 2000;
+    transform: translateX(-50%) translateY(-8px); opacity: 0;
+    transition: opacity .2s ease, transform .2s ease;
+    background: #111; color: #fff; padding: 12px 20px; border-radius: 10px;
+    font: 14px/1.35 system-ui, -apple-system, sans-serif; font-weight: 500;
+    letter-spacing: 0.01em;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.28); pointer-events: none;
+    min-width: 120px; text-align: center;
   }
-  .tdoc-toast.is-in { opacity: 0.96; transform: translateX(-50%) translateY(0); }
+  .tdoc-toast.is-in { opacity: 1; transform: translateX(-50%) translateY(0); }
   .tdoc-toast-error { background: var(--td-danger); }
   /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
      doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
@@ -1134,7 +1136,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   <p id="no-match" class="empty" hidden>No matches.</p>`}
 <script>
 (() => {
-  // Floating toast — quiet feedback, no inline status row eating layout.
+  // Floating toast — top-center, forced reflow so the fade-in actually paints.
   let toastTimer = null;
   function toast(message, kind = '') {
     if (!message) return;
@@ -1145,12 +1147,15 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     t.setAttribute('role', 'status');
     t.textContent = message;
     document.body.appendChild(t);
-    requestAnimationFrame(() => t.classList.add('is-in'));
+    // Double rAF: first paint at opacity 0, then add .is-in so the transition runs.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => { t.classList.add('is-in'); });
+    });
     toastTimer = setTimeout(() => {
       t.classList.remove('is-in');
-      setTimeout(() => t.remove(), 220);
+      setTimeout(() => t.remove(), 250);
       toastTimer = null;
-    }, 2600);
+    }, 3200);
   }
   // Styled confirm — replaces window.confirm(). Resolves true/false; never
   // silently proceeds (Cancel and the backdrop both resolve false).
