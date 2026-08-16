@@ -10,6 +10,7 @@
 #   TDOC_MOCK_NO_WRANGLER=1
 #   TDOC_MOCK_NO_JQ=1
 #   TDOC_MOCK_NO_GH=1
+#   TDOC_MOCK_UPDATE_BEHIND=N   (tdoc-update-nag: pretend N commits behind)
 #   TDOC_MOCK_NO_CF_LOGIN=1         # wrangler not logged in
 #   TDOC_MOCK_NO_SUBDOMAIN=1        # workers.dev subdomain not claimed
 #   TDOC_MOCK_NO_R2=1               # R2 not enabled
@@ -119,6 +120,16 @@ if $wrangler_ok && [ -z "${TDOC_MOCK_NO_CF_LOGIN:-}" ]; then
   fi
 fi
 
+# --- BYOK skill/overlay freshness (origin/main). JSON only — never stderr,
+# so `tdoc-doctor | jq` stays valid. Not a missing_step: first-time onboard
+# is already on latest, and a stale checkout is not a Cloudflare dep.
+update_json='{"ok":true,"checked":false,"behind":0}'
+_nag="$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag"
+if [ -x "$_nag" ]; then
+  _uj="$("$_nag" --json 2>/dev/null || true)"
+  if printf '%s' "$_uj" | grep -q '^{'; then update_json="$_uj"; fi
+fi
+
 # --- already-published config? ---
 published=false
 publish_subdomain=""
@@ -168,6 +179,9 @@ fi
 
 # --- emit JSON ---
 if $jq_ok; then
+  if ! printf '%s' "$update_json" | jq -e . >/dev/null 2>&1; then
+    update_json='{"ok":true,"checked":false,"behind":0}'
+  fi
   jq -n \
     --argjson node_ok "$node_ok" \
     --arg node_ver "$node_ver" \
@@ -186,6 +200,7 @@ if $jq_ok; then
     --arg publish_worker "$publish_worker" \
     --argjson ready_to_publish "$ready_to_publish" \
     --argjson missing_steps "$missing_json" \
+    --argjson update "$update_json" \
     '{
       deps: { node: { ok: $node_ok, version: $node_ver },
               wrangler: { ok: $wrangler_ok, version: $wrangler_ver },
@@ -197,7 +212,8 @@ if $jq_ok; then
                     r2_enabled: $cf_r2_enabled },
       published: { ok: $published, subdomain: $publish_subdomain, worker: $publish_worker },
       ready_to_publish: $ready_to_publish,
-      missing_steps: $missing_steps
+      missing_steps: $missing_steps,
+      update: $update
     }'
 else
   # Minimal JSON fallback if jq isn't installed (we still report the lack of jq).

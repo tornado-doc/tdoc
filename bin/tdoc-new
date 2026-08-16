@@ -79,6 +79,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# After --quiet/--help so help and programmatic callers stay silent.
+# Human nag on stderr; discard the machine line (skill preamble captures
+# it; doctor uses --json). `tail -n 1` / `tail -n 2` stay URL-only.
+if [ "$QUIET" != "1" ]; then
+  "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
+fi
+
 [ -n "$SLUG" ]  || die "--slug required"
 [ -n "$TITLE" ] || die "--title required"
 # slug must be kebab-case-ish so directory and URL are safe.

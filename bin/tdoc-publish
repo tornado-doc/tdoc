@@ -24,6 +24,9 @@
 #   Just upload the requested slug via /api/upload.
 
 set -euo pipefail
+# BYOK: tell the user immediately when this checkout is behind origin/main.
+# Human nag on stderr; discard the machine line (skill preamble / doctor).
+"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
 
 usage() {
   cat >&2 <<'EOF'
