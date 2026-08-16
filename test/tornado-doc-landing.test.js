@@ -116,6 +116,27 @@ t('phone rules actually override the desktop headline and CTA grid', () => {
   // has 327px. The grid has to restack or shrink.
   assert(/\.cta\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1]),
     '640px breakpoint must restack .cta; 216+216 overflows 375');
+  // Same class of bug as the original .tagline vs h1.tagline miss: an
+  // earlier 640px size is a no-op if a later 840px block also sets
+  // h1.tagline. The last media query that sets h1.tagline must be 640.
+  const mediaH1 = [...html.matchAll(/@media \(max-width:(\d+)px\)\s*\{([\s\S]*?)\n    \}/g)]
+    .filter((m) => /h1\.tagline\s*\{[^}]*font-size:/.test(m[2]));
+  const last = mediaH1[mediaH1.length - 1];
+  assert(last && last[1] === '640',
+    `last h1.tagline media query is ${last && last[1]}px; 640 must come last so phones do not inherit the 840px size`);
+});
+
+t('hero comment count matches the mock thread', () => {
+  // v8 nested Claude's answer as a reply. The notes column is one thread,
+  // so "2 comments" is a leftover from the sibling-card layout.
+  const notes = html.match(/<aside class="stage-notes">[\s\S]*?<\/aside>/);
+  assert(notes, 'missing stage-notes');
+  const threads = (notes[0].match(/<div class="mc">/g) || []).length;
+  const replies = (notes[0].match(/<div class="mc-reply">/g) || []).length;
+  assert(threads === 1, `expected 1 mock thread, found ${threads}`);
+  assert(replies === 1, `expected Claude's answer as a reply, found ${replies}`);
+  assert(/1 comment/.test(notes[0]), 'notes label must say 1 comment now that Claude is a reply');
+  assert(!/2 comments/.test(notes[0]), 'notes label still says 2 comments');
 });
 
 t('demos commentable artifacts', () => {
