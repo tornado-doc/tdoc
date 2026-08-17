@@ -177,6 +177,11 @@
       "n": 35,
       "created": "2026-08-16T15:50:00Z",
       "prompt": "Phone CTAs share one row instead of stacking"
+    },
+    {
+      "n": 36,
+      "created": "2026-08-17T00:20:00Z",
+      "prompt": "Anchor the hero comment to the Conway board so the ring shows what it points at"
     }
   ]
 }
