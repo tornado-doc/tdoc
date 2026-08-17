@@ -2751,12 +2751,20 @@
       }
     };
   }
+  function publicShareUrl() {
+    // `/` is the site. Copying the storage path tells a visitor they are
+    // looking at somebody's document, which is the same leak the bar crumb
+    // was. /d/ keeps the versioned URL.
+    return cfg.isLanding
+      ? `${location.origin}/`
+      : `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+  }
   function showShareModal() {
     // One Share button: owners get copy-link + access settings in the same
     // panel; everyone else gets copy-link only. No separate "Share settings".
     if (cfg.ownerManage) { showManageModal(); return; }
     closeAuxModal();
-    const url = `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+    const url = publicShareUrl();
     const bg = document.createElement('div');
     bg.className = 'tdoc-modal-bg';
     bg.id = 'tdoc-aux-modal';
@@ -2857,7 +2865,7 @@
     if (!cfg.ownerManage) return; // no owner data for this request → nothing to render
     closeAuxModal();
     const om = cfg.ownerManage;
-    const url = `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+    const url = publicShareUrl();
     const access = {
       visibility: 'unlisted', history_visibility: 'owner', commenting: 'signed_in', allowed_users: [],
       ...(om.access || {}),

@@ -395,6 +395,16 @@ t('homepage bar drops the slug crumb and the version picker', () => {
     'overlay still renders the slug crumb and version picker on the homepage');
   assert(/tdoc-bar-mark/.test(left[0].split('cfg.isLanding')[0]),
     'the tdoc mark must stay outside the landing conditional');
+
+  // Share on `/` must copy the canonical homepage, not /d/tornado-doc/v/N.
+  const shareFn = overlay.match(/function publicShareUrl\(\) \{[\s\S]*?\n  \}/);
+  assert(shareFn, 'overlay must have a single share-URL helper');
+  assert(/cfg\.isLanding/.test(shareFn[0]) && /\$\{location\.origin\}\//.test(shareFn[0]),
+    'Share on the homepage must copy location.origin/');
+  assert(/\/d\/\$\{encodeURIComponent\(slug\)\}\/v\/\$\{version\}/.test(shareFn[0]),
+    'Share on /d/ must still copy the versioned URL');
+  assert(/const url = publicShareUrl\(\)/.test(overlay),
+    'share modals must use publicShareUrl, not build /d/ themselves');
 });
 
 console.log('tdoc.dev / release payload');
@@ -505,6 +515,17 @@ t('shipping the homepage ships content, not just worker code', () => {
   // gate, wrong slug). Green must mean the homepage actually renders.
   assert(/is still serving the neutral fallback/.test(content),
     'publish workflow must fail when tdoc.dev/ falls back to the neutral page');
+  // First merge: the live worker does not yet have landingResponse. A
+  // push-triggered publish would GET tdoc.dev/ against that old worker
+  // and fail the isLanding check. Wait for deploy tdoc.dev instead.
+  assert(/workflow_run:/.test(content),
+    'publish must wait for the worker deploy, not race it on push');
+  assert(/deploy tdoc\.dev/.test(content),
+    'publish must trigger off the hosted worker deploy workflow');
+  assert(!/^\s+push:/m.test(content),
+    'a push trigger races deploy-tdoc-dev.yml on the first merge to main');
+  assert(/workflow_run\.head_sha/.test(content),
+    'publish must check out the commit the Worker deploy just shipped');
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);
