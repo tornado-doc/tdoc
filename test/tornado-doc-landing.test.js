@@ -168,6 +168,18 @@ t('phone rules actually override the desktop headline and CTA grid', () => {
   assert(ghost, 'ghost CTA not found');
   assert(/<svg[^>]*viewBox="0 0 24 24"/.test(ghost[0]),
     'Star button icon must set viewBox so the used mark cannot stretch the pill');
+  // v39 phone bug: icon / label / pill were direct flex children of the
+  // button. Hiding .btn-long left an anonymous text node that collected
+  // its own gap, so Star read as icon-left / pill-right. Contents must
+  // be one .btn-in child; the button then centres a single item.
+  assert(/\.btn-in\s*\{[^}]*display:\s*inline-flex/.test(html),
+    'CTA contents must sit in one .btn-in child so a hidden .btn-long cannot become a flex gap');
+  const ghosts = [...html.matchAll(/<a class="btn btn-ghost"[\s\S]*?<\/a>/g)].map((m) => m[0]);
+  assert(ghosts.length >= 2, `expected two ghost CTAs, found ${ghosts.length}`);
+  for (const g of ghosts) {
+    assert(/<span class="btn-in">/.test(g),
+      'ghost CTA must wrap icon+label+pill in .btn-in so the row stays centred on phones');
+  }
   // v14 dropped height/nowrap. The used mark then overflowed 1em and the
   // Star pill measured 77px (Create stretched with it on desktop). Lock both.
   assert(/\.btn\s*\{[^}]*height:\s*52px/.test(html),
