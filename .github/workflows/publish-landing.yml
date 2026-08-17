@@ -1,0 +1,112 @@
+name: publish tdoc.dev homepage
+
+# deploy-tdoc-dev.yml ships the Worker CODE. It does not ship the homepage,
+# because the homepage is a doc: landingResponse() reads it out of that
+# Worker's KV. Deploying the route without the doc leaves tdoc.dev/ on the
+# neutral branded page, which is the designed fallback and also a silent way
+# to think you shipped.
+#
+# This workflow ships the CONTENT. It builds the release payload from
+# landing/tornado-doc (latest version collapsed to v1, review thread dropped)
+# and POSTs it to the same /api/upload contract `tdoc publish` uses.
+#
+# Required GitHub secret:
+#   TDOC_DEV_UPLOAD_TOKEN — the tdoc.dev Worker's TDOC_UPLOAD_TOKEN
+#
+# The token never leaves Actions. Nobody needs a copy on a laptop to ship the
+# homepage, and no laptop's Cloudflare login has to own tdoc.dev.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'landing/tornado-doc/**'
+      - 'bin/tdoc-landing-release'
+      - '.github/workflows/publish-landing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two runs uploading the same slug would race on the same KV keys.
+  group: publish-landing
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish landing doc to tdoc.dev
+    if: github.repository == 'tornado-doc/tdoc'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Require the upload token
+        env:
+          TDOC_DEV_UPLOAD_TOKEN: ${{ secrets.TDOC_DEV_UPLOAD_TOKEN }}
+        run: |
+          if [ -z "$TDOC_DEV_UPLOAD_TOKEN" ]; then
+            echo "TDOC_DEV_UPLOAD_TOKEN is not set." >&2
+            echo "Add it under Settings -> Secrets and variables -> Actions, then re-run." >&2
+            exit 1
+          fi
+
+      # A broken homepage is worse than a stale one. The landing suite checks
+      # the page itself and the release payload it produces.
+      - name: Offline test suite
+        run: npm test
+
+      - name: Build the release payload
+        run: node bin/tdoc-landing-release
+
+      - name: Upload v1 to tdoc.dev
+        env:
+          TDOC_DEV_UPLOAD_TOKEN: ${{ secrets.TDOC_DEV_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          DIR=.release/tornado-doc
+
+          # Same shape tdoc-publish sends: slug, version, html, meta, widgets.
+          # comments is omitted on purpose. The payload's comments.json is
+          # empty and the worker merges rather than replaces, so sending an
+          # empty list would be a no-op that reads like an intent to clear.
+          WIDGETS='{}'
+          if [ -d "$DIR/v1/widgets" ]; then
+            for wf in "$DIR"/v1/widgets/*.html; do
+              [ -f "$wf" ] || continue
+              WIDGETS="$(jq -n --argjson acc "$WIDGETS" \
+                --arg name "$(basename "$wf" .html)" --rawfile html "$wf" \
+                '$acc + {($name): $html}')"
+            done
+          fi
+
+          jq -n --arg slug tornado-doc --argjson version 1 \
+            --rawfile html "$DIR/v1/index.html" \
+            --slurpfile meta "$DIR/meta.json" \
+            --argjson widgets "$WIDGETS" \
+            '{slug:$slug, version:$version, html:$html, meta:$meta[0]}
+             + (if $widgets == {} then {} else {widgets:$widgets} end)' > payload.json
+
+          code=$(curl -sS -o resp.json -w '%{http_code}' -X POST https://tdoc.dev/api/upload \
+            -H "Authorization: Bearer $TDOC_DEV_UPLOAD_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @payload.json)
+          # The response body carries no secret; the request is never echoed.
+          echo "HTTP $code"; cat resp.json; echo
+          [ "$code" = "200" ] || { echo "upload failed" >&2; exit 1; }
+          [ "$(jq -r '.ok // false' resp.json)" = "true" ] || { echo "worker rejected the upload" >&2; exit 1; }
+
+      - name: Verify tdoc.dev serves the doc, not the fallback
+        run: |
+          set -euo pipefail
+          body=$(curl -sS https://tdoc.dev/)
+          # landingHtml() is the neutral page. If it comes back, the route is
+          # deployed but the doc is not readable, and the run must not be green.
+          echo "$body" | grep -q 'A doc that answers its own comments' \
+            || { echo "tdoc.dev/ is still serving the neutral fallback" >&2; exit 1; }
+          echo "$body" | grep -q '"isLanding":true' \
+            || { echo "tdoc.dev/ did not render through the landing route" >&2; exit 1; }
+          echo "tdoc.dev/ is serving the landing doc."

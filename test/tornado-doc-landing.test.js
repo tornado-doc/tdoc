@@ -476,5 +476,28 @@ t('release payload carries the homepage access policy', () => {
     '/api/upload no longer applies incoming.access; the payload policy would be dropped');
 });
 
+t('shipping the homepage ships content, not just worker code', () => {
+  // deploy-tdoc-dev.yml deploys the Worker. The homepage is a doc in that
+  // Worker's KV, so code-only CD leaves tdoc.dev/ on landingHtml()'s neutral
+  // fallback while the run goes green — the exact failure that is invisible
+  // from CI. A second workflow has to upload the doc.
+  const dir = path.join(root, '.github', 'workflows');
+  const code = fs.readFileSync(path.join(dir, 'deploy-tdoc-dev.yml'), 'utf8');
+  assert(!/api\/upload/.test(code), 'deploy-tdoc-dev.yml now uploads docs; this guard needs rewriting');
+
+  const wf = path.join(dir, 'publish-landing.yml');
+  assert(fs.existsSync(wf), 'no workflow publishes the landing doc to tdoc.dev');
+  const content = fs.readFileSync(wf, 'utf8');
+  assert(/secrets\.TDOC_DEV_UPLOAD_TOKEN/.test(content),
+    'publish workflow must authenticate with the tdoc.dev upload token');
+  assert(/node bin\/tdoc-landing-release/.test(content),
+    'publish workflow must build the release payload, not upload the working copy');
+  assert(/https:\/\/tdoc\.dev\/api\/upload/.test(content), 'publish workflow does not POST to /api/upload');
+  // The upload can succeed while the page still is not readable (access
+  // gate, wrong slug). Green must mean the homepage actually renders.
+  assert(/is still serving the neutral fallback/.test(content),
+    'publish workflow must fail when tdoc.dev/ falls back to the neutral page');
+});
+
 console.log(`\n${pass} passed, ${fail} failed.`);
 process.exit(fail ? 1 : 0);
