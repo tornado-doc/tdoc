@@ -884,44 +884,13 @@
     paintTheme(next);
   };
 
-  // Download: fetches the export HTML and triggers a file download (and opens
-  // a preview tab). This is the renamed "Fork" action — it downloads a
-  // self-contained HTML snapshot of the doc.
-  async function downloadDoc() {
-    // Fetch the fork HTML once, then both download AND open it via a blob URL.
-    // This way the new tab shows exactly the SAME bytes the user has on disk —
-    // a real local copy, not the worker-hosted /fork page. Self-contained:
-    // closing the tab doesn't lose the file, and the tab has no worker
-    // dependency (uses blob: not https:).
-    const base = `/d/${encodeURIComponent(slug)}/v/${version}`;
-    let bodyText;
-    try {
-      const resp = await fetch(`${base}/fork`);
-      if (!resp.ok) throw new Error(`fork fetch failed: ${resp.status}`);
-      bodyText = await resp.text();
-    } catch (e) {
-      // Fallback: old behavior (let the worker route handle download)
-      window.location.href = `${base}/export?download=1`;
-      return;
-    }
-    const blob = new Blob([bodyText], { type: 'text/html;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
-
-    // 1. Trigger the file download via <a download>.
+  // Download: triggers a file download of the export HTML via /export?download=1.
+  // This produces the same rendered output as the published view, not fork mode.
+  function triggerDownload(s, v) {
     const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = `${slug}-v${version}-download.html`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    // 2. Open the same blob in a new tab so the user sees it rendered.
-    //    Small delay so the download starts before the new tab steals focus.
-    setTimeout(() => {
-      window.open(blobUrl, '_blank');
-      // Revoke after a generous interval — the new tab may still be parsing.
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-    }, 250);
+    a.href = `/d/${encodeURIComponent(s)}/v/${v}/export?download=1`;
+    a.download = `${s}-v${v}-download.html`;
+    document.body.appendChild(a); a.click(); a.remove();
   }
 
   // Duplicate: creates a copy of the doc in the signed-in user's account on
@@ -935,19 +904,13 @@
     const dupBtn = document.getElementById('tdoc-duplicate-btn');
     if (dupBtn) dupBtn.onclick = duplicateDoc;
     const dlBtn = document.getElementById('tdoc-download-btn');
-    if (dlBtn) dlBtn.onclick = downloadDoc;
+    if (dlBtn) dlBtn.onclick = () => triggerDownload(slug, version);
     const sb = document.getElementById('tdoc-share-btn');
     if (sb) sb.onclick = (e) => { e.stopPropagation(); showShareModal(); };
   }
   if (isLocal) {
     const pb = document.getElementById('tdoc-publish-btn');
     if (pb) pb.onclick = (e) => { e.stopPropagation(); showPublishModal(); };
-  }
-  function triggerDownload(slug, version) {
-    const a = document.createElement('a');
-    a.href = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=1`;
-    a.download = `${slug}-v${version}-download.html`;
-    document.body.appendChild(a); a.click(); a.remove();
   }
   if (isFork) {
     // Save As: same download as Download, but from within fork mode (no /fork open
@@ -998,7 +961,7 @@
       secMenu.classList.remove('open');
       if (b.dataset.action === 'repo') window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
       if (b.dataset.action === 'duplicate') duplicateDoc();
-      if (b.dataset.action === 'download') downloadDoc();
+      if (b.dataset.action === 'download') triggerDownload(slug, version);
       if (b.dataset.action === 'share') showShareModal();
       if (b.dataset.action === 'publish') showPublishModal();
       if (b.dataset.action === 'saveas') triggerDownload(slug, version);
