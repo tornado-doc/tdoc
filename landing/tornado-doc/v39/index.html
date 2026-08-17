@@ -100,10 +100,13 @@
     /* The board is a widget island now: a separate document framed with
        sandbox="allow-scripts", so it runs a real generation loop while the
        host page still executes none of its own script. */
-    /* No frame on the island itself. The ring that marks the anchored artifact
-       is drawn inside, around the board alone, so the play control underneath
-       reads as a control and not as part of what the comment points at. */
-    iframe.life { width:100%; aspect-ratio:16/11; display:block; border:0; background:transparent; }
+    /* The island keeps the artifact card. The ring that marks it as the
+       anchored artifact is drawn inside, around the board alone, so the play
+       control below reads as a control and not as part of what the comment
+       points at. The card also has to stay opaque: dark mode inverts the page
+       and inverts iframes back, so a transparent island would come back as a
+       bare white slab. */
+    iframe.life { width:100%; aspect-ratio:16/11; display:block; border:1px solid var(--rule); border-radius:7px; background:#fff; }
 
     /* comment cards */
     .note { border:1px solid var(--rule); border-radius:9px; padding:10px 12px; background:#fff; box-shadow:0 1px 3px rgba(16,18,26,.05); }
