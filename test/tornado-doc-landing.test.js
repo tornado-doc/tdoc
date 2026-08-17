@@ -161,7 +161,12 @@ t('phone rules actually override the desktop headline and CTA grid', () => {
     `640px .cta max-width is ${maxW && maxW[1]}px; "Star on GitHub 102" wraps below 232`);
   // The GitHub mark is a <use> of a 24x24 symbol. Without a viewBox the
   // used path overflows the 1em box and the grid row grows to ~77px.
-  assert(/btn-ghost[^>]*>\s*<svg[^>]*viewBox="0 0 24 24"/.test(html),
+  // Matched inside the button rather than immediately after it: the contents
+  // are wrapped in one centring child now, so adjacency is not the invariant.
+  // The invariant is that the icon carries a viewBox.
+  const ghost = html.match(/<a class="btn btn-ghost"[\s\S]*?<\/a>/);
+  assert(ghost, 'ghost CTA not found');
+  assert(/<svg[^>]*viewBox="0 0 24 24"/.test(ghost[0]),
     'Star button icon must set viewBox so the used mark cannot stretch the pill');
   // v14 dropped height/nowrap. The used mark then overflowed 1em and the
   // Star pill measured 77px (Create stretched with it on desktop). Lock both.

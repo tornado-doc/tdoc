@@ -69,6 +69,11 @@
     .btn-primary { background:var(--accent); color:#fff; }
     .btn-ghost { border:1px solid #d8dce5; color:var(--ink); background:#fff; }
     .btn-ghost:hover { border-color:#b9c0cd; }
+    .btn-label { white-space:nowrap; }
+    /* One child to centre. With the icon, label and pill as direct flex
+       children, any stray node between them became an anonymous item and
+       collected its own gap, which pushed the row off centre on phones. */
+    .btn-in { display:inline-flex; align-items:center; gap:9px; }
     .pill { background:rgba(16,18,26,.06); border-radius:999px; padding:1px 8px; font-size:12.5px; font-weight:700; }
     .trustline { display:flex; flex-wrap:wrap; gap:20px; align-items:center; margin:0 0 12px; font-size:11.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
     .trustline span { display:inline-flex; align-items:center; gap:7px; }
@@ -358,8 +363,8 @@
       <span><svg aria-hidden="true"><use href="#i-card"/></svg>Free &middot; No card</span>
     </p>
     <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Create your first doc</a>
-      <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg>Star<span class="btn-long">&nbsp;on GitHub</span> <span class="pill">102</span></a>
+      <a class="btn btn-primary" href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md"><span class="btn-in">Create your first doc</span></a>
+      <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc"><span class="btn-in"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label">Star<span class="btn-long">&nbsp;on GitHub</span></span><span class="pill">102</span></span></a>
     </div>
 
     <!-- a real published tdoc, the Conway doc, running its real CSS animation -->
@@ -686,8 +691,8 @@ Everything else dies.</div>
       <span><svg aria-hidden="true"><use href="#i-card"/></svg>Free &middot; No card</span>
     </p>
     <div class="cta" style="justify-content:center">
-      <a class="btn btn-primary" href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md">Create your first doc</a>
-      <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg>Star<span class="btn-long">&nbsp;on GitHub</span> <span class="pill">102</span></a>
+      <a class="btn btn-primary" href="https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md"><span class="btn-in">Create your first doc</span></a>
+      <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc"><span class="btn-in"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label">Star<span class="btn-long">&nbsp;on GitHub</span></span><span class="pill">102</span></span></a>
     </div>
   </section>
 
