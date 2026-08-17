@@ -2,19 +2,25 @@
 <html lang="en"><head><meta charset="utf-8">
 <title>Conway</title>
 <style>
-  html,body{margin:0;height:100%;background:#fff}
-  body{display:flex;flex-direction:column}
-  canvas{display:block;width:100%;flex:1;min-height:0}
+  html,body{margin:0;height:100%;background:transparent}
+  body{display:flex;flex-direction:column;padding:4px;box-sizing:border-box}
+  /* The selection ring belongs to the board, not to the whole island. A
+     reader rings the artifact it is commenting on, and the control under it
+     is not part of that artifact, so it sits outside the ring. The 4px body
+     padding is there so the halo is not clipped by the frame edge. */
+  .board{flex:1;min-height:0;background:#fff;border:1px solid #e0b93a;
+    border-radius:7px;box-shadow:0 0 0 3px #fff2b8;overflow:hidden}
+  canvas{display:block;width:100%;height:100%}
   /* The control lives in here, not in the document: the host page runs no
      script of its own and this frame has a unique origin, so nothing outside
      can reach the loop. */
-  .bar{flex:none;display:flex;justify-content:center;padding:8px 0 10px}
+  .bar{flex:none;display:flex;justify-content:center;padding:11px 0 2px}
   button{font:14px system-ui,-apple-system,sans-serif;background:#fff;color:#10121a;
     border:1px solid #e4e7ee;border-radius:8px;padding:6px 16px;cursor:pointer}
   button:hover{border-color:#c9cfdb}
 </style></head>
 <body>
-<canvas id="c"></canvas>
+<div class="board"><canvas id="c"></canvas></div>
 <div class="bar"><button id="t" type="button" aria-pressed="false">Pause</button></div>
 <script>
 // A real Game of Life: neighbours counted every generation, not a sprite on a

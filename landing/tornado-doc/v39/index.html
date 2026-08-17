@@ -84,9 +84,13 @@
     .chrome { display:flex; align-items:center; gap:6px; padding:10px 13px; border-bottom:1px solid var(--rule); background:var(--wash); }
     .dot { width:9px; height:9px; border-radius:50%; background:#d6dae3; }
     .addr { margin-left:8px; font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
-    .tbar { display:flex; align-items:center; gap:8px; padding:7px 13px; border-bottom:1px solid var(--rule); background:#fff; }
-    .tbar-mark { background:var(--accent); color:#fff; font-weight:700; font-size:11px; border-radius:999px; padding:3px 10px; }
-    .tbar-v { font-size:11px; color:var(--muted); }
+    /* The reader's real bar: a plain wordmark, the slug, and a grey version
+       pill. Blue is this site's CTA colour, so the demo does not spend it. */
+    .tbar { display:flex; align-items:center; gap:6px; padding:4px 13px; border-bottom:1px solid var(--rule); background:#fff; }
+    .tbar-mark { color:#555; font-size:13px; padding:6px 8px; }
+    .tbar-crumb { color:#555; font-weight:500; font-size:13px; padding:4px 6px; }
+    .tbar-sep { color:#c0c0c4; }
+    .tbar-v { font:12px ui-monospace,SFMono-Regular,Menlo,monospace; background:#f0f1f4; color:#1a1a1a; border-radius:999px; padding:3px 10px; }
 
     /* the real conway doc */
     .doc { padding:26px 30px 22px; }
@@ -96,10 +100,10 @@
     /* The board is a widget island now: a separate document framed with
        sandbox="allow-scripts", so it runs a real generation loop while the
        host page still executes none of its own script. */
-    iframe.life { width:100%; aspect-ratio:16/11; display:block; border:1px solid var(--rule); border-radius:7px; background:#fff; }
-    /* An anchored artifact, ringed the way the reader rings a selected one, so
-       the thread beside it reads as a note about the board and not the page. */
-    .life.anchored { border-color:#e0b93a; box-shadow:0 0 0 3px #fff2b8; }
+    /* No frame on the island itself. The ring that marks the anchored artifact
+       is drawn inside, around the board alone, so the play control underneath
+       reads as a control and not as part of what the comment points at. */
+    iframe.life { width:100%; aspect-ratio:16/11; display:block; border:0; background:transparent; }
 
     /* comment cards */
     .note { border:1px solid var(--rule); border-radius:9px; padding:10px 12px; background:#fff; box-shadow:0 1px 3px rgba(16,18,26,.05); }
@@ -375,7 +379,7 @@
     <!-- a real published tdoc: the Conway board is a sandboxed widget island -->
     <div class="browser" style="margin-top:40px">
       <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="addr">tdoc.dev/d/conway-life/v/2</span></div>
-      <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-v">v2 of 2</span></div>
+      <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">conway-life</span><span class="tbar-sep">/</span><span class="tbar-v">v2 &#9662;</span></div>
 
       <div class="stage">
       <div class="stage-doc">
