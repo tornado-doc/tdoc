@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Conway</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff}
+  canvas{display:block;width:100%;height:100%}
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// A real Game of Life: neighbours counted every generation, not a sprite on a
+// keyframe. It runs here because a widget is framed with sandbox="allow-scripts"
+// into a unique origin, so its script can never reach the host's cookies or API.
+// The host document still runs no script of its own.
+(function () {
+  var CELL = 7, GAP = 1, MS = 110;
+  var c = document.getElementById('c'), x = c.getContext('2d');
+  var W, H, cur, nxt;
+
+  function build() {
+    var r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    c.width = Math.max(1, Math.round(r.width * dpr));
+    c.height = Math.max(1, Math.round(r.height * dpr));
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    W = Math.max(8, Math.floor(r.width / (CELL + GAP)));
+    H = Math.max(8, Math.floor(r.height / (CELL + GAP)));
+    cur = new Uint8Array(W * H);
+    nxt = new Uint8Array(W * H);
+    for (var i = 0; i < cur.length; i++) cur[i] = Math.random() < 0.28 ? 1 : 0;
+  }
+
+  function step() {
+    for (var y = 0; y < H; y++) {
+      for (var xx = 0; xx < W; xx++) {
+        var n = 0;
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            // toroidal, so gliders leave one edge and arrive at the other
+            var ny = (y + dy + H) % H, nx = (xx + dx + W) % W;
+            n += cur[ny * W + nx];
+          }
+        }
+        var a = cur[y * W + xx];
+        nxt[y * W + xx] = (a && (n === 2 || n === 3)) || (!a && n === 3) ? 1 : 0;
+      }
+    }
+    var t = cur; cur = nxt; nxt = t;
+  }
+
+  function draw() {
+    var r = c.getBoundingClientRect();
+    x.clearRect(0, 0, r.width, r.height);
+    x.fillStyle = '#1652f0';
+    for (var y = 0; y < H; y++) {
+      for (var xx = 0; xx < W; xx++) {
+        if (cur[y * W + xx]) x.fillRect(xx * (CELL + GAP), y * (CELL + GAP), CELL, CELL);
+      }
+    }
+  }
+
+  build(); draw();
+  var timer = setInterval(function () { step(); draw(); }, MS);
+  var rt;
+  addEventListener('resize', function () {
+    clearTimeout(rt);
+    rt = setTimeout(function () { build(); draw(); }, 150);
+  });
+  // Respect the same preference the CSS version honoured.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) clearInterval(timer);
+})();
+</script>
+</body></html>

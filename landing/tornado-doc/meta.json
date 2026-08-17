@@ -192,6 +192,11 @@
       "n": 38,
       "created": "2026-08-17T00:40:00Z",
       "prompt": "Ring the Conway board and align the thread to it, so the comment reads as anchored to the artifact"
+    },
+    {
+      "n": 39,
+      "created": "2026-08-17T01:00:00Z",
+      "prompt": "Hero board becomes a real Conway widget island instead of a CSS keyframe"
     }
   ]
 }
