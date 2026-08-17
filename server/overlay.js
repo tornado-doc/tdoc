@@ -7,7 +7,7 @@
 //   - Endpoints: /api/comments, /api/reactions, /api/auth/device/start,
 //     /api/auth/device/poll, /api/auth/logout, /api/notifications,
 //     /api/notifications/unread, /api/notifications/read,
-//     /d/<slug>/v/<n>/export
+//     /d/<slug>/v/<n>/export, POST /api/doc/duplicate
 //   - Globals: window.__tdocCopyDocMd(includeComments), window.__tdocCopyCommentMd(id, btn)
 //   - Body classes: tdoc-has-comments, tdoc-narrow
 //   - Keyboard: ⌘/Ctrl-Enter submits, Esc cancels.
@@ -630,7 +630,7 @@
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
-    .tdoc-bar #tdoc-fork-btn, .tdoc-bar #tdoc-saveas-btn { display: none; }
+    .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-btn, .tdoc-bar #tdoc-saveas-btn { display: none; }
     .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   }
   @media (max-width: 700px) {
@@ -643,7 +643,7 @@
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow .tdoc-bar #tdoc-fork-btn, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
+  body.tdoc-narrow .tdoc-bar #tdoc-duplicate-btn, body.tdoc-narrow .tdoc-bar #tdoc-download-btn, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
   body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
@@ -804,10 +804,10 @@
          <span>Publish</span>
        </button>`);
 
-  // Fork / Save-as live in the ⋯ menu on narrow viewports.
+  // Duplicate + Download live in the ⋯ menu on narrow viewports.
   const forkBtnHtml = isPublished
-    ? '<button id="tdoc-fork-btn">Fork</button>'
-    : (isFork ? '<button id="tdoc-saveas-btn">Save As New Local Doc</button>' : '');
+    ? '<button id="tdoc-duplicate-btn" title="Make a copy in your account">Duplicate</button><button id="tdoc-download-btn" title="Download HTML">Download</button>'
+    : (isFork ? '<button id="tdoc-saveas-btn" title="Download HTML">Download</button>' : '');
 
   const themeBtnHtml = `
     <button type="button" id="tdoc-theme-btn" class="tdoc-theme-btn" aria-pressed="false" title="Dark mode" aria-label="Switch to dark mode">
@@ -825,9 +825,9 @@
     <div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
-        ${isPublished ? '<button data-action="share">Share</button><button data-action="fork">Fork</button>' : ''}
+        ${isPublished ? '<button data-action="share">Share</button><button data-action="duplicate">Duplicate</button><button data-action="download">Download</button>' : ''}
         ${isLocal ? '<button data-action="publish">Publish</button>' : ''}
-        ${isFork ? '<button data-action="saveas">Save copy</button>' : ''}
+        ${isFork ? '<button data-action="saveas">Download</button>' : ''}
         <button data-action="repo">tdoc on GitHub</button>
       </div>
     </div>
@@ -884,48 +884,95 @@
     paintTheme(next);
   };
 
-  // Fork: opens the renderable /fork view in a new tab AND triggers a download
-  // (one click, both happen). We use a hidden iframe to fire the download so
-  // the user keeps focus on the new fork tab.
-  async function forkAndDownload() {
-    // Fetch the fork HTML once, then both download AND open it via a blob URL.
-    // This way the new tab shows exactly the SAME bytes the user has on disk —
-    // a real local copy, not the worker-hosted /fork page. Self-contained:
-    // closing the tab doesn't lose the file, and the tab has no worker
-    // dependency (uses blob: not https:).
-    const base = `/d/${encodeURIComponent(slug)}/v/${version}`;
-    let bodyText;
-    try {
-      const resp = await fetch(`${base}/fork`);
-      if (!resp.ok) throw new Error(`fork fetch failed: ${resp.status}`);
-      bodyText = await resp.text();
-    } catch (e) {
-      // Fallback: old behavior (let the worker route handle download)
-      window.location.href = `${base}/export?download=1`;
-      return;
-    }
-    const blob = new Blob([bodyText], { type: 'text/html;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
-
-    // 1. Trigger the file download via <a download>.
+  // Duplicate = hosted account copy. Download = offline HTML export.
+  // These used to be one "Fork" control that only downloaded a file.
+  let pendingDuplicate = false;
+  function downloadExport() {
     const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = `${slug}-v${version}-fork.html`;
+    a.href = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=1`;
+    a.download = `${slug}-v${version}.html`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-
-    // 2. Open the same blob in a new tab so the user sees their fork rendered.
-    //    Small delay so the download starts before the new tab steals focus.
-    setTimeout(() => {
-      window.open(blobUrl, '_blank');
-      // Revoke after a generous interval — the new tab may still be parsing.
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-    }, 250);
+  }
+  function showAccountCopyModal({ title, body, offerDownload }) {
+    closeAuxModal();
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-aux-modal';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(body)}</p>
+        <div class="actions">
+          ${offerDownload ? '<button class="primary" id="tdoc-dup-dl">Download HTML</button>' : ''}
+          <button id="tdoc-dup-close">Close</button>
+        </div>
+      </div>`;
+    document.body.appendChild(bg);
+    document.getElementById('tdoc-dup-close').onclick = closeAuxModal;
+    const dl = document.getElementById('tdoc-dup-dl');
+    if (dl) dl.onclick = () => { downloadExport(); closeAuxModal(); };
+  }
+  async function duplicateDoc() {
+    if (!isPublished) return;
+    if (!identity) {
+      pendingDuplicate = true;
+      startDeviceFlow();
+      return;
+    }
+    try {
+      const r = await fetch('/api/doc/duplicate', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, version }),
+      });
+      let data = {};
+      try { data = await r.json(); } catch {}
+      if (r.status === 401 || data.error === 'sign_in_required') {
+        pendingDuplicate = true;
+        startDeviceFlow();
+        return;
+      }
+      if (data.error === 'account_copy_unavailable') {
+        showAccountCopyModal({
+          title: 'Account copy is not available here',
+          body: data.message || 'This host only lets the worker owner make an account copy. Download the HTML to take the doc offline.',
+          offerDownload: true,
+        });
+        return;
+      }
+      if (data.error === 'islands_not_supported') {
+        showAccountCopyModal({
+          title: 'This doc has interactive widgets',
+          body: data.message || 'Widget islands cannot be duplicated in v1. Download the host HTML instead.',
+          offerDownload: true,
+        });
+        return;
+      }
+      if (!r.ok || !data.ok || !data.url) {
+        showAccountCopyModal({
+          title: 'Could not duplicate',
+          body: data.message || data.error || (`HTTP ${r.status}`),
+          offerDownload: true,
+        });
+        return;
+      }
+      location.href = data.url;
+    } catch (e) {
+      showAccountCopyModal({
+        title: 'Could not duplicate',
+        body: e.message || 'network error',
+        offerDownload: true,
+      });
+    }
   }
   if (isPublished) {
-    const fb = document.getElementById('tdoc-fork-btn');
-    if (fb) fb.onclick = forkAndDownload;
+    const dup = document.getElementById('tdoc-duplicate-btn');
+    if (dup) dup.onclick = (e) => { e.stopPropagation(); duplicateDoc(); };
+    const dl = document.getElementById('tdoc-download-btn');
+    if (dl) dl.onclick = (e) => { e.stopPropagation(); downloadExport(); };
     const sb = document.getElementById('tdoc-share-btn');
     if (sb) sb.onclick = (e) => { e.stopPropagation(); showShareModal(); };
   }
@@ -933,17 +980,9 @@
     const pb = document.getElementById('tdoc-publish-btn');
     if (pb) pb.onclick = (e) => { e.stopPropagation(); showPublishModal(); };
   }
-  function triggerForkDownload(slug, version) {
-    const a = document.createElement('a');
-    a.href = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=1`;
-    a.download = `${slug}-v${version}-fork.html`;
-    document.body.appendChild(a); a.click(); a.remove();
-  }
   if (isFork) {
-    // Save As: same download as Fork, but from within fork mode (no /fork open
-    // since we ARE the fork tab already).
     const sa = document.getElementById('tdoc-saveas-btn');
-    if (sa) sa.onclick = () => triggerForkDownload(slug, version);
+    if (sa) sa.onclick = () => downloadExport();
   }
 
   // Version picker — clicking a row navigates to /d/<slug>/v/<n>. The
@@ -987,10 +1026,10 @@
       e.stopPropagation();
       secMenu.classList.remove('open');
       if (b.dataset.action === 'repo') window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
-      if (b.dataset.action === 'fork') forkAndDownload();
+      if (b.dataset.action === 'duplicate') duplicateDoc();
+      if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
       if (b.dataset.action === 'share') showShareModal();
       if (b.dataset.action === 'publish') showPublishModal();
-      if (b.dataset.action === 'saveas') triggerForkDownload(slug, version);
     };
   });
 
@@ -3025,6 +3064,10 @@
         closeDeviceModal();
         renderIdentity();
         refreshComments();
+        if (pendingDuplicate) {
+          pendingDuplicate = false;
+          duplicateDoc();
+        }
         return;
       }
       // slow_down: GitHub explicitly told us to back off. Bump interval by 5s

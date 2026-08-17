@@ -675,8 +675,8 @@ the host document — it is inert under CSP. Two options:
 2. **Precompute** if an island is overkill: `:checked` panels, a static SVG, or
    a CSS loop, and note in the doc what was simplified.
 
-Fork/export of a doc with islands is not supported in v1 (the downloaded file
-cannot fetch `/widget/` URLs).
+Download / Duplicate of a doc with islands is not supported in v1 (the
+downloaded file cannot fetch `/widget/` URLs; account copy is host HTML only).
 
 ### Default styling — DO NOT re-style the doc
 
