@@ -93,6 +93,23 @@ t('hero board is a sandboxed widget island', () => {
     'dark mode must restore mock reaction emoji after the page invert');
   assert(/html\[data-tdoc-theme="dark"\]\s*\.mc-av\.mc-logo/.test(html),
     'dark mode must restore the terracotta agent mark after the page invert');
+  // e5a7d7c / e58124a: the gold ring belongs to the board, not the island.
+  // The play bar sits outside .board. The island card stays opaque so a
+  // dark-mode invert-of-invert does not flash a white slab.
+  assert(/\.board\s*\{[^}]*border:\s*1px solid #e0b93a/.test(widget),
+    'widget .board must carry the reader ring; it must not sit on iframe.life');
+  assert(/iframe\.life\s*\{[^}]*background:\s*#fff/.test(html),
+    'island card must stay opaque (#fff); transparent iframe comes back white in dark mode');
+  assert(!/iframe\.life\s*\{[^}]*background:\s*transparent/.test(html),
+    'iframe.life must not be transparent');
+  assert(!/\.life\.anchored\s*\{/.test(html),
+    'host must not ring the whole island; that enclosed the play control');
+  // Demo chrome: blue is the page CTA. The mock bar uses a plain wordmark
+  // and a grey version pill so it does not steal those two buttons.
+  assert(!/\.tbar-mark\s*\{[^}]*background:\s*var\(--accent\)/.test(html),
+    'demo tbar-mark must not spend the CTA blue');
+  assert(/\.tbar-v\s*\{[^}]*background:\s*#f0f1f4/.test(html),
+    'demo version chip must be the reader grey pill, not a blue one');
 });
 
 t('carries the SEO head', () => {
@@ -228,6 +245,10 @@ t('hero comment count matches the mock thread', () => {
   assert(!/class="lbl-n"/.test(notes[0]), 'the real margin has no comment-count header');
   assert(/move anchor/i.test(notes[0]), 'real cards lead with the move-anchor row');
   assert(/mc-meta/.test(notes[0]), 'real cards carry a version and date meta row');
+  // Play/Pause lives in the board next to this card. Asking for the
+  // absence of that control reads as a bug, not a demo.
+  assert(!/without a play button/i.test(notes[0]),
+    'Anna must not ask for no play button while Pause sits in the island');
 });
 
 t('agent avatar is a filled Claude disc, not a small glyph', () => {
