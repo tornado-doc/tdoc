@@ -187,6 +187,11 @@
       "n": 37,
       "created": "2026-08-16T23:47:00Z",
       "prompt": "v37: replace the six PLACEHOLDER quotes with same-length tdoc lines; keep the six people; swap OpenTag trusted-by leftovers for agents and hosts tdoc runs on"
+    },
+    {
+      "n": 38,
+      "created": "2026-08-17T00:40:00Z",
+      "prompt": "Ring the Conway board and align the thread to it, so the comment reads as anchored to the artifact"
     }
   ]
 }
