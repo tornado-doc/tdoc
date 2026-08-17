@@ -364,9 +364,29 @@ t('homepage fails safe to the neutral page', () => {
 t('doc view and homepage share one render path', () => {
   // Regression guard: the /d/ route used to inline the whole render. If it
   // grows a second copy, the homepage and doc pages drift on access/CSP.
-  assert(/async function serveDocVersion\(env, req, slug, version\)/.test(worker), 'missing serveDocVersion');
+  assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?\)/.test(worker), 'missing serveDocVersion');
   const occurrences = (worker.match(/injectOverlay\(raw,/g) || []).length;
   assert(occurrences === 1, `injectOverlay(raw, ...) called ${occurrences} times; expected exactly 1 shared call site`);
+});
+
+t('homepage bar drops the slug crumb and the version picker', () => {
+  // `/` is the site, not a doc someone published. Printing the storage slug
+  // ("tornado-doc") and the version it happens to be on tells a first-time
+  // visitor they are reading somebody else's document. The /d/ route keeps
+  // both — same render path, one flag.
+  const fn = worker.match(/async function landingResponse[\s\S]*?\n}\n/);
+  assert(fn, 'landingResponse not found');
+  assert(/serveDocVersion\(env, req, LANDING_SLUG, Number\(latest\), true\)/.test(fn[0]),
+    'homepage no longer marks the render as the landing page');
+  assert(/isLanding: !!isLanding/.test(worker), 'bootCfg no longer carries isLanding');
+
+  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
+  const left = overlay.match(/const leftHtml = `[\s\S]*?`;\n/);
+  assert(left, 'overlay leftHtml block not found');
+  assert(/cfg\.isLanding \? '' :/.test(left[0]),
+    'overlay still renders the slug crumb and version picker on the homepage');
+  assert(/tdoc-bar-mark/.test(left[0].split('cfg.isLanding')[0]),
+    'the tdoc mark must stay outside the landing conditional');
 });
 
 console.log('tdoc.dev / release payload');

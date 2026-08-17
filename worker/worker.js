@@ -996,11 +996,15 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
   return rawHtml + inject;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding) {
   return injectOverlayCfg(rawHtml, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
+    // `/` is the site itself, not a doc someone published. The slug and the
+    // version number are storage detail; printing them in the bar tells a
+    // first-time visitor they are looking at somebody's document.
+    isLanding: !!isLanding,
     // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
     // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
     ownerManage: isOwner ? (ownerManage || null) : null,
@@ -1023,7 +1027,7 @@ const LANDING_SLUG = 'tornado-doc';
 // Returns { ok, response }. `ok:false` carries the real 401/403/404 response
 // for the /d/ route to pass through; the homepage ignores it and falls back to
 // the neutral page, because `/` must never dead-end on an access screen.
-async function serveDocVersion(env, req, slug, version) {
+async function serveDocVersion(env, req, slug, version, isLanding) {
   const gate = await enforceDocAccess(env, req, slug, version);
   if (!gate.ok) return { ok: false, response: gate.response };
   const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
@@ -1064,7 +1068,7 @@ async function serveDocVersion(env, req, slug, version) {
   const nonce = rand(16);
   return {
     ok: true,
-    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce), {
+    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1085,7 +1089,7 @@ async function landingResponse(env, req) {
     const meta = await loadDocMeta(env, LANDING_SLUG);
     const latest = meta?.versions?.[meta.versions.length - 1]?.n;
     if (!latest) return html(landingHtml());
-    const res = await serveDocVersion(env, req, LANDING_SLUG, Number(latest));
+    const res = await serveDocVersion(env, req, LANDING_SLUG, Number(latest), true);
     return res.ok ? res.response : html(landingHtml());
   } catch {
     return html(landingHtml());

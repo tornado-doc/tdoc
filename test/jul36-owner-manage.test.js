@@ -79,7 +79,10 @@ t('doc-view never leaks private doc metadata (version count) to non-owners via t
     'the non-history branch must collapse `versions` to the single viewed version, not the full list');
 });
 
-const injectOverlayStart = worker.indexOf('function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce) {');
+// Anchored on the parameters this file actually reasons about; #127 appends
+// an isLanding flag after `nonce`, and a later caller may append more.
+const injectOverlayStart = worker.search(
+  /function injectOverlay\(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce[^)]*\) \{/);
 const injectOverlayEnd = worker.indexOf('\n}', injectOverlayStart);
 if (injectOverlayStart < 0) throw new Error('injectOverlay() signature not found — did it change?');
 const injectOverlayFn = worker.slice(injectOverlayStart, injectOverlayEnd);
