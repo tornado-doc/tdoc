@@ -369,5 +369,56 @@ t('doc view and homepage share one render path', () => {
   assert(occurrences === 1, `injectOverlay(raw, ...) called ${occurrences} times; expected exactly 1 shared call site`);
 });
 
+console.log('tdoc.dev / release payload');
+
+t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
+  // The working copy under landing/tornado-doc keeps 39 versions and the
+  // review thread. Publishing that as-is would put a version picker and
+  // somebody else's notes on tdoc.dev/. The release script copies only
+  // the latest HTML to v1, rewrites the widget iframe, and writes [].
+  const { execFileSync } = require('child_process');
+  const script = path.join(root, 'bin', 'tdoc-landing-release');
+  const outDir = path.join(root, '.release', 'tornado-doc');
+  const previewDir = path.join(root, '.release', 'tdoc-home');
+  execFileSync(process.execPath, [script], { cwd: root, encoding: 'utf8' });
+  execFileSync(process.execPath, [script, 'tdoc-home'], { cwd: root, encoding: 'utf8' });
+
+  const ignore = fs.readFileSync(path.join(root, '.gitignore'), 'utf8');
+  assert(/^\.release\/$/m.test(ignore), '.release/ must be gitignored so the payload cannot be committed by mistake');
+
+  const srcComments = JSON.parse(fs.readFileSync(path.join(root, 'landing', 'tornado-doc', 'comments.json'), 'utf8'));
+  assert(Array.isArray(srcComments) && srcComments.length > 0,
+    'working copy has no comments to strip; the release script would be a no-op');
+  assert(meta.versions.length > 1,
+    'working copy is a single version; the v39→v1 collapse would be invisible');
+
+  const relMeta = JSON.parse(fs.readFileSync(path.join(outDir, 'meta.json'), 'utf8'));
+  const relComments = JSON.parse(fs.readFileSync(path.join(outDir, 'comments.json'), 'utf8'));
+  const relHtml = fs.readFileSync(path.join(outDir, 'v1', 'index.html'), 'utf8');
+  assert(relMeta.slug === 'tornado-doc', `release slug was ${relMeta.slug}`);
+  assert(relMeta.versions.length === 1 && relMeta.versions[0].n === 1,
+    `release meta must advertise only v1, got ${JSON.stringify(relMeta.versions)}`);
+  assert(!fs.existsSync(path.join(outDir, 'v2')), 'release payload still has a v2 directory');
+  assert(Array.isArray(relComments) && relComments.length === 0,
+    `release comments.json must be empty, got ${relComments.length} thread(s)`);
+  assert(/src="\/d\/tornado-doc\/v\/1\/widget\/conway"/.test(relHtml),
+    'release iframe must point at /d/tornado-doc/v/1/widget/conway');
+  assert(!new RegExp(`/d/tornado-doc/v/${latest}/widget/`).test(relHtml),
+    `release iframe still points at working-copy v${latest}`);
+  assert(fs.existsSync(path.join(outDir, 'v1', 'widgets', 'conway.html')),
+    'release payload must copy widgets/conway.html or the board 404s');
+
+  const previewHtml = fs.readFileSync(path.join(previewDir, 'v1', 'index.html'), 'utf8');
+  assert(/src="\/d\/tdoc-home\/v\/1\/widget\/conway"/.test(previewHtml),
+    'custom-slug release must rewrite the iframe to that slug');
+
+  // tdoc-publish only attaches comments.json when it is a non-empty array.
+  // An empty file is the right local signal; it does not wipe a remote
+  // thread that already exists (preview). First publish to tdoc.dev is clean.
+  const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
+  assert(/type == "array" and length > 0/.test(publish),
+    'tdoc-publish must skip empty comments.json so the release payload does not send a dummy list');
+});
+
 console.log(`\n${pass} passed, ${fail} failed.`);
 process.exit(fail ? 1 : 0);
