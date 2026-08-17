@@ -344,8 +344,19 @@ t('carries no unfinished placeholder content', () => {
   for (const name of ['Josh', 'Brandon', 'Angela F', 'Bruce Z', 'Sam H', 'Sammy']) {
     assert(visible.includes(name), `missing ${name} on the proof wall`);
   }
-  assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Works with/.test(visible), 'trusted-by label should be Works with, not a borrowed user list');
+  // v41: the trusted-by band is our own banner's list, and the owner confirmed
+  // those users are real and verified — so ByteDance is not a leftover, it is
+  // the claim. Coinbase is out because the owner removed it, and GUAZI never
+  // belonged to tdoc at all. Both must stay gone.
+  assert(!/Coinbase|GUAZI/i.test(visible), 'a trusted-by name the owner removed is back');
+  // The band is a user list again, on the owner's instruction. It has to stay
+  // one: relabelling it "Works with" and leaving OpenAI and Berkeley under it
+  // is the mushy version, since neither is a runtime or a host. Agents and
+  // hosts have their own section and must not creep back in here.
+  assert(/Trusted by users from/i.test(visible), 'the trusted-by band lost its label');
+  const band = html.slice(html.indexOf('<div class="marquee">'), html.indexOf('</section>', html.indexOf('<div class="marquee">')));
+  assert(!/i-claude|i-cloudflare|i-cursor|i-vercel|i-gemini/.test(band),
+    'a runtime or host is back in the user list; those belong to the bring-your-own section');
 });
 
 console.log('tdoc.dev / route');

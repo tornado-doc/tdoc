@@ -202,6 +202,11 @@
       "n": 40,
       "created": "2026-08-17T07:20:00Z",
       "prompt": "The Create-your-first-doc button opens onboarding instead of a GitHub markdown file"
+    },
+    {
+      "n": 41,
+      "created": "2026-08-17T13:30:00Z",
+      "prompt": "Trusted-by band lists the organisations from our own banner, without Coinbase"
     }
   ]
 }
