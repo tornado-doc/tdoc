@@ -811,6 +811,16 @@ upload_version() {
   # upload is safe. Default to [] when there's no local comments.json.
   local comments_file="$DOC_DIR/comments.json"
   local payload
+  local widgets_json="{}"
+  local wdir="$DOC_DIR/v${v}/widgets"
+  if [ -d "$wdir" ]; then
+    local wf wname
+    for wf in "$wdir"/*.html; do
+      [ -f "$wf" ] || continue
+      wname="$(basename "$wf" .html)"
+      widgets_json="$(jq -n --argjson acc "$widgets_json" --arg name "$wname" --rawfile html "$wf" '$acc + {($name): $html}')" || return 1
+    done
+  fi
   if [ -f "$comments_file" ] && jq -e 'type == "array" and length > 0' "$comments_file" >/dev/null 2>&1; then
     payload="$(jq -n \
       --arg slug "$SLUG" \
@@ -818,14 +828,16 @@ upload_version() {
       --rawfile html "$html_path" \
       --slurpfile meta "$META_FILE" \
       --slurpfile comments "$comments_file" \
-      '{slug:$slug, version:$version, html:$html, meta: $meta[0], comments: $comments[0]}')"
+      --argjson widgets "$widgets_json" \
+      '{slug:$slug, version:$version, html:$html, meta: $meta[0], comments: $comments[0]} + (if $widgets == {} then {} else {widgets:$widgets} end)')"
   else
     payload="$(jq -n \
       --arg slug "$SLUG" \
       --argjson version "$v" \
       --rawfile html "$html_path" \
       --slurpfile meta "$META_FILE" \
-      '{slug:$slug, version:$version, html:$html, meta: $meta[0]}')"
+      --argjson widgets "$widgets_json" \
+      '{slug:$slug, version:$version, html:$html, meta: $meta[0]} + (if $widgets == {} then {} else {widgets:$widgets} end)')"
   fi
   # Pass the payload via a temp file, not an argument — docs with embedded
   # images exceed ARG_MAX as a curl argument (curl: Argument list too long).

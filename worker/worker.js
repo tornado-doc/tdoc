@@ -941,6 +941,39 @@ function cspHeader(nonce) {
   return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
 }
 
+// Interactive islands (#138). Host documents keep cspHeader(); computation
+// lives in a separately served HTML resource framed with sandbox="allow-scripts"
+// (never allow-same-origin). srcdoc/blob inherit the parent CSP and cannot
+// run author JS — these must be real URLs.
+function isValidWidgetName(name) {
+  return typeof name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
+}
+function widgetCspHeader() {
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
+}
+function isWidgetFrameRequest(dest) {
+  return String(dest || '').toLowerCase() === 'iframe';
+}
+function forceWidgetSandbox(html) {
+  if (typeof html !== 'string') return html;
+  return html.replace(/<iframe\b([^>]*?)>/gi, (full, attrs) => {
+    const srcM = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
+    if (!srcM) return full;
+    const src = String(srcM[1] || srcM[2] || srcM[3] || '').trim();
+    let path;
+    try {
+      const u = new URL(src, 'https://tdoc-widget-src.invalid');
+      if (u.hostname !== 'tdoc-widget-src.invalid') return full;
+      path = u.pathname;
+    } catch {
+      return full;
+    }
+    if (!/^\/d\/[a-z0-9][a-z0-9-]{0,63}\/v\/\d+\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(path)) return full;
+    const stripped = attrs.replace(/\s*sandbox\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    return '<iframe sandbox="allow-scripts"' + stripped + '>';
+  });
+}
+
 // Inject the overlay boot + an arbitrary cfg into a document. Single source of
 // truth for "put window.__TDOC__ + overlay.js before </body>" — used by both
 // the published view and the /fork view (which previously re-implemented this
@@ -953,6 +986,7 @@ function cspHeader(nonce) {
 // choice) get unnonced tags, which simply won't execute under a nonce-based
 // CSP — fail closed, not fail open.
 function injectOverlayCfg(rawHtml, cfg, nonce) {
+  rawHtml = forceWidgetSandbox(rawHtml);
   const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const inject =
@@ -2506,6 +2540,36 @@ export default {
       return html(await indexHtml(env, s));
     }
 
+    // ---- interactive island (sandboxed widget) ----
+    // Separate HTML resource so author JS can run without inheriting the host
+    // document CSP (srcdoc/blob cannot). Must be Dest=iframe: top-level,
+    // embed, and frame loads are 403 so this URL cannot become a same-origin
+    // script gadget. Unique origin is also on the widget CSP (sandbox). No overlay.
+    const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
+    if (widgetMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr, name] = widgetMatch;
+      if (!isValidSlug(slug) || !isValidWidgetName(name)) {
+        return text('invalid slug or widget', { status: 400 });
+      }
+      const dest = req.headers.get('sec-fetch-dest');
+      if (!isWidgetFrameRequest(dest)) {
+        return text('widget must be framed', { status: 403 });
+      }
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
+      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/widgets/${name}.html`);
+      if (!obj) return text(`Not found: ${slug} v${vStr} widget ${name}`, { status: 404 });
+      const raw = method === 'HEAD' ? '' : await obj.text();
+      return html(raw, {
+        headers: {
+          'Content-Security-Policy': widgetCspHeader(),
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'no-store',
+          'Vary': 'Sec-Fetch-Dest',
+        },
+      });
+    }
+
     // ---- doc view ----
     const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
     if (docMatch && (method === 'GET' || method === 'HEAD')) {
@@ -3132,6 +3196,29 @@ export default {
       if (!verify) {
         console.error('[upload] R2 write did not persist:', r2Key);
         return json({ error: 'r2_write_lost', message: 'PUT succeeded but the key is not readable. Re-deploy the worker; the R2 binding may be stale.' }, { status: 500 });
+      }
+      const widgets = body.widgets;
+      if (widgets != null) {
+        if (typeof widgets !== 'object' || Array.isArray(widgets)) {
+          return json({ error: 'widgets must be an object of name → html' }, { status: 400 });
+        }
+        const names = Object.keys(widgets);
+        if (names.length > 32) return json({ error: 'too many widgets' }, { status: 400 });
+        for (const wname of names) {
+          if (!isValidWidgetName(wname)) return json({ error: 'invalid_widget_name', name: wname }, { status: 400 });
+          const whtml = widgets[wname];
+          if (typeof whtml !== 'string') return json({ error: 'widget html must be a string', name: wname }, { status: 400 });
+          if (whtml.length > 512 * 1024) return json({ error: 'widget too large', name: wname }, { status: 400 });
+          const wKey = `docs/${slug}/v${verNum}/widgets/${wname}.html`;
+          try {
+            await env.DOCS.put(wKey, whtml, {
+              httpMetadata: { contentType: 'text/html; charset=utf-8' },
+            });
+          } catch (e) {
+            console.error('[upload] R2 widget put failed:', e.message);
+            return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+          }
+        }
       }
       if (incoming) {
         try {
