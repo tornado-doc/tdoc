@@ -52,6 +52,15 @@ fs.writeFileSync(path.join(out, 'meta.json'), JSON.stringify({
   title: meta.title,
   created: meta.created,
   versions: [{ n: 1, created: latest.created, prompt: 'tdoc landing page' }],
+  // /api/upload applies this. A homepage is public by definition, and
+  // commenting stays open because being commentable is the pitch. History
+  // is owner-only: there is one version, and nobody needs our archive.
+  access: {
+    visibility: 'public',
+    history_visibility: 'owner',
+    commenting: 'signed_in',
+    allowed_users: [],
+  },
 }, null, 2) + '\n');
 fs.writeFileSync(path.join(out, 'comments.json'), '[]\n');
 
