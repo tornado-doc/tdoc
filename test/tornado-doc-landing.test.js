@@ -440,5 +440,41 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
     'tdoc-publish must skip empty comments.json so the release payload does not send a dummy list');
 });
 
+t('release payload carries the homepage access policy', () => {
+  // /api/upload writes meta.access. Without it, tdoc-publish defaults a
+  // brand-new access block to unlisted, and whoever publishes the homepage
+  // has to remember --visibility public --history owner --commenting signed_in.
+  // The payload states the policy so the flags are not load-bearing.
+  const { execFileSync } = require('child_process');
+  const script = path.join(root, 'bin', 'tdoc-landing-release');
+  const outDir = path.join(root, '.release', 'tornado-doc');
+  execFileSync(process.execPath, [script], { cwd: root, encoding: 'utf8' });
+
+  const relMeta = JSON.parse(fs.readFileSync(path.join(outDir, 'meta.json'), 'utf8'));
+  assert(relMeta.access && typeof relMeta.access === 'object',
+    'release meta.json has no access block');
+  assert(relMeta.access.visibility === 'public',
+    `homepage must be public, got ${relMeta.access.visibility}`);
+  assert(relMeta.access.history_visibility === 'owner',
+    `homepage history must be owner-only, got ${relMeta.access.history_visibility}`);
+  assert(relMeta.access.commenting === 'signed_in',
+    `homepage commenting must be signed_in, got ${relMeta.access.commenting}`);
+  assert(Array.isArray(relMeta.access.allowed_users) && relMeta.access.allowed_users.length === 0,
+    `homepage allowlist must be empty, got ${JSON.stringify(relMeta.access.allowed_users)}`);
+
+  const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
+  // The access block only matters if it is in the upload body.
+  assert(/meta: \$meta\[0\]/.test(publish),
+    'tdoc-publish no longer sends local meta.json, so payload access never reaches /api/upload');
+  // --visibility public must merge, not replace. Otherwise the documented
+  // publish line would wipe history_visibility / commenting back to defaults.
+  assert(/\.access\.visibility = \(if \$vis != "" then \$vis else \(\.access\.visibility \/\/ "unlisted"\) end\)/.test(publish),
+    'tdoc-publish access merge no longer keeps unspecified fields from the payload');
+
+  const workerSrc = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
+  assert(/if \(incoming\.access\)/.test(workerSrc) && /incoming\.access = normalizeAccess\(validatedAccess\.access/.test(workerSrc),
+    '/api/upload no longer applies incoming.access; the payload policy would be dropped');
+});
+
 console.log(`\n${pass} passed, ${fail} failed.`);
 process.exit(fail ? 1 : 0);
