@@ -3,10 +3,19 @@
 <title>Conway</title>
 <style>
   html,body{margin:0;height:100%;background:#fff}
-  canvas{display:block;width:100%;height:100%}
+  body{display:flex;flex-direction:column}
+  canvas{display:block;width:100%;flex:1;min-height:0}
+  /* The control lives in here, not in the document: the host page runs no
+     script of its own and this frame has a unique origin, so nothing outside
+     can reach the loop. */
+  .bar{flex:none;display:flex;justify-content:center;padding:8px 0 10px}
+  button{font:14px system-ui,-apple-system,sans-serif;background:#fff;color:#10121a;
+    border:1px solid #e4e7ee;border-radius:8px;padding:6px 16px;cursor:pointer}
+  button:hover{border-color:#c9cfdb}
 </style></head>
 <body>
 <canvas id="c"></canvas>
+<div class="bar"><button id="t" type="button" aria-pressed="false">Pause</button></div>
 <script>
 // A real Game of Life: neighbours counted every generation, not a sprite on a
 // keyframe. It runs here because a widget is framed with sandbox="allow-scripts"
@@ -60,14 +69,22 @@
   }
 
   build(); draw();
-  var timer = setInterval(function () { step(); draw(); }, MS);
+  var timer = null, btn = document.getElementById('t');
+  function run() { if (!timer) timer = setInterval(function () { step(); draw(); }, MS); paint(); }
+  function halt() { if (timer) { clearInterval(timer); timer = null; } paint(); }
+  function paint() {
+    btn.textContent = timer ? 'Pause' : 'Play';
+    btn.setAttribute('aria-pressed', timer ? 'false' : 'true');
+  }
+  btn.addEventListener('click', function () { timer ? halt() : run(); });
+  run();
   var rt;
   addEventListener('resize', function () {
     clearTimeout(rt);
     rt = setTimeout(function () { build(); draw(); }, 150);
   });
   // Respect the same preference the CSS version honoured.
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) clearInterval(timer);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) halt();
 })();
 </script>
 </body></html>

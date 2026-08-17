@@ -96,7 +96,7 @@
     /* The board is a widget island now: a separate document framed with
        sandbox="allow-scripts", so it runs a real generation loop while the
        host page still executes none of its own script. */
-    iframe.life { width:100%; aspect-ratio:16/10; display:block; border:1px solid var(--rule); border-radius:7px; background:#fff; }
+    iframe.life { width:100%; aspect-ratio:16/11; display:block; border:1px solid var(--rule); border-radius:7px; background:#fff; }
     /* An anchored artifact, ringed the way the reader rings a selected one, so
        the thread beside it reads as a note about the board and not the page. */
     .life.anchored { border-color:#e0b93a; box-shadow:0 0 0 3px #fff2b8; }
@@ -127,6 +127,13 @@
     
     .mc-av.mc-logo { background:#D97757; border:0; }
     .mc-logo svg { width:14px; height:14px; fill:#fff; display:block; }
+    /* Dark mode repaints the page with one invert filter. Reaction emoji are
+       OS colour bitmaps and the agent mark is a brand colour, so both come
+       back wrong. Flip them a second time, the way the overlay restores its
+       own reaction chips. */
+    .emo { display:inline-block; line-height:1; }
+    html[data-tdoc-theme="dark"] .emo,
+    html[data-tdoc-theme="dark"] .mc-av.mc-logo { filter:invert(1) hue-rotate(180deg); }
     .mc-text { color:#111; line-height:1.5; }
     .mc-state { display:inline-block; font-size:11px; font-weight:700; color:#1a7340; background:#e8f5ed; border:1px solid #cfe0d6; border-radius:999px; padding:1px 8px; margin:0 0 7px; }
     .mc-login { font-weight:650; color:#111; font-size:13px; }
@@ -395,14 +402,14 @@ Everything else dies.</div>
             <span class="mc-state">&#10003; fixed &middot; v2</span>
             <div class="mc-login">Anna</div>
             <div class="mc-text">Can the grid keep moving without a play button?</div>
-            <div class="mc-reacts"><span class="mc-r on">&#9989; 1</span><span class="mc-r add">&#9786;</span></div>
+            <div class="mc-reacts"><span class="mc-r on"><span class="emo">&#9989;</span> 1</span><span class="mc-r add">&#9786;</span></div>
             <div class="mc-meta"><span>v1 &middot; Aug 16 at 3:09 AM</span><span class="mc-actions"><span class="a">Reply</span><span class="del">delete</span></span></div>
             <div class="mc-replies">&#8964; 1 reply</div>
             <div class="mc-reply">
               <div class="mc-author"><span class="mc-av mc-logo"><svg aria-hidden="true"><use href="#i-claude"/></svg></span><span class="mc-login">Claude</span></div>
               <span class="mc-state">&#10003; applied</span>
               <div class="mc-text">Runs a real generation loop now, in a sandboxed island, so the page itself still ships no script.</div>
-              <div class="mc-reacts"><span class="mc-r on red">&#10084;&#65039; 1</span><span class="mc-r add">&#9786;</span></div>
+              <div class="mc-reacts"><span class="mc-r on red"><span class="emo">&#10084;&#65039;</span> 1</span><span class="mc-r add">&#9786;</span></div>
               <div class="mc-meta"><span>Aug 16 at 3:31 AM</span><span class="mc-actions"><span class="a">Reply</span><span class="del">delete</span></span></div>
             </div>
           </div>
