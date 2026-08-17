@@ -4,7 +4,7 @@
 //   DOCS   — R2 bucket (key: docs/<slug>/v<N>/index.html)
 //   META   — KV namespace
 // Vars:
-//   GITHUB_CLIENT_ID — hardcoded "Ov23liZ1UAGOchvKPmlS"
+//   GITHUB_CLIENT_ID — from wrangler [vars]; SoT is shared/github-oauth.js
 // Secrets:
 //   TDOC_UPLOAD_TOKEN — shared secret for /api/upload from `tdoc publish`
 //
@@ -1011,8 +1011,17 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
 }
 
 // Neutral landing page served at `/`. No catalog, no slug list — just
-// brand + a link to the open-source project. Docs are link-only.
-function landingHtml() {
+// brand + sign-in (when auth is configured) + a link to the open-source
+// project. Docs are link-only. `notice` is an optional toast reason when
+// we bounce users here from /me or an unknown path.
+function landingHtml(env, notice) {
+  const authOk = !!(env && String(env.GITHUB_CLIENT_ID || '').trim());
+  const toastMsg = ({
+    me: 'My docs is only available after you sign in as the worker owner.',
+    signin: 'Sign in with GitHub to continue.',
+    notfound: 'That page was not found. Sign in or open a doc from its shared link.',
+  })[notice] || '';
+  const toastJson = JSON.stringify(toastMsg);
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tdoc</title>
@@ -1025,11 +1034,120 @@ function landingHtml() {
   a { color: #1652f0; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .sub { margin-top: 14px; font-size: 13px; color: #888; }
+  .actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+  button.signin { font: inherit; padding: 8px 16px; border-radius: 8px; border: none;
+    background: #1652f0; color: #fff; font-weight: 600; cursor: pointer; }
+  button.signin:hover { background: #1245d0; }
+  button.signin:disabled { opacity: 0.6; cursor: default; }
+  #toast { position: fixed; top: 16px; right: 16px; max-width: min(360px, calc(100vw - 32px));
+    background: #111; color: #fff; padding: 12px 14px; border-radius: 10px; font-size: 13px;
+    line-height: 1.4; box-shadow: 0 8px 24px rgba(0,0,0,0.18); opacity: 0;
+    transform: translateY(-6px); transition: opacity .18s, transform .18s; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  .status { font-size: 13px; color: #888; min-height: 1.2em; }
 </style></head><body>
   <h1>tdoc</h1>
   <p>Prompt-native, commentable documents.</p>
+  <div class="actions">
+    ${authOk ? '<button type="button" class="signin" id="signin">Sign in with GitHub</button>' : ''}
+  </div>
+  <p class="status" id="status"></p>
   <p class="sub">Open a document from its shared link ·
     <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
+  <div id="toast" role="status" aria-live="polite"></div>
+<script>
+(function () {
+  var toastMsg = ${toastJson};
+  var toastEl = document.getElementById('toast');
+  if (toastMsg && toastEl) {
+    toastEl.textContent = toastMsg;
+    toastEl.classList.add('show');
+    setTimeout(function () { toastEl.classList.remove('show'); }, 5200);
+  }
+  var btn = document.getElementById('signin');
+  var status = document.getElementById('status');
+  if (!btn) return;
+  var pollTimer = null;
+  var pollInterval = 5;
+  function setStatus(t) { if (status) status.textContent = t || ''; }
+  function schedule(code) {
+    pollTimer = setTimeout(function () { poll(code); }, pollInterval * 1000);
+  }
+  async function poll(code) {
+    pollTimer = null;
+    try {
+      var r = await fetch('/api/auth/device/poll', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_code: code })
+      });
+      var data = await r.json();
+      if (data.ok) {
+        setStatus('Signed in. Opening My docs…');
+        window.location.href = '/me';
+        return;
+      }
+      if (data.error === 'slow_down') {
+        pollInterval = Math.max(pollInterval + 5, Number(data.interval) || 0);
+        schedule(code); return;
+      }
+      if (data.error === 'authorization_pending' || (data.pending && !data.error)) {
+        schedule(code); return;
+      }
+      if (data.error === 'expired_token' || data.error === 'access_denied') {
+        setStatus('Code expired or denied. Try again.');
+        btn.disabled = false; return;
+      }
+      if (data.error || !r.ok) {
+        setStatus('Sign-in failed: ' + (data.message || data.error || ('HTTP ' + r.status)));
+        btn.disabled = false; return;
+      }
+      schedule(code);
+    } catch (e) {
+      setStatus('Network error — retrying…');
+      schedule(code);
+    }
+  }
+  btn.onclick = async function () {
+    btn.disabled = true;
+    setStatus('Starting GitHub sign-in…');
+    try {
+      var r = await fetch('/api/auth/device/start', { method: 'POST' });
+      var data = await r.json();
+      if (!r.ok || data.error || !data.user_code || !data.verification_uri) {
+        setStatus('Sign-in error: ' + ((data && (data.message || data.error)) || ('HTTP ' + r.status)));
+        btn.disabled = false; return;
+      }
+      var uri = data.verification_uri_complete || data.verification_uri;
+      setStatus('Code ' + data.user_code + ' — approve in the GitHub tab, then return here.');
+      try {
+        var u = new URL(String(uri));
+        if (u.protocol === 'https:' && /(^|\\.)github\\.com$/.test(u.hostname)) window.open(uri, '_blank');
+      } catch (_) {}
+      pollInterval = Math.max(5, data.interval || 5);
+      schedule(data.device_code);
+    } catch (e) {
+      setStatus('Sign-in error: could not reach the sign-in service.');
+      btn.disabled = false;
+    }
+  };
+})();
+</script>
+</body></html>`;
+}
+
+function authDoneHtml() {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — signed in</title>
+<style>
+  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh; margin: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #111; background: #fff; gap: 8px; }
+  h1 { font-size: 22px; margin: 0; color: #1652f0; }
+  p { color: #666; margin: 0; }
+</style></head><body>
+  <h1>You're signed in</h1>
+  <p>You can close this tab and return to tdoc.</p>
 </body></html>`;
 }
 
@@ -2522,19 +2640,31 @@ export default {
 
     // ---- landing (NO public catalog) ----
     // `/` never lists docs. Docs are only reachable via their direct link.
-    // A neutral branded page points at the open-source project.
-    if (p === '/' && method === 'GET') return html(landingHtml());
+    // A neutral branded page points at the open-source project; optional
+    // ?notice=… shows a toast when we bounced the user here.
+    if (p === '/' && method === 'GET') {
+      const notice = (url.searchParams.get('notice') || '').trim();
+      return html(landingHtml(env, notice));
+    }
+
+    // Soft landing for the OAuth App "Authorization callback URL". Device
+    // Flow does not need a callback, but GitHub may still redirect here
+    // after Approve — serve a friendly page instead of a 404.
+    if ((p === '/auth/done' || p === '/auth/github/callback') && method === 'GET') {
+      return html(authDoneHtml());
+    }
 
     // ---- owner-only doc catalog ----
     // `/me` returns the list of every doc hosted on THIS worker, but only
     // to the configured owner (TDOC_OWNER) when signed in. Everyone else
-    // gets redirected to the GitHub repo — no slug enumeration.
+    // is sent to the landing page (with a toast) — never to github.com.
     if (p === '/me' && method === 'GET') {
       const s = await getSession(env, req);
       if (!isOwnerSession(env, s)) {
+        const notice = sessionLogin(s) ? 'me' : 'signin';
         return new Response(null, {
           status: 302,
-          headers: { Location: 'https://github.com/tornado-doc/tdoc' },
+          headers: { Location: `/?notice=${notice}` },
         });
       }
       return html(await indexHtml(env, s));
@@ -2756,6 +2886,7 @@ export default {
           device_code: r.device_code,
           user_code: r.user_code,
           verification_uri: r.verification_uri,
+          verification_uri_complete: r.verification_uri_complete || null,
           expires_in: r.expires_in,
           interval: r.interval,
         });
@@ -3340,6 +3471,14 @@ export default {
       return json({ ok: true });
     }
 
+    // Browser navigations to unknown paths bounce to the landing page with a
+    // toast — not a raw 404 and never github.com. API-ish methods stay 404.
+    if (method === 'GET' || method === 'HEAD') {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: '/?notice=notfound' },
+      });
+    }
     return text('Not found', { status: 404 });
   },
 };

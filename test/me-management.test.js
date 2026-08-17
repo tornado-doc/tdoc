@@ -132,5 +132,25 @@ t('/me does not introduce a bespoke cookie-only admin-auth path', () => {
   assert(!worker.includes('isSameOriginRequest'), 'same-origin is not sufficient when docs are arbitrary same-origin HTML');
 });
 
+t('/me non-owner bounce goes to landing with notice, not github.com', () => {
+  const meStart = worker.indexOf("if (p === '/me' && method === 'GET')");
+  const meEnd = worker.indexOf('// ---- doc view ----', meStart);
+  assert(meStart >= 0 && meEnd > meStart, '/me route block missing');
+  const meRoute = worker.slice(meStart, meEnd);
+  assert(meRoute.includes("Location: `/?notice=${notice}`") || meRoute.includes("Location: '/?notice="),
+    '/me must redirect to landing ?notice=…');
+  assert(!meRoute.includes('github.com/tornado-doc/tdoc'),
+    '/me must not redirect to the GitHub repo');
+});
+
+t('landing supports sign-in + toast notices; /auth/done soft-lands OAuth callback', () => {
+  assert(worker.includes('function landingHtml(env, notice)'), 'landingHtml must take a notice');
+  assert(worker.includes("id=\"signin\""), 'landing must offer Sign in with GitHub');
+  assert(worker.includes('function authDoneHtml('), 'authDoneHtml missing');
+  assert(worker.includes("/auth/done"), 'must serve /auth/done for OAuth callback URL');
+  assert(worker.includes("Location: '/?notice=notfound'"),
+    'unknown GET paths must bounce to landing with notfound notice');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
