@@ -2861,7 +2861,7 @@ export default {
       const defaultAttach = kind === 'export';
       const forceDownload = dl === '1' || (defaultAttach && dl !== '0');
       const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': cspHeader(nonce) };
-      if (forceDownload) headers['Content-Disposition'] = `attachment; filename="${slug}-v${vStr}-fork.html"`;
+      if (forceDownload) headers['Content-Disposition'] = `attachment; filename="${slug}-v${vStr}-download.html"`;
       return new Response(finalHtml, { status: 200, headers });
     }
 
