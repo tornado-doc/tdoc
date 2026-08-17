@@ -54,6 +54,30 @@ t('runs no author JavaScript', () => {
   assert(!hrefs.some((h) => /^javascript:/i.test(h)), 'page contains a javascript: URL');
 });
 
+t('hero board is a sandboxed widget island', () => {
+  // v39: the board is a real Game of Life, not a five-cell sprite on a
+  // CSS keyframe. Computation lives in widgets/conway.html, framed with
+  // sandbox="allow-scripts" and no allow-same-origin. The host stays
+  // script-free; the island is a unique origin.
+  assert(/<iframe\b[^>]*class="[^"]*\blife\b/.test(html), 'missing iframe.life');
+  assert(/src="\/d\/tornado-doc\/v\/\d+\/widget\/conway"/.test(html),
+    'iframe must point at this doc\'s /widget/conway route');
+  const iframe = html.match(/<iframe\b[^>]*class="[^"]*\blife\b[^>]*>/);
+  assert(iframe, 'could not isolate the life iframe');
+  assert(/sandbox="allow-scripts"/.test(iframe[0]),
+    `widget iframe sandbox must be allow-scripts only: ${iframe[0]}`);
+  assert(!/allow-same-origin/.test(iframe[0]),
+    'widget iframe must not include allow-same-origin');
+  const widgetPath = path.join(root, 'landing', 'tornado-doc', `v${latest}`, 'widgets', 'conway.html');
+  assert(fs.existsSync(widgetPath), `missing ${widgetPath}`);
+  const widget = fs.readFileSync(widgetPath, 'utf8');
+  assert(/<script\b/.test(widget), 'widget file must contain the generation script');
+  assert(/nxt\[/.test(widget) && /cur\[/.test(widget),
+    'widget must step a neighbour grid (nxt/cur), not animate a sprite');
+  // The CSS-sprite workaround must stay gone on the host.
+  assert(!/<g class="glider"/.test(html), 'CSS-sprite glider group still in the host');
+});
+
 t('carries the SEO head', () => {
   assert(/<title>[^<]*tdoc[^<]*<\/title>/i.test(html), 'title does not mention tdoc');
   // Upper bound is Google's snippet truncation (~160 chars) — a longer one is
