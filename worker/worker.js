@@ -8,7 +8,8 @@
 // Secrets:
 //   TDOC_UPLOAD_TOKEN — shared secret for /api/upload from `tdoc publish`
 //
-// IMPORTANT: This file contains placeholder strings `__TDOC_OVERLAY_JS__` and
+// IMPORTANT: This file contains placeholder strings `__TDOC_OVERLAY_JS__`,
+// `__TDOC_ONBOARD_JS__` and
 // `__TDOC_BUILD_INFO__`. The publish script replaces them before deploy,
 // producing worker/_worker.bundled.js. Do not deploy worker.js directly — the
 // overlay/provenance would be missing.
@@ -997,7 +998,10 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
 }
 
 function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce) {
-  return injectOverlayCfg(rawHtml, {
+  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG) && nonce
+    ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
+    : rawHtml;
+  return injectOverlayCfg(withOnboard, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
@@ -1009,6 +1013,12 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
   }, nonce);
 }
+
+// Onboarding modal, served under the page nonce. It is product UI rather than
+// author content, which is why it lives here: a published doc's own <script>
+// never executes (#138). Injected only on the landing and start slugs, and the
+// CTA keeps href="/start" so the flow degrades to that page with scripting off.
+const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;
 
 // The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
 // this published tdoc rather than a hardcoded marketing page, so the landing
