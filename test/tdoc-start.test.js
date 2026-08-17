@@ -46,6 +46,17 @@ t('offers every supported runtime', () => {
   assert(html.includes('/plugin marketplace add tornado-doc/tdoc'), 'missing marketplace line');
 });
 
+t('step 3 asks the host for a token, not for a doc', () => {
+  // There is no server-side doc creation and there should not be: the page is
+  // written by the user's agent on their machine. The web's job is to hand
+  // over the hosted publish token so `publish` works with no setup.
+  const js = fs.readFileSync(path.join(root, 'server', 'onboard.js'), 'utf8');
+  assert(/\/api\/hosted\/token/.test(js), 'step 3 must call the real hosted-token endpoint');
+  assert(!/onboard\/create/.test(js), 'no invented creation endpoint');
+  assert(/hosted_registration_disabled/.test(js),
+    'closed signup must be handled, not left as a generic error');
+});
+
 t('says what to say, not what to type', () => {
   // The whole premise is that you talk to the agent. A deploy command in the
   // hosting panel would contradict the page it sits on.

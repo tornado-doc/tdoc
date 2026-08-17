@@ -36,7 +36,11 @@
   function api(p, body) {
     return fetch(p, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' })
-      .then(function (r) { return r.json().catch(function () { return {}; }); });
+      .then(function (r) {
+        return r.json().catch(function () {
+          return { error: 'unavailable', message: 'This host does not offer that (' + r.status + ').' };
+        });
+      });
   }
   function close() { if (st.timer) clearInterval(st.timer); st.timer = null; if (bg) bg.remove(); bg = null; }
 
@@ -78,7 +82,11 @@
     bd.appendChild(wrap);
     wrap.innerHTML = '<p style="margin:0">Starting…</p>';
     api('/api/auth/device/start', {}).then(function (r) {
-      if (r.error) { wrap.innerHTML = ''; wrap.appendChild(el('p', 'tdo-err', r.message || r.error)); return; }
+      if (r.error || !r.user_code) {
+        wrap.innerHTML = '';
+        wrap.appendChild(el('p', 'tdo-err', r.message || r.error || 'Sign in is not available on this host.'));
+        return;
+      }
       st.dev = r;
       wrap.innerHTML = '';
       wrap.appendChild(el('div', 'tdo-code', r.user_code));
@@ -118,28 +126,42 @@
       g.appendChild(b);
     });
     bd.appendChild(g);
-    var next = footer('Create it', function () { stepCreate(); }, !st.kind);
+    var next = footer('Next', function () { stepToken(); }, !st.kind);
   }
 
-  // ---- step 3: create --------------------------------------------------
-  function stepCreate() {
+  // ---- step 3: hosted token ---------------------------------------------
+  // There is no server-side "create a doc" call, and there should not be: the
+  // page is written by YOUR agent on your machine. What the web can do is hand
+  // you the hosted publish token so `publish` works with no account setup.
+  function stepToken() {
     st.step = 2;
-    var bd = shell('Making your first doc…', 'This takes a few seconds.');
+    var bd = shell('One line to paste', 'Your agent writes the page. This lets it publish without you setting up a host.');
     var out = el('div'); bd.appendChild(out);
-    api('/api/onboard/create', { kind: st.kind }).then(function (r) {
-      if (r && r.url) {
-        shell('It is live.', 'Share the link. Anyone with it can comment, and your agent answers.');
-        var a = el('a', 'tdo-code', r.url);
-        a.href = r.url; a.style.display = 'block'; a.style.textDecoration = 'none';
-        box.querySelector('.tdo-bd').appendChild(a);
-        footer('Open it', function () { location.href = r.url; });
+    out.innerHTML = '<p style="margin:0">Getting your token…</p>';
+    api('/api/hosted/token', {}).then(function (r) {
+      out.innerHTML = '';
+      var want = st.kind === 'other' ? 'a page' : 'a ' + st.kind;
+      if (r && r.token) {
+        out.appendChild(el('p', null, 'Paste this into your agent:'));
+        var box = el('div', 'tdo-code');
+        box.style.cssText = 'font-size:13px;letter-spacing:0;text-align:left;line-height:1.6';
+        box.textContent = 'Set my tdoc hosted token to ' + r.token + ', then make me ' + want + ' and publish it.';
+        out.appendChild(box);
+        out.appendChild(el('p', 'tdo-note', 'Published to ' + (r.base || 'tdoc.dev') + '. You can switch to your own Cloudflare or Vercel later by asking.'));
+        footer('Done', close);
         return;
       }
-      out.appendChild(el('p', 'tdo-err',
-        (r && (r.message || r.error)) || 'Could not create it from here yet.'));
-      out.appendChild(el('p', 'tdo-note',
-        'You can still do this from your agent: say “make me ' +
-        (st.kind === 'other' ? 'a page' : 'a ' + st.kind) + ' and publish it”.'));
+      if (r && r.error === 'hosted_registration_disabled') {
+        out.appendChild(el('p', null, 'Hosted signup is closed right now, so publishing goes to a host you own.'));
+        var b2 = el('div', 'tdo-code');
+        b2.style.cssText = 'font-size:13px;letter-spacing:0;text-align:left;line-height:1.6';
+        b2.textContent = 'Make me ' + want + ' and publish it to my own Cloudflare.';
+        out.appendChild(b2);
+        out.appendChild(el('p', 'tdo-note', 'Your agent walks the couple of browser clicks Cloudflare needs.'));
+        footer('Done', close);
+        return;
+      }
+      out.appendChild(el('p', 'tdo-err', (r && (r.message || r.error)) || 'Could not reach the host.'));
       footer('Read the steps', function () { location.href = '/start'; });
     });
   }
@@ -156,6 +178,8 @@
       if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
     });
     document.body.appendChild(bg);
+    var cfg = window.__TDOC__ || {};
+    if (cfg.authConfigured === false) { stepPick(); return; }  // local Studio: anonymous by design
     api('/api/auth/me').then(function (me) {
       if (me && me.login) { st.me = me; stepPick(); } else { stepAuth(); }
     });
