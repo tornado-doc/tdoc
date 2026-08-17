@@ -997,7 +997,14 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
 }
 
 function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding) {
-  return injectOverlayCfg(rawHtml, {
+  // The onboarding modal is product UI, so it ships from here under the page
+  // nonce. The doc's own <script> would never run (#138), which is why the
+  // landing CTA still carries a plain href: with scripting off the visitor
+  // gets the /start page instead of a dead button.
+  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG) && nonce
+    ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
+    : rawHtml;
+  return injectOverlayCfg(withOnboard, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
@@ -1018,6 +1025,14 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
 // this published tdoc rather than a hardcoded marketing page, so the landing
 // page is authored, reviewed, and versioned through tdoc itself.
 const LANDING_SLUG = 'tornado-doc';
+
+// The doc behind `/start`: the same onboarding, written as a page, for anyone
+// who has scripting off or who wants to read the steps before running them.
+const START_SLUG = 'tdoc-start';
+
+// The onboarding modal, bundled in by bin/tdoc-bundle. Kept as a placeholder
+// here so the source file stays readable and the bundle stays one artifact.
+const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -1084,12 +1099,12 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
 // than a 404 or a sign-in wall. Every worker deployed from this repo runs this
 // code, but only tdoc.dev has the doc — everyone else's `/` keeps the neutral
 // page with no configuration.
-async function landingResponse(env, req) {
+async function landingResponse(env, req, slug = LANDING_SLUG) {
   try {
-    const meta = await loadDocMeta(env, LANDING_SLUG);
+    const meta = await loadDocMeta(env, slug);
     const latest = meta?.versions?.[meta.versions.length - 1]?.n;
     if (!latest) return html(landingHtml(env));
-    const res = await serveDocVersion(env, req, LANDING_SLUG, Number(latest), true);
+    const res = await serveDocVersion(env, req, slug, Number(latest), true);
     return res.ok ? res.response : html(landingHtml(env));
   } catch {
     return html(landingHtml(env));
@@ -2738,6 +2753,13 @@ export default {
       const notice = (url.searchParams.get('notice') || '').trim();
       if (notice) return html(landingHtml(env, notice));
       return landingResponse(env, req);
+    }
+
+    // `/start` is the homepage CTA's no-script destination: the same
+    // onboarding written as a page. Same fail-safe as `/` — if that doc is
+    // missing, the visitor gets the neutral page, never a 404.
+    if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, START_SLUG);
     }
 
     // Soft landing for the OAuth App "Authorization callback URL". Device

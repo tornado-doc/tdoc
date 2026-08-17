@@ -21,6 +21,7 @@ const generatedBy = process.env.TDOC_GENERATED_BY || 'tdoc-bundle';
 
 const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
 const overlay = fs.readFileSync(path.join(skill, 'server/overlay.js'), 'utf8');
+const onboard = fs.readFileSync(path.join(skill, 'server/onboard.js'), 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -53,6 +54,11 @@ if (replaced === worker) {
   console.error('bundle: failed to find OVERLAY_JS placeholder');
   process.exit(1);
 }
+replaced = replaced.replace(
+  /const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;/,
+  'const ONBOARD_JS = ' + JSON.stringify(onboard) + ';'
+);
+
 const withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,
   'const TDOC_BUILD_INFO = ' + JSON.stringify(build) + ';'
