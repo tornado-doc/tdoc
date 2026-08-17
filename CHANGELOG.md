@@ -34,6 +34,10 @@ file and `.claude-plugin/plugin.json`.
   Actions and had never been `wrangler secret put` onto the Worker.
   Re-running that workflow with `sync_upload_token` writes the secret
   once. Automatic publishes still do not rotate it.
+- **Homepage verify no longer fails a live landing page.** `set -o pipefail`
+  plus `echo "$body" | grep -q` SIGPIPEs on the 300kB homepage, so a
+  successful ship looked like the fallback. The check now uses bash
+  `[[ ]]`.
 - **`DELETE /api/doc` fails closed when hosted `release_owner` fails** and the
   Durable Object binding is present, so a 200 cannot leave the slug parked.
   Vercel (no `COMMENTS`) still returns 200 — there was never a reservation.

@@ -515,6 +515,10 @@ t('shipping the homepage ships content, not just worker code', () => {
   // gate, wrong slug). Green must mean the homepage actually renders.
   assert(/is still serving the neutral fallback/.test(content),
     'publish workflow must fail when tdoc.dev/ falls back to the neutral page');
+  assert(/\[\[ "\$body" == \*'A doc that answers its own comments'\*/.test(content),
+    'homepage verify must use bash [[ ]], not echo|grep -q under pipefail');
+  assert(!/echo "\$body" \| grep -q/.test(content),
+    'echo|grep -q SIGPIPEs on a 300kB landing page and fails a successful ship');
   // First merge: the live worker does not yet have landingResponse. A
   // push-triggered publish would GET tdoc.dev/ against that old worker
   // and fail the isLanding check. Wait for deploy tdoc.dev instead.

@@ -160,10 +160,13 @@ jobs:
           # landingHtml() is the neutral page. If it comes back, the route is
           # deployed but the doc is not readable, and the run must not be green.
           # KV is eventually consistent; retry so a one-second lag is not red.
+          # Do not pipe the body into a quiet grep under pipefail: quiet
+          # grep closes the pipe on the first match, the writer gets SIGPIPE,
+          # and a successful homepage looks like a miss. Bash [[ ]] does not.
           for i in 1 2 3 4 5 6 7 8 9 10; do
             body=$(curl -sS https://tdoc.dev/)
-            if echo "$body" | grep -q 'A doc that answers its own comments' \
-              && echo "$body" | grep -q '"isLanding":true'; then
+            if [[ "$body" == *'A doc that answers its own comments'* \
+              && "$body" == *'"isLanding":true'* ]]; then
               echo "tdoc.dev/ is serving the landing doc."
               exit 0
             fi
