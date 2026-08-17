@@ -28,6 +28,12 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **tdoc.dev homepage publish no longer dies on a present-but-unwritten token.**
+  `#129` merged and deployed the Worker, then `publish-landing.yml` got
+  `401 unauthorized` because `TDOC_DEV_UPLOAD_TOKEN` existed in GitHub
+  Actions and had never been `wrangler secret put` onto the Worker.
+  Re-running that workflow with `sync_upload_token` writes the secret
+  once. Automatic publishes still do not rotate it.
 - **`DELETE /api/doc` fails closed when hosted `release_owner` fails** and the
   Durable Object binding is present, so a 200 cannot leave the slug parked.
   Vercel (no `COMMENTS`) still returns 200 — there was never a reservation.

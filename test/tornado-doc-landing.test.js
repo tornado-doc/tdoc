@@ -526,6 +526,17 @@ t('shipping the homepage ships content, not just worker code', () => {
     'a push trigger races deploy-tdoc-dev.yml on the first merge to main');
   assert(/workflow_run\.head_sha/.test(content),
     'publish must check out the commit the Worker deploy just shipped');
+  // First ship 401'd because TDOC_DEV_UPLOAD_TOKEN lived only in GitHub.
+  // Token rotation is a manual dispatch input, never the automatic path.
+  assert(/sync_upload_token/.test(content),
+    'publish workflow must expose a manual token-sync input');
+  assert(/github.event_name == 'workflow_dispatch' && inputs.sync_upload_token/.test(content),
+    'token sync must be dispatch-only and opt-in');
+  assert(/wrangler@4\.90\.1 secret put TDOC_UPLOAD_TOKEN/.test(content),
+    'token sync must write TDOC_UPLOAD_TOKEN onto the Worker');
+  const autoPath = content.split("if: github.event_name == 'workflow_dispatch' && inputs.sync_upload_token")[0];
+  assert(!/secret put TDOC_UPLOAD_TOKEN/.test(autoPath),
+    'the automatic workflow_run path must not rotate TDOC_UPLOAD_TOKEN');
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);
