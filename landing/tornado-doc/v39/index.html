@@ -100,8 +100,6 @@
     /* An anchored artifact, ringed the way the reader rings a selected one, so
        the thread beside it reads as a note about the board and not the page. */
     .life.anchored { border-color:#e0b93a; box-shadow:0 0 0 3px #fff2b8; }
-    @keyframes glide { from { transform:translate(0,0); } to { transform:translate(48px,48px); } }
-    @media (prefers-reduced-motion: reduce) { .glider { animation:none; } }
 
     /* comment cards */
     .note { border:1px solid var(--rule); border-radius:9px; padding:10px 12px; background:#fff; box-shadow:0 1px 3px rgba(16,18,26,.05); }
@@ -374,7 +372,7 @@
       <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc"><span class="btn-in"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label">Star<span class="btn-long">&nbsp;on GitHub</span></span><span class="pill">102</span></span></a>
     </div>
 
-    <!-- a real published tdoc, the Conway doc, running its real CSS animation -->
+    <!-- a real published tdoc: the Conway board is a sandboxed widget island -->
     <div class="browser" style="margin-top:40px">
       <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="addr">tdoc.dev/d/conway-life/v/2</span></div>
       <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-v">v2 of 2</span></div>

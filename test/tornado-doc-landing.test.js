@@ -76,6 +76,23 @@ t('hero board is a sandboxed widget island', () => {
     'widget must step a neighbour grid (nxt/cur), not animate a sprite');
   // The CSS-sprite workaround must stay gone on the host.
   assert(!/<g class="glider"/.test(html), 'CSS-sprite glider group still in the host');
+  assert(!/@keyframes\s+glide/.test(html),
+    'host CSS still has the sprite @keyframes glide; the island does not use it');
+  // The board ran forever with no way to stop it. Control cannot live on
+  // the host (no author script), so it has to live in the widget.
+  assert(/<button\b[^>]*id="t"/.test(widget),
+    'widget must ship a play/pause button; the host cannot reach the loop');
+  assert(/timer \? 'Pause' : 'Play'/.test(widget),
+    'widget button must flip between Pause and Play');
+  assert(/function halt\(/.test(widget) && /function run\(/.test(widget),
+    'widget must expose run/halt so the loop can stop');
+  // Dark mode is one invert on html. Reaction emoji are OS bitmaps and
+  // the agent mark is a brand colour, so both come back wrong unless
+  // flipped a second time (same restore as overlay .tdoc-emoji).
+  assert(/html\[data-tdoc-theme="dark"\]\s*\.emo/.test(html),
+    'dark mode must restore mock reaction emoji after the page invert');
+  assert(/html\[data-tdoc-theme="dark"\]\s*\.mc-av\.mc-logo/.test(html),
+    'dark mode must restore the terracotta agent mark after the page invert');
 });
 
 t('carries the SEO head', () => {
