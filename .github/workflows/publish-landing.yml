@@ -27,6 +27,15 @@ on:
     workflows: ['deploy tdoc.dev']
     types: [completed]
   workflow_dispatch:
+    inputs:
+      sync_upload_token:
+        description: >
+          Overwrite the Worker TDOC_UPLOAD_TOKEN with GitHub's
+          TDOC_DEV_UPLOAD_TOKEN. Use when /api/upload returns 401 because
+          the GitHub secret was never written onto the Worker. Automatic
+          workflow_run publishes never rotate the secret.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -72,6 +81,41 @@ jobs:
 
       - name: Build the release payload
         run: node bin/tdoc-landing-release
+
+      # First ship (#129): TDOC_DEV_UPLOAD_TOKEN was present in GitHub and
+      # still 401'd, because nothing had ever `wrangler secret put` that
+      # value onto the Worker. deploy-tdoc-dev.yml must not rotate the
+      # secret on every CD. This step is dispatch-only and opt-in.
+      - name: Align Worker TDOC_UPLOAD_TOKEN with the GitHub secret
+        if: github.event_name == 'workflow_dispatch' && inputs.sync_upload_token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TDOC_DEV_KV_ID: ${{ secrets.TDOC_DEV_KV_ID }}
+          TDOC_DEV_OWNER: ${{ secrets.TDOC_DEV_OWNER }}
+          TDOC_DEV_UPLOAD_TOKEN: ${{ secrets.TDOC_DEV_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          missing=
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          [ -n "$TDOC_DEV_KV_ID" ] || missing="$missing TDOC_DEV_KV_ID"
+          [ -n "$TDOC_DEV_OWNER" ] || missing="$missing TDOC_DEV_OWNER"
+          [ -n "$TDOC_DEV_UPLOAD_TOKEN" ] || missing="$missing TDOC_DEV_UPLOAD_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "token sync is missing GitHub secrets:$missing" >&2
+            exit 1
+          fi
+          sed \
+            -e "s/PLACEHOLDER_KV_ID/${TDOC_DEV_KV_ID}/g" \
+            -e "s/PLACEHOLDER_OWNER/${TDOC_DEV_OWNER}/g" \
+            worker/wrangler.toml.template > worker/wrangler.toml
+          # stdin is the secret. Do not echo it. Do not print wrangler
+          # debug that might replay env.
+          # CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID come from env.
+          # --cwd is the worker dir so name=tdoc is read from wrangler.toml.
+          printf '%s' "$TDOC_DEV_UPLOAD_TOKEN" | npx --yes wrangler@4.90.1 secret put TDOC_UPLOAD_TOKEN \
+            --cwd worker
 
       - name: Upload v1 to tdoc.dev
         env:
