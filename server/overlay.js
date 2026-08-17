@@ -765,8 +765,16 @@
   const slugCrumbLabel = isFork ? `fork of ${cfg.originalSlug || slug}` : slug;
 
   // Left group: workspace mark + slug crumb + version picker.
+  //
+  // On the site homepage the crumb and the picker are dropped. `/` is the
+  // site, not a doc someone published: the slug it happens to be stored
+  // under and the version it happens to be on are our filing system, and
+  // printing them tells a first-time visitor they are reading somebody's
+  // document. The mark stays, and so does everything on the right, because
+  // the page really is a tdoc and you really can comment on it.
   const leftHtml = `
     <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc on GitHub" aria-label="tdoc on GitHub">tdoc</button>
+    ${cfg.isLanding ? '' : `
     <span class="crumb crumb-slug" title="${escapeHtml(slugCrumbLabel)}">${escapeHtml(slugCrumbLabel)}</span>
     <span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>
     <div class="tdoc-version-wrap">
@@ -776,7 +784,7 @@
           ${versions.map(v => `<button role="option" data-version="${v.n}" class="${v.n === version ? 'current' : ''}">v${v.n}${v.n === version ? ' · current' : ''}</button>`).join('')}
         </div>
       ` : ''}
-    </div>`;
+    </div>`}`;
 
   // Center: doc title (pulled from <title>). Hidden on very narrow.
   const centerHtml = `<span class="doc-title" id="tdoc-title">tdoc</span>`;
@@ -2743,12 +2751,20 @@
       }
     };
   }
+  function publicShareUrl() {
+    // `/` is the site. Copying the storage path tells a visitor they are
+    // looking at somebody's document, which is the same leak the bar crumb
+    // was. /d/ keeps the versioned URL.
+    return cfg.isLanding
+      ? `${location.origin}/`
+      : `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+  }
   function showShareModal() {
     // One Share button: owners get copy-link + access settings in the same
     // panel; everyone else gets copy-link only. No separate "Share settings".
     if (cfg.ownerManage) { showManageModal(); return; }
     closeAuxModal();
-    const url = `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+    const url = publicShareUrl();
     const bg = document.createElement('div');
     bg.className = 'tdoc-modal-bg';
     bg.id = 'tdoc-aux-modal';
@@ -2849,7 +2865,7 @@
     if (!cfg.ownerManage) return; // no owner data for this request → nothing to render
     closeAuxModal();
     const om = cfg.ownerManage;
-    const url = `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+    const url = publicShareUrl();
     const access = {
       visibility: 'unlisted', history_visibility: 'owner', commenting: 'signed_in', allowed_users: [],
       ...(om.access || {}),

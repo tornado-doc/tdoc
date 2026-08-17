@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+// Build the tdoc.dev publish payload from the landing doc in this repo.
+//
+// The doc under landing/tornado-doc is a working copy: 39 versions and the
+// review thread that produced them. That history is the point while the page
+// is being written, and noise once it is the homepage — a visitor should not
+// open tdoc.dev to a version picker of 39 entries and a sidebar of somebody
+// else's review notes. So the release payload is the latest version, renamed
+// v1, with an empty comment file.
+//
+// Commenting stays ON. The page closes by inviting the reader to comment on
+// it, and that invitation is the product demo; only the existing thread goes.
+//
+// The homepage reads this doc out of the tdoc.dev Worker's KV, not out of the
+// bundle, so merging the landing PR is not enough on its own. Someone holding
+// that Worker's upload token has to publish this payload into it:
+//
+//   node bin/tdoc-landing-release            # writes .release/
+//   TDOC_DIR="$PWD/.release" tdoc publish --visibility public tornado-doc
+//
+// Pass a slug to preview it somewhere else first; the widget iframe is
+// rewritten to point at whatever slug you publish under:
+//
+//   node bin/tdoc-landing-release tdoc-home
+//
+const fs = require('fs');
+const path = require('path');
+
+const root = path.join(__dirname, '..');
+const src = path.join(root, 'landing', 'tornado-doc');
+const slug = process.argv[2] || 'tornado-doc';
+const out = path.join(root, '.release', slug);
+
+const meta = JSON.parse(fs.readFileSync(path.join(src, 'meta.json'), 'utf8'));
+const latest = meta.versions[meta.versions.length - 1];
+const from = path.join(src, `v${latest.n}`);
+
+fs.rmSync(out, { recursive: true, force: true });
+fs.mkdirSync(path.join(out, 'v1'), { recursive: true });
+
+// The page frames its own widget island by absolute path, so the reference
+// has to follow the payload to its slug and version or the board 404s.
+const html = fs.readFileSync(path.join(from, 'index.html'), 'utf8')
+  .replace(new RegExp(`/d/tornado-doc/v/${latest.n}/widget/`, 'g'), `/d/${slug}/v/1/widget/`);
+fs.writeFileSync(path.join(out, 'v1', 'index.html'), html);
+
+const widgets = path.join(from, 'widgets');
+if (fs.existsSync(widgets)) fs.cpSync(widgets, path.join(out, 'v1', 'widgets'), { recursive: true });
+
+fs.writeFileSync(path.join(out, 'meta.json'), JSON.stringify({
+  slug,
+  title: meta.title,
+  created: meta.created,
+  versions: [{ n: 1, created: latest.created, prompt: 'tdoc landing page' }],
+  // /api/upload applies this. A homepage is public by definition, and
+  // commenting stays open because being commentable is the pitch. History
+  // is owner-only: there is one version, and nobody needs our archive.
+  access: {
+    visibility: 'public',
+    history_visibility: 'owner',
+    commenting: 'signed_in',
+    allowed_users: [],
+  },
+}, null, 2) + '\n');
+fs.writeFileSync(path.join(out, 'comments.json'), '[]\n');
+
+console.log(`[tdoc] release payload for ${slug}: ${path.relative(process.cwd(), out)} (v${latest.n} -> v1, 0 comments)`);
