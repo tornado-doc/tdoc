@@ -2650,9 +2650,10 @@
       return;
     }
     showDeviceModal(data);
-    // Only open the verification URL if it's an https GitHub URL — never window.open an
-    // arbitrary string from the response.
-    if (isGithubHttpsUrl(data.verification_uri)) window.open(data.verification_uri, '_blank');
+    // Prefer the complete URI (code pre-filled) when GitHub provides it.
+    // Only open https GitHub URLs — never window.open an arbitrary string.
+    const verifyUrl = data.verification_uri_complete || data.verification_uri;
+    if (isGithubHttpsUrl(verifyUrl)) window.open(verifyUrl, '_blank');
     pollInterval = Math.max(5, data.interval || 5);
     schedulePoll(data.device_code);
   }
@@ -3006,7 +3007,7 @@
         onConfirm: async (status) => {
           await ownerFetch(`/api/doc?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
           status.textContent = 'Deleted. Redirecting…';
-          setTimeout(() => { window.location.href = 'https://github.com/tornado-doc/tdoc'; }, 900);
+          setTimeout(() => { window.location.href = '/'; }, 900);
         },
       });
     };
@@ -3023,6 +3024,12 @@
       const data = await r.json();
       if (data.ok && data.identity) {
         identity = data.identity;
+        // Page may have booted signed-out (isOwner false). Refresh owner
+        // flag so "My docs" appears without a full reload.
+        try {
+          const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((x) => x.json());
+          if (me && typeof me.isOwner === 'boolean') isOwner = me.isOwner;
+        } catch { /* keep bootCfg isOwner */ }
         closeDeviceModal();
         renderIdentity();
         refreshComments();

@@ -299,7 +299,7 @@ vercel_bundle_sha() {
     const crypto = require("crypto");
     const skill = process.env.SKILL_DIR;
     const h = crypto.createHash("sha256");
-    for (const rel of ["worker/worker.js", "server/overlay.js"]) {
+    for (const rel of ["worker/worker.js", "server/overlay.js", "shared/github-oauth.js"]) {
       h.update(rel); h.update("\0"); h.update(fs.readFileSync(path.join(skill, rel))); h.update("\0");
     }
     const dir = path.join(skill, "vercel");
@@ -424,6 +424,8 @@ first_time_setup() {
   else
     echo "[tdoc] no GitHub login detected — doc catalog stays private (link-only)."
   fi
+  # GITHUB_CLIENT_ID comes from wrangler.toml.template (kept in sync with
+  # shared/github-oauth.js by test/no-drift.test.js).
   sed \
     -e "s/PLACEHOLDER_KV_ID/${kv_id}/g" \
     -e "s/PLACEHOLDER_OWNER/${owner_login}/g" \
@@ -485,6 +487,9 @@ sync_vercel_app() {
   mkdir -p "$VERCEL_APP_DIR/api" "$VERCEL_APP_DIR/lib"
   cp "$SKILL_DIR/vercel/api/"*.js "$VERCEL_APP_DIR/api/"
   cp "$SKILL_DIR/vercel/lib/"*.js "$VERCEL_APP_DIR/lib/"
+  # Flat-copy SoT so api/tdoc.js can require('../lib/github-oauth.js') without
+  # a ../../shared hop (vercel-app is outside the skill checkout).
+  cp "$SKILL_DIR/shared/github-oauth.js" "$VERCEL_APP_DIR/lib/github-oauth.js"
   cp "$SKILL_DIR/vercel/vercel.json" "$SKILL_DIR/vercel/package.json" "$VERCEL_APP_DIR/"
   SKILL_DIR="$SKILL_DIR" bundle_worker "$VERCEL_APP_DIR"
 }
@@ -740,6 +745,20 @@ else
         fi
         [ -n "$_ol" ] && echo "[tdoc] backfilled TDOC_OWNER=$_ol into wrangler.toml" \
           || echo "[tdoc] TDOC_OWNER left empty (catalog stays private)."
+      fi
+      # Retire the personal-account OAuth client id on existing BYOK workers.
+      if [ -f "$WORKER_DIR/wrangler.toml" ] && [ -f "$SKILL_DIR/shared/github-oauth.js" ]; then
+        _gh="$(node -e 'console.log(require(process.argv[1]).GITHUB_CLIENT_ID)' \
+          "$SKILL_DIR/shared/github-oauth.js" 2>/dev/null || true)"
+        if [ -n "$_gh" ] && grep -Eq 'Ov23liZ1UAGOchvKPmlS|PLACEHOLDER_GITHUB_CLIENT_ID' \
+          "$WORKER_DIR/wrangler.toml"; then
+          awk -v id="$_gh" '
+            /^GITHUB_CLIENT_ID[[:space:]]*=/ { print "GITHUB_CLIENT_ID = \"" id "\""; next }
+            { print }
+          ' "$WORKER_DIR/wrangler.toml" > "$WORKER_DIR/wrangler.toml.tmp" \
+            && mv "$WORKER_DIR/wrangler.toml.tmp" "$WORKER_DIR/wrangler.toml"
+          echo "[tdoc] updated GITHUB_CLIENT_ID to org OAuth SoT ($_gh)"
+        fi
       fi
       SKILL_DIR="$SKILL_DIR" bundle_worker
       (cd "$WORKER_DIR" && wrangler deploy)

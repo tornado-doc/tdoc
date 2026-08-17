@@ -345,8 +345,14 @@ console.log('tdoc.dev / route');
 
 t('homepage renders the landing doc, not a hardcoded page', () => {
   assert(/const LANDING_SLUG = 'tornado-doc'/.test(worker), 'missing LANDING_SLUG');
-  assert(/if \(p === '\/' && \(method === 'GET' \|\| method === 'HEAD'\)\) return landingResponse\(env, req\)/.test(worker),
-    '/ no longer routes through landingResponse');
+  const route = worker.match(/if \(p === '\/' && \(method === 'GET' \|\| method === 'HEAD'\)\) \{[\s\S]*?\n    \}/);
+  assert(route, '/ no longer has a GET/HEAD route');
+  assert(/return landingResponse\(env, req\)/.test(route[0]), '/ no longer routes through landingResponse');
+  // `?notice=…` is a toast for someone bounced here from /me or an unknown
+  // path. The landing doc has nowhere to render it, so that one request
+  // keeps the neutral page rather than swallowing the message.
+  assert(/if \(notice\) return html\(landingHtml\(env, notice\)\)/.test(route[0]),
+    'a bounce notice no longer reaches the visitor');
 });
 
 t('homepage fails safe to the neutral page', () => {
@@ -354,10 +360,12 @@ t('homepage fails safe to the neutral page', () => {
   assert(fn, 'landingResponse not found');
   const body = fn[0];
   // Three ways the doc can be unavailable — unpublished, gated, or throwing.
-  // All three must degrade to landingHtml(), never a 404 or a sign-in wall.
-  assert(/if \(!latest\) return html\(landingHtml\(\)\)/.test(body), 'no fallback when the doc is unpublished');
-  assert(/res\.ok \? res\.response : html\(landingHtml\(\)\)/.test(body), 'no fallback when access is denied');
-  assert(/catch \{\s*return html\(landingHtml\(\)\);/.test(body), 'no fallback when lookup throws');
+  // All three must degrade to landingHtml(env), never a 404 or a sign-in
+  // wall. env is load-bearing: landingHtml reads GITHUB_CLIENT_ID from it to
+  // decide whether to offer sign-in, so dropping it silently hides the button.
+  assert(/if \(!latest\) return html\(landingHtml\(env\)\)/.test(body), 'no fallback when the doc is unpublished');
+  assert(/res\.ok \? res\.response : html\(landingHtml\(env\)\)/.test(body), 'no fallback when access is denied');
+  assert(/catch \{\s*return html\(landingHtml\(env\)\);/.test(body), 'no fallback when lookup throws');
   assert(/meta\.versions\.length - 1\]/.test(body), 'does not resolve the LATEST version');
 });
 
