@@ -33,6 +33,7 @@
   let identity = cfg.identity || null;
   let isOwner = !!cfg.isOwner; // true only for the configured TDOC_OWNER
   if (!slug) return;
+  if (isFork) document.body.classList.add('tdoc-fork-mode');
 
   const HIGHLIGHT_API = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
 
@@ -288,7 +289,9 @@
   /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
   .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-bar .crumb-sep { color: #c0c0c4; user-select: none; padding: 0 1px; }
+  .tdoc-bar .doc-meta { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
   .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-bar .doc-byline { color: #666; font-size: 12px; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
@@ -655,6 +658,9 @@
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
   body.tdoc-narrow .tdoc-modal { padding: 20px; }
   body.tdoc-narrow .tdoc-modal .code { font-size: 20px; }
+  body.tdoc-fork-mode .tdoc-bar #tdoc-theme-btn,
+  body.tdoc-fork-mode .tdoc-bar #tdoc-copy-md-btn,
+  body.tdoc-fork-mode .tdoc-bar #tdoc-more-btn { display: none; }
   body.tdoc-narrow .tdoc-hover-outline, body.tdoc-narrow .tdoc-comment-pill, body.tdoc-narrow .tdoc-drag-marquee { display: none; }
   body.tdoc-narrow .tdoc-emoji-picker { grid-template-columns: repeat(6, 36px); }
   body.tdoc-narrow .tdoc-emoji-picker button { width: 36px; height: 36px; font-size: 20px; }
@@ -779,7 +785,9 @@
     </div>`;
 
   // Center: doc title (pulled from <title>). Hidden on very narrow.
-  const centerHtml = `<span class="doc-title" id="tdoc-title">tdoc</span>`;
+  const authorMeta = document.querySelector('meta[name="author" i], meta[property="author" i]');
+  const authorName = ((authorMeta && authorMeta.getAttribute('content')) || '').trim();
+  const centerHtml = `<span class="doc-meta"><span class="doc-title" id="tdoc-title">tdoc</span>${authorName ? `<span class="doc-byline" id="tdoc-author" title="${escapeHtml(authorName)}">${escapeHtml(authorName)}</span>` : ''}</span>`;
 
   // Right: copy menu + primary CTA (Share or Publish) + ⋯ overflow + identity.
   const copyMenuHtml = `
