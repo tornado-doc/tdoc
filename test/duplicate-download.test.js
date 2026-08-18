@@ -43,7 +43,9 @@ t('published chrome says Duplicate and Download, not Fork', () => {
   assert(!overlay.includes('data-action="share"'), 'Share stays on the bar; ⋯ must not duplicate it');
   assert(!overlay.includes('data-action="repo"'), 'tdoc mark already links to GitHub; ⋯ must not duplicate it');
   assert(!overlay.includes('id="tdoc-pdf-btn"'), 'PDF must live in the Download menu, not its own bar button');
-  assert(!overlay.includes('window.print()'), 'PDF must be a file download, not the print dialog');
+  assert(overlay.includes('win.print()'), 'PDF must use the browser print engine');
+  assert(!overlay.includes('function jpegPagesToPdf'), 'JPEG-wrapped PDF must be gone');
+  assert(!overlay.includes("toDataURL('image/jpeg'"), 'PDF must not snapshot canvas JPEGs');
 });
 
 t('Download hits /export and never opens a blob fork tab', () => {
@@ -51,8 +53,8 @@ t('Download hits /export and never opens a blob fork tab', () => {
   assert(!overlay.includes("fetch(`${base}/fork`)"), 'Download must not fetch /fork');
   assert(!overlay.includes('-fork.html'), 'download filename must not still say -fork.html');
   assert(overlay.includes('`${slug}-v${version}.html`'), 'HTML filename should be slug-vN.html');
-  assert(overlay.includes('`${slug}-v${version}.pdf`'), 'PDF filename should be slug-vN.pdf');
-  assert(overlay.includes('function jpegPagesToPdf'), 'PDF must be a generated file, not print');
+  assert(overlay.includes("doc.title = `${slug}-v${version}`"), 'print PDF should title the export slug-vN');
+  assert(overlay.includes('/export?download=0'), 'PDF must print the export reading column');
 });
 
 t('Duplicate POSTs /api/doc/duplicate and signs in when needed', () => {
