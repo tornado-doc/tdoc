@@ -118,15 +118,35 @@ t('the demo cycles all four use cases, and clicking pins one', () => {
   assert(!/animation/.test(stageOf(work, 0).block), 'a comment stage animates');
 });
 
+t('the four stages are siblings, not nested', () => {
+  // They were nested: each panel opened one more div than it closed, so
+  // .p-res sat inside .p-rep and so on. Rotation then animated an ancestor's
+  // opacity to 0 and every descendant composited away — the demo went blank
+  // after six seconds and on three of the four tabs, and the container grew
+  // to 2779px because static panels stack instead of sharing a grid cell.
+  const starts = [...work.matchAll(/<div class="uc-panel p-\w+">/g)].map(m => m.index);
+  assert(starts.length === 4, `expected 4 panels, found ${starts.length}`);
+  const end = work.indexOf('<p class="uc-note"');
+  const bounds = [...starts, end];
+  for (let i = 0; i < 4; i++) {
+    const seg = work.slice(bounds[i], bounds[i + 1]);
+    const open = (seg.match(/<div\b/g) || []).length;
+    const close = (seg.match(/<\/div>/g) || []).length;
+    const want = i === 3 ? -2 : 0;   // the last panel also closes .uc-panels and .usecases
+    assert(open - close === want,
+      `panel ${i + 1} div balance ${open - close >= 0 ? '+' : ''}${open - close}, expected ${want} — panels must be siblings`);
+  }
+});
+
 t('the stage is cropped like a screenshot', () => {
   // The doc keeps going past the frame on purpose. Without the cap the stage
   // ends early and leaves dead space under a short column — and this rule has
   // already been deleted once by an unrelated rewrite of the block it used to
   // sit in, with nothing to catch it.
-  assert(/\.stage \{[^}]*max-height:560px/.test(work), 'the stage is no longer capped');
+  assert(/\.stage \{[^}]*max-height:585px/.test(work), 'the stage is no longer capped');
   assert(/\.stage:after \{[^}]*linear-gradient\(transparent,#fff\)/.test(work),
     'the crop needs a fade, or it looks like the content simply stops');
-  assert(/max-height:520px/.test(work), 'no shorter cap on narrow screens');
+  assert(/max-height:526\.5px/.test(work), 'no shorter cap on narrow screens');
 });
 
 t('the artifacts are real sandboxed islands', () => {
