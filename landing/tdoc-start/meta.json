@@ -8,5 +8,11 @@
       "created": "2026-08-16T16:00:00Z",
       "prompt": "Interactive onboarding page for #142"
     }
-  ]
+  ],
+  "access": {
+    "visibility": "public",
+    "history_visibility": "owner",
+    "commenting": "signed_in",
+    "allowed_users": []
+  }
 }

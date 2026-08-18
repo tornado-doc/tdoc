@@ -143,8 +143,14 @@ t('does not promise zero setup while hosted signup is closed', () => {
   assert(/Cloudflare/.test(text), 'the page must say where the doc actually gets published');
   assert(/keep it local/i.test(text),
     'ONBOARDING.md supports a local-only path; the page should offer that escape hatch');
-  assert(/Cloudflare/.test(onboard) && /keep it local/i.test(onboard),
-    'the modal must price the self-host path too; it is where that visitor commits');
+  // The modal must still price the setup, because that is where the visitor
+  // commits. The local-only escape hatch lives on the /start page and in the
+  // recipe instead: the dialog was trimmed to one line and one button on
+  // purpose, and a second way out competed with the button.
+  assert(/Cloudflare/.test(onboard), 'the modal no longer says where the doc gets published');
+  const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
+  assert(/keep it local/i.test(text) || /keep it local/i.test(recipe),
+    'the local-only path is now unreachable from both the page and the recipe');
 });
 
 t('says what to say, not what to type', () => {
@@ -152,6 +158,22 @@ t('says what to say, not what to type', () => {
   // contradict the page it sits on.
   assert(!/npx |wrangler |npm i -g/.test(text),
     'the page must not hand the reader a CLI command to type');
+});
+
+t('the page is the manual, not a copy of the dialog', () => {
+  // /start used to repeat the dialog almost word for word. It is the full tour
+  // now, and the dialog links to it — so the two must not converge again.
+  const headings = (html.match(/<h3>[^<]*<\/h3>/g) || []).map(h => h.replace(/<[^>]+>/g, ''));
+  assert(headings.length >= 6, `the tour lost sections: only ${headings.length} left`);
+  for (const topic of [/comment/i, /version/i, /[Ss]hare/, /tdoc\.dev\/me|hub/i]) {
+    assert(headings.some(h => topic.test(h)) || topic.test(text),
+      `the tour no longer covers ${topic}`);
+  }
+  const onboardLink = /tdo-tut/.test(onboard) && /href = '\/start'/.test(onboard);
+  assert(onboardLink, 'the dialog no longer hands off to the full tutorial');
+  // A /start link inside the dialog must navigate, not re-open the dialog.
+  assert(/closest\('\.tdo-bg'\)/.test(onboard),
+    'clicks inside the dialog are still captured by its own CTA handler');
 });
 
 t('a failed copy still leaves the visitor holding the line', () => {

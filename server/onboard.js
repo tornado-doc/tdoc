@@ -27,7 +27,7 @@
     '.tdo{width:min(540px,100%);background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(16,18,26,.28);overflow:hidden;font:15px/1.55 system-ui,-apple-system,sans-serif;color:#10121a}',
     '.tdo-hd{display:flex;align-items:center;gap:10px;padding:18px 20px;border-bottom:1px solid #e4e7ee}',
     '.tdo-hd strong{font-size:15px}',
-    '.tdo-x{border:0;background:none;font-size:20px;line-height:1;color:#767c8b;cursor:pointer;padding:0 2px}',
+    '.tdo-x{margin-left:auto;border:0;background:none;font-size:20px;line-height:1;color:#767c8b;cursor:pointer;padding:0 2px}',
     '.tdo-bd{padding:20px}',
     '.tdo h2{font-size:20px;margin:0 0 6px;letter-spacing:-.02em}',
     '.tdo p{margin:0 0 14px;color:#5b6070;font-size:14.5px}',
@@ -39,8 +39,8 @@
     '.tdo-learn[open] summary:after{transform:rotate(-90deg)}',
     '.tdo-learn ol{margin:0;padding:0 14px 12px 31px;color:#5b6070;font-size:13px}',
     '.tdo-learn li{margin:0 0 4px}',
-    '.tdo-note{font-size:12.5px;color:#767c8b;margin:12px 0 0;display:flex;gap:7px;align-items:flex-start}',
-    '.tdo-note svg{width:14px;height:14px;flex:none;margin-top:2px;fill:none;stroke:currentColor;stroke-width:2}',
+    '.tdo-tut{display:block;text-align:center;margin:12px 0 0;font-size:13px;color:#1652f0;text-decoration:none}',
+    '.tdo-tut:hover{text-decoration:underline}',
     '.tdo-ft{padding:16px 20px;border-top:1px solid #e4e7ee;background:#fafbfd}',
     '.tdo-btn{width:100%;border:0;border-radius:999px;padding:13px;font-weight:650;font-size:15px;cursor:pointer;background:#1652f0;color:#fff;display:flex;align-items:center;justify-content:center;gap:9px}',
     '.tdo-btn[disabled]{opacity:.5;cursor:default}',
@@ -66,9 +66,6 @@
     return 'Set up tdoc and make my first doc: ' + RECIPE;
   }
 
-  function shield() {
-    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>';
-  }
   function ghMark() {
     return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>';
   }
@@ -118,21 +115,17 @@
       + '</ol>';
     bd.appendChild(learn);
 
-    var n1 = el('div', 'tdo-note');
-    n1.innerHTML = shield() + '<span>Your doc gets a public link. Only you can change it.</span>';
-    bd.appendChild(n1);
-
-    var n2 = el('div', 'tdo-note');
-    n2.innerHTML = st.hosted
-      ? shield() + '<span>Nothing to paste and no key to keep. Your AI signs you in itself.</span>'
-      : shield() + '<span>Just want it on your machine? Say <em>keep it local</em> instead.</span>';
-    bd.appendChild(n2);
-
     var ft = el('div', 'tdo-ft');
     var b = el('button', 'tdo-btn', '<span>' + (st.copied ? 'Copied' : 'Copy the line') + '</span>');
     if (st.copied) b.className = 'tdo-btn done';
     b.onclick = function () { copy(b, bd); };
     ft.appendChild(b);
+    // The page this points at used to repeat the dialog. It is the full tour
+    // now — every feature, in the order you meet them — so the dialog can stay
+    // one line and hand off the rest.
+    var tut = el('a', 'tdo-tut', 'Or read the full tutorial');
+    tut.href = '/start';
+    ft.appendChild(tut);
     st.box.appendChild(ft);
     if (st.copied) showNext(bd);
     return b;
@@ -253,7 +246,10 @@
   }
 
   document.addEventListener('click', function (e) {
-    var a = e.target && e.target.closest && e.target.closest(CTA);
-    if (a) open(e);
+    if (!e.target || !e.target.closest) return;
+    // A link to /start inside the dialog is a real navigation, not another
+    // way to open what is already open.
+    if (e.target.closest('.tdo-bg')) return;
+    if (e.target.closest(CTA)) open(e);
   });
 })();

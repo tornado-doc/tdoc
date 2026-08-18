@@ -226,7 +226,7 @@
   }
   /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
      buttons / cards keep their inline layout instead of stacking to 16px tall. */
-  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
+  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(.tdo *):not(.tds *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
   /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
      column, wrapper or not. Two halves: (a) recognized wrappers get max-width
      AND margin:auto (previously margin was missing, so wrapped docs without
