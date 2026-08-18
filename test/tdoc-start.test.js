@@ -18,7 +18,14 @@ const latest = meta.versions[meta.versions.length - 1].n;
 const html = fs.readFileSync(path.join(root, 'landing', 'tdoc-start', `v${latest}`, 'index.html'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 const onboard = fs.readFileSync(path.join(root, 'server', 'onboard.js'), 'utf8');
-const text = html.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ');
+// Strip to a fixed point. One pass is the js/incomplete-multi-character-
+// sanitization pattern: `<<h3>>` comes out the other side as `<h3>`.
+const stripTags = (src) => {
+  let out = src.replace(/<style[\s\S]*?<\/style>/gi, ' '), prev;
+  do { prev = out; out = out.replace(/<[^>]+>/g, ' '); } while (out !== prev);
+  return out;
+};
+const text = stripTags(html);
 
 console.log('onboarding /start (#142)');
 
@@ -232,7 +239,10 @@ t('says what to say, not what to type', () => {
 t('the page is the manual, not a copy of the dialog', () => {
   // /start used to repeat the dialog almost word for word. It is the full tour
   // now, and the dialog links to it — so the two must not converge again.
-  const headings = (html.match(/<h3>[^<]*<\/h3>/g) || []).map(h => h.replace(/<[^>]+>/g, ''));
+  // Capture the text directly rather than stripping tags off the match. A
+  // one-pass tag strip is the js/incomplete-multi-character-sanitization
+  // pattern — `<<h3>>` survives it — and there is nothing here to strip.
+  const headings = [...html.matchAll(/<h3>([^<]*)<\/h3>/g)].map(m => m[1]);
   assert(headings.length >= 6, `the tour lost sections: only ${headings.length} left`);
   for (const topic of [/comment/i, /version/i, /[Ss]hare/, /tdoc\.dev\/me|hub/i]) {
     assert(headings.some(h => topic.test(h)) || topic.test(text),
