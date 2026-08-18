@@ -125,6 +125,19 @@ t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
   assert(index.includes('Promise.all'), '/me should fetch meta rows in parallel');
 });
 
+t('/me shows the published-doc top bar (identity chip) without loading overlay.js', () => {
+  assert(index.includes('siteChromeCss()'), '/me must include site chrome CSS');
+  assert(index.includes("siteChromeHtml(session, { page: 'me' })"), '/me must render site chrome HTML');
+  assert(index.includes('siteChromeScript()'), '/me must include site chrome script');
+  assert(worker.includes('function siteChromeHtml(session, opts)'), 'siteChromeHtml helper missing');
+  assert(worker.includes('class="tdoc-bar"'), 'chrome must emit .tdoc-bar');
+  assert(worker.includes('id="tdoc-signout"'), 'chrome must offer Sign out');
+  assert(worker.includes("location.href = '/'"), 'mark / sign-out must return to the site home');
+  assert(!index.includes('class="who"'), 'identity belongs in the bar, not a Signed in as line');
+  assert(!index.includes('OVERLAY_JS'), '/me must not inline overlay.js');
+  assert(/padding:\s*80px 20px 48px/.test(index), '/me body must clear the 48px fixed bar');
+});
+
 t('/me does not introduce a bespoke cookie-only admin-auth path', () => {
   // The session path now used everywhere is the SHARED authorizeOwnerMutation
   // gate (session OR token) — not a one-off same-origin/cookie check bolted
