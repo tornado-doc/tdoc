@@ -253,6 +253,15 @@ t('a failed copy still leaves the visitor holding the line', () => {
     'last resort must select the line so the visitor can copy it by hand');
 });
 
+t('can be left without the browser Back button', () => {
+  // This is a full page people arrive at directly: from the dialog, a shared
+  // link, or search. The footer link is a long scroll away, so the way out
+  // sits at the top left where a way out belongs.
+  assert(/class="back" href="\/"/.test(html), 'no back link to the landing page');
+  const head = html.slice(html.indexOf('<section class="hero"'), html.indexOf('</section>'));
+  assert(/class="back"/.test(head), 'the back link must be at the top of the page, not buried');
+});
+
 t('carries the SEO head', () => {
   assert(/<title>[^<]*tdoc[^<]*<\/title>/i.test(html), 'title does not mention tdoc');
   assert(/rel="canonical"/.test(html), 'missing canonical');
