@@ -1352,7 +1352,8 @@ async function indexHtml(env, session, origin, nonce) {
     --td-danger: #b42318; --td-danger-hover: #931c14; --td-danger-tint: #fdeceb; --td-ok: #087443;
     --td-ink: #111; --td-muted: #666; --td-line: #eee; --td-surface: #f7f7f7;
   }
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 680px; margin: 0 auto; padding: 24px 20px 48px; color: var(--td-ink); }
+  body { font: 15px system-ui, -apple-system, sans-serif; margin: 0; color: var(--td-ink); }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 24px 20px 48px; }
   h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
   a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -1399,6 +1400,7 @@ async function indexHtml(env, session, origin, nonce) {
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
 </style>
 </head><body>
+<div class="wrap">
 <h1>My docs</h1>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   `<div class="toolbar">
@@ -1410,6 +1412,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   </div>
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
+</div>
 <script${nonce ? ` nonce="${nonce}"` : ''}>
 (() => {
   // Tiny top-right toast — no third-party runtime on the privileged /me page.

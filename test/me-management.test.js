@@ -125,6 +125,19 @@ t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
   assert(index.includes('Promise.all'), '/me should fetch meta rows in parallel');
 });
 
+t('overlay top bar occupies layout instead of floating over the document', () => {
+  assert(overlay.includes('.tdoc-bar { position: relative;'),
+    'bar must sit in document flow, not overlay the page');
+  assert(!overlay.includes('.tdoc-bar { position: fixed;'),
+    'bar must not be position:fixed');
+  assert(overlay.includes('document.body.insertBefore(bar, document.body.firstChild)'),
+    'bar must be the first body child so it occupies the top of the layout');
+  assert(!overlay.includes('padding-top: 44px !important'),
+    'in-flow bar must not reserve a fake padding-top gap');
+  assert(!overlay.includes('body.tdoc-has-oldver-strip { padding-top: 72px !important; }'),
+    'old-version strip must occupy flow, not extra body padding');
+});
+
 t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
   const meStart = worker.indexOf("if (p === '/me' && method === 'GET')");
   const meEnd = worker.indexOf('// ---- interactive island', meStart);
@@ -137,9 +150,16 @@ t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
   assert(!index.includes('class="who"'), 'identity belongs in the overlay chip');
   assert(index.includes('nonce="${nonce}"'), '/me catalog script must carry the CSP nonce');
   assert(overlay.includes('const isCatalog = !!cfg.isCatalog'), 'overlay must read isCatalog');
-  assert(overlay.includes("${isCatalog ? '' : copyMenuHtml}"), 'catalog must hide Copy');
-  assert(overlay.includes("${isCatalog ? '' : primaryCtaHtml}"), 'catalog must hide Share');
-  assert(overlay.includes("${isCatalog ? '' : forkBtnHtml}"), 'catalog must hide Duplicate/Download');
+  assert(overlay.includes("${isSiteBar ? '' : copyMenuHtml}"), 'catalog must hide Copy');
+  assert(overlay.includes("${isSiteBar ? '' : primaryCtaHtml}"), 'catalog must hide Share');
+  assert(overlay.includes("${isSiteBar ? '' : forkBtnHtml}"), 'catalog must hide Duplicate/Download');
+  assert(overlay.includes('id="tdoc-title"'),
+    'doc pages still show the title in the left cluster');
+  assert(!overlay.includes('tdoc-bar-center'),
+    'title must not sit in a fake-centered middle slot');
+  assert(overlay.includes('src="/tdoc_logo.png"'),
+    'bar mark must be the tdoc logo, not a text pill');
+  assert(index.includes('class="wrap"'), 'catalog content must sit in a wrap so the bar can be full-bleed');
   const catalogGate = overlay.indexOf('if (isCatalog) {');
   const commentsBoot = overlay.indexOf('// ========== Comment layer + FAB ==========');
   assert(catalogGate >= 0 && commentsBoot > catalogGate, 'catalog must not boot comment chrome');
