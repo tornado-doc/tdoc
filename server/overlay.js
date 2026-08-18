@@ -31,7 +31,10 @@
   // embedded #tdoc-fork-comments JSON. No /api calls, no auth, no publish.
   // The original published slug is in cfg.originalSlug so we can label it.
   let identity = cfg.identity || null;
-  let isOwner = !!cfg.isOwner; // true only for the configured TDOC_OWNER
+  let isOwner = !!cfg.isOwner; // true when this session owns THIS doc
+  // Worker sends this explicitly. Do not infer from isOwner — on hosted
+  // tdoc.dev a signed-in reader may not own the current doc and still has /me.
+  let canSeeMyDocs = !!cfg.canSeeMyDocs;
   if (!slug) return;
 
   const HIGHLIGHT_API = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
@@ -1471,7 +1474,7 @@
           </button>
           <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
             <button id="tdoc-inbox-open" role="menuitem">${escapeHtml(inboxMenuLabel(inboxUnreadN))}</button>
-            ${isOwner ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
+            ${canSeeMyDocs ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
             <button id="tdoc-signout" role="menuitem">Sign out</button>
           </div>
         </div>`;
@@ -1483,7 +1486,7 @@
         meBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       };
       document.getElementById('tdoc-inbox-open').onclick = () => { meMenu.classList.remove('open'); showInboxPanel(); };
-      if (isOwner) {
+      if (canSeeMyDocs) {
         document.getElementById('tdoc-my-docs').onclick = () => {
           window.open('/me', '_blank', 'noopener');
         };
@@ -1492,6 +1495,7 @@
         await fetch('/api/auth/logout', { method: 'POST' });
         identity = null;
         isOwner = false;
+        canSeeMyDocs = false;
         inboxUnreadN = 0;
         inboxSig = '';
         stopInboxPoll();
@@ -3058,7 +3062,7 @@
   // the single Share button (showShareModal dispatches here when
   // cfg.ownerManage is set). Gated on cfg.ownerManage, which the worker only
   // populates in the per-request boot config when THIS request's session
-  // passed isOwnerSession() server-side (worker.js's /d/ route). A
+  // passed isDocOwnerSession() server-side (worker.js's /d/ route). A
   // non-owner's config carries cfg.ownerManage === null — every function
   // below bails before creating any DOM, so there is no hidden button, just
   // nothing rendered for them.
@@ -3301,12 +3305,12 @@
       const data = await r.json();
       if (data.ok && data.identity) {
         identity = data.identity;
-        // Page may have booted signed-out (isOwner false). Refresh owner
-        // flag so "My docs" appears without a full reload.
+        // Page may have booted signed-out (canSeeMyDocs false). Refresh so
+        // "My docs" appears without a full reload on hosted tdoc.dev.
         try {
           const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((x) => x.json());
-          if (me && typeof me.isOwner === 'boolean') isOwner = me.isOwner;
-        } catch { /* keep bootCfg isOwner */ }
+          if (me && typeof me.canSeeMyDocs === 'boolean') canSeeMyDocs = me.canSeeMyDocs;
+        } catch { /* keep bootCfg flags */ }
         closeDeviceModal();
         renderIdentity();
         refreshComments();

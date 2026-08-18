@@ -107,10 +107,11 @@ switch — the CLI rewrites the config via full re-setup (previous file kept as
 Worker are two hostnames, not two platforms.
 
 - **Hosted (default)** — `/tdoc publish <slug>` uploads to a tdoc-managed host
-  such as `tdoc.dev`. This path skips user deploy setup. On first use, the
-  hosted service issues an account-scoped upload token and the CLI stores it in
-  `~/.tdoc/published.json`; that token can only mutate docs it owns. If hosted
-  signup is not open, the CLI says so and points at `--platform cloudflare` or
+  such as `tdoc.dev`. First use signs in with GitHub (Device Flow); the host
+  issues an account-scoped upload token bound to that login and stores it in
+  `~/.tdoc/published.json`. That token can only mutate docs it owns. `/me` on
+  the hosted worker lists that GitHub user's docs. If hosted signup is not
+  open, the CLI says so and points at `--platform cloudflare` or
   `--platform vercel`.
 - **Cloudflare** — `/tdoc publish --platform cloudflare <slug>` deploys a
   Worker + R2 + KV you own, with a Durable Object serializing concurrent

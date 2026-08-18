@@ -61,9 +61,12 @@ t('tdoc-publish defaults to hosted and treats Cloudflare/Vercel as self-host fla
   assert(/PLATFORM_FLAG:-hosted/.test(src), 'first publish must default to hosted');
   assert(/first_time_setup_hosted\(\)/.test(src), 'hosted setup function missing');
   assert(/\/api\/hosted\/token/.test(src), 'hosted setup does not request a provider-issued token');
+  assert(/\/api\/auth\/device\/start/.test(src), 'hosted setup must GitHub-device-flow before minting a token');
+  assert(/sign_in_required/.test(src), 'hosted setup must handle a missing GitHub session');
   assert(!/TDOC_HOSTED_UPLOAD_TOKEN/.test(src), 'hosted setup must not require an out-of-band upload token');
   assert(/TDOC_HOSTED_BASE:-https:\/\/tdoc\.dev/.test(src), 'hosted setup does not default to tdoc.dev');
   assert(/platform:"hosted"/.test(src), 'hosted setup does not persist hosted platform');
+  assert(/github_login:\$gh/.test(src), 'hosted setup does not persist github_login');
   assert(/account_id:\$acct/.test(src), 'hosted setup does not persist account_id');
   assert(/if \[ "\$PLATFORM" = "hosted" \]/.test(src), 'hosted platform branch missing');
   assert(/UPLOAD_BASE="\$BASE"/.test(src), 'hosted branch should upload to configured base');

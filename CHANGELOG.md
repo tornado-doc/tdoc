@@ -8,6 +8,12 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Hosted tdoc.dev is multi-tenant.** GitHub sign-in mints a recoverable
+  account-scoped upload token (`POST /api/hosted/token`). `/me` lists that
+  user's slugs (`meta.hosted.github_login`), not the Worker operator's dump.
+  Per-account doc quota (default 50) and upload-size cap (default 2 MB).
+  tdoc.dev enables signup by hostname; BYOK Workers stay single-owner unless
+  `TDOC_HOSTED_REGISTRATION` is set. `#131` `#154`.
 - **Duplicate vs Download on published docs.** The published bar no longer
   uses **Fork** (which only downloaded a file). **Duplicate** makes a
   content-only account copy for the signed-in GitHub user on tdoc.dev
@@ -26,8 +32,9 @@ file and `.claude-plugin/plugin.json`.
 ### Changed
 
 - **Default `/tdoc publish` target is hosted tdoc.dev** (Cloudflare/Vercel via
-  `--platform`). Closed signup fails clearly and points at self-host flags;
-  onboarding’s sample publish uses `--platform cloudflare`.
+  `--platform`). First hosted publish runs GitHub Device Flow, then mints a
+  token bound to that login. Closed signup on a host that left registration
+  unset still fails clearly and points at self-host flags.
 - **`--platform` after first setup switches for real.** A conflicting flag
   rewrites `~/.tdoc/published.json` via full re-setup (previous config kept as
   `published.json.bak.switch` and restored if setup fails). Cloudflare setup

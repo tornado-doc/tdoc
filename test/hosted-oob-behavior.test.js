@@ -143,7 +143,7 @@ function req(pathname, { method = 'GET', token = '', body = null, cookie = '', h
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(cookie ? { Cookie: cookie } : {}),
+      ...(cookie ? { Cookie: cookie.includes('=') ? cookie : `tdoc_sid=${cookie}` } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -151,19 +151,25 @@ function req(pathname, { method = 'GET', token = '', body = null, cookie = '', h
 }
 
 async function putSession(env, login, sid) {
-  // parseCookie only accepts hex tdoc_sid values.
-  const id = sid || [...login].map((c) => c.charCodeAt(0).toString(16).padStart(2, '0')).join('').slice(0, 24).padEnd(8, '0');
+  // Worker parseCookie only accepts hex tdoc_sid values.
+  const id = sid || [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
   await env.META.put(`session:${id}`, JSON.stringify({
-    login, avatar_url: '', name: login, created: new Date().toISOString(),
+    login, name: login, avatar_url: '', created: new Date().toISOString(),
   }));
   return `tdoc_sid=${id}`;
 }
 
-async function issue(worker, env, label = 'test') {
-  const r = await worker.fetch(req('/api/hosted/token', { method: 'POST', body: { label } }), env, {});
+async function issue(worker, env, login = 'alice', label = login) {
+  const cookie = await putSession(env, login);
+  const r = await worker.fetch(req('/api/hosted/token', {
+    method: 'POST', cookie, body: { label },
+  }), env, {});
   const data = await r.json();
-  assert(r.status === 200 && data.token && data.account_id, `token issue failed ${r.status}: ${JSON.stringify(data)}`);
-  return data;
+  assert(r.status === 200 && data.token && data.account_id,
+    `token issue failed ${r.status}: ${JSON.stringify(data)}`);
+  assert(data.github_login === login, `expected github_login ${login}, got ${data.github_login}`);
+  return { ...data, cookie, login };
 }
 
 (async () => {
@@ -172,13 +178,31 @@ async function issue(worker, env, label = 'test') {
   console.log('hosted OOB behavior');
 
   await t('hosted token mint is closed unless registration is explicitly enabled', async () => {
-    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_REGISTRATION: '' });
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_REGISTRATION: '0' });
     const r = await worker.fetch(req('/api/hosted/token', { method: 'POST', body: { label: 'closed' } }), env, {});
     const data = await r.json();
     assert(r.status === 403, `expected 403, got ${r.status}`);
     assert(data.error === 'hosted_registration_disabled', `unexpected error ${JSON.stringify(data)}`);
     assert([...env.META.map.keys()].every(k => !k.startsWith('hosted-token:')),
       'disabled registration must not persist a token record');
+  });
+
+  await t('unset registration enables on tdoc.dev and stays closed on BYOK hosts', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    delete env.TDOC_HOSTED_REGISTRATION;
+    const cookie = await putSession(env, 'alice');
+    const onDev = await worker.fetch(req('/api/hosted/token', {
+      method: 'POST', cookie, body: { label: 'dev' },
+    }), env, {});
+    assert(onDev.status === 200, `tdoc.dev should mint, got ${onDev.status}: ${await onDev.clone().text()}`);
+    const byok = await worker.fetch(new Request('https://example.workers.dev/api/hosted/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ label: 'byok' }),
+    }), env, {});
+    assert(byok.status === 403, `BYOK host should stay closed, got ${byok.status}`);
+    const byokBody = await byok.json();
+    assert(byokBody.error === 'hosted_registration_disabled', `unexpected ${JSON.stringify(byokBody)}`);
   });
 
   await t('missing-meta hosted upload still persists owner; second token cannot overwrite', async () => {
@@ -409,6 +433,133 @@ async function issue(worker, env, label = 'test') {
     assert(state.get('list')[0].events.length === 1, 'agent reply mutated comments');
   });
 
+  await t('hosted token mint requires a GitHub session even when registration is open', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const r = await worker.fetch(req('/api/hosted/token', { method: 'POST', body: { label: 'anon' } }), env, {});
+    const data = await r.json();
+    assert(r.status === 401, `expected 401, got ${r.status}`);
+    assert(data.error === 'sign_in_required', `unexpected error ${JSON.stringify(data)}`);
+    assert([...env.META.map.keys()].every(k => !k.startsWith('hosted-token:')),
+      'anonymous mint must not persist a token record');
+  });
+
+  await t('same GitHub login remints the same account_id; a second login cannot overwrite that slug', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const first = await issue(worker, env, 'alice', 'laptop');
+    const remint = await issue(worker, env, 'alice', 'phone');
+    assert(first.account_id === remint.account_id, 'remint must reuse account_id');
+    assert(first.token !== remint.token, 'remint must issue a new token');
+
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: first.token,
+      body: { slug: 'alice-doc', version: 1, html: '<h1>A</h1>' },
+    }), env, {});
+    assert(up.status === 200, `alice upload ${up.status}: ${await up.text()}`);
+    const meta = JSON.parse(await env.META.get('meta:alice-doc'));
+    assert(meta.hosted.github_login === 'alice', 'upload must stamp github_login');
+
+    const bob = await issue(worker, env, 'bob');
+    const steal = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: bob.token,
+      body: { slug: 'alice-doc', version: 1, html: '<h1>stolen</h1>' },
+    }), env, {});
+    assert(steal.status === 403, `bob should be denied, got ${steal.status}`);
+  });
+
+  await t('/me lists only the signed-in GitHub user docs; operator keeps legacy unhosted', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
+    const alice = await issue(worker, env, 'alice');
+    const bob = await issue(worker, env, 'bob');
+    const aUp = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'alice-doc', version: 1, html: '<h1>A</h1>', meta: { title: 'Alice Doc' } },
+    }), env, {});
+    assert(aUp.status === 200, `alice upload ${aUp.status}`);
+    const bUp = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: bob.token,
+      body: { slug: 'bob-doc', version: 1, html: '<h1>B</h1>', meta: { title: 'Bob Doc' } },
+    }), env, {});
+    assert(bUp.status === 200, `bob upload ${bUp.status}`);
+    await env.META.put('meta:legacy', JSON.stringify({
+      title: 'Legacy', slug: 'legacy', versions: [{ n: 1 }],
+    }));
+
+    const aliceMe = await worker.fetch(req('/me', { cookie: alice.cookie }), env, {});
+    assert(aliceMe.status === 200, `/me alice ${aliceMe.status}`);
+    const aliceHtml = await aliceMe.text();
+    assert(aliceHtml.includes('alice-doc'), 'alice must see her slug');
+    assert(!aliceHtml.includes('bob-doc'), 'alice must not see bob');
+    assert(!aliceHtml.includes('legacy'), 'alice must not see operator legacy docs');
+
+    const bobMe = await worker.fetch(req('/me', { cookie: bob.cookie }), env, {});
+    const bobHtml = await bobMe.text();
+    assert(bobHtml.includes('bob-doc'), 'bob must see his slug');
+    assert(!bobHtml.includes('alice-doc'), 'bob must not see alice');
+
+    const julieSid = await putSession(env, 'julie');
+    const julieMe = await worker.fetch(req('/me', { cookie: julieSid }), env, {});
+    assert(julieMe.status === 200, `/me julie ${julieMe.status}`);
+    const julieHtml = await julieMe.text();
+    assert(julieHtml.includes('legacy'), 'operator must still see unhosted legacy docs');
+    assert(!julieHtml.includes('alice-doc'), 'operator /me must not list other tenants');
+    assert(!julieHtml.includes('bob-doc'), 'operator /me must not list other tenants');
+  });
+
+  await t('hosted create enforces per-account doc quota; retry of same slug does not consume another slot', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_DOCS: '1' });
+    const alice = await issue(worker, env, 'alice');
+    const first = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'one', version: 1, html: '<h1>1</h1>' },
+    }), env, {});
+    assert(first.status === 200, `first upload ${first.status}`);
+    const second = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'two', version: 1, html: '<h1>2</h1>' },
+    }), env, {});
+    assert(second.status === 403, `quota should 403, got ${second.status}`);
+    const body = await second.json();
+    assert(body.error === 'quota_docs', `expected quota_docs, got ${JSON.stringify(body)}`);
+    const retry = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'one', version: 2, html: '<h1>1b</h1>' },
+    }), env, {});
+    assert(retry.status === 200, `same-slug retry should not count as a new doc, got ${retry.status}: ${await retry.text()}`);
+  });
+
+  await t('hosted upload rejects oversize html', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_UPLOAD_BYTES: '20' });
+    const alice = await issue(worker, env, 'alice');
+    const r = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'big', version: 1, html: '<h1>this is more than twenty bytes of html</h1>' },
+    }), env, {});
+    assert(r.status === 413, `expected 413, got ${r.status}`);
+    const body = await r.json();
+    assert(body.error === 'quota_upload_bytes', `expected quota_upload_bytes, got ${JSON.stringify(body)}`);
+  });
+
+  await t('hosted upload quota counts UTF-8 bytes, not JS string length', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_UPLOAD_BYTES: '20' });
+    const alice = await issue(worker, env, 'alice');
+    const cjk = '<p>' + '文'.repeat(7) + '</p>'; // 14 UTF-16 units, 28 UTF-8 bytes
+    assert(cjk.length <= 20, 'fixture must sit under the JS length cap');
+    const over = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'cjk', version: 1, html: cjk },
+    }), env, {});
+    assert(over.status === 413, `expected 413 for CJK over the byte cap, got ${over.status}`);
+    const overBody = await over.json();
+    assert(overBody.error === 'quota_upload_bytes', `unexpected ${JSON.stringify(overBody)}`);
+    assert(overBody.size === new TextEncoder().encode(cjk).byteLength,
+      `size should be UTF-8 bytes, got ${overBody.size}`);
+    const okUp = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'ok', version: 1, html: '<p>hi</p>' },
+    }), env, {});
+    assert(okUp.status === 200, `ASCII under the cap should upload, got ${okUp.status}: ${await okUp.text()}`);
+  });
+
   await t('duplicate requires a signed-in session', async () => {
     const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
     await env.DOCS.put('docs/src-doc/v1/index.html', '<h1>Src</h1>');
@@ -471,6 +622,14 @@ async function issue(worker, env, label = 'test') {
     assert(meta.versions.length === 1 && meta.versions[0].n === 1, 'must be a v1 snapshot');
     assert(meta.access && meta.access.visibility === 'unlisted', 'copy should default unlisted');
     assert(meta.hosted && meta.hosted.github_login === 'alice', 'copy must bind alice');
+    const tok = await issue(worker, env, 'alice');
+    assert(tok.account_id === meta.hosted.account_id,
+      'CLI mint and Duplicate must share account_id');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: firstBody.slug, version: 2, html: '<h1>Essay v2</h1>' },
+    }), env, {});
+    assert(up.status === 200, `CLI token should update the copy, got ${up.status}: ${await up.text()}`);
     assert(!(await env.META.get('comments:public-essay-copy')), 'comments must not come along');
 
     const second = await worker.fetch(req('/api/doc/duplicate', {
@@ -487,6 +646,35 @@ async function issue(worker, env, label = 'test') {
     assert(me.status === 200, `/me ${me.status}`);
     assert(meHtml.includes('public-essay') && !meHtml.includes('public-essay-copy'),
       'operator /me must not list alice\'s account copies');
+  });
+
+  await t('duplicate consumes the same hosted doc quota as publish', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_DOCS: '1' });
+    await env.DOCS.put('docs/src-doc/v1/index.html', '<h1>Src</h1>');
+    await env.META.put('meta:src-doc', JSON.stringify({ title: 'Src', slug: 'src-doc', versions: [{ n: 1 }] }));
+    const alice = await issue(worker, env, 'alice');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'one', version: 1, html: '<h1>1</h1>' },
+    }), env, {});
+    assert(up.status === 200, `seed upload ${up.status}`);
+    const dup = await worker.fetch(req('/api/doc/duplicate', {
+      method: 'POST', cookie: alice.cookie,
+      body: { slug: 'src-doc', version: 1 },
+    }), env, {});
+    assert(dup.status === 403, `duplicate should hit quota, got ${dup.status}`);
+    assert((await dup.json()).error === 'quota_docs', 'duplicate must return quota_docs');
+  });
+
+  await t('legacy hosted-github account_id is reused by mint', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await env.META.put('hosted-github:alice', JSON.stringify({
+      account_id: 'acct_legacyalice', github_login: 'alice', created: '2026-01-01T00:00:00.000Z',
+    }));
+    const tok = await issue(worker, env, 'alice');
+    assert(tok.account_id === 'acct_legacyalice', `expected migrated account_id, got ${tok.account_id}`);
+    const rec = JSON.parse(await env.META.get('hosted-account:alice'));
+    assert(rec.account_id === 'acct_legacyalice', 'must copy the leftover record onto hosted-account');
   });
 
   await t('duplicate refuses island-bearing docs', async () => {

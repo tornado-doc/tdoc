@@ -82,7 +82,9 @@ t('POST /api/doc/duplicate is session-gated, snapshot-only, no comment copy', ()
   assert(!dupRoute.includes('mutateComments'), 'v1 duplicate must not copy comment threads');
   assert(!dupRoute.includes('readComments'), 'v1 duplicate must not snapshot comments');
   assert(dupRoute.includes('stampAids'), 'copied HTML must be aid-stamped');
-  assert(dupRoute.includes('nextDuplicateSlug'), 'must allocate a -copy slug');
+  assert(dupRoute.includes('hostedAccountForGithub'), 'duplicate must reuse the hosted account registry');
+  assert(dupRoute.includes('quota_docs'), 'duplicate must share the hosted doc quota');
+  assert(dupRoute.includes('quota_upload_bytes'), 'duplicate must share the hosted upload-size cap');
 });
 
 t('export attachment filename is slug-vN.html, not -fork.html', () => {
@@ -107,12 +109,15 @@ t('Download /export bakes overlay reader CSS, not bar chrome', () => {
 });
 
 t('/me hides another GitHub user\'s hosted duplicate from the worker-owner catalog', () => {
+  const start = worker.indexOf('async function indexHtml(env, session');
   const idx = worker.slice(
-    worker.indexOf('async function indexHtml(env, session) {'),
-    worker.indexOf('return `<!doctype html><html><head>', worker.indexOf('async function indexHtml(env, session) {')),
+    start,
+    worker.indexOf('return `<!doctype html><html><head>', start),
   );
-  assert(idx.includes('hosted.github_login'), '/me must look at hosted.github_login');
-  assert(idx.includes('hostedLogin !== viewer'), '/me must skip other people\'s account copies');
+  assert(idx.includes('isDocOwnerSession(env, session, row.meta)'),
+    'hosted /me must filter by doc owner session');
+  assert(idx.includes('hostedGithubLogin(row.meta)'),
+    'BYOK /me must skip other people\'s hosted copies');
 });
 
 const slugStart = worker.indexOf('function isValidSlug(slug) {');
