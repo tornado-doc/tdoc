@@ -44,23 +44,26 @@ t('never asks which runtime you use', () => {
   assert(/ONBOARDING\.md/.test(onboard), 'the paste line must point the agent at the setup guide');
 });
 
-t('sign-in is step one, and is skippable', () => {
-  // It leads now because of what it buys: since #156 the hosted mint is
-  // session-gated, so signing in is what turns step two into "paste, get a
-  // link" with nothing to set up, and the same login remints the same account
-  // so the doc stays recoverable. It must stay skippable, because publishing
-  // to a host you own needs no account at all.
-  assert(/function stepSignIn/.test(onboard), 'the sign-in step is gone');
-  assert(/tdo-skip/.test(onboard), 'the sign-in step must be skippable');
-  assert(/authConfigured === false/.test(onboard),
-    'a host with no auth configured must not be asked to sign in');
-  assert(/cfg\.identity && cfg\.identity\.login/.test(onboard),
-    'someone already signed in must not be asked again');
-  // Reuse, not a second device flow.
-  assert(/getElementById\('tdoc-signin'\)/.test(onboard),
-    'must reuse the overlay device flow rather than building a parallel one');
-  assert(!/device\/start|device\/poll/.test(onboard),
-    'a second device flow implementation is back in the modal');
+t('asks for no sign-in of its own', () => {
+  // It led for exactly one commit, on the theory that it bought the hosted
+  // token. It does not: #156 adds hosted_github_signin to bin/tdoc-publish, so
+  // the CLI signs in and mints for itself. Asking here made the visitor
+  // authenticate twice for one account.
+  assert(!/stepSignIn|tdo-skip/.test(onboard), 'the sign-in step is back in onboarding');
+  assert(!/device\/start|device\/poll/.test(onboard), 'a device flow is back in the modal');
+  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
+  assert(/Sign in with GitHub to comment/.test(overlay),
+    'the composer must still offer sign-in where the server actually enforces it');
+});
+
+t('the detail is collapsed, not stacked above the button', () => {
+  // Someone who already gets it should be one click from Copy. The rest is
+  // there for whoever wants to know what they are setting loose.
+  assert(/<summary>What does it do\?<\/summary>/.test(onboard),
+    'the lesson is no longer behind a disclosure');
+  assert(/document\.createElement\('details'\)/.test(onboard),
+    'use a native <details> so it works without extra script and stays accessible');
+  assert(!/learn\.open = true|open>/.test(onboard), 'the disclosure must start closed');
 });
 
 t('the paste line stays one short sentence', () => {
@@ -101,8 +104,8 @@ t('points at the hub only when there is a hosted account behind it', () => {
   // hosted account. Naming it for a self-host visitor walks them into the
   // operator catalog's sign-in wall (#131). Guarded in both places it appears.
   const code = onboard.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
-  assert(/st\.token \? '[^']*tdoc\.dev\/me/.test(code),
-    'the lesson names the hub without checking for a hosted token');
+  assert(/st\.hosted \? '[^']*tdoc\.dev\/me/.test(code),
+    'the lesson names the hub without checking that hosted publishing is open');
   const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
   assert(/only if/i.test(recipe) && /tdoc\.dev\/me/.test(recipe),
     'the recipe must make the hub conditional on having published to hosted tdoc');

@@ -1179,6 +1179,18 @@ function landingHtml(env, notice) {
     <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
   <div id="toast" role="status" aria-live="polite"></div>
 <script>
+  // Create-a-doc tutorial. /me cannot create anything — the doc is written by
+  // the user's own agent — so this explains where creation actually happens.
+  (function () {
+    var bg = document.getElementById('mk-bg');
+    var openBtn = document.getElementById('mk-open');
+    if (!bg || !openBtn) return;
+    function show(on) { bg.hidden = !on; if (on) document.getElementById('mk-x').focus(); }
+    openBtn.onclick = function () { show(true); };
+    document.getElementById('mk-x').onclick = function () { show(false); };
+    bg.addEventListener('click', function (e) { if (e.target === bg) show(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !bg.hidden) show(false); });
+  })();
 (function () {
   var toastMsg = ${toastJson};
   var toastEl = document.getElementById('toast');
@@ -1363,6 +1375,29 @@ async function indexHtml(env, session) {
   .batch-delete:disabled { opacity: 0.5; cursor: default; }
   .doc-list { display: flex; flex-direction: column; }
   .doc-list[hidden], .doc-row[hidden], .empty[hidden] { display: none !important; }
+  /* Create-a-doc: /me is where someone lands after publishing, so it is also
+     where they come back to make the next one. The button teaches rather than
+     creates, because nothing here can create a doc — their agent writes it. */
+  .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+  .page-hd h1 { margin: 0; }
+  .mk-btn { margin-left: auto; border: 0; border-radius: 999px; background: var(--td-accent); color: #fff;
+    font: inherit; font-weight: 650; padding: 9px 16px; cursor: pointer; }
+  .mk-bg { position: fixed; inset: 0; background: rgba(16,18,26,.55); display: grid; place-items: center;
+    z-index: 99999; padding: 20px; }
+  .mk-bg[hidden] { display: none; }
+  .mk { width: min(480px, 100%); background: #fff; border-radius: 16px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(16,18,26,.28); text-align: left; }
+  .mk-hd { display: flex; align-items: center; padding: 17px 20px; border-bottom: 1px solid var(--td-line); }
+  .mk-hd strong { font-size: 15px; }
+  .mk-hd button { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1;
+    color: #767c8b; cursor: pointer; }
+  .mk-bd { padding: 18px 20px; }
+  .mk-bd ol { margin: 0; padding-left: 18px; color: #5b6070; font-size: 14px; }
+  .mk-bd li { margin: 0 0 9px; }
+  .mk-bd b { color: var(--td-ink); }
+  .mk-say { display: block; margin: 6px 0 0; padding: 9px 11px; background: #f5f6f8;
+    border: 1px solid var(--td-line); border-radius: 8px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--td-ink); }
+  .mk-ft { padding: 14px 20px; border-top: 1px solid var(--td-line); font-size: 12.5px; color: #767c8b; }
   .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
   .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
   .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
@@ -1394,9 +1429,9 @@ async function indexHtml(env, session) {
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
 </style>
 </head><body>
-<h1>My docs</h1>
+<div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
 <p class="who">${session && session.login ? `Signed in as <b>${escapeHtml(session.login)}</b>` : 'Your published docs'}.</p>
-${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
+${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how.</p>' :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
   </div>
@@ -1406,6 +1441,23 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   </div>
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
+<div class="mk-bg" id="mk-bg" hidden>
+  <div class="mk" role="dialog" aria-modal="true" aria-label="Create a doc">
+    <div class="mk-hd"><strong>Create a doc</strong><button type="button" id="mk-x" aria-label="Close">&times;</button></div>
+    <div class="mk-bd">
+      <ol>
+        <li>Open the AI you already use.
+          <span class="mk-say">Use tdoc to make me a one page summary of this quarter, with a chart of weekly signups.</span>
+        </li>
+        <li>It writes the page and opens it for you.</li>
+        <li>Hit <b>Publish</b>, top right, to put it online.</li>
+        <li>Send the link to anyone. They comment on the page, and your AI answers them.</li>
+      </ol>
+    </div>
+    <div class="mk-ft">Not set up yet? <a href="/start">Start here</a>.</div>
+  </div>
+</div>
+
 <script>
 (() => {
   // Tiny top-right toast — no third-party runtime on the privileged /me page.
