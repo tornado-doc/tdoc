@@ -36,8 +36,9 @@ t('teaches the loop on the real published doc', () => {
 });
 
 t('asks for no account and no runtime', () => {
-  // /api/hosted/token mints an anonymous account, so the sign-in step bought
-  // the visitor nothing. And only Claude Code has a documented `/plugin`
+  // Getting started needs no account at all: publishing to a host you own
+  // never touches /api/hosted/token, so the old sign-in-first step bought the
+  // visitor nothing. And only Claude Code has a documented `/plugin`
   // line, which per ONBOARDING.md an agent cannot run for you anyway — so the
   // agent reads the guide and installs itself instead of being asked.
   assert(!/device\/start|device\/poll/.test(onboard),
@@ -82,6 +83,26 @@ t('says what to say, not what to type', () => {
   // contradict the page it sits on.
   assert(!/npx |wrangler |npm i -g/.test(text),
     'the page must not hand the reader a CLI command to type');
+});
+
+t('offers hosted publishing as an upgrade, never as a gate', () => {
+  // #156 gates the hosted mint on a GitHub session and switches signup on for
+  // tdoc.dev by hostname, so a signed-out visitor gets sign_in_required rather
+  // than "closed". Degrading silently there would hide the zero-setup path
+  // from everyone who is not already signed in. Offering it must not turn the
+  // sign-in back into a gate: the paste line has to work untouched without it.
+  assert(/sign_in_required/.test(onboard), 'the modal does not recognise the hosted sign-in signal');
+  assert(/st\.canHost && !st\.token/.test(onboard),
+    'the hosted offer must only render when hosting is reachable and unclaimed');
+  // Reuse, not a second device flow.
+  assert(/getElementById\('tdoc-signin'\)/.test(onboard),
+    'must reuse the overlay device flow rather than building a parallel one');
+  assert(!/device\/start|device\/poll/.test(onboard),
+    'a second device flow implementation is back in the modal');
+  // Display state must be recomputed per open, or a closed signup keeps
+  // showing an offer the server will refuse.
+  assert(/st\.canHost = false;/.test(onboard.slice(onboard.indexOf('function open('))),
+    'open() must reset the hosted-offer flag');
 });
 
 t('a failed copy still leaves the visitor holding the line', () => {
