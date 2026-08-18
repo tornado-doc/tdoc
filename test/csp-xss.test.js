@@ -105,7 +105,7 @@ function waitReady(port, ms = 5000) {
   await t('the nonced overlay script DID execute — the tdoc bar renders', async () => {
     await page.waitForSelector('.tdoc-bar', { timeout: 2000 });
     const markSrc = await page.$eval('.tdoc-bar-mark img', (el) => el.getAttribute('src'));
-    if (markSrc !== '/tdoc_logo.png') throw new Error('tdoc bar mark is missing the logo — overlay may not have booted');
+    if (markSrc !== '/tdoc_logo.svg') throw new Error('tdoc bar mark is missing the logo — overlay may not have booted');
   });
 
   await t('commenting still works end-to-end under the CSP (drag INTO the element opens the popup, submit persists)', async () => {

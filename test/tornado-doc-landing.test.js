@@ -396,7 +396,7 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'overlay still renders the slug crumb and version picker on the homepage');
   assert(/tdoc-bar-mark/.test(left[0].split('isSiteBar')[0]),
     'the tdoc mark must stay outside the landing conditional');
-  assert(/tdoc_logo\.png/.test(left[0]),
+  assert(/tdoc_logo\.svg/.test(left[0]),
     'the mark must be the tdoc logo, not a text pill');
   assert(/tdoc-title/.test(left[0]) && /isSiteBar \? '' :/.test(left[0]),
     'homepage bar must not repeat the page title');
