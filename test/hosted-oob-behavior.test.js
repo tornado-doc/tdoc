@@ -488,8 +488,8 @@ async function issue(worker, env, login = 'alice', label = login) {
     assert(aliceMe.status === 200, `/me alice ${aliceMe.status}`);
     const aliceHtml = await aliceMe.text();
     assert(aliceHtml.includes('alice-doc'), 'alice must see her slug');
-    assert(!aliceHtml.includes('bob-doc'), 'alice must not see bob');
-    assert(!aliceHtml.includes('legacy'), 'alice must not see operator legacy docs');
+    assert(!aliceHtml.includes('data-slug="bob-doc"'), 'alice must not see bob');
+    assert(!aliceHtml.includes('data-slug="legacy"'), 'alice must not see operator legacy docs');
 
     const bobMe = await worker.fetch(req('/me', { cookie: bob.cookie }), env, {});
     const bobHtml = await bobMe.text();
@@ -500,9 +500,9 @@ async function issue(worker, env, login = 'alice', label = login) {
     const julieMe = await worker.fetch(req('/me', { cookie: julieSid }), env, {});
     assert(julieMe.status === 200, `/me julie ${julieMe.status}`);
     const julieHtml = await julieMe.text();
-    assert(julieHtml.includes('legacy'), 'operator must still see unhosted legacy docs');
-    assert(!julieHtml.includes('alice-doc'), 'operator /me must not list other tenants');
-    assert(!julieHtml.includes('bob-doc'), 'operator /me must not list other tenants');
+    assert(julieHtml.includes('data-slug="legacy"'), 'operator must still see unhosted legacy docs');
+    assert(!julieHtml.includes('data-slug="alice-doc"'), 'operator /me must not list other tenants');
+    assert(!julieHtml.includes('data-slug="bob-doc"'), 'operator /me must not list other tenants');
   });
 
   await t('hosted create enforces per-account doc quota; retry of same slug does not consume another slot', async () => {

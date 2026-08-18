@@ -1035,7 +1035,7 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog) {
   return injectOverlayCfg(rawHtml, {
     slug, version,
     identity: identity || null,
@@ -1047,6 +1047,8 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     // version number are storage detail; printing them in the bar tells a
     // first-time visitor they are looking at somebody's document.
     isLanding: !!isLanding,
+    // /me catalog: same overlay bar, no Share / Duplicate / Copy.
+    isCatalog: !!isCatalog,
     // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
     // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
     ownerManage: isOwner ? (ownerManage || null) : null,
@@ -1280,92 +1282,6 @@ function authDoneHtml() {
 </body></html>`;
 }
 
-// Site chrome for pages that do not load overlay.js (/me catalog). Same
-// visual language as the published-doc top bar: mark on the left, identity
-// chip on the right. No Share / Fork / Copy — those are doc actions.
-function siteChromeCss() {
-  return `
-  .tdoc-bar { position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
-  .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 1; }
-  .tdoc-bar-center { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; padding: 0 8px; }
-  .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-  .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
-  .tdoc-bar button:hover { background: #f0f1f4; color: #1a1a1a; }
-  .tdoc-bar button.tdoc-bar-mark { height: 28px; padding: 0 12px; border-radius: 999px; background: var(--td-accent); color: #fff; font-weight: 700; font-size: 13px; letter-spacing: -0.01em; flex-shrink: 0; }
-  .tdoc-bar button.tdoc-bar-mark:hover { background: var(--td-accent-hover); color: #fff; }
-  .tdoc-menu-wrap { position: relative; display: inline-block; }
-  .tdoc-menu { display: none; position: absolute; top: calc(100% + 6px); right: 0; background: #fff; border: 1px solid #e5e5e7; border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 1000000; min-width: 180px; }
-  .tdoc-menu.open { display: block; }
-  .tdoc-menu button { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 4px; color: #1a1a1a; font: 13px system-ui, sans-serif; }
-  .tdoc-menu button:hover { background: #f0f1f4; }
-  .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; position: relative; }
-  .tdoc-bar button.tdoc-chip { background: #f0f1f4; color: #1a1a1a; padding: 3px 12px 3px 3px; }
-  .tdoc-chip:hover, .tdoc-bar button.tdoc-chip:hover { background: #e5e6ea; color: #1a1a1a; }
-  .tdoc-chip img { width: 26px; height: 26px; border-radius: 50%; }
-  .tdoc-chip .name { font-size: 13px; font-weight: 500; }
-  @media (max-width: 900px) {
-    .tdoc-chip .name { display: none; }
-    .tdoc-chip, .tdoc-bar button.tdoc-chip { padding: 3px; }
-  }`;
-}
-
-function siteChromeHtml(session, opts) {
-  const page = (opts && opts.page) || '';
-  const login = session && typeof session.login === 'string' ? session.login : '';
-  if (!login) return '';
-  const rawAvatar = session.avatar_url;
-  const avatar = typeof rawAvatar === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(rawAvatar)
-    ? rawAvatar
-    : `https://github.com/${encodeURIComponent(login)}.png`;
-  const extra = page === 'me' ? '' : '<button type="button" id="tdoc-my-docs" role="menuitem">My docs</button>';
-  return `<div class="tdoc-bar">
-    <div class="tdoc-bar-left">
-      <button type="button" class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc home" aria-label="tdoc home">tdoc</button>
-    </div>
-    <div class="tdoc-bar-center"></div>
-    <div class="tdoc-bar-right">
-      <div class="tdoc-menu-wrap">
-        <button type="button" class="tdoc-chip" id="tdoc-me" aria-haspopup="menu" aria-expanded="false">
-          <img src="${escapeHtml(avatar)}" alt=""><span class="name">${escapeHtml(login)}</span>
-        </button>
-        <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
-          ${extra}
-          <button type="button" id="tdoc-signout" role="menuitem">Sign out</button>
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
-
-function siteChromeScript() {
-  return `<script>
-(function () {
-  var mark = document.getElementById('tdoc-bar-mark');
-  if (mark) mark.addEventListener('click', function () { location.href = '/'; });
-  var btn = document.getElementById('tdoc-me');
-  var menu = document.getElementById('tdoc-me-menu');
-  if (btn && menu) {
-    btn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      var open = menu.classList.toggle('open');
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    });
-    document.addEventListener('click', function () {
-      menu.classList.remove('open');
-      btn.setAttribute('aria-expanded', 'false');
-    });
-  }
-  var docs = document.getElementById('tdoc-my-docs');
-  if (docs) docs.addEventListener('click', function () { location.href = '/me'; });
-  var out = document.getElementById('tdoc-signout');
-  if (out) out.addEventListener('click', function () {
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
-      .finally(function () { location.href = '/'; });
-  });
-})();
-</script>`;
-}
-
 // /me — the owner's doc catalog. JUL-36 tail (2026-08-13): this used to be a
 // dense access-control table (visibility/history/commenting/allowed_users
 // dropdowns + Save) gated by an admin-token field. Both are GONE now:
@@ -1381,7 +1297,7 @@ function siteChromeScript() {
 // a quiet ⋯ Delete. No access data of any kind is computed or emitted here
 // (gate: response HTML must not contain `allowed_users` — there is nothing
 // here that could).
-async function indexHtml(env, session, origin) {
+async function indexHtml(env, session, origin, nonce) {
   // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
   // comment logs here — that was N serial Durable-Object + R2 round trips
   // per page load. Search + batch select are client-side over the rendered
@@ -1429,14 +1345,14 @@ async function indexHtml(env, session, origin) {
       </div>
     </div>`);
 
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>tdoc</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My docs</title>
 <style>
   :root {
     --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
     --td-danger: #b42318; --td-danger-hover: #931c14; --td-danger-tint: #fdeceb; --td-ok: #087443;
     --td-ink: #111; --td-muted: #666; --td-line: #eee; --td-surface: #f7f7f7;
   }
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 680px; margin: 0 auto; padding: 80px 20px 48px; color: var(--td-ink); }
+  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 680px; margin: 0 auto; padding: 24px 20px 48px; color: var(--td-ink); }
   h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
   a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -1470,9 +1386,9 @@ async function indexHtml(env, session, origin) {
   .row-menu[hidden] { display: none; }
   .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
   .row-delete:hover { background: var(--td-danger-tint); }
-  /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
-     doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
-     standalone copy here since /me does not load overlay.js. */
+  /* Styled confirm modal — replaces window.confirm() (JUL-36). Overlay.js
+     supplies the site bar; this modal stays local because catalog delete
+     is not a document Share flow. */
   .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
   .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
   .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
@@ -1481,10 +1397,8 @@ async function indexHtml(env, session, origin) {
   .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
   .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
-  ${siteChromeCss()}
 </style>
 </head><body>
-${siteChromeHtml(session, { page: 'me' })}
 <h1>My docs</h1>
 ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   `<div class="toolbar">
@@ -1496,7 +1410,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   </div>
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
-<script>
+<script${nonce ? ` nonce="${nonce}"` : ''}>
 (() => {
   // Tiny top-right toast — no third-party runtime on the privileged /me page.
   function toast(message, kind = '') {
@@ -1710,7 +1624,6 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   syncBatchUi();
 })();
 </script>
-${siteChromeScript()}
 </body></html>`;
 }
 
@@ -3042,7 +2955,12 @@ export default {
           headers: { Location: `/?notice=${notice}` },
         });
       }
-      return html(await indexHtml(env, s, url.origin));
+      const nonce = rand(16);
+      const page = await indexHtml(env, s, url.origin, nonce);
+      const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
+      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true), {
+        headers: { 'Content-Security-Policy': cspHeader(nonce) },
+      });
     }
 
     // ---- interactive island (sandboxed widget) ----

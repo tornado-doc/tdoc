@@ -125,17 +125,24 @@ t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
   assert(index.includes('Promise.all'), '/me should fetch meta rows in parallel');
 });
 
-t('/me shows the published-doc top bar (identity chip) without loading overlay.js', () => {
-  assert(index.includes('siteChromeCss()'), '/me must include site chrome CSS');
-  assert(index.includes("siteChromeHtml(session, { page: 'me' })"), '/me must render site chrome HTML');
-  assert(index.includes('siteChromeScript()'), '/me must include site chrome script');
-  assert(worker.includes('function siteChromeHtml(session, opts)'), 'siteChromeHtml helper missing');
-  assert(worker.includes('class="tdoc-bar"'), 'chrome must emit .tdoc-bar');
-  assert(worker.includes('id="tdoc-signout"'), 'chrome must offer Sign out');
-  assert(worker.includes("location.href = '/'"), 'mark / sign-out must return to the site home');
-  assert(!index.includes('class="who"'), 'identity belongs in the bar, not a Signed in as line');
-  assert(!index.includes('OVERLAY_JS'), '/me must not inline overlay.js');
-  assert(/padding:\s*80px 20px 48px/.test(index), '/me body must clear the 48px fixed bar');
+t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
+  const meStart = worker.indexOf("if (p === '/me' && method === 'GET')");
+  const meEnd = worker.indexOf('// ---- interactive island', meStart);
+  assert(meStart >= 0 && meEnd > meStart, '/me route block missing');
+  const meRoute = worker.slice(meStart, meEnd);
+  assert(meRoute.includes('injectOverlay('), '/me must inject overlay.js for the site bar');
+  assert(meRoute.includes("'Content-Security-Policy': cspHeader(nonce)"), '/me overlay needs the same CSP as docs');
+  assert(worker.includes('isCatalog: !!isCatalog'), 'injectOverlay must pass isCatalog');
+  assert(!worker.includes('function siteChromeCss'), '/me must not fork a second top bar');
+  assert(!index.includes('class="who"'), 'identity belongs in the overlay chip');
+  assert(index.includes('nonce="${nonce}"'), '/me catalog script must carry the CSP nonce');
+  assert(overlay.includes('const isCatalog = !!cfg.isCatalog'), 'overlay must read isCatalog');
+  assert(overlay.includes("${isCatalog ? '' : copyMenuHtml}"), 'catalog must hide Copy');
+  assert(overlay.includes("${isCatalog ? '' : primaryCtaHtml}"), 'catalog must hide Share');
+  assert(overlay.includes("${isCatalog ? '' : forkBtnHtml}"), 'catalog must hide Duplicate/Download');
+  const catalogGate = overlay.indexOf('if (isCatalog) {');
+  const commentsBoot = overlay.indexOf('// ========== Comment layer + FAB ==========');
+  assert(catalogGate >= 0 && commentsBoot > catalogGate, 'catalog must not boot comment chrome');
 });
 
 t('/me does not introduce a bespoke cookie-only admin-auth path', () => {
