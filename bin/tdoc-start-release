@@ -1,0 +1,46 @@
+#!/usr/bin/env node
+// Build the tdoc.dev /start publish payload from landing/tdoc-start.
+//
+// Same collapse as bin/tdoc-landing-release: latest working-copy version
+// becomes v1 with an empty comment file. /start reads this slug out of the
+// Worker KV via landingResponse(..., START_SLUG).
+//
+//   node bin/tdoc-start-release              # writes .release/tdoc-start
+//   TDOC_DIR="$PWD/.release" tdoc publish --visibility public tdoc-start
+//
+const fs = require('fs');
+const path = require('path');
+
+const root = path.join(__dirname, '..');
+const src = path.join(root, 'landing', 'tdoc-start');
+const slug = process.argv[2] || 'tdoc-start';
+const out = path.join(root, '.release', slug);
+
+const meta = JSON.parse(fs.readFileSync(path.join(src, 'meta.json'), 'utf8'));
+const latest = meta.versions[meta.versions.length - 1];
+const from = path.join(src, `v${latest.n}`);
+
+fs.rmSync(out, { recursive: true, force: true });
+fs.mkdirSync(path.join(out, 'v1'), { recursive: true });
+
+const html = fs.readFileSync(path.join(from, 'index.html'), 'utf8');
+fs.writeFileSync(path.join(out, 'v1', 'index.html'), html);
+
+const widgets = path.join(from, 'widgets');
+if (fs.existsSync(widgets)) fs.cpSync(widgets, path.join(out, 'v1', 'widgets'), { recursive: true });
+
+fs.writeFileSync(path.join(out, 'meta.json'), JSON.stringify({
+  slug,
+  title: meta.title,
+  created: meta.created,
+  versions: [{ n: 1, created: latest.created, prompt: 'tdoc first-doc onboarding' }],
+  access: {
+    visibility: 'public',
+    history_visibility: 'owner',
+    commenting: 'signed_in',
+    allowed_users: [],
+  },
+}, null, 2) + '\n');
+fs.writeFileSync(path.join(out, 'comments.json'), '[]\n');
+
+console.log(`[tdoc] release payload for ${slug}: ${path.relative(process.cwd(), out)} (v${latest.n} -> v1, 0 comments)`);

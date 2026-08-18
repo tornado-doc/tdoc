@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>tdoc, create your first doc</title>
+  <meta name="description" content="Sign in on tdoc.dev, tell your AI what to make, and share the link. Hosted by default. No Cloudflare account to bring.">
+  <link rel="icon" type="image/png" href="[image content will be provided separately]">
+  <link rel="apple-touch-icon" href="[image content will be provided separately]">
+  <link rel="canonical" href="https://tdoc.dev/start">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="tdoc">
+  <meta property="og:url" content="https://tdoc.dev/start">
+  <meta property="og:title" content="tdoc, create your first doc">
+  <meta property="og:description" content="Sign in on tdoc.dev, tell your AI what to make, and share the link.">
+  <meta property="og:image" content="https://tdoc.dev/tdoc_logo.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="tdoc, create your first doc">
+  <meta name="twitter:description" content="Sign in on tdoc.dev, tell your AI what to make, and share the link.">
+  <meta name="twitter:image" content="https://tdoc.dev/tdoc_logo.png">
+
+  <style>
+    /* No author JavaScript. Published tdocs run under a nonce-only CSP. */
+    :root {
+      --ink: #10121a;
+      --body: #454a58;
+      --muted: #767c8b;
+      --accent: #1652f0;
+      --soft: #eef3ff;
+      --rule: #e4e7ee;
+      --wash: #f7f8fb;
+      --good: #1a7340;
+    }
+    * { box-sizing: border-box; }
+    body { background:#fff; color:var(--body); font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; margin:0; -webkit-font-smoothing:antialiased; }
+    .wrap { max-width: 960px; padding: 0 24px; }
+    h1,h2,h3 { color:var(--ink); letter-spacing:-.022em; }
+    h3 { font-size:17px; margin:0 0 5px; }
+    p { margin:0 0 13px; }
+    a { color:var(--accent); }
+    section { padding:56px 0; border-top:1px solid var(--rule); }
+
+    .i { width:1em; height:1em; fill:currentColor; flex:none; vertical-align:-.125em; }
+
+    .hero { padding:56px 0 24px; border-top:0; }
+    .brand { display:flex; align-items:center; gap:10px; margin:0 0 40px; }
+    img.brand-mark { width:76px; height:76px; display:block !important; margin:0 !important; }
+    .brand-name { font-weight:700; color:var(--ink); font-size:26px; letter-spacing:-.02em; }
+    h1.tagline { font-size:56px; line-height:1.05; font-weight:700; color:var(--ink); margin:0 0 12px; letter-spacing:-.04em; }
+    .sub span { display:block; }
+    .sub { font-size:19px; max-width:680px; margin:0 0 20px; color:var(--body); }
+    .trustline { display:flex; flex-wrap:wrap; gap:20px; align-items:center; margin:0 0 28px; font-size:11.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+    .trustline span { display:inline-flex; align-items:center; gap:7px; }
+    .trustline svg { width:14px; height:14px; }
+
+    .cta { display:grid; grid-template-columns:repeat(2,232px); gap:12px; justify-content:start; }
+    .btn { display:flex; align-items:center; justify-content:center; gap:9px; width:100%; height:52px; padding:0 18px; border-radius:999px; font-weight:650; font-size:15px; white-space:nowrap; text-decoration:none; letter-spacing:-.01em; transition:transform .12s, box-shadow .12s; }
+    .btn:hover { transform:translateY(-1px); }
+    .btn-primary:hover { box-shadow:0 8px 20px rgba(22,82,240,.28); }
+    .btn-primary { background:var(--accent); color:#fff; }
+    .btn-ghost { border:1px solid #d8dce5; color:var(--ink); background:#fff; }
+    .btn-ghost:hover { border-color:#b9c0cd; }
+    .btn-in { display:inline-flex; align-items:center; gap:9px; }
+    .pill { background:rgba(16,18,26,.06); border-radius:999px; padding:1px 8px; font-size:12.5px; font-weight:700; }
+
+    .steps { display:grid; gap:18px; }
+    .step-card { border:1px solid var(--rule); border-radius:14px; background:#fff; overflow:hidden; }
+    .step-hd { display:flex; align-items:flex-start; gap:14px; padding:22px 24px 0; }
+    .step-num { flex:none; width:30px; height:30px; border-radius:50%; background:var(--accent); color:#fff; display:grid; place-items:center; font-size:14px; font-weight:700; }
+    .step-hd h3 { font-size:20px; margin:2px 0 4px; }
+    .step-hd p { font-size:15px; color:var(--muted); margin:0; }
+    .step-bd { padding:18px 24px 24px 68px; }
+
+    .runtimes { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px; }
+    .runtimes span { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--rule); border-radius:999px; padding:7px 14px; font-size:13.5px; font-weight:600; color:var(--body); background:#fff; }
+    .runtimes svg { width:15px; height:15px; }
+
+    .cmd { background:#0f1220; color:#e8ecf7; border-radius:10px; padding:14px 16px; font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-x:auto; white-space:pre-wrap; overflow-wrap:anywhere; max-width:100%; -webkit-user-select:all; user-select:all; }
+    .cmd .c { color:#8b93a8; }
+    .say { border:1px solid var(--rule); border-left:3px solid var(--accent); border-radius:0 10px 10px 0; background:var(--wash); padding:12px 15px; font-size:14.5px; color:var(--ink); margin:0 0 10px; -webkit-user-select:all; user-select:all; }
+    .hint { font-size:13px; color:var(--muted); margin:10px 0 0; }
+
+    .beats { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:0 0 18px; }
+    .beat { border:1px solid var(--rule); border-radius:12px; padding:14px; background:#fff; }
+    .beat b { display:block; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin:0 0 6px; }
+    .beat p { font-size:13.5px; margin:0; color:var(--body); }
+    .beat svg { display:block; width:100%; height:auto; margin:10px 0 0; }
+
+    footer { padding:28px 0 64px; font-size:13px; color:var(--muted); text-align:center; }
+    footer a { display:inline-flex; align-items:center; gap:6px; }
+
+    @media (max-width:980px) { .beats { grid-template-columns:repeat(3,1fr); } }
+    @media (max-width:840px) {
+      h1.tagline { font-size:38px; }
+      section { padding:48px 0; }
+    }
+    @media (max-width:700px) { .beats { grid-template-columns:1fr 1fr; } }
+    @media (max-width:640px) {
+      h1.tagline { font-size:34px; }
+      .cta { grid-template-columns:1fr 1fr; max-width:none; gap:10px; }
+      .btn { font-size:14px; padding:0 12px; }
+      .btn-long { display:none; }
+      .step-bd { padding:16px 20px 22px; }
+      .step-hd { padding:20px 20px 0; }
+    }
+    @media (max-width:480px) { .beats { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></symbol>
+  <symbol id="i-claude" viewBox="0 0 24 24"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></symbol>
+  <symbol id="i-openai" viewBox="0 0 24 24"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></symbol>
+  <symbol id="i-cursor" viewBox="0 0 24 24"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></symbol>
+  <symbol id="i-gemini" viewBox="0 0 24 24"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="m8 6-6 6 6 6M16 6l6 6-6 6"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M2 10h20" stroke="currentColor" stroke-width="2.2"/></symbol>
+</svg>
+
+<div class="wrap">
+
+  <section class="hero">
+    <div class="brand"><img class="brand-mark" src="[image content will be provided separately]" alt="" width="26" height="26"><span class="brand-name">tdoc</span></div>
+    <h1 class="tagline">Create your first doc.</h1>
+    <p class="sub"><span>Sign in on tdoc.dev, then tell the AI you already use what to make.</span><span>It publishes here. Login is the whole account.</span></p>
+    <p class="trustline">
+      <span><svg aria-hidden="true"><use href="#i-code"/></svg>Open source</span>
+      <span><svg aria-hidden="true"><use href="#i-card"/></svg>Hosted on tdoc.dev &middot; Free &middot; No card</span>
+    </p>
+  </section>
+
+  <section>
+    <div class="steps">
+
+      <article class="step-card">
+        <div class="step-hd"><span class="step-num">1</span><div><h3>Install it where your AI already lives.</h3><p>One line. The agent reads the guide and installs itself.</p></div></div>
+        <div class="step-bd">
+          <div class="runtimes" aria-label="Works with">
+            <span><svg style="color:#d97757" aria-hidden="true"><use href="#i-claude"/></svg>Claude Code</span>
+            <span><svg style="color:#000" aria-hidden="true"><use href="#i-openai"/></svg>Codex</span>
+            <span><svg style="color:#000" aria-hidden="true"><use href="#i-cursor"/></svg>Cursor</span>
+            <span><svg style="color:#8e75b2" aria-hidden="true"><use href="#i-gemini"/></svg>Gemini</span>
+            <span><svg style="color:#000" aria-hidden="true"><use href="#i-x"/></svg>Grok</span>
+          </div>
+          <div class="cmd"><span class="c"># paste this to your agent</span>
+Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md</div>
+          <p class="hint">You do not set up hosting. That line is for the agent, not a Cloudflare walkthrough.</p>
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-hd"><span class="step-num">2</span><div><h3>Sign in, then say what you want.</h3><p>GitHub is the account. The doc lands on tdoc.dev.</p></div></div>
+        <div class="step-bd">
+          <div class="say">Make me a one page summary of this quarter, with a chart of weekly signups, and publish it to tdoc.dev.</div>
+          <div class="say">Turn my notes into an explainer with a diagram, then publish it.</div>
+          <p class="hint">Self host is something you ask the agent for later, not a setup step. No Workers account. No card.</p>
+        </div>
+      </article>
+
+      <article class="step-card">
+        <div class="step-hd"><span class="step-num">3</span><div><h3>Watch a comment fix itself.</h3><p>On a real doc, not a mockup. Five actions, about a minute.</p></div></div>
+        <div class="step-bd">
+          <div class="beats">
+            <div class="beat"><b>01</b><p>Duplicate the example</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="18" y="20" width="120" height="7" rx="3.5" fill="#d3d8e3"/><rect x="18" y="38" width="150" height="18" rx="5" fill="#ffd84d" stroke="#10121a" stroke-width="1.6"/><path d="M150 52l18 13-7 2 5 10-5 2-5-10-6 4z" fill="#10121a"/></svg><p class="hint" style="margin-top:8px">Your copy, on your tdoc.dev account.</p></div>
+            <div class="beat"><b>02</b><p>Sign in with GitHub</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="40" y="28" width="120" height="34" rx="17" fill="#10121a"/><svg x="56" y="37" width="16" height="16" viewBox="0 0 24 24" fill="#fff"><use href="#i-github"/></svg><text x="112" y="50" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#fff">Sign in</text></svg><p class="hint" style="margin-top:8px">Once. Comments and publishes use the same login.</p></div>
+            <div class="beat"><b>03</b><p>Ask your AI to fix a comment</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="30" y="26" width="140" height="38" rx="10" fill="#fff" stroke="#1652f0" stroke-width="1.8"/><svg x="44" y="36" width="18" height="18" viewBox="0 0 24 24" fill="#d97757"><use href="#i-claude"/></svg><rect x="72" y="41" width="76" height="7" rx="3.5" fill="#d3d8e3"/></svg><p class="hint" style="margin-top:8px">Point at it and say so.</p></div>
+            <div class="beat"><b>04</b><p>A new version appears</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="24" y="30" width="60" height="30" rx="7" fill="#fff" stroke="#10121a" stroke-width="1.6"/><rect x="116" y="30" width="60" height="30" rx="7" fill="#eef3ff" stroke="#1652f0" stroke-width="1.8"/><path d="M90 45h18" stroke="#10121a" stroke-width="1.6"/><path d="M104 41l5 4-5 4" fill="none" stroke="#10121a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><text x="54" y="49" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#10121a">v1</text><text x="146" y="49" text-anchor="middle" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#1652f0">v2</text></svg><p class="hint" style="margin-top:8px">The old one stays where it was.</p></div>
+            <div class="beat"><b>05</b><p>Everyone gets an answer</p><svg viewBox="0 0 200 90" aria-hidden="true"><rect width="200" height="90" rx="8" fill="#f7f8fb"/><rect x="22" y="24" width="156" height="42" rx="9" fill="#f4faf6" stroke="#1a7340" stroke-width="1.6"/><circle cx="42" cy="45" r="9" fill="#D97757"/><svg x="35" y="38" width="14" height="14" viewBox="0 0 24 24" fill="#fff"><use href="#i-claude"/></svg><rect x="58" y="36" width="70" height="6" rx="3" fill="#cfe0d6"/><rect x="58" y="48" width="48" height="6" rx="3" fill="#cfe0d6"/><path d="M150 42l4 4 8-9" fill="none" stroke="#1a7340" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><p class="hint" style="margin-top:8px">Signed by the agent that made the change.</p></div>
+          </div>
+          <div class="cta">
+            <a class="btn btn-primary" href="https://tdoc.dev/d/conway-life/v/2"><span class="btn-in">Open the example</span></a>
+            <a class="btn btn-ghost" href="https://github.com/tornado-doc/tdoc"><span class="btn-in"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label">Star<span class="btn-long">&nbsp;on GitHub</span></span><span class="pill">102</span></span></a>
+          </div>
+          <p class="hint">Duplicating needs a sign in so the copy is yours. Commenting uses the same GitHub session.</p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/tornado-doc/tdoc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-github"/></svg>github.com/tornado-doc/tdoc</a>
+    &nbsp;&middot;&nbsp; MIT &nbsp;&middot;&nbsp; <a href="/">back to tdoc.dev</a>
+    <br><br>
+    This page is a tdoc. Highlight a sentence and leave a comment.
+  </footer>
+
+</div>
+</body>
+</html>

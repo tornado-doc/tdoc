@@ -8,6 +8,10 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Create your first doc** on the landing page and empty `/me` both open
+  `/start`. Hosted on tdoc.dev: sign in, then start. Not a BYOK /
+  self-host setup. `#157` `#142`.
+
 - **Hosted tdoc.dev is multi-tenant.** GitHub sign-in mints a recoverable
   account-scoped upload token (`POST /api/hosted/token`). `/me` lists that
   user's slugs (`meta.hosted.github_login`), not the Worker operator's dump.

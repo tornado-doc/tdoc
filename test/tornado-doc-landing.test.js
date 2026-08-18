@@ -143,9 +143,14 @@ t('names tdoc and tornado-doc', () => {
   assert(meta.slug === 'tornado-doc', `meta slug was ${meta.slug}`);
 });
 
-t('links to the GitHub repo and install path', () => {
+t('links to the GitHub repo and first-doc onboarding', () => {
   assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc'), 'missing GitHub repo href');
-  assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md'), 'missing Install href');
+  const firstDoc = [...html.matchAll(/<a class="btn btn-primary" href="([^"]+)"/g)].map((m) => m[1]);
+  assert(firstDoc.length >= 2, `expected two Create your first doc CTAs, found ${firstDoc.length}`);
+  assert(firstDoc.every((h) => h === '/start'),
+    `Create your first doc must go to /start, got ${firstDoc.join(', ')}`);
+  assert(!hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md'),
+    'first-doc CTA must not send visitors to BYOK ONBOARDING.md');
 });
 
 t('hero stage-notes is a sibling of stage-doc', () => {
@@ -384,7 +389,9 @@ t('homepage bar drops the slug crumb and the version picker', () => {
   // both — same render path, one flag.
   const fn = worker.match(/async function landingResponse[\s\S]*?\n}\n/);
   assert(fn, 'landingResponse not found');
-  assert(/serveDocVersion\(env, req, LANDING_SLUG, Number\(latest\), true\)/.test(fn[0]),
+  assert(/const isLanding = slug === LANDING_SLUG/.test(fn[0]),
+    'homepage must mark only LANDING_SLUG as isLanding so /start keeps doc chrome');
+  assert(/serveDocVersion\(env, req, slug, Number\(latest\), isLanding\)/.test(fn[0]),
     'homepage no longer marks the render as the landing page');
   assert(/isLanding: !!isLanding/.test(worker), 'bootCfg no longer carries isLanding');
 
