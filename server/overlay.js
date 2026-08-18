@@ -130,7 +130,7 @@
      artifacts like transcript panes). UI chrome opts out explicitly via
      .tdoc-* selectors below. Media artifacts (img/svg/canvas/video) are
      non-selectable by their nature so they don't need an exception. */
-  body { padding-top: 44px !important; padding-bottom: 24px; -webkit-user-select: text; user-select: text; }
+  body { margin: 0; padding-bottom: 24px; -webkit-user-select: text; user-select: text; }
   body .tdoc-bar, body .tdoc-bar *, body #tdoc-comment-layer, body #tdoc-comment-layer *, body #tdoc-pin-layer, body #tdoc-pin-layer *, body .tdoc-cluster-pop, body .tdoc-cluster-pop *, body .tdoc-hover-outline, body .tdoc-comment-pill, body .tdoc-emoji-picker, body .tdoc-secondary-menu, body .tdoc-anchor-mark.tdoc-anchor-mark-element, body .tdoc-drag-marquee, body .tdoc-modal, body .tdoc-modal * { -webkit-user-select: none !important; user-select: none !important; }
   body .tdoc-modal .code, body .tdoc-modal textarea, body .tdoc-modal input { -webkit-user-select: text !important; user-select: text !important; }
   /* Comment pins/cards are provider chrome, not document layout. Keep the
@@ -291,25 +291,29 @@
   }
   /* TDOC_READER_CSS_END */
 
-  /* ========== Top bar (HackMD-inspired rhythm) ==========
-     Three groups: left breadcrumb (workspace + slug + version), center
-     doc title (truncates), right cluster (identity, primary CTA, more).
-     No borders on individual buttons — uses hover background instead, so
-     the bar reads as a clean strip rather than a row of chiclets.
-     Light theme to match the doc body. */
-  .tdoc-bar { position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
-  .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 1; }
-  .tdoc-bar-center { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; padding: 0 8px; }
-  .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  /* ========== Top bar ==========
+     Two groups, Google Docs / Notion style: left (logo + crumb + title)
+     and right (identity, primary CTA, more). The title is NOT viewport-
+     centered — left and right chrome are different widths, so a flex
+     "center" slot always looks off. Title truncates in the left group.
+     No borders on individual buttons — hover background instead. */
+  /* In document flow, not position:fixed: the bar occupies the top of the
+     layout so page HTML cannot scroll underneath a floating strip. */
+  .tdoc-bar { position: relative; width: 100%; height: 48px; box-sizing: border-box; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+  .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+  .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
 
-  /* Workspace mark — circular dot like HackMD's logo. Clicks → /. */
-  .tdoc-bar-mark { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--td-accent); color: #fff; font-weight: 700; font-size: 13px; letter-spacing: -0.01em; cursor: pointer; flex-shrink: 0; border: none; }
-  .tdoc-bar-mark:hover { background: var(--td-accent-hover); }
+  /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
+  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; }
+  .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
+  .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; color: #555; }
+  .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
+  .tdoc-bar .tdoc-github-btn svg { display: block; }
 
   /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
   .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-bar .crumb-sep { color: #c0c0c4; user-select: none; padding: 0 1px; }
-  .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
@@ -391,10 +395,9 @@
   /* Old-version strip — a thin, quiet bar just under the top bar shown when
      the viewer is on a non-latest version. Single-direction nudge: it only
      points forward to the latest version. Hidden by default; the bar-setup
-     code reveals it (and adds the body padding) only when version < latest. */
-  .tdoc-oldver-strip { display: none; position: fixed; top: 44px; left: 0; right: 0; height: 28px; background: #fbf6e9; color: #6b5e3a; border-bottom: 1px solid #efe6cd; font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; align-items: center; justify-content: center; gap: 6px; z-index: 999998; padding: 0 12px; }
+     code reveals it only when version < latest. In flow under the top bar. */
+  .tdoc-oldver-strip { display: none; position: relative; width: 100%; height: 28px; box-sizing: border-box; background: #fbf6e9; color: #6b5e3a; border-bottom: 1px solid #efe6cd; font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; align-items: center; justify-content: center; gap: 6px; z-index: 999998; padding: 0 12px; }
   body.tdoc-has-oldver-strip .tdoc-oldver-strip { display: flex; }
-  body.tdoc-has-oldver-strip { padding-top: 72px !important; }
   .tdoc-oldver-strip a { color: #8a6d1f; font-weight: 600; text-decoration: none; border-bottom: 1px solid currentColor; }
   .tdoc-oldver-strip a:hover { color: #6b5413; }
   /* Ghost marker — a faint horizontal line at the unanchored comment's
@@ -641,10 +644,10 @@
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
      stays elegant at every size.
-       ≥1100px: workspace · slug · v · | title | identity · share · ⋯
-       <1100px: workspace ·          v · | title | identity · share · ⋯  (slug hides)
-       < 900px: workspace ·          v · | title | avatar   · share · ⋯  (name hides)
-       < 700px: workspace             · | title |            share · ⋯  (version+identity into ⋯) */
+       ≥1100px: logo · slug · v · title ……………… identity · share · ⋯
+       <1100px: logo ·      · v · title ……………… identity · share · ⋯  (slug hides)
+       < 900px: logo ·      · v · title ……………… avatar   · share · ⋯  (name hides)
+       < 700px: logo ·          title ………………            share · ⋯  (version+identity into ⋯) */
   @media (max-width: 1100px) {
     .tdoc-bar .crumb-slug, .tdoc-bar .crumb-sep-slug { display: none; }
   }
@@ -720,6 +723,9 @@
   html[data-tdoc-theme="dark"] .tdoc-emoji {
     filter: invert(1) hue-rotate(180deg);
   }
+  /* The site mark is a black-on-white PNG. Let it invert with the page
+     instead of restoring, or it becomes a white tile on the dark bar. */
+  html[data-tdoc-theme="dark"] .tdoc-bar-mark img { filter: none; }
   /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
      them in .tdoc-emoji so they get the same restore as photos. */
   .tdoc-emoji { display: inline-block; line-height: 1; }
@@ -783,7 +789,7 @@
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  // ========== Top bar (HackMD-style three-group layout) ==========
+  // ========== Top bar (left title + right actions) ==========
   const bar = document.createElement('div');
   bar.className = 'tdoc-bar';
 
@@ -791,17 +797,14 @@
   versions.sort((a, b) => (a.n || 0) - (b.n || 0));
   const slugCrumbLabel = isFork ? `fork of ${cfg.originalSlug || slug}` : slug;
 
-  // Left group: workspace mark + slug crumb + version picker.
-  //
-  // On the site homepage the crumb and the picker are dropped. `/` is the
-  // site, not a doc someone published: the slug it happens to be stored
-  // under and the version it happens to be on are our filing system, and
-  // printing them tells a first-time visitor they are reading somebody's
-  // document. The mark stays, and so does everything on the right, because
-  // the page really is a tdoc and you really can comment on it.
+  // Left group: site mark + slug crumb + version picker + title.
+  // Title lives here (not a fake viewport-center) because left and right
+  // chrome are different widths. `/` and `/me` drop crumb/picker/title —
+  // those pages already name themselves in the document.
+  const isSiteBar = !!(cfg.isLanding || isCatalog);
   const leftHtml = `
-    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc on GitHub" aria-label="tdoc on GitHub">tdoc</button>
-    ${cfg.isLanding ? '' : isCatalog ? '' : `
+    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc home" aria-label="tdoc home"><img src="/tdoc_logo.png" alt="" width="24" height="24"></button>
+    ${isSiteBar ? '' : `
     <span class="crumb crumb-slug" title="${escapeHtml(slugCrumbLabel)}">${escapeHtml(slugCrumbLabel)}</span>
     <span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>
     <div class="tdoc-version-wrap">
@@ -811,10 +814,8 @@
           ${versions.map(v => `<button role="option" data-version="${v.n}" class="${v.n === version ? 'current' : ''}">v${v.n}${v.n === version ? ' · current' : ''}</button>`).join('')}
         </div>
       ` : ''}
-    </div>`}`;
-
-  // Center: doc title (pulled from <title>). Hidden on very narrow.
-  const centerHtml = `<span class="doc-title" id="tdoc-title">tdoc</span>`;
+    </div>
+    <span class="doc-title" id="tdoc-title">tdoc</span>`}`;
 
   // Right: copy menu + primary CTA (Share or Publish) + ⋯ overflow + identity.
   const copyMenuHtml = `
@@ -858,12 +859,18 @@
       <svg class="tdoc-theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
     </button>`;
 
+  const githubBtnHtml = `
+    <a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="tdoc on GitHub" aria-label="tdoc on GitHub">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>`;
+
   const rightHtml = `
+    ${cfg.isLanding ? githubBtnHtml : ''}
     ${themeBtnHtml}
-    ${isCatalog ? '' : copyMenuHtml}
-    ${isCatalog ? '' : forkBtnHtml}
-    ${isCatalog ? '' : primaryCtaHtml}
-    ${!isCatalog && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
+    ${isSiteBar ? '' : copyMenuHtml}
+    ${isSiteBar ? '' : forkBtnHtml}
+    ${isSiteBar ? '' : primaryCtaHtml}
+    ${!isSiteBar && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
         ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
@@ -874,10 +881,9 @@
 
   bar.innerHTML = `
     <div class="tdoc-bar-left">${leftHtml}</div>
-    <div class="tdoc-bar-center">${centerHtml}</div>
     <div class="tdoc-bar-right">${rightHtml}</div>
   `;
-  document.body.appendChild(bar);
+  document.body.insertBefore(bar, document.body.firstChild);
 
   // Old-version strip — a quiet, single-direction nudge shown only when a
   // published viewer is looking at a non-latest version. `versions` is already
@@ -890,7 +896,7 @@
       strip.className = 'tdoc-oldver-strip';
       const latestUrl = `/d/${encodeURIComponent(slug)}/v/${latestVersion}`;
       strip.innerHTML = `<span>You're viewing v${version} — the latest is <a href="${latestUrl}">v${latestVersion}</a></span>`;
-      document.body.appendChild(strip);
+      bar.insertAdjacentElement('afterend', strip);
       document.body.classList.add('tdoc-has-oldver-strip');
     }
   }
@@ -910,13 +916,11 @@
   }
 
   const titleEl = document.querySelector('title');
-  if (titleEl && titleEl.textContent) document.getElementById('tdoc-title').textContent = titleEl.textContent;
+  const barTitle = document.getElementById('tdoc-title');
+  if (barTitle && titleEl && titleEl.textContent) barTitle.textContent = titleEl.textContent;
 
-  // Workspace mark in the bar's left → the open-source project. There is
-  // no public catalog; the owner reaches their doc list via the profile
-  // chip menu instead.
-  document.getElementById('tdoc-bar-mark').onclick = () =>
-    window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
+  // Site mark → home. GitHub lives in its own icon on `/`.
+  document.getElementById('tdoc-bar-mark').onclick = () => { location.href = '/'; };
 
   paintTheme(currentTheme());
   document.getElementById('tdoc-theme-btn').onclick = () => {
