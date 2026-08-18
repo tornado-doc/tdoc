@@ -34,7 +34,8 @@ const OFFLINE = [
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
-  'tdoc-start.test.js', // #142 onboarding: /start page + the modal served with it
+  'tdoc-start.test.js',
+  'tdoc-work-demo.test.js', // experiment: demo must mirror the real reader // #142 onboarding: /start page + the modal served with it
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard
   'coverage.test.js',         // migration, bundle inlining, pull-merge, rich fold

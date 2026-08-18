@@ -1,0 +1,47 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Queue</title>
+<style>
+ html,body{margin:0;height:100%;background:#fff;font:13px system-ui,-apple-system,sans-serif;color:#10121a}
+ body{display:flex;flex-direction:column;padding:14px;box-sizing:border-box;gap:10px}
+ canvas{flex:1;min-height:0;width:100%;display:block}
+ .legend{display:flex;gap:16px;font-size:11.5px;color:#767c8b;flex:none}
+ .k{display:inline-flex;align-items:center;gap:6px}
+ .sw{width:9px;height:9px;border-radius:2px}
+</style></head><body>
+<canvas id="c"></canvas>
+<div class="legend">
+  <span class="k"><span class="sw" style="background:#1652f0"></span>queued</span>
+  <span class="k"><span class="sw" style="background:#1a7340"></span>drained</span>
+  <span class="k"><span class="sw" style="background:#c3452f"></span>retried</span>
+</div>
+<script>
+// Arrivals outrun two workers, the backlog builds, retries spike, then it
+// drains. The shape is the argument the doc is making.
+(function(){
+ var c=document.getElementById('c'),x=c.getContext('2d'),t=0,hist=[];
+ function size(){var r=c.getBoundingClientRect(),d=devicePixelRatio||1;
+   c.width=r.width*d;c.height=r.height*d;x.setTransform(d,0,0,d,0,0);return r;}
+ function step(){
+   var r=size(),W=r.width,H=r.height;
+   t+=1;
+   var arrive=6+5*Math.sin(t/22)+3*Math.sin(t/7);
+   var drain=7, q=(hist.length?hist[hist.length-1].q:0)+arrive-drain;
+   if(q<0)q=0; if(q>40)q=40;
+   hist.push({q:q,r:Math.max(0,(q-18)/22*6)});
+   if(hist.length>Math.floor(W/4))hist.shift();
+   x.clearRect(0,0,W,H);
+   x.strokeStyle='#eef0f5';x.lineWidth=1;
+   for(var g=1;g<4;g++){var y=H*g/4;x.beginPath();x.moveTo(0,y);x.lineTo(W,y);x.stroke();}
+   function line(key,col,fill){
+     x.beginPath();
+     hist.forEach(function(h,i){var px=i*4,py=H-(h[key]/40)*H*0.92;i?x.lineTo(px,py):x.moveTo(px,py);});
+     x.strokeStyle=col;x.lineWidth=2;x.stroke();
+     if(fill){x.lineTo((hist.length-1)*4,H);x.lineTo(0,H);x.closePath();x.fillStyle=fill;x.fill();}
+   }
+   line('q','#1652f0','rgba(22,82,240,.09)');
+   line('r','#c3452f',null);
+   x.fillStyle='#1a7340';x.fillRect(0,H-2,W,2);
+ }
+ step(); setInterval(step,110);
+ addEventListener('resize',function(){size();});
+})();
+</script></body></html>
