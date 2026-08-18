@@ -197,6 +197,11 @@
       "n": 39,
       "created": "2026-08-17T01:00:00Z",
       "prompt": "Hero board becomes a real Conway widget island instead of a CSS keyframe"
+    },
+    {
+      "n": 40,
+      "created": "2026-08-18T05:30:00Z",
+      "prompt": "Create your first doc CTAs go to /start (hosted, no BYOK). #157"
     }
   ]
 }

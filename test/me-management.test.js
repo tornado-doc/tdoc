@@ -38,6 +38,17 @@ const deleteRoute = worker.slice(deleteStart, deleteEnd);
 
 console.log('/me owner catalog');
 
+t('/me empty catalog offers Create your first doc via /start', () => {
+  // #157: the dashed empty box used to be a dead end. Same label and
+  // destination as the landing CTA. Hosted /start, not BYOK.
+  assert(index.includes('Create your first doc'), '/me empty state missing the first-doc label');
+  assert(index.includes('href="/start"'), '/me empty state must go to /start');
+  assert(index.includes('emptyCatalogHtml'),
+    'SSR empty and last-delete empty must share one markup string');
+  assert(!index.includes('ONBOARDING.md'),
+    '/me first-doc CTA must not send the owner to BYOK ONBOARDING.md');
+});
+
 t('/me no longer exposes the per-row access-control form', () => {
   assert(!index.includes('class="access-form"'), '/me must not render the old access-form');
   assert(!index.includes('name="visibility"'), '/me must not render a visibility control');

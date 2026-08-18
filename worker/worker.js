@@ -1063,6 +1063,11 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
 // page is authored, reviewed, and versioned through tdoc itself.
 const LANDING_SLUG = 'tornado-doc';
 
+// The onboarding page behind "Create your first doc" (#157, #142). Same
+// shape as LANDING_SLUG: a published tdoc at `/start`, so it is commentable
+// and versioned rather than a hardcoded page. Hosted default; not BYOK.
+const START_SLUG = 'tdoc-start';
+
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
 // gate, version picker, owner-manage payload, nonce + CSP — instead of the
@@ -1128,12 +1133,15 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
 // than a 404 or a sign-in wall. Every worker deployed from this repo runs this
 // code, but only tdoc.dev has the doc — everyone else's `/` keeps the neutral
 // page with no configuration.
-async function landingResponse(env, req) {
+async function landingResponse(env, req, slug = LANDING_SLUG) {
   try {
-    const meta = await loadDocMeta(env, LANDING_SLUG);
+    const meta = await loadDocMeta(env, slug);
     const latest = meta?.versions?.[meta.versions.length - 1]?.n;
     if (!latest) return html(landingHtml(env));
-    const res = await serveDocVersion(env, req, LANDING_SLUG, Number(latest), true);
+    // Only `/` is the site chrome (no slug crumb / version picker, share
+    // copies origin/). `/start` is a real doc at a dedicated URL.
+    const isLanding = slug === LANDING_SLUG;
+    const res = await serveDocVersion(env, req, slug, Number(latest), isLanding);
     return res.ok ? res.response : html(landingHtml(env));
   } catch {
     return html(landingHtml(env));
@@ -1328,6 +1336,12 @@ async function indexHtml(env, session, origin, nonce) {
     return true;
   });
   const visible = docs;
+  // Same empty catalog on first paint and after the last delete (#157).
+  // Hosted first-doc goes to `/start`, not a BYOK / self-host setup.
+  const emptyCatalogHtml = `<div class="empty">
+      <p>No published docs yet.</p>
+      <a class="create-first" href="/start">Create your first doc</a>
+    </div>`;
 
   const rows = visible.map(({ slug, title, latest }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">
       <label class="row-check">
@@ -1356,7 +1370,10 @@ async function indexHtml(env, session, origin, nonce) {
   h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
   a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
+  .empty { color: #888; padding: 40px 20px; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .empty p { margin: 0; }
+  a.create-first { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 18px; border-radius: 999px; background: var(--td-accent); color: #fff; font-weight: 600; text-decoration: none; }
+  a.create-first:hover { background: var(--td-accent-hover); text-decoration: none; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
   .toolbar input[type="search"] { flex: 1 1 220px; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
   .toolbar input[type="search"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
@@ -1400,7 +1417,7 @@ async function indexHtml(env, session, origin, nonce) {
 </style>
 </head><body>
 <h1>My docs</h1>
-${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
+${rows.length === 0 ? emptyCatalogHtml :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
   </div>
@@ -1557,7 +1574,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
     if (!listEl.querySelector('.doc-row')) {
       search.closest('.toolbar').hidden = true;
       selectAll.closest('.batch-bar').hidden = true;
-      listEl.insertAdjacentHTML('afterend', '<p class="empty">No published docs yet.</p>');
+      listEl.insertAdjacentHTML('afterend', ${JSON.stringify(emptyCatalogHtml)});
       listEl.remove();
       if (noMatch) noMatch.hidden = true;
     }
@@ -2931,6 +2948,13 @@ export default {
       const notice = (url.searchParams.get('notice') || '').trim();
       if (notice) return html(landingHtml(env, notice));
       return landingResponse(env, req);
+    }
+
+    // `/start` is the first-doc CTA destination (#157). Same fail-safe as
+    // `/`: unpublished or gated degrades to the neutral page, so self-hosted
+    // workers without the tdoc-start doc are unchanged.
+    if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, START_SLUG);
     }
 
     // Soft landing for the OAuth App "Authorization callback URL". Device

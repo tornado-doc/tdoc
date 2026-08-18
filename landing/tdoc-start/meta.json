@@ -1,0 +1,18 @@
+{
+  "title": "tdoc, get started",
+  "slug": "tdoc-start",
+  "created": "2026-08-18T05:30:00Z",
+  "versions": [
+    {
+      "n": 1,
+      "created": "2026-08-18T05:30:00Z",
+      "prompt": "Hosted first-doc onboarding at /start. Login is enough. Not BYOK. #157 #142"
+    }
+  ],
+  "access": {
+    "visibility": "public",
+    "history_visibility": "owner",
+    "commenting": "signed_in",
+    "allowed_users": []
+  }
+}

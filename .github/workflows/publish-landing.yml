@@ -80,7 +80,9 @@ jobs:
         run: npm test
 
       - name: Build the release payload
-        run: node bin/tdoc-landing-release
+        run: |
+          node bin/tdoc-landing-release
+          node bin/tdoc-start-release
 
       # First ship (#129): TDOC_DEV_UPLOAD_TOKEN was present in GitHub and
       # still 401'd, because nothing had ever `wrangler secret put` that
@@ -154,6 +156,26 @@ jobs:
           [ "$code" = "200" ] || { echo "upload failed" >&2; exit 1; }
           [ "$(jq -r '.ok // false' resp.json)" = "true" ] || { echo "worker rejected the upload" >&2; exit 1; }
 
+      - name: Upload /start v1 to tdoc.dev
+        env:
+          TDOC_DEV_UPLOAD_TOKEN: ${{ secrets.TDOC_DEV_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          DIR=.release/tdoc-start
+
+          jq -n --arg slug tdoc-start --argjson version 1 \
+            --rawfile html "$DIR/v1/index.html" \
+            --slurpfile meta "$DIR/meta.json" \
+            '{slug:$slug, version:$version, html:$html, meta:$meta[0]}' > payload-start.json
+
+          code=$(curl -sS -o resp-start.json -w '%{http_code}' -X POST https://tdoc.dev/api/upload \
+            -H "Authorization: Bearer $TDOC_DEV_UPLOAD_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @payload-start.json)
+          echo "HTTP $code"; cat resp-start.json; echo
+          [ "$code" = "200" ] || { echo "/start upload failed" >&2; exit 1; }
+          [ "$(jq -r '.ok // false' resp-start.json)" = "true" ] || { echo "worker rejected the /start upload" >&2; exit 1; }
+
       - name: Verify tdoc.dev serves the doc, not the fallback
         run: |
           set -euo pipefail
@@ -174,4 +196,20 @@ jobs:
             sleep 6
           done
           echo "tdoc.dev/ is still serving the neutral fallback" >&2
+          exit 1
+
+      - name: Verify tdoc.dev/start serves the onboarding doc
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            body=$(curl -sS https://tdoc.dev/start)
+            if [[ "$body" == *'Create your first doc'* \
+              && "$body" == *'Login is the whole account'* ]]; then
+              echo "tdoc.dev/start is serving the onboarding doc."
+              exit 0
+            fi
+            echo "attempt $i: tdoc.dev/start is not the onboarding doc yet" >&2
+            sleep 6
+          done
+          echo "tdoc.dev/start is still serving the neutral fallback" >&2
           exit 1
