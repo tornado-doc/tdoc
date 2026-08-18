@@ -63,30 +63,49 @@ t('sign-in is step one, and is skippable', () => {
     'a second device flow implementation is back in the modal');
 });
 
-t('the first doc is a Game of Life lesson, not a blank noun', () => {
-  // The first doc has to be worth commenting on, because commenting on it is
-  // the lesson. A live artifact plus a tutorial gives the loop something real
-  // to happen to.
-  assert(/Game of Life/.test(onboard), 'the first doc is no longer the Game of Life example');
-  assert(/artifact/i.test(onboard), 'the first doc must carry a live artifact');
-  for (const beat of ['comments', 'fix them', 'new version', 'sharing the link']) {
-    assert(onboard.includes(beat), `the tutorial no longer covers: ${beat}`);
+t('the paste line stays one short sentence', () => {
+  // Everything it used to spell out lives in FIRST-DOC.md now. A prompt the
+  // visitor has to read before pasting is a prompt they edit or abandon.
+  const m = onboard.match(/function line\(\) \{[\s\S]*?\n  \}/);
+  assert(m, 'line() not found');
+  assert(m[0].length < 220, `the paste line is growing again: ${m[0].length} chars of builder`);
+  assert(/FIRST-DOC\.md/.test(onboard), 'the line must point the agent at the first-doc recipe');
+});
+
+t('no credential is ever pasted into a prompt', () => {
+  // The token used to ride in the line because minting was browser-only.
+  // Since #156 the CLI signs in and mints for itself, and a secret in a
+  // pasted prompt lands in the agent's history and possibly its logs.
+  const m = onboard.match(/function line\(\) \{[\s\S]*?\n  \}/);
+  assert(!/st\.token/.test(m[0]), 'the paste line splices a token again');
+  assert(!/hosted token is/.test(onboard), 'the token phrase is back in the prompt');
+});
+
+t('the first doc is a Game of Life lesson, and the recipe carries it', () => {
+  // The doc is written fresh from FIRST-DOC.md each time, so there is no
+  // fixture to drift. That file has to keep teaching the loop.
+  const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
+  assert(/Game of Life/.test(recipe), 'the recipe no longer builds the Game of Life doc');
+  assert(/widget island/i.test(recipe),
+    'the recipe must say the artifact goes in a widget island, or CSP will kill it');
+  for (const beat of ['comments', 'fix', 'new version', 'reply', 'friend']) {
+    assert(new RegExp(beat, 'i').test(recipe), `the tutorial no longer covers: ${beat}`);
   }
+  assert(/ONBOARDING\.md/.test(recipe), 'the recipe must hand install back to ONBOARDING.md');
+  assert(/[Dd]o not ask for a token/.test(recipe),
+    'the recipe must tell the agent not to ask the human for a token');
 });
 
 t('points at the hub only when there is a hosted account behind it', () => {
-  // /me is per-user only once #156 lands, and only for someone who actually
-  // holds a hosted account. Naming it for a self-host visitor would dead-end
-  // them on the operator catalog's sign-in wall (#131).
-  // Check the code, not the prose: a comment mentioning /me must not satisfy
-  // this, and every place the visitor can actually SEE it must be guarded.
+  // /me is per-user only once #156 lands, and only for someone holding a
+  // hosted account. Naming it for a self-host visitor walks them into the
+  // operator catalog's sign-in wall (#131). Guarded in both places it appears.
   const code = onboard.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
-  const mentions = code.split('tdoc.dev/me').length - 1;
-  assert(mentions >= 2, `expected the hub in both the paste line and the lesson, found ${mentions}`);
-  assert(/if \(st\.token\) s \+= '[^']*tdoc\.dev\/me/.test(code),
-    'the paste line names the hub without checking for a hosted token');
   assert(/st\.token \? '[^']*tdoc\.dev\/me/.test(code),
     'the lesson names the hub without checking for a hosted token');
+  const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
+  assert(/only if/i.test(recipe) && /tdoc\.dev\/me/.test(recipe),
+    'the recipe must make the hub conditional on having published to hosted tdoc');
 });
 
 t('does not offer to email the line', () => {

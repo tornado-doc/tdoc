@@ -53,23 +53,17 @@
 
   function el(t, c, h) { var e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; }
 
-  // The literal text the visitor pastes. It does three jobs in one paste:
-  // installs the skill (the agent reads GUIDE), claims the hosted account, and
-  // builds the first doc. The first doc is a Game of Life explainer carrying a
-  // live artifact and a tutorial, so the thing the visitor learns tdoc ON is
-  // already a real published tdoc with something worth commenting about.
+  // The literal text the visitor pastes. It stays one short sentence because
+  // everything it used to spell out — install, auth, what to build, the
+  // tutorial, the hub — now lives in FIRST-DOC.md, which the agent reads.
+  //
+  // No token in here. It used to carry one because minting was browser-only,
+  // so the clipboard was the only way to get a credential to the agent. Since
+  // #156 the CLI signs in and mints for itself, which is better than pasting a
+  // secret into a prompt that lands in the agent's history.
+  var RECIPE = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
   function line() {
-    var s = 'Read ' + GUIDE + ' and set yourself up with tdoc.';
-    if (st.token) s += ' My tdoc hosted token is ' + st.token + '.';
-    s += ' Then create a Game of Life tdoc: what Conway’s Game of Life is,'
-      + ' a live Game of Life artifact I can play with, and a short tdoc tutorial'
-      + ' that walks me through leaving comments, asking you to fix them, checking'
-      + ' the new version, and sharing the link';
-    // Only point at the hub when we hold a hosted token. Without one there is
-    // no hosted account behind the login, and tdoc.dev/me is still the
-    // operator's catalog — sending them there would dead-end on a sign-in wall.
-    if (st.token) s += ', then finding everything I publish at tdoc.dev/me';
-    return s + '. Publish it.';
+    return 'Set up tdoc and make my first doc: ' + RECIPE;
   }
 
   function shield() {
