@@ -32,7 +32,9 @@
   // The original published slug is in cfg.originalSlug so we can label it.
   let identity = cfg.identity || null;
   let isOwner = !!cfg.isOwner; // true when this session owns THIS doc
-  let canSeeMyDocs = !!(cfg.canSeeMyDocs || cfg.isOwner);
+  // Worker sends this explicitly. Do not infer from isOwner — on hosted
+  // tdoc.dev a signed-in reader may not own the current doc and still has /me.
+  let canSeeMyDocs = !!cfg.canSeeMyDocs;
   if (!slug) return;
 
   const HIGHLIGHT_API = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
@@ -3309,7 +3311,6 @@
           const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((x) => x.json());
           if (me && typeof me.isOwner === 'boolean') isOwner = me.isOwner;
           if (me && typeof me.canSeeMyDocs === 'boolean') canSeeMyDocs = me.canSeeMyDocs;
-          else if (me && me.isOwner) canSeeMyDocs = true;
         } catch { /* keep bootCfg flags */ }
         closeDeviceModal();
         renderIdentity();

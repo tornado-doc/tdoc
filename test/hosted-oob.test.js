@@ -82,6 +82,8 @@ t('Hosted upload stamps remote meta ownership before writing', () => {
   assert(uploadRoute.includes('stampHostedOwnership(incoming, auth.actor)'), 'upload must stamp hosted owner');
   assert(uploadRoute.includes('quota_docs'), 'hosted create must enforce a per-account doc quota');
   assert(uploadRoute.includes('quota_upload_bytes'), 'hosted upload must cap payload bytes');
+  assert(uploadRoute.includes('utf8ByteLength(doc)'), 'upload quota must count UTF-8 bytes');
+  assert(!uploadRoute.includes('doc.length > maxBytes'), 'upload quota must not use JS string length');
   const gate = uploadRoute.indexOf('requireDocWriteAccess(env, auth.actor, slug, { create: true })');
   const validate = uploadRoute.indexOf('validateAccessWrite');
   const claim = uploadRoute.indexOf("kind: 'claim_owner'");

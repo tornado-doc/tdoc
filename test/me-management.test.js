@@ -7,8 +7,8 @@
 // controls moved to the doc-page Share panel (overlay.js showManageModal,
 // see jul36-owner-manage.test.js), and Delete now authorizes off the owner's
 // session cookie instead of a pasted token (safe only because of the CSP on
-// every doc response — see csp.test.js). /me is reachable only by the
-// signed-in owner (route-level isOwnerSession redirect), so its own
+// every doc response — see csp.test.js). /me is gated by canSeeMyDocs
+// (hosted: any signed-in GitHub user; BYOK: TDOC_OWNER), so its own
 // same-origin fetches are already cookied.
 //
 // Gate (小cc review #2): the /me HTML response must not contain access data
@@ -25,6 +25,7 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const worker = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+const overlay = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
 const start = worker.indexOf('async function indexHtml(env, session');
 const end = worker.indexOf('// ─────────────────────────────────────────────────────────────────────────', start);
 if (start < 0 || end < 0 || end <= start) throw new Error('indexHtml block missing');
@@ -139,6 +140,12 @@ t('/me non-owner bounce goes to landing with notice, not github.com', () => {
   const meRoute = worker.slice(meStart, meEnd);
   assert(meRoute.includes('canSeeMyDocs(env, s, url.origin)'),
     '/me must gate on canSeeMyDocs (hosted per-user or BYOK TDOC_OWNER)');
+  assert(!worker.includes('isOwnerSession gate in the'),
+    '/me must not document the retired owner-only gate');
+  assert(!overlay.includes('cfg.canSeeMyDocs || cfg.isOwner'),
+    'My docs must not fall back to this-doc isOwner');
+  assert(!overlay.includes('else if (me && me.isOwner) canSeeMyDocs'),
+    'device-flow must not treat isOwner as canSeeMyDocs');
   assert(meRoute.includes("Location: `/?notice=${notice}`") || meRoute.includes("Location: '/?notice="),
     '/me must redirect to landing ?notice=…');
   assert(!meRoute.includes('github.com/tornado-doc/tdoc'),

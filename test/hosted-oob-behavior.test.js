@@ -539,6 +539,27 @@ async function issue(worker, env, login = 'alice', label = login) {
     assert(body.error === 'quota_upload_bytes', `expected quota_upload_bytes, got ${JSON.stringify(body)}`);
   });
 
+  await t('hosted upload quota counts UTF-8 bytes, not JS string length', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_UPLOAD_BYTES: '20' });
+    const alice = await issue(worker, env, 'alice');
+    const cjk = '<p>' + '文'.repeat(7) + '</p>'; // 14 UTF-16 units, 28 UTF-8 bytes
+    assert(cjk.length <= 20, 'fixture must sit under the JS length cap');
+    const over = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'cjk', version: 1, html: cjk },
+    }), env, {});
+    assert(over.status === 413, `expected 413 for CJK over the byte cap, got ${over.status}`);
+    const overBody = await over.json();
+    assert(overBody.error === 'quota_upload_bytes', `unexpected ${JSON.stringify(overBody)}`);
+    assert(overBody.size === new TextEncoder().encode(cjk).byteLength,
+      `size should be UTF-8 bytes, got ${overBody.size}`);
+    const okUp = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'ok', version: 1, html: '<p>hi</p>' },
+    }), env, {});
+    assert(okUp.status === 200, `ASCII under the cap should upload, got ${okUp.status}: ${await okUp.text()}`);
+  });
+
   await t('duplicate requires a signed-in session', async () => {
     const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
     await env.DOCS.put('docs/src-doc/v1/index.html', '<h1>Src</h1>');

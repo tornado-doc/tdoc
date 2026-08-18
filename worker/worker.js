@@ -1041,7 +1041,8 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     identity: identity || null,
     isOwner: !!isOwner,
     // Hosted tdoc.dev: any signed-in GitHub user. BYOK: TDOC_OWNER only.
-    canSeeMyDocs: canSeeMyDocsFlag != null ? !!canSeeMyDocsFlag : !!isOwner,
+    // Never fall back to isOwner — that hid My docs from hosted readers.
+    canSeeMyDocs: !!canSeeMyDocsFlag,
     // `/` is the site itself, not a doc someone published. The slug and the
     // version number are storage detail; printing them in the bar tells a
     // first-time visitor they are looking at somebody's document.
@@ -1287,9 +1288,9 @@ function authDoneHtml() {
 //     the right place to manage that doc, not a spreadsheet of every doc.
 //   - the admin-token field is gone because DELETE /api/doc now accepts the
 //     owner's session cookie (authorizeOwnerMutation) — safe because of the
-//     CSP set on every doc response (see cspHeader()). /me is only reachable
-//     by the signed-in owner in the first place (isOwnerSession gate in the
-//     route above), so its own fetches are already same-origin + cookied.
+//     CSP set on every doc response (see cspHeader()). /me is gated by
+//     canSeeMyDocs (hosted: any signed-in GitHub user; BYOK: TDOC_OWNER),
+//     so its own fetches are already same-origin + cookied.
 // What's left: title, slug, version, search, multi-select batch delete, and
 // a quiet ⋯ Delete. No access data of any kind is computed or emitted here
 // (gate: response HTML must not contain `allowed_users` — there is nothing
@@ -2140,6 +2141,10 @@ function hostedMaxDocs(env) {
 function hostedMaxUploadBytes(env) {
   const n = Number(env && env.TDOC_HOSTED_MAX_UPLOAD_BYTES);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2 * 1024 * 1024;
+}
+
+function utf8ByteLength(s) {
+  return new TextEncoder().encode(String(s || '')).byteLength;
 }
 
 async function countHostedDocs(env, accountId) {
@@ -3645,8 +3650,9 @@ export default {
       if (!writeGate.ok) return writeGate.response;
       if (auth.actor && auth.actor.kind === 'hosted') {
         const maxBytes = hostedMaxUploadBytes(env);
-        if (doc.length > maxBytes) {
-          return json({ error: 'quota_upload_bytes', limit: maxBytes, size: doc.length }, { status: 413 });
+        const size = utf8ByteLength(doc);
+        if (size > maxBytes) {
+          return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
         }
         if (!writeGate.meta) {
           const used = await countHostedDocs(env, auth.actor.account_id);
