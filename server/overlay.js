@@ -929,7 +929,8 @@
     paintTheme(next);
   };
 
-  // Duplicate = hosted account copy. Download = HTML file or PDF snapshot.
+  // Duplicate = hosted account copy. Download HTML = /export file.
+  // Download PDF = print the export (browser Save as PDF), not a JPEG wrap.
   let pendingDuplicate = false;
   function downloadExport() {
     const a = document.createElement('a');
@@ -939,140 +940,13 @@
     a.click();
     a.remove();
   }
-  function utf8Bytes(s) { return new TextEncoder().encode(s); }
-  function concatBytes(parts) {
-    const len = parts.reduce((n, p) => n + p.length, 0);
-    const out = new Uint8Array(len);
-    let o = 0;
-    for (const p of parts) { out.set(p, o); o += p.length; }
-    return out;
-  }
-  function jpegPagesToPdf(pages) {
-    const PW = 612, PH = 792, M = 36;
-    const innerW = PW - 2 * M, innerH = PH - 2 * M;
-    const parts = [];
-    const offsets = [0];
-    let size = 0;
-    function add(chunk) {
-      if (typeof chunk === 'string') chunk = utf8Bytes(chunk);
-      parts.push(chunk);
-      size += chunk.length;
-    }
-    function addObj(body, stream) {
-      offsets.push(size);
-      add(body);
-      if (stream) {
-        add('stream\n');
-        add(stream);
-        add('endstream\nendobj\n');
-      }
-    }
-    add('%PDF-1.4\n');
-    const pageIds = [];
-    let obj = 3;
-    const pageMeta = [];
-    for (const p of pages) {
-      const scale = Math.min(innerW / p.width, innerH / p.height);
-      const dw = p.width * scale, dh = p.height * scale;
-      const x = M + (innerW - dw) / 2;
-      const y = PH - M - dh;
-      pageMeta.push({ pageId: obj, contentId: obj + 1, imageId: obj + 2, dw, dh, x, y, p });
-      pageIds.push(obj);
-      obj += 3;
-    }
-    addObj('1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n');
-    addObj(`2 0 obj << /Type /Pages /Kids [${pageIds.map((id) => id + ' 0 R').join(' ')}] /Count ${pages.length} >> endobj\n`);
-    for (const m of pageMeta) {
-      addObj(`${m.pageId} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im${m.imageId} ${m.imageId} 0 R >> >> /Contents ${m.contentId} 0 R >> endobj\n`);
-      const content = `q ${m.dw.toFixed(2)} 0 0 ${m.dh.toFixed(2)} ${m.x.toFixed(2)} ${m.y.toFixed(2)} cm /Im${m.imageId} Do Q\n`;
-      addObj(`${m.contentId} 0 obj << /Length ${content.length} >>\n`, utf8Bytes(content));
-      addObj(`${m.imageId} 0 obj << /Type /XObject /Subtype /Image /Width ${m.p.width} /Height ${m.p.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${m.p.jpeg.length} >>\n`, m.p.jpeg);
-    }
-    const xrefAt = size;
-    add(`xref\n0 ${obj}\n0000000000 65535 f \n`);
-    for (let i = 1; i < obj; i++) {
-      add(String(offsets[i]).padStart(10, '0') + ' 00000 n \n');
-    }
-    add(`trailer << /Size ${obj} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`);
-    return new Blob([concatBytes(parts)], { type: 'application/pdf' });
-  }
-  function paintTextNode(ctx, node, ox, oy, sliceTop, sliceH) {
-    const text = node.textContent;
-    if (!text || !/\S/.test(text)) return;
-    const parent = node.parentElement;
-    if (!parent) return;
-    const view = parent.ownerDocument.defaultView;
-    const st = view.getComputedStyle(parent);
-    if (st.visibility === 'hidden') return;
-    ctx.fillStyle = st.color || '#111';
-    ctx.font = st.font;
-    ctx.textBaseline = 'top';
-    let i = 0;
-    while (i < text.length) {
-      while (i < text.length && text[i] === '\n') i++;
-      if (i >= text.length) break;
-      const range = node.ownerDocument.createRange();
-      range.setStart(node, i);
-      range.setEnd(node, i + 1);
-      const first = range.getBoundingClientRect();
-      let end = i + 1;
-      while (end < text.length && text[end] !== '\n') {
-        range.setEnd(node, end + 1);
-        const r = range.getBoundingClientRect();
-        if (Math.abs(r.top - first.top) > 1) break;
-        end++;
-      }
-      range.setEnd(node, end);
-      const r = range.getBoundingClientRect();
-      if (r.bottom > sliceTop && r.top < sliceTop + sliceH) {
-        ctx.fillText(text.slice(i, end), r.left - ox, r.top - oy);
-      }
-      i = end;
-    }
-  }
-  function paintElement(ctx, el, ox, oy, sliceTop, sliceH) {
-    const tag = el.tagName;
-    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return;
-    const view = el.ownerDocument.defaultView;
-    const st = view.getComputedStyle(el);
-    if (st.display === 'none' || st.visibility === 'hidden') return;
-    const r = el.getBoundingClientRect();
-    if (r.bottom < sliceTop || r.top > sliceTop + sliceH) {
-      if (!el.children.length) return;
-    }
-    const bg = st.backgroundColor;
-    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-      ctx.fillStyle = bg;
-      ctx.fillRect(r.left - ox, r.top - oy, r.width, r.height);
-    }
-    const bw = parseFloat(st.borderTopWidth) || 0;
-    if (bw > 0 && st.borderTopStyle !== 'none') {
-      ctx.strokeStyle = st.borderTopColor || '#ddd';
-      ctx.lineWidth = bw;
-      ctx.strokeRect(r.left - ox + bw / 2, r.top - oy + bw / 2, Math.max(0, r.width - bw), Math.max(0, r.height - bw));
-    }
-    if ((tag === 'IMG' || tag === 'CANVAS') && r.width && r.height) {
-      try { ctx.drawImage(el, r.left - ox, r.top - oy, r.width, r.height); } catch (e) { /* tainted */ }
-    }
-    if (tag === 'RECT' || tag === 'rect') {
-      const fill = el.getAttribute('fill');
-      if (fill && fill !== 'none') {
-        ctx.fillStyle = fill;
-        ctx.fillRect(r.left - ox, r.top - oy, r.width, r.height);
-      }
-      return;
-    }
-    for (const child of el.childNodes) {
-      if (child.nodeType === 3) paintTextNode(ctx, child, ox, oy, sliceTop, sliceH);
-      else if (child.nodeType === 1) paintElement(ctx, child, ox, oy, sliceTop, sliceH);
-    }
-  }
   async function downloadPdf() {
     const src = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=0`;
     const iframe = document.createElement('iframe');
-    iframe.setAttribute('title', 'tdoc pdf snapshot');
-    iframe.style.cssText = 'position:fixed;left:-12000px;top:0;width:800px;height:1200px;border:0;opacity:0;pointer-events:none;';
+    iframe.setAttribute('title', 'Print');
+    iframe.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:100vh;border:0;opacity:0;pointer-events:none;';
     document.body.appendChild(iframe);
+    const drop = () => { if (iframe.parentNode) iframe.remove(); };
     try {
       await new Promise((resolve, reject) => {
         iframe.onload = resolve;
@@ -1081,43 +955,18 @@
         setTimeout(() => reject(new Error('pdf export timed out')), 20000);
       });
       const doc = iframe.contentDocument;
-      if (!doc || !doc.body) throw new Error('empty export');
+      const win = iframe.contentWindow;
+      if (!doc || !win || !doc.body) throw new Error('empty export');
+      doc.title = `${slug}-v${version}`;
       await Promise.all([...doc.images].map((img) => img.decode ? img.decode().catch(() => {}) : Promise.resolve()));
-      const fullH = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1);
-      iframe.style.height = fullH + 'px';
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const width = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth, 720);
-      const height = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1);
-      const innerW = 540, innerH = 720;
-      const sliceH = Math.max(1, Math.round(width * innerH / innerW));
-      const origin = doc.documentElement.getBoundingClientRect();
-      const pages = [];
-      for (let y = 0; y < height; y += sliceH) {
-        const h = Math.min(sliceH, height - y);
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, width, h);
-        paintElement(ctx, doc.body, origin.left, origin.top + y, y, h);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        const bin = atob(dataUrl.split(',')[1]);
-        const jpeg = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) jpeg[i] = bin.charCodeAt(i);
-        pages.push({ width, height: h, jpeg });
-      }
-      const blob = jpegPagesToPdf(pages);
-      const a = document.createElement('a');
-      const blobUrl = URL.createObjectURL(blob);
-      a.href = blobUrl;
-      a.download = `${slug}-v${version}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
-    } finally {
-      iframe.remove();
+      win.addEventListener('afterprint', drop, { once: true });
+      setTimeout(drop, 120000);
+      win.focus();
+      win.print();
+    } catch (e) {
+      drop();
+      throw e;
     }
   }
   async function startDownload(format) {

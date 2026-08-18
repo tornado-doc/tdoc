@@ -19,7 +19,7 @@ file and `.claude-plugin/plugin.json`.
   content-only account copy for the signed-in GitHub user on tdoc.dev
   (self-host: worker owner only). **Download** is one control with **Download
   HTML** (`slug-vN.html`, reader CSS inlined) and **Download PDF**
-  (`slug-vN.pdf`, a paginated snapshot of the reading column). No comments,
+  (browser print of that reading column — Save as PDF, real text). No comments,
   history, or widget islands in v1.
 
 - **Sandboxed interactive widgets.** Author JS still does not run in the host
@@ -55,6 +55,9 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Download PDF uses the browser print engine.** The JPEG-page wrap was
+  ~100 DPI and looked mushy. PDF now prints `/export` (reader CSS, no bar)
+  so Save as PDF keeps vector text.
 - **tdoc.dev homepage publish no longer dies on a present-but-unwritten token.**
   `#129` merged and deployed the Worker, then `publish-landing.yml` got
   `401 unauthorized` because `TDOC_DEV_UPLOAD_TOKEN` existed in GitHub
