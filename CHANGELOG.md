@@ -31,6 +31,18 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **Overlay top bar sits in document flow** instead of `position: fixed`.
+  Page HTML no longer scrolls underneath a floating strip; the bar (and the
+  old-version strip) occupy the top of the layout.
+- **Site chrome on `/` and `/me` is no longer a document toolbar.** The
+  bar title is gone (those pages already have an h1). `/` keeps the
+  tdoc logo, a GitHub icon, appearance, and sign-in. The mark is the same
+  logo as the favicon, not a text pill.
+- **Doc title sits in the left cluster**, after the logo and version, not
+  in a fake-centered middle slot. Left and right chrome are different
+  widths, so a flex "center" never looked viewport-centered. Google Docs
+  and Notion keep the title on the left.
+
 - **Default `/tdoc publish` target is hosted tdoc.dev** (Cloudflare/Vercel via
   `--platform`). First hosted publish runs GitHub Device Flow, then mints a
   token bound to that login. Closed signup on a host that left registration
