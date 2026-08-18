@@ -3062,7 +3062,7 @@
   // the single Share button (showShareModal dispatches here when
   // cfg.ownerManage is set). Gated on cfg.ownerManage, which the worker only
   // populates in the per-request boot config when THIS request's session
-  // passed isOwnerSession() server-side (worker.js's /d/ route). A
+  // passed isDocOwnerSession() server-side (worker.js's /d/ route). A
   // non-owner's config carries cfg.ownerManage === null — every function
   // below bails before creating any DOM, so there is no hidden button, just
   // nothing rendered for them.
@@ -3309,7 +3309,6 @@
         // "My docs" appears without a full reload on hosted tdoc.dev.
         try {
           const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((x) => x.json());
-          if (me && typeof me.isOwner === 'boolean') isOwner = me.isOwner;
           if (me && typeof me.canSeeMyDocs === 'boolean') canSeeMyDocs = me.canSeeMyDocs;
         } catch { /* keep bootCfg flags */ }
         closeDeviceModal();

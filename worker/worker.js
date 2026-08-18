@@ -90,8 +90,8 @@ function isOwnerSession(env, session) {
 // pattern short-circuited to "allow" on null, letting any GitHub session
 // delete/re-anchor authorless legacy comments. Same logic for the three
 // mutation sites, in one place.
-function canMutate(record, session, env) {
-  if (isOwnerSession(env, session)) return true;
+function canMutate(record, session, env, meta) {
+  if (isDocOwnerSession(env, session, meta)) return true;
   const who = record && record.author && record.author.login;
   return !!(who && session && session.login && who === session.login);
 }
@@ -2147,7 +2147,7 @@ function utf8ByteLength(s) {
   return new TextEncoder().encode(String(s || '')).byteLength;
 }
 
-async function countHostedDocs(env, accountId) {
+async function countHostedDocs(env, accountId, stopAt) {
   if (!accountId || !env.META) return 0;
   let n = 0;
   let cursor;
@@ -2159,7 +2159,10 @@ async function countHostedDocs(env, accountId) {
         const raw = await env.META.get(k.name);
         if (raw) meta = JSON.parse(raw);
       } catch {}
-      if (meta && meta.hosted && meta.hosted.account_id === accountId) n++;
+      if (meta && meta.hosted && meta.hosted.account_id === accountId) {
+        n++;
+        if (stopAt && n >= stopAt) return n;
+      }
     }
     cursor = r.cursor;
     if (r.list_complete) break;
@@ -2201,24 +2204,36 @@ function nextDuplicateSlug(sourceSlug, n) {
 }
 
 async function hostedAccountForGithub(env, login) {
-  const norm = String(login || '').trim().toLowerCase();
+  const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
-  const key = `hosted-github:${norm}`;
+  const primary = `hosted-account:${norm}`;
+  const legacy = `hosted-github:${norm}`;
+  let rec = null;
   try {
-    const raw = await env.META.get(key);
-    if (raw) {
-      const rec = JSON.parse(raw);
-      if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
-    }
+    const raw = await env.META.get(primary);
+    if (raw) rec = JSON.parse(raw);
   } catch {}
-  const record = {
-    account_id: `acct_${rand(12)}`,
-    github_login: norm,
-    created: new Date().toISOString(),
-    source: 'duplicate',
-  };
-  await env.META.put(key, JSON.stringify(record));
-  return record;
+  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+    try {
+      const raw = await env.META.get(legacy);
+      if (raw) rec = JSON.parse(raw);
+    } catch {}
+  }
+  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+    rec = {
+      account_id: `acct_${rand(12)}`,
+      github_login: norm,
+      created: new Date().toISOString(),
+    };
+  } else {
+    rec = {
+      account_id: rec.account_id,
+      github_login: norm,
+      created: rec.created || new Date().toISOString(),
+    };
+  }
+  await env.META.put(primary, JSON.stringify(rec));
+  return rec;
 }
 
 async function sourceHasWidgets(env, slug, version) {
@@ -2235,27 +2250,12 @@ async function issueHostedToken(env, body = {}) {
   if (!github_login) {
     return { error: 'sign_in_required', status: 401 };
   }
-  const accountKey = `hosted-account:${github_login}`;
-  let account = null;
-  try {
-    const raw = await env.META.get(accountKey);
-    if (raw) account = JSON.parse(raw);
-  } catch {}
-  const account_id = (account && typeof account.account_id === 'string' && account.account_id)
-    ? account.account_id
-    : `acct_${rand(12)}`;
-  if (!account || account.account_id !== account_id) {
-    account = {
-      account_id,
-      github_login,
-      created: (account && account.created) || new Date().toISOString(),
-    };
-    await env.META.put(accountKey, JSON.stringify(account));
-  }
+  const account = await hostedAccountForGithub(env, github_login);
+  if (!account) return { error: 'sign_in_required', status: 401 };
   const token = `tdoc_${rand(24)}`;
   const tokenHash = await sha256Hex(token);
   const record = {
-    account_id,
+    account_id: account.account_id,
     github_login,
     created: new Date().toISOString(),
   };
@@ -3159,7 +3159,19 @@ export default {
       if (!ownerCopy) {
         const acct = await hostedAccountForGithub(env, session.login);
         if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
-        actor = { kind: 'hosted', account_id: acct.account_id };
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+      }
+      if (actor.kind === 'hosted') {
+        const maxBytes = hostedMaxUploadBytes(env);
+        const size = utf8ByteLength(rawHtml);
+        if (size > maxBytes) {
+          return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
+        }
+        const limit = hostedMaxDocs(env);
+        const used = await countHostedDocs(env, actor.account_id, limit);
+        if (used >= limit) {
+          return json({ error: 'quota_docs', limit, used }, { status: 403 });
+        }
       }
 
       let newSlug = null;
@@ -3203,12 +3215,6 @@ export default {
         access: normalizeAccess({}, { legacy: false }),
       };
       incoming = stampHostedOwnership(incoming, actor);
-      if (actor.kind === 'hosted') {
-        incoming.hosted = {
-          ...(incoming.hosted || {}),
-          github_login: String(session.login).trim().toLowerCase(),
-        };
-      }
 
       const { html: stampedHtml } = stampAids(rawHtml);
       const r2Key = `docs/${newSlug}/v1/index.html`;
@@ -3230,7 +3236,7 @@ export default {
       const s = await getSession(env, req);
       return json({
         identity: s ? { login: s.login, avatar_url: s.avatar_url, name: s.name } : null,
-        isOwner: isOwnerSession(env, s),
+        isOwner: isOwnerSession(env, s), // worker operator; overlay must not clobber per-doc isOwner
         canSeeMyDocs: canSeeMyDocs(env, s, url.origin),
         authConfigured: true,
       });
@@ -3462,7 +3468,8 @@ export default {
       ensureMigrated(authList);
       const target = authList.find(c => c.id === id);
       if (!target) return json({ error: 'not_found' }, { status: 404 });
-      if (!canMutate(target, s, env)) return json({ error: 'not_author' }, { status: 403 });
+      const meta = await loadDocMeta(env, slug);
+      if (!canMutate(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const V = coerceBodyVersion(version, target.created_in || 1);
       const res = await mutateComments(env, slug, {
         kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: s.login },
@@ -3507,17 +3514,18 @@ export default {
       // is harmless (applyCommentOp returns 404).
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
+      const meta = await loadDocMeta(env, slug);
       let authorized = false;
       const top = authList.find(c => c.id === id);
       if (top) {
-        if (!canMutate(top, s, env)) return json({ error: 'not_author' }, { status: 403 });
+        if (!canMutate(top, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
         authorized = true;
       } else {
         for (const c of authList) {
           ensureEventLog(c);
           const reply = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
           if (reply) {
-            if (!canMutate(reply.reply, s, env)) return json({ error: 'not_author' }, { status: 403 });
+            if (!canMutate(reply.reply, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
             authorized = true;
             break;
           }
@@ -3655,8 +3663,8 @@ export default {
           return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
         }
         if (!writeGate.meta) {
-          const used = await countHostedDocs(env, auth.actor.account_id);
           const limit = hostedMaxDocs(env);
+          const used = await countHostedDocs(env, auth.actor.account_id, limit);
           if (used >= limit) {
             return json({ error: 'quota_docs', limit, used }, { status: 403 });
           }

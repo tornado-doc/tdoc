@@ -40,7 +40,11 @@ const box = { URL }; // isLocalMutation uses the URL global
 vm.createContext(box);
 vm.runInContext([
   sliceFn(workerSrc, 'forHtmlComment'),
+  sliceFn(workerSrc, 'sessionLogin'),
+  sliceFn(workerSrc, 'normalizeGithubLogin'),
+  sliceFn(workerSrc, 'hostedGithubLogin'),
   sliceFn(workerSrc, 'isOwnerSession'),
+  sliceFn(workerSrc, 'isDocOwnerSession'),
   sliceFn(workerSrc, 'canMutate'),
   sliceFn(serverSrc, 'safeSlug'),
   sliceFn(serverSrc, 'isLocalMutation'),
@@ -76,9 +80,15 @@ t('canMutate DENIES a stranger on someone else’s record', () => {
 t('canMutate ALLOWS the author of the record', () => {
   assert(box.canMutate({ author: { login: 'alice' } }, { login: 'alice' }, ENV) === true);
 });
-t('canMutate ALLOWS the doc owner regardless of author', () => {
+t('canMutate ALLOWS the unhosted worker owner regardless of author', () => {
   assert(box.canMutate({ author: { login: 'alice' } }, { login: 'owner' }, ENV) === true);
   assert(box.canMutate({ author: null }, { login: 'owner' }, ENV) === true, 'owner can clean up legacy null-author records');
+});
+t('canMutate ALLOWS the hosted publisher, not TDOC_OWNER, on a hosted doc', () => {
+  const meta = { hosted: { github_login: 'alice' } };
+  assert(box.canMutate({ author: { login: 'bob' } }, { login: 'alice' }, ENV, meta) === true);
+  assert(box.canMutate({ author: { login: 'bob' } }, { login: 'owner' }, ENV, meta) === false,
+    'operator must not moderate comments on another tenant\'s hosted doc');
 });
 t('canMutate DENIES when session is null/anonymous', () => {
   assert(box.canMutate({ author: { login: 'alice' } }, null, ENV) === false);

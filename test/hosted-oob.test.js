@@ -47,6 +47,21 @@ t('Worker exposes provider-gated hosted token bootstrap', () => {
   assert(hostedRoute.includes('github_login'), 'hosted route must return github_login');
 });
 
+t('CLI mint and Duplicate share one hosted-account registry', () => {
+  const acctStart = worker.indexOf('async function hostedAccountForGithub');
+  const acct = worker.slice(acctStart, worker.indexOf('async function sourceHasWidgets'));
+  const issue = worker.slice(
+    worker.indexOf('async function issueHostedToken'),
+    worker.indexOf('async function hostedTokenActor'),
+  );
+  assert(acct.includes('hosted-account:'), 'canonical account key is hosted-account:<login>');
+  assert(acct.includes('hosted-github:'), 'must still read leftover hosted-github records');
+  assert(!acct.includes("source: 'duplicate'"), 'must not mint a second registry just for Duplicate');
+  assert(issue.includes('hostedAccountForGithub(env, github_login)'),
+    'token mint must reuse hostedAccountForGithub');
+  assert(!issue.includes('hosted-github:'), 'token mint must not write a second registry');
+});
+
 t('tdoc.dev opens hosted registration by hostname; BYOK template does not', () => {
   const uncommented = wranglerTpl.split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
   assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(uncommented),

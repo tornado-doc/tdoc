@@ -146,6 +146,8 @@ t('/me non-owner bounce goes to landing with notice, not github.com', () => {
     'My docs must not fall back to this-doc isOwner');
   assert(!overlay.includes('else if (me && me.isOwner) canSeeMyDocs'),
     'device-flow must not treat isOwner as canSeeMyDocs');
+  assert(!overlay.includes("typeof me.isOwner === 'boolean') isOwner"),
+    'device-flow must not clobber per-doc isOwner from /api/auth/me');
   assert(meRoute.includes("Location: `/?notice=${notice}`") || meRoute.includes("Location: '/?notice="),
     '/me must redirect to landing ?notice=…');
   assert(!meRoute.includes('github.com/tornado-doc/tdoc'),

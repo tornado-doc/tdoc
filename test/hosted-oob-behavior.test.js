@@ -622,6 +622,14 @@ async function issue(worker, env, login = 'alice', label = login) {
     assert(meta.versions.length === 1 && meta.versions[0].n === 1, 'must be a v1 snapshot');
     assert(meta.access && meta.access.visibility === 'unlisted', 'copy should default unlisted');
     assert(meta.hosted && meta.hosted.github_login === 'alice', 'copy must bind alice');
+    const tok = await issue(worker, env, 'alice');
+    assert(tok.account_id === meta.hosted.account_id,
+      'CLI mint and Duplicate must share account_id');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: firstBody.slug, version: 2, html: '<h1>Essay v2</h1>' },
+    }), env, {});
+    assert(up.status === 200, `CLI token should update the copy, got ${up.status}: ${await up.text()}`);
     assert(!(await env.META.get('comments:public-essay-copy')), 'comments must not come along');
 
     const second = await worker.fetch(req('/api/doc/duplicate', {
@@ -638,6 +646,35 @@ async function issue(worker, env, login = 'alice', label = login) {
     assert(me.status === 200, `/me ${me.status}`);
     assert(meHtml.includes('public-essay') && !meHtml.includes('public-essay-copy'),
       'operator /me must not list alice\'s account copies');
+  });
+
+  await t('duplicate consumes the same hosted doc quota as publish', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_DOCS: '1' });
+    await env.DOCS.put('docs/src-doc/v1/index.html', '<h1>Src</h1>');
+    await env.META.put('meta:src-doc', JSON.stringify({ title: 'Src', slug: 'src-doc', versions: [{ n: 1 }] }));
+    const alice = await issue(worker, env, 'alice');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'one', version: 1, html: '<h1>1</h1>' },
+    }), env, {});
+    assert(up.status === 200, `seed upload ${up.status}`);
+    const dup = await worker.fetch(req('/api/doc/duplicate', {
+      method: 'POST', cookie: alice.cookie,
+      body: { slug: 'src-doc', version: 1 },
+    }), env, {});
+    assert(dup.status === 403, `duplicate should hit quota, got ${dup.status}`);
+    assert((await dup.json()).error === 'quota_docs', 'duplicate must return quota_docs');
+  });
+
+  await t('legacy hosted-github account_id is reused by mint', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await env.META.put('hosted-github:alice', JSON.stringify({
+      account_id: 'acct_legacyalice', github_login: 'alice', created: '2026-01-01T00:00:00.000Z',
+    }));
+    const tok = await issue(worker, env, 'alice');
+    assert(tok.account_id === 'acct_legacyalice', `expected migrated account_id, got ${tok.account_id}`);
+    const rec = JSON.parse(await env.META.get('hosted-account:alice'));
+    assert(rec.account_id === 'acct_legacyalice', 'must copy the leftover record onto hosted-account');
   });
 
   await t('duplicate refuses island-bearing docs', async () => {
