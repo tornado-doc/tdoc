@@ -81,7 +81,7 @@
     .trustline svg { width:14px; height:14px; }
 
     /* browser chrome */
-    .browser { border:1px solid var(--rule); border-radius:13px; background:#fff; overflow:hidden; box-shadow:0 12px 34px rgba(16,18,26,.07); }
+    .browser { min-width:0; border:1px solid var(--rule); border-radius:13px; background:#fff; overflow:hidden; box-shadow:0 12px 34px rgba(16,18,26,.07); }
     .chrome { display:flex; align-items:center; gap:6px; padding:10px 13px; border-bottom:1px solid var(--rule); background:var(--wash); }
     .dot { width:9px; height:9px; border-radius:50%; background:#d6dae3; }
     .addr { margin-left:8px; font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
@@ -145,8 +145,11 @@
        tallest and nothing has to be positioned absolutely. Rotation animates
        opacity and visibility, which animate reliably — `display` in keyframes
        did not apply here and left every panel hidden. */
-    .uc-panels { display:grid; }
-    .uc-panel { grid-area:1 / 1; opacity:0; visibility:hidden; }
+    /* minmax(0,1fr), not the default min-content: the Safari chrome's own
+       minimum is ~412px, and an auto track refuses to go below it, which made
+       the whole page scroll sideways on every phone. */
+    .uc-panels { display:grid; grid-template-columns:minmax(0,1fr); }
+    .uc-panel { grid-area:1 / 1; min-width:0; opacity:0; visibility:hidden; }
     /* Untouched, the window cycles all four, six seconds each: one demo on a
        loop only ever sells one use case. Clicking a tab stops it where it was
        put. Pure CSS, because a published tdoc runs no author JS of its own. */
@@ -173,7 +176,7 @@
     /* The artifact frame is wide and short on a desk, tall and narrow on a
        phone, or the chart inside gets 135px of height and clips. */
     @media (max-width:900px) { iframe.life { aspect-ratio:16/10; } }
-    @media (max-width:700px) { iframe.life { aspect-ratio:4/5; } }
+    @media (max-width:700px) { iframe.life { aspect-ratio:4/3; } }
 
     /* comment cards */
     .note { border:1px solid var(--rule); border-radius:9px; padding:10px 12px; background:#fff; box-shadow:0 1px 3px rgba(16,18,26,.05); }
@@ -423,7 +426,6 @@
     }
     /* Below ~360 the two CTAs cannot share a row without touching the screen
        edge, so they stack instead of spilling. */
-    @media (max-width:360px) { .cta { grid-template-columns:1fr; } }
     @media (max-width:640px) {
       .mc-row { padding-top:0; }
       h1.tagline { font-size:34px; }
@@ -440,7 +442,39 @@
          (scrollWidth 545), and the feature cards are 156px. */
       .loop, .sm-grid, .proof-wall { grid-template-columns:1fr; }
     }
-  </style>
+  
+    /* After the 640 block on purpose: same specificity, so the later rule is
+       the one that applies. Written before it, this never fired and the two
+       buttons stayed side by side with the second one flush to the edge. */
+    @media (max-width:360px) { .cta { grid-template-columns:1fr; } }
+
+    /* Below ~430 the six-column table hid 59% of itself behind a fade. A fade
+       says "there is more"; it does not say "drag me sideways", and on a phone
+       there is no scrollbar to notice. Stack it into one card per row instead,
+       each cell labelled by its column. */
+    @media (max-width:430px) {
+      .tablewrap { overflow:visible; border:0; border-radius:0; -webkit-mask-image:none; mask-image:none; }
+      .tablewrap table { min-width:0; display:block; background:none; }
+      .tablewrap thead { display:none; }
+      .tablewrap tbody, .tablewrap tr { display:block; }
+      .tablewrap tr { border:1px solid var(--rule); border-radius:11px; padding:12px 13px 9px; margin:0 0 10px; background:#fff; }
+      /* The row label becomes the card's heading. */
+      /* width:auto matters: the desktop rule pins the label column narrow,
+         which made every heading wrap one word per line. */
+      .tablewrap td.lbl { display:block; width:auto; min-width:0; background:none; font-weight:700;
+        color:var(--ink); font-size:14px; line-height:1.3;
+        padding:0 0 9px; margin:0 0 9px; border-bottom:1px solid var(--rule); }
+      /* Five products in two columns rather than five full-width rows, or a
+         seven-feature table becomes thirty-five rows of scrolling. */
+      .tablewrap tr { display:grid; grid-template-columns:1fr 1fr; gap:7px 10px; }
+      .tablewrap td.lbl { grid-column:1 / -1; }
+      .tablewrap td { display:block; background:none !important; border:0; padding:0; text-align:left; font-size:12.5px; }
+      .tablewrap td:not(.lbl):before { content:attr(data-col); display:block; font-size:10px; font-weight:700;
+        letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:0 0 2px; }
+      .tablewrap td.us { grid-column:1 / -1; background:var(--soft) !important; border-radius:8px; padding:7px 9px; min-height:0; }
+      .tablewrap td span.yes, .tablewrap td span.no, .tablewrap td span.part { vertical-align:-2px; }
+    }
+</style>
 </head>
 <body>
 
@@ -811,59 +845,59 @@ rollback  14:41 UTC</div>
         <tbody>
           <tr>
             <td class="lbl">Has your working context</td>
-            <td class="us"><span class="yes"><svg><use href="#i-check"/></svg></span><b>Runs in your agent session</b></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="part"><svg><use href="#i-dash"/></svg></span>What you paste</td>
-            <td><span class="part"><svg><use href="#i-dash"/></svg></span>What you paste</td>
+            <td data-col="tdoc" class="us"><span class="yes"><svg><use href="#i-check"/></svg></span><b>Runs in your agent session</b></td>
+            <td data-col="Google Docs"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="Notion"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="ChatGPT"><span class="part"><svg><use href="#i-dash"/></svg></span>What you paste</td>
+            <td data-col="Claude artifacts"><span class="part"><svg><use href="#i-dash"/></svg></span>What you paste</td>
           </tr>
           <tr>
             <td class="lbl">Anyone can comment</td>
-            <td class="us"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
-            <td><span class="yes"><svg><use href="#i-check"/></svg></span></td>
-            <td><span class="yes"><svg><use href="#i-check"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="tdoc" class="us"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
+            <td data-col="Google Docs"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
+            <td data-col="Notion"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
+            <td data-col="ChatGPT"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="Claude artifacts"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
           </tr>
           <tr>
             <td class="lbl">Your AI reads the comments</td>
-            <td class="us"><span class="yes"><svg><use href="#i-check"/></svg>All at once</span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg>You copy them</span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg>You copy them</span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg>None to read</span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg>None to read</span></td>
+            <td data-col="tdoc" class="us"><span class="yes"><svg><use href="#i-check"/></svg>All at once</span></td>
+            <td data-col="Google Docs"><span class="no"><svg><use href="#i-cross"/></svg>You copy them</span></td>
+            <td data-col="Notion"><span class="no"><svg><use href="#i-cross"/></svg>You copy them</span></td>
+            <td data-col="ChatGPT"><span class="no"><svg><use href="#i-cross"/></svg>None to read</span></td>
+            <td data-col="Claude artifacts"><span class="no"><svg><use href="#i-cross"/></svg>None to read</span></td>
           </tr>
           <tr>
             <td class="lbl">Your AI has its own identity</td>
-            <td class="us"><span class="yes"><svg><use href="#i-check"/></svg>Its own name and avatar</span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="tdoc" class="us"><span class="yes"><svg><use href="#i-check"/></svg>Its own name and avatar</span></td>
+            <td data-col="Google Docs"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="Notion"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="ChatGPT"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="Claude artifacts"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
           </tr>
           <tr>
             <td class="lbl">What you can make</td>
-            <td class="us"><span class="yes"><svg><use href="#i-check"/></svg>Any web page</span></td>
-            <td><span class="part"><svg><use href="#i-dash"/></svg>Text docs</span></td>
-            <td><span class="part"><svg><use href="#i-dash"/></svg>Docs, databases</span></td>
-            <td><span class="part"><svg><use href="#i-dash"/></svg>Chat</span></td>
-            <td><span class="yes"><svg><use href="#i-check"/></svg>Any web page</span></td>
+            <td data-col="tdoc" class="us"><span class="yes"><svg><use href="#i-check"/></svg>Any web page</span></td>
+            <td data-col="Google Docs"><span class="part"><svg><use href="#i-dash"/></svg>Text docs</span></td>
+            <td data-col="Notion"><span class="part"><svg><use href="#i-dash"/></svg>Docs, databases</span></td>
+            <td data-col="ChatGPT"><span class="part"><svg><use href="#i-dash"/></svg>Chat</span></td>
+            <td data-col="Claude artifacts"><span class="yes"><svg><use href="#i-check"/></svg>Any web page</span></td>
           </tr>
           <tr>
             <td class="lbl">Live co editing</td>
-            <td class="us"><span class="part"><svg><use href="#i-dash"/></svg>Coming soon</span></td>
-            <td><span class="yes"><svg><use href="#i-check"/></svg></span></td>
-            <td><span class="yes"><svg><use href="#i-check"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="tdoc" class="us"><span class="part"><svg><use href="#i-dash"/></svg>Coming soon</span></td>
+            <td data-col="Google Docs"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
+            <td data-col="Notion"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
+            <td data-col="ChatGPT"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="Claude artifacts"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
           </tr>
           <tr>
             <td class="lbl">Open source</td>
-            <td class="us"><span class="yes"><svg><use href="#i-check"/></svg>MIT</span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="tdoc" class="us"><span class="yes"><svg><use href="#i-check"/></svg>MIT</span></td>
+            <td data-col="Google Docs"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="Notion"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="ChatGPT"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
+            <td data-col="Claude artifacts"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
           </tr>
         </tbody>
       </table>

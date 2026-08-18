@@ -16,15 +16,26 @@
  .bar i{display:block;height:100%;border-radius:3px}
  .up{color:#1a7340}.dn{color:#c3452f}
  .foot{margin:11px 0 0;font-size:11px;color:#8e939f;display:flex;gap:14px;flex-wrap:wrap}
+ /* Six columns will not fit a phone-width frame: the headers ran together
+    ("SIGNUPSSHARE") and channel collided with source. Drop the two columns a
+    reader can do without, and let the source sit under the channel name. */
+ @media (max-width:430px){
+   th:nth-child(2),td:nth-child(2),th:nth-child(5),td:nth-child(5){display:none}
+   .ch{flex-wrap:wrap}
+   td:first-child{max-width:118px}
+   .src-inline{display:block;width:100%;font-size:10.5px;color:#8e939f;padding-left:17px}
+   th,td{font-size:12px}
+ }
+ .src-inline{display:none}
 </style></head><body>
 <table>
  <thead><tr><th>Channel</th><th>Source</th><th class="n">Signups</th><th>Share</th><th class="n">Δ vs Q2</th><th class="n">CAC</th></tr></thead>
  <tbody>
-  <tr><td class="ch"><span class="sw" style="background:#1652f0"></span>Referral</td><td class="src">Google Analytics</td><td class="n">4,182</td><td><span class="bar"><i style="width:34%;background:#1652f0"></i></span></td><td class="n up">+9 pts</td><td class="n">$11</td></tr>
-  <tr><td class="ch"><span class="sw" style="background:#1a7340"></span>Organic</td><td class="src">Search Console</td><td class="n">3,196</td><td><span class="bar"><i style="width:26%;background:#1a7340"></i></span></td><td class="n up">+2 pts</td><td class="n">$4</td></tr>
-  <tr><td class="ch"><span class="sw" style="background:#D97757"></span>Paid social</td><td class="src">Meta Ads</td><td class="n">2,336</td><td><span class="bar"><i style="width:19%;background:#D97757"></i></span></td><td class="n dn">−4 pts</td><td class="n">$63</td></tr>
-  <tr><td class="ch"><span class="sw" style="background:#7a5bd6"></span>Partnerships</td><td class="src">HubSpot</td><td class="n">1,598</td><td><span class="bar"><i style="width:13%;background:#7a5bd6"></i></span></td><td class="n up">+1 pt</td><td class="n">$19</td></tr>
-  <tr><td class="ch"><span class="sw" style="background:#767c8b"></span>Direct</td><td class="src">Google Analytics</td><td class="n">983</td><td><span class="bar"><i style="width:8%;background:#767c8b"></i></span></td><td class="n dn">−1 pt</td><td class="n">—</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#1652f0"></span>Referral<span class="src-inline">Google Analytics</span></td><td class="src">Google Analytics</td><td class="n">4,182</td><td><span class="bar"><i style="width:34%;background:#1652f0"></i></span></td><td class="n up">+9 pts</td><td class="n">$11</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#1a7340"></span>Organic<span class="src-inline">Search Console</span></td><td class="src">Search Console</td><td class="n">3,196</td><td><span class="bar"><i style="width:26%;background:#1a7340"></i></span></td><td class="n up">+2 pts</td><td class="n">$4</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#D97757"></span>Paid social<span class="src-inline">Meta Ads</span></td><td class="src">Meta Ads</td><td class="n">2,336</td><td><span class="bar"><i style="width:19%;background:#D97757"></i></span></td><td class="n dn">−4 pts</td><td class="n">$63</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#7a5bd6"></span>Partnerships<span class="src-inline">HubSpot</span></td><td class="src">HubSpot</td><td class="n">1,598</td><td><span class="bar"><i style="width:13%;background:#7a5bd6"></i></span></td><td class="n up">+1 pt</td><td class="n">$19</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#767c8b"></span>Direct<span class="src-inline">Google Analytics</span></td><td class="src">Google Analytics</td><td class="n">983</td><td><span class="bar"><i style="width:8%;background:#767c8b"></i></span></td><td class="n dn">−1 pt</td><td class="n">—</td></tr>
  </tbody>
 </table>
 <div class="foot"><span>Signups by channel, last 90 days.</span><span>Sources: Google Analytics · Search Console · Meta Ads · HubSpot · Stripe</span></div>
