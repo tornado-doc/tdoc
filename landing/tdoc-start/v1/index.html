@@ -78,9 +78,13 @@
     .chrome { display:flex; align-items:center; gap:6px; padding:10px 13px; border-bottom:1px solid var(--rule); background:var(--wash); }
     .dot { width:9px; height:9px; border-radius:50%; background:#d6dae3; }
     .addr { margin-left:8px; font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
-    .tbar { display:flex; align-items:center; gap:8px; padding:7px 13px; border-bottom:1px solid var(--rule); background:#fff; }
-    .tbar-mark { background:var(--accent); color:#fff; font-weight:700; font-size:11px; border-radius:999px; padding:3px 10px; }
-    .tbar-v { font-size:11px; color:var(--muted); }
+    /* The reader's real bar. Blue is this site's CTA colour, so the demo does
+       not spend it. Kept in step with the landing page's copy of these rules. */
+    .tbar { display:flex; align-items:center; gap:6px; padding:4px 13px; border-bottom:1px solid var(--rule); background:#fff; }
+    .tbar-mark { color:#555; font-size:13px; padding:6px 8px; }
+    .tbar-crumb { color:#555; font-weight:500; font-size:13px; padding:4px 6px; }
+    .tbar-sep { color:#c0c0c4; }
+    .tbar-v { font:12px ui-monospace,SFMono-Regular,Menlo,monospace; background:#f0f1f4; color:#1a1a1a; border-radius:999px; padding:3px 10px; }
 
     /* the real conway doc */
     .doc { padding:26px 30px 22px; }
@@ -339,6 +343,18 @@
     .tabs label { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--rule); border-radius:999px; padding:7px 14px; font-size:13.5px; font-weight:600; color:var(--body); cursor:pointer; background:#fff; }
     .tabs label svg { width:15px; height:15px; }
     .panel { display:none; }
+    .tiers { display:grid; gap:8px; margin:0 0 14px; }
+    .tier { display:flex; align-items:baseline; gap:10px; border:1px solid var(--rule); border-radius:9px; padding:10px 12px; background:#fff; }
+    .tier b { font-size:13px; color:var(--ink); min-width:64px; }
+    .tier span { font-size:12.5px; color:var(--muted); }
+    .tier.on { border-color:var(--accent); background:var(--soft); }
+    .tier .lbl-def { margin-left:auto; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--accent); }
+    .takeaways { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin:0 0 14px; }
+    .takeaway { border:1px solid var(--rule); border-radius:9px; padding:11px 12px; background:#fff; }
+    .takeaway b { display:block; font-size:13px; color:var(--ink); margin:0 0 3px; }
+    .takeaway span { font-size:12px; color:var(--muted); }
+    @media (max-width:560px) { .takeaways { grid-template-columns:1fr; } }
+    .prompt { background:var(--wash); color:var(--ink); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; font:13px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; -webkit-user-select:all; user-select:all; }
     .cmd { background:#0f1220; color:#e8ecf7; border-radius:10px; padding:14px 16px; font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-x:auto; white-space:pre-wrap; overflow-wrap:anywhere; -webkit-user-select:all; user-select:all; }
     .cmd .c { color:#8b93a8; }
     .say { border:1px solid var(--rule); border-left:3px solid var(--accent); border-radius:0 10px 10px 0; background:var(--wash); padding:12px 15px; font-size:14.5px; color:var(--ink); margin:0 0 10px; -webkit-user-select:all; user-select:all; }
@@ -413,10 +429,10 @@
       <article class="step-card">
         <div class="step-hd"><span class="step-num">1</span><div><h3>Get set up.</h3><p>One line. Your AI installs tdoc and builds you a first doc to practise on.</p></div></div>
         <div class="step-bd">
-          <div class="cmd">Set up tdoc and make my first doc: https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md</div>
+          <div class="prompt">Set up tdoc and make my first doc: https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md</div>
           <p class="hint">You get a Game of Life page with a live board, published to a link you can share.</p>
           <p style="margin:14px 0 0"><a class="btn btn-primary" href="/start" style="width:auto;display:inline-flex;padding:0 22px">Copy the line</a></p>
-          <details class="more"><summary>Where does it get published?</summary><div class="more-bd">
+          <details class="more"><summary>Where does it get published?</summary><div class="inner">
             <p class="hint" style="margin:0 0 10px">To a free Cloudflare account you own. The first time, your agent walks you through it: you click <em>create account</em> and <em>enable R2</em> in your own browser. No card. About five minutes, once.</p>
             <p class="hint" style="margin:0">Only want it on your machine? Say <b>keep it local</b> and skip the account entirely.</p>
           </div></details>
@@ -470,7 +486,7 @@ Everything else dies.</div>
     </div>
   
           <p class="hint" style="margin:14px 0 0">Readers need no account to read. Commenting asks for a one time GitHub sign in, so every note carries a name.</p>
-          <details class="more"><summary>What can be commented on?</summary><div class="more-bd">
+          <details class="more"><summary>What can be commented on?</summary><div class="inner">
             <p class="hint" style="margin:0">Any sentence you can select, and any <b>picture, chart, table, code block, diagram or live widget</b> on the page. A comment sticks to the thing it points at, not to a line number, so it survives a rewrite.</p>
           </div></details>
         </div>
@@ -480,13 +496,24 @@ Everything else dies.</div>
         <div class="step-hd"><span class="step-num">3</span><div><h3>Tell your AI to fix the comments.</h3><p>You never copy notes back and forth. It reads every comment and what each one points at.</p></div></div>
         <div class="step-bd">
           <div class="say">Read the comments on my doc and fix them.</div>
-          <p class="hint">It edits the page, publishes a new version, and replies to each comment saying what changed.</p>
+          <p class="hint" style="margin:0 0 14px">It edits the page, publishes a new version, and replies to each comment saying what changed. The reply is signed by the agent that made the change, so whoever commented finds out without chasing you.</p>
+          <div class="mc" style="max-width:420px"><div class="mc-reply">
+              <div class="mc-author"><span class="mc-av mc-logo"><svg aria-hidden="true"><use href="#i-claude"/></svg></span><span class="mc-login">Claude</span></div>
+              <span class="mc-state">&#10003; applied</span>
+              <div class="mc-text">Runs a real generation loop now, in a sandboxed island, so the page itself still ships no script.</div>
+              <div class="mc-reacts"><span class="mc-r on red"><span class="emo">&#10084;&#65039;</span> 1</span><span class="mc-r add">&#9786;</span></div>
+              <div class="mc-meta"><span>Aug 16 at 3:31 AM</span><span class="mc-actions"><span class="a">Reply</span><span class="del">delete</span></span></div>
+            </div></div>
         </div>
       </article>
 
       <article class="step-card">
         <div class="step-hd"><span class="step-num">4</span><div><h3>Every version is kept.</h3><p>A new version never breaks the link you already shared.</p></div></div>
         <div class="step-bd">
+          <div class="browser" style="max-width:440px;margin:0 0 14px">
+            <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">conway-life</span><span class="tbar-sep">/</span><span class="tbar-v">v3 &#9662;</span></div>
+            <div style="padding:10px 13px"><div class="mc-state">&#10003; fixed &middot; v2</div><p class="hint" style="margin:6px 0 0">A comment left on v2 stays on v2, and says so.</p></div>
+          </div>
           <p class="hint">Use the version picker in the top bar to flip back. Comments stay anchored to the version they were left on, so you can see what the page looked like when someone objected.</p>
         </div>
       </article>
@@ -494,8 +521,13 @@ Everything else dies.</div>
       <article class="step-card">
         <div class="step-hd"><span class="step-num">5</span><div><h3>Share it the way you want.</h3><p>Anyone with the link can read. You choose who can comment.</p></div></div>
         <div class="step-bd">
+          <div class="tiers">
+            <div class="tier on"><b>Unlisted</b><span>Anyone with the link can read. Never listed anywhere.</span><span class="lbl-def">Default</span></div>
+            <div class="tier"><b>Public</b><span>The same, and may be listed.</span></div>
+            <div class="tier"><b>Private</b><span>You, plus the accounts you allow.</span></div>
+          </div>
           <p class="hint">Hit <b>Share</b> in the top bar for the link. Owners also get visibility and commenting controls there.</p>
-          <details class="more"><summary>Who can see it?</summary><div class="more-bd">
+          <details class="more"><summary>Who can see it?</summary><div class="inner">
             <p class="hint" style="margin:0 0 8px"><b>Unlisted</b> is the default: anyone with the link can read, and it is never listed anywhere.</p>
             <p class="hint" style="margin:0 0 8px"><b>Public</b> is the same, and may be listed.</p>
             <p class="hint" style="margin:0"><b>Private</b> is you plus the accounts you allow.</p>
@@ -506,14 +538,29 @@ Everything else dies.</div>
       <article class="step-card">
         <div class="step-hd"><span class="step-num">6</span><div><h3>Take it with you.</h3><p>Your doc is a plain HTML file, and it stays one.</p></div></div>
         <div class="step-bd">
-          <p class="hint"><b>Download</b> gives you the rendered page as a file you own. <b>Duplicate</b> makes your own copy of someone else's doc to edit. <b>Copy as Markdown</b> takes the text, with or without the comment thread, straight into another tool.</p>
+          <div class="takeaways">
+            <div class="takeaway"><b>Download</b><span>The rendered page as a file you own.</span></div>
+            <div class="takeaway"><b>Duplicate</b><span>Your own copy of someone else's doc, to edit.</span></div>
+            <div class="takeaway"><b>Copy as Markdown</b><span>The text, with or without the comment thread.</span></div>
+          </div>
+          <p class="hint">All three are in the top bar. Nothing here locks your writing inside tdoc.</p>
         </div>
       </article>
 
       <article class="step-card">
         <div class="step-hd"><span class="step-num">7</span><div><h3>Everything you publish, in one place.</h3><p>Your hub lists the docs on your account.</p></div></div>
         <div class="step-bd">
-          <p class="hint">Open <b>tdoc.dev/me</b> once you have published something. That is also where <b>Create a doc</b> lives when you want the next one.</p>
+          <div class="browser" style="max-width:460px;margin:0 0 14px">
+            <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="addr">tdoc.dev/me</span></div>
+            <div style="padding:14px 16px">
+              <div style="display:flex;align-items:center;gap:12px;margin:0 0 12px">
+                <b style="font-size:15px;color:var(--ink)">My docs</b>
+                <span style="margin-left:auto;background:var(--accent);color:#fff;font-size:12px;font-weight:650;border-radius:999px;padding:6px 13px">Create a doc</span>
+              </div>
+              <div class="tier"><b style="min-width:0">Game of Life</b><span>conway-life &middot; v3</span></div>
+            </div>
+          </div>
+          <p class="hint">Open <b>tdoc.dev/me</b> once you have published something. That is also where <b>Create a doc</b> lives when you want the next one, with the same walkthrough you just read.</p>
         </div>
       </article>
 
