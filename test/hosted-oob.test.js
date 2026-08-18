@@ -39,17 +39,22 @@ const authorizeSrc = worker.slice(authorizeStart, authorizeEnd);
 console.log('hosted out-of-box publish');
 
 t('Worker exposes provider-gated hosted token bootstrap', () => {
-  assert(hostedRoute.includes('hostedRegistrationEnabled(env)'), 'hosted route must be registration-gated');
-  assert(hostedRoute.includes('issueHostedToken(env, body)'), 'hosted route must mint a token server-side');
+  assert(hostedRoute.includes('hostedRegistrationEnabled(env, url.origin)'), 'hosted route must be registration-gated');
+  assert(hostedRoute.includes('issueHostedToken(env,'), 'hosted route must mint a token server-side');
   assert(hostedRoute.includes("hosted_registration_disabled"), 'hosted route must return disabled registration error');
+  assert(hostedRoute.includes("sign_in_required"), 'hosted mint must require a GitHub session');
   assert(hostedRoute.includes('account_id'), 'hosted route must return account_id');
+  assert(hostedRoute.includes('github_login'), 'hosted route must return github_login');
 });
 
-t('tdoc.dev must not enable hosted registration', () => {
-  assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(wranglerTpl),
-    'wrangler template must not set TDOC_HOSTED_REGISTRATION=1');
+t('tdoc.dev opens hosted registration by hostname; BYOK template does not', () => {
+  const uncommented = wranglerTpl.split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+  assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(uncommented),
+    'wrangler template must not set TDOC_HOSTED_REGISTRATION=1 (BYOK stays single-owner /me)');
   assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(deployWf),
-    'tdoc.dev CD must not set TDOC_HOSTED_REGISTRATION=1');
+    'tdoc.dev CD must not set TDOC_HOSTED_REGISTRATION=1 (hostname opens it)');
+  assert(worker.includes("origin === 'https://tdoc.dev'"),
+    'unset registration must enable on the tdoc.dev origin');
 });
 
 t('Hosted tokens are stored hashed, not in cleartext', () => {
@@ -65,7 +70,7 @@ t('Upload auth accepts either provider admin token or hosted account token', () 
 });
 
 t('Combined owner-mutation gate is session OR admin token OR (hosted token + slug ACL)', () => {
-  assert(authorizeSrc.includes('isOwnerSession(env, session)'), 'session path missing');
+  assert(authorizeSrc.includes('isDocOwnerSession(env, session, meta)'), 'session path missing');
   assert(authorizeSrc.includes('requireUploadAuth(req, env)'), 'token fallback missing');
   assert(authorizeSrc.includes("auth.actor.kind === 'admin'"), 'admin token must skip slug ACL');
   assert(authorizeSrc.includes('requireDocWriteAccess(env, auth.actor, slug)'),
@@ -75,6 +80,8 @@ t('Combined owner-mutation gate is session OR admin token OR (hosted token + slu
 t('Hosted upload stamps remote meta ownership before writing', () => {
   assert(uploadRoute.includes('requireDocWriteAccess(env, auth.actor, slug, { create: true })'), 'upload must enforce create/claim write access');
   assert(uploadRoute.includes('stampHostedOwnership(incoming, auth.actor)'), 'upload must stamp hosted owner');
+  assert(uploadRoute.includes('quota_docs'), 'hosted create must enforce a per-account doc quota');
+  assert(uploadRoute.includes('quota_upload_bytes'), 'hosted upload must cap payload bytes');
   const gate = uploadRoute.indexOf('requireDocWriteAccess(env, auth.actor, slug, { create: true })');
   const validate = uploadRoute.indexOf('validateAccessWrite');
   const claim = uploadRoute.indexOf("kind: 'claim_owner'");

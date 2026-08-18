@@ -48,8 +48,8 @@ if (docViewStart < 0 || docViewEnd < 0) throw new Error('serveDocVersion block m
 const docViewRoute = worker.slice(docViewStart, docViewEnd);
 
 t('doc-view route computes isOwner server-side from the session, not the client', () => {
-  assert(docViewRoute.includes('const isOwner = isOwnerSession(env, session);'),
-    'isOwner must be derived from isOwnerSession(env, session) on THIS request');
+  assert(docViewRoute.includes('const isOwner = isDocOwnerSession(env, session, gate.meta);'),
+    'isOwner must be derived from isDocOwnerSession(env, session, meta) on THIS request');
 });
 
 t('doc-view route only builds ownerManage data inside an isOwner guard', () => {
@@ -133,11 +133,17 @@ const getSessionStart = worker.indexOf('async function getSession(env, req) {');
 const getSessionEnd = worker.indexOf('\n}', getSessionStart) + 2;
 const isOwnerSessionStart = worker.indexOf('function isOwnerSession(env, session) {');
 const isOwnerSessionEnd = worker.indexOf('\n}', isOwnerSessionStart) + 2;
+const sessionLoginStart = worker.indexOf('function sessionLogin(session) {');
+const isDocOwnerStart = worker.indexOf('function isDocOwnerSession(env, session, meta) {');
+const isDocOwnerEnd = worker.indexOf('\n}', isDocOwnerStart) + 2;
+const loadDocMetaStart = worker.indexOf('async function loadDocMeta(env, slug) {');
+const loadDocMetaEnd = worker.indexOf('\n}', loadDocMetaStart) + 2;
 const hostedHelpersStart = worker.indexOf('async function sha256Hex(s) {');
 const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env, slug) {');
 const hostedHelpersEnd = worker.indexOf('// #34 — Per-slug write serialization', hostedHelpersStart);
 if (uploadAuthStart < 0 || timingEqualStart < 0 || parseCookieStart < 0 || getSessionStart < 0
-  || isOwnerSessionStart < 0 || authorizeStart < 0 || hostedHelpersStart < 0 || hostedHelpersEnd < 0) {
+  || isOwnerSessionStart < 0 || sessionLoginStart < 0 || isDocOwnerStart < 0 || loadDocMetaStart < 0
+  || authorizeStart < 0 || hostedHelpersStart < 0 || hostedHelpersEnd < 0) {
   throw new Error('auth helpers not found');
 }
 const authSrc = [
@@ -145,6 +151,8 @@ const authSrc = [
   worker.slice(parseCookieStart, parseCookieEnd),
   worker.slice(getSessionStart, getSessionEnd),
   worker.slice(isOwnerSessionStart, isOwnerSessionEnd),
+  worker.slice(sessionLoginStart, isDocOwnerEnd),
+  worker.slice(loadDocMetaStart, loadDocMetaEnd),
   worker.slice(hostedHelpersStart, hostedHelpersEnd),
 ].join('\n');
 
@@ -165,13 +173,13 @@ t('DELETE /api/doc and PATCH /api/doc/access both go through the shared authoriz
   assert(!worker.includes('isSameOriginRequest'), 'same-origin is not sufficient — docs are arbitrary same-origin HTML');
 });
 
-t('authorizeOwnerMutation gate itself calls isOwnerSession, then falls back to requireUploadAuth', () => {
+t('authorizeOwnerMutation gate itself calls isDocOwnerSession, then falls back to requireUploadAuth', () => {
   const fnSrc = worker.slice(authorizeStart, hostedHelpersEnd);
-  const ownerCheck = fnSrc.indexOf('isOwnerSession(env, session)');
+  const ownerCheck = fnSrc.indexOf('isDocOwnerSession(env, session, meta)');
   const tokenCheck = fnSrc.indexOf('requireUploadAuth(req, env)');
-  assert(ownerCheck >= 0, 'must check isOwnerSession');
+  assert(ownerCheck >= 0, 'must check isDocOwnerSession');
   assert(tokenCheck >= 0, 'must fall back to requireUploadAuth');
-  assert(ownerCheck < tokenCheck, 'owner-session check must come before the token fallback');
+  assert(ownerCheck < tokenCheck, 'doc-owner session check must come before the token fallback');
   assert(fnSrc.includes('requireDocWriteAccess(env, auth.actor, slug)'),
     'hosted tokens must be slug-scoped inside the shared gate, not treated as global owners');
 });
@@ -284,7 +292,7 @@ async function main() {
   }
 
   t('worker /me page no longer uses window.confirm() for delete', () => {
-    const idxStart = worker.indexOf('async function indexHtml(env, session)');
+    const idxStart = worker.indexOf('async function indexHtml(env, session');
     const idxEnd = worker.indexOf('// ─────────────────────────────────────────────────────────────────────────', idxStart);
     const indexHtmlSrc = worker.slice(idxStart, idxEnd);
     assert(!nativeConfirmCall.test(stripLineComments(indexHtmlSrc)), '/me must not call the native confirm()');

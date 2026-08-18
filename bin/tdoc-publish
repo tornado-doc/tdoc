@@ -210,6 +210,74 @@ require_vercel() {
   fi
 }
 
+# GitHub Device Flow against the hosted Worker. Writes the session cookie into
+# $2 (curl cookie jar) so /api/hosted/token can bind the upload token to the
+# signed-in login. Same shape as the overlay sign-in, for the CLI.
+hosted_github_signin() {
+  local base="$1" cookiejar="$2"
+  local resp http payload
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+    -X POST "$base/api/auth/device/start" -H "Content-Type: application/json" -d '{}')" || {
+      fail_with_agent_prompt "hosted GitHub sign-in is unreachable" \
+        "The hosted tdoc service at $base did not start GitHub sign-in. Retry '/tdoc publish $SLUG' later, or self-host with '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+    }
+  http="${resp##*$'\n'}"
+  payload="${resp%$'\n'*}"
+  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
+    echo "[tdoc] GitHub device-flow start returned HTTP $http" >&2
+    printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+    exit 1
+  fi
+  local user_code device_code uri interval expires
+  user_code="$(printf '%s' "$payload" | jq -r '.user_code // empty')"
+  device_code="$(printf '%s' "$payload" | jq -r '.device_code // empty')"
+  uri="$(printf '%s' "$payload" | jq -r '.verification_uri_complete // .verification_uri // empty')"
+  interval="$(printf '%s' "$payload" | jq -r '.interval // 5')"
+  expires="$(printf '%s' "$payload" | jq -r '.expires_in // 900')"
+  if [ -z "$user_code" ] || [ -z "$device_code" ] || [ -z "$uri" ]; then
+    echo "[tdoc] GitHub device-flow start was missing user_code/device_code." >&2
+    printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+    exit 1
+  fi
+  case "$interval" in ''|*[!0-9]*) interval=5 ;; esac
+  [ "$interval" -lt 5 ] && interval=5
+  case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
+  echo "[tdoc] Sign in with GitHub to publish on $base" >&2
+  echo "[tdoc] Open: $uri" >&2
+  echo "[tdoc] Code: $user_code" >&2
+  echo "[tdoc] Waiting for GitHub approval…" >&2
+  local waited=0 err
+  while [ "$waited" -lt "$expires" ]; do
+    sleep "$interval"
+    waited=$((waited + interval))
+    resp="$(curl -sS --connect-timeout 10 --max-time 30 -c "$cookiejar" -b "$cookiejar" -w $'\n%{http_code}' \
+      -X POST "$base/api/auth/device/poll" -H "Content-Type: application/json" \
+      -d "{\"device_code\":\"$(printf '%s' "$device_code" | sed 's/"/\\"/g')\"}")" || continue
+    http="${resp##*$'\n'}"
+    payload="${resp%$'\n'*}"
+    if printf '%s' "$payload" | jq -e '.ok == true' >/dev/null 2>&1; then
+      echo "[tdoc] Signed in as $(printf '%s' "$payload" | jq -r '.identity.login // "github user"')" >&2
+      return 0
+    fi
+    err="$(printf '%s' "$payload" | jq -r '.error // empty')"
+    case "$err" in
+      authorization_pending|'') ;;
+      slow_down) interval=$((interval + 5)) ;;
+      expired_token|access_denied)
+        fail_with_agent_prompt "GitHub sign-in expired or was denied" \
+          "Retry '/tdoc publish $SLUG' and approve the GitHub device code shown in the terminal."
+        ;;
+      *)
+        echo "[tdoc] GitHub sign-in error: ${err:-HTTP $http}" >&2
+        printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+        exit 1
+        ;;
+    esac
+  done
+  fail_with_agent_prompt "GitHub sign-in timed out" \
+    "Retry '/tdoc publish $SLUG' and approve the GitHub device code before it expires. To self-host instead, run '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+}
+
 first_time_setup_hosted() {
   local base="${TDOC_HOSTED_BASE:-https://tdoc.dev}"
   base="${base%/}"
@@ -217,13 +285,17 @@ first_time_setup_hosted() {
     http://*|https://*) ;;
     *) echo "[tdoc] TDOC_HOSTED_BASE must start with http:// or https:// (got '$base')." >&2; exit 1 ;;
   esac
-  local resp http payload token account_id
-  resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+  local cookiejar resp http payload token account_id github_login
+  cookiejar="$(mktemp -t tdoc-hosted-cookie.XXXXXX)"
+  hosted_github_signin "$base" "$cookiejar"
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -b "$cookiejar" -w $'\n%{http_code}' \
     -X POST "$base/api/hosted/token" -H "Content-Type: application/json" \
     -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\"}" 2>&1)" || {
+      rm -f "$cookiejar"
       fail_with_agent_prompt "hosted service is unreachable" \
         "The hosted tdoc service at $base did not respond. Retry '/tdoc publish $SLUG' later, or set TDOC_HOSTED_BASE to the correct hosted URL. To self-host instead, run '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
     }
+  rm -f "$cookiejar"
   http="${resp##*$'\n'}"
   payload="${resp%$'\n'*}"
   if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
@@ -231,12 +303,17 @@ first_time_setup_hosted() {
       fail_with_agent_prompt "hosted signup is not open on $base" \
         "The default publish target is hosted tdoc ($base), but self-serve signup is not enabled there. Publish to your own account instead: '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
     fi
+    if printf '%s' "$payload" | grep -q 'sign_in_required'; then
+      fail_with_agent_prompt "hosted publish requires GitHub sign-in" \
+        "Retry '/tdoc publish $SLUG' and complete the GitHub device-flow prompt. To self-host instead, run '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+    fi
     echo "[tdoc] hosted token request returned HTTP $http" >&2
     printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
     exit 1
   fi
   token="$(printf '%s' "$payload" | jq -r '.token // empty')"
   account_id="$(printf '%s' "$payload" | jq -r '.account_id // empty')"
+  github_login="$(printf '%s' "$payload" | jq -r '.github_login // empty')"
   if [ -z "$token" ] || [ -z "$account_id" ]; then
     echo "[tdoc] hosted token response was missing token/account_id." >&2
     printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
@@ -251,7 +328,8 @@ first_time_setup_hosted() {
       --arg base "$base" \
       --arg host "$public_host" \
       --arg acct "$account_id" \
-      '{platform:"hosted", upload_token:$tok, base:$base, public_host:$host, account_id:$acct, created: now | todate}' \
+      --arg gh "$github_login" \
+      '{platform:"hosted", upload_token:$tok, base:$base, public_host:$host, account_id:$acct, github_login:$gh, created: now | todate}' \
       > "$CONFIG_FILE"
   )
   chmod 600 "$CONFIG_FILE"

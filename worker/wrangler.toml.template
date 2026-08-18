@@ -30,11 +30,11 @@ new_sqlite_classes = ["CommentsStore"]
 # test/no-drift.test.js fails if this drifts from the SoT module.
 GITHUB_CLIENT_ID = "Ov23li1jJiBkS23x4O07"
 
-# The worker owner's GitHub login. Only this signed-in viewer sees the
-# "My docs" catalog (profile chip → My docs). Empty = catalog stays fully
-# private (no one can enumerate docs; they're reachable only by direct link).
+# The worker operator's GitHub login. On BYOK (hosted registration unset),
+# only this signed-in viewer sees /me. On tdoc.dev, /me is per signed-in user;
+# TDOC_OWNER still owns legacy docs with no hosted.github_login.
 TDOC_OWNER = "PLACEHOLDER_OWNER"
 
 # Secret: TDOC_UPLOAD_TOKEN — set via `wrangler secret put TDOC_UPLOAD_TOKEN`
-# TDOC_HOSTED_REGISTRATION — leave unset. /api/hosted/token stays closed.
-# Do not set this on tdoc.dev until hosted signup is intentionally opened.
+# TDOC_HOSTED_REGISTRATION — leave unset on BYOK so /me stays single-owner.
+# Unset + hostname https://tdoc.dev enables hosted signup; set to "0" to force off.

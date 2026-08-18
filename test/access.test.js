@@ -83,6 +83,24 @@ t('history_visibility owner hides picker from allowlisted non-owner', () => {
   assert(box.canSeeHistory(a, null, ENV) === false);
 });
 
+t('hosted publisher is the doc owner; TDOC_OWNER is not', () => {
+  const a = box.normalizeAccess({
+    visibility: 'private',
+    history_visibility: 'owner',
+    commenting: 'owner',
+    allowed_users: [],
+  });
+  const hosted = { hosted: { github_login: 'alice', account_id: 'acct_1' } };
+  assert(box.isDocOwnerSession(ENV, alice, hosted) === true);
+  assert(box.isDocOwnerSession(ENV, owner, hosted) === false);
+  assert(box.canSeeHistory(a, alice, ENV, hosted) === true);
+  assert(box.canSeeHistory(a, owner, ENV, hosted) === false);
+  assert(box.canReadDoc(a, alice, ENV, hosted) === true);
+  assert(box.canReadDoc(a, owner, ENV, hosted) === false);
+  assert(box.canCommentOnDoc(a, alice, ENV, hosted) === true);
+  assert(box.canCommentOnDoc(a, owner, ENV, hosted) === false);
+});
+
 t('history_visibility invited allows allowlist', () => {
   const a = box.normalizeAccess({
     visibility: 'private',

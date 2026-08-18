@@ -25,7 +25,7 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const worker = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
-const start = worker.indexOf('async function indexHtml(env, session)');
+const start = worker.indexOf('async function indexHtml(env, session');
 const end = worker.indexOf('// ─────────────────────────────────────────────────────────────────────────', start);
 if (start < 0 || end < 0 || end <= start) throw new Error('indexHtml block missing');
 const index = worker.slice(start, end);
@@ -137,6 +137,8 @@ t('/me non-owner bounce goes to landing with notice, not github.com', () => {
   const meEnd = worker.indexOf('// ---- doc view ----', meStart);
   assert(meStart >= 0 && meEnd > meStart, '/me route block missing');
   const meRoute = worker.slice(meStart, meEnd);
+  assert(meRoute.includes('canSeeMyDocs(env, s, url.origin)'),
+    '/me must gate on canSeeMyDocs (hosted per-user or BYOK TDOC_OWNER)');
   assert(meRoute.includes("Location: `/?notice=${notice}`") || meRoute.includes("Location: '/?notice="),
     '/me must redirect to landing ?notice=…');
   assert(!meRoute.includes('github.com/tornado-doc/tdoc'),

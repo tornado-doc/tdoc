@@ -409,11 +409,12 @@ pkill -f "$SKILL_DIR/server/server.js"
 
 Publishes the latest version of `<slug>` to a public URL.
 
-Default target is **hosted** (`https://tdoc.dev`). First run asks the host for
-an account-scoped upload token and stores it in `~/.tdoc/published.json`. That
-token can only mutate docs it owns. If hosted signup is not open, the CLI fails
-with a clear prompt to self-host instead — do **not** tell the user to flip a
-Worker env flag.
+Default target is **hosted** (`https://tdoc.dev`). First run signs in with
+GitHub (Device Flow), then asks the host for an account-scoped upload token
+bound to that login and stores it in `~/.tdoc/published.json`. That token can
+only mutate docs it owns. `/me` on tdoc.dev lists that GitHub user's docs. If
+hosted signup is not open on the target, the CLI fails with a clear prompt to
+self-host instead — do **not** tell the user to flip a Worker env flag.
 
 **Self-host — Cloudflare**: `tdoc-publish --platform cloudflare <slug>`.
 First run (or an explicit switch onto cloudflare) prompts `wrangler login`,
@@ -783,13 +784,13 @@ Remote storage holds optional `meta.access`:
 }
 ```
 
-- **public / unlisted**: link-readable without login. Unlisted is not catalog-discovery; `/me` still lists owner docs.
-- **private**: `TDOC_OWNER` + `allowed_users` only. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
+- **public / unlisted**: link-readable without login. Unlisted is not catalog-discovery; `/me` still lists the signed-in publisher's docs.
+- **private**: the doc publisher (hosted `github_login`, or `TDOC_OWNER` on BYOK/legacy) + `allowed_users`. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
 - **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
 - Legacy meta without `access` stays world-readable + full history (back-compat).
 - Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
 - After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
-- `/me` may list docs through the owner GitHub session, but remote write actions still use the upload token; do not authorize destructive/access changes from the owner cookie while arbitrary published docs share the same origin.
+- `/me` on hosted tdoc.dev lists the signed-in GitHub user's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
 
 
 ### Comment anchor stability (important for `/tdoc edit`)
