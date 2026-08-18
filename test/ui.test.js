@@ -514,6 +514,8 @@ async function tPub(name, fn) {
     const dl = await page.$('#tdoc-download-btn');
     if (!dup) throw new Error('no #tdoc-duplicate-btn on published doc');
     if (!dl) throw new Error('no #tdoc-download-btn on published doc');
+    if (!(await page.$('#tdoc-download-menu'))) throw new Error('no #tdoc-download-menu on published doc');
+    if (await page.$('#tdoc-pdf-btn')) throw new Error('PDF must be in the Download menu, not its own button');
     if (await page.$('#tdoc-fork-btn')) throw new Error('legacy #tdoc-fork-btn still present');
     const dupText = await dup.textContent();
     const dlText = await dl.textContent();

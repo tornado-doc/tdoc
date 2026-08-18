@@ -113,7 +113,13 @@ class FakeDurableNamespace {
 }
 
 async function loadWorker() {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+  const root = path.join(__dirname, '..');
+  let src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
+  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
+  src = src.replace(
+    /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
+    'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
+  );
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);
   const mod = await import(`file://${tmp}`);
@@ -507,6 +513,20 @@ async function issue(worker, env, label = 'test') {
     const cd = r.headers.get('content-disposition') || '';
     assert(cd.includes('src-doc-v1.html'), `disposition was ${cd}`);
     assert(!cd.includes('fork'), `disposition still says fork: ${cd}`);
+  });
+
+  await t('export HTML includes reader CSS and no overlay bar', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
+    await env.DOCS.put('docs/src-doc/v1/index.html', '<!doctype html><html><head><title>Src</title></head><body><h1>Src</h1></body></html>');
+    await env.META.put('meta:src-doc', JSON.stringify({ title: 'Src', slug: 'src-doc', versions: [{ n: 1 }] }));
+    const r = await worker.fetch(req('/d/src-doc/v/1/export?download=1'), env, {});
+    assert(r.status === 200, `export ${r.status}`);
+    const body = await r.text();
+    assert(body.includes('id="tdoc-reader"'), 'export must stamp #tdoc-reader');
+    assert(body.includes(':where(body h1)'), 'export must include the Classic heading template');
+    assert(body.includes('--td-accent'), 'export must include theme tokens');
+    assert(!body.includes('window.__TDOC__'), 'export must not boot overlay JS');
+    assert(!body.includes('id="tdoc-duplicate-btn"'), 'export must not include published chrome');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

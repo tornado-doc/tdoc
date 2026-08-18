@@ -11,8 +11,10 @@ file and `.claude-plugin/plugin.json`.
 - **Duplicate vs Download on published docs.** The published bar no longer
   uses **Fork** (which only downloaded a file). **Duplicate** makes a
   content-only account copy for the signed-in GitHub user on tdoc.dev
-  (self-host: worker owner only). **Download** saves `slug-vN.html`. No
-  comments, history, or widget islands in v1.
+  (self-host: worker owner only). **Download** is one control with **Download
+  HTML** (`slug-vN.html`, reader CSS inlined) and **Download PDF**
+  (`slug-vN.pdf`, a paginated snapshot of the reading column). No comments,
+  history, or widget islands in v1.
 
 - **Sandboxed interactive widgets.** Author JS still does not run in the host
   document. Computation lives in `/d/:slug/v/:n/widget/:name`, loaded only as

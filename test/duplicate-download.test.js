@@ -30,21 +30,29 @@ console.log('duplicate vs download (#146)');
 t('published chrome says Duplicate and Download, not Fork', () => {
   assert(overlay.includes('id="tdoc-duplicate-btn"'), 'missing Duplicate button');
   assert(overlay.includes('id="tdoc-download-btn"'), 'missing Download button');
+  assert(overlay.includes('id="tdoc-download-menu"'), 'Download must be a menu, not a single action');
   assert(overlay.includes('>Duplicate<'), 'Duplicate label missing');
-  assert(overlay.includes('title="Download HTML"'), 'Download title missing');
+  assert(overlay.includes('>Download HTML<'), 'Download HTML item missing');
+  assert(overlay.includes('>Download PDF<'), 'Download PDF item missing');
   assert(!overlay.includes('id="tdoc-fork-btn"'), 'legacy Fork button must be gone');
   assert(!overlay.includes('>Fork<'), 'Fork label must not remain in published chrome');
   assert(!overlay.includes('data-action="fork"'), 'overflow menu must not keep a fork action');
   assert(overlay.includes('data-action="duplicate"'), 'overflow menu missing Duplicate');
-  assert(overlay.includes('data-action="download"'), 'overflow menu missing Download');
+  assert(overlay.includes('data-action="download"'), 'overflow menu missing Download HTML');
+  assert(overlay.includes('data-action="download-pdf"'), 'overflow menu missing Download PDF');
+  assert(!overlay.includes('data-action="share"'), 'Share stays on the bar; ⋯ must not duplicate it');
+  assert(!overlay.includes('data-action="repo"'), 'tdoc mark already links to GitHub; ⋯ must not duplicate it');
+  assert(!overlay.includes('id="tdoc-pdf-btn"'), 'PDF must live in the Download menu, not its own bar button');
+  assert(!overlay.includes('window.print()'), 'PDF must be a file download, not the print dialog');
 });
 
 t('Download hits /export and never opens a blob fork tab', () => {
-  assert(overlay.includes('/export?download=1'), 'Download must use /export?download=1');
+  assert(overlay.includes('/export?download=1'), 'Download HTML must use /export?download=1');
   assert(!overlay.includes("fetch(`${base}/fork`)"), 'Download must not fetch /fork');
-  assert(!overlay.includes('createObjectURL'), 'Download must not open a blob tab');
   assert(!overlay.includes('-fork.html'), 'download filename must not still say -fork.html');
-  assert(overlay.includes('`${slug}-v${version}.html`'), 'download filename should be slug-vN.html');
+  assert(overlay.includes('`${slug}-v${version}.html`'), 'HTML filename should be slug-vN.html');
+  assert(overlay.includes('`${slug}-v${version}.pdf`'), 'PDF filename should be slug-vN.pdf');
+  assert(overlay.includes('function jpegPagesToPdf'), 'PDF must be a generated file, not print');
 });
 
 t('Duplicate POSTs /api/doc/duplicate and signs in when needed', () => {
@@ -81,6 +89,21 @@ t('export attachment filename is slug-vN.html, not -fork.html', () => {
   const exp = block(worker, '// ---- doc export / fork ----', '// ---- account duplicate');
   assert(exp.includes('filename="${slug}-v${vStr}.html"'), 'Content-Disposition must drop -fork');
   assert(!exp.includes('-fork.html'), 'export filename must not still say -fork.html');
+});
+
+t('Download /export bakes overlay reader CSS, not bar chrome', () => {
+  const start = overlay.indexOf('/* TDOC_READER_CSS_START */');
+  const end = overlay.indexOf('/* TDOC_READER_CSS_END */');
+  assert(start >= 0 && end > start, 'overlay must mark the reader CSS slice');
+  const css = overlay.slice(start, end);
+  assert(css.includes('--td-accent'), 'reader CSS missing theme tokens');
+  assert(css.includes(':where(body h1)'), 'reader CSS missing heading template');
+  assert(css.includes('max-width: 720px'), 'reader CSS missing reading column');
+  assert(css.includes('@media print'), 'reader CSS must include print/PDF styles');
+  assert(!css.includes('.tdoc-bar {'), 'reader CSS must not include the overlay bar');
+  const exp = block(worker, '// ---- doc export / fork ----', '// ---- account duplicate');
+  assert(worker.includes('function injectReaderCss'), 'worker must stamp reader CSS into export HTML');
+  assert(exp.includes('injectReaderCss(bodyHtml, readerCssFromOverlay())'), 'export must inject reader CSS');
 });
 
 t('/me hides another GitHub user\'s hosted duplicate from the worker-owner catalog', () => {

@@ -150,6 +150,7 @@
      single place to change a colour instead of hunting literals. These are the
      Classic values — the look is unchanged. Alternate palettes and any picker
      UI are deliberately out of scope for this CSS block. ===== */
+  /* TDOC_READER_CSS_START */
   :root {
     --td-accent: #1652f0;
     --td-accent-hover: #1245d0;
@@ -269,6 +270,19 @@
   .tdoc-table-scroll > table { max-width: none; }
   /* Pre/code blocks scroll horizontally instead of breaking the layout. */
   :where(body pre) { max-width: 100%; overflow-x: auto; }
+  @media print {
+    .tdoc-bar, .tdoc-fab, .tdoc-footer, .tdoc-oldver-strip,
+    #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop,
+    .tdoc-popup, .tdoc-modal-bg, .tdoc-hover-outline,
+    .tdoc-comment-pill, .tdoc-drag-marquee, .tdoc-emoji-picker,
+    .tdoc-reanchor-banner { display: none !important; }
+    body { padding-top: 0 !important; padding-right: 0 !important; padding-left: 0 !important; }
+    :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
+      padding-top: 24px;
+    }
+    @page { margin: 14mm; }
+  }
+  /* TDOC_READER_CSS_END */
 
   /* ========== Top bar (HackMD-inspired rhythm) ==========
      Three groups: left breadcrumb (workspace + slug + version), center
@@ -630,7 +644,7 @@
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
-    .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-btn, .tdoc-bar #tdoc-saveas-btn { display: none; }
+    .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
     .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   }
   @media (max-width: 700px) {
@@ -643,7 +657,7 @@
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow .tdoc-bar #tdoc-duplicate-btn, body.tdoc-narrow .tdoc-bar #tdoc-download-btn, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
+  body.tdoc-narrow .tdoc-bar #tdoc-duplicate-btn, body.tdoc-narrow .tdoc-bar #tdoc-download-wrap, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
   body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
@@ -805,9 +819,17 @@
        </button>`);
 
   // Duplicate + Download live in the ⋯ menu on narrow viewports.
+  const downloadMenuHtml = (isPublished || isFork) ? `
+    <div class="tdoc-menu-wrap" id="tdoc-download-wrap">
+      <button id="tdoc-download-btn" title="Download" aria-haspopup="menu" aria-expanded="false">Download</button>
+      <div class="tdoc-menu" id="tdoc-download-menu" role="menu">
+        <button data-format="html" role="menuitem">Download HTML</button>
+        <button data-format="pdf" role="menuitem">Download PDF</button>
+      </div>
+    </div>` : '';
   const forkBtnHtml = isPublished
-    ? '<button id="tdoc-duplicate-btn" title="Make a copy in your account">Duplicate</button><button id="tdoc-download-btn" title="Download HTML">Download</button>'
-    : (isFork ? '<button id="tdoc-saveas-btn" title="Download HTML">Download</button>' : '');
+    ? '<button id="tdoc-duplicate-btn" title="Make a copy in your account">Duplicate</button>' + downloadMenuHtml
+    : downloadMenuHtml;
 
   const themeBtnHtml = `
     <button type="button" id="tdoc-theme-btn" class="tdoc-theme-btn" aria-pressed="false" title="Dark mode" aria-label="Switch to dark mode">
@@ -818,19 +840,15 @@
   const rightHtml = `
     ${themeBtnHtml}
     ${copyMenuHtml}
-    <div class="tdoc-menu-wrap">
-    </div>
     ${forkBtnHtml}
     ${primaryCtaHtml}
-    <div class="tdoc-menu-wrap">
+    ${isPublished || isFork ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
-        ${isPublished ? '<button data-action="share">Share</button><button data-action="duplicate">Duplicate</button><button data-action="download">Download</button>' : ''}
-        ${isLocal ? '<button data-action="publish">Publish</button>' : ''}
-        ${isFork ? '<button data-action="saveas">Download</button>' : ''}
-        <button data-action="repo">tdoc on GitHub</button>
+        ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
+        ${isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
       </div>
-    </div>
+    </div>` : ''}
     <span id="tdoc-identity-slot"></span>`;
 
   bar.innerHTML = `
@@ -884,8 +902,7 @@
     paintTheme(next);
   };
 
-  // Duplicate = hosted account copy. Download = offline HTML export.
-  // These used to be one "Fork" control that only downloaded a file.
+  // Duplicate = hosted account copy. Download = HTML file or PDF snapshot.
   let pendingDuplicate = false;
   function downloadExport() {
     const a = document.createElement('a');
@@ -894,6 +911,201 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+  function utf8Bytes(s) { return new TextEncoder().encode(s); }
+  function concatBytes(parts) {
+    const len = parts.reduce((n, p) => n + p.length, 0);
+    const out = new Uint8Array(len);
+    let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  }
+  function jpegPagesToPdf(pages) {
+    const PW = 612, PH = 792, M = 36;
+    const innerW = PW - 2 * M, innerH = PH - 2 * M;
+    const parts = [];
+    const offsets = [0];
+    let size = 0;
+    function add(chunk) {
+      if (typeof chunk === 'string') chunk = utf8Bytes(chunk);
+      parts.push(chunk);
+      size += chunk.length;
+    }
+    function addObj(body, stream) {
+      offsets.push(size);
+      add(body);
+      if (stream) {
+        add('stream\n');
+        add(stream);
+        add('endstream\nendobj\n');
+      }
+    }
+    add('%PDF-1.4\n');
+    const pageIds = [];
+    let obj = 3;
+    const pageMeta = [];
+    for (const p of pages) {
+      const scale = Math.min(innerW / p.width, innerH / p.height);
+      const dw = p.width * scale, dh = p.height * scale;
+      const x = M + (innerW - dw) / 2;
+      const y = PH - M - dh;
+      pageMeta.push({ pageId: obj, contentId: obj + 1, imageId: obj + 2, dw, dh, x, y, p });
+      pageIds.push(obj);
+      obj += 3;
+    }
+    addObj('1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n');
+    addObj(`2 0 obj << /Type /Pages /Kids [${pageIds.map((id) => id + ' 0 R').join(' ')}] /Count ${pages.length} >> endobj\n`);
+    for (const m of pageMeta) {
+      addObj(`${m.pageId} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im${m.imageId} ${m.imageId} 0 R >> >> /Contents ${m.contentId} 0 R >> endobj\n`);
+      const content = `q ${m.dw.toFixed(2)} 0 0 ${m.dh.toFixed(2)} ${m.x.toFixed(2)} ${m.y.toFixed(2)} cm /Im${m.imageId} Do Q\n`;
+      addObj(`${m.contentId} 0 obj << /Length ${content.length} >>\n`, utf8Bytes(content));
+      addObj(`${m.imageId} 0 obj << /Type /XObject /Subtype /Image /Width ${m.p.width} /Height ${m.p.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${m.p.jpeg.length} >>\n`, m.p.jpeg);
+    }
+    const xrefAt = size;
+    add(`xref\n0 ${obj}\n0000000000 65535 f \n`);
+    for (let i = 1; i < obj; i++) {
+      add(String(offsets[i]).padStart(10, '0') + ' 00000 n \n');
+    }
+    add(`trailer << /Size ${obj} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`);
+    return new Blob([concatBytes(parts)], { type: 'application/pdf' });
+  }
+  function paintTextNode(ctx, node, ox, oy, sliceTop, sliceH) {
+    const text = node.textContent;
+    if (!text || !/\S/.test(text)) return;
+    const parent = node.parentElement;
+    if (!parent) return;
+    const view = parent.ownerDocument.defaultView;
+    const st = view.getComputedStyle(parent);
+    if (st.visibility === 'hidden') return;
+    ctx.fillStyle = st.color || '#111';
+    ctx.font = st.font;
+    ctx.textBaseline = 'top';
+    let i = 0;
+    while (i < text.length) {
+      while (i < text.length && text[i] === '\n') i++;
+      if (i >= text.length) break;
+      const range = node.ownerDocument.createRange();
+      range.setStart(node, i);
+      range.setEnd(node, i + 1);
+      const first = range.getBoundingClientRect();
+      let end = i + 1;
+      while (end < text.length && text[end] !== '\n') {
+        range.setEnd(node, end + 1);
+        const r = range.getBoundingClientRect();
+        if (Math.abs(r.top - first.top) > 1) break;
+        end++;
+      }
+      range.setEnd(node, end);
+      const r = range.getBoundingClientRect();
+      if (r.bottom > sliceTop && r.top < sliceTop + sliceH) {
+        ctx.fillText(text.slice(i, end), r.left - ox, r.top - oy);
+      }
+      i = end;
+    }
+  }
+  function paintElement(ctx, el, ox, oy, sliceTop, sliceH) {
+    const tag = el.tagName;
+    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return;
+    const view = el.ownerDocument.defaultView;
+    const st = view.getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') return;
+    const r = el.getBoundingClientRect();
+    if (r.bottom < sliceTop || r.top > sliceTop + sliceH) {
+      if (!el.children.length) return;
+    }
+    const bg = st.backgroundColor;
+    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+      ctx.fillStyle = bg;
+      ctx.fillRect(r.left - ox, r.top - oy, r.width, r.height);
+    }
+    const bw = parseFloat(st.borderTopWidth) || 0;
+    if (bw > 0 && st.borderTopStyle !== 'none') {
+      ctx.strokeStyle = st.borderTopColor || '#ddd';
+      ctx.lineWidth = bw;
+      ctx.strokeRect(r.left - ox + bw / 2, r.top - oy + bw / 2, Math.max(0, r.width - bw), Math.max(0, r.height - bw));
+    }
+    if ((tag === 'IMG' || tag === 'CANVAS') && r.width && r.height) {
+      try { ctx.drawImage(el, r.left - ox, r.top - oy, r.width, r.height); } catch (e) { /* tainted */ }
+    }
+    if (tag === 'RECT' || tag === 'rect') {
+      const fill = el.getAttribute('fill');
+      if (fill && fill !== 'none') {
+        ctx.fillStyle = fill;
+        ctx.fillRect(r.left - ox, r.top - oy, r.width, r.height);
+      }
+      return;
+    }
+    for (const child of el.childNodes) {
+      if (child.nodeType === 3) paintTextNode(ctx, child, ox, oy, sliceTop, sliceH);
+      else if (child.nodeType === 1) paintElement(ctx, child, ox, oy, sliceTop, sliceH);
+    }
+  }
+  async function downloadPdf() {
+    const src = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=0`;
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('title', 'tdoc pdf snapshot');
+    iframe.style.cssText = 'position:fixed;left:-12000px;top:0;width:800px;height:1200px;border:0;opacity:0;pointer-events:none;';
+    document.body.appendChild(iframe);
+    try {
+      await new Promise((resolve, reject) => {
+        iframe.onload = resolve;
+        iframe.onerror = () => reject(new Error('could not load export'));
+        iframe.src = src;
+        setTimeout(() => reject(new Error('pdf export timed out')), 20000);
+      });
+      const doc = iframe.contentDocument;
+      if (!doc || !doc.body) throw new Error('empty export');
+      await Promise.all([...doc.images].map((img) => img.decode ? img.decode().catch(() => {}) : Promise.resolve()));
+      const fullH = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1);
+      iframe.style.height = fullH + 'px';
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const width = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth, 720);
+      const height = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1);
+      const innerW = 540, innerH = 720;
+      const sliceH = Math.max(1, Math.round(width * innerH / innerW));
+      const origin = doc.documentElement.getBoundingClientRect();
+      const pages = [];
+      for (let y = 0; y < height; y += sliceH) {
+        const h = Math.min(sliceH, height - y);
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, width, h);
+        paintElement(ctx, doc.body, origin.left, origin.top + y, y, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        const bin = atob(dataUrl.split(',')[1]);
+        const jpeg = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) jpeg[i] = bin.charCodeAt(i);
+        pages.push({ width, height: h, jpeg });
+      }
+      const blob = jpegPagesToPdf(pages);
+      const a = document.createElement('a');
+      const blobUrl = URL.createObjectURL(blob);
+      a.href = blobUrl;
+      a.download = `${slug}-v${version}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+    } finally {
+      iframe.remove();
+    }
+  }
+  async function startDownload(format) {
+    if (format === 'pdf') {
+      try { await downloadPdf(); }
+      catch (e) {
+        showAccountCopyModal({
+          title: 'Could not download PDF',
+          body: e.message || 'PDF export failed. Try Download HTML.',
+          offerDownload: true,
+        });
+      }
+      return;
+    }
+    downloadExport();
   }
   function showAccountCopyModal({ title, body, offerDownload }) {
     closeAuxModal();
@@ -971,8 +1183,6 @@
   if (isPublished) {
     const dup = document.getElementById('tdoc-duplicate-btn');
     if (dup) dup.onclick = (e) => { e.stopPropagation(); duplicateDoc(); };
-    const dl = document.getElementById('tdoc-download-btn');
-    if (dl) dl.onclick = (e) => { e.stopPropagation(); downloadExport(); };
     const sb = document.getElementById('tdoc-share-btn');
     if (sb) sb.onclick = (e) => { e.stopPropagation(); showShareModal(); };
   }
@@ -980,9 +1190,24 @@
     const pb = document.getElementById('tdoc-publish-btn');
     if (pb) pb.onclick = (e) => { e.stopPropagation(); showPublishModal(); };
   }
-  if (isFork) {
-    const sa = document.getElementById('tdoc-saveas-btn');
-    if (sa) sa.onclick = () => downloadExport();
+
+  const dlBtn = document.getElementById('tdoc-download-btn');
+  const dlMenu = document.getElementById('tdoc-download-menu');
+  if (dlBtn && dlMenu) {
+    dlBtn.onclick = (e) => {
+      e.stopPropagation();
+      const open = dlMenu.classList.toggle('open');
+      dlBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (copyMenu) copyMenu.classList.remove('open');
+    };
+    dlMenu.querySelectorAll('button').forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        dlMenu.classList.remove('open');
+        dlBtn.setAttribute('aria-expanded', 'false');
+        startDownload(b.dataset.format);
+      };
+    });
   }
 
   // Version picker — clicking a row navigates to /d/<slug>/v/<n>. The
@@ -1009,7 +1234,12 @@
 
   const copyBtn = document.getElementById('tdoc-copy-md-btn');
   const copyMenu = document.getElementById('tdoc-copy-md-menu');
-  copyBtn.onclick = (e) => { e.stopPropagation(); copyMenu.classList.toggle('open'); };
+  copyBtn.onclick = (e) => {
+    e.stopPropagation();
+    copyMenu.classList.toggle('open');
+    if (dlMenu) dlMenu.classList.remove('open');
+    if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
+  };
   copyMenu.querySelectorAll('button').forEach(b => {
     b.onclick = async (e) => {
       e.stopPropagation();
@@ -1020,18 +1250,18 @@
 
   const moreBtn = document.getElementById('tdoc-more-btn');
   const secMenu = document.getElementById('tdoc-secondary-menu');
-  moreBtn.onclick = (e) => { e.stopPropagation(); secMenu.classList.toggle('open'); };
-  secMenu.querySelectorAll('button').forEach(b => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      secMenu.classList.remove('open');
-      if (b.dataset.action === 'repo') window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
-      if (b.dataset.action === 'duplicate') duplicateDoc();
-      if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
-      if (b.dataset.action === 'share') showShareModal();
-      if (b.dataset.action === 'publish') showPublishModal();
-    };
-  });
+  if (moreBtn && secMenu) {
+    moreBtn.onclick = (e) => { e.stopPropagation(); secMenu.classList.toggle('open'); };
+    secMenu.querySelectorAll('button').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        secMenu.classList.remove('open');
+        if (b.dataset.action === 'duplicate') duplicateDoc();
+        if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
+        if (b.dataset.action === 'download-pdf') startDownload('pdf');
+      };
+    });
+  }
 
 
   let inboxUnreadN = 0;
@@ -3839,8 +4069,12 @@
     if (!t || t.nodeType !== 1) return;
 
     // Close menus that aren't under the cursor
-    if (!t.closest('#tdoc-more-btn') && !t.closest('#tdoc-secondary-menu')) secMenu.classList.remove('open');
-    if (!t.closest('.tdoc-menu-wrap')) copyMenu.classList.remove('open');
+    if (secMenu && !t.closest('#tdoc-more-btn') && !t.closest('#tdoc-secondary-menu')) secMenu.classList.remove('open');
+    if (!t.closest('.tdoc-menu-wrap')) {
+      copyMenu.classList.remove('open');
+      if (dlMenu) dlMenu.classList.remove('open');
+      if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
+    }
     // Close the profile menu on any click outside its wrapper.
     if (!t.closest('#tdoc-me') && !t.closest('#tdoc-me-menu')) {
       const mm = document.getElementById('tdoc-me-menu');

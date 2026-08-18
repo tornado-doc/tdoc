@@ -996,6 +996,27 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
   return rawHtml + inject;
 }
 
+// Download (/export) has no overlay JS, so the live reading-column CSS never
+// runs. Slice the marked Classic template out of overlay.js (same source as
+// the published view) and stamp it as a static <style>. Bar / comments stay
+// out — those need overlay JS. Empty when OVERLAY_JS is still the bundle
+// placeholder (unbundled worker.js in some tests).
+const READER_CSS_START = '/* TDOC_READER_CSS_START */';
+const READER_CSS_END = '/* TDOC_READER_CSS_END */';
+function readerCssFromOverlay() {
+  const src = typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '';
+  const i = src.indexOf(READER_CSS_START);
+  const j = src.indexOf(READER_CSS_END);
+  if (i < 0 || j < 0 || j <= i) return '';
+  return src.slice(i + READER_CSS_START.length, j).trim();
+}
+function injectReaderCss(html, css) {
+  if (!css) return html;
+  const tag = `<style id="tdoc-reader">${css}</style>\n`;
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${tag}</head>`);
+  return tag + html;
+}
+
 function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce) {
   return injectOverlayCfg(rawHtml, {
     slug, version,
@@ -2821,7 +2842,8 @@ export default {
 
     // ---- doc export / fork ----
     // /export → forces a file download (Content-Disposition: attachment) unless
-    //           ?download=0. Used for "save a copy" links.
+    //           ?download=0. Stamps overlay reader CSS (no bar/comments) so the
+    //           file matches the published reading column.
     // /fork   → returns the SAME bundled HTML but boots the overlay in
     //           mode:"fork" (read-only renderable view with comments mirrored
     //           from the embedded JSON). No /api calls, no auth, no publish.
@@ -2919,6 +2941,11 @@ export default {
       // way; author content stays unnonced and inert under the CSP below.
       const nonce = rand(16);
       let bodyHtml = html;
+      if (kind === 'export') {
+        // File save has no overlay JS. Bake the reading-column CSS so a
+        // downloaded slug-vN.html still looks like the published doc.
+        bodyHtml = injectReaderCss(bodyHtml, readerCssFromOverlay());
+      }
       if (kind === 'fork') {
         bodyHtml = injectOverlayCfg(bodyHtml, {
           slug, version: Number(vStr), identity: null,
