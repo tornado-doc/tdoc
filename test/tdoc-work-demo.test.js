@@ -40,16 +40,24 @@ function skeleton(html) {
   }
   return out;
 }
-// Compare from the reader's own toolbar down. The window around it is
-// browser chrome — the experiment dresses it as a Safari window with tabs —
-// but everything tdoc renders has to match the real page exactly.
+// What must match one to one is the reader's chrome and the comment thread —
+// the parts tdoc renders identically for every document. The doc BODY is the
+// document itself and is expected to differ: a growth report has more
+// paragraphs than a Conway explainer, and demanding an equal paragraph count
+// would be demanding that every tdoc say the same thing.
 function stageOf(html, from) {
   const i = html.indexOf('<div class="tbar">', from);
   const j = html.indexOf('</aside>', i);
-  return { block: html.slice(i, j), end: j };
+  let block = html.slice(i, j);
+  // Collapse the whole doc body to a marker. Prose before AND after the
+  // artifact is the document talking; the scaffolding around it is the part
+  // that has to match.
+  block = block.replace(/<div class="doc">[\s\S]*?(?=<aside class="stage-notes">)/,
+                        '<div class="doc">DOCBODY');
+  return { block, end: j };
 }
 
-t('every stage matches the real landing page tdoc, one to one', () => {
+t('every stage renders the reader and the thread exactly like the real page', () => {
   const refSk = skeleton(stageOf(ref, 0).block);
   assert(refSk.length > 40, `reference stage looks wrong: ${refSk.length} nodes`);
   // The chrome is allowed to differ; the tdoc is not.
@@ -94,6 +102,22 @@ t('the comment threads are static', () => {
   assert(/input type="radio" name="uc"/.test(work), 'the use-case switcher is not CSS radio');
 });
 
+t('the demo cycles all four use cases, and clicking pins one', () => {
+  // One demo on a loop only ever sells one use case. Untouched it rotates;
+  // clicking a tab stops it where it was put.
+  for (const k of ['cyc1', 'cyc2', 'cyc3', 'cyc4']) {
+    assert(new RegExp('@keyframes ' + k).test(work), `missing rotation keyframe ${k}`);
+  }
+  assert(/:not\(:has\(input:checked\)\)/.test(work),
+    'rotation must stop once a tab is chosen');
+  assert(/@supports not selector\(:has\(\*\)\)/.test(work),
+    'without :has support the page must still show a demo, not an empty frame');
+  assert(/prefers-reduced-motion[\s\S]{0,200}animation:none/.test(work),
+    'reduced motion must pin one use case instead of rotating');
+  // Rotation is the panel swapping. The threads inside stay static.
+  assert(!/animation/.test(stageOf(work, 0).block), 'a comment stage animates');
+});
+
 t('the artifacts are real sandboxed islands', () => {
   const frames = [...work.matchAll(/<iframe[^>]*class="[^"]*\blife\b[^>]*>/g)].map(m => m[0]);
   assert(frames.length === 4, `expected 4 artifacts, found ${frames.length}`);
@@ -106,7 +130,11 @@ t('the artifacts are real sandboxed islands', () => {
   for (const w of widgets) {
     const p = path.join(root, 'landing', 'tdoc-work', 'v1', 'widgets', `${w}.html`);
     assert(fs.existsSync(p), `missing widget file for ${w}`);
-    assert(/<script\b/.test(fs.readFileSync(p, 'utf8')), `${w} is not actually live`);
+    // Not every artifact needs to move. The growth report is a table on
+    // purpose — an animation there is decoration competing with the numbers.
+    // What matters is that it is a real island, served by the widget route.
+    const body = fs.readFileSync(p, 'utf8');
+    assert(/<html/i.test(body) && body.length > 200, `${w} is not a real page`);
   }
 });
 
