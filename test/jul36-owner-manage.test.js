@@ -38,9 +38,13 @@ console.log('JUL-36 owner manage UX');
 
 // ── (a) non-owner doc-view response can never carry manage data ──────────
 
-const docViewStart = worker.indexOf("// ---- doc view ----");
-const docViewEnd = worker.indexOf("// ---- doc export / fork ----", docViewStart);
-if (docViewStart < 0 || docViewEnd < 0) throw new Error('doc-view route block missing');
+// #127: the doc-view render moved out of the `/d/` route body into
+// serveDocVersion(), which the `/d/` route and the `/` homepage now share.
+// Scan the shared function — that is where these guarantees have to hold, and
+// slicing it keeps ONE copy of them under test instead of per-route copies.
+const docViewStart = worker.indexOf('async function serveDocVersion(');
+const docViewEnd = worker.indexOf('async function landingResponse', docViewStart);
+if (docViewStart < 0 || docViewEnd < 0) throw new Error('serveDocVersion block missing');
 const docViewRoute = worker.slice(docViewStart, docViewEnd);
 
 t('doc-view route computes isOwner server-side from the session, not the client', () => {
@@ -70,12 +74,15 @@ t('doc-view never leaks private doc metadata (version count) to non-owners via t
   assert(full >= 0, 'doc-view must build the version list from meta.versions');
   assert(gate >= 0 && gate < full && gate > gateStmt,
     'the full version list must be gated by canSeeHistory(...) in the SAME if — never handed out unconditionally');
-  const collapse = docViewRoute.indexOf('versions = [{ n: Number(vStr)', full);
+  const collapse = docViewRoute.indexOf('versions = [{ n: version,', full);
   assert(collapse >= 0,
     'the non-history branch must collapse `versions` to the single viewed version, not the full list');
 });
 
-const injectOverlayStart = worker.indexOf('function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce) {');
+// Anchored on the parameters this file actually reasons about; #127 appends
+// an isLanding flag after `nonce`, and a later caller may append more.
+const injectOverlayStart = worker.search(
+  /function injectOverlay\(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce[^)]*\) \{/);
 const injectOverlayEnd = worker.indexOf('\n}', injectOverlayStart);
 if (injectOverlayStart < 0) throw new Error('injectOverlay() signature not found — did it change?');
 const injectOverlayFn = worker.slice(injectOverlayStart, injectOverlayEnd);

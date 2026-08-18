@@ -1017,11 +1017,15 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding) {
   return injectOverlayCfg(rawHtml, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
+    // `/` is the site itself, not a doc someone published. The slug and the
+    // version number are storage detail; printing them in the bar tells a
+    // first-time visitor they are looking at somebody's document.
+    isLanding: !!isLanding,
     // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
     // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
     ownerManage: isOwner ? (ownerManage || null) : null,
@@ -1031,10 +1035,93 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
   }, nonce);
 }
 
-// Neutral landing page served at `/`. No catalog, no slug list — just
-// brand + sign-in (when auth is configured) + a link to the open-source
-// project. Docs are link-only. `notice` is an optional toast reason when
-// we bounce users here from /me or an unknown path.
+// The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
+// this published tdoc rather than a hardcoded marketing page, so the landing
+// page is authored, reviewed, and versioned through tdoc itself.
+const LANDING_SLUG = 'tornado-doc';
+
+// Render one published doc version as a full overlay page. Extracted so `/`
+// (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
+// gate, version picker, owner-manage payload, nonce + CSP — instead of the
+// homepage growing a parallel copy that drifts.
+//
+// Returns { ok, response }. `ok:false` carries the real 401/403/404 response
+// for the /d/ route to pass through; the homepage ignores it and falls back to
+// the neutral page, because `/` must never dead-end on an access screen.
+async function serveDocVersion(env, req, slug, version, isLanding) {
+  const gate = await enforceDocAccess(env, req, slug, version);
+  if (!gate.ok) return { ok: false, response: gate.response };
+  const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+  if (!obj) return { ok: false, response: text(`Not found: ${slug} v${version}`, { status: 404 }) };
+  const raw = await obj.text();
+  const session = gate.session;
+  const identity = session ? { login: session.login, avatar_url: session.avatar_url, name: session.name } : null;
+  // Pure-publish: version picker only for callers allowed by history_visibility.
+  let versions = [{ n: version, created: null }];
+  try {
+    const meta = gate.meta;
+    if (meta && Array.isArray(meta.versions) && canSeeHistory(gate.access, session, env)) {
+      versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
+    } else if (meta && Array.isArray(meta.versions)) {
+      const hit = meta.versions.find(v => Number(v.n) === version);
+      versions = [{ n: version, created: (hit && hit.created) || null }];
+    }
+  } catch {}
+  const isOwner = isOwnerSession(env, session);
+  // JUL-36: owner-only manage data (Delete / Unpublish / visibility switch),
+  // computed fresh on THIS request and embedded only for the owner. A
+  // non-owner's bootCfg carries `ownerManage: null` — the overlay's manage
+  // menu never builds a single DOM node without it, so there is nothing to
+  // hide, only nothing rendered. Kept separate from `isOwner` (also still
+  // sent) so the manage UI's data dependency is explicit and single-source.
+  let ownerManage = null;
+  if (isOwner) {
+    let commentCount = 0;
+    try {
+      const list = await readComments(env, slug);
+      ensureMigrated(list);
+      for (const c of historyList(list)) {
+        commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+      }
+    } catch {}
+    ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
+  }
+  const nonce = rand(16);
+  return {
+    ok: true,
+    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding), {
+      headers: { 'Content-Security-Policy': cspHeader(nonce) },
+    }),
+  };
+}
+
+// `/` — the homepage. Renders the LANDING_SLUG doc at its LATEST version, so
+// the canonical URL stays `https://tdoc.dev/` forever: publishing v2 changes
+// what the homepage says without changing the URL that search engines and
+// inbound links point at.
+//
+// Fails safe. If the doc was never published to this worker, was unpublished,
+// or is access-gated, the visitor gets the neutral branded page below rather
+// than a 404 or a sign-in wall. Every worker deployed from this repo runs this
+// code, but only tdoc.dev has the doc — everyone else's `/` keeps the neutral
+// page with no configuration.
+async function landingResponse(env, req) {
+  try {
+    const meta = await loadDocMeta(env, LANDING_SLUG);
+    const latest = meta?.versions?.[meta.versions.length - 1]?.n;
+    if (!latest) return html(landingHtml(env));
+    const res = await serveDocVersion(env, req, LANDING_SLUG, Number(latest), true);
+    return res.ok ? res.response : html(landingHtml(env));
+  } catch {
+    return html(landingHtml(env));
+  }
+}
+
+// Neutral landing page served at `/` when the landing doc is unavailable, and
+// on every self-hosted worker that has no such doc. No catalog, no slug list —
+// just brand + sign-in (when auth is configured) + a link to the open-source
+// project. Docs are link-only. `notice` is an optional toast reason when we
+// bounce users here from /me or an unknown path.
 function landingHtml(env, notice) {
   const authOk = !!(env && String(env.GITHUB_CLIENT_ID || '').trim());
   const toastMsg = ({
@@ -2733,11 +2820,17 @@ export default {
 
     // ---- landing (NO public catalog) ----
     // `/` never lists docs. Docs are only reachable via their direct link.
-    // A neutral branded page points at the open-source project; optional
-    // ?notice=… shows a toast when we bounced the user here.
-    if (p === '/' && method === 'GET') {
+    // The homepage itself is a published tdoc (see landingResponse), falling
+    // back to a neutral branded page pointing at the open-source project.
+    //
+    // `?notice=…` keeps the neutral page. It is a toast for someone we
+    // bounced here from /me or an unknown path, and the landing doc has
+    // nowhere to show it — losing the message would be worse than losing
+    // the marketing page for that one request.
+    if (p === '/' && (method === 'GET' || method === 'HEAD')) {
       const notice = (url.searchParams.get('notice') || '').trim();
-      return html(landingHtml(env, notice));
+      if (notice) return html(landingHtml(env, notice));
+      return landingResponse(env, req);
     }
 
     // Soft landing for the OAuth App "Authorization callback URL". Device
@@ -2797,47 +2890,8 @@ export default {
     const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
     if (docMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr] = docMatch;
-      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
-      if (!gate.ok) return gate.response;
-      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
-      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
-      const raw = await obj.text();
-      const session = gate.session;
-      const identity = session ? { login: session.login, avatar_url: session.avatar_url, name: session.name } : null;
-      // Pure-publish: version picker only for callers allowed by history_visibility.
-      let versions = [{ n: Number(vStr), created: null }];
-      try {
-        const meta = gate.meta;
-        if (meta && Array.isArray(meta.versions) && canSeeHistory(gate.access, session, env)) {
-          versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
-        } else if (meta && Array.isArray(meta.versions)) {
-          const hit = meta.versions.find(v => Number(v.n) === Number(vStr));
-          versions = [{ n: Number(vStr), created: (hit && hit.created) || null }];
-        }
-      } catch {}
-      const isOwner = isOwnerSession(env, session);
-      // JUL-36: owner-only manage data (Delete / Unpublish / visibility switch),
-      // computed fresh on THIS request and embedded only for the owner. A
-      // non-owner's bootCfg carries `ownerManage: null` — the overlay's manage
-      // menu never builds a single DOM node without it, so there is nothing to
-      // hide, only nothing rendered. Kept separate from `isOwner` (also still
-      // sent) so the manage UI's data dependency is explicit and single-source.
-      let ownerManage = null;
-      if (isOwner) {
-        let commentCount = 0;
-        try {
-          const list = await readComments(env, slug);
-          ensureMigrated(list);
-          for (const c of historyList(list)) {
-            commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
-          }
-        } catch {}
-        ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
-      }
-      const nonce = rand(16);
-      return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwner, ownerManage, nonce), {
-        headers: { 'Content-Security-Policy': cspHeader(nonce) },
-      });
+      const res = await serveDocVersion(env, req, slug, Number(vStr));
+      return res.response;
     }
 
     // ---- doc export / fork ----

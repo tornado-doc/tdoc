@@ -36,6 +36,16 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **tdoc.dev homepage publish no longer dies on a present-but-unwritten token.**
+  `#129` merged and deployed the Worker, then `publish-landing.yml` got
+  `401 unauthorized` because `TDOC_DEV_UPLOAD_TOKEN` existed in GitHub
+  Actions and had never been `wrangler secret put` onto the Worker.
+  Re-running that workflow with `sync_upload_token` writes the secret
+  once. Automatic publishes still do not rotate it.
+- **Homepage verify no longer fails a live landing page.** `set -o pipefail`
+  plus `echo "$body" | grep -q` SIGPIPEs on the 300kB homepage, so a
+  successful ship looked like the fallback. The check now uses bash
+  `[[ ]]`.
 - **`DELETE /api/doc` fails closed when hosted `release_owner` fails** and the
   Durable Object binding is present, so a 200 cannot leave the slug parked.
   Vercel (no `COMMENTS`) still returns 200 — there was never a reservation.
@@ -91,6 +101,15 @@ file and `.claude-plugin/plugin.json`.
   updates the dot and the doc without a manual refresh. Clicking a row
   (or the comment in the doc) marks it read and opens that comment. `#118`.
 - **Dark mode switch in the top bar.** One icon in the menu bar flips light/dark via a page invert (so author colors, artifacts, and replies flip together). After you switch, the choice is stored in `localStorage` on that host and restored on later visits. Default stays light until you switch. `#120`.
+- **tdoc.dev's homepage is itself a tdoc.** `/` renders the `tornado-doc`
+  landing doc (`landing/tornado-doc`) at its latest version instead of a
+  hardcoded page, so the homepage is authored, reviewed, and versioned through
+  tdoc — and publishing v2 changes what it says without changing the URL that
+  inbound links and search engines point at. The page carries a full SEO head
+  (title, description, canonical, Open Graph, Twitter card) and doubles as the
+  artifact demo: its diagram and install block are commentable like any other
+  tdoc. `/` falls back to the previous neutral page when the landing doc is
+  unpublished or access-gated, so self-hosted workers are unaffected. `#127`.
 - **Nested replies.** You can reply to a reply (and to that reply), the way
   Reddit and Hacker News do. Each node in the thread has its own Reply.
 - **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /

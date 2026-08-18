@@ -155,10 +155,13 @@ function get(port, p) {
     if (body.includes('unsafe-inline')) throw new Error("cspHeader must not include 'unsafe-inline'");
   });
 
-  await t('worker doc-view route sets the CSP header on its response', async () => {
-    const s = workerSrc.indexOf('// ---- doc view ----');
-    const e = workerSrc.indexOf('// ---- doc export / fork ----', s);
-    if (s < 0 || e < 0) throw new Error('doc-view route block not found');
+  await t('worker doc-view render sets the CSP header on its response', async () => {
+    // #127: this render moved into serveDocVersion(), shared by the `/d/`
+    // route and the `/` homepage — so the homepage serves author HTML under
+    // the same nonce policy, and there is one place for this to regress.
+    const s = workerSrc.indexOf('async function serveDocVersion(');
+    const e = workerSrc.indexOf('async function landingResponse', s);
+    if (s < 0 || e < 0) throw new Error('serveDocVersion block not found');
     if (!workerSrc.slice(s, e).includes("'Content-Security-Policy': cspHeader(nonce)"))
       throw new Error("doc-view response must set 'Content-Security-Policy': cspHeader(nonce) — dropping it reopens the XSS channel the token removal relies on being closed");
   });
