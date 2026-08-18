@@ -35,7 +35,11 @@
   // Worker sends this explicitly. Do not infer from isOwner — on hosted
   // tdoc.dev a signed-in reader may not own the current doc and still has /me.
   let canSeeMyDocs = !!cfg.canSeeMyDocs;
-  if (!slug) return;
+  // /me catalog reuses this overlay for the bar (mark, theme, identity) and
+  // hides Share / Duplicate / Copy. No slug — it is not a document.
+  const isCatalog = !!cfg.isCatalog;
+  if (!slug && !isCatalog) return;
+  if (isCatalog) document.body.classList.add('tdoc-catalog');
 
   const HIGHLIGHT_API = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
 
@@ -720,6 +724,12 @@
      them in .tdoc-emoji so they get the same restore as photos. */
   .tdoc-emoji { display: inline-block; line-height: 1; }
 
+  /* /me catalog: overlay reader template would otherwise restyle the list. */
+  body.tdoc-catalog :where(body) { font-size: 15px; line-height: 1.5; }
+  body.tdoc-catalog :where(body h1) { font-size: 28px; line-height: 1.2; color: var(--td-accent); margin: 0 0 24px; letter-spacing: -0.01em; }
+  body.tdoc-catalog :where(body a) { text-decoration: none; }
+  body.tdoc-catalog :where(body a):hover { text-decoration: underline; }
+
   /* Footer */
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
   .tdoc-footer .tdoc-footer-row { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; row-gap: 4px; }
@@ -791,7 +801,7 @@
   // the page really is a tdoc and you really can comment on it.
   const leftHtml = `
     <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc on GitHub" aria-label="tdoc on GitHub">tdoc</button>
-    ${cfg.isLanding ? '' : `
+    ${cfg.isLanding ? '' : isCatalog ? '' : `
     <span class="crumb crumb-slug" title="${escapeHtml(slugCrumbLabel)}">${escapeHtml(slugCrumbLabel)}</span>
     <span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>
     <div class="tdoc-version-wrap">
@@ -850,10 +860,10 @@
 
   const rightHtml = `
     ${themeBtnHtml}
-    ${copyMenuHtml}
-    ${forkBtnHtml}
-    ${primaryCtaHtml}
-    ${isPublished || isFork ? `<div class="tdoc-menu-wrap">
+    ${isCatalog ? '' : copyMenuHtml}
+    ${isCatalog ? '' : forkBtnHtml}
+    ${isCatalog ? '' : primaryCtaHtml}
+    ${!isCatalog && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
         ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
@@ -888,14 +898,16 @@
   // Re-anchor banner — shown while a re-anchor action is in flight. Three
   // explicit actions to avoid the gesture conflict (clicking empty space
   // would otherwise be ambiguous with "deselect").
-  const reanchorBanner = document.createElement('div');
-  reanchorBanner.className = 'tdoc-reanchor-banner';
-  reanchorBanner.innerHTML = `
+  if (!isCatalog) {
+    const reanchorBanner = document.createElement('div');
+    reanchorBanner.className = 'tdoc-reanchor-banner';
+    reanchorBanner.innerHTML = `
     <span class="label">Select text to move anchor</span>
     <button type="button" id="tdoc-reanchor-remove">Remove anchor</button>
     <button type="button" id="tdoc-reanchor-cancel" class="danger">Cancel</button>
   `;
-  document.body.appendChild(reanchorBanner);
+    document.body.appendChild(reanchorBanner);
+  }
 
   const titleEl = document.querySelector('title');
   if (titleEl && titleEl.textContent) document.getElementById('tdoc-title').textContent = titleEl.textContent;
@@ -1094,19 +1106,21 @@
 
   const copyBtn = document.getElementById('tdoc-copy-md-btn');
   const copyMenu = document.getElementById('tdoc-copy-md-menu');
-  copyBtn.onclick = (e) => {
-    e.stopPropagation();
-    copyMenu.classList.toggle('open');
-    if (dlMenu) dlMenu.classList.remove('open');
-    if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
-  };
-  copyMenu.querySelectorAll('button').forEach(b => {
-    b.onclick = async (e) => {
+  if (copyBtn && copyMenu) {
+    copyBtn.onclick = (e) => {
       e.stopPropagation();
-      copyMenu.classList.remove('open');
-      await window.__tdocCopyDocMd(b.dataset.mode === 'doc-comments');
+      copyMenu.classList.toggle('open');
+      if (dlMenu) dlMenu.classList.remove('open');
+      if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
     };
-  });
+    copyMenu.querySelectorAll('button').forEach(b => {
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        copyMenu.classList.remove('open');
+        await window.__tdocCopyDocMd(b.dataset.mode === 'doc-comments');
+      };
+    });
+  }
 
   const moreBtn = document.getElementById('tdoc-more-btn');
   const secMenu = document.getElementById('tdoc-secondary-menu');
@@ -1323,7 +1337,7 @@
           </button>
           <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
             <button id="tdoc-inbox-open" role="menuitem">${escapeHtml(inboxMenuLabel(inboxUnreadN))}</button>
-            ${canSeeMyDocs ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
+            ${canSeeMyDocs && !isCatalog ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
             <button id="tdoc-signout" role="menuitem">Sign out</button>
           </div>
         </div>`;
@@ -1335,7 +1349,7 @@
         meBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       };
       document.getElementById('tdoc-inbox-open').onclick = () => { meMenu.classList.remove('open'); showInboxPanel(); };
-      if (canSeeMyDocs) {
+      if (canSeeMyDocs && !isCatalog) {
         document.getElementById('tdoc-my-docs').onclick = () => {
           window.open('/me', '_blank', 'noopener');
         };
@@ -1349,7 +1363,7 @@
         inboxSig = '';
         stopInboxPoll();
         renderIdentity();
-        refreshComments();
+        if (!isCatalog) refreshComments();
       };
       tickInbox();
       startInboxPoll();
@@ -1361,6 +1375,22 @@
     }
   }
   renderIdentity();
+
+  // Catalog (/me): bar + identity only. Comment pins, FAB, and selection
+  // are document chrome and would fetch /api/comments for a fake slug.
+  if (isCatalog) {
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!t || t.nodeType !== 1) return;
+      if (!t.closest('#tdoc-me') && !t.closest('#tdoc-me-menu')) {
+        const mm = document.getElementById('tdoc-me-menu');
+        const mb = document.getElementById('tdoc-me');
+        if (mm) mm.classList.remove('open');
+        if (mb) mb.setAttribute('aria-expanded', 'false');
+      }
+    });
+    return;
+  }
 
   // ========== Comment layer + FAB ==========
   const commentLayer = document.createElement('div');
