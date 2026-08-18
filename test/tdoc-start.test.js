@@ -77,6 +77,13 @@ t('carries the SEO head', () => {
   assert(/property="og:title"/.test(html), 'missing og:title');
 });
 
+t('inlines the tdoc mark (no image placeholder)', () => {
+  assert(!html.includes('[image content will be provided separately]'),
+    '/start still has a leftover image placeholder');
+  assert(/<img class="brand-mark" src="data:image\/png;base64,/.test(html),
+    'brand mark must be an inlined PNG like the homepage');
+});
+
 t('/start serves the doc and fails safe', () => {
   assert(/const START_SLUG = 'tdoc-start'/.test(worker), 'missing START_SLUG');
   const route = worker.match(/if \(p === '\/start' && \(method === 'GET' \|\| method === 'HEAD'\)\) \{[\s\S]*?\n    \}/);
