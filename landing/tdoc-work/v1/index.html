@@ -114,10 +114,33 @@
        comment threads are plain static markup — nothing here animates except
        the artifacts, which are sandboxed islands that may. */
     .usecases input[name="uc"] { position:absolute; opacity:0; pointer-events:none; }
-    .uc-tabs { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 14px; }
-    .uc-tabs label { border:1px solid var(--rule); background:#fff; border-radius:999px;
-      padding:7px 15px; font-size:13.5px; font-weight:600; color:var(--body); cursor:pointer; white-space:nowrap; }
-    .uc-tabs label:hover { border-color:#b9c0cd; }
+    /* A macOS Safari window, separate-tab-bar layout: toolbar with the
+       address field on top, tab bar underneath. The accent colour belongs to
+       the CTA, so the chrome stays grey and the active tab reads as focused
+       by being lighter, not by being coloured. */
+    .chrome { background:#e6e6e8; border-bottom:0; padding:9px 12px; gap:8px; }
+    .sfnav { color:#8e8e93; font-size:15px; letter-spacing:5px; margin-left:6px; }
+    .sfurl { flex:1; min-width:0; display:flex; align-items:center; justify-content:center; gap:7px;
+      background:#dcdcdf; border-radius:7px; padding:4px 12px; margin:0 6px;
+      font:12px ui-monospace,SFMono-Regular,Menlo,monospace; color:#4a4a4f;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sfaa { font-size:10px; color:#8e8e93; letter-spacing:-1px; }
+    .sfplus { color:#8e8e93; font-size:15px; padding:0 2px; }
+    .sfbar { display:flex; align-items:stretch; gap:0; background:#e6e6e8; padding:0 8px 7px;
+      border-bottom:1px solid #d0d0d4; }
+    .sft { flex:1 1 0; min-width:0; display:flex; align-items:center; gap:6px; cursor:pointer;
+      padding:6px 11px; border-radius:7px; font-size:12.5px; color:#5c5c61;
+      position:relative; background:transparent; }
+    /* Inactive Safari tabs are divided by hairlines, not by borders. */
+    .sft + .sft:before { content:""; position:absolute; left:0; top:6px; bottom:6px; width:1px; background:#cfcfd4; }
+    .sft:hover { background:rgba(255,255,255,.5); }
+    .sft.on { background:#fff; color:#10121a; box-shadow:0 1px 3px rgba(16,18,26,.14); }
+    .sft.on:before, .sft.on + .sft:before { display:none; }
+    .sfico { width:11px; height:11px; border-radius:2.5px; background:#1652f0; flex:none; opacity:.85; }
+    .sfnm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sfx { color:#a0a0a6; font-size:9px; opacity:0; flex:none; }
+    .sft.on .sfx { opacity:1; }
+    @media (max-width:640px) { .sfnm { font-size:11.5px; } .sft { padding:6px 8px; } .sfx { display:none; } }
     .uc-panel { display:none; }
     #uc-rep:checked ~ .uc-tabs label[for="uc-rep"],
     #uc-res:checked ~ .uc-tabs label[for="uc-res"],
@@ -130,6 +153,7 @@
     .uc-note { margin:14px 0 0; text-align:center; color:var(--muted); font-size:13.5px; }
     /* The artifact frame is wide and short on a desk, tall and narrow on a
        phone, or the chart inside gets 135px of height and clips. */
+    @media (max-width:900px) { iframe.life { aspect-ratio:16/10; } }
     @media (max-width:700px) { iframe.life { aspect-ratio:4/5; } }
 
     /* comment cards */
@@ -244,7 +268,16 @@
     .host p { font-size:13.5px; margin:0; color:var(--muted); }
 
     /* compare, opentag marks */
-    .tablewrap { overflow-x:auto; border:1px solid var(--rule); border-radius:13px; }
+    .tablewrap { overflow-x:auto; border:1px solid var(--rule); border-radius:13px; scrollbar-width:thin; }
+    /* Below the table's own floor the last column is cut with nothing to show
+       for it — under overlay scrollbars the table looks complete and is not.
+       Fade the right edge so the cut is visible, and let the columns shrink
+       before resorting to scrolling at all. */
+    @media (max-width:890px) {
+      .tablewrap { -webkit-mask-image:linear-gradient(90deg,#000 92%,transparent); mask-image:linear-gradient(90deg,#000 92%,transparent); }
+      .tablewrap table { min-width:660px; }
+      .tablewrap th, .tablewrap td { padding-left:9px; padding-right:9px; }
+    }
     /* The overlay styles author tables with `margin: 0 0 18px -14px`, which
        pulls the table out of its own scroll wrapper and leaves a gap on the
        right and bottom. Neutralised here with a more specific selector so the
@@ -413,10 +446,8 @@
     <!-- a real published tdoc: the Conway board is a sandboxed widget island -->
     <div class="usecases">
       <input type="radio" name="uc" id="uc-rep" checked><input type="radio" name="uc" id="uc-res"><input type="radio" name="uc" id="uc-des"><input type="radio" name="uc" id="uc-inc">
-      <div class="uc-tabs"><label for="uc-rep">Report</label><label for="uc-res">Research</label><label for="uc-des">Design doc</label><label for="uc-inc">Incident review</label></div>
       <div class="uc-panels"><div class="uc-panel p-rep"><div class="browser">
-      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="addr">tdoc.dev/d/q3-growth/v/2</span></div>
-      <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">q3-growth</span><span class="tbar-sep">/</span><span class="tbar-v">v2 &#9662;</span></div>
+      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="sfnav">&#8249;&#8250;</span><span class="sfurl"><span class="sfaa">&#120120;&#120120;</span>tdoc.dev/d/q3-growth/v/2</span><span class="sfplus">&#43;</span></div><div class="sfbar"><label for="uc-rep" class="sft on"><span class="sfico"></span><span class="sfnm">Report</span><span class="sfx">&#10005;</span></label><label for="uc-res" class="sft"><span class="sfico"></span><span class="sfnm">Research</span><span class="sfx">&#10005;</span></label><label for="uc-des" class="sft"><span class="sfico"></span><span class="sfnm">Design doc</span><span class="sfx">&#10005;</span></label><label for="uc-inc" class="sft"><span class="sfico"></span><span class="sfnm">Incident review</span><span class="sfx">&#10005;</span></label></div><div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">q3-growth</span><span class="tbar-sep">/</span><span class="tbar-v">v2 &#9662;</span></div>
 
       <div class="stage">
       <div class="stage-doc">
@@ -455,8 +486,7 @@ Paid social 19%  ↓ 4 pts</div>
         </div>
       </aside>
     </div></div><div class="uc-panel p-res"><div class="browser">
-      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="addr">tdoc.dev/d/signup-research/v/3</span></div>
-      <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">signup-research</span><span class="tbar-sep">/</span><span class="tbar-v">v3 &#9662;</span></div>
+      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="sfnav">&#8249;&#8250;</span><span class="sfurl"><span class="sfaa">&#120120;&#120120;</span>tdoc.dev/d/signup-research/v/3</span><span class="sfplus">&#43;</span></div><div class="sfbar"><label for="uc-rep" class="sft"><span class="sfico"></span><span class="sfnm">Report</span><span class="sfx">&#10005;</span></label><label for="uc-res" class="sft on"><span class="sfico"></span><span class="sfnm">Research</span><span class="sfx">&#10005;</span></label><label for="uc-des" class="sft"><span class="sfico"></span><span class="sfnm">Design doc</span><span class="sfx">&#10005;</span></label><label for="uc-inc" class="sft"><span class="sfico"></span><span class="sfnm">Incident review</span><span class="sfx">&#10005;</span></label></div><div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">signup-research</span><span class="tbar-sep">/</span><span class="tbar-v">v3 &#9662;</span></div>
 
       <div class="stage">
       <div class="stage-doc">
@@ -495,8 +525,7 @@ Stated reason: “I did not know what to make”</div>
         </div>
       </aside>
     </div></div><div class="uc-panel p-des"><div class="browser">
-      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="addr">tdoc.dev/d/retry-queue/v/5</span></div>
-      <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">retry-queue</span><span class="tbar-sep">/</span><span class="tbar-v">v5 &#9662;</span></div>
+      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="sfnav">&#8249;&#8250;</span><span class="sfurl"><span class="sfaa">&#120120;&#120120;</span>tdoc.dev/d/retry-queue/v/5</span><span class="sfplus">&#43;</span></div><div class="sfbar"><label for="uc-rep" class="sft"><span class="sfico"></span><span class="sfnm">Report</span><span class="sfx">&#10005;</span></label><label for="uc-res" class="sft"><span class="sfico"></span><span class="sfnm">Research</span><span class="sfx">&#10005;</span></label><label for="uc-des" class="sft on"><span class="sfico"></span><span class="sfnm">Design doc</span><span class="sfx">&#10005;</span></label><label for="uc-inc" class="sft"><span class="sfico"></span><span class="sfnm">Incident review</span><span class="sfx">&#10005;</span></label></div><div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">retry-queue</span><span class="tbar-sep">/</span><span class="tbar-v">v5 &#9662;</span></div>
 
       <div class="stage">
       <div class="stage-doc">
@@ -535,8 +564,7 @@ retry     exponential, capped at 30s</div>
         </div>
       </aside>
     </div></div><div class="uc-panel p-inc"><div class="browser">
-      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="addr">tdoc.dev/d/cache-incident/v/2</span></div>
-      <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">cache-incident</span><span class="tbar-sep">/</span><span class="tbar-v">v2 &#9662;</span></div>
+      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="sfnav">&#8249;&#8250;</span><span class="sfurl"><span class="sfaa">&#120120;&#120120;</span>tdoc.dev/d/cache-incident/v/2</span><span class="sfplus">&#43;</span></div><div class="sfbar"><label for="uc-rep" class="sft"><span class="sfico"></span><span class="sfnm">Report</span><span class="sfx">&#10005;</span></label><label for="uc-res" class="sft"><span class="sfico"></span><span class="sfnm">Research</span><span class="sfx">&#10005;</span></label><label for="uc-des" class="sft"><span class="sfico"></span><span class="sfnm">Design doc</span><span class="sfx">&#10005;</span></label><label for="uc-inc" class="sft on"><span class="sfico"></span><span class="sfnm">Incident review</span><span class="sfx">&#10005;</span></label></div><div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">cache-incident</span><span class="tbar-sep">/</span><span class="tbar-v">v2 &#9662;</span></div>
 
       <div class="stage">
       <div class="stage-doc">

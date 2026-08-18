@@ -40,15 +40,20 @@ function skeleton(html) {
   }
   return out;
 }
+// Compare from the reader's own toolbar down. The window around it is
+// browser chrome — the experiment dresses it as a Safari window with tabs —
+// but everything tdoc renders has to match the real page exactly.
 function stageOf(html, from) {
-  const i = html.indexOf('<div class="browser"', from);
+  const i = html.indexOf('<div class="tbar">', from);
   const j = html.indexOf('</aside>', i);
   return { block: html.slice(i, j), end: j };
 }
 
-t('every stage matches the real landing page stage, one to one', () => {
+t('every stage matches the real landing page tdoc, one to one', () => {
   const refSk = skeleton(stageOf(ref, 0).block);
   assert(refSk.length > 40, `reference stage looks wrong: ${refSk.length} nodes`);
+  // The chrome is allowed to differ; the tdoc is not.
+  assert(!/class="browser"/.test(stageOf(ref, 0).block), 'comparison should start at the reader bar');
   let cursor = 0, seen = 0;
   while (true) {
     const i = work.indexOf('<div class="browser"', cursor);
@@ -106,6 +111,15 @@ t('the artifacts are real sandboxed islands', () => {
 });
 
 t('the experiment cannot reach tdoc.dev', () => {
+  // The tabs are Safari chrome, not a second row of CTAs: the accent colour
+  // belongs to the call to action, and a coloured tab competes with it.
+  assert(/\.sft\.on \{[^}]*background:#fff/.test(work),
+    'the active tab should read as a focused Safari tab, not as a button');
+  assert(!/\.sft[^}]*background:var\(--accent\)/.test(work),
+    'tabs must not take the CTA colour');
+  // Safari divides inactive tabs with hairlines and lifts the focused one.
+  assert(/\.sft \+ \.sft:before/.test(work), 'inactive tabs need Safari hairline dividers');
+  assert(/\.sft\.on \{[^}]*box-shadow/.test(work), 'the focused tab should lift off the bar');
   const wf = fs.readFileSync(path.join(root, '.github', 'workflows', 'publish-landing.yml'), 'utf8');
   assert(!/tdoc-work/.test(wf), 'the publish workflow now ships the experiment to production');
   assert(/noindex/.test(work), 'the experiment should not be indexed while it is an experiment');
