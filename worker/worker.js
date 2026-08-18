@@ -991,6 +991,7 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const inject =
     `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
     `<script${nonceAttr}>${OVERLAY_JS}</script>`;
   if (rawHtml.includes('</body>')) return rawHtml.replace('</body>', `${inject}\n</body>`);
   return rawHtml + inject;
@@ -1054,6 +1055,10 @@ const START_SLUG = 'tdoc-start';
 // The onboarding modal, bundled in by bin/tdoc-bundle. Kept as a placeholder
 // here so the source file stays readable and the bundle stays one artifact.
 const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;
+
+// The one GitHub device-flow client, shared by the overlay and the neutral
+// landing page so a fix or a new provider lands once. See server/signin.js.
+const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -1178,94 +1183,19 @@ function landingHtml(env, notice) {
   <p class="sub">Open a document from its shared link ·
     <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
   <div id="toast" role="status" aria-live="polite"></div>
+<script>${SIGNIN_JS}</script>
 <script>
-  // Create-a-doc tutorial. /me cannot create anything — the doc is written by
-  // the user's own agent — so this explains where creation actually happens.
+  // One shared device flow (server/signin.js). This page used to carry its own
+  // copy with its own retry loop and its own error strings.
   (function () {
-    var bg = document.getElementById('mk-bg');
-    var openBtn = document.getElementById('mk-open');
-    if (!bg || !openBtn) return;
-    function show(on) { bg.hidden = !on; if (on) document.getElementById('mk-x').focus(); }
-    openBtn.onclick = function () { show(true); };
-    document.getElementById('mk-x').onclick = function () { show(false); };
-    bg.addEventListener('click', function (e) { if (e.target === bg) show(false); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !bg.hidden) show(false); });
+    var btn = document.getElementById('signin');
+    if (!btn || !window.__tdocSignIn) return;
+    btn.onclick = function () {
+      btn.disabled = true;
+      window.__tdocSignIn().then(function () { location.href = '/me'; },
+        function () { btn.disabled = false; });
+    };
   })();
-(function () {
-  var toastMsg = ${toastJson};
-  var toastEl = document.getElementById('toast');
-  if (toastMsg && toastEl) {
-    toastEl.textContent = toastMsg;
-    toastEl.classList.add('show');
-    setTimeout(function () { toastEl.classList.remove('show'); }, 5200);
-  }
-  var btn = document.getElementById('signin');
-  var status = document.getElementById('status');
-  if (!btn) return;
-  var pollTimer = null;
-  var pollInterval = 5;
-  function setStatus(t) { if (status) status.textContent = t || ''; }
-  function schedule(code) {
-    pollTimer = setTimeout(function () { poll(code); }, pollInterval * 1000);
-  }
-  async function poll(code) {
-    pollTimer = null;
-    try {
-      var r = await fetch('/api/auth/device/poll', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code: code })
-      });
-      var data = await r.json();
-      if (data.ok) {
-        setStatus('Signed in. Opening My docs…');
-        window.location.href = '/me';
-        return;
-      }
-      if (data.error === 'slow_down') {
-        pollInterval = Math.max(pollInterval + 5, Number(data.interval) || 0);
-        schedule(code); return;
-      }
-      if (data.error === 'authorization_pending' || (data.pending && !data.error)) {
-        schedule(code); return;
-      }
-      if (data.error === 'expired_token' || data.error === 'access_denied') {
-        setStatus('Code expired or denied. Try again.');
-        btn.disabled = false; return;
-      }
-      if (data.error || !r.ok) {
-        setStatus('Sign-in failed: ' + (data.message || data.error || ('HTTP ' + r.status)));
-        btn.disabled = false; return;
-      }
-      schedule(code);
-    } catch (e) {
-      setStatus('Network error — retrying…');
-      schedule(code);
-    }
-  }
-  btn.onclick = async function () {
-    btn.disabled = true;
-    setStatus('Starting GitHub sign-in…');
-    try {
-      var r = await fetch('/api/auth/device/start', { method: 'POST' });
-      var data = await r.json();
-      if (!r.ok || data.error || !data.user_code || !data.verification_uri) {
-        setStatus('Sign-in error: ' + ((data && (data.message || data.error)) || ('HTTP ' + r.status)));
-        btn.disabled = false; return;
-      }
-      var uri = data.verification_uri_complete || data.verification_uri;
-      setStatus('Code ' + data.user_code + ' — approve in the GitHub tab, then return here.');
-      try {
-        var u = new URL(String(uri));
-        if (u.protocol === 'https:' && /(^|\\.)github\\.com$/.test(u.hostname)) window.open(uri, '_blank');
-      } catch (_) {}
-      pollInterval = Math.max(5, data.interval || 5);
-      schedule(data.device_code);
-    } catch (e) {
-      setStatus('Sign-in error: could not reach the sign-in service.');
-      btn.disabled = false;
-    }
-  };
-})();
 </script>
 </body></html>`;
 }
@@ -1459,6 +1389,19 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
 </div>
 
 <script>
+  // Create-a-doc tutorial. /me cannot create anything — the doc is written by
+  // the user's own agent — so this explains where creation actually happens.
+  (function () {
+    var bg = document.getElementById('mk-bg');
+    var openBtn = document.getElementById('mk-open');
+    if (!bg || !openBtn) return;
+    function show(on) { bg.hidden = !on; if (on) document.getElementById('mk-x').focus(); }
+    openBtn.onclick = function () { show(true); };
+    document.getElementById('mk-x').onclick = function () { show(false); };
+    bg.addEventListener('click', function (e) { if (e.target === bg) show(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !bg.hidden) show(false); });
+  })();
+
 (() => {
   // Tiny top-right toast — no third-party runtime on the privileged /me page.
   function toast(message, kind = '') {

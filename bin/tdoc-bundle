@@ -22,6 +22,7 @@ const generatedBy = process.env.TDOC_GENERATED_BY || 'tdoc-bundle';
 const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
 const overlay = fs.readFileSync(path.join(skill, 'server/overlay.js'), 'utf8');
 const onboard = fs.readFileSync(path.join(skill, 'server/onboard.js'), 'utf8');
+const signin = fs.readFileSync(path.join(skill, 'server/signin.js'), 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -57,6 +58,10 @@ if (replaced === worker) {
 replaced = replaced.replace(
   /const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;/,
   'const ONBOARD_JS = ' + JSON.stringify(onboard) + ';'
+);
+replaced = replaced.replace(
+  /const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;/,
+  'const SIGNIN_JS = ' + JSON.stringify(signin) + ';'
 );
 
 const withBuild = replaced.replace(
