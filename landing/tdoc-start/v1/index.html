@@ -426,7 +426,50 @@
       <article class="step-card">
         <div class="step-hd"><span class="step-num">2</span><div><h3>Comment on anything, not just text.</h3><p>Highlight a sentence, or hover a picture, a chart, a table, a code block. Artifacts are commentable too.</p></div></div>
         <div class="step-bd">
-          <p class="hint">Readers need no account to read. Commenting asks for a one time GitHub sign in, so every note carries a name.</p>
+          <p class="hint" style="margin:0 0 16px">This is a real tdoc, not a screenshot. Hover the board and the comment button appears; the note on the right is anchored to the board itself, not to a line of text.</p>
+<div class="browser" style="margin-top:40px">
+      <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="addr">tdoc.dev/d/conway-life/v/2</span></div>
+      <div class="tbar"><span class="tbar-mark">tdoc</span><span class="tbar-crumb">conway-life</span><span class="tbar-sep">/</span><span class="tbar-v">v2 &#9662;</span></div>
+
+      <div class="stage">
+      <div class="stage-doc">
+      <div class="doc">
+        <h4>What if a doc could think?</h4>
+        <p>Most documents are static. They sit there.</p>
+        <p>This one runs Conway's Game of Life, a tiny universe with two rules, evolving in your browser as you read.</p>
+        <div class="rules">Live cell with 2 or 3 neighbors → survives.
+Dead cell with exactly 3 neighbors → comes alive.
+Everything else dies.</div>
+
+        <iframe class="life anchored" src="/d/tdoc-start/v/1/widget/conway"
+                title="Conway's Game of Life, running" loading="lazy"
+                sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+      </div>
+      </div>
+      <aside class="stage-notes">
+        <div class="mc-row">
+          <span class="pin pin-active"><span class="pin-av" style="background:#b4732f">A</span></span>
+          <div class="mc">
+            <div class="mc-anchor">&#8635; move anchor</div>
+            <span class="mc-state">&#10003; fixed &middot; v2</span>
+            <div class="mc-login">Anna</div>
+            <div class="mc-text">Can the grid keep moving while I read?</div>
+            <div class="mc-reacts"><span class="mc-r on"><span class="emo">&#9989;</span> 1</span><span class="mc-r add">&#9786;</span></div>
+            <div class="mc-meta"><span>v1 &middot; Aug 16 at 3:09 AM</span><span class="mc-actions"><span class="a">Reply</span><span class="del">delete</span></span></div>
+            <div class="mc-replies">&#8964; 1 reply</div>
+            <div class="mc-reply">
+              <div class="mc-author"><span class="mc-av mc-logo"><svg aria-hidden="true"><use href="#i-claude"/></svg></span><span class="mc-login">Claude</span></div>
+              <span class="mc-state">&#10003; applied</span>
+              <div class="mc-text">Runs a real generation loop now, in a sandboxed island, so the page itself still ships no script.</div>
+              <div class="mc-reacts"><span class="mc-r on red"><span class="emo">&#10084;&#65039;</span> 1</span><span class="mc-r add">&#9786;</span></div>
+              <div class="mc-meta"><span>Aug 16 at 3:31 AM</span><span class="mc-actions"><span class="a">Reply</span><span class="del">delete</span></span></div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  
+          <p class="hint" style="margin:14px 0 0">Readers need no account to read. Commenting asks for a one time GitHub sign in, so every note carries a name.</p>
           <details class="more"><summary>What can be commented on?</summary><div class="more-bd">
             <p class="hint" style="margin:0">Any sentence you can select, and any <b>picture, chart, table, code block, diagram or live widget</b> on the page. A comment sticks to the thing it points at, not to a line number, so it survives a rewrite.</p>
           </div></details>

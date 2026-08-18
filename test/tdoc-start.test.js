@@ -44,27 +44,45 @@ t('never asks which runtime you use', () => {
   assert(/ONBOARDING\.md/.test(onboard), 'the paste line must point the agent at the setup guide');
 });
 
-t('asks for no sign-in of its own', () => {
-  // It led for exactly one commit, on the theory that it bought the hosted
-  // token. It does not: #156 adds hosted_github_signin to bin/tdoc-publish, so
-  // the CLI signs in and mints for itself. Asking here made the visitor
-  // authenticate twice for one account.
-  assert(!/stepSignIn|tdo-skip/.test(onboard), 'the sign-in step is back in onboarding');
-  assert(!/device\/start|device\/poll/.test(onboard), 'a device flow is back in the modal');
-  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
-  assert(/Sign in with GitHub to comment/.test(overlay),
-    'the composer must still offer sign-in where the server actually enforces it');
+t('sign-in is page one, and only when there is a session to get', () => {
+  // It leads again, on the owner's call: signing in here is what produces the
+  // hosted token, which is what makes publishing zero-setup. It must not
+  // become a wall — skippable, and skipped outright for anyone already signed
+  // in or on a host with no auth configured.
+  assert(/function stepSignIn/.test(onboard), 'the sign-in page is gone');
+  assert(/tdo-skip/.test(onboard), 'the sign-in page must be skippable');
+  assert(/authConfigured === false \|\| signedIn/.test(onboard),
+    'a signed-in visitor, or a host with no auth, must skip straight to the line');
+  assert(/__tdocSignIn/.test(onboard), 'must reuse the shared device flow');
+  assert(!/device\/start|device\/poll/.test(onboard), 'a second device flow is back in the modal');
 });
 
-t('the detail is collapsed, not stacked above the button', () => {
-  // Someone who already gets it should be one click from Copy. The rest is
-  // there for whoever wants to know what they are setting loose.
+t('shows one page at a time', () => {
+  // Everything at once was the complaint: copying expanded a panel underneath
+  // the button and the whole dialog jumped.
+  assert(/var PAGES = \[/.test(onboard), 'the dialog is back to a single screen');
+  assert(/st\.page = 2/.test(onboard), 'copying no longer advances to its own page');
+  assert(!/showNext/.test(onboard), 'the in-place expansion is back');
+});
+
+t('Copy sits inside the prompt box', () => {
+  // A button under the dialog reads as "copy the dialog", which is exactly
+  // how it looked.
+  assert(/\.tdo-linewrap\{position:relative/.test(onboard) && /\.tdo-copy\{position:absolute/.test(onboard),
+    'the copy button must be positioned inside the prompt box');
+  const paste = onboard.slice(onboard.indexOf('function stepPaste'), onboard.indexOf('function stepNext'));
+  assert(/wrap\.appendChild\(cp\)/.test(paste), 'the copy button must live in the box, not the footer');
+});
+
+t('the detail is collapsed on the page that has a job to do', () => {
+  // Someone who already gets it should be one click from Copy. The last page
+  // is different: its list IS the content, so that one opens.
   assert(/<summary>What does it do\?<\/summary>/.test(onboard),
     'the lesson is no longer behind a disclosure');
-  assert(/document\.createElement\('details'\)/.test(onboard),
-    'use a native <details> so it works without extra script and stays accessible');
-  assert(!/learn\.open = true|open>/.test(onboard), 'the disclosure must start closed');
+  const paste = onboard.slice(onboard.indexOf('function stepPaste'), onboard.indexOf('function stepNext'));
+  assert(!/learn\.open = true/.test(paste), 'the paste page disclosure must start closed');
 });
+
 
 t('the paste line stays one short sentence', () => {
   // Everything it used to spell out lives in FIRST-DOC.md now. A prompt the
