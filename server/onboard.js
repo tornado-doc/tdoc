@@ -54,7 +54,7 @@
   ].join('');
   document.head.appendChild(S);
 
-  var st = { page: 0, token: null, hosted: false, copied: false, waiting: false, bg: null, box: null, esc: null };
+  var st = { page: 0, selfHost: false, token: null, hosted: false, copied: false, waiting: false, bg: null, box: null, esc: null };
 
   function el(t, c, h) { var e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; }
 
@@ -68,7 +68,9 @@
   // secret into a prompt that lands in the agent's history.
   var RECIPE = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
   function line() {
-    return 'Set up tdoc and make my first doc: ' + RECIPE;
+    var s = 'Set up tdoc and make my first doc: ' + RECIPE;
+    if (st.selfHost) s += ' Publish it to my own Cloudflare, not the hosted service.';
+    return s;
   }
 
   function ghMark() {
@@ -110,7 +112,7 @@
     b.onclick = signIn;
     ft.appendChild(b);
     var skip = el('button', 'tdo-skip', 'Skip, I publish to my own host');
-    skip.onclick = function () { st.page = 1; render(); };
+    skip.onclick = function () { st.selfHost = true; st.page = 1; render(); };
     ft.appendChild(skip);
     st.box.appendChild(ft);
     return b;
@@ -118,9 +120,11 @@
 
   // ---- page 2: the line, with Copy inside the box ------------------------
   function stepPaste() {
-    var bd = shell('Paste this into your AI', st.hosted
-      ? 'It installs tdoc, builds your first doc, and publishes it.'
-      : 'It installs tdoc, builds your first doc, and publishes it to a free Cloudflare account you own. No card.');
+    var bd = shell('Paste this into your AI', st.selfHost
+      ? 'It installs tdoc, builds your first doc, and sets up your own Cloudflare account to publish it. Two browser clicks, no card.'
+      : (st.hosted
+        ? 'It installs tdoc, builds your first doc, and publishes it.'
+        : 'It installs tdoc, builds your first doc, and publishes it to a free Cloudflare account you own. No card.'));
 
     var wrap = el('div', 'tdo-linewrap');
     var pre = el('div', 'tdo-line');
@@ -156,6 +160,16 @@
   // ---- page 3: what happens next -----------------------------------------
   function stepNext() {
     var bd = shell('Now go run it', 'The link it hands back is the proof it worked.');
+    // Still here on purpose: this is the page where they alt-tab to their
+    // agent, which is exactly when they may need to grab it again.
+    var wrap = el('div', 'tdo-linewrap');
+    var pre = el('div', 'tdo-line');
+    pre.textContent = line();
+    wrap.appendChild(pre);
+    var cp = el('button', 'tdo-copy' + (st.copied ? ' done' : ''), st.copied ? 'Copied' : 'Copy');
+    cp.onclick = function () { copyOnly(cp, pre); };
+    wrap.appendChild(cp);
+    bd.appendChild(wrap);
     var learn = document.createElement('details');
     learn.className = 'tdo-learn';
     learn.open = true;
@@ -214,6 +228,24 @@
       fallback(text, done, manual);
     }
   }
+  // Same copy, minus the page turn: there is nowhere left to advance to.
+  function copyOnly(btn, pre) {
+    var text = line();
+    var mark = function () { btn.textContent = 'Copied'; btn.className = 'tdo-copy done'; st.copied = true; };
+    var manual = function () {
+      try {
+        var rng = document.createRange();
+        rng.selectNodeContents(pre);
+        var sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(rng);
+      } catch (e) {}
+      btn.textContent = /Mac|iP(hone|ad)/.test(navigator.platform || '') ? 'Press \u2318C' : 'Press Ctrl+C';
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(mark, function () { fallback(text, mark, manual); });
+    } else { fallback(text, mark, manual); }
+  }
+
   function fallback(text, done, manual) {
     var ta = document.createElement('textarea');
     ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
@@ -264,7 +296,7 @@
 
     // Display state is recomputed per open, so a stale page or a green
     // "Copied" never survives into a fresh dialog.
-    st.page = 0; st.token = null; st.hosted = false; st.copied = false; st.waiting = false;
+    st.page = 0; st.selfHost = false; st.token = null; st.hosted = false; st.copied = false; st.waiting = false;
 
     st.bg = el('div', 'tdo-bg');
     st.box = el('div', 'tdo');

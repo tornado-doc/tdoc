@@ -11,9 +11,16 @@ not ask the human which runtime they use; that file tells you how to install
 yourself and how to authenticate.
 
 Publishing is hosted by default. If the CLI asks the human to sign in with
-GitHub, print the code and the URL and wait for them — do not fall back to
-self-hosting unless they ask for it, and do not ask them for a token. There is
-nothing for them to paste.
+GitHub, print the code and the URL and wait for them. Do not ask them for a
+token; there is nothing for them to paste.
+
+**If the human said to publish to their own Cloudflare** — the line they pasted
+will say so — do that instead, and do not sign them into the hosted service.
+ONBOARDING.md step 4 covers it: install wrangler, `wrangler login`, then two
+things only they can click in a browser (claim a workers.dev subdomain, enable
+R2). Print each URL, say what to click, and wait for them to confirm before
+re-probing with `bin/tdoc-doctor`. It is about five minutes the first time and
+free. Their account, their bill, no card.
 
 ## Step 2 — make the doc
 
@@ -54,9 +61,10 @@ this page, right now**:
 
 If — and only if — the doc was published to hosted tdoc (`tdoc.dev`), close
 with one line telling them that everything they publish is listed at
-**https://tdoc.dev/me**, their hub. Omit this entirely when publishing to a
-host they own: on a self-hosted worker `/me` is the operator's catalog, not
-theirs, and pointing them at it walks them into a sign-in wall.
+**https://tdoc.dev/me**, their hub. Omit this entirely when they published to
+their own Cloudflare: on a worker they own, `/me` is the operator catalog —
+which is them — but it is reached at their own domain, not tdoc.dev, so naming
+tdoc.dev there walks them into a sign-in wall on somebody else's site.
 
 ## Step 4 — publish and hand it over
 

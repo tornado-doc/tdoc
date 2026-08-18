@@ -99,7 +99,7 @@
   // NOTE: #tdoc-pin-layer and .tdoc-cluster-pop are tdoc's OWN comment-pins UI.
   // They MUST be in UI_CONTAINERS so artifact detection / the hover comment-pill
   // never treats a pin avatar <img> (or a cluster row) as a commentable artifact.
-  const UI_CONTAINERS = '.tdoc-bar, .tdoc-oldver-strip, .tdoc-popup, .tdoc-margin-comment, .tdoc-modal-bg, #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop, .tdoc-footer';
+  const UI_CONTAINERS = '.tdoc-bar, .tdoc-oldver-strip, .tdoc-popup, .tdoc-margin-comment, .tdoc-modal-bg, .tdo-bg, .tds-bg, #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop, .tdoc-footer';
   const UI_ALL = UI_CONTAINERS + ', .tdoc-anchor-mark, .tdoc-element-outline, .tdoc-hover-outline, .tdoc-comment-pill, .tdoc-emoji-picker, .tdoc-secondary-menu';
 
   // ========== Geometry helpers ==========
@@ -2899,6 +2899,19 @@
   // and once it does, we must bump our interval by ≥5s or it will keep
   // refusing forever. Use a chained setTimeout so each tick can adjust the
   // delay before scheduling the next.
+  // Whoever ran the shared flow — this bar, or the onboarding dialog — the
+  // page has to stop showing a signed-out state. signin.js announces success
+  // once; this is the overlay's half of that.
+  document.addEventListener('tdoc:signedin', function (e) {
+    if (!e.detail) return;
+    identity = e.detail;
+    fetch('/api/auth/me', { credentials: 'same-origin' })
+      .then(function (x) { return x.json(); })
+      .then(function (me) { if (me && typeof me.isOwner === 'boolean') isOwner = me.isOwner; })
+      .catch(function () {})
+      .then(function () { renderIdentity(); refreshComments(); });
+  });
+
   // Sign-in lives in server/signin.js, shared with the neutral landing page so
   // the protocol, the backoff and the copy exist once. This wrapper only says
   // what the overlay does afterwards.

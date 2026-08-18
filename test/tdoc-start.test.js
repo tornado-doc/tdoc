@@ -84,6 +84,57 @@ t('the detail is collapsed on the page that has a job to do', () => {
 });
 
 
+t('the self-host path changes the line and the recipe knows what to do', () => {
+  // Someone who explicitly skipped hosting must not get the hosted default
+  // anyway. The line says which host; the recipe carries the steps.
+  assert(/st\.selfHost/.test(onboard), 'skipping sign-in no longer records the choice');
+  assert(/Publish it to my own Cloudflare/.test(onboard),
+    'the self-host line does not tell the agent where to publish');
+  const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
+  assert(/own Cloudflare/i.test(recipe) && /wrangler login/.test(recipe),
+    'the recipe does not cover the self-host branch');
+  assert(/walks them into a sign-in wall/.test(recipe),
+    'the recipe must still withhold tdoc.dev/me from a self-host publisher');
+});
+
+t('the prompt survives the page it was copied from', () => {
+  // Taking the line away right after telling someone to go paste it is the one
+  // moment they still need it.
+  const next = onboard.slice(onboard.indexOf('function stepNext'), onboard.indexOf('function render'));
+  assert(/tdo-line/.test(next), 'the last page no longer shows the prompt');
+  assert(/copyOnly/.test(next), 'the last page has no way to copy it again');
+});
+
+t('the dialogs are not commentable surfaces', () => {
+  // Selecting text inside a dialog was raising a comment pill on the page
+  // behind it, because the overlay treated product chrome as author content.
+  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
+  const m = overlay.match(/const UI_CONTAINERS = '[^']*'/);
+  assert(m, 'UI_CONTAINERS not found');
+  assert(/\.tdo-bg/.test(m[0]) && /\.tds-bg/.test(m[0]),
+    'the onboarding and sign-in dialogs must be listed as overlay UI');
+});
+
+t('signing in updates the page it was started from', () => {
+  // The flow can now be launched from the onboarding dialog, not just the bar,
+  // so success has to reach the bar and the comments either way. One
+  // announcement from the shared module; no second implementation.
+  const signin = fs.readFileSync(path.join(root, 'server', 'signin.js'), 'utf8');
+  assert(/tdoc:signedin/.test(signin), 'the shared flow announces nothing on success');
+  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
+  assert(/addEventListener\('tdoc:signedin'/.test(overlay),
+    'the overlay does not refresh when sign-in happened elsewhere');
+});
+
+t('the device code can be copied', () => {
+  // Retyping a six character code from a dialog is the kind of small friction
+  // that loses people mid-flow. Shared module, so every surface gets it.
+  const signin = fs.readFileSync(path.join(root, 'server', 'signin.js'), 'utf8');
+  assert(/tds-copy/.test(signin), 'no copy button on the device code');
+  assert(/Press \\u2318C|Press Ctrl\+C/.test(signin),
+    'no fallback when the clipboard is unavailable');
+});
+
 t('the paste line stays one short sentence', () => {
   // Everything it used to spell out lives in FIRST-DOC.md now. A prompt the
   // visitor has to read before pasting is a prompt they edit or abandon.

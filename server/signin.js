@@ -26,7 +26,11 @@
     '.tds h3{margin:0 0 14px;font-size:18px}',
     '.tds-step{display:flex;gap:9px;align-items:flex-start;margin:0 0 10px;font-size:14px;color:#5b6070}',
     '.tds-n{flex:none;width:19px;height:19px;border-radius:50%;background:#eef3ff;color:#1652f0;font-size:11.5px;font-weight:700;display:grid;place-items:center;margin-top:1px}',
-    '.tds-code{font:22px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.2em;background:#f5f6f8;border:1px solid #e4e7ee;border-radius:10px;padding:15px;text-align:center;margin:0 0 12px;cursor:pointer;-webkit-user-select:all;user-select:all}',
+    '.tds-codewrap{position:relative;margin:0 0 12px}',
+    '.tds-code{font:22px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.2em;background:#f5f6f8;border:1px solid #e4e7ee;border-radius:10px;padding:15px 15px 46px;text-align:center;-webkit-user-select:all;user-select:all}',
+    '.tds-copy{position:absolute;right:10px;bottom:10px;border:1px solid #d3d8e3;background:#fff;color:#10121a;border-radius:8px;padding:6px 13px;font:13px system-ui,-apple-system,sans-serif;font-weight:650;cursor:pointer}',
+    '.tds-copy:hover{border-color:#b9c0cd}',
+    '.tds-copy.done{background:#1a7340;border-color:#1a7340;color:#fff}',
     '.tds-status{color:#767c8b;font-size:13px}',
     '.tds-err{color:#c3452f}',
     '.tds-ft{padding:13px 20px;border-top:1px solid #e4e7ee;background:#fafbfd;text-align:right}',
@@ -79,7 +83,8 @@
         + '<div class="tds-bd">'
         + '<h3>Sign in with GitHub</h3>'
         + '<div class="tds-step"><span class="tds-n">1</span><span>Copy this code:</span></div>'
-        + '<div class="tds-code" id="tds-code">…</div>'
+        + '<div class="tds-codewrap"><div class="tds-code" id="tds-code">…</div>'
+        + '<button type="button" class="tds-copy" id="tds-copy">Copy</button></div>'
         + '<div class="tds-step"><span class="tds-n">2</span><span id="tds-where">Opening GitHub…</span></div>'
         + '<div class="tds-step"><span class="tds-n">3</span><span class="tds-status" id="tds-status">Starting…</span></div>'
         + '</div><div class="tds-ft"><button type="button" id="tds-cancel">Cancel</button></div></div>';
@@ -109,9 +114,24 @@
         }
         var code = document.getElementById('tds-code');
         code.textContent = d.user_code;
-        code.onclick = function () {
-          if (navigator.clipboard) navigator.clipboard.writeText(d.user_code);
-        };
+        var cbtn = document.getElementById('tds-copy');
+        function copyCode() {
+          var mark = function () { cbtn.textContent = 'Copied'; cbtn.className = 'tds-copy done'; };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(d.user_code).then(mark, function () { selectCode(); });
+          } else { selectCode(); }
+        }
+        function selectCode() {
+          try {
+            var rng = document.createRange();
+            rng.selectNodeContents(code);
+            var sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(rng);
+            cbtn.textContent = /Mac|iP(hone|ad)/.test(navigator.platform || '') ? 'Press \u2318C' : 'Press Ctrl+C';
+          } catch (e) {}
+        }
+        cbtn.onclick = copyCode;
+        code.onclick = copyCode;
         var uri = d.verification_uri_complete || d.verification_uri;
         document.getElementById('tds-where').innerHTML =
           'Paste it at <b>' + esc(d.verification_uri) + '</b> and approve.';
@@ -122,7 +142,14 @@
         (function poll() {
           timer = setTimeout(function () {
             api('/api/auth/device/poll', { device_code: d.device_code }).then(function (p) {
-              if (p && p.ok && p.identity) return finish(resolve, p.identity);
+              if (p && p.ok && p.identity) {
+                // One announcement, so the bar, the comments and any open
+                // dialog all update wherever the flow was started from.
+                try {
+                  document.dispatchEvent(new CustomEvent('tdoc:signedin', { detail: p.identity }));
+                } catch (e) {}
+                return finish(resolve, p.identity);
+              }
               // RFC 8628 §3.5: back off 5s when told to, or GitHub keeps
               // refusing at the same cadence forever.
               if (p && p.error === 'slow_down') interval += 5;
