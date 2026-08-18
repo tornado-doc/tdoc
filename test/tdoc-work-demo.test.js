@@ -118,6 +118,17 @@ t('the demo cycles all four use cases, and clicking pins one', () => {
   assert(!/animation/.test(stageOf(work, 0).block), 'a comment stage animates');
 });
 
+t('the stage is cropped like a screenshot', () => {
+  // The doc keeps going past the frame on purpose. Without the cap the stage
+  // ends early and leaves dead space under a short column — and this rule has
+  // already been deleted once by an unrelated rewrite of the block it used to
+  // sit in, with nothing to catch it.
+  assert(/\.stage \{[^}]*max-height:560px/.test(work), 'the stage is no longer capped');
+  assert(/\.stage:after \{[^}]*linear-gradient\(transparent,#fff\)/.test(work),
+    'the crop needs a fade, or it looks like the content simply stops');
+  assert(/max-height:520px/.test(work), 'no shorter cap on narrow screens');
+});
+
 t('the artifacts are real sandboxed islands', () => {
   const frames = [...work.matchAll(/<iframe[^>]*class="[^"]*\blife\b[^>]*>/g)].map(m => m[0]);
   assert(frames.length === 4, `expected 4 artifacts, found ${frames.length}`);

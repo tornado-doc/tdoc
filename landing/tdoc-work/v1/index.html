@@ -332,6 +332,14 @@
 
     /* hero split: doc left, comments in the right margin, as on desktop */
     .stage { display:grid; grid-template-columns:1fr 300px; }
+    /* A real report does not stop where the frame does. Cap the stage and fade
+       the cut, so it reads as a screenshot of something longer rather than a
+       short page with dead space under it. Lives here, beside the other
+       .stage rules, because it was once written next to the switcher CSS and
+       a later rewrite of that block took it out with no test to notice. */
+    .stage { max-height:560px; overflow:hidden; position:relative; }
+    .stage:after { content:""; position:absolute; left:0; right:0; bottom:0; height:64px;
+      background:linear-gradient(transparent,#fff); pointer-events:none; }
     .stage-doc { }
     .stage-notes { padding:22px 16px 22px 0; }
     .mc-row { padding-top:238px; }
@@ -422,7 +430,7 @@
       .cta { grid-template-columns:1fr 1fr; max-width:none; gap:10px; }
       .btn { font-size:14px; padding:0 12px; }
       .btn-long { display:none; }
-      .stage { grid-template-columns:1fr; }
+      .stage { grid-template-columns:1fr; max-height:520px; }
       .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
       /* v28 left these on desktop tracks. At 375 the loop is 98px
          (one word per line), the quote wall is three 164px columns
