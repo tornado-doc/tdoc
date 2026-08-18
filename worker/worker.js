@@ -996,6 +996,27 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
   return rawHtml + inject;
 }
 
+// Download (/export) has no overlay JS, so the live reading-column CSS never
+// runs. Slice the marked Classic template out of overlay.js (same source as
+// the published view) and stamp it as a static <style>. Bar / comments stay
+// out — those need overlay JS. Empty when OVERLAY_JS is still the bundle
+// placeholder (unbundled worker.js in some tests).
+const READER_CSS_START = '/* TDOC_READER_CSS_START */';
+const READER_CSS_END = '/* TDOC_READER_CSS_END */';
+function readerCssFromOverlay() {
+  const src = typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '';
+  const i = src.indexOf(READER_CSS_START);
+  const j = src.indexOf(READER_CSS_END);
+  if (i < 0 || j < 0 || j <= i) return '';
+  return src.slice(i + READER_CSS_START.length, j).trim();
+}
+function injectReaderCss(html, css) {
+  if (!css) return html;
+  const tag = `<style id="tdoc-reader">${css}</style>\n`;
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${tag}</head>`);
+  return tag + html;
+}
+
 function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding) {
   return injectOverlayCfg(rawHtml, {
     slug, version,
@@ -1274,10 +1295,19 @@ async function indexHtml(env, session) {
     let meta = {};
     try { meta = JSON.parse(metaRaw || '{}'); } catch {}
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
+    // Duplicates owned by another GitHub login must not appear on this
+    // worker-owner catalog (#146). Full per-user /me is #131; this only
+    // keeps other people's account copies off the operator list.
+    const hostedLogin = meta.hosted && typeof meta.hosted.github_login === 'string'
+      ? meta.hosted.github_login.trim().toLowerCase()
+      : '';
+    const viewer = sessionLogin(session);
+    if (hostedLogin && hostedLogin !== viewer) return null;
     return { slug, title: meta.title || slug, latest };
   }));
+  const visible = docs.filter(Boolean);
 
-  const rows = docs.map(({ slug, title, latest }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">
+  const rows = visible.map(({ slug, title, latest }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">
       <label class="row-check">
         <input type="checkbox" class="doc-check" aria-label="Select ${escapeHtml(title)}">
       </label>
@@ -2063,6 +2093,69 @@ function hostedRegistrationEnabled(env) {
   return v === '1' || v === 'true' || v === 'yes';
 }
 
+function envFlagTrue(v) {
+  const s = String(v || '').toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
+}
+
+// Browser "Duplicate" may write a new slug for a signed-in GitHub user.
+// Open that path on the hosted product (tdoc.dev) and when an operator
+// explicitly opts in. Self-host / BYOK stays owner-only so a personal
+// worker is not a write surface for every GitHub login. CLI hosted
+// signup (TDOC_HOSTED_REGISTRATION) remains a separate, closed switch.
+function hostedAccountCopiesEnabled(env, req) {
+  if (envFlagTrue(env && env.TDOC_ACCOUNT_COPY)) return true;
+  if (hostedRegistrationEnabled(env)) return true;
+  try {
+    const host = new URL(req.url).hostname.toLowerCase();
+    return host === 'tdoc.dev' || host.endsWith('.tdoc.dev');
+  } catch {
+    return false;
+  }
+}
+
+// `${source}-copy`, `${source}-copy-2`, … clipped to isValidSlug's 64-char cap.
+function nextDuplicateSlug(sourceSlug, n) {
+  if (!isValidSlug(sourceSlug) || !Number.isInteger(n) || n < 1) return null;
+  const suffix = n === 1 ? '-copy' : `-copy-${n}`;
+  const maxBase = 64 - suffix.length;
+  if (maxBase < 1) return null;
+  const base = sourceSlug.slice(0, maxBase).replace(/-+$/g, '');
+  if (!base) return null;
+  const candidate = `${base}${suffix}`;
+  return isValidSlug(candidate) ? candidate : null;
+}
+
+async function hostedAccountForGithub(env, login) {
+  const norm = String(login || '').trim().toLowerCase();
+  if (!norm || !env || !env.META) return null;
+  const key = `hosted-github:${norm}`;
+  try {
+    const raw = await env.META.get(key);
+    if (raw) {
+      const rec = JSON.parse(raw);
+      if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
+    }
+  } catch {}
+  const record = {
+    account_id: `acct_${rand(12)}`,
+    github_login: norm,
+    created: new Date().toISOString(),
+    source: 'duplicate',
+  };
+  await env.META.put(key, JSON.stringify(record));
+  return record;
+}
+
+async function sourceHasWidgets(env, slug, version) {
+  try {
+    const r = await env.DOCS.list({ prefix: `docs/${slug}/v${version}/widgets/` });
+    return { ok: true, has: Array.isArray(r.objects) && r.objects.length > 0 };
+  } catch (e) {
+    return { ok: false, response: json({ error: 'doc_bytes_check_failed', message: e.message || String(e) }, { status: 503 }) };
+  }
+}
+
 async function issueHostedToken(env, body = {}) {
   const token = `tdoc_${rand(24)}`;
   const tokenHash = await sha256Hex(token);
@@ -2803,7 +2896,8 @@ export default {
 
     // ---- doc export / fork ----
     // /export → forces a file download (Content-Disposition: attachment) unless
-    //           ?download=0. Used for "save a copy" links.
+    //           ?download=0. Stamps overlay reader CSS (no bar/comments) so the
+    //           file matches the published reading column.
     // /fork   → returns the SAME bundled HTML but boots the overlay in
     //           mode:"fork" (read-only renderable view with comments mirrored
     //           from the embedded JSON). No /api calls, no auth, no publish.
@@ -2901,6 +2995,11 @@ export default {
       // way; author content stays unnonced and inert under the CSP below.
       const nonce = rand(16);
       let bodyHtml = html;
+      if (kind === 'export') {
+        // File save has no overlay JS. Bake the reading-column CSS so a
+        // downloaded slug-vN.html still looks like the published doc.
+        bodyHtml = injectReaderCss(bodyHtml, readerCssFromOverlay());
+      }
       if (kind === 'fork') {
         bodyHtml = injectOverlayCfg(bodyHtml, {
           slug, version: Number(vStr), identity: null,
@@ -2915,8 +3014,112 @@ export default {
       const defaultAttach = kind === 'export';
       const forceDownload = dl === '1' || (defaultAttach && dl !== '0');
       const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': cspHeader(nonce) };
-      if (forceDownload) headers['Content-Disposition'] = `attachment; filename="${slug}-v${vStr}-fork.html"`;
+      if (forceDownload) headers['Content-Disposition'] = `attachment; filename="${slug}-v${vStr}.html"`;
       return new Response(finalHtml, { status: 200, headers });
+    }
+
+    // ---- account duplicate (published reader) ----
+    // Content snapshot only: one new slug, v1, no comments, no history, no
+    // widget islands. Download stays on /export. This is the hosted "make a
+    // copy in my account" path (#146), not a file download.
+    if (p === '/api/doc/duplicate' && method === 'POST') {
+      const session = await getSession(env, req);
+      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body && body.slug;
+      const version = Number(body && body.version);
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      if (!Number.isInteger(version) || version < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      const gate = await enforceDocAccess(env, req, slug, version);
+      if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
+      const ownerCopy = isOwnerSession(env, session);
+      if (!ownerCopy && !hostedAccountCopiesEnabled(env, req)) {
+        return json({
+          error: 'account_copy_unavailable',
+          message: 'Account copies on this host are limited to the worker owner. Use Download for an offline HTML file.',
+        }, { status: 403 });
+      }
+      const widgets = await sourceHasWidgets(env, slug, version);
+      if (!widgets.ok) return widgets.response;
+      if (widgets.has) {
+        return json({
+          error: 'islands_not_supported',
+          message: 'Docs with interactive widgets cannot be duplicated in v1. Use Download for the host HTML.',
+        }, { status: 409 });
+      }
+      const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+      if (!obj) return json({ error: 'not_found' }, { status: 404 });
+      const rawHtml = await obj.text();
+
+      let actor = { kind: 'owner_session' };
+      if (!ownerCopy) {
+        const acct = await hostedAccountForGithub(env, session.login);
+        if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
+        actor = { kind: 'hosted', account_id: acct.account_id };
+      }
+
+      let newSlug = null;
+      for (let n = 1; n <= 99; n++) {
+        const candidate = nextDuplicateSlug(slug, n);
+        if (!candidate) continue;
+        const existsMeta = await loadDocMeta(env, candidate);
+        if (existsMeta) continue;
+        const bytes = await docBytesExist(env, candidate);
+        if (!bytes.ok) return bytes.response;
+        if (bytes.exists) continue;
+        if (actor.kind === 'hosted') {
+          const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: actor.account_id });
+          if (!claimed.ok) {
+            if (
+              claimed.status === 503
+              || claimed.error === 'hosted_owner_store_unavailable'
+              || claimed.error === 'owner_store_conflict'
+            ) {
+              return json({ error: claimed.error || 'hosted_owner_store_unavailable' }, { status: claimed.status || 503 });
+            }
+            continue;
+          }
+        }
+        newSlug = candidate;
+        break;
+      }
+      if (!newSlug) return json({ error: 'slug_exhausted' }, { status: 409 });
+
+      const now = new Date().toISOString();
+      const srcMeta = gate.meta || {};
+      const srcTitle = typeof srcMeta.title === 'string' && srcMeta.title.trim() ? srcMeta.title.trim() : slug;
+      const title = / \(copy\)$/i.test(srcTitle) ? srcTitle : `${srcTitle} (copy)`;
+      let incoming = {
+        title,
+        slug: newSlug,
+        created: now,
+        versions: [{ n: 1, created: now, prompt: `Duplicated from ${slug} v${version}` }],
+        source: { slug, version },
+        duplicated_by: session.login,
+        access: normalizeAccess({}, { legacy: false }),
+      };
+      incoming = stampHostedOwnership(incoming, actor);
+      if (actor.kind === 'hosted') {
+        incoming.hosted = {
+          ...(incoming.hosted || {}),
+          github_login: String(session.login).trim().toLowerCase(),
+        };
+      }
+
+      const { html: stampedHtml } = stampAids(rawHtml);
+      const r2Key = `docs/${newSlug}/v1/index.html`;
+      try {
+        await env.DOCS.put(r2Key, stampedHtml, {
+          httpMetadata: { contentType: 'text/html; charset=utf-8' },
+        });
+      } catch (e) {
+        return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+      }
+      const verify = await env.DOCS.head(r2Key);
+      if (!verify) return json({ error: 'r2_write_lost' }, { status: 500 });
+      await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
+      return json({ ok: true, slug: newSlug, version: 1, url: `/d/${newSlug}/v/1` });
     }
 
     // ---- auth ----
