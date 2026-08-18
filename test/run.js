@@ -33,6 +33,7 @@ const OFFLINE = [
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
   'tornado-doc-landing.test.js',
+  'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js', // #142 onboarding: /start page + the modal served with it
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard

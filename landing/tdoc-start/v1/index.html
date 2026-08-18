@@ -145,8 +145,11 @@
     .mc-replies { margin:9px 0 0; font-size:12px; color:var(--accent); font-weight:600; }
     .mc-row { display:flex; align-items:flex-start; gap:9px; }
     .mc-row.collapsed { margin-top:16px; align-items:center; }
-    .pin { width:26px; height:26px; border-radius:50%; flex:none; display:grid; place-items:center; background:#fff; border:2px solid var(--accent); box-shadow:0 1px 4px rgba(16,18,26,.12); }
-    img.pin-av { object-fit:cover; display:block !important; margin:0 !important; }
+    .pin { width:26px; height:26px; border-radius:50%; overflow:hidden; flex:none; display:grid; place-items:center; background:#fff; border:2px solid var(--accent); box-shadow:0 1px 4px rgba(16,18,26,.12); }
+    /* The source art has its own margin around the character, so at pin size
+       you saw its backdrop rather than the face. Zoom past it and clip to the
+       ring. */
+    img.pin-av { object-fit:cover; transform:scale(1.34); display:block !important; margin:0 !important; }
     .pin-av { width:100%; height:100%; border-radius:50%; display:grid; place-items:center; color:#fff; font-size:11px; font-weight:700; }
     .pin-cluster { background:var(--accent); border-color:var(--accent); color:#fff; font-size:12px; font-weight:700; }
     .pin-hint { font-size:11.5px; color:var(--muted); line-height:1.4; }
@@ -476,7 +479,7 @@
 Dead cell with exactly 3 neighbors → comes alive.
 Everything else dies.</div>
 
-        <iframe class="life anchored" src="/d/tdoc-start/v/1/widget/conway"
+        <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tdoc-start/v/1/widget/conway"
                 title="Conway's Game of Life, running" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
       </div>

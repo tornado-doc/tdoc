@@ -706,13 +706,18 @@
   html[data-tdoc-theme="dark"] textarea {
     color-scheme: light;
   }
-  html[data-tdoc-theme="dark"] img,
-  html[data-tdoc-theme="dark"] video,
-  html[data-tdoc-theme="dark"] canvas,
-  html[data-tdoc-theme="dark"] iframe,
+  html[data-tdoc-theme="dark"] img:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] video:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] canvas:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] iframe:not([data-tdoc-dark="invert"]),
   html[data-tdoc-theme="dark"] .tdoc-emoji {
     filter: invert(1) hue-rotate(180deg);
   }
+  /* Opt out via data-tdoc-dark="invert": this is a drawing, not a
+     photograph. Photos and video have to come back to their true colours or
+     they look like negatives, but a chart or a simulation drawn in ink on a
+     white field should go dark with everything else — otherwise it sits in a
+     dark page as a glowing white slab. */
   /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
      them in .tdoc-emoji so they get the same restore as photos. */
   .tdoc-emoji { display: inline-block; line-height: 1; }
