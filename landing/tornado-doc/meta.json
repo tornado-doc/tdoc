@@ -202,6 +202,11 @@
       "n": 40,
       "created": "2026-08-17T07:20:00Z",
       "prompt": "The Create-your-first-doc button opens onboarding instead of a GitHub markdown file"
+    },
+    {
+      "n": 41,
+      "created": "2026-08-18T06:40:00Z",
+      "prompt": "The demo commenter is Jesse Pollak, with his own avatar"
     }
   ]
 }
