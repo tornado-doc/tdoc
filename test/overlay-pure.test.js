@@ -23,11 +23,15 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
+// isGithubHttpsUrl moved to server/signin.js when the two device-flow
+// implementations were merged into one. Search both files for a function so
+// this stays a test of behaviour rather than of file layout.
+const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8')
+  + '\n' + fs.readFileSync(path.join(__dirname, '..', 'server', 'signin.js'), 'utf8');
 function sliceFn(name) {
   // overlay functions are indented inside the IIFE; match `function name(`
   const start = src.indexOf(`function ${name}(`);
-  if (start === -1) throw new Error(`fn ${name} not found in overlay.js`);
+  if (start === -1) throw new Error(`fn ${name} not found in overlay.js or signin.js`);
   let i = src.indexOf('{', start), depth = 0;
   for (; i < src.length; i++) {
     if (src[i] === '{') depth++;

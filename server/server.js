@@ -13,6 +13,11 @@ const { spawn } = require('child_process');
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
+const ONBOARD_PATH = path.join(__dirname, 'onboard.js');
+const SIGNIN_PATH = path.join(__dirname, 'signin.js');
+// Slugs that carry the onboarding modal. Product UI, injected under the same
+// nonce as the overlay, because a doc's own <script> never runs.
+const ONBOARD_SLUGS = new Set(['tornado-doc', 'tdoc-start']);
 // Optional two-person local inbox (browser e2e). Off unless TDOC_E2E_USER is set.
 const E2E_USER = String(process.env.TDOC_E2E_USER || '').trim();
 const E2E_OWNER = String(process.env.TDOC_E2E_OWNER || E2E_USER || '').trim();
@@ -271,6 +276,19 @@ function forceWidgetSandbox(html) {
 
 function injectOverlay(html, slug, version, nonce) {
   html = forceWidgetSandbox(html);
+  if (ONBOARD_SLUGS.has(slug)) {
+    try {
+      const onboard = fs.readFileSync(ONBOARD_PATH, 'utf8');
+      const tag = `<script${nonce ? ` nonce="${nonce}"` : ''}>${onboard}</script>`;
+      html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
+    } catch {}
+  }
+  // The shared device flow goes in before the overlay, which calls into it.
+  try {
+    const signin = fs.readFileSync(SIGNIN_PATH, 'utf8');
+    const tag = `<script${nonce ? ` nonce="${nonce}"` : ''}>${signin}</script>`;
+    html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
+  } catch {}
   const overlay = fs.readFileSync(OVERLAY_PATH, 'utf8');
   // Hand the overlay the full version list so the bar can offer a version
   // picker. Read straight from meta.json; ignore failures and fall back to

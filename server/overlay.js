@@ -106,7 +106,7 @@
   // NOTE: #tdoc-pin-layer and .tdoc-cluster-pop are tdoc's OWN comment-pins UI.
   // They MUST be in UI_CONTAINERS so artifact detection / the hover comment-pill
   // never treats a pin avatar <img> (or a cluster row) as a commentable artifact.
-  const UI_CONTAINERS = '.tdoc-bar, .tdoc-oldver-strip, .tdoc-popup, .tdoc-margin-comment, .tdoc-modal-bg, #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop, .tdoc-footer';
+  const UI_CONTAINERS = '.tdoc-bar, .tdoc-oldver-strip, .tdoc-popup, .tdoc-margin-comment, .tdoc-modal-bg, .tdo-bg, .tds-bg, #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop, .tdoc-footer';
   const UI_ALL = UI_CONTAINERS + ', .tdoc-anchor-mark, .tdoc-element-outline, .tdoc-hover-outline, .tdoc-comment-pill, .tdoc-emoji-picker, .tdoc-secondary-menu';
 
   // ========== Geometry helpers ==========
@@ -233,7 +233,7 @@
   }
   /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
      buttons / cards keep their inline layout instead of stacking to 16px tall. */
-  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
+  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(.tdo *):not(.tds *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
   /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
      column, wrapper or not. Two halves: (a) recognized wrappers get max-width
      AND margin:auto (previously margin was missing, so wrapped docs without
@@ -716,13 +716,18 @@
   html[data-tdoc-theme="dark"] textarea {
     color-scheme: light;
   }
-  html[data-tdoc-theme="dark"] img,
-  html[data-tdoc-theme="dark"] video,
-  html[data-tdoc-theme="dark"] canvas,
-  html[data-tdoc-theme="dark"] iframe,
+  html[data-tdoc-theme="dark"] img:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] video:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] canvas:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] iframe:not([data-tdoc-dark="invert"]),
   html[data-tdoc-theme="dark"] .tdoc-emoji {
     filter: invert(1) hue-rotate(180deg);
   }
+  /* Opt out via data-tdoc-dark="invert": this is a drawing, not a
+     photograph. Photos and video have to come back to their true colours or
+     they look like negatives, but a chart or a simulation drawn in ink on a
+     white field should go dark with everything else — otherwise it sits in a
+     dark page as a glowing white slab. */
   /* The site mark is a black-on-white PNG. Let it invert with the page
      instead of restoring, or it becomes a white tile on the dark bar. */
   html[data-tdoc-theme="dark"] .tdoc-bar-mark img { filter: none; }
@@ -2786,63 +2791,40 @@
   // and once it does, we must bump our interval by ≥5s or it will keep
   // refusing forever. Use a chained setTimeout so each tick can adjust the
   // delay before scheduling the next.
-  let pollTimer = null;
-  let pollInterval = 5;
+  // Whoever ran the shared flow — this bar, or the onboarding dialog — the
+  // page has to stop showing a signed-out state. signin.js announces success
+  // once; this is the overlay's half of that.
+  document.addEventListener('tdoc:signedin', function (e) {
+    if (!e.detail) return;
+    identity = e.detail;
+    // Deliberately not refreshing isOwner here: since #162 it means "owns THIS
+    // doc" and the worker sends it explicitly, so inferring it from
+    // /api/auth/me would put the worker-owner sense back on a per-doc field.
+    // canSeeMyDocs is the flag that governs the My docs entry.
+    if (e.detail.canSeeMyDocs != null) canSeeMyDocs = !!e.detail.canSeeMyDocs;
+    renderIdentity();
+    refreshComments();
+  });
+
+  // Sign-in lives in server/signin.js, shared with the neutral landing page so
+  // the protocol, the backoff and the copy exist once. This wrapper only says
+  // what the overlay does afterwards.
   async function startDeviceFlow() {
     if (!isPublished) return;
-    let data;
+    if (!window.__tdocSignIn) return;
+    let ident;
     try {
-      const r = await fetch('/api/auth/device/start', { method: 'POST' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      data = await r.json();
+      ident = await window.__tdocSignIn();
     } catch (e) {
-      // Network failure or a non-JSON edge error (e.g. an HTML 502) must not
-      // leave an unhandled promise rejection with no feedback.
-      alert('Sign-in error: could not reach the sign-in service. Please try again.');
-      return;
+      return;  // cancelled
     }
-    if (!data || data.error || !data.user_code || !data.verification_uri) {
-      alert('Sign-in error: ' + ((data && (data.message || data.error)) || 'unexpected response'));
-      return;
+    identity = ident;
+    renderIdentity();
+    refreshComments();
+    if (pendingDuplicate) {
+      pendingDuplicate = false;
+      duplicateDoc();
     }
-    showDeviceModal(data);
-    // Prefer the complete URI (code pre-filled) when GitHub provides it.
-    // Only open https GitHub URLs — never window.open an arbitrary string.
-    const verifyUrl = data.verification_uri_complete || data.verification_uri;
-    if (isGithubHttpsUrl(verifyUrl)) window.open(verifyUrl, '_blank');
-    pollInterval = Math.max(5, data.interval || 5);
-    schedulePoll(data.device_code);
-  }
-  function isGithubHttpsUrl(u) {
-    try {
-      const url = new URL(String(u));
-      return url.protocol === 'https:' && /(^|\.)github\.com$/.test(url.hostname);
-    } catch { return false; }
-  }
-  function schedulePoll(device_code) {
-    pollTimer = setTimeout(() => pollDevice(device_code), pollInterval * 1000);
-  }
-  function showDeviceModal(data) {
-    const bg = document.createElement('div');
-    bg.className = 'tdoc-modal-bg';
-    bg.id = 'tdoc-device-modal';
-    bg.innerHTML = `
-      <div class="tdoc-modal">
-        <h3>Sign in with GitHub</h3>
-        <div class="step"><span class="n">1</span><span>Copy this code:</span></div>
-        <div class="code" id="tdoc-user-code">${escapeHtml(data.user_code)}</div>
-        <div class="step"><span class="n">2</span><span>Paste it at <b>${escapeHtml(data.verification_uri)}</b> (opened in a new tab) and approve.</span></div>
-        <div class="step"><span class="n">3</span><span class="status" id="tdoc-poll-status">Waiting for you to approve…</span></div>
-        <div class="actions"><button id="tdoc-modal-cancel">Cancel</button></div>
-      </div>`;
-    document.body.appendChild(bg);
-    document.getElementById('tdoc-user-code').onclick = () => navigator.clipboard?.writeText(data.user_code);
-    document.getElementById('tdoc-modal-cancel').onclick = closeDeviceModal;
-  }
-  function closeDeviceModal() {
-    const m = document.getElementById('tdoc-device-modal');
-    if (m) m.remove();
-    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   }
 
   // ========== Publish / Share modals ==========
@@ -3177,61 +3159,6 @@
     };
   }
 
-  async function pollDevice(device_code) {
-    const status = document.getElementById('tdoc-poll-status');
-    pollTimer = null;
-    try {
-      const r = await fetch('/api/auth/device/poll', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code })
-      });
-      const data = await r.json();
-      if (data.ok && data.identity) {
-        identity = data.identity;
-        // Page may have booted signed-out (canSeeMyDocs false). Refresh so
-        // "My docs" appears without a full reload on hosted tdoc.dev.
-        try {
-          const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((x) => x.json());
-          if (me && typeof me.canSeeMyDocs === 'boolean') canSeeMyDocs = me.canSeeMyDocs;
-        } catch { /* keep bootCfg flags */ }
-        closeDeviceModal();
-        renderIdentity();
-        refreshComments();
-        if (pendingDuplicate) {
-          pendingDuplicate = false;
-          duplicateDoc();
-        }
-        return;
-      }
-      // slow_down: GitHub explicitly told us to back off. Bump interval by 5s
-      // (per RFC 8628 §3.5) before scheduling the next poll, otherwise GitHub
-      // will keep rejecting at the same cadence forever.
-      if (data.error === 'slow_down') {
-        // GitHub may suggest a new interval; otherwise add 5s.
-        pollInterval = Math.max(pollInterval + 5, Number(data.interval) || 0);
-        schedulePoll(device_code);
-        return;
-      }
-      if (data.error === 'authorization_pending' || (data.pending && !data.error)) {
-        schedulePoll(device_code);
-        return;
-      }
-      if (data.error === 'expired_token' || data.error === 'access_denied') {
-        if (status) status.textContent = 'Code expired or denied. Try again.';
-        return;
-      }
-      // Any other error (no_user, github_unreachable, 500) — show it and stop.
-      if (data.error || !r.ok) {
-        if (status) status.textContent = 'Sign-in failed: ' + (data.message || data.error || `HTTP ${r.status}`) + '. Try again.';
-        return;
-      }
-      // Fallback: unknown shape, keep polling at current interval.
-      schedulePoll(device_code);
-    } catch (e) {
-      if (status) status.textContent = 'Network error: ' + e.message + ' — retrying…';
-      schedulePoll(device_code);
-    }
-  }
 
   // ========== Popup (new-comment): text + element anchors ==========
   let popup = null;

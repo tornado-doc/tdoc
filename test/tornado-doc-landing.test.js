@@ -145,7 +145,14 @@ t('names tdoc and tornado-doc', () => {
 
 t('links to the GitHub repo and install path', () => {
   assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc'), 'missing GitHub repo href');
-  assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md'), 'missing Install href');
+  // v40: the primary CTA opens onboarding. It used to point at ONBOARDING.md,
+  // which dropped a non-technical visitor into a raw markdown file on GitHub
+  // as their first experience of the product. `/start` upgrades in place —
+  // the modal intercepts the click, and with scripting off the href still
+  // serves the same steps as a page.
+  assert(hrefs.some((h) => h === '/start'), 'primary CTA no longer opens onboarding');
+  assert(!hrefs.some((h) => /github\.com\/.+\/blob\//.test(h)),
+    'a CTA points at a raw GitHub file; that is a repo, not an onboarding');
 });
 
 t('hero stage-notes is a sibling of stage-doc', () => {
@@ -385,7 +392,9 @@ t('homepage bar is site chrome, not a document toolbar', () => {
   // document title are document chrome; `/` keeps GitHub + sign-in + theme.
   const fn = worker.match(/async function landingResponse[\s\S]*?\n}\n/);
   assert(fn, 'landingResponse not found');
-  assert(/serveDocVersion\(env, req, LANDING_SLUG, Number\(latest\), true\)/.test(fn[0]),
+  // `slug` rather than LANDING_SLUG: /start renders through the same helper
+  // (see landingResponse's default), and both are site chrome, not a doc.
+  assert(/serveDocVersion\(env, req, slug, Number\(latest\), true\)/.test(fn[0]),
     'homepage no longer marks the render as the landing page');
   assert(/isLanding: !!isLanding/.test(worker), 'bootCfg no longer carries isLanding');
 
@@ -528,8 +537,13 @@ t('shipping the homepage ships content, not just worker code', () => {
   // gate, wrong slug). Green must mean the homepage actually renders.
   assert(/is still serving the neutral fallback/.test(content),
     'publish workflow must fail when tdoc.dev/ falls back to the neutral page');
-  assert(/\[\[ "\$body" == \*'A doc that answers its own comments'\*/.test(content),
+  assert(/\[\[ "\$home" == \*'A doc that answers its own comments'\*/.test(content),
     'homepage verify must use bash [[ ]], not echo|grep -q under pipefail');
+  // The homepage links to /start. Shipping one without the other leaves that
+  // link on the neutral fallback, which reads as "the tour does not exist".
+  assert(/upload tdoc-start/.test(content), 'the tutorial is never uploaded to tdoc.dev');
+  assert(/"\$tour" == \*'Everything tdoc does'\*/.test(content),
+    'a green run must mean /start renders too, not just the homepage');
   assert(!/echo "\$body" \| grep -q/.test(content),
     'echo|grep -q SIGPIPEs on a 300kB landing page and fails a successful ship');
   // First merge: the live worker does not yet have landingResponse. A

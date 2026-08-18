@@ -1009,6 +1009,7 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const inject =
     `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
     `<script${nonceAttr}>${OVERLAY_JS}</script>`;
   if (rawHtml.includes('</body>')) return rawHtml.replace('</body>', `${inject}\n</body>`);
   return rawHtml + inject;
@@ -1036,7 +1037,14 @@ function injectReaderCss(html, css) {
 }
 
 function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog) {
-  return injectOverlayCfg(rawHtml, {
+  // The onboarding modal is product UI, so it ships from here under the page
+  // nonce. The doc's own <script> would never run (#138), which is why the
+  // landing CTA still carries a plain href: with scripting off the visitor
+  // gets the /start page instead of a dead button.
+  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG) && nonce
+    ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
+    : rawHtml;
+  return injectOverlayCfg(withOnboard, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
@@ -1062,6 +1070,18 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
 // this published tdoc rather than a hardcoded marketing page, so the landing
 // page is authored, reviewed, and versioned through tdoc itself.
 const LANDING_SLUG = 'tornado-doc';
+
+// The doc behind `/start`: the same onboarding, written as a page, for anyone
+// who has scripting off or who wants to read the steps before running them.
+const START_SLUG = 'tdoc-start';
+
+// The onboarding modal, bundled in by bin/tdoc-bundle. Kept as a placeholder
+// here so the source file stays readable and the bundle stays one artifact.
+const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;
+
+// The one GitHub device-flow client, shared by the overlay and the neutral
+// landing page so a fix or a new provider lands once. See server/signin.js.
+const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -1128,12 +1148,12 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
 // than a 404 or a sign-in wall. Every worker deployed from this repo runs this
 // code, but only tdoc.dev has the doc — everyone else's `/` keeps the neutral
 // page with no configuration.
-async function landingResponse(env, req) {
+async function landingResponse(env, req, slug = LANDING_SLUG) {
   try {
-    const meta = await loadDocMeta(env, LANDING_SLUG);
+    const meta = await loadDocMeta(env, slug);
     const latest = meta?.versions?.[meta.versions.length - 1]?.n;
     if (!latest) return html(landingHtml(env));
-    const res = await serveDocVersion(env, req, LANDING_SLUG, Number(latest), true);
+    const res = await serveDocVersion(env, req, slug, Number(latest), true);
     return res.ok ? res.response : html(landingHtml(env));
   } catch {
     return html(landingHtml(env));
@@ -1186,82 +1206,19 @@ function landingHtml(env, notice) {
   <p class="sub">Open a document from its shared link ·
     <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
   <div id="toast" role="status" aria-live="polite"></div>
+<script>${SIGNIN_JS}</script>
 <script>
-(function () {
-  var toastMsg = ${toastJson};
-  var toastEl = document.getElementById('toast');
-  if (toastMsg && toastEl) {
-    toastEl.textContent = toastMsg;
-    toastEl.classList.add('show');
-    setTimeout(function () { toastEl.classList.remove('show'); }, 5200);
-  }
-  var btn = document.getElementById('signin');
-  var status = document.getElementById('status');
-  if (!btn) return;
-  var pollTimer = null;
-  var pollInterval = 5;
-  function setStatus(t) { if (status) status.textContent = t || ''; }
-  function schedule(code) {
-    pollTimer = setTimeout(function () { poll(code); }, pollInterval * 1000);
-  }
-  async function poll(code) {
-    pollTimer = null;
-    try {
-      var r = await fetch('/api/auth/device/poll', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code: code })
-      });
-      var data = await r.json();
-      if (data.ok) {
-        setStatus('Signed in. Opening My docs…');
-        window.location.href = '/me';
-        return;
-      }
-      if (data.error === 'slow_down') {
-        pollInterval = Math.max(pollInterval + 5, Number(data.interval) || 0);
-        schedule(code); return;
-      }
-      if (data.error === 'authorization_pending' || (data.pending && !data.error)) {
-        schedule(code); return;
-      }
-      if (data.error === 'expired_token' || data.error === 'access_denied') {
-        setStatus('Code expired or denied. Try again.');
-        btn.disabled = false; return;
-      }
-      if (data.error || !r.ok) {
-        setStatus('Sign-in failed: ' + (data.message || data.error || ('HTTP ' + r.status)));
-        btn.disabled = false; return;
-      }
-      schedule(code);
-    } catch (e) {
-      setStatus('Network error — retrying…');
-      schedule(code);
-    }
-  }
-  btn.onclick = async function () {
-    btn.disabled = true;
-    setStatus('Starting GitHub sign-in…');
-    try {
-      var r = await fetch('/api/auth/device/start', { method: 'POST' });
-      var data = await r.json();
-      if (!r.ok || data.error || !data.user_code || !data.verification_uri) {
-        setStatus('Sign-in error: ' + ((data && (data.message || data.error)) || ('HTTP ' + r.status)));
-        btn.disabled = false; return;
-      }
-      var uri = data.verification_uri_complete || data.verification_uri;
-      setStatus('Code ' + data.user_code + ' — approve in the GitHub tab, then return here.');
-      try {
-        var u = new URL(String(uri));
-        if (u.protocol === 'https:' && /(^|\\.)github\\.com$/.test(u.hostname)) window.open(uri, '_blank');
-      } catch (_) {}
-      pollInterval = Math.max(5, data.interval || 5);
-      schedule(data.device_code);
-    } catch (e) {
-      setStatus('Sign-in error: could not reach the sign-in service.');
-      btn.disabled = false;
-    }
-  };
-})();
+  // One shared device flow (server/signin.js). This page used to carry its own
+  // copy with its own retry loop and its own error strings.
+  (function () {
+    var btn = document.getElementById('signin');
+    if (!btn || !window.__tdocSignIn) return;
+    btn.onclick = function () {
+      btn.disabled = true;
+      window.__tdocSignIn().then(function () { location.href = '/me'; },
+        function () { btn.disabled = false; });
+    };
+  })();
 </script>
 </body></html>`;
 }
@@ -1369,6 +1326,29 @@ async function indexHtml(env, session, origin, nonce) {
   .batch-delete:disabled { opacity: 0.5; cursor: default; }
   .doc-list { display: flex; flex-direction: column; }
   .doc-list[hidden], .doc-row[hidden], .empty[hidden] { display: none !important; }
+  /* Create-a-doc: /me is where someone lands after publishing, so it is also
+     where they come back to make the next one. The button teaches rather than
+     creates, because nothing here can create a doc — their agent writes it. */
+  .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+  .page-hd h1 { margin: 0; }
+  .mk-btn { margin-left: auto; border: 0; border-radius: 999px; background: var(--td-accent); color: #fff;
+    font: inherit; font-weight: 650; padding: 9px 16px; cursor: pointer; }
+  .mk-bg { position: fixed; inset: 0; background: rgba(16,18,26,.55); display: grid; place-items: center;
+    z-index: 99999; padding: 20px; }
+  .mk-bg[hidden] { display: none; }
+  .mk { width: min(480px, 100%); background: #fff; border-radius: 16px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(16,18,26,.28); text-align: left; }
+  .mk-hd { display: flex; align-items: center; padding: 17px 20px; border-bottom: 1px solid var(--td-line); }
+  .mk-hd strong { font-size: 15px; }
+  .mk-hd button { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1;
+    color: #767c8b; cursor: pointer; }
+  .mk-bd { padding: 18px 20px; }
+  .mk-bd ol { margin: 0; padding-left: 18px; color: #5b6070; font-size: 14px; }
+  .mk-bd li { margin: 0 0 9px; }
+  .mk-bd b { color: var(--td-ink); }
+  .mk-say { display: block; margin: 6px 0 0; padding: 9px 11px; background: #f5f6f8;
+    border: 1px solid var(--td-line); border-radius: 8px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--td-ink); }
+  .mk-ft { padding: 14px 20px; border-top: 1px solid var(--td-line); font-size: 12.5px; color: #767c8b; }
   .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
   .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
   .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
@@ -1401,8 +1381,8 @@ async function indexHtml(env, session, origin, nonce) {
 </style>
 </head><body>
 <div class="wrap">
-<h1>My docs</h1>
-${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
+<div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
+${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how.</p>' :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
   </div>
@@ -1413,7 +1393,37 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
 </div>
+
+<div class="mk-bg" id="mk-bg" hidden>
+  <div class="mk" role="dialog" aria-modal="true" aria-label="Create a doc">
+    <div class="mk-hd"><strong>Create a doc</strong><button type="button" id="mk-x" aria-label="Close">&times;</button></div>
+    <div class="mk-bd">
+      <ol>
+        <li>Open the AI you already use.
+          <span class="mk-say">Use tdoc to make me a one page summary of this quarter, with a chart of weekly signups.</span>
+        </li>
+        <li>It writes the page and opens it for you.</li>
+        <li>Hit <b>Publish</b>, top right, to put it online.</li>
+        <li>Send the link to anyone. They comment on the page, and your AI answers them.</li>
+      </ol>
+    </div>
+    <div class="mk-ft">Not set up yet? <a href="/start">Start here</a>.</div>
+  </div>
+</div>
 <script${nonce ? ` nonce="${nonce}"` : ''}>
+  // Create-a-doc tutorial. /me cannot create anything — the doc is written by
+  // the user's own agent — so this explains where creation actually happens.
+  (function () {
+    var bg = document.getElementById('mk-bg');
+    var openBtn = document.getElementById('mk-open');
+    if (!bg || !openBtn) return;
+    function show(on) { bg.hidden = !on; if (on) document.getElementById('mk-x').focus(); }
+    openBtn.onclick = function () { show(true); };
+    document.getElementById('mk-x').onclick = function () { show(false); };
+    bg.addEventListener('click', function (e) { if (e.target === bg) show(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !bg.hidden) show(false); });
+  })();
+
 (() => {
   // Tiny top-right toast — no third-party runtime on the privileged /me page.
   function toast(message, kind = '') {
@@ -2953,6 +2963,13 @@ export default {
       const notice = (url.searchParams.get('notice') || '').trim();
       if (notice) return html(landingHtml(env, notice));
       return landingResponse(env, req);
+    }
+
+    // `/start` is the homepage CTA's no-script destination: the same
+    // onboarding written as a page. Same fail-safe as `/` — if that doc is
+    // missing, the visitor gets the neutral page, never a 404.
+    if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, START_SLUG);
     }
 
     // Soft landing for the OAuth App "Authorization callback URL". Device
