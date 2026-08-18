@@ -14,6 +14,14 @@ file and `.claude-plugin/plugin.json`.
   Per-account doc quota (default 50) and upload-size cap (default 2 MB).
   tdoc.dev enables signup by hostname; BYOK Workers stay single-owner unless
   `TDOC_HOSTED_REGISTRATION` is set. `#131` `#154`.
+- **Duplicate vs Download on published docs.** The published bar no longer
+  uses **Fork** (which only downloaded a file). **Duplicate** makes a
+  content-only account copy for the signed-in GitHub user on tdoc.dev
+  (self-host: worker owner only). **Download** is one control with **Download
+  HTML** (`slug-vN.html`, reader CSS inlined) and **Download PDF**
+  (`slug-vN.pdf`, a paginated snapshot of the reading column). No comments,
+  history, or widget islands in v1.
+
 - **Sandboxed interactive widgets.** Author JS still does not run in the host
   document. Computation lives in `/d/:slug/v/:n/widget/:name`, loaded only as
   `Sec-Fetch-Dest: iframe`, with `sandbox="allow-scripts"` on the iframe and

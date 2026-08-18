@@ -113,7 +113,13 @@ class FakeDurableNamespace {
 }
 
 async function loadWorker() {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+  const root = path.join(__dirname, '..');
+  let src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
+  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
+  src = src.replace(
+    /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
+    'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
+  );
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);
   const mod = await import(`file://${tmp}`);
@@ -132,26 +138,26 @@ function makeEnv(StoreClass, extra = {}) {
   return env;
 }
 
-function req(pathname, { method = 'GET', token = '', body = null, cookie = '' } = {}) {
-  return new Request(`https://tdoc.dev${pathname}`, {
+function req(pathname, { method = 'GET', token = '', body = null, cookie = '', host = 'tdoc.dev' } = {}) {
+  return new Request(`https://${host}${pathname}`, {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(cookie ? { Cookie: `tdoc_sid=${cookie}` } : {}),
+      ...(cookie ? { Cookie: cookie.includes('=') ? cookie : `tdoc_sid=${cookie}` } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
 }
 
-async function putSession(env, login) {
+async function putSession(env, login, sid) {
   // Worker parseCookie only accepts hex tdoc_sid values.
-  const sid = [...crypto.getRandomValues(new Uint8Array(16))]
+  const id = sid || [...crypto.getRandomValues(new Uint8Array(16))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
-  await env.META.put(`session:${sid}`, JSON.stringify({
+  await env.META.put(`session:${id}`, JSON.stringify({
     login, name: login, avatar_url: '', created: new Date().toISOString(),
   }));
-  return sid;
+  return `tdoc_sid=${id}`;
 }
 
 async function issue(worker, env, login = 'alice', label = login) {
@@ -191,7 +197,7 @@ async function issue(worker, env, login = 'alice', label = login) {
     assert(onDev.status === 200, `tdoc.dev should mint, got ${onDev.status}: ${await onDev.clone().text()}`);
     const byok = await worker.fetch(new Request('https://example.workers.dev/api/hosted/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Cookie: `tdoc_sid=${cookie}` },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ label: 'byok' }),
     }), env, {});
     assert(byok.status === 403, `BYOK host should stay closed, got ${byok.status}`);
@@ -531,6 +537,126 @@ async function issue(worker, env, login = 'alice', label = login) {
     assert(r.status === 413, `expected 413, got ${r.status}`);
     const body = await r.json();
     assert(body.error === 'quota_upload_bytes', `expected quota_upload_bytes, got ${JSON.stringify(body)}`);
+  });
+
+  await t('duplicate requires a signed-in session', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
+    await env.DOCS.put('docs/src-doc/v1/index.html', '<h1>Src</h1>');
+    await env.META.put('meta:src-doc', JSON.stringify({ title: 'Src', slug: 'src-doc', versions: [{ n: 1 }] }));
+    const r = await worker.fetch(req('/api/doc/duplicate', {
+      method: 'POST', body: { slug: 'src-doc', version: 1 },
+    }), env, {});
+    assert(r.status === 401, `expected 401, got ${r.status}`);
+    const body = await r.json();
+    assert(body.error === 'sign_in_required', `unexpected ${JSON.stringify(body)}`);
+  });
+
+  await t('self-host non-owner cannot duplicate; owner can', async () => {
+    const env = makeEnv(mod.CommentsStore, {
+      TDOC_OWNER: 'julie',
+      TDOC_ACCOUNT_COPY: '',
+      TDOC_HOSTED_REGISTRATION: '',
+    });
+    await env.DOCS.put('docs/src-doc/v1/index.html', '<h1>Src</h1>');
+    await env.META.put('meta:src-doc', JSON.stringify({ title: 'Src', slug: 'src-doc', versions: [{ n: 1 }] }));
+    const alice = await putSession(env, 'alice');
+    const denied = await worker.fetch(req('/api/doc/duplicate', {
+      method: 'POST', cookie: alice, host: 'tdoc.example.workers.dev',
+      body: { slug: 'src-doc', version: 1 },
+    }), env, {});
+    assert(denied.status === 403, `alice should 403 on self-host, got ${denied.status}`);
+    assert((await denied.json()).error === 'account_copy_unavailable', 'expected account_copy_unavailable');
+
+    const julie = await putSession(env, 'julie');
+    const okDup = await worker.fetch(req('/api/doc/duplicate', {
+      method: 'POST', cookie: julie, host: 'tdoc.example.workers.dev',
+      body: { slug: 'src-doc', version: 1 },
+    }), env, {});
+    const okBody = await okDup.json();
+    assert(okDup.status === 200 && okBody.ok && okBody.slug === 'src-doc-copy',
+      `owner duplicate failed ${okDup.status}: ${JSON.stringify(okBody)}`);
+    assert(await env.DOCS.head('docs/src-doc-copy/v1/index.html'), 'owner copy missing R2 bytes');
+    const comments = await env.META.get('comments:src-doc-copy');
+    assert(!comments, 'duplicate must not copy comments');
+  });
+
+  await t('tdoc.dev signed-in reader gets an unlisted snapshot they own; /me hides it from the operator', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
+    await env.DOCS.put('docs/public-essay/v2/index.html', '<h1>Essay</h1><p>body</p>');
+    await env.META.put('meta:public-essay', JSON.stringify({
+      title: 'Essay', slug: 'public-essay', versions: [{ n: 1 }, { n: 2 }],
+    }));
+    await env.META.put('comments:public-essay', JSON.stringify([{ id: 'c1', text: 'nope' }]));
+    const alice = await putSession(env, 'alice');
+    const first = await worker.fetch(req('/api/doc/duplicate', {
+      method: 'POST', cookie: alice,
+      body: { slug: 'public-essay', version: 2 },
+    }), env, {});
+    const firstBody = await first.json();
+    assert(first.status === 200 && firstBody.slug === 'public-essay-copy',
+      `alice duplicate failed ${first.status}: ${JSON.stringify(firstBody)}`);
+    const meta = JSON.parse(await env.META.get('meta:public-essay-copy'));
+    assert(meta.duplicated_by === 'alice', 'duplicated_by missing');
+    assert(meta.source && meta.source.slug === 'public-essay' && meta.source.version === 2, 'source pointer missing');
+    assert(meta.versions.length === 1 && meta.versions[0].n === 1, 'must be a v1 snapshot');
+    assert(meta.access && meta.access.visibility === 'unlisted', 'copy should default unlisted');
+    assert(meta.hosted && meta.hosted.github_login === 'alice', 'copy must bind alice');
+    assert(!(await env.META.get('comments:public-essay-copy')), 'comments must not come along');
+
+    const second = await worker.fetch(req('/api/doc/duplicate', {
+      method: 'POST', cookie: alice,
+      body: { slug: 'public-essay', version: 2 },
+    }), env, {});
+    const secondBody = await second.json();
+    assert(second.status === 200 && secondBody.slug === 'public-essay-copy-2',
+      `second copy should be -copy-2, got ${JSON.stringify(secondBody)}`);
+
+    const julie = await putSession(env, 'julie');
+    const me = await worker.fetch(req('/me', { cookie: julie }), env, {});
+    const meHtml = await me.text();
+    assert(me.status === 200, `/me ${me.status}`);
+    assert(meHtml.includes('public-essay') && !meHtml.includes('public-essay-copy'),
+      'operator /me must not list alice\'s account copies');
+  });
+
+  await t('duplicate refuses island-bearing docs', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
+    await env.DOCS.put('docs/with-island/v1/index.html', '<h1>Host</h1><iframe src="/d/with-island/v/1/widget/sim"></iframe>');
+    await env.DOCS.put('docs/with-island/v1/widgets/sim.html', '<html><script>1</script></html>');
+    await env.META.put('meta:with-island', JSON.stringify({ title: 'Island', slug: 'with-island', versions: [{ n: 1 }] }));
+    const alice = await putSession(env, 'alice');
+    const r = await worker.fetch(req('/api/doc/duplicate', {
+      method: 'POST', cookie: alice,
+      body: { slug: 'with-island', version: 1 },
+    }), env, {});
+    assert(r.status === 409, `expected 409, got ${r.status}`);
+    assert((await r.json()).error === 'islands_not_supported');
+    assert(!await env.DOCS.head('docs/with-island-copy/v1/index.html'), 'island doc must not be copied');
+  });
+
+  await t('export attachment uses slug-vN.html', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
+    await env.DOCS.put('docs/src-doc/v1/index.html', '<h1>Src</h1>');
+    await env.META.put('meta:src-doc', JSON.stringify({ title: 'Src', slug: 'src-doc', versions: [{ n: 1 }] }));
+    const r = await worker.fetch(req('/d/src-doc/v/1/export?download=1'), env, {});
+    assert(r.status === 200, `export ${r.status}`);
+    const cd = r.headers.get('content-disposition') || '';
+    assert(cd.includes('src-doc-v1.html'), `disposition was ${cd}`);
+    assert(!cd.includes('fork'), `disposition still says fork: ${cd}`);
+  });
+
+  await t('export HTML includes reader CSS and no overlay bar', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
+    await env.DOCS.put('docs/src-doc/v1/index.html', '<!doctype html><html><head><title>Src</title></head><body><h1>Src</h1></body></html>');
+    await env.META.put('meta:src-doc', JSON.stringify({ title: 'Src', slug: 'src-doc', versions: [{ n: 1 }] }));
+    const r = await worker.fetch(req('/d/src-doc/v/1/export?download=1'), env, {});
+    assert(r.status === 200, `export ${r.status}`);
+    const body = await r.text();
+    assert(body.includes('id="tdoc-reader"'), 'export must stamp #tdoc-reader');
+    assert(body.includes(':where(body h1)'), 'export must include the Classic heading template');
+    assert(body.includes('--td-accent'), 'export must include theme tokens');
+    assert(!body.includes('window.__TDOC__'), 'export must not boot overlay JS');
+    assert(!body.includes('id="tdoc-duplicate-btn"'), 'export must not include published chrome');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
