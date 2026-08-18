@@ -3,25 +3,19 @@
 // (see #138). The landing CTA keeps its href so the flow still works with
 // scripting off; this upgrades it in place.
 //
-// One screen, no account. Everything this flow needs is a line of text the
-// visitor pastes into the agent they already use, so every step that is not
-// that line has been cut:
+// Two steps, and the first one is a sign-in — which is only worth asking for
+// because of what it now buys. Since #156 the hosted mint is session-gated, so
+// signing in is what turns the second step into "paste this, get a link" with
+// nothing to install and nothing to pay for. Signed out, the same paste line
+// still works; it just ends at a Cloudflare account the visitor sets up.
 //
-//   - No sign-in to get started. Publishing to a host you own needs no
-//     account at all, and the sign-in that IS enforced (commenting) is already
-//     offered in the composer at the moment it is needed. Asking for GitHub up
-//     front spent the highest-abandon interaction in the funnel — leave the
-//     site, type a code, come back — before the visitor had anything to lose.
-//     Once #156 lands, letting US host the doc does require a session, so that
-//     is offered here as an optional upgrade, after the working line, and only
-//     to the people who want it. Last, not first.
+// What is deliberately NOT here:
 //   - No runtime picker. Only Claude Code has a documented `/plugin` line,
 //     agents cannot run `/plugin` for you anyway, and ONBOARDING.md is written
-//     for an agent to read. So the agent installs itself and the question
-//     never gets asked.
-//   - No "what do you want to make?" step. It changed one noun, and a five
-//     item menu teaches the wrong thing: the point is that you can ask for
-//     anything, so the line says so in words instead of offering a dropdown.
+//     for an agent to read. So the agent installs itself.
+//   - No "what do you want to make?" step. The first doc is fixed on purpose:
+//     a Game of Life page that teaches the loop by being the thing you comment
+//     on. Choosing a noun taught nothing.
 (function () {
   var CTA = 'a[href="/start"]';
   var GUIDE = 'https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md';
@@ -32,42 +26,57 @@
     '.tdo{width:min(540px,100%);background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(16,18,26,.28);overflow:hidden;font:15px/1.55 system-ui,-apple-system,sans-serif;color:#10121a}',
     '.tdo-hd{display:flex;align-items:center;gap:10px;padding:18px 20px;border-bottom:1px solid #e4e7ee}',
     '.tdo-hd strong{font-size:15px}',
-    '.tdo-x{margin-left:auto;border:0;background:none;font-size:20px;line-height:1;color:#767c8b;cursor:pointer;padding:0 2px}',
+    '.tdo-dots{display:flex;gap:6px;margin-left:auto}',
+    '.tdo-dot{width:7px;height:7px;border-radius:50%;background:#dfe3ea}.tdo-dot.on{background:#1652f0}',
+    '.tdo-x{border:0;background:none;font-size:20px;line-height:1;color:#767c8b;cursor:pointer;padding:0 2px}',
     '.tdo-bd{padding:20px}',
     '.tdo h2{font-size:20px;margin:0 0 6px;letter-spacing:-.02em}',
     '.tdo p{margin:0 0 14px;color:#5b6070;font-size:14.5px}',
     '.tdo-line{font:13.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;background:#f5f6f8;border:1px solid #e4e7ee;border-radius:10px;padding:14px;color:#10121a;word-break:break-word}',
-    '.tdo-swap{font-size:12.5px;color:#767c8b;margin:9px 0 0}',
-    '.tdo-swap b{color:#10121a;font-weight:600}',
+    '.tdo-learn{margin:14px 0 0;padding:13px 14px;border:1px solid #e4e7ee;border-radius:10px;background:#fafbfd}',
+    '.tdo-learn b{display:block;font-size:13px;margin:0 0 7px}',
+    '.tdo-learn ol{margin:0;padding-left:17px;color:#5b6070;font-size:13px}',
+    '.tdo-learn li{margin:0 0 4px}',
     '.tdo-note{font-size:12.5px;color:#767c8b;margin:12px 0 0;display:flex;gap:7px;align-items:flex-start}',
     '.tdo-note svg{width:14px;height:14px;flex:none;margin-top:2px;fill:none;stroke:currentColor;stroke-width:2}',
     '.tdo-ft{padding:16px 20px;border-top:1px solid #e4e7ee;background:#fafbfd}',
-    '.tdo-btn{width:100%;border:0;border-radius:999px;padding:13px;font-weight:650;font-size:15px;cursor:pointer;background:#1652f0;color:#fff}',
+    '.tdo-btn{width:100%;border:0;border-radius:999px;padding:13px;font-weight:650;font-size:15px;cursor:pointer;background:#1652f0;color:#fff;display:flex;align-items:center;justify-content:center;gap:9px}',
+    '.tdo-btn[disabled]{opacity:.5;cursor:default}',
     '.tdo-btn.done{background:#1a7340}',
-    '.tdo-alt{display:block;text-align:center;margin:11px 0 0;font-size:13px;color:#5b6070}',
-    '.tdo-up{margin:14px 0 0;padding:12px 13px;border:1px solid #cddcff;background:#f4f7ff;border-radius:10px;font-size:13.5px;color:#10121a}',
-    '.tdo-up button{margin:8px 0 0;border:1px solid #1652f0;background:#fff;color:#1652f0;border-radius:999px;padding:7px 14px;font:inherit;font-weight:650;cursor:pointer}',
-    '.tdo-up p{margin:0;color:#5b6070;font-size:12.5px}',
-    '.tdo-next{margin:16px 0 0;padding:14px;border:1px solid #e4e7ee;border-radius:10px;background:#fff}',
-    '.tdo-next ol{margin:0;padding-left:18px;color:#5b6070;font-size:14px}',
-    '.tdo-next li{margin:0 0 5px}'
+    '.tdo-btn svg{width:16px;height:16px;fill:currentColor;flex:none}',
+    '.tdo-skip{display:block;width:100%;text-align:center;margin:11px 0 0;font-size:13px;color:#767c8b;background:none;border:0;cursor:pointer;font-family:inherit}',
+    '.tdo-skip:hover{color:#10121a}'
   ].join('');
   document.head.appendChild(S);
 
-  var st = { token: null, copied: false, canHost: false, waiting: false, bg: null, box: null, esc: null, scrollY: 0 };
+  var st = { step: 0, token: null, copied: false, waiting: false, signedIn: false, bg: null, box: null, esc: null };
 
   function el(t, c, h) { var e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; }
 
-  // The literal text the visitor pastes. The agent reads GUIDE and installs
-  // itself, so this one line works in every runtime and needs no picker.
+  // The literal text the visitor pastes. It does three jobs in one paste:
+  // installs the skill (the agent reads GUIDE), claims the hosted account, and
+  // builds the first doc. The first doc is a Game of Life explainer carrying a
+  // live artifact and a tutorial, so the thing the visitor learns tdoc ON is
+  // already a real published tdoc with something worth commenting about.
   function line() {
     var s = 'Read ' + GUIDE + ' and set yourself up with tdoc.';
     if (st.token) s += ' My tdoc hosted token is ' + st.token + '.';
-    return s + ' Then make me a report and publish it.';
+    s += ' Then create a Game of Life tdoc: what Conway’s Game of Life is,'
+      + ' a live Game of Life artifact I can play with, and a short tdoc tutorial'
+      + ' that walks me through leaving comments, asking you to fix them, checking'
+      + ' the new version, and sharing the link';
+    // Only point at the hub when we hold a hosted token. Without one there is
+    // no hosted account behind the login, and tdoc.dev/me is still the
+    // operator's catalog — sending them there would dead-end on a sign-in wall.
+    if (st.token) s += ', then finding everything I publish at tdoc.dev/me';
+    return s + '. Publish it.';
   }
 
   function shield() {
     return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/></svg>';
+  }
+  function ghMark() {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>';
   }
 
   function close() {
@@ -77,31 +86,72 @@
     st.bg = null; st.box = null;
   }
 
-  function render() {
+  function shell(title, sub) {
     var box = st.box;
-    if (!box) return;
     box.innerHTML = '';
-
     var hd = el('div', 'tdo-hd');
     hd.appendChild(el('strong', null, 'Make your first doc'));
+    var dots = el('div', 'tdo-dots');
+    for (var i = 0; i < 2; i++) dots.appendChild(el('span', 'tdo-dot' + (i <= st.step ? ' on' : '')));
+    hd.appendChild(dots);
     var x = el('button', 'tdo-x', '&times;');
     x.setAttribute('aria-label', 'Close'); x.onclick = close;
     hd.appendChild(x);
     box.appendChild(hd);
-
     var bd = el('div', 'tdo-bd');
-    bd.appendChild(el('h2', null, 'Paste one line into your AI'));
-    // What it costs, before the button, not after. With hosted signup closed
-    // this ends in a Cloudflare account, and "it handles it" is how a Notion
-    // user reads any softer wording. See ONBOARDING.md steps 4a and 4b.
-    bd.appendChild(el('p', null, st.token
-      ? 'It installs tdoc, writes the page, and publishes it. Nothing to set up.'
-      : 'It installs tdoc, writes the page, and publishes it to a free Cloudflare account you own. About five minutes the first time, then it is one sentence.'));
+    bd.appendChild(el('h2', null, title));
+    if (sub) bd.appendChild(el('p', null, sub));
+    box.appendChild(bd);
+    return bd;
+  }
+
+  // ---- step 1: sign in ---------------------------------------------------
+  // Worth a step only because of what it unlocks: the hosted mint is
+  // session-gated since #156, and the same login remints the same account, so
+  // this is also how the doc is recoverable later. Skippable, because
+  // publishing to your own host needs no account at all.
+  function stepSignIn() {
+    st.step = 0;
+    var bd = shell('Sign in with GitHub',
+      'So tdoc can host your doc and hand you a link with nothing to set up. Same login gets you back to it later, on any machine.');
+
+    var n = el('div', 'tdo-note');
+    n.innerHTML = shield() + '<span>We read your GitHub username, nothing else. tdoc never sees your code or your repositories.</span>';
+    bd.appendChild(n);
+
+    var ft = el('div', 'tdo-ft');
+    var b = el('button', 'tdo-btn', (st.waiting ? '' : ghMark()) + '<span>' + (st.waiting ? 'Waiting for GitHub…' : 'Sign in with GitHub') + '</span>');
+    b.disabled = !!st.waiting;
+    b.onclick = signIn;
+    ft.appendChild(b);
+
+    var skip = el('button', 'tdo-skip', 'Skip, I’ll publish to my own host');
+    skip.onclick = function () { st.step = 1; render(); };
+    ft.appendChild(skip);
+    st.box.appendChild(ft);
+    return b;
+  }
+
+  // ---- step 2: the one line ---------------------------------------------
+  function stepPaste() {
+    st.step = 1;
+    var bd = shell('Paste one line into your AI', st.token
+      ? 'It installs tdoc, builds your first doc, and publishes it. Nothing to set up.'
+      : 'It installs tdoc, builds your first doc, and publishes it to a free Cloudflare account you own. About five minutes the first time, then it is one sentence.');
 
     bd.appendChild(el('div', 'tdo-line', null)).textContent = line();
-    bd.appendChild(el('p', 'tdo-swap', 'Swap <b>a report</b> for whatever you actually need: a weekly update, a launch plan, a competitor teardown.'));
 
-    // Both disclosures sit against the button, never in a footnote.
+    // The first doc is a lesson, so say what it will teach before they paste.
+    var learn = el('div', 'tdo-learn');
+    learn.innerHTML = '<b>Your first doc teaches the loop</b>'
+      + '<ol><li>Leave a couple of comments on the page.</li>'
+      + '<li>Tell your AI to fix them.</li>'
+      + '<li>A new version appears, with a reply on every comment.</li>'
+      + '<li>Send the link to a friend and let them comment too.</li>'
+      + (st.token ? '<li>Everything you publish lands in your hub at <strong>tdoc.dev/me</strong>.</li>' : '')
+      + '</ol>';
+    bd.appendChild(learn);
+
     var n1 = el('div', 'tdo-note');
     n1.innerHTML = shield() + '<span>Your doc gets a public link. Anyone with the URL can read it, and only you can change it.</span>';
     bd.appendChild(n1);
@@ -111,51 +161,31 @@
       ? shield() + '<span>The key lets your agent publish and edit <strong>your</strong> docs. It cannot read your computer and cannot touch anyone else’s docs. Signing in with the same GitHub account gets you back to it.</span>'
       : shield() + '<span>First time only: your agent gets you a free Cloudflare account. You click <em>create account</em> and <em>enable R2</em> in your own browser. No card. Just want it on your machine? Say <em>keep it local</em> instead and skip all of it.</span>';
     bd.appendChild(n2);
-    // #156 gates the hosted mint on a GitHub session and turns signup on for
-    // tdoc.dev by hostname. A signed-out visitor therefore gets
-    // sign_in_required, not "closed" — the zero-setup path is available, it
-    // just costs a sign-in. Offering it beats silently degrading to Cloudflare,
-    // which would hide the best path from everyone who is not already signed in.
-    // Still last, still optional: the line above already works without it.
-    if (st.canHost && !st.token) {
-      var up = el('div', 'tdo-up');
-      up.innerHTML = '<strong>Or let us host it.</strong>'
-        + '<p>Publish straight to tdoc.dev with no account to set up. Signing in also means you can get the doc back later, on any machine.</p>';
-      var sb = el('button', null, st.waiting ? 'Waiting for GitHub…' : 'Sign in with GitHub');
-      if (st.waiting) sb.disabled = true;
-      sb.onclick = signIn;
-      up.appendChild(sb);
-      bd.appendChild(up);
-    }
-
-    box.appendChild(bd);
 
     var ft = el('div', 'tdo-ft');
-    var b = el('button', 'tdo-btn', st.copied ? 'Copy again' : 'Copy the line');
+    var b = el('button', 'tdo-btn', '<span>' + (st.copied ? 'Copied' : 'Copy the line') + '</span>');
+    if (st.copied) b.className = 'tdo-btn done';
     b.onclick = function () { copy(b, bd); };
     ft.appendChild(b);
-
-    // The landing page gets read on a phone while the agent is on a laptop,
-    // so the line needs a way to travel. mailto needs no backend.
-    var mail = el('a', 'tdo-alt', 'Email it to myself');
-    mail.href = 'mailto:?subject=' + encodeURIComponent('My tdoc setup line')
-      + '&body=' + encodeURIComponent(line() + '\n\nPaste that into Claude Code, Codex, Cursor, Gemini, or Grok.');
-    ft.appendChild(mail);
-    box.appendChild(ft);
-
+    st.box.appendChild(ft);
     if (st.copied) showNext(bd);
     return b;
   }
 
+  function render() {
+    if (!st.box) return null;
+    return st.step === 0 ? stepSignIn() : stepPaste();
+  }
+
   // The visitor is about to leave for their agent and may not come back, so
-  // the copy is also the handoff: say what happens next while the line is
-  // still on screen, and name the landmark that proves it worked.
+  // the copy is also the handoff: name the landmark that proves it worked.
   function showNext(bd) {
     if (bd.querySelector('.tdo-next')) return;
-    var n = el('div', 'tdo-next');
-    n.innerHTML = '<ol><li>Open the AI you already use.</li>'
+    var n = el('div', 'tdo-learn');
+    n.className = 'tdo-learn tdo-next';
+    n.innerHTML = '<b>Now</b><ol><li>Open the AI you already use.</li>'
       + '<li>Paste the line and send it.</li>'
-      + '<li>You will know it worked when it hands you a link. Share it, and comments land on the page.</li></ol>';
+      + '<li>You will know it worked when it hands you a link.</li></ol>';
     bd.appendChild(n);
   }
 
@@ -163,14 +193,13 @@
     var text = line();
     var done = function () {
       st.copied = true;
-      btn.textContent = 'Copied';
+      btn.innerHTML = '<span>Copied</span>';
       btn.className = 'tdo-btn done';
       showNext(bd);
     };
     // A click that appears to do nothing is worse than no button. The
-    // clipboard API rejects whenever the document is not focused, and
-    // execCommand is gone in some browsers, so the last resort still has to
-    // leave the visitor holding the line: select it and say which keys.
+    // clipboard API rejects whenever the document is not focused, so the last
+    // resort still has to leave the visitor holding the line.
     var manual = function () {
       var pre = bd.querySelector('.tdo-line');
       try {
@@ -179,9 +208,8 @@
         var sel = window.getSelection();
         sel.removeAllRanges(); sel.addRange(rng);
       } catch (e) {}
-      btn.textContent = /Mac|iP(hone|ad)/.test(navigator.platform || '')
-        ? 'Selected — press ⌘C to copy'
-        : 'Selected — press Ctrl+C to copy';
+      btn.innerHTML = '<span>' + (/Mac|iP(hone|ad)/.test(navigator.platform || '')
+        ? 'Selected — press ⌘C to copy' : 'Selected — press Ctrl+C to copy') + '</span>';
       st.copied = true;
       showNext(bd);
     };
@@ -201,11 +229,9 @@
     if (ok) done(); else manual();
   }
 
-
   // The overlay already ships a full device flow and binds it to the bar's
   // sign-in chip. Click that instead of writing a parallel one, then watch for
-  // the session and re-mint. If the chip is absent (already signed in, or auth
-  // not configured) just try the mint again.
+  // the session and mint.
   function signIn() {
     var chip = document.getElementById('tdoc-signin');
     if (chip) chip.click();
@@ -219,8 +245,8 @@
         .then(function (me) {
           if (!me || !me.login) return;
           clearInterval(iv);
-          st.waiting = false;
-          mint();
+          st.waiting = false; st.signedIn = true;
+          mint().then(function () { st.step = 1; render(); });
         })
         .catch(function () {});
     }, 3000);
@@ -231,10 +257,7 @@
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: '{}', credentials: 'same-origin',
     }).then(function (r) { return r.json(); }).then(function (r) {
-      if (!st.bg) return;
-      if (r && r.token) { st.token = r.token; st.canHost = false; render(); return; }
-      // Hosted is on but this visitor has no session yet.
-      if (r && r.error === 'sign_in_required') { st.canHost = true; render(); }
+      if (r && r.token) st.token = r.token;
     }).catch(function () {});
   }
 
@@ -244,12 +267,10 @@
     if (e && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button && e.button !== 0))) return;
     if (e) e.preventDefault();
 
-    // Display state is recomputed per open. Without this, a visitor who saw
-    // the hosted offer once keeps seeing it after signup closes, and the
-    // green "Copied" survives into a fresh dialog.
-    st.copied = false;
-    st.canHost = false;
-    st.waiting = false;
+    // Display state is recomputed per open, so a stale step or a green
+    // "Copied" never survives into a fresh dialog.
+    st.step = 0; st.token = null; st.copied = false; st.waiting = false; st.signedIn = false;
+
     st.bg = el('div', 'tdo-bg');
     st.box = el('div', 'tdo');
     st.box.setAttribute('role', 'dialog');
@@ -276,11 +297,14 @@
     var btn = render();
     if (btn) btn.focus();
 
-    // Ask for a hosted token, but never make the visitor wait on it. Whatever
-    // comes back, the line above already works: a token upgrades it to
-    // zero-setup, sign_in_required offers that upgrade, anything else is our
-    // problem and stays invisible.
-    mint();
+    // Someone already signed in should not be asked again, and a host with no
+    // auth configured (local Studio) has nobody to ask. Both start at the line.
+    var cfg = window.__TDOC__ || {};
+    if (cfg.authConfigured === false) { st.step = 1; render(); return; }
+    if (cfg.identity && cfg.identity.login) {
+      st.signedIn = true;
+      mint().then(function () { if (st.bg) { st.step = 1; render(); } });
+    }
   }
 
   document.addEventListener('click', function (e) {

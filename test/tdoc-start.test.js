@@ -35,17 +35,64 @@ t('teaches the loop on the real published doc', () => {
     'the example must point at a real published doc, not a mockup');
 });
 
-t('asks for no account and no runtime', () => {
-  // Getting started needs no account at all: publishing to a host you own
-  // never touches /api/hosted/token, so the old sign-in-first step bought the
-  // visitor nothing. And only Claude Code has a documented `/plugin`
-  // line, which per ONBOARDING.md an agent cannot run for you anyway — so the
-  // agent reads the guide and installs itself instead of being asked.
-  assert(!/device\/start|device\/poll/.test(onboard),
-    'onboarding starts a GitHub device flow again; sign-in belongs in the comment composer');
+t('never asks which runtime you use', () => {
+  // Only Claude Code has a documented `/plugin` line, Codex is a git clone,
+  // and three runtimes have none. ONBOARDING.md also says an agent cannot run
+  // `/plugin` for the user — so the agent reads the guide and installs itself.
   assert(!/plugin marketplace add/.test(html) && !/plugin marketplace add/.test(onboard),
     'a /plugin line is back; it is Claude Code only and agents cannot run it');
   assert(/ONBOARDING\.md/.test(onboard), 'the paste line must point the agent at the setup guide');
+});
+
+t('sign-in is step one, and is skippable', () => {
+  // It leads now because of what it buys: since #156 the hosted mint is
+  // session-gated, so signing in is what turns step two into "paste, get a
+  // link" with nothing to set up, and the same login remints the same account
+  // so the doc stays recoverable. It must stay skippable, because publishing
+  // to a host you own needs no account at all.
+  assert(/function stepSignIn/.test(onboard), 'the sign-in step is gone');
+  assert(/tdo-skip/.test(onboard), 'the sign-in step must be skippable');
+  assert(/authConfigured === false/.test(onboard),
+    'a host with no auth configured must not be asked to sign in');
+  assert(/cfg\.identity && cfg\.identity\.login/.test(onboard),
+    'someone already signed in must not be asked again');
+  // Reuse, not a second device flow.
+  assert(/getElementById\('tdoc-signin'\)/.test(onboard),
+    'must reuse the overlay device flow rather than building a parallel one');
+  assert(!/device\/start|device\/poll/.test(onboard),
+    'a second device flow implementation is back in the modal');
+});
+
+t('the first doc is a Game of Life lesson, not a blank noun', () => {
+  // The first doc has to be worth commenting on, because commenting on it is
+  // the lesson. A live artifact plus a tutorial gives the loop something real
+  // to happen to.
+  assert(/Game of Life/.test(onboard), 'the first doc is no longer the Game of Life example');
+  assert(/artifact/i.test(onboard), 'the first doc must carry a live artifact');
+  for (const beat of ['comments', 'fix them', 'new version', 'sharing the link']) {
+    assert(onboard.includes(beat), `the tutorial no longer covers: ${beat}`);
+  }
+});
+
+t('points at the hub only when there is a hosted account behind it', () => {
+  // /me is per-user only once #156 lands, and only for someone who actually
+  // holds a hosted account. Naming it for a self-host visitor would dead-end
+  // them on the operator catalog's sign-in wall (#131).
+  // Check the code, not the prose: a comment mentioning /me must not satisfy
+  // this, and every place the visitor can actually SEE it must be guarded.
+  const code = onboard.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+  const mentions = code.split('tdoc.dev/me').length - 1;
+  assert(mentions >= 2, `expected the hub in both the paste line and the lesson, found ${mentions}`);
+  assert(/if \(st\.token\) s \+= '[^']*tdoc\.dev\/me/.test(code),
+    'the paste line names the hub without checking for a hosted token');
+  assert(/st\.token \? '[^']*tdoc\.dev\/me/.test(code),
+    'the lesson names the hub without checking for a hosted token');
+});
+
+t('does not offer to email the line', () => {
+  // Added once, cut on sight: it is a second exit from a dialog whose whole
+  // job is one button.
+  assert(!/mailto/.test(onboard), 'the email escape hatch is back');
 });
 
 t('the sign-in it drops is still offered where the server enforces it', () => {
@@ -75,7 +122,7 @@ t('does not promise zero setup while hosted signup is closed', () => {
   assert(/keep it local/i.test(text),
     'ONBOARDING.md supports a local-only path; the page should offer that escape hatch');
   assert(/Cloudflare/.test(onboard) && /keep it local/i.test(onboard),
-    'the modal must price the setup too; it is where the visitor commits');
+    'the modal must price the self-host path too; it is where that visitor commits');
 });
 
 t('says what to say, not what to type', () => {
@@ -83,26 +130,6 @@ t('says what to say, not what to type', () => {
   // contradict the page it sits on.
   assert(!/npx |wrangler |npm i -g/.test(text),
     'the page must not hand the reader a CLI command to type');
-});
-
-t('offers hosted publishing as an upgrade, never as a gate', () => {
-  // #156 gates the hosted mint on a GitHub session and switches signup on for
-  // tdoc.dev by hostname, so a signed-out visitor gets sign_in_required rather
-  // than "closed". Degrading silently there would hide the zero-setup path
-  // from everyone who is not already signed in. Offering it must not turn the
-  // sign-in back into a gate: the paste line has to work untouched without it.
-  assert(/sign_in_required/.test(onboard), 'the modal does not recognise the hosted sign-in signal');
-  assert(/st\.canHost && !st\.token/.test(onboard),
-    'the hosted offer must only render when hosting is reachable and unclaimed');
-  // Reuse, not a second device flow.
-  assert(/getElementById\('tdoc-signin'\)/.test(onboard),
-    'must reuse the overlay device flow rather than building a parallel one');
-  assert(!/device\/start|device\/poll/.test(onboard),
-    'a second device flow implementation is back in the modal');
-  // Display state must be recomputed per open, or a closed signup keeps
-  // showing an offer the server will refuse.
-  assert(/st\.canHost = false;/.test(onboard.slice(onboard.indexOf('function open('))),
-    'open() must reset the hosted-offer flag');
 });
 
 t('a failed copy still leaves the visitor holding the line', () => {
