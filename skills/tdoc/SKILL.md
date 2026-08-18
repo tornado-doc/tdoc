@@ -675,12 +675,12 @@ the host document — it is inert under CSP. Two options:
 2. **Precompute** if an island is overkill: `:checked` panels, a static SVG, or
    a CSS loop, and note in the doc what was simplified.
 
-Fork/export of a doc with islands is not supported in v1 (the downloaded file
-cannot fetch `/widget/` URLs).
+Download / Duplicate of a doc with islands is not supported in v1 (the
+downloaded file cannot fetch `/widget/` URLs; account copy is host HTML only).
 
 ### Default styling — DO NOT re-style the doc
 
-The overlay injects a complete default template modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only.
+The overlay injects a complete default template modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only. **Download** is a menu: **Download HTML** (`/export`, reader CSS inlined as `<style id="tdoc-reader">`) and **Download PDF** (a `slug-vN.pdf` snapshot of that reading column, not a print dialog). Neither includes overlay chrome (bar, comments).
 
 - System font stack (`system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`)
 - Body: 17px / line-height 1.65 / `#111` on white

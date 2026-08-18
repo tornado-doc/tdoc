@@ -28,6 +28,7 @@ const OFFLINE = [
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
   'hosted-oob.test.js',       // hosted token bootstrap + scoped writes
   'hosted-oob-behavior.test.js', // hosted token ownership behavior with fake bindings
+  'duplicate-download.test.js', // #146 Duplicate vs Download chrome + route contract
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
