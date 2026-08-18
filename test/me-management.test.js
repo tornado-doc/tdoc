@@ -7,8 +7,8 @@
 // controls moved to the doc-page Share panel (overlay.js showManageModal,
 // see jul36-owner-manage.test.js), and Delete now authorizes off the owner's
 // session cookie instead of a pasted token (safe only because of the CSP on
-// every doc response — see csp.test.js). /me is reachable only by the
-// signed-in owner (route-level isOwnerSession redirect), so its own
+// every doc response — see csp.test.js). /me is gated by canSeeMyDocs
+// (hosted: any signed-in GitHub user; BYOK: TDOC_OWNER), so its own
 // same-origin fetches are already cookied.
 //
 // Gate (小cc review #2): the /me HTML response must not contain access data
@@ -25,7 +25,8 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const worker = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
-const start = worker.indexOf('async function indexHtml(env, session)');
+const overlay = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
+const start = worker.indexOf('async function indexHtml(env, session');
 const end = worker.indexOf('// ─────────────────────────────────────────────────────────────────────────', start);
 if (start < 0 || end < 0 || end <= start) throw new Error('indexHtml block missing');
 const index = worker.slice(start, end);
@@ -124,6 +125,46 @@ t('/me catalog does not fold comment logs or HEAD R2 per row', () => {
   assert(index.includes('Promise.all'), '/me should fetch meta rows in parallel');
 });
 
+t('overlay top bar occupies layout instead of floating over the document', () => {
+  assert(overlay.includes('.tdoc-bar { position: relative;'),
+    'bar must sit in document flow, not overlay the page');
+  assert(!overlay.includes('.tdoc-bar { position: fixed;'),
+    'bar must not be position:fixed');
+  assert(overlay.includes('document.body.insertBefore(bar, document.body.firstChild)'),
+    'bar must be the first body child so it occupies the top of the layout');
+  assert(!overlay.includes('padding-top: 44px !important'),
+    'in-flow bar must not reserve a fake padding-top gap');
+  assert(!overlay.includes('body.tdoc-has-oldver-strip { padding-top: 72px !important; }'),
+    'old-version strip must occupy flow, not extra body padding');
+});
+
+t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
+  const meStart = worker.indexOf("if (p === '/me' && method === 'GET')");
+  const meEnd = worker.indexOf('// ---- interactive island', meStart);
+  assert(meStart >= 0 && meEnd > meStart, '/me route block missing');
+  const meRoute = worker.slice(meStart, meEnd);
+  assert(meRoute.includes('injectOverlay('), '/me must inject overlay.js for the site bar');
+  assert(meRoute.includes("'Content-Security-Policy': cspHeader(nonce)"), '/me overlay needs the same CSP as docs');
+  assert(worker.includes('isCatalog: !!isCatalog'), 'injectOverlay must pass isCatalog');
+  assert(!worker.includes('function siteChromeCss'), '/me must not fork a second top bar');
+  assert(!index.includes('class="who"'), 'identity belongs in the overlay chip');
+  assert(index.includes('nonce="${nonce}"'), '/me catalog script must carry the CSP nonce');
+  assert(overlay.includes('const isCatalog = !!cfg.isCatalog'), 'overlay must read isCatalog');
+  assert(overlay.includes("${isSiteBar ? '' : copyMenuHtml}"), 'catalog must hide Copy');
+  assert(overlay.includes("${isSiteBar ? '' : primaryCtaHtml}"), 'catalog must hide Share');
+  assert(overlay.includes("${isSiteBar ? '' : forkBtnHtml}"), 'catalog must hide Duplicate/Download');
+  assert(overlay.includes('id="tdoc-title"'),
+    'doc pages still show the title in the left cluster');
+  assert(!overlay.includes('tdoc-bar-center'),
+    'title must not sit in a fake-centered middle slot');
+  assert(overlay.includes('src="/tdoc_logo.png"'),
+    'bar mark must be the tdoc logo, not a text pill');
+  assert(index.includes('class="wrap"'), 'catalog content must sit in a wrap so the bar can be full-bleed');
+  const catalogGate = overlay.indexOf('if (isCatalog) {');
+  const commentsBoot = overlay.indexOf('// ========== Comment layer + FAB ==========');
+  assert(catalogGate >= 0 && commentsBoot > catalogGate, 'catalog must not boot comment chrome');
+});
+
 t('/me does not introduce a bespoke cookie-only admin-auth path', () => {
   // The session path now used everywhere is the SHARED authorizeOwnerMutation
   // gate (session OR token) — not a one-off same-origin/cookie check bolted
@@ -137,6 +178,16 @@ t('/me non-owner bounce goes to landing with notice, not github.com', () => {
   const meEnd = worker.indexOf('// ---- doc view ----', meStart);
   assert(meStart >= 0 && meEnd > meStart, '/me route block missing');
   const meRoute = worker.slice(meStart, meEnd);
+  assert(meRoute.includes('canSeeMyDocs(env, s, url.origin)'),
+    '/me must gate on canSeeMyDocs (hosted per-user or BYOK TDOC_OWNER)');
+  assert(!worker.includes('isOwnerSession gate in the'),
+    '/me must not document the retired owner-only gate');
+  assert(!overlay.includes('cfg.canSeeMyDocs || cfg.isOwner'),
+    'My docs must not fall back to this-doc isOwner');
+  assert(!overlay.includes('else if (me && me.isOwner) canSeeMyDocs'),
+    'device-flow must not treat isOwner as canSeeMyDocs');
+  assert(!overlay.includes("typeof me.isOwner === 'boolean') isOwner"),
+    'device-flow must not clobber per-doc isOwner from /api/auth/me');
   assert(meRoute.includes("Location: `/?notice=${notice}`") || meRoute.includes("Location: '/?notice="),
     '/me must redirect to landing ?notice=…');
   assert(!meRoute.includes('github.com/tornado-doc/tdoc'),

@@ -9,6 +9,7 @@
 //   OUT_DIR             directory to write the bundle (default: $SKILL_DIR/worker)
 //   TDOC_GENERATED_BY   provenance label (default: tdoc-bundle)
 //   TDOC_SOURCE_SHA     optional override for source_sha (CI passes github.sha)
+//   TDOC_PREVIEW=1      un-export CommentsStore so Cloudflare will mint preview URLs
 
 const fs = require('fs');
 const path = require('path');
@@ -64,13 +65,24 @@ replaced = replaced.replace(
   'const SIGNIN_JS = ' + JSON.stringify(signin) + ';'
 );
 
-const withBuild = replaced.replace(
+let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,
   'const TDOC_BUILD_INFO = ' + JSON.stringify(build) + ';'
 );
 if (withBuild === replaced) {
   console.error('bundle: failed to find TDOC_BUILD_INFO placeholder');
   process.exit(1);
+}
+
+// Preview Worker must not *implement* a Durable Object. Cloudflare skips
+// preview URLs for scripts that export a DO class, even with no binding.
+if (process.env.TDOC_PREVIEW === '1') {
+  const stripped = withBuild.replace('export class CommentsStore {', 'class CommentsStore {');
+  if (stripped === withBuild) {
+    console.error('bundle: preview strip failed — export class CommentsStore not found');
+    process.exit(1);
+  }
+  withBuild = stripped;
 }
 
 fs.mkdirSync(outDir, { recursive: true });

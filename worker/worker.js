@@ -73,10 +73,11 @@ async function getSession(env, req) {
     return { id: sid, ...data };
   } catch { return null; }
 }
-// The worker owner = the GitHub login configured in TDOC_OWNER at deploy.
-// Only that signed-in viewer may see the catalog of hosted docs. Case-
-// insensitive; if TDOC_OWNER is unset, nobody is owner (catalog stays
-// fully private — safe default).
+// The worker operator = the GitHub login configured in TDOC_OWNER at deploy.
+// On BYOK (hosted registration off) only that signed-in viewer sees /me.
+// On hosted tdoc.dev, /me is per signed-in GitHub user; TDOC_OWNER still
+// owns legacy docs with no hosted.github_login. Case-insensitive; if
+// TDOC_OWNER is unset, nobody is operator.
 function isOwnerSession(env, session) {
   const owner = (env.TDOC_OWNER || '').trim().toLowerCase();
   if (!owner || !session || !session.login) return false;
@@ -89,8 +90,8 @@ function isOwnerSession(env, session) {
 // pattern short-circuited to "allow" on null, letting any GitHub session
 // delete/re-anchor authorless legacy comments. Same logic for the three
 // mutation sites, in one place.
-function canMutate(record, session, env) {
-  if (isOwnerSession(env, session)) return true;
+function canMutate(record, session, env, meta) {
+  if (isDocOwnerSession(env, session, meta)) return true;
   const who = record && record.author && record.author.login;
   return !!(who && session && session.login && who === session.login);
 }
@@ -127,6 +128,23 @@ function normalizeGithubLogin(v) {
   // GitHub logins: alphanumeric + hyphen
   if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(s)) return null;
   return s;
+}
+
+// Publisher GitHub login stamped on hosted-tenant meta. Empty on BYOK / legacy
+// docs — those still belong to TDOC_OWNER.
+function hostedGithubLogin(meta) {
+  return meta && meta.hosted ? normalizeGithubLogin(meta.hosted.github_login) : null;
+}
+
+// True when this session owns this document:
+//   - hosted: meta.hosted.github_login matches the session
+//   - unhosted / legacy: the Worker operator (TDOC_OWNER)
+function isDocOwnerSession(env, session, meta) {
+  const login = sessionLogin(session);
+  if (!login) return false;
+  const hostedLogin = hostedGithubLogin(meta);
+  if (hostedLogin) return hostedLogin === login;
+  return isOwnerSession(env, session);
 }
 
 // Normalize meta.access. `legacy` chooses defaults when the field is absent:
@@ -227,31 +245,31 @@ function applyAccessPatch(meta, patch) {
   return { meta: { ...meta, access: next }, access: next };
 }
 
-function isAllowlisted(access, session, env) {
-  if (isOwnerSession(env, session)) return true;
+function isAllowlisted(access, session, env, meta) {
+  if (isDocOwnerSession(env, session, meta)) return true;
   const login = sessionLogin(session);
   if (!login) return false;
   return (access.allowed_users || []).includes(login);
 }
 
-function canReadDoc(access, session, env) {
+function canReadDoc(access, session, env, meta) {
   if (access.visibility === 'public' || access.visibility === 'unlisted') return true;
-  return isAllowlisted(access, session, env);
+  return isAllowlisted(access, session, env, meta);
 }
 
-function canSeeHistory(access, session, env) {
+function canSeeHistory(access, session, env, meta) {
   if (access.history_visibility === 'public') return true;
-  if (access.history_visibility === 'invited') return isAllowlisted(access, session, env);
-  // owner — TDOC_OWNER only (not every allowlisted reviewer)
-  return isOwnerSession(env, session);
+  if (access.history_visibility === 'invited') return isAllowlisted(access, session, env, meta);
+  // owner — the doc publisher (hosted GitHub login) or TDOC_OWNER on legacy docs
+  return isDocOwnerSession(env, session, meta);
 }
 
-function canCommentOnDoc(access, session, env) {
+function canCommentOnDoc(access, session, env, meta) {
   if (access.commenting === 'off') return false;
   if (!sessionLogin(session)) return false;
   if (access.commenting === 'signed_in') return true;
-  if (access.commenting === 'owner') return isOwnerSession(env, session);
-  if (access.commenting === 'invited') return isAllowlisted(access, session, env);
+  if (access.commenting === 'owner') return isDocOwnerSession(env, session, meta);
+  if (access.commenting === 'invited') return isAllowlisted(access, session, env, meta);
   return false;
 }
 
@@ -292,7 +310,7 @@ async function enforceDocAccess(env, req, slug, version) {
   // No meta yet (orphan R2 object) — treat as public so legacy uploads still work.
   const access = accessFromMeta(meta || {});
   const session = await getSession(env, req);
-  if (canReadDoc(access, session, env)) {
+  if (canReadDoc(access, session, env, meta)) {
     return { ok: true, access, session, meta };
   }
   if (!sessionLogin(session)) {
@@ -1018,7 +1036,7 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog) {
   // The onboarding modal is product UI, so it ships from here under the page
   // nonce. The doc's own <script> would never run (#138), which is why the
   // landing CTA still carries a plain href: with scripting off the visitor
@@ -1030,10 +1048,15 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
+    // Hosted tdoc.dev: any signed-in GitHub user. BYOK: TDOC_OWNER only.
+    // Never fall back to isOwner — that hid My docs from hosted readers.
+    canSeeMyDocs: !!canSeeMyDocsFlag,
     // `/` is the site itself, not a doc someone published. The slug and the
     // version number are storage detail; printing them in the bar tells a
     // first-time visitor they are looking at somebody's document.
     isLanding: !!isLanding,
+    // /me catalog: same overlay bar, no Share / Duplicate / Copy.
+    isCatalog: !!isCatalog,
     // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
     // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
     ownerManage: isOwner ? (ownerManage || null) : null,
@@ -1080,14 +1103,14 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   let versions = [{ n: version, created: null }];
   try {
     const meta = gate.meta;
-    if (meta && Array.isArray(meta.versions) && canSeeHistory(gate.access, session, env)) {
+    if (meta && Array.isArray(meta.versions) && canSeeHistory(gate.access, session, env, meta)) {
       versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
     } else if (meta && Array.isArray(meta.versions)) {
       const hit = meta.versions.find(v => Number(v.n) === version);
       versions = [{ n: version, created: (hit && hit.created) || null }];
     }
   } catch {}
-  const isOwner = isOwnerSession(env, session);
+  const isOwner = isDocOwnerSession(env, session, gate.meta);
   // JUL-36: owner-only manage data (Delete / Unpublish / visibility switch),
   // computed fresh on THIS request and embedded only for the owner. A
   // non-owner's bootCfg carries `ownerManage: null` — the overlay's manage
@@ -1109,7 +1132,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   const nonce = rand(16);
   return {
     ok: true,
-    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding), {
+    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req))), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1224,14 +1247,14 @@ function authDoneHtml() {
 //     the right place to manage that doc, not a spreadsheet of every doc.
 //   - the admin-token field is gone because DELETE /api/doc now accepts the
 //     owner's session cookie (authorizeOwnerMutation) — safe because of the
-//     CSP set on every doc response (see cspHeader()). /me is only reachable
-//     by the signed-in owner in the first place (isOwnerSession gate in the
-//     route above), so its own fetches are already same-origin + cookied.
+//     CSP set on every doc response (see cspHeader()). /me is gated by
+//     canSeeMyDocs (hosted: any signed-in GitHub user; BYOK: TDOC_OWNER),
+//     so its own fetches are already same-origin + cookied.
 // What's left: title, slug, version, search, multi-select batch delete, and
 // a quiet ⋯ Delete. No access data of any kind is computed or emitted here
 // (gate: response HTML must not contain `allowed_users` — there is nothing
 // here that could).
-async function indexHtml(env, session) {
+async function indexHtml(env, session, origin, nonce) {
   // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
   // comment logs here — that was N serial Durable-Object + R2 round trips
   // per page load. Search + batch select are client-side over the rendered
@@ -1246,23 +1269,22 @@ async function indexHtml(env, session) {
     if (r.list_complete) break;
   } while (cursor);
 
-  const docs = await Promise.all(list.map(async (k) => {
+  const hosted = hostedRegistrationEnabled(env, origin);
+  const docs = (await Promise.all(list.map(async (k) => {
     const slug = k.name.slice('meta:'.length);
     const metaRaw = await env.META.get(k.name);
     let meta = {};
     try { meta = JSON.parse(metaRaw || '{}'); } catch {}
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
-    // Duplicates owned by another GitHub login must not appear on this
-    // worker-owner catalog (#146). Full per-user /me is #131; this only
-    // keeps other people's account copies off the operator list.
-    const hostedLogin = meta.hosted && typeof meta.hosted.github_login === 'string'
-      ? meta.hosted.github_login.trim().toLowerCase()
-      : '';
-    const viewer = sessionLogin(session);
-    if (hostedLogin && hostedLogin !== viewer) return null;
-    return { slug, title: meta.title || slug, latest };
-  }));
-  const visible = docs.filter(Boolean);
+    return { slug, title: meta.title || slug, latest, meta };
+  }))).filter((row) => {
+    if (hosted) return isDocOwnerSession(env, session, row.meta);
+    // BYOK operator catalog: keep other people's hosted copies off the list (#146).
+    const hostedLogin = hostedGithubLogin(row.meta);
+    if (hostedLogin && hostedLogin !== sessionLogin(session)) return false;
+    return true;
+  });
+  const visible = docs;
 
   const rows = visible.map(({ slug, title, latest }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">
       <label class="row-check">
@@ -1280,17 +1302,16 @@ async function indexHtml(env, session) {
       </div>
     </div>`);
 
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>tdoc</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My docs</title>
 <style>
   :root {
     --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
     --td-danger: #b42318; --td-danger-hover: #931c14; --td-danger-tint: #fdeceb; --td-ok: #087443;
     --td-ink: #111; --td-muted: #666; --td-line: #eee; --td-surface: #f7f7f7;
   }
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 680px; margin: 48px auto; padding: 0 20px; color: var(--td-ink); }
-  h1 { font-size: 28px; margin: 0 0 4px; color: var(--td-accent); }
-  .who { color: var(--td-muted); font-size: 13px; margin: 0 0 20px; }
-  .who b { color: #444; font-weight: 600; }
+  body { font: 15px system-ui, -apple-system, sans-serif; margin: 0; color: var(--td-ink); }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 24px 20px 48px; }
+  h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
   a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
@@ -1346,10 +1367,10 @@ async function indexHtml(env, session) {
   .row-menu[hidden] { display: none; }
   .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
   .row-delete:hover { background: var(--td-danger-tint); }
-  /* Styled confirm modal — replaces window.confirm() (JUL-36). Matches the
-     doc overlay's .tdoc-modal-bg/.tdoc-modal visual language; kept as a
-     standalone copy here since /me does not load overlay.js. */
-  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
+  /* Styled confirm modal — replaces window.confirm() (JUL-36). Overlay.js
+     supplies the site bar; this modal stays local because catalog delete
+     is not a document Share flow. */
+  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
   .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
   .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
   .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
@@ -1359,8 +1380,8 @@ async function indexHtml(env, session) {
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
 </style>
 </head><body>
+<div class="wrap">
 <div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
-<p class="who">${session && session.login ? `Signed in as <b>${escapeHtml(session.login)}</b>` : 'Your published docs'}.</p>
 ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how.</p>' :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
@@ -1371,6 +1392,8 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
   </div>
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
+</div>
+
 <div class="mk-bg" id="mk-bg" hidden>
   <div class="mk" role="dialog" aria-modal="true" aria-label="Create a doc">
     <div class="mk-hd"><strong>Create a doc</strong><button type="button" id="mk-x" aria-label="Close">&times;</button></div>
@@ -1387,8 +1410,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     <div class="mk-ft">Not set up yet? <a href="/start">Start here</a>.</div>
   </div>
 </div>
-
-<script>
+<script${nonce ? ` nonce="${nonce}"` : ''}>
   // Create-a-doc tutorial. /me cannot create anything — the doc is written by
   // the user's own agent — so this explains where creation actually happens.
   (function () {
@@ -1411,7 +1433,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     t.className = 'tdoc-toast';
     t.textContent = message;
     t.setAttribute('role', 'status');
-    t.style.cssText = 'position:fixed;top:18px;right:18px;z-index:2000;background:' +
+    t.style.cssText = 'position:fixed;top:62px;right:18px;z-index:1000001;background:' +
       (kind === 'error' ? '#b42318' : '#1652f0') +
       ';color:#fff;padding:12px 16px;border-radius:8px;font:14px system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.18)';
     document.body.appendChild(t);
@@ -2098,9 +2120,66 @@ async function sha256Hex(s) {
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function hostedRegistrationEnabled(env) {
-  const v = String(env.TDOC_HOSTED_REGISTRATION || env.TDOC_HOSTED_SIGNUP || '').toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes';
+function requestOrigin(reqOrUrl) {
+  if (typeof reqOrUrl === 'string') {
+    try { return new URL(reqOrUrl).origin; } catch { return ''; }
+  }
+  if (reqOrUrl && reqOrUrl.url) {
+    try { return new URL(reqOrUrl.url).origin; } catch { return ''; }
+  }
+  return '';
+}
+
+// Explicit 1/true/yes: on (wrangler dev). Explicit 0/false/no: off.
+// Unset: only the hosted product hostname (tdoc.dev) — BYOK stays single-owner.
+function hostedRegistrationEnabled(env, origin) {
+  const v = String((env && (env.TDOC_HOSTED_REGISTRATION || env.TDOC_HOSTED_SIGNUP)) || '').toLowerCase();
+  if (v === '1' || v === 'true' || v === 'yes') return true;
+  if (v === '0' || v === 'false' || v === 'no') return false;
+  return origin === 'https://tdoc.dev';
+}
+
+function canSeeMyDocs(env, session, origin) {
+  if (!sessionLogin(session)) return false;
+  if (hostedRegistrationEnabled(env, origin)) return true;
+  return isOwnerSession(env, session);
+}
+
+function hostedMaxDocs(env) {
+  const n = Number(env && env.TDOC_HOSTED_MAX_DOCS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 50;
+}
+
+function hostedMaxUploadBytes(env) {
+  const n = Number(env && env.TDOC_HOSTED_MAX_UPLOAD_BYTES);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2 * 1024 * 1024;
+}
+
+function utf8ByteLength(s) {
+  return new TextEncoder().encode(String(s || '')).byteLength;
+}
+
+async function countHostedDocs(env, accountId, stopAt) {
+  if (!accountId || !env.META) return 0;
+  let n = 0;
+  let cursor;
+  do {
+    const r = await env.META.list({ prefix: 'meta:', cursor });
+    for (const k of r.keys || []) {
+      let meta = null;
+      try {
+        const raw = await env.META.get(k.name);
+        if (raw) meta = JSON.parse(raw);
+      } catch {}
+      if (meta && meta.hosted && meta.hosted.account_id === accountId) {
+        n++;
+        if (stopAt && n >= stopAt) return n;
+      }
+    }
+    cursor = r.cursor;
+    if (r.list_complete) break;
+  } while (cursor);
+  return n;
 }
 
 function envFlagTrue(v) {
@@ -2115,7 +2194,7 @@ function envFlagTrue(v) {
 // signup (TDOC_HOSTED_REGISTRATION) remains a separate, closed switch.
 function hostedAccountCopiesEnabled(env, req) {
   if (envFlagTrue(env && env.TDOC_ACCOUNT_COPY)) return true;
-  if (hostedRegistrationEnabled(env)) return true;
+  if (hostedRegistrationEnabled(env, requestOrigin(req))) return true;
   try {
     const host = new URL(req.url).hostname.toLowerCase();
     return host === 'tdoc.dev' || host.endsWith('.tdoc.dev');
@@ -2137,24 +2216,36 @@ function nextDuplicateSlug(sourceSlug, n) {
 }
 
 async function hostedAccountForGithub(env, login) {
-  const norm = String(login || '').trim().toLowerCase();
+  const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
-  const key = `hosted-github:${norm}`;
+  const primary = `hosted-account:${norm}`;
+  const legacy = `hosted-github:${norm}`;
+  let rec = null;
   try {
-    const raw = await env.META.get(key);
-    if (raw) {
-      const rec = JSON.parse(raw);
-      if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
-    }
+    const raw = await env.META.get(primary);
+    if (raw) rec = JSON.parse(raw);
   } catch {}
-  const record = {
-    account_id: `acct_${rand(12)}`,
-    github_login: norm,
-    created: new Date().toISOString(),
-    source: 'duplicate',
-  };
-  await env.META.put(key, JSON.stringify(record));
-  return record;
+  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+    try {
+      const raw = await env.META.get(legacy);
+      if (raw) rec = JSON.parse(raw);
+    } catch {}
+  }
+  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+    rec = {
+      account_id: `acct_${rand(12)}`,
+      github_login: norm,
+      created: new Date().toISOString(),
+    };
+  } else {
+    rec = {
+      account_id: rec.account_id,
+      github_login: norm,
+      created: rec.created || new Date().toISOString(),
+    };
+  }
+  await env.META.put(primary, JSON.stringify(rec));
+  return rec;
 }
 
 async function sourceHasWidgets(env, slug, version) {
@@ -2167,10 +2258,17 @@ async function sourceHasWidgets(env, slug, version) {
 }
 
 async function issueHostedToken(env, body = {}) {
+  const github_login = normalizeGithubLogin(body.login);
+  if (!github_login) {
+    return { error: 'sign_in_required', status: 401 };
+  }
+  const account = await hostedAccountForGithub(env, github_login);
+  if (!account) return { error: 'sign_in_required', status: 401 };
   const token = `tdoc_${rand(24)}`;
   const tokenHash = await sha256Hex(token);
   const record = {
-    account_id: `acct_${rand(12)}`,
+    account_id: account.account_id,
+    github_login,
     created: new Date().toISOString(),
   };
   if (typeof body.label === 'string' && body.label.trim()) {
@@ -2189,7 +2287,8 @@ async function hostedTokenActor(env, token) {
     if (raw) record = JSON.parse(raw);
   } catch {}
   if (!record || typeof record.account_id !== 'string' || !record.account_id) return null;
-  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash };
+  const github_login = normalizeGithubLogin(record.github_login);
+  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash, github_login };
 }
 
 async function hostedOwnerOp(env, slug, op) {
@@ -2297,18 +2396,21 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
 
 function stampHostedOwnership(meta, actor) {
   if (!actor || actor.kind !== 'hosted') return meta;
+  const hosted = {
+    ...((meta && meta.hosted && typeof meta.hosted === 'object') ? meta.hosted : {}),
+    account_id: actor.account_id,
+  };
+  if (actor.github_login) hosted.github_login = actor.github_login;
   return {
     ...(meta || {}),
-    hosted: {
-      ...((meta && meta.hosted && typeof meta.hosted === 'object') ? meta.hosted : {}),
-      account_id: actor.account_id,
-    },
+    hosted,
   };
 }
 
 // Combined write gate for browser-facing admin routes (DELETE /api/doc,
 // PATCH /api/doc/access). One of:
-//   - signed in as TDOC_OWNER (session cookie; CSP makes this safe);
+//   - signed in as the doc publisher (hosted.github_login, or TDOC_OWNER on
+//     unhosted/legacy docs; CSP makes the cookie path safe);
 //   - provider-wide upload token (self-host CLI, global admin);
 //   - hosted account token AND requireDocWriteAccess for `slug`.
 //
@@ -2317,10 +2419,11 @@ function stampHostedOwnership(meta, actor) {
 // session, meta? } or { ok: false, response }.
 async function authorizeOwnerMutation(req, env, slug) {
   const session = await getSession(env, req);
-  if (isOwnerSession(env, session)) return { ok: true, session, actor: { kind: 'owner_session' } };
+  const meta = slug ? await loadDocMeta(env, slug) : null;
+  if (isDocOwnerSession(env, session, meta)) return { ok: true, session, actor: { kind: 'owner_session' }, meta };
   const auth = await requireUploadAuth(req, env);
   if (!auth.ok) return { ok: false, response: auth.response };
-  if (auth.actor.kind === 'admin') return { ok: true, session: null, actor: auth.actor };
+  if (auth.actor.kind === 'admin') return { ok: true, session: null, actor: auth.actor, meta };
   if (!slug) return { ok: false, response: json({ error: 'slug required' }, { status: 400 }) };
   const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
   if (!writeGate.ok) return writeGate;
@@ -2811,8 +2914,27 @@ export class CommentsStore {
   }
 }
 
+// Preview Worker (#148): KV has no bucket-level TTL. Cap every META write at
+// 14 days when TDOC_PREVIEW=1 so ghost meta cannot outlive the R2 lifecycle.
+const PREVIEW_KV_TTL_SECONDS = 14 * 24 * 60 * 60;
+function applyPreviewKvTtl(env) {
+  if (!env || env.TDOC_PREVIEW !== '1' || !env.META || env.META.__tdocPreviewTtl) return;
+  const inner = env.META.put.bind(env.META);
+  env.META.put = (key, value, extra) => {
+    const opts = extra ? { ...extra } : {};
+    if (opts.expirationTtl == null && opts.expiration == null) {
+      opts.expirationTtl = PREVIEW_KV_TTL_SECONDS;
+    } else if (typeof opts.expirationTtl === 'number') {
+      opts.expirationTtl = Math.min(opts.expirationTtl, PREVIEW_KV_TTL_SECONDS);
+    }
+    return inner(key, value, opts);
+  };
+  env.META.__tdocPreviewTtl = true;
+}
+
 export default {
   async fetch(req, env, ctx) {
+    applyPreviewKvTtl(env);
     const url = new URL(req.url);
     const p = url.pathname;
     const method = req.method;
@@ -2857,20 +2979,27 @@ export default {
       return html(authDoneHtml());
     }
 
-    // ---- owner-only doc catalog ----
-    // `/me` returns the list of every doc hosted on THIS worker, but only
-    // to the configured owner (TDOC_OWNER) when signed in. Everyone else
-    // is sent to the landing page (with a toast) — never to github.com.
+    // ---- owner catalog ----
+    // BYOK (registration off): `/me` lists every doc on THIS worker, but only
+    // for TDOC_OWNER. Hosted tdoc.dev (registration on): any signed-in GitHub
+    // user sees *their* slugs (meta.hosted.github_login). Everyone else is
+    // sent to the landing page (with a toast) — never to github.com, and
+    // never a public catalog.
     if (p === '/me' && method === 'GET') {
       const s = await getSession(env, req);
-      if (!isOwnerSession(env, s)) {
+      if (!canSeeMyDocs(env, s, url.origin)) {
         const notice = sessionLogin(s) ? 'me' : 'signin';
         return new Response(null, {
           status: 302,
           headers: { Location: `/?notice=${notice}` },
         });
       }
-      return html(await indexHtml(env, s));
+      const nonce = rand(16);
+      const page = await indexHtml(env, s, url.origin, nonce);
+      const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
+      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true), {
+        headers: { 'Content-Security-Policy': cspHeader(nonce) },
+      });
     }
 
     // ---- interactive island (sandboxed widget) ----
@@ -3073,7 +3202,19 @@ export default {
       if (!ownerCopy) {
         const acct = await hostedAccountForGithub(env, session.login);
         if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
-        actor = { kind: 'hosted', account_id: acct.account_id };
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+      }
+      if (actor.kind === 'hosted') {
+        const maxBytes = hostedMaxUploadBytes(env);
+        const size = utf8ByteLength(rawHtml);
+        if (size > maxBytes) {
+          return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
+        }
+        const limit = hostedMaxDocs(env);
+        const used = await countHostedDocs(env, actor.account_id, limit);
+        if (used >= limit) {
+          return json({ error: 'quota_docs', limit, used }, { status: 403 });
+        }
       }
 
       let newSlug = null;
@@ -3117,12 +3258,6 @@ export default {
         access: normalizeAccess({}, { legacy: false }),
       };
       incoming = stampHostedOwnership(incoming, actor);
-      if (actor.kind === 'hosted') {
-        incoming.hosted = {
-          ...(incoming.hosted || {}),
-          github_login: String(session.login).trim().toLowerCase(),
-        };
-      }
 
       const { html: stampedHtml } = stampAids(rawHtml);
       const r2Key = `docs/${newSlug}/v1/index.html`;
@@ -3144,7 +3279,8 @@ export default {
       const s = await getSession(env, req);
       return json({
         identity: s ? { login: s.login, avatar_url: s.avatar_url, name: s.name } : null,
-        isOwner: isOwnerSession(env, s),
+        isOwner: isOwnerSession(env, s), // worker operator; overlay must not clobber per-doc isOwner
+        canSeeMyDocs: canSeeMyDocs(env, s, url.origin),
         authConfigured: true,
       });
     }
@@ -3271,21 +3407,25 @@ export default {
     // ---- hosted publish token bootstrap ----
     // Hosted/OOB users should not create Cloudflare resources or receive the
     // provider-wide TDOC_UPLOAD_TOKEN. The central Worker mints an account-
-    // scoped upload token, and write routes enforce slug ownership for that
-    // token. Registration is provider-gated by env so tdoc.dev can stay
-    // closed without changing client code. Do not set TDOC_HOSTED_REGISTRATION
-    // on tdoc.dev until signup is intentionally opened.
+    // scoped upload token bound to the caller's GitHub login. Same login
+    // remints the same account_id so a lost ~/.tdoc/published.json is
+    // recoverable. Unset env: on for https://tdoc.dev only; explicit 0 disables.
     if (p === '/api/hosted/token' && method === 'POST') {
-      if (!hostedRegistrationEnabled(env)) {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
         return json({ error: 'hosted_registration_disabled' }, { status: 403 });
       }
+      const session = await getSession(env, req);
+      const login = sessionLogin(session);
+      if (!login) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
-      const issued = await issueHostedToken(env, body);
+      const issued = await issueHostedToken(env, { ...body, login });
+      if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       return json({
         ok: true,
         token: issued.token,
         account_id: issued.record.account_id,
+        github_login: issued.record.github_login,
         base: url.origin,
       });
     }
@@ -3320,8 +3460,8 @@ export default {
       {
         const meta = await loadDocMeta(env, slug);
         const access = accessFromMeta(meta || {});
-        if (!canReadDoc(access, s, env)) return json({ error: 'access_denied' }, { status: 403 });
-        if (!canCommentOnDoc(access, s, env)) return json({ error: 'commenting_disabled' }, { status: 403 });
+        if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+        if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
       }
       const author = { login: s.login, avatar_url: s.avatar_url, name: s.name };
       const created = new Date().toISOString();
@@ -3337,7 +3477,7 @@ export default {
         const meta = await loadDocMeta(env, slug);
         const title = (meta && meta.title) || slug;
         if (!parent_id) {
-          await deliverInbox(env, env.TDOC_OWNER, {
+          await deliverInbox(env, hostedGithubLogin(meta) || env.TDOC_OWNER, {
             kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
             actor: author, preview: commentText, title, at: created,
           });
@@ -3371,7 +3511,8 @@ export default {
       ensureMigrated(authList);
       const target = authList.find(c => c.id === id);
       if (!target) return json({ error: 'not_found' }, { status: 404 });
-      if (!canMutate(target, s, env)) return json({ error: 'not_author' }, { status: 403 });
+      const meta = await loadDocMeta(env, slug);
+      if (!canMutate(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const V = coerceBodyVersion(version, target.created_in || 1);
       const res = await mutateComments(env, slug, {
         kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: s.login },
@@ -3416,17 +3557,18 @@ export default {
       // is harmless (applyCommentOp returns 404).
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
+      const meta = await loadDocMeta(env, slug);
       let authorized = false;
       const top = authList.find(c => c.id === id);
       if (top) {
-        if (!canMutate(top, s, env)) return json({ error: 'not_author' }, { status: 403 });
+        if (!canMutate(top, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
         authorized = true;
       } else {
         for (const c of authList) {
           ensureEventLog(c);
           const reply = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
           if (reply) {
-            if (!canMutate(reply.reply, s, env)) return json({ error: 'not_author' }, { status: 403 });
+            if (!canMutate(reply.reply, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
             authorized = true;
             break;
           }
@@ -3557,6 +3699,20 @@ export default {
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
+      if (auth.actor && auth.actor.kind === 'hosted') {
+        const maxBytes = hostedMaxUploadBytes(env);
+        const size = utf8ByteLength(doc);
+        if (size > maxBytes) {
+          return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
+        }
+        if (!writeGate.meta) {
+          const limit = hostedMaxDocs(env);
+          const used = await countHostedDocs(env, auth.actor.account_id, limit);
+          if (used >= limit) {
+            return json({ error: 'quota_docs', limit, used }, { status: 403 });
+          }
+        }
+      }
       // Validate write-side access policy before writing doc bytes. Read paths
       // stay tolerant for legacy/corrupt stored meta; writes must fail closed.
       // Hosted claim happens AFTER this so a 400 cannot park the slug.

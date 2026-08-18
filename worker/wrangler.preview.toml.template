@@ -1,0 +1,33 @@
+# Preview Worker for PR published-chrome checks (#148).
+# Separate from production `tdoc` / tdoc.dev. Own KV + R2. No Durable Object
+# (Cloudflare will not mint preview URLs for a Worker that implements a DO).
+#
+# Materialize: replace PLACEHOLDER_PREVIEW_KV_ID, then:
+#   TDOC_PREVIEW=1 node bin/tdoc-bundle
+#   wrangler deploy -c worker/wrangler.preview.toml
+#
+# Do not bind tdoc-docs or the production META namespace.
+
+name = "tdoc-preview"
+main = "_worker.bundled.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+preview_urls = true
+
+[[r2_buckets]]
+binding = "DOCS"
+bucket_name = "tdoc-preview-docs"
+
+[[kv_namespaces]]
+binding = "META"
+id = "PLACEHOLDER_PREVIEW_KV_ID"
+
+[vars]
+GITHUB_CLIENT_ID = "Ov23liZ1UAGOchvKPmlS"
+TDOC_OWNER = ""
+# KV writes get a 14-day TTL in worker.js when this is "1".
+# R2 objects expire via the bucket lifecycle rule expire-preview-14d.
+TDOC_PREVIEW = "1"
+
+# Secret: TDOC_UPLOAD_TOKEN — preview-only; never the production token.
+# TDOC_HOSTED_REGISTRATION — leave unset.

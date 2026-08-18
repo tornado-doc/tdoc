@@ -7,7 +7,7 @@
 `tdoc` is a Claude Code skill that gives the user prompt-native HTML documents with text- and artifact-anchored comments. After install + onboarding, the user can:
 
 - `/tdoc new <prompt>` → generate a commentable HTML doc
-- `/tdoc publish <slug>` → publish (default target is hosted tdoc.dev; signup may be closed, so onboarding uses `--platform cloudflare` below)
+- `/tdoc publish <slug>` → publish (default target is hosted tdoc.dev; first publish signs in with GitHub)
 - Share the live URL; commenters sign in with GitHub
 
 Install + onboarding takes ~3 minutes on a clean machine. Most steps are automatic. The user only has to click ~2 things in a browser.
@@ -139,10 +139,10 @@ cat > ~/tdocs/$SLUG/meta.json <<EOF
 {"title":"Hello tdoc","slug":"$SLUG","versions":[{"n":1,"created":"$(date -Iseconds)"}]}
 EOF
 echo '[]' > ~/tdocs/$SLUG/comments.json
-# Publish to the user's own Cloudflare Worker. Hosted tdoc.dev is the
-# default for `/tdoc publish`, but self-serve signup is closed — use an
-# explicit self-host flag here.
-~/.claude/skills/tdoc/bin/tdoc-publish --platform cloudflare $SLUG
+# Publish to hosted tdoc.dev. First run signs in with GitHub Device Flow
+# (open the printed URL and enter the code), then uploads.
+# To self-host instead: --platform cloudflare or --platform vercel.
+~/.claude/skills/tdoc/bin/tdoc-publish $SLUG
 ```
 
 The script prints the live URL. Show it to the user.

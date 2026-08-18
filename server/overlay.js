@@ -31,8 +31,15 @@
   // embedded #tdoc-fork-comments JSON. No /api calls, no auth, no publish.
   // The original published slug is in cfg.originalSlug so we can label it.
   let identity = cfg.identity || null;
-  let isOwner = !!cfg.isOwner; // true only for the configured TDOC_OWNER
-  if (!slug) return;
+  let isOwner = !!cfg.isOwner; // true when this session owns THIS doc
+  // Worker sends this explicitly. Do not infer from isOwner — on hosted
+  // tdoc.dev a signed-in reader may not own the current doc and still has /me.
+  let canSeeMyDocs = !!cfg.canSeeMyDocs;
+  // /me catalog reuses this overlay for the bar (mark, theme, identity) and
+  // hides Share / Duplicate / Copy. No slug — it is not a document.
+  const isCatalog = !!cfg.isCatalog;
+  if (!slug && !isCatalog) return;
+  if (isCatalog) document.body.classList.add('tdoc-catalog');
 
   const HIGHLIGHT_API = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
 
@@ -123,7 +130,7 @@
      artifacts like transcript panes). UI chrome opts out explicitly via
      .tdoc-* selectors below. Media artifacts (img/svg/canvas/video) are
      non-selectable by their nature so they don't need an exception. */
-  body { padding-top: 44px !important; padding-bottom: 24px; -webkit-user-select: text; user-select: text; }
+  body { margin: 0; padding-bottom: 24px; -webkit-user-select: text; user-select: text; }
   body .tdoc-bar, body .tdoc-bar *, body #tdoc-comment-layer, body #tdoc-comment-layer *, body #tdoc-pin-layer, body #tdoc-pin-layer *, body .tdoc-cluster-pop, body .tdoc-cluster-pop *, body .tdoc-hover-outline, body .tdoc-comment-pill, body .tdoc-emoji-picker, body .tdoc-secondary-menu, body .tdoc-anchor-mark.tdoc-anchor-mark-element, body .tdoc-drag-marquee, body .tdoc-modal, body .tdoc-modal * { -webkit-user-select: none !important; user-select: none !important; }
   body .tdoc-modal .code, body .tdoc-modal textarea, body .tdoc-modal input { -webkit-user-select: text !important; user-select: text !important; }
   /* Comment pins/cards are provider chrome, not document layout. Keep the
@@ -284,25 +291,29 @@
   }
   /* TDOC_READER_CSS_END */
 
-  /* ========== Top bar (HackMD-inspired rhythm) ==========
-     Three groups: left breadcrumb (workspace + slug + version), center
-     doc title (truncates), right cluster (identity, primary CTA, more).
-     No borders on individual buttons — uses hover background instead, so
-     the bar reads as a clean strip rather than a row of chiclets.
-     Light theme to match the doc body. */
-  .tdoc-bar { position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
-  .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 1; }
-  .tdoc-bar-center { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; padding: 0 8px; }
-  .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  /* ========== Top bar ==========
+     Two groups, Google Docs / Notion style: left (logo + crumb + title)
+     and right (identity, primary CTA, more). The title is NOT viewport-
+     centered — left and right chrome are different widths, so a flex
+     "center" slot always looks off. Title truncates in the left group.
+     No borders on individual buttons — hover background instead. */
+  /* In document flow, not position:fixed: the bar occupies the top of the
+     layout so page HTML cannot scroll underneath a floating strip. */
+  .tdoc-bar { position: relative; width: 100%; height: 48px; box-sizing: border-box; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+  .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+  .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
 
-  /* Workspace mark — circular dot like HackMD's logo. Clicks → /. */
-  .tdoc-bar-mark { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--td-accent); color: #fff; font-weight: 700; font-size: 13px; letter-spacing: -0.01em; cursor: pointer; flex-shrink: 0; border: none; }
-  .tdoc-bar-mark:hover { background: var(--td-accent-hover); }
+  /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
+  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; }
+  .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
+  .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; color: #555; }
+  .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
+  .tdoc-bar .tdoc-github-btn svg { display: block; }
 
   /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
   .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-bar .crumb-sep { color: #c0c0c4; user-select: none; padding: 0 1px; }
-  .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
@@ -384,10 +395,9 @@
   /* Old-version strip — a thin, quiet bar just under the top bar shown when
      the viewer is on a non-latest version. Single-direction nudge: it only
      points forward to the latest version. Hidden by default; the bar-setup
-     code reveals it (and adds the body padding) only when version < latest. */
-  .tdoc-oldver-strip { display: none; position: fixed; top: 44px; left: 0; right: 0; height: 28px; background: #fbf6e9; color: #6b5e3a; border-bottom: 1px solid #efe6cd; font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; align-items: center; justify-content: center; gap: 6px; z-index: 999998; padding: 0 12px; }
+     code reveals it only when version < latest. In flow under the top bar. */
+  .tdoc-oldver-strip { display: none; position: relative; width: 100%; height: 28px; box-sizing: border-box; background: #fbf6e9; color: #6b5e3a; border-bottom: 1px solid #efe6cd; font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; align-items: center; justify-content: center; gap: 6px; z-index: 999998; padding: 0 12px; }
   body.tdoc-has-oldver-strip .tdoc-oldver-strip { display: flex; }
-  body.tdoc-has-oldver-strip { padding-top: 72px !important; }
   .tdoc-oldver-strip a { color: #8a6d1f; font-weight: 600; text-decoration: none; border-bottom: 1px solid currentColor; }
   .tdoc-oldver-strip a:hover { color: #6b5413; }
   /* Ghost marker — a faint horizontal line at the unanchored comment's
@@ -634,10 +644,10 @@
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
      stays elegant at every size.
-       ≥1100px: workspace · slug · v · | title | identity · share · ⋯
-       <1100px: workspace ·          v · | title | identity · share · ⋯  (slug hides)
-       < 900px: workspace ·          v · | title | avatar   · share · ⋯  (name hides)
-       < 700px: workspace             · | title |            share · ⋯  (version+identity into ⋯) */
+       ≥1100px: logo · slug · v · title ……………… identity · share · ⋯
+       <1100px: logo ·      · v · title ……………… identity · share · ⋯  (slug hides)
+       < 900px: logo ·      · v · title ……………… avatar   · share · ⋯  (name hides)
+       < 700px: logo ·          title ………………            share · ⋯  (version+identity into ⋯) */
   @media (max-width: 1100px) {
     .tdoc-bar .crumb-slug, .tdoc-bar .crumb-sep-slug { display: none; }
   }
@@ -718,9 +728,18 @@
      they look like negatives, but a chart or a simulation drawn in ink on a
      white field should go dark with everything else — otherwise it sits in a
      dark page as a glowing white slab. */
+  /* The site mark is a black-on-white PNG. Let it invert with the page
+     instead of restoring, or it becomes a white tile on the dark bar. */
+  html[data-tdoc-theme="dark"] .tdoc-bar-mark img { filter: none; }
   /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
      them in .tdoc-emoji so they get the same restore as photos. */
   .tdoc-emoji { display: inline-block; line-height: 1; }
+
+  /* /me catalog: overlay reader template would otherwise restyle the list. */
+  body.tdoc-catalog :where(body) { font-size: 15px; line-height: 1.5; }
+  body.tdoc-catalog :where(body h1) { font-size: 28px; line-height: 1.2; color: var(--td-accent); margin: 0 0 24px; letter-spacing: -0.01em; }
+  body.tdoc-catalog :where(body a) { text-decoration: none; }
+  body.tdoc-catalog :where(body a):hover { text-decoration: underline; }
 
   /* Footer */
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
@@ -775,7 +794,7 @@
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  // ========== Top bar (HackMD-style three-group layout) ==========
+  // ========== Top bar (left title + right actions) ==========
   const bar = document.createElement('div');
   bar.className = 'tdoc-bar';
 
@@ -783,17 +802,14 @@
   versions.sort((a, b) => (a.n || 0) - (b.n || 0));
   const slugCrumbLabel = isFork ? `fork of ${cfg.originalSlug || slug}` : slug;
 
-  // Left group: workspace mark + slug crumb + version picker.
-  //
-  // On the site homepage the crumb and the picker are dropped. `/` is the
-  // site, not a doc someone published: the slug it happens to be stored
-  // under and the version it happens to be on are our filing system, and
-  // printing them tells a first-time visitor they are reading somebody's
-  // document. The mark stays, and so does everything on the right, because
-  // the page really is a tdoc and you really can comment on it.
+  // Left group: site mark + slug crumb + version picker + title.
+  // Title lives here (not a fake viewport-center) because left and right
+  // chrome are different widths. `/` and `/me` drop crumb/picker/title —
+  // those pages already name themselves in the document.
+  const isSiteBar = !!(cfg.isLanding || isCatalog);
   const leftHtml = `
-    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc on GitHub" aria-label="tdoc on GitHub">tdoc</button>
-    ${cfg.isLanding ? '' : `
+    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc home" aria-label="tdoc home"><img src="/tdoc_logo.png" alt="" width="24" height="24"></button>
+    ${isSiteBar ? '' : `
     <span class="crumb crumb-slug" title="${escapeHtml(slugCrumbLabel)}">${escapeHtml(slugCrumbLabel)}</span>
     <span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>
     <div class="tdoc-version-wrap">
@@ -803,10 +819,8 @@
           ${versions.map(v => `<button role="option" data-version="${v.n}" class="${v.n === version ? 'current' : ''}">v${v.n}${v.n === version ? ' · current' : ''}</button>`).join('')}
         </div>
       ` : ''}
-    </div>`}`;
-
-  // Center: doc title (pulled from <title>). Hidden on very narrow.
-  const centerHtml = `<span class="doc-title" id="tdoc-title">tdoc</span>`;
+    </div>
+    <span class="doc-title" id="tdoc-title">tdoc</span>`}`;
 
   // Right: copy menu + primary CTA (Share or Publish) + ⋯ overflow + identity.
   const copyMenuHtml = `
@@ -850,12 +864,18 @@
       <svg class="tdoc-theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
     </button>`;
 
+  const githubBtnHtml = `
+    <a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="tdoc on GitHub" aria-label="tdoc on GitHub">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>`;
+
   const rightHtml = `
+    ${cfg.isLanding ? githubBtnHtml : ''}
     ${themeBtnHtml}
-    ${copyMenuHtml}
-    ${forkBtnHtml}
-    ${primaryCtaHtml}
-    ${isPublished || isFork ? `<div class="tdoc-menu-wrap">
+    ${isSiteBar ? '' : copyMenuHtml}
+    ${isSiteBar ? '' : forkBtnHtml}
+    ${isSiteBar ? '' : primaryCtaHtml}
+    ${!isSiteBar && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
         ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
@@ -866,10 +886,9 @@
 
   bar.innerHTML = `
     <div class="tdoc-bar-left">${leftHtml}</div>
-    <div class="tdoc-bar-center">${centerHtml}</div>
     <div class="tdoc-bar-right">${rightHtml}</div>
   `;
-  document.body.appendChild(bar);
+  document.body.insertBefore(bar, document.body.firstChild);
 
   // Old-version strip — a quiet, single-direction nudge shown only when a
   // published viewer is looking at a non-latest version. `versions` is already
@@ -882,7 +901,7 @@
       strip.className = 'tdoc-oldver-strip';
       const latestUrl = `/d/${encodeURIComponent(slug)}/v/${latestVersion}`;
       strip.innerHTML = `<span>You're viewing v${version} — the latest is <a href="${latestUrl}">v${latestVersion}</a></span>`;
-      document.body.appendChild(strip);
+      bar.insertAdjacentElement('afterend', strip);
       document.body.classList.add('tdoc-has-oldver-strip');
     }
   }
@@ -890,23 +909,23 @@
   // Re-anchor banner — shown while a re-anchor action is in flight. Three
   // explicit actions to avoid the gesture conflict (clicking empty space
   // would otherwise be ambiguous with "deselect").
-  const reanchorBanner = document.createElement('div');
-  reanchorBanner.className = 'tdoc-reanchor-banner';
-  reanchorBanner.innerHTML = `
+  if (!isCatalog) {
+    const reanchorBanner = document.createElement('div');
+    reanchorBanner.className = 'tdoc-reanchor-banner';
+    reanchorBanner.innerHTML = `
     <span class="label">Select text to move anchor</span>
     <button type="button" id="tdoc-reanchor-remove">Remove anchor</button>
     <button type="button" id="tdoc-reanchor-cancel" class="danger">Cancel</button>
   `;
-  document.body.appendChild(reanchorBanner);
+    document.body.appendChild(reanchorBanner);
+  }
 
   const titleEl = document.querySelector('title');
-  if (titleEl && titleEl.textContent) document.getElementById('tdoc-title').textContent = titleEl.textContent;
+  const barTitle = document.getElementById('tdoc-title');
+  if (barTitle && titleEl && titleEl.textContent) barTitle.textContent = titleEl.textContent;
 
-  // Workspace mark in the bar's left → the open-source project. There is
-  // no public catalog; the owner reaches their doc list via the profile
-  // chip menu instead.
-  document.getElementById('tdoc-bar-mark').onclick = () =>
-    window.open('https://github.com/tornado-doc/tdoc', '_blank', 'noopener');
+  // Site mark → home. GitHub lives in its own icon on `/`.
+  document.getElementById('tdoc-bar-mark').onclick = () => { location.href = '/'; };
 
   paintTheme(currentTheme());
   document.getElementById('tdoc-theme-btn').onclick = () => {
@@ -915,7 +934,8 @@
     paintTheme(next);
   };
 
-  // Duplicate = hosted account copy. Download = HTML file or PDF snapshot.
+  // Duplicate = hosted account copy. Download HTML = /export file.
+  // Download PDF = print the export (browser Save as PDF), not a JPEG wrap.
   let pendingDuplicate = false;
   function downloadExport() {
     const a = document.createElement('a');
@@ -925,140 +945,13 @@
     a.click();
     a.remove();
   }
-  function utf8Bytes(s) { return new TextEncoder().encode(s); }
-  function concatBytes(parts) {
-    const len = parts.reduce((n, p) => n + p.length, 0);
-    const out = new Uint8Array(len);
-    let o = 0;
-    for (const p of parts) { out.set(p, o); o += p.length; }
-    return out;
-  }
-  function jpegPagesToPdf(pages) {
-    const PW = 612, PH = 792, M = 36;
-    const innerW = PW - 2 * M, innerH = PH - 2 * M;
-    const parts = [];
-    const offsets = [0];
-    let size = 0;
-    function add(chunk) {
-      if (typeof chunk === 'string') chunk = utf8Bytes(chunk);
-      parts.push(chunk);
-      size += chunk.length;
-    }
-    function addObj(body, stream) {
-      offsets.push(size);
-      add(body);
-      if (stream) {
-        add('stream\n');
-        add(stream);
-        add('endstream\nendobj\n');
-      }
-    }
-    add('%PDF-1.4\n');
-    const pageIds = [];
-    let obj = 3;
-    const pageMeta = [];
-    for (const p of pages) {
-      const scale = Math.min(innerW / p.width, innerH / p.height);
-      const dw = p.width * scale, dh = p.height * scale;
-      const x = M + (innerW - dw) / 2;
-      const y = PH - M - dh;
-      pageMeta.push({ pageId: obj, contentId: obj + 1, imageId: obj + 2, dw, dh, x, y, p });
-      pageIds.push(obj);
-      obj += 3;
-    }
-    addObj('1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n');
-    addObj(`2 0 obj << /Type /Pages /Kids [${pageIds.map((id) => id + ' 0 R').join(' ')}] /Count ${pages.length} >> endobj\n`);
-    for (const m of pageMeta) {
-      addObj(`${m.pageId} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im${m.imageId} ${m.imageId} 0 R >> >> /Contents ${m.contentId} 0 R >> endobj\n`);
-      const content = `q ${m.dw.toFixed(2)} 0 0 ${m.dh.toFixed(2)} ${m.x.toFixed(2)} ${m.y.toFixed(2)} cm /Im${m.imageId} Do Q\n`;
-      addObj(`${m.contentId} 0 obj << /Length ${content.length} >>\n`, utf8Bytes(content));
-      addObj(`${m.imageId} 0 obj << /Type /XObject /Subtype /Image /Width ${m.p.width} /Height ${m.p.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${m.p.jpeg.length} >>\n`, m.p.jpeg);
-    }
-    const xrefAt = size;
-    add(`xref\n0 ${obj}\n0000000000 65535 f \n`);
-    for (let i = 1; i < obj; i++) {
-      add(String(offsets[i]).padStart(10, '0') + ' 00000 n \n');
-    }
-    add(`trailer << /Size ${obj} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`);
-    return new Blob([concatBytes(parts)], { type: 'application/pdf' });
-  }
-  function paintTextNode(ctx, node, ox, oy, sliceTop, sliceH) {
-    const text = node.textContent;
-    if (!text || !/\S/.test(text)) return;
-    const parent = node.parentElement;
-    if (!parent) return;
-    const view = parent.ownerDocument.defaultView;
-    const st = view.getComputedStyle(parent);
-    if (st.visibility === 'hidden') return;
-    ctx.fillStyle = st.color || '#111';
-    ctx.font = st.font;
-    ctx.textBaseline = 'top';
-    let i = 0;
-    while (i < text.length) {
-      while (i < text.length && text[i] === '\n') i++;
-      if (i >= text.length) break;
-      const range = node.ownerDocument.createRange();
-      range.setStart(node, i);
-      range.setEnd(node, i + 1);
-      const first = range.getBoundingClientRect();
-      let end = i + 1;
-      while (end < text.length && text[end] !== '\n') {
-        range.setEnd(node, end + 1);
-        const r = range.getBoundingClientRect();
-        if (Math.abs(r.top - first.top) > 1) break;
-        end++;
-      }
-      range.setEnd(node, end);
-      const r = range.getBoundingClientRect();
-      if (r.bottom > sliceTop && r.top < sliceTop + sliceH) {
-        ctx.fillText(text.slice(i, end), r.left - ox, r.top - oy);
-      }
-      i = end;
-    }
-  }
-  function paintElement(ctx, el, ox, oy, sliceTop, sliceH) {
-    const tag = el.tagName;
-    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return;
-    const view = el.ownerDocument.defaultView;
-    const st = view.getComputedStyle(el);
-    if (st.display === 'none' || st.visibility === 'hidden') return;
-    const r = el.getBoundingClientRect();
-    if (r.bottom < sliceTop || r.top > sliceTop + sliceH) {
-      if (!el.children.length) return;
-    }
-    const bg = st.backgroundColor;
-    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-      ctx.fillStyle = bg;
-      ctx.fillRect(r.left - ox, r.top - oy, r.width, r.height);
-    }
-    const bw = parseFloat(st.borderTopWidth) || 0;
-    if (bw > 0 && st.borderTopStyle !== 'none') {
-      ctx.strokeStyle = st.borderTopColor || '#ddd';
-      ctx.lineWidth = bw;
-      ctx.strokeRect(r.left - ox + bw / 2, r.top - oy + bw / 2, Math.max(0, r.width - bw), Math.max(0, r.height - bw));
-    }
-    if ((tag === 'IMG' || tag === 'CANVAS') && r.width && r.height) {
-      try { ctx.drawImage(el, r.left - ox, r.top - oy, r.width, r.height); } catch (e) { /* tainted */ }
-    }
-    if (tag === 'RECT' || tag === 'rect') {
-      const fill = el.getAttribute('fill');
-      if (fill && fill !== 'none') {
-        ctx.fillStyle = fill;
-        ctx.fillRect(r.left - ox, r.top - oy, r.width, r.height);
-      }
-      return;
-    }
-    for (const child of el.childNodes) {
-      if (child.nodeType === 3) paintTextNode(ctx, child, ox, oy, sliceTop, sliceH);
-      else if (child.nodeType === 1) paintElement(ctx, child, ox, oy, sliceTop, sliceH);
-    }
-  }
   async function downloadPdf() {
     const src = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=0`;
     const iframe = document.createElement('iframe');
-    iframe.setAttribute('title', 'tdoc pdf snapshot');
-    iframe.style.cssText = 'position:fixed;left:-12000px;top:0;width:800px;height:1200px;border:0;opacity:0;pointer-events:none;';
+    iframe.setAttribute('title', 'Print');
+    iframe.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:100vh;border:0;opacity:0;pointer-events:none;';
     document.body.appendChild(iframe);
+    const drop = () => { if (iframe.parentNode) iframe.remove(); };
     try {
       await new Promise((resolve, reject) => {
         iframe.onload = resolve;
@@ -1067,43 +960,18 @@
         setTimeout(() => reject(new Error('pdf export timed out')), 20000);
       });
       const doc = iframe.contentDocument;
-      if (!doc || !doc.body) throw new Error('empty export');
+      const win = iframe.contentWindow;
+      if (!doc || !win || !doc.body) throw new Error('empty export');
+      doc.title = `${slug}-v${version}`;
       await Promise.all([...doc.images].map((img) => img.decode ? img.decode().catch(() => {}) : Promise.resolve()));
-      const fullH = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1);
-      iframe.style.height = fullH + 'px';
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const width = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth, 720);
-      const height = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1);
-      const innerW = 540, innerH = 720;
-      const sliceH = Math.max(1, Math.round(width * innerH / innerW));
-      const origin = doc.documentElement.getBoundingClientRect();
-      const pages = [];
-      for (let y = 0; y < height; y += sliceH) {
-        const h = Math.min(sliceH, height - y);
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, width, h);
-        paintElement(ctx, doc.body, origin.left, origin.top + y, y, h);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        const bin = atob(dataUrl.split(',')[1]);
-        const jpeg = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) jpeg[i] = bin.charCodeAt(i);
-        pages.push({ width, height: h, jpeg });
-      }
-      const blob = jpegPagesToPdf(pages);
-      const a = document.createElement('a');
-      const blobUrl = URL.createObjectURL(blob);
-      a.href = blobUrl;
-      a.download = `${slug}-v${version}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
-    } finally {
-      iframe.remove();
+      win.addEventListener('afterprint', drop, { once: true });
+      setTimeout(drop, 120000);
+      win.focus();
+      win.print();
+    } catch (e) {
+      drop();
+      throw e;
     }
   }
   async function startDownload(format) {
@@ -1247,19 +1115,21 @@
 
   const copyBtn = document.getElementById('tdoc-copy-md-btn');
   const copyMenu = document.getElementById('tdoc-copy-md-menu');
-  copyBtn.onclick = (e) => {
-    e.stopPropagation();
-    copyMenu.classList.toggle('open');
-    if (dlMenu) dlMenu.classList.remove('open');
-    if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
-  };
-  copyMenu.querySelectorAll('button').forEach(b => {
-    b.onclick = async (e) => {
+  if (copyBtn && copyMenu) {
+    copyBtn.onclick = (e) => {
       e.stopPropagation();
-      copyMenu.classList.remove('open');
-      await window.__tdocCopyDocMd(b.dataset.mode === 'doc-comments');
+      copyMenu.classList.toggle('open');
+      if (dlMenu) dlMenu.classList.remove('open');
+      if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
     };
-  });
+    copyMenu.querySelectorAll('button').forEach(b => {
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        copyMenu.classList.remove('open');
+        await window.__tdocCopyDocMd(b.dataset.mode === 'doc-comments');
+      };
+    });
+  }
 
   const moreBtn = document.getElementById('tdoc-more-btn');
   const secMenu = document.getElementById('tdoc-secondary-menu');
@@ -1476,7 +1346,7 @@
           </button>
           <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
             <button id="tdoc-inbox-open" role="menuitem">${escapeHtml(inboxMenuLabel(inboxUnreadN))}</button>
-            ${isOwner ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
+            ${canSeeMyDocs && !isCatalog ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
             <button id="tdoc-signout" role="menuitem">Sign out</button>
           </div>
         </div>`;
@@ -1488,7 +1358,7 @@
         meBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       };
       document.getElementById('tdoc-inbox-open').onclick = () => { meMenu.classList.remove('open'); showInboxPanel(); };
-      if (isOwner) {
+      if (canSeeMyDocs && !isCatalog) {
         document.getElementById('tdoc-my-docs').onclick = () => {
           window.open('/me', '_blank', 'noopener');
         };
@@ -1497,11 +1367,12 @@
         await fetch('/api/auth/logout', { method: 'POST' });
         identity = null;
         isOwner = false;
+        canSeeMyDocs = false;
         inboxUnreadN = 0;
         inboxSig = '';
         stopInboxPoll();
         renderIdentity();
-        refreshComments();
+        if (!isCatalog) refreshComments();
       };
       tickInbox();
       startInboxPoll();
@@ -1513,6 +1384,22 @@
     }
   }
   renderIdentity();
+
+  // Catalog (/me): bar + identity only. Comment pins, FAB, and selection
+  // are document chrome and would fetch /api/comments for a fake slug.
+  if (isCatalog) {
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!t || t.nodeType !== 1) return;
+      if (!t.closest('#tdoc-me') && !t.closest('#tdoc-me-menu')) {
+        const mm = document.getElementById('tdoc-me-menu');
+        const mb = document.getElementById('tdoc-me');
+        if (mm) mm.classList.remove('open');
+        if (mb) mb.setAttribute('aria-expanded', 'false');
+      }
+    });
+    return;
+  }
 
   // ========== Comment layer + FAB ==========
   const commentLayer = document.createElement('div');
@@ -2910,11 +2797,13 @@
   document.addEventListener('tdoc:signedin', function (e) {
     if (!e.detail) return;
     identity = e.detail;
-    fetch('/api/auth/me', { credentials: 'same-origin' })
-      .then(function (x) { return x.json(); })
-      .then(function (me) { if (me && typeof me.isOwner === 'boolean') isOwner = me.isOwner; })
-      .catch(function () {})
-      .then(function () { renderIdentity(); refreshComments(); });
+    // Deliberately not refreshing isOwner here: since #162 it means "owns THIS
+    // doc" and the worker sends it explicitly, so inferring it from
+    // /api/auth/me would put the worker-owner sense back on a per-doc field.
+    // canSeeMyDocs is the flag that governs the My docs entry.
+    if (e.detail.canSeeMyDocs != null) canSeeMyDocs = !!e.detail.canSeeMyDocs;
+    renderIdentity();
+    refreshComments();
   });
 
   // Sign-in lives in server/signin.js, shared with the neutral landing page so
@@ -2930,12 +2819,6 @@
       return;  // cancelled
     }
     identity = ident;
-    // The page may have booted signed-out, so isOwner is stale. Refresh it or
-    // "My docs" stays hidden until a full reload.
-    try {
-      const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((x) => x.json());
-      if (me && typeof me.isOwner === 'boolean') isOwner = me.isOwner;
-    } catch { /* keep bootCfg isOwner */ }
     renderIdentity();
     refreshComments();
     if (pendingDuplicate) {
@@ -3044,7 +2927,7 @@
   // the single Share button (showShareModal dispatches here when
   // cfg.ownerManage is set). Gated on cfg.ownerManage, which the worker only
   // populates in the per-request boot config when THIS request's session
-  // passed isOwnerSession() server-side (worker.js's /d/ route). A
+  // passed isDocOwnerSession() server-side (worker.js's /d/ route). A
   // non-owner's config carries cfg.ownerManage === null — every function
   // below bails before creating any DOM, so there is no hidden button, just
   // nothing rendered for them.

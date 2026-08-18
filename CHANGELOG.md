@@ -8,12 +8,18 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Hosted tdoc.dev is multi-tenant.** GitHub sign-in mints a recoverable
+  account-scoped upload token (`POST /api/hosted/token`). `/me` lists that
+  user's slugs (`meta.hosted.github_login`), not the Worker operator's dump.
+  Per-account doc quota (default 50) and upload-size cap (default 2 MB).
+  tdoc.dev enables signup by hostname; BYOK Workers stay single-owner unless
+  `TDOC_HOSTED_REGISTRATION` is set. `#131` `#154`.
 - **Duplicate vs Download on published docs.** The published bar no longer
   uses **Fork** (which only downloaded a file). **Duplicate** makes a
   content-only account copy for the signed-in GitHub user on tdoc.dev
   (self-host: worker owner only). **Download** is one control with **Download
   HTML** (`slug-vN.html`, reader CSS inlined) and **Download PDF**
-  (`slug-vN.pdf`, a paginated snapshot of the reading column). No comments,
+  (browser print of that reading column — Save as PDF, real text). No comments,
   history, or widget islands in v1.
 
 - **Sandboxed interactive widgets.** Author JS still does not run in the host
@@ -25,9 +31,22 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **Overlay top bar sits in document flow** instead of `position: fixed`.
+  Page HTML no longer scrolls underneath a floating strip; the bar (and the
+  old-version strip) occupy the top of the layout.
+- **Site chrome on `/` and `/me` is no longer a document toolbar.** The
+  bar title is gone (those pages already have an h1). `/` keeps the
+  tdoc logo, a GitHub icon, appearance, and sign-in. The mark is the same
+  logo as the favicon, not a text pill.
+- **Doc title sits in the left cluster**, after the logo and version, not
+  in a fake-centered middle slot. Left and right chrome are different
+  widths, so a flex "center" never looked viewport-centered. Google Docs
+  and Notion keep the title on the left.
+
 - **Default `/tdoc publish` target is hosted tdoc.dev** (Cloudflare/Vercel via
-  `--platform`). Closed signup fails clearly and points at self-host flags;
-  onboarding’s sample publish uses `--platform cloudflare`.
+  `--platform`). First hosted publish runs GitHub Device Flow, then mints a
+  token bound to that login. Closed signup on a host that left registration
+  unset still fails clearly and points at self-host flags.
 - **`--platform` after first setup switches for real.** A conflicting flag
   rewrites `~/.tdoc/published.json` via full re-setup (previous config kept as
   `published.json.bak.switch` and restored if setup fails). Cloudflare setup
@@ -36,6 +55,9 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Download PDF uses the browser print engine.** The JPEG-page wrap was
+  ~100 DPI and looked mushy. PDF now prints `/export` (reader CSS, no bar)
+  so Save as PDF keeps vector text.
 - **tdoc.dev homepage publish no longer dies on a present-but-unwritten token.**
   `#129` merged and deployed the Worker, then `publish-landing.yml` got
   `401 unauthorized` because `TDOC_DEV_UPLOAD_TOKEN` existed in GitHub

@@ -384,11 +384,12 @@ t('doc view and homepage share one render path', () => {
   assert(occurrences === 1, `injectOverlay(raw, ...) called ${occurrences} times; expected exactly 1 shared call site`);
 });
 
-t('homepage bar drops the slug crumb and the version picker', () => {
+t('homepage bar is site chrome, not a document toolbar', () => {
   // `/` is the site, not a doc someone published. Printing the storage slug
   // ("tornado-doc") and the version it happens to be on tells a first-time
   // visitor they are reading somebody else's document. The /d/ route keeps
-  // both — same render path, one flag.
+  // both — same render path, one flag. Share / Copy / Duplicate and the
+  // document title are document chrome; `/` keeps GitHub + sign-in + theme.
   const fn = worker.match(/async function landingResponse[\s\S]*?\n}\n/);
   assert(fn, 'landingResponse not found');
   // `slug` rather than LANDING_SLUG: /start renders through the same helper
@@ -400,10 +401,22 @@ t('homepage bar drops the slug crumb and the version picker', () => {
   const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
   const left = overlay.match(/const leftHtml = `[\s\S]*?`;\n/);
   assert(left, 'overlay leftHtml block not found');
-  assert(/cfg\.isLanding \? '' :/.test(left[0]),
+  assert(/isSiteBar \? '' :/.test(left[0]),
     'overlay still renders the slug crumb and version picker on the homepage');
-  assert(/tdoc-bar-mark/.test(left[0].split('cfg.isLanding')[0]),
+  assert(/tdoc-bar-mark/.test(left[0].split('isSiteBar')[0]),
     'the tdoc mark must stay outside the landing conditional');
+  assert(/tdoc_logo\.png/.test(left[0]),
+    'the mark must be the tdoc logo, not a text pill');
+  assert(/tdoc-title/.test(left[0]) && /isSiteBar \? '' :/.test(left[0]),
+    'homepage bar must not repeat the page title');
+  assert(!overlay.includes('tdoc-bar-center'),
+    'title must sit in the left cluster, not a fake-centered slot');
+  assert(overlay.includes("${cfg.isLanding ? githubBtnHtml : ''}"),
+    'homepage bar must expose a GitHub icon');
+  assert(overlay.includes("${isSiteBar ? '' : copyMenuHtml}"),
+    'homepage bar must drop Copy');
+  assert(overlay.includes("${isSiteBar ? '' : primaryCtaHtml}"),
+    'homepage bar must drop Share');
 
   // Share on `/` must copy the canonical homepage, not /d/tornado-doc/v/N.
   const shareFn = overlay.match(/function publicShareUrl\(\) \{[\s\S]*?\n  \}/);
@@ -524,8 +537,13 @@ t('shipping the homepage ships content, not just worker code', () => {
   // gate, wrong slug). Green must mean the homepage actually renders.
   assert(/is still serving the neutral fallback/.test(content),
     'publish workflow must fail when tdoc.dev/ falls back to the neutral page');
-  assert(/\[\[ "\$body" == \*'A doc that answers its own comments'\*/.test(content),
+  assert(/\[\[ "\$home" == \*'A doc that answers its own comments'\*/.test(content),
     'homepage verify must use bash [[ ]], not echo|grep -q under pipefail');
+  // The homepage links to /start. Shipping one without the other leaves that
+  // link on the neutral fallback, which reads as "the tour does not exist".
+  assert(/upload tdoc-start/.test(content), 'the tutorial is never uploaded to tdoc.dev');
+  assert(/"\$tour" == \*'Everything tdoc does'\*/.test(content),
+    'a green run must mean /start renders too, not just the homepage');
   assert(!/echo "\$body" \| grep -q/.test(content),
     'echo|grep -q SIGPIPEs on a 300kB landing page and fails a successful ship');
   // First merge: the live worker does not yet have landingResponse. A

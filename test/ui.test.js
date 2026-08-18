@@ -55,6 +55,21 @@ async function tPub(name, fn) {
     await page.waitForSelector('.tdoc-bar', { timeout: 5000 });
   });
 
+  await t('top bar occupies layout instead of floating over the document', async () => {
+    const info = await page.evaluate(() => {
+      const bar = document.querySelector('.tdoc-bar');
+      const cs = getComputedStyle(bar);
+      return {
+        position: cs.position,
+        firstChildIsBar: document.body.firstElementChild === bar,
+      };
+    });
+    if (info.position === 'fixed' || info.position === 'sticky') {
+      throw new Error(`bar must be in document flow, got position:${info.position}`);
+    }
+    if (!info.firstChildIsBar) throw new Error('bar must be the first body element');
+  });
+
   await t('Dark mode switch is in the top bar', async () => {
     const btn = await page.$('#tdoc-theme-btn');
     if (!btn) throw new Error('no #tdoc-theme-btn');
