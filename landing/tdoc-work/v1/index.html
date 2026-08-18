@@ -141,41 +141,34 @@
     .sfx { color:#a0a0a6; font-size:9px; opacity:0; flex:none; }
     .sft.on .sfx { opacity:1; }
     @media (max-width:640px) { .sfnm { font-size:11.5px; } .sft { padding:6px 8px; } .sfx { display:none; } }
-    .uc-panel { display:none; }
-    /* Untouched, the window cycles through all four use cases, six seconds
-       each — one demo on a loop only ever sells one use case. The moment a
-       tab is clicked the rotation stops and stays where it was put. Pure CSS,
-       because a published tdoc runs no author JS: display switches at
-       discrete keyframes, and :has() turns the whole thing off. */
-    @keyframes cyc1 { 0%,24.99% { display:block } 25%,100% { display:none } }
-    @keyframes cyc2 { 0%,24.99% { display:none } 25%,49.99% { display:block } 50%,100% { display:none } }
-    @keyframes cyc3 { 0%,49.99% { display:none } 50%,74.99% { display:block } 75%,100% { display:none } }
-    @keyframes cyc4 { 0%,74.99% { display:none } 75%,100% { display:block } }
+    /* All four stack in one grid cell, so the container is as tall as the
+       tallest and nothing has to be positioned absolutely. Rotation animates
+       opacity and visibility, which animate reliably — `display` in keyframes
+       did not apply here and left every panel hidden. */
+    .uc-panels { display:grid; }
+    .uc-panel { grid-area:1 / 1; opacity:0; visibility:hidden; }
+    /* Untouched, the window cycles all four, six seconds each: one demo on a
+       loop only ever sells one use case. Clicking a tab stops it where it was
+       put. Pure CSS, because a published tdoc runs no author JS of its own. */
+    @keyframes cyc1 { 0%,23% { opacity:1; visibility:visible } 25%,98% { opacity:0; visibility:hidden } 100% { opacity:1; visibility:visible } }
+    @keyframes cyc2 { 0%,23% { opacity:0; visibility:hidden } 25%,48% { opacity:1; visibility:visible } 50%,100% { opacity:0; visibility:hidden } }
+    @keyframes cyc3 { 0%,48% { opacity:0; visibility:hidden } 50%,73% { opacity:1; visibility:visible } 75%,100% { opacity:0; visibility:hidden } }
+    @keyframes cyc4 { 0%,73% { opacity:0; visibility:hidden } 75%,98% { opacity:1; visibility:visible } 100% { opacity:0; visibility:hidden } }
     .usecases:not(:has(input:checked)) .p-rep { animation:cyc1 24s infinite; }
     .usecases:not(:has(input:checked)) .p-res { animation:cyc2 24s infinite; }
     .usecases:not(:has(input:checked)) .p-des { animation:cyc3 24s infinite; }
     .usecases:not(:has(input:checked)) .p-inc { animation:cyc4 24s infinite; }
-    /* No :has() support: show the first rather than nothing at all. */
-    @supports not selector(:has(*)) { .p-rep { display:block; } }
-    @media (prefers-reduced-motion: reduce) {
-      .usecases .uc-panel { animation:none !important; }
-      .usecases:not(:has(input:checked)) .p-rep { display:block; }
-    }
-    #uc-rep:checked ~ .uc-tabs label[for="uc-rep"],
-    #uc-res:checked ~ .uc-tabs label[for="uc-res"],
-    #uc-des:checked ~ .uc-tabs label[for="uc-des"],
-    #uc-inc:checked ~ .uc-tabs label[for="uc-inc"] { background:var(--accent); border-color:var(--accent); color:#fff; }
+    /* Clicking pins one and cancels the rotation. */
     #uc-rep:checked ~ .uc-panels .p-rep,
     #uc-res:checked ~ .uc-panels .p-res,
     #uc-des:checked ~ .uc-panels .p-des,
-    #uc-inc:checked ~ .uc-panels .p-inc { display:block; }
-    /* A report does not stop where the frame does. Cap the stage and clip,
-       so it reads as a screenshot of something longer rather than a short
-       page with dead space under it. */
-    .stage { max-height:560px; overflow:hidden; position:relative; }
-    .stage:after { content:""; position:absolute; left:0; right:0; bottom:0; height:64px;
-      background:linear-gradient(transparent,#fff); pointer-events:none; }
-    @media (max-width:700px) { .stage { max-height:520px; } }
+    #uc-inc:checked ~ .uc-panels .p-inc { opacity:1; visibility:visible; animation:none; }
+    /* No :has() support, or motion turned down: show the first, do not rotate. */
+    @supports not selector(:has(*)) { .p-rep { opacity:1; visibility:visible; } }
+    @media (prefers-reduced-motion: reduce) {
+      .usecases .uc-panel { animation:none !important; }
+      .usecases:not(:has(input:checked)) .p-rep { opacity:1; visibility:visible; }
+    }
     .uc-note { margin:14px 0 0; text-align:center; color:var(--muted); font-size:13.5px; }
     /* The artifact frame is wide and short on a desk, tall and narrow on a
        phone, or the chart inside gets 135px of height and clips. */
