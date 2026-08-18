@@ -2904,8 +2904,27 @@ export class CommentsStore {
   }
 }
 
+// Preview Worker (#148): KV has no bucket-level TTL. Cap every META write at
+// 14 days when TDOC_PREVIEW=1 so ghost meta cannot outlive the R2 lifecycle.
+const PREVIEW_KV_TTL_SECONDS = 14 * 24 * 60 * 60;
+function applyPreviewKvTtl(env) {
+  if (!env || env.TDOC_PREVIEW !== '1' || !env.META || env.META.__tdocPreviewTtl) return;
+  const inner = env.META.put.bind(env.META);
+  env.META.put = (key, value, extra) => {
+    const opts = extra ? { ...extra } : {};
+    if (opts.expirationTtl == null && opts.expiration == null) {
+      opts.expirationTtl = PREVIEW_KV_TTL_SECONDS;
+    } else if (typeof opts.expirationTtl === 'number') {
+      opts.expirationTtl = Math.min(opts.expirationTtl, PREVIEW_KV_TTL_SECONDS);
+    }
+    return inner(key, value, opts);
+  };
+  env.META.__tdocPreviewTtl = true;
+}
+
 export default {
   async fetch(req, env, ctx) {
+    applyPreviewKvTtl(env);
     const url = new URL(req.url);
     const p = url.pathname;
     const method = req.method;
