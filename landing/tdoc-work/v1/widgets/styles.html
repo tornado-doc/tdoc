@@ -1,0 +1,68 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Style options</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff;font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10121a;overflow:hidden}
+  body{padding:13px 15px 14px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
+  .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+  .ttl{font-size:13px;font-weight:650;letter-spacing:-.01em}
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:2px 9px;
+    font-size:11px;font-weight:700;color:#1a7340;background:#e8f5ed;border:1px solid #cfe0d6}
+  .pulse{width:6px;height:6px;background:#1a7340;animation:pl 2s ease-in-out infinite}
+  @keyframes pl{0%,100%{opacity:1}50%{opacity:.35}}
+  @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+  .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+  .src{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;
+    background:#f5f6f8;border:1px solid #e5e5e5;font-size:11px;color:#5b6070}
+  .src b{width:7px;height:7px;display:inline-block}
+  .card{flex:1;min-height:0;padding:13px;border:1px solid #e0b93a;box-shadow:0 0 0 3px #fff2b8;background:#fff;overflow:hidden}
+  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#767c8b;flex-wrap:wrap}
+ /* Three real renders, not screenshots of three renders. Each option is the
+    actual type, weight and fill it is proposing, so picking one is picking
+    what you can already see. */
+ .live{color:#5b4bbf;background:#efecfd;border-color:#d9d2f7}
+ .pulse{background:#5b4bbf}
+ .card{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
+ .opt{display:flex;flex-direction:column;min-width:0;border:1px solid #e4e7ee;background:#fff;cursor:pointer}
+ .opt[aria-pressed=true]{border-color:#10121a;box-shadow:inset 0 0 0 1px #10121a}
+ .oh{display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #f0f1f4;flex:none}
+ .ok{font-size:10px;font-weight:800;letter-spacing:.08em;color:#8e939f}
+ .on{font-size:11px;color:#5b6070;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .pick{margin-left:auto;font-size:9.5px;font-weight:700;color:#fff;background:#10121a;padding:1px 5px;display:none;flex:none}
+ .opt[aria-pressed=true] .pick{display:block}
+ .rn{flex:1;min-height:0;padding:11px 10px;display:flex;flex-direction:column;justify-content:center;gap:5px;overflow:hidden}
+ /* A — quiet */
+ .a .eyebrow{font-size:8.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#8e939f}
+ .a .h{font:600 17px/1.15 system-ui,-apple-system,sans-serif;color:#10121a;letter-spacing:-.02em}
+ .a .sub{font-size:10px;color:#767c8b}
+ /* B — loud */
+ .b .h{font:800 26px/.95 system-ui,-apple-system,sans-serif;letter-spacing:-.045em;color:#1652f0}
+ .b .sub{font-size:10px;color:#5b6070;font-weight:500}
+ /* C — editorial */
+ .c .h{font:400 20px/1.1 Georgia,"Times New Roman",serif;color:#10121a;letter-spacing:-.01em}
+ .c .rule{height:1px;background:#10121a;width:26px}
+ .c .sub{font:italic 10px/1.4 Georgia,serif;color:#767c8b}
+ @media (max-width:430px){ .card{grid-template-columns:1fr;gap:7px} .rn{padding:8px} .b .h{font-size:20px} }
+</style></head><body>
+<div class="hd"><span class="ttl">Pricing header &middot; three treatments</span><span class="live"><span class="pulse"></span>Click to pick</span></div>
+<div class="srcs"><span class="src"><b style="background:#10121a"></b>Same copy</span><span class="src"><b style="background:#8e939f"></b>Same layout</span><span class="src"><b style="background:#1652f0"></b>Type, weight, fill differ</span></div>
+<div class="card" id="k">
+  <button class="opt a" type="button" aria-pressed="false">
+    <span class="oh"><span class="ok">A</span><span class="on">Quiet</span><span class="pick">PICKED</span></span>
+    <span class="rn"><span class="eyebrow">Pricing</span><span class="h">Pay for what you ship</span><span class="sub">Per seat, monthly</span></span>
+  </button>
+  <button class="opt b" type="button" aria-pressed="true">
+    <span class="oh"><span class="ok">B</span><span class="on">Loud</span><span class="pick">PICKED</span></span>
+    <span class="rn"><span class="h">Pay for what you ship</span><span class="sub">Per seat, monthly</span></span>
+  </button>
+  <button class="opt c" type="button" aria-pressed="false">
+    <span class="oh"><span class="ok">C</span><span class="on">Editorial</span><span class="pick">PICKED</span></span>
+    <span class="rn"><span class="h">Pay for what you ship</span><span class="rule"></span><span class="sub">Per seat, monthly</span></span>
+  </button>
+</div>
+<div class="foot"><span>Pick one and the agent applies it across the page</span><span>Awaiting your call</span></div>
+<script>
+document.getElementById('k').addEventListener('click',function(e){
+  var b=e.target.closest('.opt'); if(!b) return;
+  [].forEach.call(this.children,function(x){x.setAttribute('aria-pressed',String(x===b))});
+});
+</script>
+</body></html>

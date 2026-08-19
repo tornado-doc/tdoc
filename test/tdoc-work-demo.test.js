@@ -143,8 +143,11 @@ t('the stage is cropped like a screenshot', () => {
   // ends early and leaves dead space under a short column — and this rule has
   // already been deleted once by an unrelated rewrite of the block it used to
   // sit in, with nothing to catch it.
-  assert(/\.stage \{[^}]*max-height:585px/.test(work), 'the stage is no longer capped');
-  assert(/\.stage:after \{[^}]*linear-gradient\(transparent,#fff\)/.test(work),
+  assert(/\.stage-doc \{[^}]*max-height:585px/.test(work), 'the document column is no longer capped');
+  // The thread must never be the thing that gets cut.
+  assert(!/\.stage \{[^}]*max-height/.test(work),
+    'capping .stage crops the comment card too; cap .stage-doc instead');
+  assert(/\.stage-doc:after \{[^}]*linear-gradient\(transparent,#fff\)/.test(work),
     'the crop needs a fade, or it looks like the content simply stops');
   assert(/max-height:526\.5px/.test(work), 'no shorter cap on narrow screens');
 });

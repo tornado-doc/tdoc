@@ -1,0 +1,47 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Competitors</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff;font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10121a;overflow:hidden}
+  body{padding:13px 15px 14px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
+  .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+  .ttl{font-size:13px;font-weight:650;letter-spacing:-.01em}
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:2px 9px;
+    font-size:11px;font-weight:700;color:#1a7340;background:#e8f5ed;border:1px solid #cfe0d6}
+  .pulse{width:6px;height:6px;background:#1a7340;animation:pl 2s ease-in-out infinite}
+  @keyframes pl{0%,100%{opacity:1}50%{opacity:.35}}
+  @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+  .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+  .src{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;
+    background:#f5f6f8;border:1px solid #e5e5e5;font-size:11px;color:#5b6070}
+  .src b{width:7px;height:7px;display:inline-block}
+  .card{flex:1;min-height:0;padding:13px;border:1px solid #e0b93a;box-shadow:0 0 0 3px #fff2b8;background:#fff;overflow:hidden}
+  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#767c8b;flex-wrap:wrap}
+ table{width:100%;border-collapse:collapse}
+ th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    color:#8e939f;padding:0 10px 7px 0;border-bottom:1px solid #e4e7ee;white-space:nowrap}
+ th.n,td.n{text-align:right;padding-right:0;padding-left:18px}
+ th.ctx{font-size:9.5px}
+ td{padding:6px 10px 6px 0;border-bottom:1px solid #f0f1f4}
+ .ch{display:flex;align-items:center;gap:7px;font-size:12px;color:#454a58;white-space:nowrap}
+ .sw{width:8px;height:8px;flex:none}
+ .srccell{font-size:11px;color:#9aa0aa;white-space:nowrap}
+ .n{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#10121a;white-space:nowrap}
+ .big{font-size:14px;font-weight:600}
+ .up{color:#1a7340}.dn{color:#c3452f}.win{color:#1a7340}
+ @media (max-width:430px){ th.ctx:nth-child(2),td.srccell{display:none} th,td{font-size:11px} }
+</style></head><body>
+<div class="hd"><span class="ttl">Traffic and pricing by competitor</span><span class="live"><span class="pulse"></span>Live &middot; every 6 h</span></div>
+<div class="srcs"><span class="src"><b style="background:#3291ff"></b>SimilarWeb</span><span class="src"><b style="background:#ef4444"></b>G2</span><span class="src"><b style="background:#f59e0b"></b>Crunchbase</span><span class="src"><b style="background:#0a66c2"></b>LinkedIn</span></div>
+<div class="card">
+<table>
+ <thead><tr><th class="ctx">Competitor</th><th class="ctx">Segment</th><th class="n">Visits / mo</th><th class="n">vs Q2</th><th class="n">Entry price</th></tr></thead>
+ <tbody>
+  <tr><td class="ch"><span class="sw" style="background:#1652f0"></span>Lumen</td><td class="srccell">Direct</td><td class="n big">412K</td><td class="n up">+18%</td><td class="n big">$24</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#7a5bd6"></span>Parallel</td><td class="srccell">Direct</td><td class="n big">268K</td><td class="n up">+7%</td><td class="n big">$18</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#D97757"></span>Corva</td><td class="srccell">Direct</td><td class="n big">190K</td><td class="n dn">&#8722;11%</td><td class="n big">$39</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#1a7340"></span>Junction</td><td class="srccell">Adjacent</td><td class="n big">96K</td><td class="n up">+64%</td><td class="n big win">Free</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#767c8b"></span>Kite</td><td class="srccell">Adjacent</td><td class="n big">41K</td><td class="n up">+9%</td><td class="n big">$12</td></tr>
+ </tbody>
+</table>
+</div>
+<div class="foot"><span>1.01M visits tracked &middot; 1 Jul &ndash; 28 Sep</span><span>Updated 4 h ago</span></div>
+</body></html>

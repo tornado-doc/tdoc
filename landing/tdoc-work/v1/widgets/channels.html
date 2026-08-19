@@ -4,7 +4,7 @@
      card is clipped rather than scrollable — an artifact in a doc is a view
      onto data, not a pane you drag around. */
   html,body{margin:0;height:100%;background:#fff;font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10121a;overflow:hidden}
-  body{padding:13px 14px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
+  body{padding:13px 15px 14px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
   .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
   .ttl{font-size:13px;font-weight:650;letter-spacing:-.01em}
   .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:2px 9px;
@@ -16,7 +16,7 @@
   .src{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;
     background:#f5f6f8;border:1px solid #e5e5e5;font-size:11px;color:#5b6070}
   .src b{width:7px;height:7px;display:inline-block}
-  .card{flex:1;min-height:0;padding:13px;border:1px solid #e4e7ee;background:#fff;overflow:hidden}
+  .card{flex:1;min-height:0;padding:13px;border:1px solid #e0b93a;box-shadow:0 0 0 3px #fff2b8;background:#fff;overflow:hidden}
   .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#767c8b;flex-wrap:wrap}
  No animation. A growth table does not need to move to be read, and a bar
     that grows on every loop is a distraction from the number beside it. */
@@ -45,18 +45,38 @@
    th,td{font-size:12px}
  }
  .srcline{display:none}
+
+ table{width:100%;border-collapse:collapse}
+ th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    color:#8e939f;padding:0 10px 7px 0;border-bottom:1px solid #e4e7ee;white-space:nowrap}
+ th.n,td.n{text-align:right;padding-right:0;padding-left:18px}
+ th.ctx{font-size:9.5px}
+ td{padding:6px 10px 6px 0;border-bottom:1px solid #f0f1f4}
+ .ch{display:flex;align-items:center;gap:7px;font-size:12px;color:#454a58;white-space:nowrap}
+ .sw{width:8px;height:8px;flex:none}
+ .srccell{font-size:11px;color:#9aa0aa;white-space:nowrap}
+ .n{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:#10121a;white-space:nowrap}
+ .big{font-size:14px;font-weight:600}
+ .up{color:#1a7340}.dn{color:#c3452f}.warn{color:#c3452f}
+ th.n:last-child,td.n:last-child{width:1%}
+ @media (max-width:430px){ th.ctx:nth-child(2),td.srccell{display:none} th,td{font-size:11px} }
 </style></head><body>
 <div class="hd"><span class="ttl">Signups by channel</span><span class="live"><span class="pulse"></span>Live · every 5 min</span></div>
 <div class="srcs"><span class="src"><b style="background:#f59e0b"></b>Google Analytics</span><span class="src"><b style="background:#3291ff"></b>Meta Ads</span><span class="src"><b style="background:#ef4444"></b>HubSpot</span><span class="src"><b style="background:#8b5cf6"></b>Stripe</span></div>
-<div class="card"><table>
- <thead><tr><th>Channel</th><th>Source</th><th class="n">Signups</th><th class="n">vs Q2</th><th class="n">CAC</th></tr></thead>
+<div class="card">
+<table>
+ <thead><tr>
+   <th class="ctx">Channel</th><th class="ctx">Source</th>
+   <th class="n">Signups</th><th class="n">vs Q2</th><th class="n">Cost per signup</th>
+ </tr></thead>
  <tbody>
-  <tr><td class="ch"><span class="sw" style="background:#1652f0"></span>Referral<span class="srcline">Google Analytics</span></td><td class="srccell">Google Analytics</td><td class="n">4,182</td><td class="n up">+9 pts</td><td class="n">$11</td></tr>
-  <tr><td class="ch"><span class="sw" style="background:#1a7340"></span>Organic<span class="srcline">Search Console</span></td><td class="srccell">Search Console</td><td class="n">3,196</td><td class="n up">+2 pts</td><td class="n">$4</td></tr>
-  <tr><td class="ch"><span class="sw" style="background:#D97757"></span>Paid social<span class="srcline">Meta Ads</span></td><td class="srccell">Meta Ads</td><td class="n">2,336</td><td class="n dn">−4 pts</td><td class="n">$63</td></tr>
-  <tr><td class="ch"><span class="sw" style="background:#7a5bd6"></span>Partnerships<span class="srcline">HubSpot</span></td><td class="srccell">HubSpot</td><td class="n">1,598</td><td class="n up">+1 pt</td><td class="n">$19</td></tr>
-  <tr><td class="ch"><span class="sw" style="background:#767c8b"></span>Direct<span class="srcline">Google Analytics</span></td><td class="srccell">Google Analytics</td><td class="n">983</td><td class="n dn">−1 pt</td><td class="n">—</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#1652f0"></span>Referral</td><td class="srccell">Google Analytics</td><td class="n big">4,182</td><td class="n up">+34%</td><td class="n big">$11</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#1a7340"></span>Organic</td><td class="srccell">Search Console</td><td class="n big">3,196</td><td class="n up">+12%</td><td class="n big">$4</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#D97757"></span>Paid social</td><td class="srccell">Meta Ads</td><td class="n big">2,336</td><td class="n dn">−18%</td><td class="n big warn">$63</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#7a5bd6"></span>Partnerships</td><td class="srccell">HubSpot</td><td class="n big">1,598</td><td class="n up">+8%</td><td class="n big">$19</td></tr>
+  <tr><td class="ch"><span class="sw" style="background:#767c8b"></span>Direct</td><td class="srccell">Google Analytics</td><td class="n big">983</td><td class="n dn">−3%</td><td class="n">—</td></tr>
  </tbody>
-</table></div>
+</table>
+</div>
 <div class="foot"><span>12,295 signups · 1 Jul – 28 Sep</span><span>Updated 2 min ago</span></div>
 </body></html>

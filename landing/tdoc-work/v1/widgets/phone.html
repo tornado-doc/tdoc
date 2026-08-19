@@ -1,0 +1,82 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Context phone mock</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff;font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10121a;overflow:hidden}
+  body{padding:13px 15px 14px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
+  .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+  .ttl{font-size:13px;font-weight:650;letter-spacing:-.01em}
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:2px 9px;
+    font-size:11px;font-weight:700;color:#1a7340;background:#e8f5ed;border:1px solid #cfe0d6}
+  .pulse{width:6px;height:6px;background:#1a7340;animation:pl 2s ease-in-out infinite}
+  @keyframes pl{0%,100%{opacity:1}50%{opacity:.35}}
+  @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+  .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+  .src{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;
+    background:#f5f6f8;border:1px solid #e5e5e5;font-size:11px;color:#5b6070}
+  .src b{width:7px;height:7px;display:inline-block}
+  .card{flex:1;min-height:0;padding:13px;border:1px solid #e0b93a;box-shadow:0 0 0 3px #fff2b8;background:#fff;overflow:hidden}
+  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#767c8b;flex-wrap:wrap}
+ /* A design-doc figure, not a dashboard: the badge says mock, because
+    nothing here is live data and labelling it Live would be a lie. */
+ .live{color:#5b4bbf;background:#efecfd;border-color:#d9d2f7}
+ .pulse{background:#5b4bbf}
+ .card{display:flex;gap:16px;align-items:stretch}
+ .ph{flex:none;width:106px;border:2px solid #10121a;border-radius:13px;background:#0e1016;
+   display:flex;flex-direction:column;padding:6px 6px 7px;box-sizing:border-box;color:#fff}
+ .notch{width:34px;height:4px;background:#3a3f4d;border-radius:3px;margin:0 auto 6px}
+ .callr{font-size:11px;font-weight:700;line-height:1.25}
+ .callo{font-size:9px;color:#9aa0b4;margin-bottom:6px}
+ .ctx{background:#1b1f2b;border-left:2px solid #64b5f6;padding:5px 6px;font-size:8.5px;
+   line-height:1.4;color:#d6dae6;margin-bottom:auto}
+ .ctx b{color:#fff;font-weight:650}
+ .keys{display:flex;gap:6px;margin-top:7px}
+ .key{flex:1;height:17px;border-radius:9px;display:grid;place-items:center;font-size:8px;font-weight:700}
+ .no{background:#c3452f}.yes{background:#1a7340}
+ .rt{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+ .rtt{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#8e939f}
+ .fed{display:flex;align-items:baseline;gap:7px;font-size:11.5px;color:#454a58;
+   padding-bottom:5px;border-bottom:1px solid #f0f1f4}
+ .fed b{color:#10121a;font-weight:600;flex:none}
+ .fed i{margin-left:auto;font-style:normal;font-size:10.5px;color:#9aa0aa;flex:none}
+ .states{display:flex;gap:5px;margin-top:auto}
+ .st{flex:1;text-align:center;padding:4px 2px;border:1px solid #e4e7ee;background:#fff;
+   font:11px system-ui,-apple-system,sans-serif;color:#5b6070;cursor:pointer}
+ .st[aria-pressed=true]{background:#10121a;border-color:#10121a;color:#fff;font-weight:600}
+</style></head><body>
+<div class="hd"><span class="ttl">Context phone &middot; call screen</span><span class="live"><span class="pulse"></span>Interactive mock</span></div>
+<div class="srcs"><span class="src"><b style="background:#ef4444"></b>HubSpot</span><span class="src"><b style="background:#3291ff"></b>Gmail</span><span class="src"><b style="background:#10b981"></b>Slack</span><span class="src"><b style="background:#f59e0b"></b>Calendar</span></div>
+<div class="card">
+  <div class="ph">
+    <div class="notch"></div>
+    <div class="callr" id="cr">Dana Ruiz</div>
+    <div class="callo" id="co">Northwind &middot; mobile</div>
+    <div class="ctx" id="cx"><b>Pricing thread open.</b> Last spoke 12 Aug. Asked for a 3-seat quote.</div>
+    <div class="keys" id="kb"><span class="key no">Decline</span><span class="key yes">Answer</span></div>
+  </div>
+  <div class="rt">
+    <div class="rtt">What fills the card</div>
+    <div class="fed"><b>Who</b> account owner, stage <i>HubSpot</i></div>
+    <div class="fed"><b>History</b> last thread, 12 Aug <i>Gmail</i></div>
+    <div class="fed"><b>Intent</b> open ask in #deals <i>Slack</i></div>
+    <div class="states" id="sw">
+      <button class="st" type="button" aria-pressed="true" data-s="0">Before ring</button>
+      <button class="st" type="button" aria-pressed="false" data-s="1">In call</button>
+      <button class="st" type="button" aria-pressed="false" data-s="2">After</button>
+    </div>
+  </div>
+</div>
+<div class="foot"><span>Assembled before the second ring &middot; ~1.2s budget</span><span>Mock v5</span></div>
+<script>
+// The three states a caller actually passes through. The card is populated
+// before the first ring, which is the whole argument of the doc.
+var S=[{r:'Dana Ruiz',o:'Northwind · incoming',c:'<b>Pricing thread open.</b> Last spoke 12 Aug. Asked for a 3-seat quote.',k:1},
+       {r:'Dana Ruiz',o:'Northwind · 04:12',c:'<b>She asked about seats.</b> Current plan caps at 3. Upgrade path is $18/seat.',k:0},
+       {r:'Call ended',o:'Northwind · 6m 41s',c:'<b>Logged to HubSpot.</b> Follow-up drafted in Gmail, waiting for your send.',k:0}];
+var cr=document.getElementById('cr'),co=document.getElementById('co'),cx=document.getElementById('cx'),kb=document.getElementById('kb');
+document.getElementById('sw').addEventListener('click',function(e){
+  var b=e.target.closest('.st'); if(!b) return;
+  [].forEach.call(this.children,function(x){x.setAttribute('aria-pressed',String(x===b))});
+  var s=S[+b.dataset.s]; cr.textContent=s.r; co.innerHTML=s.o; cx.innerHTML=s.c;
+  kb.style.visibility=s.k?'visible':'hidden';
+});
+</script>
+</body></html>
