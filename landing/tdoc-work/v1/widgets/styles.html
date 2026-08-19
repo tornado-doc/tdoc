@@ -6,8 +6,8 @@
   .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
   .ttl{font-size:14px;font-weight:600;letter-spacing:-.012em}
   .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:3px 9px;
-    font-size:11px;font-weight:600;color:#8A5230;background:#F6EAE2;border:1px solid #EBD7C9}
-  .pulse{width:6px;height:6px;border-radius:50%;background:#D97757;animation:pl 2s ease-in-out infinite}
+    font-size:11px;font-weight:600;color:#1246CC;background:#EEF3FF;border:1px solid #D6E2FF}
+  .pulse{width:6px;height:6px;border-radius:50%;background:#1652f0;animation:pl 2s ease-in-out infinite}
   @keyframes pl{0%,100%{opacity:1}50%{opacity:.3}}
   @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
   .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
@@ -20,11 +20,13 @@
   .card{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;padding:12px}
   .opt{display:flex;flex-direction:column;min-width:0;border:1px solid #E5E2D8;
     background:#FCFBF7;cursor:pointer;text-align:left;padding:0;overflow:hidden}
-  .opt[aria-pressed=true]{border-color:#D97757;box-shadow:0 0 0 1px #D97757;background:#fff}
+  .opt[aria-pressed=true]{border-color:#1652f0;box-shadow:0 0 0 1px #1652f0;background:#fff}
+  .opt:hover{border-color:#B9C6E8;background:#fff}
+  .opt:hover .oh{background:#F5F8FF}
   .oh{display:flex;align-items:center;gap:6px;padding:6px 9px;border-bottom:1px solid #EFEDE5;flex:none}
   .ok{font-size:9.5px;font-weight:800;letter-spacing:.08em;color:#B0ABA3;flex:none}
   .on{font-size:10.5px;color:#5F5C55;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  .pick{margin-left:auto;font-size:8.5px;font-weight:700;color:#fff;background:#D97757;
+  .pick{margin-left:auto;font-size:8.5px;font-weight:700;color:#fff;background:#1652f0;
     padding:1px 4px;display:none;flex:none;letter-spacing:.03em}
   .opt[aria-pressed=true] .pick{display:block}
   .rn{flex:1;min-height:0;padding:12px 11px;display:flex;flex-direction:column;
@@ -33,15 +35,15 @@
   .h2{font-size:12.5px;font-weight:650;line-height:1.2;color:#1F1E1D}
   .h3{font-size:10.5px;font-weight:600;color:#3D3A34}
   .bd{font-size:10.5px;line-height:1.45;color:#6B6862}
-  .fa .h1,.fa .h2,.fa .h3{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
-  .fb .h1,.fb .h2,.fb .h3{font-family:Georgia,"Times New Roman",serif;letter-spacing:-.005em}
-  .fc .h1,.fc .h2,.fc .h3{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.03em}
+  .fa .h1,.fa .h2,.fa .h3{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.03em}
+  .fb .h1,.fb .h2,.fb .h3{font-family:Georgia,"Iowan Old Style","Times New Roman",serif;letter-spacing:-.005em}
+  .fc .h1,.fc .h2,.fc .h3{font-family:"Bradley Hand","Segoe Script","Brush Script MT",cursive;letter-spacing:0}
   .rn .bd{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
   @media (max-width:430px){.card{grid-template-columns:1fr;gap:7px;padding:9px}
    .h1{font-size:15px}.h2,.h3,.bd{display:none}.rn{padding:8px 9px;justify-content:center}}
 </style></head><body>
 <div class="hd"><span class="ttl">Type &middot; three options</span><span class="live"><span class="pulse"></span>Click to pick</span></div>
-<div class="card"><button class="opt fa" type="button" aria-pressed="false"><span class="oh"><span class="ok">A</span><span class="on">Sans throughout</span><span class="pick">PICKED</span></span><span class="rn"><span class="h1">Pay for what you ship</span><span class="h2">Plans and pricing</span><span class="h3">Per seat, monthly</span><span class="bd">Body copy stays the same.</span></span></button><button class="opt fb" type="button" aria-pressed="true"><span class="oh"><span class="ok">B</span><span class="on">Serif headings</span><span class="pick">PICKED</span></span><span class="rn"><span class="h1">Pay for what you ship</span><span class="h2">Plans and pricing</span><span class="h3">Per seat, monthly</span><span class="bd">Body copy stays the same.</span></span></button><button class="opt fc" type="button" aria-pressed="false"><span class="oh"><span class="ok">C</span><span class="on">Mono headings</span><span class="pick">PICKED</span></span><span class="rn"><span class="h1">Pay for what you ship</span><span class="h2">Plans and pricing</span><span class="h3">Per seat, monthly</span><span class="bd">Body copy stays the same.</span></span></button></div>
+<div class="card"><button class="opt fa" type="button" aria-pressed="false"><span class="oh"><span class="ok">A</span><span class="on">Monospace</span><span class="pick">PICKED</span></span><span class="rn"><span class="h1">Pay for what you ship</span><span class="h2">Plans and pricing</span><span class="h3">Per seat, monthly</span><span class="bd">Body copy stays the same.</span></span></button><button class="opt fb" type="button" aria-pressed="true"><span class="oh"><span class="ok">B</span><span class="on">Serif</span><span class="pick">PICKED</span></span><span class="rn"><span class="h1">Pay for what you ship</span><span class="h2">Plans and pricing</span><span class="h3">Per seat, monthly</span><span class="bd">Body copy stays the same.</span></span></button><button class="opt fc" type="button" aria-pressed="false"><span class="oh"><span class="ok">C</span><span class="on">Handwriting</span><span class="pick">PICKED</span></span><span class="rn"><span class="h1">Pay for what you ship</span><span class="h2">Plans and pricing</span><span class="h3">Per seat, monthly</span><span class="bd">Body copy stays the same.</span></span></button></div>
 <div class="foot"><span>Headings change, body stays the same</span><span>Awaiting your call</span></div>
 <script>
 document.querySelector('.card').addEventListener('click',function(e){
