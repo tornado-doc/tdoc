@@ -5,47 +5,51 @@
   body{padding:15px 17px 16px;display:flex;flex-direction:column;gap:11px;box-sizing:border-box}
   .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
   .ttl{font-size:14px;font-weight:600;letter-spacing:-.012em}
-  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:3px 9px;border-radius:6px;
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:3px 9px;
     font-size:11px;font-weight:600;color:#8A5230;background:#F6EAE2;border:1px solid #EBD7C9}
   .pulse{width:6px;height:6px;border-radius:50%;background:#D97757;animation:pl 2s ease-in-out infinite}
   @keyframes pl{0%,100%{opacity:1}50%{opacity:.3}}
   @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
   .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
-  .src{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;
+  .src{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
     background:#F2F0E9;border:1px solid #E5E2D8;font-size:11px;color:#5F5C55}
   .src svg{width:13px;height:13px;display:block;flex:none}
-  .card{flex:1;min-height:0;padding:14px;border-radius:8px;background:#fff;
+  .card{flex:1;min-height:0;padding:14px;background:#fff;
     border:1px solid #E0B96E;box-shadow:0 0 0 3px #FAEFD2;overflow:hidden}
+  .src i{font-style:normal}
+  @media (max-width:430px){.src i{display:none}.src{padding:4px 7px}.srcs{gap:5px}}
   .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#8B8781;flex-wrap:wrap}
-  .card{display:flex;flex-direction:column;gap:12px}
-  .bar{display:flex;height:34px;border-radius:6px;overflow:hidden;flex:none;border:1px solid #E8E5DC}
-  .seg{display:grid;place-items:center;font-size:10.5px;font-weight:700;color:#fff;min-width:0;overflow:hidden;
-    transition:flex-grow .45s cubic-bezier(.22,.8,.28,1)}
-  .seg.pale{color:#8B8781}
-  @media (prefers-reduced-motion:reduce){.seg{transition:none}}
-  .legend{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:3px 18px;align-content:start}
-  .lg{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#3D3A34;padding:2px 0}
-  .lgs{width:9px;height:9px;border-radius:2px;flex:none}
-  .lgn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .lgv{font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#6B6862}
-  .modes{display:flex;gap:6px;flex:none}
-  .md{flex:1;padding:5px 4px;border-radius:6px;border:1px solid #E5E2D8;background:#FCFBF7;
-    font:11.5px ui-sans-serif,system-ui,sans-serif;color:#5F5C55;cursor:pointer}
-  .md[aria-pressed=true]{background:#1F1E1D;border-color:#1F1E1D;color:#fff;font-weight:600}
+  .card{display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+  pre{margin:0;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;
+    color:#3D3A34;white-space:pre;overflow:hidden;letter-spacing:0}
+  pre b{font-weight:600;color:#1F1E1D}
+  pre u{text-decoration:none;color:#D97757}
+  .narrow{display:none}
+  @media (max-width:700px){pre{font-size:11px}}
+  @media (max-width:430px){.wide{display:none}.narrow{display:block}pre{font-size:11px}}
 </style></head><body>
-<div class="hd"><span class="ttl">What fills the context window</span><span class="live"><span class="pulse"></span>Interactive</span></div>
-<div class="srcs"><span class="src"><svg viewBox="0 0 16 16"><path d="M8 .5a7.5 7.5 0 0 0-2.4 14.6c.4.1.5-.2.5-.4v-1.3c-2 .5-2.5-.9-2.5-.9-.3-.9-.8-1.1-.8-1.1-.7-.4 0-.4 0-.4.8.1 1.2.8 1.2.8.7 1.1 1.8.8 2.2.6.1-.5.3-.9.5-1.1-1.6-.2-3.3-.8-3.3-3.6 0-.8.3-1.5.8-2 0-.2-.4-.9.1-2 0 0 .6-.2 2 .8a7 7 0 0 1 3.7 0c1.4-1 2-.8 2-.8.5 1.1.1 1.8.1 2 .5.5.8 1.2.8 2 0 2.8-1.7 3.4-3.3 3.6.3.2.5.7.5 1.4v2.1c0 .2.1.5.5.4A7.5 7.5 0 0 0 8 .5z" fill="#1F1E1D"/></svg>GitHub</span><span class="src"><svg viewBox="0 0 16 16"><rect x="6.3" y="1" width="3.4" height="8" rx="1.7" fill="#36C5F0"/><rect x="7" y="7" width="8" height="3.4" rx="1.7" fill="#2EB67D"/><rect x="6.3" y="7" width="3.4" height="8" rx="1.7" fill="#ECB22E"/><rect x="1" y="5.6" width="8" height="3.4" rx="1.7" fill="#E01E5A"/></svg>Slack</span><span class="src"><svg viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#4285F4" stroke-width="1.8"/><path d="M10.5 10.5 L14.6 14.6" stroke="#34A853" stroke-width="2" stroke-linecap="round"/><rect x="4.6" y="6.4" width="1.5" height="3" fill="#4285F4"/><rect x="6.9" y="4.6" width="1.5" height="4.8" fill="#EA4335"/><rect x="9.2" y="5.8" width="1.5" height="3.6" fill="#FBBC05"/></svg>Search Console</span><span class="src"><svg viewBox="0 0 16 16"><circle cx="11.2" cy="9.6" r="3.9" fill="none" stroke="#FF7A59" stroke-width="1.9"/><circle cx="12.9" cy="2.6" r="1.9" fill="#FF7A59"/><rect x="2" y="6.4" width="1.9" height="4.6" fill="#FF7A59"/><path d="M3.9 8.7h3.6M11.2 5.7V4.4" stroke="#FF7A59" stroke-width="1.6"/></svg>HubSpot</span></div>
-<div class="card"><div class="bar" id="bar"><div class="seg" data-i="0" style="flex:34 0 0;background:#D97757">34%</div><div class="seg" data-i="1" style="flex:18 0 0;background:#C58C5A">18%</div><div class="seg" data-i="2" style="flex:22 0 0;background:#7A6FB0">22%</div><div class="seg" data-i="3" style="flex:14 0 0;background:#3F7A52">14%</div><div class="seg pale" data-i="4" style="flex:12 0 0;background:#EDEAE1">12%</div></div><div class="legend"><div class="lg"><span class="lgs" style="background:#D97757"></span><span class="lgn">Repo</span><span class="lgv" data-l="0">34%</span></div><div class="lg"><span class="lgs" style="background:#C58C5A"></span><span class="lgn">Open threads</span><span class="lgv" data-l="1">18%</span></div><div class="lg"><span class="lgs" style="background:#7A6FB0"></span><span class="lgn">Connectors</span><span class="lgv" data-l="2">22%</span></div><div class="lg"><span class="lgs" style="background:#3F7A52"></span><span class="lgn">This doc</span><span class="lgv" data-l="3">14%</span></div><div class="lg"><span class="lgs" style="background:#EDEAE1"></span><span class="lgn">Headroom</span><span class="lgv" data-l="4">12%</span></div></div><div class="modes" id="md"><button class="md" type="button" aria-pressed="true" data-m="0">As it runs now</button><button class="md" type="button" aria-pressed="false" data-m="1">With the repo trimmed</button></div></div>
+<div class="hd"><span class="ttl">How context reaches the doc</span><span class="live">Figure 1</span></div>
+<div class="srcs"><span class="src"><svg viewBox="0 0 16 16"><path d="M8 .5a7.5 7.5 0 0 0-2.4 14.6c.4.1.5-.2.5-.4v-1.3c-2 .5-2.5-.9-2.5-.9-.3-.9-.8-1.1-.8-1.1-.7-.4 0-.4 0-.4.8.1 1.2.8 1.2.8.7 1.1 1.8.8 2.2.6.1-.5.3-.9.5-1.1-1.6-.2-3.3-.8-3.3-3.6 0-.8.3-1.5.8-2 0-.2-.4-.9.1-2 0 0 .6-.2 2 .8a7 7 0 0 1 3.7 0c1.4-1 2-.8 2-.8.5 1.1.1 1.8.1 2 .5.5.8 1.2.8 2 0 2.8-1.7 3.4-3.3 3.6.3.2.5.7.5 1.4v2.1c0 .2.1.5.5.4A7.5 7.5 0 0 0 8 .5z" fill="#1F1E1D"/></svg><i>GitHub</i></span><span class="src"><svg viewBox="0 0 16 16"><rect x="6.3" y="1" width="3.4" height="8" rx="1.7" fill="#36C5F0"/><rect x="7" y="7" width="8" height="3.4" rx="1.7" fill="#2EB67D"/><rect x="6.3" y="7" width="3.4" height="8" rx="1.7" fill="#ECB22E"/><rect x="1" y="5.6" width="8" height="3.4" rx="1.7" fill="#E01E5A"/></svg><i>Slack</i></span><span class="src"><svg viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#4285F4" stroke-width="1.8"/><path d="M10.5 10.5 L14.6 14.6" stroke="#34A853" stroke-width="2" stroke-linecap="round"/><rect x="4.6" y="6.4" width="1.5" height="3" fill="#4285F4"/><rect x="6.9" y="4.6" width="1.5" height="4.8" fill="#EA4335"/><rect x="9.2" y="5.8" width="1.5" height="3.6" fill="#FBBC05"/></svg><i>Search Console</i></span><span class="src"><svg viewBox="0 0 16 16"><circle cx="11.2" cy="9.6" r="3.9" fill="none" stroke="#FF7A59" stroke-width="1.9"/><circle cx="12.9" cy="2.6" r="1.9" fill="#FF7A59"/><rect x="2" y="6.4" width="1.9" height="4.6" fill="#FF7A59"/><path d="M3.9 8.7h3.6M11.2 5.7V4.4" stroke="#FF7A59" stroke-width="1.6"/></svg><i>HubSpot</i></span></div>
+<div class="card"><pre class="wide"> github   slack   search   hubspot
+   └────────┴───────┴─────────┘
+                │
+        ┌───────▼─────────┐
+        │ <b>context builder</b> │
+        └───────┬─────────┘
+ ┌──────────────▼───────────────────────────────────────┐
+ │ <b>200k window</b>    <u>repo 68k</u> · threads 36k · conn 44k     │
+ │                doc 28k  · <u>free 24k</u>                   │
+ └──────────────────────────────────────────────────────┘</pre><pre class="narrow"> github  slack  search  hubspot
+   └───────┴──────┴────────┘
+               │
+       ┌───────▼─────────┐
+       │ <b>context builder</b> │
+       └───────┬─────────┘
+ ┌─────────────▼──────────────┐
+ │ <b>200k window</b>                │
+ │   <u>repo 68k</u>   threads 36k   │
+ │   conn 44k   doc 28k       │
+ │   <u>free 24k</u>                 │
+ └────────────────────────────┘</pre></div>
 <div class="foot"><span>200k window &middot; measured over 40 sessions</span><span>Design v5</span></div>
-<script>
-// Two budgets, one bar. Trimming the repo is the whole recommendation, so
-// the reader should be able to see the headroom it buys.
-var A=[34,18,22,14,12], B=[12,18,22,14,34];
-document.getElementById('md').addEventListener('click',function(e){
-  var b=e.target.closest('.md'); if(!b) return;
-  [].forEach.call(this.children,function(x){x.setAttribute('aria-pressed',String(x===b))});
-  var v=(+b.dataset.m)?B:A;
-  [].forEach.call(document.querySelectorAll('.seg'),function(s,i){s.style.flexGrow=v[i];s.textContent=v[i]+'%';});
-  [].forEach.call(document.querySelectorAll('[data-l]'),function(s,i){s.textContent=v[i]+'%';});
-});
-</script></body></html>
+</body></html>

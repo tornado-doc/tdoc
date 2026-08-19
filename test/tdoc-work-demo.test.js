@@ -143,13 +143,17 @@ t('the stage is cropped like a screenshot', () => {
   // ends early and leaves dead space under a short column — and this rule has
   // already been deleted once by an unrelated rewrite of the block it used to
   // sit in, with nothing to catch it.
-  assert(/\.stage-doc \{[^}]*max-height:585px/.test(work), 'the document column is no longer capped');
+  assert(/\.doc-tail \{[^}]*max-height:104px/.test(work), 'the trailing prose is no longer capped');
+  // Only the tail may truncate: a cut ring or a cut comment card reads broken.
+  assert(!/\.stage(-doc)? \{[^}]*max-height/.test(work),
+    'capping the stage crops the artifact and the thread; cap .doc-tail instead');
   // The thread must never be the thing that gets cut.
-  assert(!/\.stage \{[^}]*max-height/.test(work),
-    'capping .stage crops the comment card too; cap .stage-doc instead');
-  assert(/\.stage-doc:after \{[^}]*linear-gradient\(transparent,#fff\)/.test(work),
+  assert(/\.doc-tail:after \{[^}]*linear-gradient\(transparent,#fff\)/.test(work),
     'the crop needs a fade, or it looks like the content simply stops');
-  assert(/max-height:526\.5px/.test(work), 'no shorter cap on narrow screens');
+  assert(/\.doc-tail \{ max-height:78px/.test(work), 'no shorter cap on narrow screens');
+  // The margin column starves the artifact below ~900; the split has to give.
+  assert(/@media \(max-width:900px\) \{\s*\.stage \{ grid-template-columns:1fr; \}/.test(work),
+    'the stage must collapse to one column before the artifact is squeezed');
 });
 
 t('the artifacts are real sandboxed islands', () => {

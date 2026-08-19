@@ -143,6 +143,21 @@
     .sfx { color:#8a8a90; font-size:9px; flex:none; }
     .sfplus { color:#7c7c82; font-size:15px; padding-left:11px; flex:none; }
     @media (max-width:640px) { .sfnm { font-size:11px; } .sft { padding:4px 7px; } .sfx, .sfside, .sfnav { display:none; } }
+    /* Four equal boxes at 320 gave every tab 42px, which renders as "G L. D
+       F." — four tabs you cannot tell apart. Safari solves this by feeding
+       the frontmost tab and starving the rest, so do the same: the open doc
+       keeps a readable name, the others keep enough letters to aim at. */
+    @media (max-width:520px) {
+      /* Sharing ~170px between four names gives each one 9px of text — a
+         single letter. Safari compresses to favicon-only long before that,
+         so do the same: the open doc keeps its whole name and the rest
+         stay tappable icons. */
+      .sft:not(.on) .sfnm { display:none; }
+      .sft:not(.on) { flex:0 0 auto; padding:4px 6px; }
+      .sft.on { flex:1 1 auto; padding:4px 8px; gap:5px; }
+      .sfnm { font-size:10.5px; }
+      .tl { width:11px; height:11px; margin-right:6px; }
+    }
     /* The touch floor applies where there is a finger, not on a desk. */
     @media (pointer: coarse) { .sft { min-height:40px; } }
     /* All four stack in one grid cell, so the container is as tall as the
@@ -179,8 +194,9 @@
     .uc-note { margin:14px 0 0; text-align:center; color:var(--muted); font-size:13.5px; }
     /* The artifact frame is wide and short on a desk, tall and narrow on a
        phone, or the chart inside gets 135px of height and clips. */
-    @media (max-width:900px) { iframe.life { aspect-ratio:16/11; } }
+    @media (max-width:900px) { iframe.life { aspect-ratio:16/8; } }
     @media (max-width:700px) { iframe.life { aspect-ratio:4/3; } }
+    @media (max-width:520px) { iframe.life { aspect-ratio:1/1.7; } }
 
     .tldr { display:flex; gap:11px; align-items:flex-start; margin:15px 0;
       padding:12px 14px; background:var(--wash); border-left:3px solid var(--ink); }
@@ -379,8 +395,8 @@
     /* 585 is thirty lines of 19.5px, so the fade starts on a whole line
        instead of slicing one, and it clears the artifact's bottom edge (569)
        rather than cropping the chart. */
-    .stage-doc { max-height:585px; overflow:hidden; position:relative; }
-    .stage-doc:after { content:""; position:absolute; left:0; right:0; bottom:0; height:64px;
+    .doc-tail { max-height:104px; overflow:hidden; position:relative; }
+    .doc-tail:after { content:""; position:absolute; left:0; right:0; bottom:0; height:64px;
       background:linear-gradient(transparent,#fff); pointer-events:none; }
     .stage-notes { padding:22px 16px 22px 0; }
     .mc-row { padding-top:238px; }
@@ -452,8 +468,12 @@
 
     /* the split is the product's real desktop layout, so hold it as long as
        the margin column stays usable rather than collapsing at tablet width */
+    @media (max-width:900px) {
+      .stage { grid-template-columns:1fr; }
+      .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
+      .mc-row { padding-top:0; }
+    }
     @media (max-width:840px) {
-            .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
       h1.tagline { font-size:38px; }
       h2 { font-size:25px; }
       section { padding:56px 0; }
@@ -462,7 +482,6 @@
     /* Below ~360 the two CTAs cannot share a row without touching the screen
        edge, so they stack instead of spilling. */
     @media (max-width:640px) {
-      .mc-row { padding-top:0; }
       h1.tagline { font-size:34px; }
       /* 342px of usable width at 375, so two 232px tracks cannot sit side by
          side. Share the row instead of stacking, and drop the two words that
@@ -470,9 +489,7 @@
       .cta { grid-template-columns:1fr 1fr; max-width:none; gap:10px; }
       .btn { font-size:14px; padding:0 12px; }
       .btn-long { display:none; }
-      .stage { grid-template-columns:1fr; }
-      .stage-doc { max-height:526.5px; }
-      .stage-doc { border-right:0; border-bottom:1px solid var(--rule); }
+      .doc-tail { max-height:78px; }
       /* v28 left these on desktop tracks. At 375 the loop is 98px
          (one word per line), the quote wall is three 164px columns
          (scrollWidth 545), and the feature cards are 156px. */
@@ -568,9 +585,9 @@
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tdoc-work/v/1/widget/channels"
                 title="Signups by channel" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
-        <h4 style="margin-top:26px">What we are funding next quarter</h4>
+        <div class="doc-tail"><h4 style="margin-top:26px">What we are funding next quarter</h4>
         <p>Referral is the cheapest channel we have and it is still supply-limited: only 6% of accounts have ever sent an invite.</p>
-        <p>Paid social is the opposite. It is the second largest channel by volume and the most expensive by a factor of five.</p>
+        <p>Paid social is the opposite. It is the second largest channel by volume and the most expensive by a factor of five.</p></div>
       </div>
       </div>
       <aside class="stage-notes">
@@ -608,9 +625,9 @@
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tdoc-work/v/1/widget/competitors"
                 title="Where the tools sit, plotted on two axes" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
-        <h4 style="margin-top:26px">Why the empty quadrant is empty</h4>
+        <div class="doc-tail"><h4 style="margin-top:26px">Why the empty quadrant is empty</h4>
         <p>The solo tools sit inside your editor, which is exactly why they have your context and exactly why nobody else can comment.</p>
-        <p>The team tools own the comment thread and nothing else. They never see the repo, the data or the session the work actually happens in.</p>
+        <p>The team tools own the comment thread and nothing else. They never see the repo, the data or the session the work actually happens in.</p></div>
       </div>
       </div>
       <aside class="stage-notes">
@@ -643,14 +660,14 @@
       <div class="doc">
         <h4>Design: how the agent gets your context</h4>
         <p>The agent runs in your session, so context is not something we fetch. It is something we budget.</p>
-        <p>The chart below is the live budget across forty sessions. Switch it to see what trimming the repo buys.</p>
+        <p>The figure below is how it fits together, and where the 200k window actually goes.</p>
         <div class="tldr"><b class="tldr-k">TL;DR</b><span>The repo is <b>a third of the window</b> and the doc being edited is 14%. <b>Trim the repo first &#8212; it triples the headroom without dropping a single connector.</b></span></div>
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tdoc-work/v/1/widget/phone"
                 title="What fills the agent context window" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
-        <h4 style="margin-top:26px">What we are cutting first</h4>
+        <div class="doc-tail"><h4 style="margin-top:26px">What we are cutting first</h4>
         <p>Nothing here is a new integration. Every source is already open in the session before tdoc is asked for anything.</p>
-        <p>The budget is the design constraint: once the window is full, the oldest thread silently falls out and nobody is told.</p>
+        <p>The budget is the design constraint: once the window is full, the oldest thread silently falls out and nobody is told.</p></div>
       </div>
       </div>
       <aside class="stage-notes">
@@ -688,9 +705,9 @@
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tdoc-work/v/1/widget/styles"
                 title="Three type options, click to pick" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
-        <h4 style="margin-top:26px">What happens after you pick</h4>
+        <div class="doc-tail"><h4 style="margin-top:26px">What happens after you pick</h4>
         <p>The choice propagates to the pricing table, the plan cards and the footer in one pass, so the page keeps one voice.</p>
-        <p>If none of the three is right, say which heading from which, and the next version is a fourth built out of your answer.</p>
+        <p>If none of the three is right, say which heading from which, and the next version is a fourth built out of your answer.</p></div>
       </div>
       </div>
       <aside class="stage-notes">
@@ -880,8 +897,8 @@
             <td data-col="tdoc" class="us"><span class="yes"><svg><use href="#i-check"/></svg></span><b>Runs in your agent session</b></td>
             <td data-col="Google Docs"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
             <td data-col="Notion"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
-            <td data-col="ChatGPT"><span class="part"><svg><use href="#i-dash"/></svg></span>What you paste</td>
-            <td data-col="Claude artifacts"><span class="part"><svg><use href="#i-dash"/></svg></span>What you paste</td>
+            <td data-col="ChatGPT"><span class="part"><svg><use href="#i-dash"/></svg>What you paste</span></td>
+            <td data-col="Claude artifacts"><span class="part"><svg><use href="#i-dash"/></svg>What you paste</span></td>
           </tr>
           <tr>
             <td class="lbl">Anyone can comment</td>
