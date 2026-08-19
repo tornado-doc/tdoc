@@ -1041,7 +1041,11 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
   // nonce. The doc's own <script> would never run (#138), which is why the
   // landing CTA still carries a plain href: with scripting off the visitor
   // gets the /start page instead of a dead button.
-  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG) && nonce
+  // The modal ships wherever its trigger is. Gating on the slug meant a doc
+  // could carry the CTA and get a dead link to /start instead — which is what
+  // happened the first time the landing page was drafted under another slug.
+  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml);
+  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce
     ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
     : rawHtml;
   return injectOverlayCfg(withOnboard, {
