@@ -1,25 +1,23 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><title>Latency</title>
 <style>
-  /* first-tree idiom: stat cards on a tinted gradient, a live status pill, and
-     the sources named on the card itself. A doc-shaped dashboard says where
-     its numbers came from and when they last moved. */
-  html,body{margin:0;background:#fff;font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10121a}
-  body{padding:13px 14px;display:flex;flex-direction:column;gap:11px;box-sizing:border-box;min-height:100%}
+  /* tdoc's own visual: its palette, its chip shapes, square corners. The
+     card is clipped rather than scrollable — an artifact in a doc is a view
+     onto data, not a pane you drag around. */
+  html,body{margin:0;height:100%;background:#fff;font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10121a;overflow:hidden}
+  body{padding:13px 14px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
   .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
   .ttl{font-size:13px;font-weight:650;letter-spacing:-.01em}
-  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;
-    padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;
-    background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:#0f7a55}
-  .pulse{width:6px;height:6px;border-radius:50%;background:#10b981;animation:pl 2s ease-in-out infinite}
-  @keyframes pl{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:2px 9px;
+    font-size:11px;font-weight:700;color:#1a7340;background:#e8f5ed;border:1px solid #cfe0d6}
+  .pulse{width:6px;height:6px;background:#1a7340;animation:pl 2s ease-in-out infinite}
+  @keyframes pl{0%,100%{opacity:1}50%{opacity:.35}}
   @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
   .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
-  .src{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:6px;
-    background:#f5f6f8;border:1px solid #e4e7ee;font-size:11px;color:#5b6070}
-  .src b{width:7px;height:7px;border-radius:2px;display:inline-block}
-  .card{flex:1;min-height:0;padding:14px;border-radius:12px;border:1px solid #e4e7ee;
-    background:linear-gradient(135deg,rgba(50,145,255,.06) 0%,rgba(139,92,246,.06) 100%)}
-  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#8e939f;flex-wrap:wrap}
+  .src{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;
+    background:#f5f6f8;border:1px solid #e5e5e5;font-size:11px;color:#5b6070}
+  .src b{width:7px;height:7px;display:inline-block}
+  .card{flex:1;min-height:0;padding:13px;border:1px solid #e4e7ee;background:#fff;overflow:hidden}
+  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#767c8b;flex-wrap:wrap}
  .hd{display:flex;gap:18px;flex:none;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
  .hd b{font-weight:700}
  .p50{color:#1a7340}.p95{color:#D97757}.p99{color:#c3452f}
