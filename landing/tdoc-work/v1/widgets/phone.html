@@ -28,28 +28,31 @@
   @media (max-width:700px){pre{font-size:11px}}
   @media (max-width:430px){.wide{display:none}.narrow{display:block}pre{font-size:11px}}
 </style></head><body>
-<div class="hd"><span class="ttl">How context reaches the doc</span><span class="live">Figure 1</span></div>
-<div class="srcs"><span class="src"><svg viewBox="0 0 16 16"><path d="M8 .5a7.5 7.5 0 0 0-2.4 14.6c.4.1.5-.2.5-.4v-1.3c-2 .5-2.5-.9-2.5-.9-.3-.9-.8-1.1-.8-1.1-.7-.4 0-.4 0-.4.8.1 1.2.8 1.2.8.7 1.1 1.8.8 2.2.6.1-.5.3-.9.5-1.1-1.6-.2-3.3-.8-3.3-3.6 0-.8.3-1.5.8-2 0-.2-.4-.9.1-2 0 0 .6-.2 2 .8a7 7 0 0 1 3.7 0c1.4-1 2-.8 2-.8.5 1.1.1 1.8.1 2 .5.5.8 1.2.8 2 0 2.8-1.7 3.4-3.3 3.6.3.2.5.7.5 1.4v2.1c0 .2.1.5.5.4A7.5 7.5 0 0 0 8 .5z" fill="#1F1E1D"/></svg><i>GitHub</i></span><span class="src"><svg viewBox="0 0 16 16"><rect x="6.3" y="1" width="3.4" height="8" rx="1.7" fill="#36C5F0"/><rect x="7" y="7" width="8" height="3.4" rx="1.7" fill="#2EB67D"/><rect x="6.3" y="7" width="3.4" height="8" rx="1.7" fill="#ECB22E"/><rect x="1" y="5.6" width="8" height="3.4" rx="1.7" fill="#E01E5A"/></svg><i>Slack</i></span><span class="src"><svg viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#4285F4" stroke-width="1.8"/><path d="M10.5 10.5 L14.6 14.6" stroke="#34A853" stroke-width="2" stroke-linecap="round"/><rect x="4.6" y="6.4" width="1.5" height="3" fill="#4285F4"/><rect x="6.9" y="4.6" width="1.5" height="4.8" fill="#EA4335"/><rect x="9.2" y="5.8" width="1.5" height="3.6" fill="#FBBC05"/></svg><i>Search Console</i></span><span class="src"><svg viewBox="0 0 16 16"><circle cx="11.2" cy="9.6" r="3.9" fill="none" stroke="#FF7A59" stroke-width="1.9"/><circle cx="12.9" cy="2.6" r="1.9" fill="#FF7A59"/><rect x="2" y="6.4" width="1.9" height="4.6" fill="#FF7A59"/><path d="M3.9 8.7h3.6M11.2 5.7V4.4" stroke="#FF7A59" stroke-width="1.6"/></svg><i>HubSpot</i></span></div>
-<div class="card"><pre class="wide"> github   slack   search   hubspot
-   └────────┴───────┴─────────┘
-                │
-        ┌───────▼─────────┐
-        │ <b>context builder</b> │
-        └───────┬─────────┘
- ┌──────────────▼───────────────────────────────────────┐
- │ <b>200k window</b>    <u>repo 68k</u> · threads 36k · conn 44k     │
- │                doc 28k  · <u>free 24k</u>                   │
- └──────────────────────────────────────────────────────┘</pre><pre class="narrow"> github  slack  search  hubspot
-   └───────┴──────┴────────┘
-               │
-       ┌───────▼─────────┐
-       │ <b>context builder</b> │
-       └───────┬─────────┘
- ┌─────────────▼──────────────┐
- │ <b>200k window</b>                │
- │   <u>repo 68k</u>   threads 36k   │
- │   conn 44k   doc 28k       │
- │   <u>free 24k</u>                 │
- └────────────────────────────┘</pre></div>
-<div class="foot"><span>200k window &middot; measured over 40 sessions</span><span>Design v5</span></div>
+<div class="hd"><span class="ttl">Context assembly</span><span class="live">Figure 1</span></div>
+<div class="card"><pre class="wide">   ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
+   │    repo    │  │  threads   │  │ connectors │  │  this doc  │
+   └──────┬─────┘  └──────┬─────┘  └──────┬─────┘  └──────┬─────┘
+          └───────────────┴───────┬───────┴───────────────┘
+                       ┌──────────▼──────────┐
+                       │ <b>context builder</b>     │
+                       │ rank · trim · pin   │
+                       └──────────┬──────────┘
+ ┌────────────────────────────────▼───────────────────┐
+ │<b>200k window</b>   repo 68k · threads 36k · conn 44k     │
+ │              doc 28k · <u>free 24k</u>                    │
+ └────────────────────────────────────────────────────┘</pre><pre class="narrow"> ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐
+ │ repo │ │threads│ │ conn │ │ doc  │
+ └───┬──┘ └───┬──┘ └───┬──┘ └───┬──┘
+     └────────┴───┬────┴────────┘
+       ┌──────────▼──────────┐
+       │ <b>context builder</b>     │
+       │ rank·trim·pin       │
+       └──────────┬──────────┘
+┌─────────────────▼─────────┐
+│<b>200k window</b>                │
+│ repo 68k  threads 36k     │
+│ conn 44k  doc 28k         │
+│ <u>free 24k</u>                  │
+└───────────────────────────┘</pre></div>
+<div class="foot"><span>Measured over 40 sessions</span><span>Design v5</span></div>
 </body></html>
