@@ -207,6 +207,17 @@
       "n": 41,
       "created": "2026-08-18T06:40:00Z",
       "prompt": "The demo commenter is Jesse Pollak, with his own avatar"
+    },
+    {
+      "n": 42,
+      "created": "2026-08-18T14:30:00Z",
+      "prompt": "Docs that act on your comments: work-angle landing page with four real demo tabs"
     }
-  ]
+  ],
+  "access": {
+    "visibility": "public",
+    "history_visibility": "owner",
+    "commenting": "signed_in",
+    "allowed_users": []
+  }
 }
