@@ -525,12 +525,12 @@ t('shipping the homepage ships content, not just worker code', () => {
   // gate, wrong slug). Green must mean the homepage actually renders.
   assert(/is still serving the neutral fallback/.test(content),
     'publish workflow must fail when tdoc.dev/ falls back to the neutral page');
-  assert(/\[\[ "\$home" == \*'A doc that answers its own comments'\*/.test(content),
-    'homepage verify must use bash [[ ]], not echo|grep -q under pipefail');
+  assert(/\[\[ "\$home" == \*'"slug":"tornado-doc"'\*/.test(content),
+    'homepage verify must use bash [[ ]] on the slug, not echo|grep -q under pipefail');
   // The homepage links to /start. Shipping one without the other leaves that
   // link on the neutral fallback, which reads as "the tour does not exist".
   assert(/upload tdoc-start/.test(content), 'the tutorial is never uploaded to tdoc.dev');
-  assert(/"\$tour" == \*'Everything tdoc does'\*/.test(content),
+  assert(/"\$tour" == \*'"slug":"tdoc-start"'\*/.test(content),
     'a green run must mean /start renders too, not just the homepage');
   assert(!/echo "\$body" \| grep -q/.test(content),
     'echo|grep -q SIGPIPEs on a 300kB landing page and fails a successful ship');
