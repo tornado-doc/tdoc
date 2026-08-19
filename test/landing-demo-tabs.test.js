@@ -1,14 +1,13 @@
-// The experimental work-angle landing page (landing/tdoc-work).
+// The landing page's demo: four tdocs shown in the reader's own chrome.
 //
-// Its demo is four tdocs shown in the reader's own chrome. The whole point is
-// that they are the SAME page the product renders, only the subject changes —
-// so this file diffs each stage's structure against the reference stage on the
-// live landing page and fails on any drift.
+// The whole point is that they are the SAME page the product renders, only the
+// subject changes, so this file diffs every stage against the first one and
+// fails on any drift between them.
 //
 // Two rules that are easy to break by accident:
 //   - the comment threads are static markup, no animation. Only the artifacts
 //     move, and they are sandboxed islands.
-//   - this experiment must never reach tdoc.dev.
+//   - the tabs are Safari chrome, not a second row of calls to action.
 const fs = require('fs');
 const path = require('path');
 
@@ -19,12 +18,11 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const root = path.join(__dirname, '..');
-const work = fs.readFileSync(path.join(root, 'landing', 'tdoc-work', 'v1', 'index.html'), 'utf8');
-const refMeta = JSON.parse(fs.readFileSync(path.join(root, 'landing', 'tornado-doc', 'meta.json'), 'utf8'));
-const refLatest = refMeta.versions[refMeta.versions.length - 1].n;
-const ref = fs.readFileSync(path.join(root, 'landing', 'tornado-doc', `v${refLatest}`, 'index.html'), 'utf8');
+const meta = JSON.parse(fs.readFileSync(path.join(root, 'landing', 'tornado-doc', 'meta.json'), 'utf8'));
+const latest = meta.versions[meta.versions.length - 1].n;
+const work = fs.readFileSync(path.join(root, 'landing', 'tornado-doc', `v${latest}`, 'index.html'), 'utf8');
 
-console.log('tdoc-work demo (experiment)');
+console.log('landing demo tabs');
 
 // tag+class sequence, ignoring text and attribute values
 function skeleton(html) {
@@ -57,23 +55,25 @@ function stageOf(html, from) {
   return { block, end: j };
 }
 
-t('every stage renders the reader and the thread exactly like the real page', () => {
-  const refSk = skeleton(stageOf(ref, 0).block);
-  assert(refSk.length > 40, `reference stage looks wrong: ${refSk.length} nodes`);
-  // The chrome is allowed to differ; the tdoc is not.
-  assert(!/class="browser"/.test(stageOf(ref, 0).block), 'comparison should start at the reader bar');
-  let cursor = 0, seen = 0;
+t('every stage renders the reader and the thread the same way', () => {
+  let refSk = null, cursor = 0, seen = 0;
   while (true) {
     const i = work.indexOf('<div class="browser"', cursor);
     if (i < 0) break;
     const s = stageOf(work, i);
     const sk = skeleton(s.block);
     seen++;
+    if (!refSk) {
+      refSk = sk;
+      assert(refSk.length > 40, `first stage looks wrong: ${refSk.length} nodes`);
+      cursor = s.end;
+      continue;
+    }
     assert(sk.length === refSk.length,
-      `stage ${seen} has ${sk.length} nodes, reference has ${refSk.length}`);
+      `stage ${seen} has ${sk.length} nodes, stage 1 has ${refSk.length}`);
     for (let k = 0; k < refSk.length; k++) {
       assert(sk[k] === refSk[k],
-        `stage ${seen} node ${k}: got ${sk[k]}, reference has ${refSk[k]}`);
+        `stage ${seen} node ${k}: got ${sk[k]}, stage 1 has ${refSk[k]}`);
     }
     cursor = s.end;
   }
@@ -124,18 +124,21 @@ t('the four stages are siblings, not nested', () => {
   // opacity to 0 and every descendant composited away — the demo went blank
   // after six seconds and on three of the four tabs, and the container grew
   // to 2779px because static panels stack instead of sharing a grid cell.
-  const starts = [...work.matchAll(/<div class="uc-panel p-\w+">/g)].map(m => m.index);
+  const starts = [...work.matchAll(/<div class="uc-panel p-\w+">/g)].map((m) => m.index);
   assert(starts.length === 4, `expected 4 panels, found ${starts.length}`);
-  const end = work.indexOf('<p class="uc-note"');
-  const bounds = [...starts, end];
-  for (let i = 0; i < 4; i++) {
-    const seg = work.slice(bounds[i], bounds[i + 1]);
-    const open = (seg.match(/<div\b/g) || []).length;
-    const close = (seg.match(/<\/div>/g) || []).length;
-    const want = i === 3 ? -2 : 0;   // the last panel also closes .uc-panels and .usecases
-    assert(open - close === want,
-      `panel ${i + 1} div balance ${open - close >= 0 ? '+' : ''}${open - close}, expected ${want} — panels must be siblings`);
-  }
+  // Measure the nesting depth of each panel inside .uc-panels rather than
+  // slicing to a sentinel elsewhere in the section: the old check anchored on
+  // a caption, so deleting that caption silently moved the boundary.
+  const container = work.indexOf('<div class="uc-panels"');
+  assert(container > -1, 'missing .uc-panels container');
+  const depths = starts.map((i) => {
+    const seg = work.slice(container, i);
+    return (seg.match(/<div\b/g) || []).length - (seg.match(/<\/div>/g) || []).length;
+  });
+  assert(depths.every((d) => d === depths[0]),
+    `panels sit at depths ${depths.join(', ')} — they must be siblings`);
+  assert(depths[0] === 1,
+    `panels must be direct children of .uc-panels, found depth ${depths[0]}`);
 });
 
 t('the stage is cropped like a screenshot', () => {
@@ -166,7 +169,7 @@ t('the artifacts are real sandboxed islands', () => {
   const widgets = [...work.matchAll(/\/widget\/(\w+)"/g)].map(m => m[1]);
   assert(new Set(widgets).size === 4, `each stage needs its own artifact, got ${widgets}`);
   for (const w of widgets) {
-    const p = path.join(root, 'landing', 'tdoc-work', 'v1', 'widgets', `${w}.html`);
+    const p = path.join(root, 'landing', 'tornado-doc', `v${latest}`, 'widgets', `${w}.html`);
     assert(fs.existsSync(p), `missing widget file for ${w}`);
     // Not every artifact needs to move. The growth report is a table on
     // purpose — an animation there is decoration competing with the numbers.
@@ -176,7 +179,7 @@ t('the artifacts are real sandboxed islands', () => {
   }
 });
 
-t('the experiment cannot reach tdoc.dev', () => {
+t('the tabs are Safari chrome, and the page is indexable', () => {
   // The tabs are Safari chrome, not a second row of CTAs: the accent colour
   // belongs to the call to action, and a coloured tab competes with it.
   assert(/\.sft\.on \{[^}]*background:#fff/.test(work),
@@ -186,9 +189,9 @@ t('the experiment cannot reach tdoc.dev', () => {
   // Safari divides inactive tabs with hairlines and lifts the focused one.
   assert(/\.sft \+ \.sft:before/.test(work), 'inactive tabs need Safari hairline dividers');
   assert(/\.sft\.on \{[^}]*box-shadow/.test(work), 'the focused tab should lift off the bar');
-  const wf = fs.readFileSync(path.join(root, '.github', 'workflows', 'publish-landing.yml'), 'utf8');
-  assert(!/tdoc-work/.test(wf), 'the publish workflow now ships the experiment to production');
-  assert(/noindex/.test(work), 'the experiment should not be indexed while it is an experiment');
+  // This is the homepage now. The experiment's noindex must not have ridden
+  // along with it.
+  assert(!/name="robots"[^>]*noindex/.test(work), 'the homepage must not carry noindex');
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);

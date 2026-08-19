@@ -54,38 +54,28 @@ t('runs no author JavaScript', () => {
   assert(!hrefs.some((h) => /^javascript:/i.test(h)), 'page contains a javascript: URL');
 });
 
-t('hero board is a sandboxed widget island', () => {
-  // v39: the board is a real Game of Life, not a five-cell sprite on a
-  // CSS keyframe. Computation lives in widgets/conway.html, framed with
+t('hero artifact is a sandboxed widget island', () => {
+  // Anything that computes lives in a widget island, framed with
   // sandbox="allow-scripts" and no allow-same-origin. The host stays
   // script-free; the island is a unique origin.
   assert(/<iframe\b[^>]*class="[^"]*\blife\b/.test(html), 'missing iframe.life');
-  assert(/src="\/d\/tornado-doc\/v\/\d+\/widget\/conway"/.test(html),
-    'iframe must point at this doc\'s /widget/conway route');
+  assert(/src="\/d\/tornado-doc\/v\/\d+\/widget\/[a-z0-9-]+"/.test(html),
+    'iframe must point at a /widget/ route on this doc');
   const iframe = html.match(/<iframe\b[^>]*class="[^"]*\blife\b[^>]*>/);
   assert(iframe, 'could not isolate the life iframe');
   assert(/sandbox="allow-scripts"/.test(iframe[0]),
     `widget iframe sandbox must be allow-scripts only: ${iframe[0]}`);
   assert(!/allow-same-origin/.test(iframe[0]),
     'widget iframe must not include allow-same-origin');
-  const widgetPath = path.join(root, 'landing', 'tornado-doc', `v${latest}`, 'widgets', 'conway.html');
+  const islands = [...html.matchAll(/\/widget\/([a-z0-9-]+)"/g)].map((m) => m[1]);
+  assert(islands.length, 'no widget island framed on the page');
+  const widgetPath = path.join(root, 'landing', 'tornado-doc', `v${latest}`, 'widgets', `${islands[0]}.html`);
   assert(fs.existsSync(widgetPath), `missing ${widgetPath}`);
   const widget = fs.readFileSync(widgetPath, 'utf8');
-  assert(/<script\b/.test(widget), 'widget file must contain the generation script');
-  assert(/nxt\[/.test(widget) && /cur\[/.test(widget),
-    'widget must step a neighbour grid (nxt/cur), not animate a sprite');
   // The CSS-sprite workaround must stay gone on the host.
   assert(!/<g class="glider"/.test(html), 'CSS-sprite glider group still in the host');
   assert(!/@keyframes\s+glide/.test(html),
     'host CSS still has the sprite @keyframes glide; the island does not use it');
-  // The board ran forever with no way to stop it. Control cannot live on
-  // the host (no author script), so it has to live in the widget.
-  assert(/<button\b[^>]*id="t"/.test(widget),
-    'widget must ship a play/pause button; the host cannot reach the loop');
-  assert(/timer \? 'Pause' : 'Play'/.test(widget),
-    'widget button must flip between Pause and Play');
-  assert(/function halt\(/.test(widget) && /function run\(/.test(widget),
-    'widget must expose run/halt so the loop can stop');
   // Dark mode is one invert on html. Reaction emoji are OS bitmaps and
   // the agent mark is a brand colour, so both come back wrong unless
   // flipped a second time (same restore as overlay .tdoc-emoji).
@@ -93,11 +83,8 @@ t('hero board is a sandboxed widget island', () => {
     'dark mode must restore mock reaction emoji after the page invert');
   assert(/html\[data-tdoc-theme="dark"\]\s*\.mc-av\.mc-logo/.test(html),
     'dark mode must restore the terracotta agent mark after the page invert');
-  // e5a7d7c / e58124a: the gold ring belongs to the board, not the island.
-  // The play bar sits outside .board. The island card stays opaque so a
-  // dark-mode invert-of-invert does not flash a white slab.
-  assert(/\.board\s*\{[^}]*border:\s*1px solid #e0b93a/.test(widget),
-    'widget .board must carry the reader ring; it must not sit on iframe.life');
+  // The ring belongs to the artifact inside the island, never to the frame:
+  // ringing the frame encloses whatever control sits under the artifact.
   assert(/iframe\.life\s*\{[^}]*background:\s*#fff/.test(html),
     'island card must stay opaque (#fff); transparent iframe comes back white in dark mode');
   assert(!/iframe\.life\s*\{[^}]*background:\s*transparent/.test(html),
@@ -305,7 +292,7 @@ t('has a compare table that admits a loss', () => {
   // lose outright. A `part` cell ("Coming soon") is equally honest: the reader
   // sees a row we do not win, which is what makes the other rows believable.
   const lost = rows.filter((r) => {
-    const ours = r.match(/<td class="us">[\s\S]*?<\/td>/);
+    const ours = r.match(/<td [^>]*class="us"[^>]*>[\s\S]*?<\/td>/);
     return !!ours && /class="(no|part)"/.test(ours[0]);
   });
   assert(lost.length >= 1, 'every compare row favours tdoc — keep at least one row we do not win');
@@ -461,15 +448,16 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
   assert(!fs.existsSync(path.join(outDir, 'v2')), 'release payload still has a v2 directory');
   assert(Array.isArray(relComments) && relComments.length === 0,
     `release comments.json must be empty, got ${relComments.length} thread(s)`);
-  assert(/src="\/d\/tornado-doc\/v\/1\/widget\/conway"/.test(relHtml),
-    'release iframe must point at /d/tornado-doc/v/1/widget/conway');
+  assert(/src="\/d\/tornado-doc\/v\/1\/widget\/[a-z0-9-]+"/.test(relHtml),
+    'release iframe must point at /d/tornado-doc/v/1/widget/<name>');
   assert(!new RegExp(`/d/tornado-doc/v/${latest}/widget/`).test(relHtml),
     `release iframe still points at working-copy v${latest}`);
-  assert(fs.existsSync(path.join(outDir, 'v1', 'widgets', 'conway.html')),
-    'release payload must copy widgets/conway.html or the board 404s');
+  const relIslands = [...relHtml.matchAll(/\/widget\/([a-z0-9-]+)"/g)].map((m) => m[1]);
+  assert(relIslands.every((n) => fs.existsSync(path.join(outDir, 'v1', 'widgets', `${n}.html`))),
+    'release payload must copy every widget the page frames or the island 404s');
 
   const previewHtml = fs.readFileSync(path.join(previewDir, 'v1', 'index.html'), 'utf8');
-  assert(/src="\/d\/tdoc-home\/v\/1\/widget\/conway"/.test(previewHtml),
+  assert(/src="\/d\/tdoc-home\/v\/1\/widget\/[a-z0-9-]+"/.test(previewHtml),
     'custom-slug release must rewrite the iframe to that slug');
 
   // tdoc-publish only attaches comments.json when it is a non-empty array.
