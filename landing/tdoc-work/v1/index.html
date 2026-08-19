@@ -406,29 +406,24 @@
        routes that actually exist. No Copy button — this page runs no script,
        so a button that cannot copy would be a lie. user-select:all makes one
        click select the whole line, which is real. */
-    .clidiv { display:flex; align-items:center; gap:14px; margin:30px 0 14px; max-width:520px; }
+    /* the second way in, under the buttons. No Copy button: this page runs
+       no script, so a Copy that cannot copy would be a lie. user-select:all
+       makes one click select the whole line, which is real. */
+    .clidiv { display:flex; align-items:center; gap:14px; margin:30px 0 13px; max-width:496px; }
     .clidiv:before, .clidiv:after { content:""; flex:1; height:1px; background:var(--rule); }
     .clidiv span { font-size:10.5px; font-weight:700; letter-spacing:.13em; color:var(--muted);
       text-transform:uppercase; white-space:nowrap; }
-    .cli { max-width:520px; border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:#fff; }
-    .cli input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
-    .cli-bar { display:flex; align-items:center; gap:0; padding:7px 11px; background:#F2F0E9;
+    .cli { max-width:496px; border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:#fff; }
+    .cli-bar { display:flex; align-items:center; padding:8px 12px; background:#F2F0E9;
       border-bottom:1px solid var(--rule); }
     .cli-bar .tl { width:11px; height:11px; border-radius:50%; margin-right:7px; flex:none; }
-    .cli-tab { padding:3px 11px; border-radius:6px; font:12px ui-monospace,SFMono-Regular,Menlo,monospace;
-      color:#6B6862; cursor:pointer; white-space:nowrap; }
-    .cli-tab:first-of-type { margin-left:6px; }
-    .cli-body { position:relative; padding:15px 16px; }
-    .cli-pane { display:none; }
-    .cli-pane code { display:block; font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+    .cli-title { margin-left:8px; font:12px ui-monospace,SFMono-Regular,Menlo,monospace; color:#6B6862; }
+    .cli-body { padding:14px 16px 13px; }
+    .cli-body code { display:block; font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
       color:var(--ink); user-select:all; word-break:break-word; }
     .cli-hint { display:block; margin-top:9px; font-size:11px; color:var(--muted); }
-    #cli-a:checked ~ .cli-bar label[for=cli-a],
-    #cli-b:checked ~ .cli-bar label[for=cli-b] { background:#fff; color:var(--ink); font-weight:650;
-      box-shadow:0 1px 2px rgba(31,30,29,.12); }
-    #cli-a:checked ~ .cli-body .cli-p-a, #cli-b:checked ~ .cli-body .cli-p-b { display:block; }
     @media (max-width:520px) { .clidiv span { font-size:9.5px; letter-spacing:.09em; }
-      .cli-pane code { font-size:12px; } }
+      .cli-body code { font-size:12px; } }
 
     /* trusted by marquee */
     .trust-label { margin:0 0 22px; text-align:center; font:700 11.5px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
@@ -599,11 +594,9 @@
 
     <div class="clidiv"><span>Or set it up from the command line</span></div>
     <div class="cli">
-      <input type="radio" name="cli" id="cli-a" checked><input type="radio" name="cli" id="cli-b">
-      <div class="cli-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><label for="cli-a" class="cli-tab">Ask your agent</label><label for="cli-b" class="cli-tab">Claude Code</label></div>
+      <div class="cli-bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="cli-title">Claude Code</span></div>
       <div class="cli-body">
-        <div class="cli-pane cli-p-a"><code>Set up tdoc and make my first doc: https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md</code></div>
-        <div class="cli-pane cli-p-b"><code>/plugin marketplace add tornado-doc/tdoc</code></div>
+        <code>/plugin marketplace add tornado-doc/tdoc</code>
         <span class="cli-hint">Click the line to select it.</span>
       </div>
     </div>
