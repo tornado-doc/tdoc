@@ -1,82 +1,51 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Context phone mock</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>What fills the context window</title>
 <style>
-  html,body{margin:0;height:100%;background:#fff;font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10121a;overflow:hidden}
-  body{padding:13px 15px 14px;display:flex;flex-direction:column;gap:10px;box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#FAF9F5;color:#1F1E1D;
+    font:13px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+  body{padding:15px 17px 16px;display:flex;flex-direction:column;gap:11px;box-sizing:border-box}
   .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
-  .ttl{font-size:13px;font-weight:650;letter-spacing:-.01em}
-  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:2px 9px;
-    font-size:11px;font-weight:700;color:#1a7340;background:#e8f5ed;border:1px solid #cfe0d6}
-  .pulse{width:6px;height:6px;background:#1a7340;animation:pl 2s ease-in-out infinite}
-  @keyframes pl{0%,100%{opacity:1}50%{opacity:.35}}
+  .ttl{font-size:14px;font-weight:600;letter-spacing:-.012em}
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:3px 9px;border-radius:6px;
+    font-size:11px;font-weight:600;color:#8A5230;background:#F6EAE2;border:1px solid #EBD7C9}
+  .pulse{width:6px;height:6px;border-radius:50%;background:#D97757;animation:pl 2s ease-in-out infinite}
+  @keyframes pl{0%,100%{opacity:1}50%{opacity:.3}}
   @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
   .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
-  .src{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;
-    background:#f5f6f8;border:1px solid #e5e5e5;font-size:11px;color:#5b6070}
-  .src b{width:7px;height:7px;display:inline-block}
-  .card{flex:1;min-height:0;padding:13px;border:1px solid #e0b93a;box-shadow:0 0 0 3px #fff2b8;background:#fff;overflow:hidden}
-  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#767c8b;flex-wrap:wrap}
- /* A design-doc figure, not a dashboard: the badge says mock, because
-    nothing here is live data and labelling it Live would be a lie. */
- .live{color:#5b4bbf;background:#efecfd;border-color:#d9d2f7}
- .pulse{background:#5b4bbf}
- .card{display:flex;gap:16px;align-items:stretch}
- .ph{flex:none;width:106px;border:2px solid #10121a;border-radius:13px;background:#0e1016;
-   display:flex;flex-direction:column;padding:6px 6px 7px;box-sizing:border-box;color:#fff}
- .notch{width:34px;height:4px;background:#3a3f4d;border-radius:3px;margin:0 auto 6px}
- .callr{font-size:11px;font-weight:700;line-height:1.25}
- .callo{font-size:9px;color:#9aa0b4;margin-bottom:6px}
- .ctx{background:#1b1f2b;border-left:2px solid #64b5f6;padding:5px 6px;font-size:8.5px;
-   line-height:1.4;color:#d6dae6;margin-bottom:auto}
- .ctx b{color:#fff;font-weight:650}
- .keys{display:flex;gap:6px;margin-top:7px}
- .key{flex:1;height:17px;border-radius:9px;display:grid;place-items:center;font-size:8px;font-weight:700}
- .no{background:#c3452f}.yes{background:#1a7340}
- .rt{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
- .rtt{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#8e939f}
- .fed{display:flex;align-items:baseline;gap:7px;font-size:11.5px;color:#454a58;
-   padding-bottom:5px;border-bottom:1px solid #f0f1f4}
- .fed b{color:#10121a;font-weight:600;flex:none}
- .fed i{margin-left:auto;font-style:normal;font-size:10.5px;color:#9aa0aa;flex:none}
- .states{display:flex;gap:5px;margin-top:auto}
- .st{flex:1;text-align:center;padding:4px 2px;border:1px solid #e4e7ee;background:#fff;
-   font:11px system-ui,-apple-system,sans-serif;color:#5b6070;cursor:pointer}
- .st[aria-pressed=true]{background:#10121a;border-color:#10121a;color:#fff;font-weight:600}
+  .src{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;
+    background:#F2F0E9;border:1px solid #E5E2D8;font-size:11px;color:#5F5C55}
+  .src svg{width:13px;height:13px;display:block;flex:none}
+  .card{flex:1;min-height:0;padding:14px;border-radius:8px;background:#fff;
+    border:1px solid #E0B96E;box-shadow:0 0 0 3px #FAEFD2;overflow:hidden}
+  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#8B8781;flex-wrap:wrap}
+  .card{display:flex;flex-direction:column;gap:12px}
+  .bar{display:flex;height:34px;border-radius:6px;overflow:hidden;flex:none;border:1px solid #E8E5DC}
+  .seg{display:grid;place-items:center;font-size:10.5px;font-weight:700;color:#fff;min-width:0;overflow:hidden;
+    transition:flex-grow .45s cubic-bezier(.22,.8,.28,1)}
+  .seg.pale{color:#8B8781}
+  @media (prefers-reduced-motion:reduce){.seg{transition:none}}
+  .legend{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:3px 18px;align-content:start}
+  .lg{display:flex;align-items:center;gap:7px;font-size:11.5px;color:#3D3A34;padding:2px 0}
+  .lgs{width:9px;height:9px;border-radius:2px;flex:none}
+  .lgn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lgv{font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#6B6862}
+  .modes{display:flex;gap:6px;flex:none}
+  .md{flex:1;padding:5px 4px;border-radius:6px;border:1px solid #E5E2D8;background:#FCFBF7;
+    font:11.5px ui-sans-serif,system-ui,sans-serif;color:#5F5C55;cursor:pointer}
+  .md[aria-pressed=true]{background:#1F1E1D;border-color:#1F1E1D;color:#fff;font-weight:600}
 </style></head><body>
-<div class="hd"><span class="ttl">Context phone &middot; call screen</span><span class="live"><span class="pulse"></span>Interactive mock</span></div>
-<div class="srcs"><span class="src"><b style="background:#ef4444"></b>HubSpot</span><span class="src"><b style="background:#3291ff"></b>Gmail</span><span class="src"><b style="background:#10b981"></b>Slack</span><span class="src"><b style="background:#f59e0b"></b>Calendar</span></div>
-<div class="card">
-  <div class="ph">
-    <div class="notch"></div>
-    <div class="callr" id="cr">Dana Ruiz</div>
-    <div class="callo" id="co">Northwind &middot; mobile</div>
-    <div class="ctx" id="cx"><b>Pricing thread open.</b> Last spoke 12 Aug. Asked for a 3-seat quote.</div>
-    <div class="keys" id="kb"><span class="key no">Decline</span><span class="key yes">Answer</span></div>
-  </div>
-  <div class="rt">
-    <div class="rtt">What fills the card</div>
-    <div class="fed"><b>Who</b> account owner, stage <i>HubSpot</i></div>
-    <div class="fed"><b>History</b> last thread, 12 Aug <i>Gmail</i></div>
-    <div class="fed"><b>Intent</b> open ask in #deals <i>Slack</i></div>
-    <div class="states" id="sw">
-      <button class="st" type="button" aria-pressed="true" data-s="0">Before ring</button>
-      <button class="st" type="button" aria-pressed="false" data-s="1">In call</button>
-      <button class="st" type="button" aria-pressed="false" data-s="2">After</button>
-    </div>
-  </div>
-</div>
-<div class="foot"><span>Assembled before the second ring &middot; ~1.2s budget</span><span>Mock v5</span></div>
+<div class="hd"><span class="ttl">What fills the context window</span><span class="live"><span class="pulse"></span>Interactive</span></div>
+<div class="srcs"><span class="src"><svg viewBox="0 0 16 16"><path d="M8 .5a7.5 7.5 0 0 0-2.4 14.6c.4.1.5-.2.5-.4v-1.3c-2 .5-2.5-.9-2.5-.9-.3-.9-.8-1.1-.8-1.1-.7-.4 0-.4 0-.4.8.1 1.2.8 1.2.8.7 1.1 1.8.8 2.2.6.1-.5.3-.9.5-1.1-1.6-.2-3.3-.8-3.3-3.6 0-.8.3-1.5.8-2 0-.2-.4-.9.1-2 0 0 .6-.2 2 .8a7 7 0 0 1 3.7 0c1.4-1 2-.8 2-.8.5 1.1.1 1.8.1 2 .5.5.8 1.2.8 2 0 2.8-1.7 3.4-3.3 3.6.3.2.5.7.5 1.4v2.1c0 .2.1.5.5.4A7.5 7.5 0 0 0 8 .5z" fill="#1F1E1D"/></svg>GitHub</span><span class="src"><svg viewBox="0 0 16 16"><rect x="6.3" y="1" width="3.4" height="8" rx="1.7" fill="#36C5F0"/><rect x="7" y="7" width="8" height="3.4" rx="1.7" fill="#2EB67D"/><rect x="6.3" y="7" width="3.4" height="8" rx="1.7" fill="#ECB22E"/><rect x="1" y="5.6" width="8" height="3.4" rx="1.7" fill="#E01E5A"/></svg>Slack</span><span class="src"><svg viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#4285F4" stroke-width="1.8"/><path d="M10.5 10.5 L14.6 14.6" stroke="#34A853" stroke-width="2" stroke-linecap="round"/><rect x="4.6" y="6.4" width="1.5" height="3" fill="#4285F4"/><rect x="6.9" y="4.6" width="1.5" height="4.8" fill="#EA4335"/><rect x="9.2" y="5.8" width="1.5" height="3.6" fill="#FBBC05"/></svg>Search Console</span><span class="src"><svg viewBox="0 0 16 16"><circle cx="11.2" cy="9.6" r="3.9" fill="none" stroke="#FF7A59" stroke-width="1.9"/><circle cx="12.9" cy="2.6" r="1.9" fill="#FF7A59"/><rect x="2" y="6.4" width="1.9" height="4.6" fill="#FF7A59"/><path d="M3.9 8.7h3.6M11.2 5.7V4.4" stroke="#FF7A59" stroke-width="1.6"/></svg>HubSpot</span></div>
+<div class="card"><div class="bar" id="bar"><div class="seg" data-i="0" style="flex:34 0 0;background:#D97757">34%</div><div class="seg" data-i="1" style="flex:18 0 0;background:#C58C5A">18%</div><div class="seg" data-i="2" style="flex:22 0 0;background:#7A6FB0">22%</div><div class="seg" data-i="3" style="flex:14 0 0;background:#3F7A52">14%</div><div class="seg pale" data-i="4" style="flex:12 0 0;background:#EDEAE1">12%</div></div><div class="legend"><div class="lg"><span class="lgs" style="background:#D97757"></span><span class="lgn">Repo</span><span class="lgv" data-l="0">34%</span></div><div class="lg"><span class="lgs" style="background:#C58C5A"></span><span class="lgn">Open threads</span><span class="lgv" data-l="1">18%</span></div><div class="lg"><span class="lgs" style="background:#7A6FB0"></span><span class="lgn">Connectors</span><span class="lgv" data-l="2">22%</span></div><div class="lg"><span class="lgs" style="background:#3F7A52"></span><span class="lgn">This doc</span><span class="lgv" data-l="3">14%</span></div><div class="lg"><span class="lgs" style="background:#EDEAE1"></span><span class="lgn">Headroom</span><span class="lgv" data-l="4">12%</span></div></div><div class="modes" id="md"><button class="md" type="button" aria-pressed="true" data-m="0">As it runs now</button><button class="md" type="button" aria-pressed="false" data-m="1">With the repo trimmed</button></div></div>
+<div class="foot"><span>200k window &middot; measured over 40 sessions</span><span>Design v5</span></div>
 <script>
-// The three states a caller actually passes through. The card is populated
-// before the first ring, which is the whole argument of the doc.
-var S=[{r:'Dana Ruiz',o:'Northwind · incoming',c:'<b>Pricing thread open.</b> Last spoke 12 Aug. Asked for a 3-seat quote.',k:1},
-       {r:'Dana Ruiz',o:'Northwind · 04:12',c:'<b>She asked about seats.</b> Current plan caps at 3. Upgrade path is $18/seat.',k:0},
-       {r:'Call ended',o:'Northwind · 6m 41s',c:'<b>Logged to HubSpot.</b> Follow-up drafted in Gmail, waiting for your send.',k:0}];
-var cr=document.getElementById('cr'),co=document.getElementById('co'),cx=document.getElementById('cx'),kb=document.getElementById('kb');
-document.getElementById('sw').addEventListener('click',function(e){
-  var b=e.target.closest('.st'); if(!b) return;
+// Two budgets, one bar. Trimming the repo is the whole recommendation, so
+// the reader should be able to see the headroom it buys.
+var A=[34,18,22,14,12], B=[12,18,22,14,34];
+document.getElementById('md').addEventListener('click',function(e){
+  var b=e.target.closest('.md'); if(!b) return;
   [].forEach.call(this.children,function(x){x.setAttribute('aria-pressed',String(x===b))});
-  var s=S[+b.dataset.s]; cr.textContent=s.r; co.innerHTML=s.o; cx.innerHTML=s.c;
-  kb.style.visibility=s.k?'visible':'hidden';
+  var v=(+b.dataset.m)?B:A;
+  [].forEach.call(document.querySelectorAll('.seg'),function(s,i){s.style.flexGrow=v[i];s.textContent=v[i]+'%';});
+  [].forEach.call(document.querySelectorAll('[data-l]'),function(s,i){s.textContent=v[i]+'%';});
 });
-</script>
-</body></html>
+</script></body></html>
