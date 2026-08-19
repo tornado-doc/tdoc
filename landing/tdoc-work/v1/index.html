@@ -578,6 +578,9 @@ Stated reason: “I did not know what to make”</div>
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tdoc-work/v/1/widget/funnel"
                 title="Signup to publish funnel" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+        <h4 style="margin-top:26px">What we are changing first</h4>
+        <p>Install is the wall. Nine of twelve sessions stalled between the plugin line and the first doc, and none of them mentioned writing.</p>
+        <p>The fix under test is a first doc the agent builds for you, so the blank page never happens.</p>
       </div>
       </div>
       <aside class="stage-notes">
@@ -618,6 +621,9 @@ retry     exponential, capped at 30s</div>
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tdoc-work/v/1/widget/queue"
                 title="Queue depth and retries, simulated" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+        <h4 style="margin-top:26px">What four workers costs</h4>
+        <p>Two more workers is roughly $40 a month at current volume, against a backlog that currently clears three bursts late.</p>
+        <p>The cap on retry backoff matters more than the worker count once arrivals settle.</p>
       </div>
       </div>
       <aside class="stage-notes">
@@ -658,6 +664,9 @@ rollback  14:41 UTC</div>
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tdoc-work/v/1/widget/latency"
                 title="Request latency, p50 p95 p99" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+        <h4 style="margin-top:26px">What we are changing</h4>
+        <p>The alert watched median latency, which never moved. It watches p99 now, and pages at two minutes over threshold rather than five.</p>
+        <p>The cache change itself was fine under load; the eviction policy was not.</p>
       </div>
       </div>
       <aside class="stage-notes">

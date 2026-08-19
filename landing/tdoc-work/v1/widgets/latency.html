@@ -1,16 +1,36 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><title>Latency</title>
 <style>
- html,body{margin:0;height:100%;background:#fff;font:13px system-ui,-apple-system,sans-serif;color:#10121a}
- body{display:flex;flex-direction:column;padding:14px;box-sizing:border-box;gap:9px}
+  /* first-tree idiom: stat cards on a tinted gradient, a live status pill, and
+     the sources named on the card itself. A doc-shaped dashboard says where
+     its numbers came from and when they last moved. */
+  html,body{margin:0;background:#fff;font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10121a}
+  body{padding:13px 14px;display:flex;flex-direction:column;gap:11px;box-sizing:border-box;min-height:100%}
+  .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+  .ttl{font-size:13px;font-weight:650;letter-spacing:-.01em}
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;
+    padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;
+    background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:#0f7a55}
+  .pulse{width:6px;height:6px;border-radius:50%;background:#10b981;animation:pl 2s ease-in-out infinite}
+  @keyframes pl{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
+  @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+  .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+  .src{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:6px;
+    background:#f5f6f8;border:1px solid #e4e7ee;font-size:11px;color:#5b6070}
+  .src b{width:7px;height:7px;border-radius:2px;display:inline-block}
+  .card{flex:1;min-height:0;padding:14px;border-radius:12px;border:1px solid #e4e7ee;
+    background:linear-gradient(135deg,rgba(50,145,255,.06) 0%,rgba(139,92,246,.06) 100%)}
+  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#8e939f;flex-wrap:wrap}
  .hd{display:flex;gap:18px;flex:none;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
  .hd b{font-weight:700}
  .p50{color:#1a7340}.p95{color:#D97757}.p99{color:#c3452f}
  canvas{flex:1;min-height:0;width:100%;display:block}
  .cap{flex:none;font-size:11.5px;color:#767c8b}
 </style></head><body>
-<div class="hd"><span class="p50">p50 <b id="a">—</b></span><span class="p95">p95 <b id="b">—</b></span><span class="p99">p99 <b id="c">—</b></span></div>
+<div class="hd"><span class="ttl">Request latency</span><span class="live"><span class="pulse"></span>Live · every 60 s</span></div>
+<div class="srcs"><span class="src"><b style="background:#8b5cf6"></b>Datadog</span><span class="src"><b style="background:#10121a"></b>GitHub</span><span class="src"><b style="background:#10b981"></b>Slack #incidents</span></div>
+<div class="card"><div class="hd"><span class="p50">p50 <b id="a">—</b></span><span class="p95">p95 <b id="b">—</b></span><span class="p99">p99 <b id="c">—</b></span></div>
 <canvas id="cv"></canvas>
-<div class="cap">Request latency after the cache change. p99 is the one that pages you.</div>
+
 <script>
 // Live-ish latency: p99 spikes when the cache misses, then settles. Drawn
 // rather than screenshotted, so the tail is actually visible.
@@ -38,4 +58,6 @@
  }
  tick();setInterval(tick,120);addEventListener('resize',size);
 })();
-</script></body></html>
+</script></div>
+<div class="foot"><span>window either side of the deploy</span><span>Updated just now</span></div>
+</body></html>
