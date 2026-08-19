@@ -199,46 +199,31 @@
     /* The promise is the demo: click the phrase (or the hand on it) and a
        real thread opens under it. No author script runs on this page, so the
        toggle is a checkbox and the reveal is a rule. */
-    .hsel-in { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
-    .sub .hsel { cursor:pointer; }
-    .hero-thread { display:none; gap:10px; align-items:flex-start; margin:-22px 0 32px; max-width:520px; }
-    #hero-sel:checked ~ .hero-thread { display:flex; }
-    #hero-sel:checked ~ .sub .hsel { animation:none; background-size:100% 100%; }
-    #hero-sel:checked ~ .sub .tcur { display:none; }
-    .ht-pin { width:28px; height:28px; border-radius:50%; overflow:hidden; flex:none; display:grid;
-      place-items:center; background:#fff; border:2px solid var(--accent); box-shadow:0 1px 4px rgba(16,18,26,.12); }
-    img.ht-av { width:100%; height:100%; object-fit:cover; transform:scale(1.34);
-      display:block !important; margin:0 !important; border-radius:50%; }
-    .ht-card { flex:1; min-width:0; border:1px solid var(--rule); border-radius:11px; background:#fff;
-      padding:11px 13px; box-shadow:0 2px 10px rgba(16,18,26,.06); }
-    .ht-who { font-size:13px; font-weight:650; color:var(--ink); margin:0 0 3px; }
-    .ht-text { font-size:13.5px; line-height:1.5; color:var(--body); margin:0; }
-    .ht-reply { margin:11px 0 0; padding:9px 0 0 11px; border-left:2px solid var(--rule); }
-    .ht-agent { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:650; color:var(--ink); }
-    .ht-mark { width:19px; height:19px; border-radius:50%; background:#D97757; display:grid; place-items:center; flex:none; }
-    .ht-mark svg { width:12px; height:12px; fill:#fff; display:block; }
-    .ht-state { display:inline-block; margin-left:7px; font-size:11px; font-weight:700; color:var(--good);
-      background:#eef7f1; border:1px solid #cfe0d6; border-radius:5px; padding:1px 6px; vertical-align:1px; }
-    .ht-reply .ht-text { margin-top:6px; }
-
-    /* The demo's selections are static: it is a picture of a real doc.
-       The hero's is the one that moves — a hand drags across the promise and
-       the selection fills in behind it, which is the thing a still page
-       cannot say: select any words here and comment on them. */
-    .tsel { background:#FFF2B8; box-shadow:0 0 0 1px #E0B93A; }
-    .sub .hsel { display:inline; position:relative; color:var(--ink);
+    /* The promise is the demo. A hand drags across the phrase, the selection
+       fills in behind it, and the run ends on a press so the invitation is
+       unmistakable. Clicking it selects the phrase for real and opens the
+       product's own composer — no second composer to drift from that one. */
+    .sub .hsel { display:inline; position:relative; cursor:pointer; color:var(--ink);
       background-image:linear-gradient(#FFF2B8,#FFF2B8); background-repeat:no-repeat;
       background-size:0% 100%; animation:hsel-fill 7s cubic-bezier(.42,0,.24,1) infinite; }
     @keyframes hsel-fill { 0% { background-size:0% 100%; } 22%,88% { background-size:100% 100%; }
       100% { background-size:0% 100%; } }
-    .tcur { position:absolute; left:0; top:.82em; width:26px; height:29px; pointer-events:none;
+    .tcur { position:absolute; left:0; top:.52em; width:23px; height:26px; pointer-events:none;
       animation:hsel-drag 7s cubic-bezier(.42,0,.24,1) infinite; }
     .tcur svg { width:100%; height:100%; display:block; filter:drop-shadow(0 1px 2px rgba(31,30,29,.3)); }
-    @keyframes hsel-drag { 0% { left:0; opacity:0; } 7% { opacity:1; }
-      22%,88% { left:100%; opacity:1; } 95%,100% { left:100%; opacity:0; } }
+    @keyframes hsel-drag { 0% { left:0; opacity:0; transform:none; } 7% { opacity:1; }
+      22% { left:100%; transform:none; } 26% { transform:translateY(3px) scale(.92); }
+      31% { transform:none; } 88% { left:100%; opacity:1; }
+      95%,100% { left:100%; opacity:0; } }
+    .tcur:after { content:""; position:absolute; left:-7px; top:-6px; width:24px; height:24px;
+      border:2px solid var(--ink); border-radius:50%; opacity:0;
+      animation:hsel-tap 7s cubic-bezier(.42,0,.24,1) infinite; }
+    @keyframes hsel-tap { 0%,23% { transform:scale(.3); opacity:0; }
+      28% { opacity:.5; } 42%,100% { transform:scale(1.6); opacity:0; } }
     @media (prefers-reduced-motion: reduce) {
-      .hsel { animation:none; background-size:100% 100%; }
+      .sub .hsel { animation:none; background-size:100% 100%; }
       .tcur { animation:none; left:100%; }
+      .tcur:after { animation:none; opacity:0; }
     }
     .tldr { display:flex; gap:11px; align-items:flex-start; margin:15px 0;
       padding:12px 14px; background:var(--wash); border-left:3px solid var(--ink); }
@@ -543,8 +528,6 @@
       .mc-text { font-size:12px; line-height:1.45; }
       .mc-reply { margin-top:8px; padding-top:8px; }
       iframe.life { aspect-ratio:17/9; }
-      .hero-thread { margin:-14px 0 26px; }
-      .ht-text { font-size:12.5px; }
       .sfnm { font-size:11px; } .sft { padding:4px 7px; }
       .sfx, .sfside, .sfnav { display:none; }
       /* 342px of usable width at 375, so two 232px tracks cannot sit side by
@@ -622,21 +605,7 @@
     <div class="brand"><img class="brand-mark" src="data:image/png;base64,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" alt="" width="26" height="26"><span class="brand-name">tdoc</span></div>
 
     <h1 class="tagline">Docs that act on your comments.</h1>
-    <input type="checkbox" id="hero-sel" class="hsel-in">
-    <p class="sub"><span>Like Google Docs, but your agent <label for="hero-sel" class="hsel">turns comments into changes with one click.<i class="tcur"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M17 27V9a4 4 0 0 1 8 0v13h2.5a3.2 3.2 0 0 1 3.2 3.2V27h1.6a3 3 0 0 1 3 3v1.4a3 3 0 0 1 .7 2v4.1A7.5 7.5 0 0 1 28.5 45h-7.9a7.4 7.4 0 0 1-5.5-2.4l-6.8-7.6a3.4 3.4 0 0 1 5-4.6L17 33z" fill="#fff" stroke="#1F1E1D" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/></svg></i></label></span></p>
-
-    <div class="hero-thread">
-      <span class="ht-pin"><img class="ht-av" src="data:image/png;base64,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" alt="Jesse Pollak" width="26" height="26"></span>
-      <div class="ht-card">
-        <div class="ht-who">Jesse Pollak</div>
-        <p class="ht-text">Can you make this a weekly report instead, and rerun the numbers?</p>
-        <div class="ht-reply">
-          <span class="ht-agent"><span class="ht-mark"><svg aria-hidden="true"><use href="#i-claude"/></svg></span>Claude</span>
-          <span class="ht-state">&#10003; applied</span>
-          <p class="ht-text">Rewrote it weekly and reran them. That is v2.</p>
-        </div>
-      </div>
-    </div>
+    <p class="sub"><span>Like Google Docs, but your agent <span class="hsel" data-tdoc-select>turns comments into changes with one click.<i class="tcur"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M17 27V9a4 4 0 0 1 8 0v13h2.5a3.2 3.2 0 0 1 3.2 3.2V27h1.6a3 3 0 0 1 3 3v1.4a3 3 0 0 1 .7 2v4.1A7.5 7.5 0 0 1 28.5 45h-7.9a7.4 7.4 0 0 1-5.5-2.4l-6.8-7.6a3.4 3.4 0 0 1 5-4.6L17 33z" fill="#fff" stroke="#1F1E1D" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/></svg></i></span></span></p>
 
     <p class="trustline">
       <span><svg aria-hidden="true"><use href="#i-code"/></svg>Open source</span>
@@ -951,7 +920,7 @@
         <tbody>
           <tr>
             <td class="lbl">Has your working context</td>
-            <td class="us" data-col="tdoc"><span class="yes"><svg><use href="#i-check"/></svg></span><b>Runs in your agent session</b></td>
+            <td class="us" data-col="tdoc"><span class="yes"><svg><use href="#i-check"/></svg><b>Runs in your agent session</b></span></td>
             <td data-col="Google Docs"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
             <td data-col="Notion"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
             <td data-col="ChatGPT"><span class="part"><svg><use href="#i-dash"/></svg>What you paste</span></td>
@@ -990,7 +959,7 @@
             <td data-col="Claude artifacts"><span class="yes"><svg><use href="#i-check"/></svg>Any web page</span></td>
           </tr>
           <tr>
-            <td class="lbl">Live co editing</td>
+            <td class="lbl">Live co-editing</td>
             <td class="us" data-col="tdoc"><span class="part"><svg><use href="#i-dash"/></svg>Coming soon</span></td>
             <td data-col="Google Docs"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
             <td data-col="Notion"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
