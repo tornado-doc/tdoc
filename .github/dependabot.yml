@@ -19,3 +19,9 @@ updates:
       prefix: "ci"
     labels:
       - "dependencies"
+    # init and analyze MUST share one codeql-action SHA (see codeql.yml).
+    # Ungrouped updates open twin PRs that each fail CI. Keep them together.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
