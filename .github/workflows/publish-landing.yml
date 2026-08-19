@@ -180,9 +180,13 @@ jobs:
             # while /start is still on the fallback is a broken hand-off, not
             # a success. Both, or keep waiting.
             tour=$(curl -sS https://tdoc.dev/start || true)
-            if [[ "$home" == *'A doc that answers its own comments'* \
+            # Match on what proves the doc rendered, not on its wording: the
+            # slug and the landing flag come from the overlay config, and the
+            # neutral fallback carries neither. Keying on the headline meant
+            # every homepage rewrite failed its own deploy.
+            if [[ "$home" == *'"slug":"tornado-doc"'* \
               && "$home" == *'"isLanding":true'* \
-              && "$tour" == *'Everything tdoc does'* ]]; then
+              && "$tour" == *'"slug":"tdoc-start"'* ]]; then
               echo "tdoc.dev/ and /start are both serving their docs."
               exit 0
             fi

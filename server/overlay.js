@@ -3715,6 +3715,23 @@
     setTimeout(() => maybeOpenSelectionPopup(t), 0);
   }, true);
 
+  // An author can mark a phrase as an invitation: `data-tdoc-select`. Clicking
+  // it selects that phrase and hands off to the same popup a drag-select
+  // opens, so the page teaches the gesture without shipping a second
+  // composer that could drift from this one. A click costs less than a drag,
+  // and a reader who will not drag will still tap.
+  document.addEventListener('click', (e) => {
+    const invite = e.target?.closest?.('[data-tdoc-select]');
+    if (!invite || isInUI(invite)) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(invite);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    maybeOpenSelectionPopup(invite);
+  }, true);
+
   function maybeOpenSelectionPopup(target) {
     // Selected text wins over "comment whole artifact." If there's a real text
     // selection, open the text-selection popup regardless of whether the
