@@ -194,26 +194,36 @@
        phone, or the chart inside gets 135px of height and clips. */
     @media (max-width:900px) { iframe.life { aspect-ratio:16/8; } }
     @media (max-width:700px) { iframe.life { aspect-ratio:4/3; } }
-    @media (max-width:520px) { iframe.life { aspect-ratio:1/1.7; } }
+    @media (max-width:520px) { iframe.life { aspect-ratio:17/11; } }
 
-    /* The demo's selections are static: it is a picture of a real doc.
-       The hero's is the one that moves — a hand drags across the promise and
-       the selection fills in behind it, which is the thing a still page
-       cannot say: select any words here and comment on them. */
-    .tsel { background:#FFF2B8; box-shadow:0 0 0 1px #E0B93A; }
-    .sub .hsel { display:inline; position:relative; color:var(--ink);
+    /* The promise is the demo: click the phrase (or the hand on it) and a
+       real thread opens under it. No author script runs on this page, so the
+       toggle is a checkbox and the reveal is a rule. */
+    /* The promise is the demo. A hand drags across the phrase, the selection
+       fills in behind it, and the run ends on a press so the invitation is
+       unmistakable. Clicking it selects the phrase for real and opens the
+       product's own composer — no second composer to drift from that one. */
+    .sub .hsel { display:inline; position:relative; cursor:pointer; color:var(--ink);
       background-image:linear-gradient(#FFF2B8,#FFF2B8); background-repeat:no-repeat;
       background-size:0% 100%; animation:hsel-fill 7s cubic-bezier(.42,0,.24,1) infinite; }
     @keyframes hsel-fill { 0% { background-size:0% 100%; } 22%,88% { background-size:100% 100%; }
       100% { background-size:0% 100%; } }
-    .tcur { position:absolute; left:0; top:.82em; width:26px; height:29px; pointer-events:none;
+    .tcur { position:absolute; left:0; top:.52em; width:23px; height:26px; pointer-events:none;
       animation:hsel-drag 7s cubic-bezier(.42,0,.24,1) infinite; }
     .tcur svg { width:100%; height:100%; display:block; filter:drop-shadow(0 1px 2px rgba(31,30,29,.3)); }
-    @keyframes hsel-drag { 0% { left:0; opacity:0; } 7% { opacity:1; }
-      22%,88% { left:100%; opacity:1; } 95%,100% { left:100%; opacity:0; } }
+    @keyframes hsel-drag { 0% { left:0; opacity:0; transform:none; } 7% { opacity:1; }
+      22% { left:100%; transform:none; } 26% { transform:translateY(3px) scale(.92); }
+      31% { transform:none; } 88% { left:100%; opacity:1; }
+      95%,100% { left:100%; opacity:0; } }
+    .tcur:after { content:""; position:absolute; left:-7px; top:-6px; width:24px; height:24px;
+      border:2px solid var(--ink); border-radius:50%; opacity:0;
+      animation:hsel-tap 7s cubic-bezier(.42,0,.24,1) infinite; }
+    @keyframes hsel-tap { 0%,23% { transform:scale(.3); opacity:0; }
+      28% { opacity:.5; } 42%,100% { transform:scale(1.6); opacity:0; } }
     @media (prefers-reduced-motion: reduce) {
-      .hsel { animation:none; background-size:100% 100%; }
+      .sub .hsel { animation:none; background-size:100% 100%; }
       .tcur { animation:none; left:100%; }
+      .tcur:after { animation:none; opacity:0; }
     }
     .tldr { display:flex; gap:11px; align-items:flex-start; margin:15px 0;
       padding:12px 14px; background:var(--wash); border-left:3px solid var(--ink); }
@@ -306,12 +316,20 @@
     .rt { display:inline-flex; align-items:center; gap:9px; border:1px solid var(--rule); border-radius:11px; padding:12px 19px; background:#fff; font-weight:600; font-size:15px; color:var(--ink); }
     .rt svg { width:19px; height:19px; }
 
-    .rt-split { display:flex; justify-content:center; align-items:stretch; gap:40px; }
-    .rt-split > div { display:flex; flex-direction:column; align-items:center; }
-    .rt-hosts { display:flex; flex-direction:row; gap:14px; padding-left:40px; border-left:1px solid var(--rule); }
-    .rt-cap { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:0 0 16px; text-align:center; }
     .logorow { justify-content:center; }
-    @media (max-width:840px) { .rt-split { flex-direction:column; gap:28px; } .rt-hosts { padding-left:0; border-left:0; } }
+
+    /* No setup: the agents are what you already have, not a menu you pick
+       from, and the hosts are the "or" in a sentence rather than a second
+       decision standing between you and a first doc. */
+    .nosetup { display:flex; flex-direction:column; align-items:center; gap:16px; }
+    .ns-cap { font-size:14px; color:var(--muted); margin:0; text-align:center; }
+    .ns-host { font-size:14px; color:var(--muted); margin:8px 0 0; text-align:center;
+      max-width:620px; display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:9px; }
+    .ns-host b { color:var(--ink); font-weight:650; }
+    .ns-marks { display:inline-flex; gap:8px; align-items:center; }
+    .apptile.ns-small { width:42px; height:42px; border-radius:11px; }
+    .apptile.ns-small svg { width:21px; height:21px; }
+    .apptile.ns-small img.apptile-img { width:25px; height:25px; }
 
     /* feature cards, opentag layout */
         /* rows stretch so the four bottoms line up. align-items:start hugs the
@@ -488,6 +506,28 @@
        edge, so they stack instead of spilling. */
     @media (max-width:640px) {
       h1.tagline { font-size:34px; }
+      /* On a phone the demo has to be one screen or it stops reading as a
+         screenshot and starts reading as a scroll. The stage keeps the three
+         things that carry the story — the doc, the artifact, the thread —
+         and drops the supporting prose. */
+      .tldr { display:none; }
+      .doc-tail { display:none; }
+      .doc h4:not(:first-child) { display:none; }
+      /* The thread keeps what tells the story — who said it, what the agent
+         did — and drops the reader furniture that costs 116px of the one
+         screen: the anchor hint, the reaction rows, the timestamps. */
+      .mc-anchor, .mc-reacts, .mc-meta { display:none; }
+      /* The lead paragraph stays: on two tabs it carries the phrase the
+         comment is anchored to. Everything around it gives up a few pixels
+         each until the window fits the screen. */
+      .stage-notes { padding:12px 14px 14px 0; }
+      .doc { padding:14px 14px 4px; }
+      .doc h4 { margin-bottom:6px; }
+      .doc p { font-size:13px; line-height:1.5; margin-bottom:8px; }
+      .tbar { padding:7px 12px; }
+      .mc-text { font-size:12px; line-height:1.45; }
+      .mc-reply { margin-top:8px; padding-top:8px; }
+      iframe.life { aspect-ratio:17/9; }
       .sfnm { font-size:11px; } .sft { padding:4px 7px; }
       .sfx, .sfside, .sfnav { display:none; }
       /* 342px of usable width at 375, so two 232px tracks cannot sit side by
@@ -565,7 +605,7 @@
     <div class="brand"><img class="brand-mark" src="data:image/png;base64,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" alt="" width="26" height="26"><span class="brand-name">tdoc</span></div>
 
     <h1 class="tagline">Docs that act on your comments.</h1>
-    <p class="sub"><span>Like Google Docs, but your agent <span class="hsel">turns comments into changes with one click.<i class="tcur"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M17 27V9a4 4 0 0 1 8 0v13h2.5a3.2 3.2 0 0 1 3.2 3.2V27h1.6a3 3 0 0 1 3 3v1.4a3 3 0 0 1 .7 2v4.1A7.5 7.5 0 0 1 28.5 45h-7.9a7.4 7.4 0 0 1-5.5-2.4l-6.8-7.6a3.4 3.4 0 0 1 5-4.6L17 33z" fill="#fff" stroke="#1F1E1D" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/></svg></i></span></span></p>
+    <p class="sub"><span>Like Google Docs, but your agent <span class="hsel" data-tdoc-select>turns comments into changes with one click.<i class="tcur"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M17 27V9a4 4 0 0 1 8 0v13h2.5a3.2 3.2 0 0 1 3.2 3.2V27h1.6a3 3 0 0 1 3 3v1.4a3 3 0 0 1 .7 2v4.1A7.5 7.5 0 0 1 28.5 45h-7.9a7.4 7.4 0 0 1-5.5-2.4l-6.8-7.6a3.4 3.4 0 0 1 5-4.6L17 33z" fill="#fff" stroke="#1F1E1D" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/></svg></i></span></span></p>
 
     <p class="trustline">
       <span><svg aria-hidden="true"><use href="#i-code"/></svg>Open source</span>
@@ -586,8 +626,7 @@
       <div class="stage-doc">
       <div class="doc">
         <h4>Weekly GTM report</h4>
-        <p>947 signups this week, up 23% on last week. Referral and organic carried it; paid social fell 18% while its spend went up.</p>
-        <p>Fund referral next week and cut paid social back. Referral costs $11 a signup against paid social&#8217;s $63, and only 6% of accounts have ever sent an invite.</p>
+        <p>947 signups this week, up 23%. Fund referral next week and cut paid social back: $11 a signup against $63.</p>
         <div class="tldr"><b class="tldr-k">TL;DR</b><span>Paid social is <b>19% of signups and 62% of the spend</b>. Referral is 34% of signups on 19% of it.</span></div>
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tornado-doc/v/42/widget/channels"
                 title="Signups by channel" loading="lazy"
@@ -626,10 +665,9 @@
       <div class="stage-doc">
       <div class="doc">
         <h4>Competitor analysis</h4>
-        <p>Forty-two products screened, five worth plotting. Everything that already has your context is built for one person; <span class="tsel">everything built for a team makes you paste it in</span>.</p>
-        <p>Build for the empty quadrant: team-shaped, running inside the session that already holds the context. Nobody is there, and it is the only position the other four cannot reach.</p>
+        <p>Forty-two screened, five plotted. Everything with your context is built for one person; <span class="tsel">everything built for a team makes you paste it in</span>.</p>
         <div class="tldr"><b class="tldr-k">TL;DR</b><span>Of 42 products, <b>none</b> sit in team-shaped and already-has-your-context. Five come close on one axis and fail the other.</span></div>
-        <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tornado-doc/v/42/widget/competitors"
+        <iframe data-tdoc-dark="invert" class="life" src="/d/tornado-doc/v/42/widget/competitors"
                 title="Where the tools sit, plotted on two axes" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
         <div class="doc-tail"><h4 style="margin-top:26px">Why the empty quadrant is empty</h4>
@@ -666,10 +704,9 @@
       <div class="stage-doc">
       <div class="doc">
         <h4>Design: how the agent gets your context</h4>
-        <p>The 200k window is full before tdoc asks for anything: repo 68k, open threads 36k, connectors 44k, the doc itself 28k, <span class="tsel">24k free</span>.</p>
-        <p>Trim the repo first. It is the only source large enough to matter and the easiest to rank down, and it returns 44k of headroom without dropping a connector.</p>
+        <p>The window is full before tdoc asks for anything: repo 68k, threads 36k, connectors 44k, this doc 28k, <span class="tsel">24k free</span>.</p>
         <div class="tldr"><b class="tldr-k">TL;DR</b><span>The repo is <b>a third of the window</b>. The doc being edited is 14%, and free space is 12%.</span></div>
-        <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tornado-doc/v/42/widget/phone"
+        <iframe data-tdoc-dark="invert" class="life" src="/d/tornado-doc/v/42/widget/phone"
                 title="What fills the agent context window" loading="lazy"
                 sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
         <div class="doc-tail"><h4 style="margin-top:26px">What we are cutting first</h4>
@@ -706,8 +743,7 @@
       <div class="stage-doc">
       <div class="doc">
         <h4>Which one do you want?</h4>
-        <p>Three type options for the pricing page. Same copy, same layout, and only the fonts change.</p>
-        <p>Comment on the one you want. It goes across the pricing table, the plan cards and the footer in one pass, so the page keeps one voice.</p>
+        <p>Three type options for the pricing page. Same copy, same layout; only the fonts change.</p>
         <div class="tldr"><b class="tldr-k">TL;DR</b><span>A is monospace, B is serif, C is a script. <b>The body stays the same in all three.</b></span></div>
         <iframe data-tdoc-dark="invert" class="life anchored" src="/d/tornado-doc/v/42/widget/styles"
                 title="Three type options, click to pick" loading="lazy"
@@ -794,31 +830,26 @@
     </div>
   </section>
 
-  <!-- ══ RUNTIMES ══ -->
+  <!-- ══ NO SETUP ══ -->
   <section>
     <div class="sec-head ctr">
-      <p class="eyebrow">Bring your own AI</p>
-      <h2>Your agent, your host, your bill.</h2>
-      <p>Open source, MIT. Runs on the agent you already pay for. Publishes to tdoc.dev, or to a Cloudflare or Vercel account you own.</p>
+      <p class="eyebrow">No setup</p>
+      <h2>It already runs where you work.</h2>
+      <p><span>tdoc lives in the agent session you already have open. Ask it to publish and it hands you back a link.</span><span>Nothing to install, no account to connect, no key to paste.</span></p>
     </div>
-    <div class="rt-split">
-      <div>
-        <p class="rt-cap">Runtimes</p>
-        <div class="logorow">
-      <div class="apptile" role="img" aria-label="Claude" title="Claude" style="background:#D97757"><svg fill="#fff" aria-hidden="true"><use href="#i-claude"/></svg></div>
-      <div class="apptile" role="img" aria-label="OpenAI Codex" title="OpenAI Codex" style="background:#fff"><svg fill="#0A0A0A" aria-hidden="true"><use href="#i-openai"/></svg></div>
-      <div class="apptile" role="img" aria-label="Grok" title="Grok" style="background:#0A0A0A"><svg fill="#fff" aria-hidden="true"><use href="#i-grok"/></svg></div>
-      
-      <div class="apptile" role="img" aria-label="Cursor" title="Cursor" style="background:#0A0A0A"><svg fill="#fff" aria-hidden="true"><use href="#i-cursor"/></svg></div>
-      <div class="apptile more" aria-hidden="true">&hellip;</div>
-        </div>
+
+    <div class="nosetup">
+      <div class="logorow">
+        <div class="apptile" role="img" aria-label="Claude" title="Claude" style="background:#D97757"><svg fill="#fff" aria-hidden="true"><use href="#i-claude"/></svg></div>
+        <div class="apptile" role="img" aria-label="OpenAI Codex" title="OpenAI Codex" style="background:#fff"><svg fill="#0A0A0A" aria-hidden="true"><use href="#i-openai"/></svg></div>
+        <div class="apptile" role="img" aria-label="Grok" title="Grok" style="background:#0A0A0A"><svg fill="#fff" aria-hidden="true"><use href="#i-grok"/></svg></div>
+        <div class="apptile" role="img" aria-label="Cursor" title="Cursor" style="background:#0A0A0A"><svg fill="#fff" aria-hidden="true"><use href="#i-cursor"/></svg></div>
+        <div class="apptile more" aria-hidden="true">&hellip;</div>
       </div>
-      <div>
-        <p class="rt-cap">Hosts</p>
-        <div class="rt-hosts">
-        <div class="apptile" role="img" aria-label="tdoc.dev" title="tdoc.dev" style="background:#fff"><img class="apptile-img" src="data:image/png;base64,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" alt="" width="42" height="42"></div><div class="apptile" role="img" aria-label="Cloudflare" title="Cloudflare" style="background:#fff"><svg fill="#F38020" aria-hidden="true"><use href="#i-cloudflare"/></svg></div>
-        <div class="apptile" role="img" aria-label="Vercel" title="Vercel" style="background:#fff"><svg fill="#000" aria-hidden="true"><use href="#i-vercel"/></svg></div>
-        </div>
+      <p class="ns-cap">Whichever one is already open on your machine.</p>
+      <div class="ns-host">
+        <span>Open source, MIT. Published to <b>tdoc.dev</b> by default, or to a server you own:</span>
+        <span class="ns-marks"><span class="apptile ns-small" role="img" aria-label="tdoc.dev" title="tdoc.dev" style="background:#fff"><img class="apptile-img" src="data:image/png;base64,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" alt="" width="25" height="25"></span><span class="apptile ns-small" role="img" aria-label="Cloudflare" title="Cloudflare" style="background:#fff"><svg fill="#F38020" aria-hidden="true"><use href="#i-cloudflare"/></svg></span><span class="apptile ns-small" role="img" aria-label="Vercel" title="Vercel" style="background:#fff"><svg fill="#000" aria-hidden="true"><use href="#i-vercel"/></svg></span></span>
       </div>
     </div>
   </section>
@@ -889,7 +920,7 @@
         <tbody>
           <tr>
             <td class="lbl">Has your working context</td>
-            <td class="us" data-col="tdoc"><span class="yes"><svg><use href="#i-check"/></svg></span><b>Runs in your agent session</b></td>
+            <td class="us" data-col="tdoc"><span class="yes"><svg><use href="#i-check"/></svg><b>Runs in your agent session</b></span></td>
             <td data-col="Google Docs"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
             <td data-col="Notion"><span class="no"><svg><use href="#i-cross"/></svg></span></td>
             <td data-col="ChatGPT"><span class="part"><svg><use href="#i-dash"/></svg>What you paste</span></td>
@@ -928,7 +959,7 @@
             <td data-col="Claude artifacts"><span class="yes"><svg><use href="#i-check"/></svg>Any web page</span></td>
           </tr>
           <tr>
-            <td class="lbl">Live co editing</td>
+            <td class="lbl">Live co-editing</td>
             <td class="us" data-col="tdoc"><span class="part"><svg><use href="#i-dash"/></svg>Coming soon</span></td>
             <td data-col="Google Docs"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
             <td data-col="Notion"><span class="yes"><svg><use href="#i-check"/></svg></span></td>
