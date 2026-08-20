@@ -536,6 +536,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/') return send(res, 200, indexPage(), { 'Content-Type': 'text/html; charset=utf-8' });
+  // Overlay mark always goes to /me. Local studio has no hosted catalog, so
+  // send them to the local index — the analog of My docs.
+  if (p === '/me') {
+    res.writeHead(302, { Location: '/' });
+    return res.end();
+  }
 
   const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
   if (widgetMatch) {
