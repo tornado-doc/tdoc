@@ -3032,7 +3032,9 @@ export default {
       const code = url.searchParams.get('code');
       if (!code) return html(authDoneHtml());
       const state = url.searchParams.get('state');
-      const cookieNonce = (/tdoc_oauth=([a-f0-9]+)/.exec(req.headers.get('cookie') || '') || [])[1];
+      // Anchor to a cookie-pair boundary so a cookie merely ending in
+      // "tdoc_oauth" (e.g. "xtdoc_oauth=") can't supply the nonce.
+      const cookieNonce = (/(?:^|;\s*)tdoc_oauth=([a-f0-9]+)/.exec(req.headers.get('cookie') || '') || [])[1];
       if (!state || !cookieNonce || state !== cookieNonce) {
         return html(authErrorHtml('Sign-in could not be verified (state mismatch). Please try again.'), { status: 400 });
       }
