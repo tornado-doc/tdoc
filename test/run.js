@@ -46,6 +46,7 @@ const OFFLINE = [
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'notifications.test.js',    // inbox aggregation + Reddit recipients
+  'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)

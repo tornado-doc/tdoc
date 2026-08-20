@@ -47,10 +47,11 @@ vm.runInContext([
   'escapeHtml', 'normalizeNeedle', 'normalizeContext', 'normalizeQuery',
   'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl',
   'isAnthropicCompanyMark', 'tdocLogoUrl', 'agentLogoUrl', 'childrenOf',
+  'inboxTargetUrl', 'findCommentRoot',
 ].map(sliceFn).join('\n\n'), box);
 const { escapeHtml, normalizeNeedle, normalizeContext, normalizeQuery,
         commonPrefixLen, commonSuffixLen, isGithubHttpsUrl, agentLogoUrl,
-        childrenOf } = box;
+        childrenOf, inboxTargetUrl, findCommentRoot } = box;
 
 console.log('overlay-pure (#23 testable surface)');
 
@@ -144,6 +145,46 @@ t('childrenOf nests replies under their immediate parent', () => {
   assert(childrenOf(replies, 'c1', 'c1').map(r => r.id).join() === 'r1,r3', 'tops');
   assert(childrenOf(replies, 'r1', 'c1').map(r => r.id).join() === 'r2', 'nested');
   assert(childrenOf(replies, 'r2', 'c1').length === 0, 'leaf');
+});
+
+t('inboxTargetUrl builds /d/<slug>/v/<n>?comment=<id>', () => {
+  assert(inboxTargetUrl(
+    { slug: 'conway-life', version: 3, comment_id: 'c_1' },
+    { slug: 'other', version: 1 }
+  ) === '/d/conway-life/v/3?comment=c_1');
+});
+t('inboxTargetUrl falls back to the current doc when the row has no slug', () => {
+  assert(inboxTargetUrl(
+    { comment_id: 'r_9', thread_id: 'c_1' },
+    { slug: 'sample-doc', version: 2 }
+  ) === '/d/sample-doc/v/2?comment=r_9');
+});
+t('inboxTargetUrl never emits /d/undefined', () => {
+  assert(inboxTargetUrl({}, {}) === '');
+  assert(inboxTargetUrl({ comment_id: 'c_1' }, { version: 1 }) === '');
+  assert(inboxTargetUrl(null, null) === '');
+});
+t('inboxTargetUrl encodes slug and comment id', () => {
+  assert(inboxTargetUrl(
+    { slug: 'a b', version: 1, comment_id: 'c 1' },
+    {}
+  ) === '/d/a%20b/v/1?comment=c%201');
+});
+t('inboxTargetUrl treats bad versions as 1', () => {
+  assert(inboxTargetUrl({ slug: 'd', version: 'nope', comment_id: 'c' }, {}) === '/d/d/v/1?comment=c');
+  assert(inboxTargetUrl({ slug: 'd', version: 0 }, {}) === '/d/d/v/1');
+});
+t('findCommentRoot maps a reply id to its top-level card', () => {
+  const list = [
+    { id: 'c1', replies: [{ id: 'r1' }, { id: 'r2' }] },
+    { id: 'c2', replies: [] },
+  ];
+  assert(findCommentRoot(list, 'c1') === 'c1');
+  assert(findCommentRoot(list, 'r2') === 'c1');
+  assert(findCommentRoot(list, 'c2') === 'c2');
+  assert(findCommentRoot(list, 'missing') === 'missing');
+  assert(findCommentRoot(list, '') === null);
+  assert(findCommentRoot(null, 'c1') === 'c1');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
