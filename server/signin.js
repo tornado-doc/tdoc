@@ -76,6 +76,19 @@
   }
 
   function run() {
+    var cfg = window.__TDOC__ || {};
+    // Web redirect flow: hand the whole tab to GitHub and let it bring the
+    // visitor back already signed in — the callback sets the cookie and 302s
+    // to `return`. This is the path phones need: no device code to copy, no
+    // second tab to find, no GitHub "Congratulations" dead end. The device-code
+    // modal below is the fallback when no client secret is configured
+    // (cfg.webAuth false) and for anything without a browser (the CLI). On this
+    // path the page navigates away, so the promise intentionally never settles.
+    if (cfg.webAuth) {
+      var ret = cfg.signinReturn || (location.pathname + location.search + location.hash);
+      location.href = '/api/auth/web/login?return=' + encodeURIComponent(ret);
+      return new Promise(function () {});
+    }
     styles();
     return new Promise(function (resolve, reject) {
       var timer = null, done = false;

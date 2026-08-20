@@ -30,4 +30,8 @@ TDOC_OWNER = ""
 TDOC_PREVIEW = "1"
 
 # Secret: TDOC_UPLOAD_TOKEN — preview-only; never the production token.
+# Secret: GITHUB_CLIENT_SECRET — set via `wrangler secret put GITHUB_CLIENT_SECRET`
+#   for the web OAuth redirect flow. Generate it on the SAME OAuth App as the
+#   preview GITHUB_CLIENT_ID above, with callback URL
+#   https://<preview-host>/auth/github/callback. Unset ⇒ device-code flow.
 # TDOC_HOSTED_REGISTRATION — leave unset.
