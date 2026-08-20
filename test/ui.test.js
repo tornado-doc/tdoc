@@ -637,15 +637,17 @@ async function tPub(name, fn) {
   await tPub('Clicking + React on anon view triggers sign-in (no picker)', async () => {
     // Anon: should NOT open the emoji picker — should redirect to sign-in modal.
     await page.click('.tdoc-react-add');
-    // Modal appears after the device/start network round-trip (~1-2s).
+    // Modal appears after the device/start network round-trip (~1-2s). It is
+    // the shared server/signin.js dialog (.tds-bg), not the old inline overlay
+    // modal those selectors predate.
     try {
-      await page.waitForSelector('#tdoc-device-modal', { timeout: 5000 });
+      await page.waitForSelector('.tds-bg', { timeout: 5000 });
     } catch {
       throw new Error('expected device-flow modal to appear');
     }
     const picker = await page.$('.tdoc-emoji-picker');
     if (picker) throw new Error('emoji picker opened without sign-in');
-    await page.click('#tdoc-modal-cancel');
+    await page.click('#tds-cancel');
     await page.waitForTimeout(150);
   });
 
