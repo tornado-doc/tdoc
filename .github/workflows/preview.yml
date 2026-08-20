@@ -1,0 +1,209 @@
+name: PR preview
+
+# Isolated preview Worker (tdoc-preview) for published-chrome checks (#148).
+# Not tdoc.dev, not anyone's BYOK Worker. Own KV + R2, no Durable Object
+# (Cloudflare will not mint preview URLs for a Worker that implements a DO).
+#
+# Required GitHub secrets (same Cloudflare account as tdoc.dev CD):
+#   CLOUDFLARE_API_TOKEN
+#   CLOUDFLARE_ACCOUNT_ID
+#   TDOC_PREVIEW_UPLOAD_TOKEN — preview-only; never TDOC_DEV_UPLOAD_TOKEN
+#
+# KV id is discovered at runtime (namespace title tdoc-preview-META).
+# R2 bucket tdoc-preview-docs is created if missing.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: publish PR preview
+    if: >
+      github.repository == 'tornado-doc/tdoc' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Require preview secrets
+        env:
+          TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
+        run: |
+          missing=
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          [ -n "$TDOC_PREVIEW_UPLOAD_TOKEN" ] || missing="$missing TDOC_PREVIEW_UPLOAD_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "PR preview is missing GitHub secrets:$missing" >&2
+            echo "These live on the tornado-doc Cloudflare account (same as tdoc.dev CD)." >&2
+            echo "Do not deploy previews to a personal Worker." >&2
+            exit 1
+          fi
+
+      - name: Offline test suite
+        run: npm test
+
+      - name: Install wrangler
+        run: npm i -g wrangler@4.90.1
+
+      - name: Ensure preview R2 + KV (not production tdoc-docs / META)
+        id: ns
+        run: |
+          set -euo pipefail
+          if ! wrangler r2 bucket list 2>/dev/null | grep -q 'tdoc-preview-docs'; then
+            wrangler r2 bucket create tdoc-preview-docs
+          fi
+          KV_JSON="$(wrangler kv namespace list)"
+          KV_ID="$(printf '%s' "$KV_JSON" | jq -r '.[] | select(.title=="tdoc-preview-META") | .id' | head -1)"
+          if [ -z "$KV_ID" ] || [ "$KV_ID" = "null" ]; then
+            CREATE="$(wrangler kv namespace create tdoc-preview-META)"
+            echo "$CREATE"
+            KV_ID="$(wrangler kv namespace list | jq -r '.[] | select(.title=="tdoc-preview-META") | .id' | head -1)"
+          fi
+          if [ -z "$KV_ID" ] || [ "$KV_ID" = "null" ]; then
+            echo "failed to resolve tdoc-preview-META id" >&2
+            exit 1
+          fi
+          echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
+          sed -e "s/PLACEHOLDER_PREVIEW_KV_ID/${KV_ID}/g" \
+            worker/wrangler.preview.toml.template > worker/wrangler.preview.toml
+          # Guard: never bind production storage even if the template drifts.
+          if grep -q 'bucket_name = "tdoc-docs"' worker/wrangler.preview.toml; then
+            echo "preview toml bound production R2" >&2; exit 1
+          fi
+          if grep -q '80fd771188f649a093a9f0c812f540fb' worker/wrangler.preview.toml; then
+            echo "preview toml bound production META" >&2; exit 1
+          fi
+
+      - name: Bundle overlay (preview: strip Durable Object export)
+        env:
+          SKILL_DIR: ${{ github.workspace }}
+          OUT_DIR: ${{ github.workspace }}/worker
+          TDOC_GENERATED_BY: tdoc-preview
+          TDOC_SOURCE_SHA: ${{ github.sha }}
+          TDOC_PREVIEW: '1'
+        run: node bin/tdoc-bundle
+
+      - name: Guard preview bundle
+        run: |
+          test -f worker/_worker.bundled.js || { echo "bundle missing" >&2; exit 1; }
+          if grep -q 'export class CommentsStore {' worker/_worker.bundled.js; then
+            echo "preview bundle still exports CommentsStore — preview URLs will not mint" >&2
+            exit 1
+          fi
+          if grep -q 'const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;' worker/_worker.bundled.js; then
+            echo "bundle still contains the overlay placeholder" >&2
+            exit 1
+          fi
+
+      - name: Create tdoc-preview Worker if missing
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          if ! wrangler deployments list --name tdoc-preview >/dev/null 2>&1; then
+            wrangler deploy --name tdoc-preview -c wrangler.preview.toml
+          fi
+
+      - name: Put preview-only upload token (never production)
+        env:
+          TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
+        working-directory: worker
+        run: |
+          printf '%s' "$TDOC_PREVIEW_UPLOAD_TOKEN" | wrangler secret put TDOC_UPLOAD_TOKEN --name tdoc-preview
+
+      - name: Upload version with pr-N alias
+        id: upload
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          ALIAS="pr-${{ github.event.pull_request.number }}"
+          # Alias + worker name must stay within the 63-char DNS label.
+          OUT="$(wrangler versions upload --name tdoc-preview -c wrangler.preview.toml --preview-alias "$ALIAS" --message "PR ${{ github.event.pull_request.number }} ${{ github.sha }}" 2>&1 | tee /tmp/wrangler-preview.out)"
+          echo "$OUT"
+          HOST="$(printf '%s\n' "$OUT" | grep -Eo "https://${ALIAS}-tdoc-preview\\.[A-Za-z0-9.-]+\\.workers\\.dev" | head -1 | sed 's|^https://||')"
+          if [ -z "$HOST" ]; then
+            HOST="$(printf '%s\n' "$OUT" | grep -Eo 'https://[A-Za-z0-9.-]+-tdoc-preview\\.[A-Za-z0-9.-]+\\.workers\\.dev' | head -1 | sed 's|^https://||')"
+          fi
+          if [ -z "$HOST" ]; then
+            echo "could not parse preview host from wrangler output" >&2
+            exit 1
+          fi
+          echo "host=$HOST" >> "$GITHUB_OUTPUT"
+          echo "Preview host: $HOST"
+
+      - name: Seed demo doc conway-life v1 + v2
+        env:
+          TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
+          PREVIEW_HOST: ${{ steps.upload.outputs.host }}
+        run: |
+          set -euo pipefail
+          BASE="https://${PREVIEW_HOST}"
+          ok_ping=
+          for i in 1 2 3 4 5 6 7 8; do
+            if curl -sf --max-time 8 "$BASE/api/ping" | grep -q '"service" *: *"tdoc"'; then
+              ok_ping=1
+              break
+            fi
+            sleep 3
+          done
+          if [ -z "$ok_ping" ]; then
+            echo "preview host never answered /api/ping: $BASE" >&2
+            exit 1
+          fi
+          seed() {
+            local v="$1" html="$2"
+            jq -n \
+              --arg slug conway-life \
+              --argjson version "$v" \
+              --rawfile html "$html" \
+              --argjson meta '{"title":"Conway'\''s Game of Life","slug":"conway-life","versions":[{"n":1},{"n":2}]}' \
+              '{slug:$slug, version:$version, html:$html, meta:$meta}' \
+              > /tmp/tdoc-preview-upload.json
+            curl -sS --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \
+              -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @/tmp/tdoc-preview-upload.json \
+              | tee /tmp/tdoc-preview-upload-resp.json
+            jq -e '.ok == true' /tmp/tdoc-preview-upload-resp.json >/dev/null
+          }
+          seed 1 test/fixtures/tdocs/sample-doc/v1/index.html
+          seed 2 test/fixtures/tdocs/sample-doc/v2/index.html
+
+      - name: Sticky preview comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_HOST: ${{ steps.upload.outputs.host }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          BODY=$(cat <<EOF
+          <!-- tdoc-preview -->
+          ### Preview
+          **Open this:** https://${PREVIEW_HOST}/d/conway-life/v/2
+
+          This link is unique to this PR. New commits update the same URL. It is not [tdoc.dev](https://tdoc.dev).
+
+          Preview has no Durable Object — concurrent comments use the KV fallback. Data expires in 14 days.
+          EOF
+          )
+          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --jq '.[] | select(.body | contains("<!-- tdoc-preview -->")) | .id' | head -1)"
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}" -f body="$BODY"
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" -f body="$BODY"
+          fi
