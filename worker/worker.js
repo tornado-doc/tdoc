@@ -1036,7 +1036,7 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth) {
   // The onboarding modal is product UI, so it ships from here under the page
   // nonce. The doc's own <script> would never run (#138), which is why the
   // landing CTA still carries a plain href: with scripting off the visitor
@@ -1065,6 +1065,9 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
     ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
+    // When the client secret is set, browsers use the redirect flow (signin.js
+    // sends them to /api/auth/web/login) instead of the device-code modal.
+    webAuth: !!webAuth,
     mode: 'published',
     versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
   }, nonce);
@@ -1136,7 +1139,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   const nonce = rand(16);
   return {
     ok: true,
-    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req))), {
+    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1171,6 +1174,7 @@ async function landingResponse(env, req, slug = LANDING_SLUG) {
 // bounce users here from /me or an unknown path.
 function landingHtml(env, notice) {
   const authOk = !!(env && String(env.GITHUB_CLIENT_ID || '').trim());
+  const authWeb = !!(env && env.GITHUB_CLIENT_SECRET);
   const toastMsg = ({
     me: 'My docs is only available after you sign in as the worker owner.',
     signin: 'Sign in with GitHub to continue.',
@@ -1210,10 +1214,12 @@ function landingHtml(env, notice) {
   <p class="sub">Open a document from its shared link ·
     <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
   <div id="toast" role="status" aria-live="polite"></div>
+<script>window.__TDOC__ = { authConfigured: true, webAuth: ${authWeb ? 'true' : 'false'}, signinReturn: '/me' };</script>
 <script>${SIGNIN_JS}</script>
 <script>
-  // One shared device flow (server/signin.js). This page used to carry its own
-  // copy with its own retry loop and its own error strings.
+  // One shared sign-in (server/signin.js): web redirect flow when webAuth is on,
+  // else the device-code modal. On the redirect path __tdocSignIn navigates away
+  // and never resolves, so the .then below only runs on the device path.
   (function () {
     var btn = document.getElementById('signin');
     if (!btn || !window.__tdocSignIn) return;
@@ -1241,6 +1247,47 @@ function authDoneHtml() {
   <h1>You're signed in</h1>
   <p>You can close this tab and return to tdoc.</p>
 </body></html>`;
+}
+
+// Web OAuth redirect flow (browsers). Device flow stays for CLIs; this is the
+// hop that phones need — GitHub sends the visitor straight back here after
+// Approve, so nobody is stranded on GitHub's "Congratulations" page. Active
+// only when GITHUB_CLIENT_SECRET is set (the token exchange requires it), so a
+// deploy without the secret silently keeps the device flow.
+function authErrorHtml(msg) {
+  const safe = String(msg || 'Sign-in failed.').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]);
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — sign-in</title>
+<style>
+  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh; margin: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #111; background: #fff; gap: 8px; text-align: center; padding: 0 20px; }
+  h1 { font-size: 22px; margin: 0; color: #c3452f; }
+  p { color: #666; margin: 0; }
+  a { color: #1652f0; }
+</style></head><body>
+  <h1>Sign-in failed</h1>
+  <p>${safe}</p>
+  <p><a href="/">Back to tdoc</a></p>
+</body></html>`;
+}
+
+// Only ever redirect to a same-origin path we produced. Reject absolute URLs
+// and protocol-relative (`//evil.com`) targets so a crafted `?return=` can't
+// bounce a signed-in visitor off-site. Falls back to the site root.
+function sanitizeReturn(raw) {
+  if (typeof raw !== 'string' || !raw) return '/';
+  if (raw[0] !== '/' || raw[1] === '/' || raw[1] === '\\') return '/';
+  if (/[\x00-\x1f]/.test(raw)) return '/';
+  return raw;
+}
+
+// 302 that can also set cookies — no existing helper does both at once.
+function redirectTo(location, cookies) {
+  const h = new Headers({ Location: location });
+  (cookies || []).forEach((c) => h.append('Set-Cookie', c));
+  return new Response(null, { status: 302, headers: h });
 }
 
 // /me — the owner's doc catalog. JUL-36 tail (2026-08-13): this used to be a
@@ -2976,10 +3023,54 @@ export default {
       return landingResponse(env, req, START_SLUG);
     }
 
-    // Soft landing for the OAuth App "Authorization callback URL". Device
-    // Flow does not need a callback, but GitHub may still redirect here
-    // after Approve — serve a friendly page instead of a 404.
-    if ((p === '/auth/done' || p === '/auth/github/callback') && method === 'GET') {
+    // Web OAuth callback. With a `code` this is the redirect flow: exchange it
+    // for a token (needs the client secret), mint the same session the device
+    // flow does, and 302 the visitor back to the page they started from — one
+    // tab, no "Congratulations" dead end. Without a code it's the device-flow
+    // soft landing GitHub may bounce to after Approve; keep the friendly page.
+    if (p === '/auth/github/callback' && method === 'GET') {
+      const code = url.searchParams.get('code');
+      if (!code) return html(authDoneHtml());
+      const state = url.searchParams.get('state');
+      const cookieNonce = (/tdoc_oauth=([a-f0-9]+)/.exec(req.headers.get('cookie') || '') || [])[1];
+      if (!state || !cookieNonce || state !== cookieNonce) {
+        return html(authErrorHtml('Sign-in could not be verified (state mismatch). Please try again.'), { status: 400 });
+      }
+      if (!env.GITHUB_CLIENT_SECRET) {
+        return html(authErrorHtml('Web sign-in is not configured on this host.'), { status: 500 });
+      }
+      const ret = sanitizeReturn(await env.META.get(`oauthstate:${state}`));
+      await env.META.delete(`oauthstate:${state}`);
+      try {
+        const r = await ghPost('/login/oauth/access_token', {
+          client_id: env.GITHUB_CLIENT_ID,
+          client_secret: env.GITHUB_CLIENT_SECRET,
+          code,
+          redirect_uri: `${url.origin}/auth/github/callback`,
+        });
+        if (r.error || !r.access_token) {
+          return html(authErrorHtml('GitHub sign-in failed: ' + (r.error_description || r.error || 'no token returned')), { status: 400 });
+        }
+        const user = await ghUser(r.access_token);
+        if (!user.login) return html(authErrorHtml('GitHub returned no account.'), { status: 500 });
+        const sid = rand(24);
+        const session = {
+          login: user.login,
+          avatar_url: user.avatar_url,
+          name: user.name || user.login,
+          created: new Date().toISOString(),
+        };
+        await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+        return redirectTo(ret, [
+          `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+          'tdoc_oauth=; Path=/; Max-Age=0',
+        ]);
+      } catch (e) {
+        return html(authErrorHtml('Sign-in error: ' + e.message), { status: 500 });
+      }
+    }
+    // Static soft landing (device flow, or the OAuth App's callback URL).
+    if (p === '/auth/done' && method === 'GET') {
       return html(authDoneHtml());
     }
 
@@ -3001,7 +3092,7 @@ export default {
       const nonce = rand(16);
       const page = await indexHtml(env, s, url.origin, nonce);
       const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
-      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true), {
+      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true, !!env.GITHUB_CLIENT_SECRET), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
       });
     }
@@ -3287,6 +3378,25 @@ export default {
         canSeeMyDocs: canSeeMyDocs(env, s, url.origin),
         authConfigured: true,
       });
+    }
+
+    // Web redirect flow, step 1: stash where to land afterwards against a CSRF
+    // nonce, then send the browser to GitHub's authorize page. The browser only
+    // reaches here when cfg.webAuth is on (secret configured); the guard keeps a
+    // stray hit from 500ing.
+    if (p === '/api/auth/web/login' && method === 'GET') {
+      if (!env.GITHUB_CLIENT_SECRET) return redirectTo('/?notice=signin');
+      const ret = sanitizeReturn(url.searchParams.get('return'));
+      const nonce = rand(16);
+      await env.META.put(`oauthstate:${nonce}`, ret, { expirationTtl: 600 });
+      const gh = new URL('https://github.com/login/oauth/authorize');
+      gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
+      gh.searchParams.set('redirect_uri', `${url.origin}/auth/github/callback`);
+      gh.searchParams.set('scope', 'read:user');
+      gh.searchParams.set('state', nonce);
+      return redirectTo(gh.toString(), [
+        `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+      ]);
     }
 
     if (p === '/api/auth/device/start' && method === 'POST') {

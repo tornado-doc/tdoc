@@ -37,6 +37,7 @@ const OFFLINE = [
   'tdoc-start.test.js',
   'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader
   'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it
+  'web-oauth.test.js',        // web redirect flow: sanitizeReturn open-redirect guard + flow wiring + device fallback
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard
   'coverage.test.js',         // migration, bundle inlining, pull-merge, rich fold
