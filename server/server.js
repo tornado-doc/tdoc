@@ -146,8 +146,8 @@ function logoForAgentLogin(login) {
   }
   if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
   if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
-  // tdoc project mark (assets/tdoc_logo.png, served at /tdoc_logo.png).
-  return '/tdoc_logo.png';
+  // tdoc project mark (assets/tdoc_logo.svg, served at /tdoc_logo.svg).
+  return '/tdoc_logo.svg';
 }
 
 function isGenericAgentLogin(login) {
@@ -526,6 +526,15 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, unread: items.filter(i => i && !i.read).length });
   }
 
+  if (p === '/tdoc_logo.svg') {
+    const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.svg');
+    if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(logoPath), {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
   if (p === '/tdoc_logo.png') {
     const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
     if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');

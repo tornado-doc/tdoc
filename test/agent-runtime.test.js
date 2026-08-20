@@ -93,13 +93,30 @@ t('TDOC_AGENT_LOGIN is the last fallback before tdoc-agent', () => {
   assert(a.login === 'cursor' && a.name === 'Cursor', JSON.stringify(a));
   const bare = agentIdentity({}, {});
   assert(bare.login === 'tdoc-agent', JSON.stringify(bare));
-  assert(String(bare.avatar_url).includes('tdoc_logo.png'), JSON.stringify(bare));
+  assert(String(bare.avatar_url).includes('tdoc_logo.svg'), JSON.stringify(bare));
 });
 
-t('tdoc_logo.png ships in assets/', () => {
-  const p = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
-  assert(fs.existsSync(p), 'assets/tdoc_logo.png missing');
-  assert(fs.readFileSync(p, { flag: 'r' })[0] === 0x89, 'not a PNG');
+t('tdoc_logo.svg is the vector SoT; PNG stays for Open Graph', () => {
+  const svgPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.svg');
+  const pngPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
+  assert(fs.existsSync(svgPath), 'assets/tdoc_logo.svg missing');
+  const svg = fs.readFileSync(svgPath, 'utf8');
+  assert(/<svg[\s>]/.test(svg), 'not an SVG');
+  assert(/<path[\s>]/.test(svg), 'SVG has no path');
+  assert(/currentColor/.test(svg), 'SVG must follow currentColor');
+  assert(/fill-rule\s*=\s*["']evenodd["']/.test(svg), 'outline holes need evenodd');
+  assert(!/<image[\s>]/i.test(svg), 'embedded <image> not allowed');
+  assert(!/data:image\//i.test(svg), 'embedded bitmap not allowed');
+  assert(!/<script[\s>]/i.test(svg), 'SVG must be inert');
+  assert(fs.existsSync(pngPath), 'assets/tdoc_logo.png missing (OG fallback)');
+  assert(fs.readFileSync(pngPath, { flag: 'r' })[0] === 0x89, 'not a PNG');
+});
+
+t('worker TDOC_LOGO_SVG matches assets/tdoc_logo.svg', () => {
+  const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', 'tdoc_logo.svg'), 'utf8');
+  const m = src.match(/const TDOC_LOGO_SVG = `([\s\S]*?)`;/);
+  assert(m, 'TDOC_LOGO_SVG missing from worker.js');
+  assert(m[1] === asset, 'worker SVG drifted from assets/tdoc_logo.svg');
 });
 
 t('logoForAgentLogin maps each product, Claude is not Anthropic', () => {
@@ -109,8 +126,8 @@ t('logoForAgentLogin maps each product, Claude is not Anthropic', () => {
   assert(logoForAgentLogin('codex').includes('openai'));
   assert(logoForAgentLogin('cursor').includes('cursor'));
   assert(logoForAgentLogin('gemini').includes('gemini'));
-  assert(logoForAgentLogin('tdoc-agent').includes('tdoc_logo.png'), 'tdoc logo');
-  assert(logoForAgentLogin('mystery-bot').includes('tdoc_logo.png'), 'unmatched');
+  assert(logoForAgentLogin('tdoc-agent').includes('tdoc_logo.svg'), 'tdoc logo');
+  assert(logoForAgentLogin('mystery-bot').includes('tdoc_logo.svg'), 'unmatched');
 });
 
 t('agentIdentity drops a stored Anthropic company mark', () => {

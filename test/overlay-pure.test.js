@@ -121,8 +121,8 @@ t('agentLogoUrl maps grok/claude/codex/cursor/gemini logins to product marks', (
   assert(agentLogoUrl({ login: 'codex' }).includes('openai'), 'codex');
   assert(agentLogoUrl({ login: 'cursor' }).includes('cursor'), 'cursor');
   assert(agentLogoUrl({ login: 'gemini' }).includes('gemini'), 'gemini');
-  assert(agentLogoUrl({ login: 'tdoc-agent' }).includes('tdoc_logo.png'), 'tdoc logo');
-  assert(agentLogoUrl({ login: 'mystery-bot' }).includes('tdoc_logo.png'), 'unmatched uses tdoc logo');
+  assert(agentLogoUrl({ login: 'tdoc-agent' }).includes('tdoc_logo.svg'), 'tdoc logo');
+  assert(agentLogoUrl({ login: 'mystery-bot' }).includes('tdoc_logo.svg'), 'unmatched uses tdoc logo');
   assert(!String(agentLogoUrl({ login: 'tdoc-agent' })).includes('⚡'), 'no lightning');
 });
 t('agentLogoUrl prefers an explicit https avatar_url', () => {

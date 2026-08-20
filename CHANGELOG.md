@@ -31,6 +31,9 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **Project mark is SVG.** Overlay bar, unmatched agent avatars, and
+  `/tdoc_logo.svg` serve a vector Tornado Dog (`currentColor`, no embedded
+  bitmap). `/tdoc_logo.png` stays for Open Graph. `#161`.
 - **Overlay top bar sits in document flow** instead of `position: fixed`.
   Page HTML no longer scrolls underneath a floating strip; the bar (and the
   old-version strip) occupy the top of the layout.
