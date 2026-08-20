@@ -409,6 +409,12 @@ pkill -f "$SKILL_DIR/server/server.js"
 
 Publishes the latest version of `<slug>` to a public URL.
 
+Architecture — publish auth, multi-tenant scoping, GitHub-account/BYOK
+switching, and the client-version gap — is written up as a tdoc:
+`docs/publish-auth-architecture.html` (live: `tdoc.dev/d/tdoc-auth-arch`). Read
+it before changing `bin/tdoc-publish`, `bin/tdoc-update-nag`, or the worker
+auth/hosted-token routes.
+
 Default target is **hosted** (`https://tdoc.dev`). First run signs in with
 GitHub (Device Flow), then asks the host for an account-scoped upload token
 bound to that login and stores it in `~/.tdoc/published.json`. That token can

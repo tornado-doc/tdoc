@@ -429,7 +429,7 @@
         </ul>
       </div>
     </div>
-    <div class="switchbar">Concretely for tdoc: the pre-multi-tenant CLI hitting the new <code>sign_in_required</code> and dumping a raw <code>HTTP 401</code> is exactly the case a <code>min_client_version</code> on <code>/api/upload</code> should catch — turning a confusing error into "your tdoc is too old for hosted publish → <code>/tdoc update</code>". The client already calls the server on every publish, so it's zero extra round-trips.</div>
+    <div class="switchbar"><b>Shipped now (interim):</b> the <code>sign_in_required</code> 401 on <code>/api/hosted/token</code> already carries an actionable <code>hint</code> field — it reaches the pre-device-flow hosted CLIs that print the response body, turning a raw 401 into "your tdoc is too old → <code>/tdoc update</code>". It does <em>not</em> reach an install so old it still defaults to Cloudflare and never calls this route. <b>Durable follow-up:</b> a <code>min_supported</code> gate on <code>/api/upload</code> — the route every publish hits — closes that remaining gap at zero extra round-trips.</div>
   </section>
 
   <footer>
