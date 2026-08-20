@@ -35,7 +35,8 @@ const OFFLINE = [
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
-  'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader // #142 onboarding: /start page + the modal served with it
+  'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader
+  'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard
   'coverage.test.js',         // migration, bundle inlining, pull-merge, rich fold
@@ -46,6 +47,7 @@ const OFFLINE = [
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'notifications.test.js',    // inbox aggregation + Reddit recipients
+  'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)

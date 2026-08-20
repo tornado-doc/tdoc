@@ -1179,6 +1179,35 @@
     if (row.kind === 'reaction') return n > 1 ? `${n} people reacted to your comment` : `${who} reacted to your comment`;
     return 'Notification';
   }
+  // Canonical inbox destination. Never returns /d/undefined — empty slug is ''.
+  function inboxTargetUrl(row, current) {
+    row = row || {};
+    current = current || {};
+    const destSlug = row.slug || current.slug || '';
+    if (!destSlug) return '';
+    const rawVer = row.version != null && row.version !== '' ? row.version : current.version;
+    const destVer = Number(rawVer);
+    const ver = Number.isFinite(destVer) && destVer > 0 ? destVer : 1;
+    const target = row.comment_id || row.thread_id || '';
+    let href = '/d/' + encodeURIComponent(destSlug) + '/v/' + ver;
+    if (target) href += '?comment=' + encodeURIComponent(target);
+    return href;
+  }
+  // Map a comment or reply id to the top-level card that holds it.
+  function findCommentRoot(list, want) {
+    if (!want) return null;
+    const comments = Array.isArray(list) ? list : [];
+    for (let i = 0; i < comments.length; i++) {
+      const c = comments[i];
+      if (!c) continue;
+      if (c.id === want) return c.id;
+      const replies = c.replies || [];
+      for (let j = 0; j < replies.length; j++) {
+        if (replies[j] && replies[j].id === want) return c.id;
+      }
+    }
+    return want;
+  }
   function inboxFingerprint(body) {
     const items = (body && Array.isArray(body.items)) ? body.items : [];
     return `${body && body.unread}|${items.map(i => [i.id, i.count, i.at, i.read].join(':')).join(',')}`;
@@ -1216,7 +1245,8 @@
       btn.dataset.thread = row.thread_id || '';
       if (btn._bound) return;
       btn._bound = true;
-      const go = () => {
+      const go = (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
         openInboxTarget({
           slug: btn.dataset.slug, version: btn.dataset.version,
           comment_id: btn.dataset.comment, thread_id: btn.dataset.thread,
@@ -1224,7 +1254,7 @@
         closeAuxModal();
       };
       btn.onclick = go;
-      btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+      btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); } };
     });
   }
   async function refreshInboxBadge() {
@@ -1279,22 +1309,23 @@
     refreshInboxBadge();
   }
   function openInboxTarget(row) {
-    const target = row.comment_id || row.thread_id;
-    const root = row.thread_id || row.comment_id;
-    const destSlug = row.slug || slug;
-    const destVer = row.version || version;
-    if (destSlug === slug && Number(destVer) === Number(version)) {
-      if (root) {
-        state.openReplyThreads.add(root);
-        pinOpenCard(root);
-        if (target === root) setActiveComment(root);
-      }
-      const el = document.querySelector(`[data-comment-id="${CSS.escape(target || '')}"]`);
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-      markInboxSeen(target);
+    const href = inboxTargetUrl(row, { slug, version });
+    if (!href) return;
+    const q = href.indexOf('?');
+    const destPath = q >= 0 ? href.slice(0, q) : href;
+    const destSearch = q >= 0 ? href.slice(q) : '';
+    const herePath = (typeof location !== 'undefined' && location.pathname) || '';
+    // /me and `/` always assign /d/<slug>/v/<n>?comment=. Same-doc stays
+    // in place and only replaceState-s the query.
+    if (!isCatalog && herePath === destPath) {
+      const want = (row && (row.comment_id || row.thread_id)) || '';
+      applyCommentDeepLink(want);
+      try {
+        if (destSearch && location.search !== destSearch) history.replaceState(null, '', href);
+      } catch {}
       return;
     }
-    location.href = `/d/${encodeURIComponent(destSlug)}/v/${destVer}?comment=${encodeURIComponent(target || root || '')}`;
+    location.assign(href);
   }
   async function showInboxPanel() {
     closeAuxModal();
@@ -2481,6 +2512,10 @@
   function closeClusterPopover() { clusterPop.classList.remove('open'); clusterPop._key = null; }
   document.addEventListener('click', (e) => {
     if (!clusterPop.contains(e.target) && !e.target.closest?.('.tdoc-pin-cluster')) closeClusterPopover();
+    // Inbox / Share / profile chrome is overlay UI. A click there must not
+    // count as "outside the card" or opening a notification would pin the
+    // comment and the same click would immediately unpin it.
+    if (isInUI(e.target)) return;
     // Click outside an open pinned card (and not on a pin) unpins it.
     if (state.pinnedId && !e.target.closest?.('.tdoc-margin-comment') && !e.target.closest?.('.tdoc-pin')) {
       const id = state.pinnedId; state.pinnedId = null; hideCardIfIdle(id); markPinActive(id, false);
@@ -2642,6 +2677,13 @@
     const fabCount = document.getElementById('tdoc-fab-count');
     if (fabCount) fabCount.textContent = state.activeComments.length;
 
+    const want = allowDeepLink
+      ? (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })()
+      : null;
+    const deepRoot = findCommentRoot(state.activeComments, want);
+    // Expand the thread before buildCard so a reply deep-link is not born collapsed.
+    if (deepRoot) state.openReplyThreads.add(deepRoot);
+
     let textCache = state.activeComments.some(c => (c.anchor?.kind || (c.anchor?.text ? 'text' : null)) === 'text')
       ? collectTextNodes() : null;
     for (const comment of state.activeComments) {
@@ -2703,33 +2745,42 @@
     evaluateLayout();
     requestAnimationFrame(() => {
       repositionCards();
-      // Restore the pinned floating card if its comment survived the refresh
-      // and we're in wide (pins) mode. Runs after repositionCards so the pin
-      // elements exist to mark active.
-      if (keepPinnedId && !state.narrow && state.cardEls.has(keepPinnedId)) {
+      if (want) {
+        applyCommentDeepLink(want);
+      } else if (keepPinnedId && !state.narrow && state.cardEls.has(keepPinnedId)) {
+        // Restore the pinned floating card if its comment survived the refresh.
         // Use setActiveComment (not the manual pin/show/mark trio) so the
         // card's .active class, anchor highlight, activeId, AND the pin state
         // are all re-established together. The manual version desynced activeId
         // and lost the card's .active state (+ the "move anchor" affordance).
         setActiveComment(keepPinnedId);
       }
-      const want = allowDeepLink
-        ? (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })()
-        : null;
-      if (want) {
-        const hit = state.activeComments.find(c => c.id === want)
-          || state.activeComments.find(c => (c.replies || []).some(r => r.id === want));
-        const root = hit ? hit.id : want;
-        state.openReplyThreads.add(root);
-        // Opening a reply must not activate the root — that would mark the
-        // root's own notifications (e.g. a reaction) as read.
-        if (want === root && state.cardEls.has(root)) setActiveComment(root);
-        else if (state.cardEls.has(root)) pinOpenCard(root);
-        const el = document.querySelector(`[data-comment-id="${CSS.escape(want)}"]`);
-        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-        markInboxSeen(want);
-      }
     });
+  }
+
+  function applyCommentDeepLink(want) {
+    if (!want) return;
+    const root = findCommentRoot(state.activeComments, want);
+    if (root) {
+      state.openReplyThreads.add(root);
+      // Same-doc inbox clicks run after cards already exist. The set is
+      // only consulted at buildCard — collapsed threads stay display:none
+      // until .tdoc-replies.open is on the live card.
+      const card = state.cardEls.get(root);
+      if (card) {
+        card.querySelector('.tdoc-replies')?.classList.add('open');
+        card.querySelector('.tdoc-replies-toggle')?.classList.add('open');
+      }
+    }
+    if (state.narrow) commentLayer.classList.add('open');
+    // Opening a reply must not activate the root — that would mark the
+    // root's own notifications (e.g. a reaction) as read.
+    if (want === root && state.cardEls.has(root)) setActiveComment(root);
+    else if (root && state.cardEls.has(root)) pinOpenCard(root);
+    const el = document.querySelector(`[data-comment-id="${CSS.escape(want)}"]`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+    if (root) requestAnimationFrame(repositionCards);
+    markInboxSeen(want);
   }
 
   // Click on a Highlight-API range → activate. Highlight API has no per-range
