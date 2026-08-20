@@ -439,6 +439,10 @@ async function issue(worker, env, login = 'alice', label = login) {
     const data = await r.json();
     assert(r.status === 401, `expected 401, got ${r.status}`);
     assert(data.error === 'sign_in_required', `unexpected error ${JSON.stringify(data)}`);
+    // The 401 body carries an actionable hint so a stale CLI that just prints
+    // the response still tells the user to update.
+    assert(typeof data.hint === 'string' && /tdoc update/.test(data.hint),
+      `sign_in_required should include an update hint, got ${JSON.stringify(data)}`);
     assert([...env.META.map.keys()].every(k => !k.startsWith('hosted-token:')),
       'anonymous mint must not persist a token record');
   });
