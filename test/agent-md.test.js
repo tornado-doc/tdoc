@@ -1,12 +1,19 @@
 // AGENTS.md is the durable product rule for agents (auto-loaded by agent hosts).
-// Keep it short; do not reintroduce ARCHITECTURE.md as a second source of truth.
+// It is NOT frozen byte-for-byte: intentional, human-reviewed edits are fine.
+// The guard is that it stays MINIMAL and does not grow into a second source of
+// truth — keep the core invariants, keep it short, don't reintroduce a separate
+// ARCHITECTURE doc. Adding a one-line pointer is allowed; pasting a doc is not.
 const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const expected =
-  'Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold.\n' +
-  'Published reader invariants are provider-enforced in overlay/worker code and tests, not left only to author HTML or prompts.\n';
+// Core invariants that must always remain (substring, not exact match).
+const coreInvariants = [
+  'Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold.',
+  'Published reader invariants are provider-enforced in overlay/worker code and tests, not left only to author HTML or prompts.',
+];
+const MAX_LINES = 6;   // minimal by construction; a doc paste would blow this
+const MAX_BYTES = 1200;
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -16,9 +23,18 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 console.log('agents.md source-of-truth rule');
 
-t('AGENTS.md exists and is exactly the short source-of-truth rule', () => {
+t('AGENTS.md keeps the core rules and stays minimal', () => {
   const body = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
-  assert(body === expected, `AGENTS.md must be exactly the guarded short rule.\nGot:\n${JSON.stringify(body)}`);
+  for (const rule of coreInvariants) {
+    assert(body.includes(rule), `AGENTS.md must keep the core rule:\n${rule}`);
+  }
+  const lines = body.split('\n').filter(l => l.trim() !== '');
+  assert(lines.length <= MAX_LINES,
+    `AGENTS.md must stay minimal (<= ${MAX_LINES} non-empty lines); got ${lines.length}. Keep edits intentional, not a second doc.`);
+  assert(body.length <= MAX_BYTES,
+    `AGENTS.md must stay minimal (<= ${MAX_BYTES} bytes); got ${body.length}.`);
+  assert(!/ARCHITECTURE\.md/.test(body),
+    'do not reintroduce ARCHITECTURE.md as a second source of truth');
 });
 
 t('AGENT.md (singular) is not used — hosts auto-read AGENTS.md', () => {

@@ -3420,7 +3420,15 @@ export default {
       }
       const session = await getSession(env, req);
       const login = sessionLogin(session);
-      if (!login) return json({ error: 'sign_in_required' }, { status: 401 });
+      // Additive `hint` so a stale CLI that just prints the error body still
+      // gets an actionable next step. A current CLI ran the device flow and
+      // sent a session cookie, so it never lands here; one that hits this
+      // without showing a device code is out of date. Fail-open: no new
+      // rejection, just a clearer 401.
+      if (!login) return json({
+        error: 'sign_in_required',
+        hint: 'Hosted publish needs a GitHub sign-in. If your tdoc CLI did not show a device code to approve, it is out of date — run: /tdoc update --yes',
+      }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const issued = await issueHostedToken(env, { ...body, login });

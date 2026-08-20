@@ -1,0 +1,438 @@
+<title>tdoc publish · auth & multi-tenant architecture</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --panel-2:#eef1f5; --ink:#1a2230; --ink-soft:#495468;
+    --line:#d3dae4; --line-strong:#b7c0cd;
+    --hosted:#0e8f88; --hosted-bg:#dff2f0; --hosted-line:#3bb3ab;
+    --byok:#b5771a; --byok-bg:#f6ecd8; --byok-line:#d3a24a;
+    --gh:#5b53c9; --gh-bg:#e9e7fb;
+    --store:#3f6ea5; --store-bg:#e2ebf6;
+    --danger:#b23c38;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0d1017; --panel:#151a23; --panel-2:#1c2330; --ink:#e6ebf2; --ink-soft:#9aa6b8;
+      --line:#28303d; --line-strong:#3a4557;
+      --hosted:#4fd1c5; --hosted-bg:#0f2a29; --hosted-line:#2b8f89;
+      --byok:#e6b458; --byok-bg:#2c2312; --byok-line:#8a6b2c;
+      --gh:#a79cff; --gh-bg:#1e1b33;
+      --store:#7fb0e8; --store-bg:#122031;
+      --danger:#e8756f;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f7f9; --panel:#ffffff; --panel-2:#eef1f5; --ink:#1a2230; --ink-soft:#495468;
+    --line:#d3dae4; --line-strong:#b7c0cd;
+    --hosted:#0e8f88; --hosted-bg:#dff2f0; --hosted-line:#3bb3ab;
+    --byok:#b5771a; --byok-bg:#f6ecd8; --byok-line:#d3a24a;
+    --gh:#5b53c9; --gh-bg:#e9e7fb; --store:#3f6ea5; --store-bg:#e2ebf6; --danger:#b23c38;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0d1017; --panel:#151a23; --panel-2:#1c2330; --ink:#e6ebf2; --ink-soft:#9aa6b8;
+    --line:#28303d; --line-strong:#3a4557;
+    --hosted:#4fd1c5; --hosted-bg:#0f2a29; --hosted-line:#2b8f89;
+    --byok:#e6b458; --byok-bg:#2c2312; --byok-line:#8a6b2c;
+    --gh:#a79cff; --gh-bg:#1e1b33; --store:#7fb0e8; --store-bg:#122031; --danger:#e8756f;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 24px 96px}
+  header.top{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:8px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-soft);margin:0 0 10px}
+  h1{font-size:30px;line-height:1.15;margin:0 0 8px;font-weight:680;text-wrap:balance;letter-spacing:-.01em}
+  .sub{color:var(--ink-soft);max-width:64ch;margin:0;font-size:15px}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:18px;font-family:var(--mono);font-size:12px}
+  .legend span{display:inline-flex;align-items:center;gap:7px;color:var(--ink-soft)}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  section{margin-top:46px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-soft);display:flex;align-items:center;gap:10px;margin:0 0 4px}
+  .eyebrow b{color:var(--ink);font-weight:600}
+  .num{font-family:var(--mono);color:var(--ink-soft);border:1px solid var(--line-strong);
+    border-radius:6px;padding:1px 7px;font-size:11px}
+  h2{font-size:21px;margin:6px 0 6px;font-weight:640;letter-spacing:-.01em}
+  .lead{color:var(--ink-soft);margin:0 0 20px;max-width:70ch;font-size:14.5px}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+  .scroll{overflow-x:auto}
+
+  /* topology */
+  .topo{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;min-width:760px}
+  .col-h{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-soft);margin:0 0 10px;text-align:center}
+  .node{border:1px solid var(--line-strong);border-radius:10px;padding:12px 13px;background:var(--panel-2);
+    margin-bottom:10px}
+  .node h4{margin:0 0 4px;font-size:14px;font-weight:620;display:flex;align-items:center;gap:8px}
+  .node p{margin:0;font-size:12.5px;color:var(--ink-soft)}
+  .node code,code.k{font-family:var(--mono);font-size:11.5px;background:transparent;color:var(--ink);
+    border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+  .tag{font-family:var(--mono);font-size:10.5px;padding:1px 7px;border-radius:20px;font-weight:600;
+    letter-spacing:.02em}
+  .t-hosted{background:var(--hosted-bg);color:var(--hosted)}
+  .t-byok{background:var(--byok-bg);color:var(--byok)}
+  .t-gh{background:var(--gh-bg);color:var(--gh)}
+  .t-store{background:var(--store-bg);color:var(--store)}
+  .stores{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .stores .node{margin-bottom:0}
+
+  /* step flow */
+  ol.steps{list-style:none;margin:0;padding:0;counter-reset:s}
+  ol.steps>li{position:relative;padding:0 0 18px 46px;counter-increment:s}
+  ol.steps>li::before{content:counter(s);position:absolute;left:0;top:0;width:30px;height:30px;
+    border-radius:8px;display:grid;place-items:center;font-family:var(--mono);font-size:13px;font-weight:600;
+    background:var(--panel-2);border:1px solid var(--line-strong);color:var(--ink)}
+  ol.steps>li:not(:last-child)::after{content:"";position:absolute;left:14px;top:32px;bottom:2px;
+    width:1px;background:var(--line-strong)}
+  ol.steps.hosted>li::before{border-color:var(--hosted-line);color:var(--hosted)}
+  ol.steps.hosted>li:not(:last-child)::after{background:var(--hosted-line)}
+  .st-head{font-weight:600;font-size:14.5px;margin:4px 0 3px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .st-body{color:var(--ink-soft);font-size:13px;margin:0}
+  .st-body code{font-family:var(--mono);font-size:11.5px;color:var(--ink);border:1px solid var(--line);
+    border-radius:5px;padding:0 4px}
+  .who{font-family:var(--mono);font-size:10.5px;padding:1px 8px;border-radius:20px;border:1px solid var(--line-strong);
+    color:var(--ink-soft)}
+  .who.cli{border-color:var(--hosted-line);color:var(--hosted)}
+  .who.you{border-color:var(--gh);color:var(--gh)}
+  .who.srv{border-color:var(--store);color:var(--store)}
+
+  /* table */
+  table{border-collapse:collapse;width:100%;min-width:640px;font-size:13px}
+  th,td{text-align:left;padding:11px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  tbody tr:last-child td{border-bottom:none}
+  td code{font-family:var(--mono);font-size:11.5px}
+  .yes{color:var(--hosted);font-weight:600}
+  .no{color:var(--ink-soft)}
+  .warn{color:var(--danger);font-weight:600}
+
+  /* two-path switch */
+  .paths{display:grid;grid-template-columns:1fr 1fr;gap:14px;min-width:700px}
+  .path{border-radius:12px;padding:16px 17px;border:1px solid}
+  .path.h{border-color:var(--hosted-line);background:var(--hosted-bg)}
+  .path.b{border-color:var(--byok-line);background:var(--byok-bg)}
+  .path h3{margin:0 0 3px;font-size:15.5px;display:flex;align-items:center;gap:9px}
+  .path .meta{font-family:var(--mono);font-size:11px;color:var(--ink-soft);margin:0 0 12px}
+  .path ul{margin:0;padding-left:18px;font-size:13px;color:var(--ink-soft)}
+  .path ul li{margin:5px 0}
+  .path ul li b{color:var(--ink);font-weight:600}
+  .path ul li code{font-family:var(--mono);font-size:11px;color:var(--ink)}
+  .switchbar{margin-top:14px;font-size:13px;color:var(--ink-soft);border-top:1px dashed var(--line-strong);
+    padding-top:12px}
+  .switchbar code{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--panel-2);
+    border:1px solid var(--line);border-radius:5px;padding:2px 6px}
+
+  .callout{border-left:3px solid var(--hosted);background:var(--hosted-bg);border-radius:0 10px 10px 0;
+    padding:14px 16px;margin-top:18px;font-size:13.5px}
+  .callout.crux{border-left-color:var(--gh);background:var(--gh-bg)}
+  .callout b{font-weight:640}
+  .callout code{font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-radius:5px;padding:0 5px}
+  .arrow{color:var(--ink-soft);font-family:var(--mono)}
+  .muted{color:var(--ink-soft)}
+  footer{margin-top:56px;border-top:1px solid var(--line);padding-top:18px;color:var(--ink-soft);
+    font-size:12px;font-family:var(--mono)}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <p class="kicker">tdoc · publish subsystem</p>
+    <h1>Publish auth &amp; multi-tenant architecture</h1>
+    <p class="sub">How the CLI proves who you are, how tdoc.dev keeps tenants apart, and how identity is decided when you juggle GitHub accounts or switch between hosted and bring-your-own-key hosting.</p>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--hosted)"></i>Hosted (out-of-the-box, tdoc.dev)</span>
+      <span><i class="dot" style="background:var(--byok)"></i>BYOK (your Cloudflare / Vercel)</span>
+      <span><i class="dot" style="background:var(--gh)"></i>GitHub identity</span>
+      <span><i class="dot" style="background:var(--store)"></i>Server state</span>
+    </div>
+  </header>
+
+  <!-- TOPOLOGY -->
+  <section>
+    <p class="eyebrow"><span class="num">MAP</span> <b>System topology</b></p>
+    <h2>Three parties, one contract</h2>
+    <p class="lead">Every publish target — hosted or BYOK — speaks the same <code class="k">POST /api/upload</code> contract, authenticated by a bearer <em>upload token</em>. What differs is where that token comes from and who owns the Worker serving it.</p>
+    <div class="panel scroll">
+      <div class="topo">
+        <div>
+          <p class="col-h">Your machine</p>
+          <div class="node">
+            <h4>tdoc CLI <span class="tag t-hosted">bash</span></h4>
+            <p><code>~/.claude/skills/tdoc/bin/tdoc-publish</code> — drives setup, sign-in &amp; upload.</p>
+          </div>
+          <div class="node">
+            <h4>Local config <span class="tag t-store">1 tenant</span></h4>
+            <p><code>~/.tdoc/published.json</code> holds <code>platform</code>, <code>upload_token</code>, <code>account_id</code>, <code>github_login</code>. One active identity at a time.</p>
+          </div>
+          <div class="node">
+            <h4>Local docs</h4>
+            <p><code>~/tdocs/&lt;slug&gt;/</code> — <code>meta.json</code> + <code>v&lt;n&gt;/index.html</code>.</p>
+          </div>
+          <div class="node">
+            <h4>Browser <span class="tag t-gh">device auth</span></h4>
+            <p>Only touched once, to authorize the GitHub device code.</p>
+          </div>
+        </div>
+        <div>
+          <p class="col-h">tdoc.dev Worker (shared)</p>
+          <div class="node">
+            <h4>Auth routes <span class="tag t-gh">github</span></h4>
+            <p><code>/api/auth/device/start</code> · <code>/poll</code> → mints a session cookie.</p>
+          </div>
+          <div class="node">
+            <h4>Token route <span class="tag t-hosted">gated</span></h4>
+            <p><code>/api/hosted/token</code> — requires a session; binds an upload token to your login.</p>
+          </div>
+          <div class="node">
+            <h4>Upload route</h4>
+            <p><code>/api/upload</code> — bearer token → account → per-slug write ACL.</p>
+          </div>
+          <div class="node">
+            <h4>GitHub OAuth</h4>
+            <p>Device grant via <code>GITHUB_CLIENT_ID</code>. Access token is <b>never persisted</b>.</p>
+          </div>
+        </div>
+        <div>
+          <p class="col-h">State &amp; BYOK targets</p>
+          <div class="stores">
+            <div class="node"><h4>KV <span class="tag t-store">META</span></h4><p><code>session:&lt;sid&gt;</code> 30d · <code>hosted-account:&lt;login&gt;</code> · <code>hosted-token:&lt;hash&gt;</code></p></div>
+            <div class="node"><h4>R2</h4><p>Published HTML bytes per slug/version.</p></div>
+            <div class="node"><h4>Durable Object</h4><p>Per-slug ownership — the multi-tenant lock.</p></div>
+            <div class="node"><h4 style="color:var(--byok)">Your Worker <span class="tag t-byok">byok</span></h4><p>Cloudflare (R2+KV) or Vercel (Blob+Upstash). You own it.</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FLOW 1 -->
+  <section>
+    <p class="eyebrow"><span class="num">FLOW 1</span> <b>First-time onboarding</b> · hosted default</p>
+    <h2>Device flow auto-triggers on the first publish</h2>
+    <p class="lead">Run <code class="k">/tdoc publish &lt;slug&gt;</code> with no config (or pass <code class="k">--platform hosted</code>). Because there is no valid hosted token, the CLI starts GitHub sign-in itself — you don't run a separate login command.</p>
+    <div class="panel">
+      <ol class="steps hosted">
+        <li>
+          <div class="st-head">No token in <code>published.json</code> <span class="who cli">CLI</span></div>
+          <p class="st-body">Missing config, or <code>platform ≠ hosted</code>, routes into <code>first_time_setup_hosted</code>. A stale <code>platform:null</code> is read as <code>cloudflare</code> — so pass <code>--platform hosted</code> to force the switch (old config saved as <code>.bak.switch</code>).</p>
+        </li>
+        <li>
+          <div class="st-head">Start device flow <span class="who cli">CLI</span> <span class="arrow">→</span> <code>POST /api/auth/device/start</code></div>
+          <p class="st-body">Worker asks GitHub for a device+user code and returns <code>user_code</code>, <code>device_code</code>, <code>verification_uri</code>, <code>interval</code>.</p>
+        </li>
+        <li>
+          <div class="st-head">Authorize in the browser <span class="who you">You</span></div>
+          <p class="st-body">CLI prints <code>Code: XXXX-XXXX</code>. You open <code>github.com/login/device</code>, signed in as the account you want to publish as, and approve. <b>This one step decides the tenant.</b></p>
+        </li>
+        <li>
+          <div class="st-head">Poll until approved <span class="who cli">CLI</span> <span class="arrow">→</span> <code>POST /api/auth/device/poll</code></div>
+          <p class="st-body">CLI polls every <code>interval</code>s (backing off on <code>slow_down</code>). On approval the Worker exchanges the grant, reads GitHub <code>/user</code>, mints <code>session:&lt;sid&gt;</code> in KV (30-day TTL, no GitHub token stored) and sets the cookie into the CLI's cookie jar.</p>
+        </li>
+        <li>
+          <div class="st-head">Mint the upload token <span class="who cli">CLI</span> <span class="arrow">→</span> <code>POST /api/hosted/token</code> <span class="who srv">session</span></div>
+          <p class="st-body">Gated by the session cookie. <code>hostedAccountForGithub(login)</code> looks up <code>hosted-account:&lt;login&gt;</code>, reuses the existing <code>account_id</code> or mints <code>acct_…</code>, then stores the token <em>hashed</em> as <code>hosted-token:&lt;sha256&gt;</code>. Returns <code>{token, account_id, github_login}</code>.</p>
+        </li>
+        <li>
+          <div class="st-head">Persist &amp; upload <span class="who cli">CLI</span> <span class="arrow">→</span> <code>POST /api/upload</code></div>
+          <p class="st-body">Config written 0600 with <code>platform:hosted</code>. Each version uploads with <code>Authorization: Bearer &lt;token&gt;</code>. First write claims the slug in the Durable Object; the doc goes live at <code>tdoc.dev/d/&lt;slug&gt;</code>.</p>
+        </li>
+      </ol>
+      <div class="callout"><b>Recoverable, not disposable.</b> The upload token is a credential you can re-mint anytime by signing in again — <code>account_id</code> is derived from your GitHub login, so the same login always resolves to the same account and its docs.</div>
+    </div>
+  </section>
+
+  <!-- FLOW 2 -->
+  <section>
+    <p class="eyebrow"><span class="num">FLOW 2</span> <b>Multiple accounts</b> · server-side tenancy</p>
+    <h2>login → account_id → per-slug lock</h2>
+    <p class="lead">The shared Worker keeps tenants apart with three layers. Nothing is scoped by the CLI or the machine — it's all keyed off the GitHub login proven at sign-in.</p>
+    <div class="panel scroll">
+      <table>
+        <thead><tr><th>Layer</th><th>Key</th><th>Guarantee</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>Identity</b></td>
+            <td><code>hosted-account:&lt;login&gt;</code> → <code>account_id</code></td>
+            <td>Same login always remints the <span class="yes">same account_id</span> (legacy <code>hosted-github:</code> keys reused). Stable &amp; recoverable.</td>
+          </tr>
+          <tr>
+            <td><b>Credential</b></td>
+            <td><code>hosted-token:&lt;sha256&gt;</code> → <code>{account_id}</code></td>
+            <td>Tokens stored hashed, never cleartext. A bearer token resolves to exactly one account.</td>
+          </tr>
+          <tr>
+            <td><b>Ownership</b></td>
+            <td>Durable Object, per slug</td>
+            <td>First upload claims the slug. A second account gets <span class="warn">slug_taken (409)</span> / <span class="warn">not_doc_owner (403)</span> — it <b>cannot</b> overwrite, delete, wipe comments, or agent-reply.</td>
+          </tr>
+          <tr>
+            <td><b>Listing</b></td>
+            <td><code>/me</code></td>
+            <td>Shows only the signed-in login's docs. Per-account doc quota; re-publishing the same slug doesn't consume another slot.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout crux"><b>One machine, one active tenant.</b> <code>published.json</code> stores a single token. To publish as a <em>different</em> account from the same machine you re-run setup (or <code>--platform hosted</code> again) and authorize the other GitHub login in the browser — that overwrites the active token. There's no local multi-profile; the server keeps every account distinct, but the CLI holds one at a time.</div>
+  </section>
+
+  <!-- FLOW 3 -->
+  <section>
+    <p class="eyebrow"><span class="num">FLOW 3</span> <b>Which identity wins</b> · juggling local GitHub accounts</p>
+    <h2>The credential that decides the tenant depends on the platform</h2>
+    <p class="lead">This is the easy-to-trip-on part: you may have <code>gh</code> CLI logged into several accounts, a wrangler login, and a browser session — and they govern <em>different</em> platforms.</p>
+    <div class="panel scroll">
+      <table>
+        <thead><tr><th>Platform</th><th>Identity that governs the tenant</th><th><code>gh auth switch</code> effect</th><th>Browser needed?</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="tag t-hosted">hosted</span> tdoc.dev</td>
+            <td><b>Browser GitHub session</b> — whoever you approve at <code>github.com/login/device</code>.</td>
+            <td class="no">None. Hosted ignores the <code>gh</code> CLI entirely.</td>
+            <td class="yes">Once, at sign-in</td>
+          </tr>
+          <tr>
+            <td><span class="tag t-byok">cloudflare</span></td>
+            <td><b>Wrangler OAuth</b> for the deploy; <code>gh api user</code> only stamps the <code>owner_login</code> label.</td>
+            <td class="warn">Only changes the owner label, not the deploy account.</td>
+            <td class="no">No (wrangler login)</td>
+          </tr>
+          <tr>
+            <td><span class="tag t-byok">vercel</span></td>
+            <td><b>Vercel CLI auth</b> for the deploy; <code>gh api user</code> stamps <code>owner_login</code>.</td>
+            <td class="warn">Only the owner label.</td>
+            <td class="no">No (vercel login)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout crux"><b>Concretely:</b> switching <code>gh</code> CLI to another account does <u>not</u> change who you publish as on tdoc.dev. To test a second tenant, log the <em>browser</em> into that GitHub account before approving the device code — or clear the active token and re-run sign-in.</div>
+  </section>
+
+  <!-- FLOW 4 -->
+  <section>
+    <p class="eyebrow"><span class="num">FLOW 4</span> <b>Hosted ⇄ BYOK</b> · switching hosting</p>
+    <h2>Same upload contract, different owner of the Worker</h2>
+    <p class="lead">Platform is chosen on first publish and remembered. Re-passing <code>--platform</code> switches it: the CLI backs up the old config to <code>published.json.bak.switch</code> and runs that platform's setup from scratch.</p>
+    <div class="panel scroll">
+      <div class="paths">
+        <div class="path h">
+          <h3><i class="dot" style="background:var(--hosted)"></i> Out-of-the-box</h3>
+          <p class="meta">--platform hosted · default</p>
+          <ul>
+            <li><b>Auth:</b> GitHub device flow → session → account-scoped <code>upload_token</code>.</li>
+            <li><b>Infra:</b> none to provision — tdoc's shared Worker + KV + R2 + DO.</li>
+            <li><b>Tenancy:</b> enforced centrally by <code>account_id</code> + per-slug DO lock.</li>
+            <li><b>Serves at:</b> <code>tdoc.dev/d/&lt;slug&gt;</code>.</li>
+            <li><b>Cost:</b> free, always-on, zero infra.</li>
+          </ul>
+        </div>
+        <div class="path b">
+          <h3><i class="dot" style="background:var(--byok)"></i> Bring your own key</h3>
+          <p class="meta">--platform cloudflare | vercel</p>
+          <ul>
+            <li><b>Auth:</b> wrangler / vercel login; a random <code>TDOC_UPLOAD_TOKEN</code> set as a Worker secret.</li>
+            <li><b>Infra:</b> CLI creates R2 bucket + KV namespace (or Vercel Blob + Upstash KV) and deploys <b>your</b> Worker.</li>
+            <li><b>Tenancy:</b> single-owner by construction — it's your account's Worker; <code>owner_login</code> from <code>gh api user</code>.</li>
+            <li><b>Serves at:</b> your <code>*.workers.dev</code> / Vercel domain.</li>
+            <li><b>Cost:</b> your cloud bill; full control &amp; data residency.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="switchbar">Switch anytime — same slug, new home:
+      <code>/tdoc publish --platform cloudflare &lt;slug&gt;</code> <span class="arrow">···</span> the mismatch triggers full re-setup and rewrites <code>published.json</code> (old kept as <code>.bak.switch</code>). Hosting a hostname pair on one Worker (e.g. <code>tdoc.dev</code> + <code>*.workers.dev</code>) is <b>not</b> a switch.
+    </div>
+  </section>
+
+  <!-- FAQ from review -->
+  <section>
+    <p class="eyebrow"><span class="num">FAQ</span> <b>Switching &amp; multiple accounts</b> · answered from review</p>
+    <h2>What actually happens when you flip platform or account</h2>
+    <p class="lead">Raised in review: does the backup get reused, what about switching back, multiple switches, and does the agent know which account it's on? Answers below, all grounded in <code>bin/tdoc-publish</code>.</p>
+    <div class="panel">
+      <ol class="steps">
+        <li>
+          <div class="st-head">The <code>.bak.switch</code> file is a rollback copy, not a profile</div>
+          <p class="st-body">On switch, the old config is copied to <code>published.json.bak.switch</code> and <b>only restored if setup fails</b> (a trap on EXIT). On success it's kept but <b>never read back</b>, and every switch overwrites it — so only the <em>immediately-previous</em> config survives, not a history stack.</p>
+        </li>
+        <li>
+          <div class="st-head">Switching back re-runs setup — but lands you in the same place</div>
+          <p class="st-body">It does <b>not</b> reuse the backup file; it does a full re-setup. That's equivalent because state is recoverable server-side. <b>Hosted:</b> re-mints a <em>fresh</em> upload token, but <code>account_id</code> is derived from your login, so you return to the same docs. <b>Cloudflare:</b> re-setup is idempotent (R2 "already exists" is fine, KV looked up by title <code>META</code>) and just rotates the Worker's <code>TDOC_UPLOAD_TOKEN</code>.</p>
+        </li>
+        <li>
+          <div class="st-head">Multiple switches / multiple accounts are enforced server-side</div>
+          <p class="st-body">No matter how many times you flip locally, ownership is the <code>account_id</code> + per-slug Durable Object lock. Local config can't grant ownership you don't have — cross-account writes return <span class="warn">slug_taken 409</span> / <span class="warn">not_doc_owner 403</span>.</p>
+        </li>
+        <li>
+          <div class="st-head">Switch platform vs switch account</div>
+          <p class="st-body"><b>Platform:</b> <code>--platform &lt;other&gt;</code> → backup + full re-setup. <b>Account:</b> there is no dedicated verb — re-run device sign-in (<code>--platform hosted</code> again, or delete <code>published.json</code>) and approve the other GitHub login in the browser; the token rebinds.</p>
+        </li>
+        <li>
+          <div class="st-head">Yes — the agent can tell which account is active, without a network call</div>
+          <p class="st-body">Source of truth is <code>~/.tdoc/published.json → github_login</code> (+ <code>account_id</code>); the CLI also prints <code>Signed in as &lt;login&gt;</code> at sign-in, and <code>tdoc-agent-reply --print-identity</code> reports it. <b>UX caveat:</b> readable ≠ frictionless — switching account means re-running the device flow, there's no one-command profile select, and a machine holds one active tenant at a time.</p>
+        </li>
+        <li>
+          <div class="st-head">Two accounts: was publishing as #1, now want #2</div>
+          <p class="st-body">Re-run publish and approve <b>account #2</b> at the device screen → new token bound to #2. Account #1's already-published docs <b>stay owned by #1</b> — #2 can't overwrite them. To publish #1's docs again, re-authorize as #1.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- DESIGN NOTE: keeping clients current -->
+  <section>
+    <p class="eyebrow"><span class="num">DESIGN</span> <b>Keeping clients current</b> · the too-old-to-nag gap</p>
+    <h2>Client self-checks can't guarantee latest — the server has to</h2>
+    <p class="lead">Today <code>tdoc-update-nag</code> runs on every publish: a git <code>fetch origin main</code>, compares <code>HEAD</code> vs <code>origin/main</code>, and nags on stderr if behind (<code>Run: /tdoc update --yes</code>). It never blocks and never auto-updates. It has one fundamental blind spot.</p>
+    <div class="callout crux"><b>A too-old install can't warn you it's too old.</b> The nag <em>script itself</em> shipped in a later version — an install predating it (this session's was 57 commits behind, with no nag file at all) literally cannot self-report. The notification only works once you're new enough to have the notification. It's also git-only (a non-git copy silently no-ops) and checks source parity, not compatibility with the deployed Worker.</div>
+
+    <p class="lead" style="margin-top:26px">Is a server-driven version signal standard? Yes — the norm is <b>soft-nag by default, hard-fail only on breaking incompatibility</b>.</p>
+    <div class="panel scroll">
+      <table>
+        <thead><tr><th>Domain</th><th>Prior art</th></tr></thead>
+        <tbody>
+          <tr><td>Mobile apps</td><td>Firebase in-app updates: <code>min_supported</code> from a config endpoint → <b>force</b> or <b>flexible</b> prompt.</td></tr>
+          <tr><td>HTTP APIs</td><td>RFC 8594 <code>Deprecation</code>/<code>Sunset</code> headers; Stripe pins an API version per account; SDKs stamp <code>User-Agent</code>.</td></tr>
+          <tr><td>Protocol handshakes</td><td>TLS, Postgres wire, Mongo <code>wireVersion</code>, Kafka ApiVersions — <b>negotiate a range</b>, reject only true incompatibility. The healthiest shape.</td></tr>
+          <tr><td>CLIs</td><td><code>gh</code>/<code>stripe</code>/<code>wrangler</code> print soft "new version" nags; <code>terraform</code> provider protocol &amp; <code>kubectl</code> skew hard-fail on breaking gaps.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="paths" style="margin-top:22px;min-width:700px">
+      <div class="path b">
+        <h3><i class="dot" style="background:var(--byok)"></i> Why NOT force-update every time</h3>
+        <p class="meta">especially for an out-of-the-box product</p>
+        <ul>
+          <li><b>Breaks the "always works" promise</b> — a blocking step at the exact moment the user wants to publish.</li>
+          <li><b>Update isn't atomic &amp; can fail</b> — diverged checkout, fast-forward blocked, network/permission — so an unrelated upgrade sinks the publish.</li>
+          <li><b>Availability coupling</b> — one bad <code>min_version</code> push or a down endpoint can <b>lock out every client at once</b>; a typo becomes a global outage.</li>
+          <li><b>No pinning / reproducibility</b> — CI &amp; teams need a known-good version; force-latest can inject a regression they didn't opt into.</li>
+          <li><b>Churn &amp; lost consent</b> — surprise behavior changes; users lose control of when to absorb them. Offline users can't publish at all.</li>
+        </ul>
+      </div>
+      <div class="path h">
+        <h3><i class="dot" style="background:var(--hosted)"></i> The shape to build instead</h3>
+        <p class="meta">two-tier, fail-open</p>
+        <ul>
+          <li><b>Server returns two numbers</b> on <code>/api/upload</code>: <code>min_supported</code> (hard floor) and <code>latest</code> (soft).</li>
+          <li><b>Hard floor trips only</b> when an old client would <em>silently do the wrong thing</em> — then return a clear, actionable message, not a raw error.</li>
+          <li><b>Everything else is a soft nag</b> with a one-command update; never block.</li>
+          <li><b>Fail open</b> — if the version check itself errors, allow the publish. Version infra must never take down the core action.</li>
+          <li><b>The floor moves rarely</b> (security / unshippable incompatibility only); auto-update stays an opt-in convenience via the plugin marketplace.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="switchbar">Concretely for tdoc: the pre-multi-tenant CLI hitting the new <code>sign_in_required</code> and dumping a raw <code>HTTP 401</code> is exactly the case a <code>min_client_version</code> on <code>/api/upload</code> should catch — turning a confusing error into "your tdoc is too old for hosted publish → <code>/tdoc update</code>". The client already calls the server on every publish, so it's zero extra round-trips.</div>
+  </section>
+
+  <footer>
+    grounded in ~/.claude/skills/tdoc · bin/tdoc-publish · tdoc-update-nag · worker/worker.js &nbsp;·&nbsp; hosted = device-flow session · account_id ← github login · per-slug Durable Object lock &nbsp;·&nbsp; v3 adds client-version design note
+  </footer>
+</div>
