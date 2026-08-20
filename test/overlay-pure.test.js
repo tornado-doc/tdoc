@@ -9,7 +9,8 @@
 // functions become a documented, testable surface.
 //
 // Pure functions covered: escapeHtml, normalizeNeedle, normalizeContext,
-// normalizeQuery, commonPrefixLen, commonSuffixLen.
+// normalizeQuery, commonPrefixLen, commonSuffixLen, isVisibleClientRect,
+// nearestClientRect, endRectOnLine.
 //
 // Run with: node test/overlay-pure.test.js
 
@@ -48,10 +49,12 @@ vm.runInContext([
   'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl',
   'isAnthropicCompanyMark', 'tdocLogoUrl', 'agentLogoUrl', 'childrenOf',
   'inboxTargetUrl', 'findCommentRoot',
+  'isVisibleClientRect', 'nearestClientRect', 'endRectOnLine',
 ].map(sliceFn).join('\n\n'), box);
 const { escapeHtml, normalizeNeedle, normalizeContext, normalizeQuery,
         commonPrefixLen, commonSuffixLen, isGithubHttpsUrl, agentLogoUrl,
-        childrenOf, inboxTargetUrl, findCommentRoot } = box;
+        childrenOf, inboxTargetUrl, findCommentRoot,
+        isVisibleClientRect, nearestClientRect, endRectOnLine } = box;
 
 console.log('overlay-pure (#23 testable surface)');
 
@@ -173,6 +176,30 @@ t('inboxTargetUrl encodes slug and comment id', () => {
 t('inboxTargetUrl treats bad versions as 1', () => {
   assert(inboxTargetUrl({ slug: 'd', version: 'nope', comment_id: 'c' }, {}) === '/d/d/v/1?comment=c');
   assert(inboxTargetUrl({ slug: 'd', version: 0 }, {}) === '/d/d/v/1');
+});
+t('isVisibleClientRect rejects empty / missing boxes', () => {
+  assert(isVisibleClientRect(null) === false);
+  assert(isVisibleClientRect({ width: 0, height: 0 }) === false);
+  assert(isVisibleClientRect({ width: 12, height: 0 }) === true);
+  assert(isVisibleClientRect({ width: 0, height: 16 }) === true);
+});
+t('endRectOnLine sits at the caret X, not the line origin', () => {
+  const line = { left: 40, right: 400, top: 120, bottom: 140, width: 360, height: 20 };
+  const end = endRectOnLine(line, 280);
+  assert(end.left === 280 && end.right === 280, 'x is the caret, not line.left');
+  assert(end.top === 120 && end.bottom === 140, 'stays on the same line');
+  assert(endRectOnLine(line).left === 400, 'no x → line end');
+  assert(endRectOnLine(null) === null);
+});
+t('nearestClientRect picks the line box under the caret, not the union', () => {
+  const line1 = { left: 40, right: 400, top: 100, bottom: 120, width: 360, height: 20 };
+  const line2 = { left: 40, right: 180, top: 120, bottom: 140, width: 140, height: 20 };
+  const empty = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+  const hit = nearestClientRect([line1, empty, line2], 170, 132);
+  assert(hit === line2, 'caret on the second line should not snap to line 1');
+  const up = nearestClientRect([line1, line2], 80, 108);
+  assert(up === line1, 'upward selection caret stays on the first line');
+  assert(nearestClientRect([], 0, 0) === null);
 });
 t('findCommentRoot maps a reply id to its top-level card', () => {
   const list = [
