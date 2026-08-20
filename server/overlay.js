@@ -765,6 +765,7 @@
     pinnedId: null,                // comment whose floating card is click-pinned open (wide mode)
     hoverId: null,                 // comment whose card is open via hover (wide mode)
     openReplyThreads: new Set(),   // top-level comment ids whose reply lists stay expanded
+    pendingDeepLink: null,         // comment/reply id a notification click wants revealed on next refresh
   };
 
   // Highlight API: one shared registry for pending, one per saved comment.
@@ -1284,14 +1285,13 @@
     const destSlug = row.slug || slug;
     const destVer = row.version || version;
     if (destSlug === slug && Number(destVer) === Number(version)) {
-      if (root) {
-        state.openReplyThreads.add(root);
-        pinOpenCard(root);
-        if (target === root) setActiveComment(root);
-      }
-      const el = document.querySelector(`[data-comment-id="${CSS.escape(target || '')}"]`);
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-      markInboxSeen(target);
+      // Route through refreshComments so the target thread is opened BEFORE its
+      // card is (re)built and the reply/reaction target is actually revealed.
+      // Poking the DOM here instead raced the collapsed cards and left replies
+      // hidden. refreshComments handles opening, activating, scrolling, and
+      // markInboxSeen for the pending target.
+      state.pendingDeepLink = target || root || null;
+      refreshComments();
       return;
     }
     location.href = `/d/${encodeURIComponent(destSlug)}/v/${destVer}?comment=${encodeURIComponent(target || root || '')}`;
@@ -2639,6 +2639,24 @@
     document.body.classList.toggle('tdoc-has-comments', state.activeComments.length > 0);
     document.body.dataset.tdocReady = '1';
 
+    // Resolve the deep-link target (notification click or ?comment= on load)
+    // BEFORE building cards. A card only renders its reply list expanded when its
+    // id is in state.openReplyThreads at build time, so a reply/reaction target
+    // must open its thread up front — otherwise buildCard renders it collapsed and
+    // the referenced reply is never revealed or scrolled to. `want` is consumed in
+    // the post-layout rAF below.
+    const want = allowDeepLink
+      ? (state.pendingDeepLink
+          || (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })())
+      : null;
+    let deepLinkRoot = null;
+    if (want) {
+      const hit = state.activeComments.find(c => c.id === want)
+        || state.activeComments.find(c => (c.replies || []).some(r => r.id === want));
+      deepLinkRoot = hit ? hit.id : want;
+      state.openReplyThreads.add(deepLinkRoot);
+    }
+
     const fabCount = document.getElementById('tdoc-fab-count');
     if (fabCount) fabCount.textContent = state.activeComments.length;
 
@@ -2713,14 +2731,10 @@
         // and lost the card's .active state (+ the "move anchor" affordance).
         setActiveComment(keepPinnedId);
       }
-      const want = allowDeepLink
-        ? (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })()
-        : null;
       if (want) {
-        const hit = state.activeComments.find(c => c.id === want)
-          || state.activeComments.find(c => (c.replies || []).some(r => r.id === want));
-        const root = hit ? hit.id : want;
-        state.openReplyThreads.add(root);
+        const root = deepLinkRoot || want;
+        // The thread was already opened before the build loop, so its reply
+        // elements are in the DOM and expanded; here we only activate and scroll.
         // Opening a reply must not activate the root — that would mark the
         // root's own notifications (e.g. a reaction) as read.
         if (want === root && state.cardEls.has(root)) setActiveComment(root);
@@ -2728,6 +2742,7 @@
         const el = document.querySelector(`[data-comment-id="${CSS.escape(want)}"]`);
         if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
         markInboxSeen(want);
+        state.pendingDeepLink = null;
       }
     });
   }
