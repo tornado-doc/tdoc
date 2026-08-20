@@ -118,8 +118,9 @@
         var code = document.getElementById('tds-code');
         code.textContent = d.user_code;
         var cbtn = document.getElementById('tds-copy');
+        var copied = false;
+        function mark() { copied = true; cbtn.textContent = 'Copied'; cbtn.className = 'tds-copy done'; }
         function copyCode() {
-          var mark = function () { cbtn.textContent = 'Copied'; cbtn.className = 'tds-copy done'; };
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(d.user_code).then(mark, function () { selectCode(); });
           } else { selectCode(); }
@@ -135,6 +136,21 @@
         }
         cbtn.onclick = copyCode;
         code.onclick = copyCode;
+
+        // Put the code on the clipboard the moment it exists, so a visitor who
+        // lands on GitHub's login first (which never shows the code) can paste
+        // it without coming back for it — the miss this whole flow is built to
+        // avoid. On desktop the click that opened this modal still counts as
+        // recent activation, so this lands silently and the button reads
+        // "Copied". Where activation is gone (Safari drops it across the
+        // device/start round-trip) it stays quiet: no false "Copied", and the
+        // Open-GitHub tap below copies again from a real gesture. Never fall
+        // back to the "Press Ctrl+C" hint here — that's only honest after a
+        // real click.
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(d.user_code).then(mark, function () {});
+        }
+
         var uri = d.verification_uri_complete || d.verification_uri;
         var where = document.getElementById('tds-where');
         // A native target=_blank anchor is the only hop that every browser
@@ -154,6 +170,12 @@
             + ' 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24'
             + ' 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015'
             + ' 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>Open GitHub</a>';
+          // Copy on the tap that leaves for GitHub — the reliable moment, and
+          // the belt to the auto-copy's braces if activation was gone above.
+          // The anchor still navigates; this only seeds the clipboard first.
+          document.getElementById('tds-open').addEventListener('click', function () {
+            if (!copied) copyCode();
+          });
           // Try the convenience popup too, but never depend on it.
           var popped = null;
           try { popped = window.open(uri, '_blank', 'noopener'); } catch (e) {}
