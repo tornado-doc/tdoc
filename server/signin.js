@@ -152,15 +152,22 @@
         }
 
         var uri = d.verification_uri_complete || d.verification_uri;
+        var prefilled = !!d.verification_uri_complete;
         var where = document.getElementById('tds-where');
-        // A native target=_blank anchor is the only hop that every browser
-        // honours: a scripted window.open() fired after this await is outside
-        // the click's activation window, so Safari and in-app webviews either
-        // swallow it or, worse, open it in this tab. Losing this tab loses the
-        // poll below, and the sign-in can never complete. The anchor cannot
-        // navigate the page it sits on.
+        // One hop to GitHub, and the visitor takes it. We deliberately do not
+        // open it for them: a dialog that yanks you to a fresh GitHub tab
+        // the instant it appears reads as a hijack, not a sign-in — and on
+        // desktop that scripted open actually lands, so the visitor is gone
+        // before they've read a word. A native target=_blank anchor is the only
+        // hop every browser honours anyway (a scripted open() after this await
+        // is outside the click's activation window, so Safari and in-app
+        // webviews swallow it or open it in this tab, losing the poll). The tap is a
+        // fresh gesture, so the new tab is allowed on phones too, and it copies
+        // the code as the visitor leaves. The anchor cannot navigate this page.
         if (isGithubHttpsUrl(uri)) {
-          where.innerHTML = 'Open GitHub and approve. The code is already filled in.'
+          where.innerHTML = (prefilled
+              ? 'Open GitHub and approve — the code is already filled in.'
+              : 'Open GitHub, paste the code, and approve.')
             + '<a class="tds-open" id="tds-open" href="' + esc(uri) + '"'
             + ' target="_blank" rel="noopener noreferrer">'
             + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0'
@@ -170,17 +177,14 @@
             + ' 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24'
             + ' 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015'
             + ' 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>Open GitHub</a>';
-          // Copy on the tap that leaves for GitHub — the reliable moment, and
-          // the belt to the auto-copy's braces if activation was gone above.
-          // The anchor still navigates; this only seeds the clipboard first.
+          // The tap copies the code (reliable gesture, and the belt to the
+          // auto-copy's braces if activation was gone above) and flips the
+          // status to waiting; the anchor itself opens the tab.
           document.getElementById('tds-open').addEventListener('click', function () {
             if (!copied) copyCode();
+            status('Waiting for you to approve…');
           });
-          // Try the convenience popup too, but never depend on it.
-          var popped = null;
-          try { popped = window.open(uri, '_blank', 'noopener'); } catch (e) {}
-          if (!popped) status('Click Open GitHub to approve, then come back to this tab.');
-          else status('Waiting for you to approve…');
+          status('Click Open GitHub to approve, then come back to this tab.');
         } else {
           where.innerHTML = 'Paste it at <b>' + esc(d.verification_uri) + '</b> and approve.';
           status('Waiting for you to approve…');

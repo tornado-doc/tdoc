@@ -1,4 +1,4 @@
-// #179: the sign-in dialog must hand GitHub off to a new tab, always.
+// #179: the sign-in dialog hands GitHub off to a new tab the visitor opens.
 //
 // The device flow's only route to GitHub used to be a scripted
 // window.open() fired after `await api('/api/auth/device/start')`. That is
@@ -7,9 +7,13 @@
 // text with nothing to click — or open it in the current tab. Losing this
 // tab loses the poll loop, and the sign-in can never finish.
 //
-// A native <a target="_blank"> cannot navigate the page it sits on, so the
-// guard here is: the anchor exists, points at the verification URL, and the
-// flow never depends on the popup landing.
+// #179 answered that with a native <a target="_blank"> AND an auto
+// window.open() "convenience popup". The popup was the mistake: on desktop it
+// lands, so the dialog yanks the visitor to a GitHub tab the instant it opens
+// — reads as a hijack, not a sign-in. So the anchor is now the ONLY hop, and
+// the visitor takes it. The guard: the anchor exists, points at the
+// verification URL, cannot navigate this page, and nothing opens GitHub for
+// the visitor.
 const fs = require('fs');
 const path = require('path');
 
@@ -43,16 +47,19 @@ t('only an https github.com URL is ever linked or opened', () => {
     'the anchor and the popup must both sit behind isGithubHttpsUrl');
 });
 
-t('a blocked popup is handled, not assumed away', () => {
-  assert(/popped = window\.open\(uri, '_blank', 'noopener'\)/.test(src),
-    'the convenience popup should still be attempted');
-  assert(/if \(!popped\)/.test(src),
-    'a blocked popup must change the copy; the flow cannot depend on it landing');
-  assert(/try \{ popped = window\.open/.test(src),
-    'window.open can throw in embedded webviews; it must be guarded');
+t('nothing opens GitHub for the visitor — they tap the anchor', () => {
+  // A dialog that auto-opens a GitHub tab the instant it appears reads as a
+  // hijack; on desktop the scripted open lands and the visitor is gone before
+  // reading anything. The anchor tap is the only hop.
+  assert(!/window\.open\(/.test(src),
+    'the dialog must not open GitHub itself; the visitor taps the anchor');
+  assert(/getElementById\('tds-open'\)\.addEventListener\('click'/.test(src),
+    'the anchor tap must be wired: it copies the code as the visitor leaves');
+  assert(/Click Open GitHub to approve/.test(src),
+    'the status must point the visitor at the Open GitHub button');
 });
 
-t('the poll keeps running whether or not the popup landed', () => {
+t('the poll keeps running however the visitor reaches GitHub', () => {
   const after = src.slice(src.indexOf('if (isGithubHttpsUrl(uri))'));
   assert(/\(function poll\(\)/.test(after),
     'the poll must start regardless of how the user reaches GitHub');
