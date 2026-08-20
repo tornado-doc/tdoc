@@ -71,6 +71,16 @@ t('applyCommentDeepLink opens the phone drawer and the card', () => {
   assert(fn.includes('markInboxSeen(want)'), 'deep-link must mark the notification read');
 });
 
+t('applyCommentDeepLink expands an already-built collapsed thread', () => {
+  const fn = sliceFn('applyCommentDeepLink');
+  assert(fn.includes("card.querySelector('.tdoc-replies')?.classList.add('open')"),
+    'same-doc must add .open on the live .tdoc-replies list');
+  assert(fn.includes("card.querySelector('.tdoc-replies-toggle')?.classList.add('open')"),
+    'same-doc must flip the replies chevron');
+  assert(fn.includes('requestAnimationFrame(repositionCards)'),
+    'expanding replies must reflow the card');
+});
+
 t('deep-link reads ?comment= from the page URL', () => {
   const refresh = sliceFn('refreshComments');
   assert(refresh.includes("URLSearchParams(location.search).get('comment')"),

@@ -2761,7 +2761,17 @@
   function applyCommentDeepLink(want) {
     if (!want) return;
     const root = findCommentRoot(state.activeComments, want);
-    if (root) state.openReplyThreads.add(root);
+    if (root) {
+      state.openReplyThreads.add(root);
+      // Same-doc inbox clicks run after cards already exist. The set is
+      // only consulted at buildCard — collapsed threads stay display:none
+      // until .tdoc-replies.open is on the live card.
+      const card = state.cardEls.get(root);
+      if (card) {
+        card.querySelector('.tdoc-replies')?.classList.add('open');
+        card.querySelector('.tdoc-replies-toggle')?.classList.add('open');
+      }
+    }
     if (state.narrow) commentLayer.classList.add('open');
     // Opening a reply must not activate the root — that would mark the
     // root's own notifications (e.g. a reaction) as read.
@@ -2769,6 +2779,7 @@
     else if (root && state.cardEls.has(root)) pinOpenCard(root);
     const el = document.querySelector(`[data-comment-id="${CSS.escape(want)}"]`);
     if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+    if (root) requestAnimationFrame(repositionCards);
     markInboxSeen(want);
   }
 

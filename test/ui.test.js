@@ -544,6 +544,57 @@ async function tPub(name, fn) {
     }
   });
 
+  await t('without ?comment= the fixture reply thread stays collapsed', async () => {
+    const deep = await ctx.newPage();
+    try {
+      await deep.goto(URL, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const reply = document.querySelector('[data-comment-id="r_fixture_1"]');
+        return {
+          hasReplies: !!replies,
+          hasReply: !!reply,
+          repliesOpen: !!(replies && replies.classList.contains('open')),
+          repliesDisplay: replies ? getComputedStyle(replies).display : null,
+        };
+      });
+      if (!st.hasReplies || !st.hasReply) throw new Error('fixture reply thread missing');
+      if (st.repliesOpen) throw new Error('replies must start collapsed without ?comment=');
+      if (st.repliesDisplay !== 'none') throw new Error(`expected display:none, got ${st.repliesDisplay}`);
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('adding .open on a live replies list reveals the hidden reply', async () => {
+    // Same-doc inbox clicks cannot wait for a rebuild. They have to flip
+    // .tdoc-replies.open on the card that is already in the DOM.
+    // Check the list's own computed display, not the reply's client rects —
+    // in pins mode the parent card is hidden until it is pinned.
+    const deep = await ctx.newPage();
+    try {
+      await deep.goto(URL, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const toggle = document.querySelector('.tdoc-replies-toggle');
+        if (!replies) return { missing: true };
+        const before = getComputedStyle(replies).display;
+        replies.classList.add('open');
+        toggle?.classList.add('open');
+        return { before, after: getComputedStyle(replies).display };
+      });
+      if (st.missing) throw new Error('fixture reply thread missing');
+      if (st.before !== 'none') throw new Error(`expected display:none before .open, got ${st.before}`);
+      if (st.after === 'none') throw new Error('replies stayed display:none after .open');
+    } finally {
+      await deep.close();
+    }
+  });
+
   await t('Clicking an inbox row does not unpin the open comment card', async () => {
     // Regression #180: the inbox click used to bubble to the document
     // "click outside card" handler and immediately close the card it opened.
