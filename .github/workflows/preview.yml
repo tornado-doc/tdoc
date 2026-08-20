@@ -90,7 +90,7 @@ jobs:
             echo "preview toml bound production META" >&2; exit 1
           fi
 
-      - name: Bundle overlay (preview: strip Durable Object export)
+      - name: Bundle overlay for preview (strip Durable Object export)
         env:
           SKILL_DIR: ${{ github.workspace }}
           OUT_DIR: ${{ github.workspace }}/worker
