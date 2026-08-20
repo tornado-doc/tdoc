@@ -55,6 +55,12 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Notification clicks open the target doc and comment.** Inbox rows
+  go to `/d/<slug>/v/<n>?comment=<id>` (including from `/me` and `/`).
+  Same-doc clicks no longer pin the card and then immediately unpin it
+  because the click bubbled as an outside click. `?comment=` expands the
+  thread before the card is built, pins it, and on a phone opens the
+  comment drawer. `#180`.
 - **Download PDF uses the browser print engine.** The JPEG-page wrap was
   ~100 DPI and looked mushy. PDF now prints `/export` (reader CSS, no bar)
   so Save as PDF keeps vector text.

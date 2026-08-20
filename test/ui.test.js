@@ -465,6 +465,111 @@ async function tPub(name, fn) {
     if (!/\d+ repl(y|ies)/.test(text)) throw new Error(`toggle text was "${text}"`);
   });
 
+  await t('?comment= deep-link opens the target comment card', async () => {
+    const deep = await ctx.newPage();
+    try {
+      const u = URL.replace(/\/?$/, '') + '?comment=c_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const card = document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]');
+        const narrow = document.body.classList.contains('tdoc-narrow');
+        const drawerOpen = !!document.getElementById('tdoc-comment-layer')?.classList.contains('open');
+        return {
+          hasCard: !!card,
+          active: !!(card && card.classList.contains('active')),
+          floating: !!(card && card.classList.contains('tdoc-floating-open')),
+          visible: !!(card && card.getClientRects().length > 0),
+          narrow, drawerOpen,
+        };
+      });
+      if (!st.hasCard) throw new Error('deep-linked comment card missing');
+      if (st.narrow) {
+        if (!st.drawerOpen) throw new Error('narrow deep-link must open the comment drawer');
+      } else if (!st.floating && !st.active) {
+        throw new Error('wide deep-link must pin or activate the card');
+      } else if (!st.visible) {
+        throw new Error('deep-linked card is not visible');
+      }
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('?comment= on a reply expands the thread', async () => {
+    const deep = await ctx.newPage();
+    try {
+      const u = URL.replace(/\/?$/, '') + '?comment=r_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const reply = document.querySelector('[data-comment-id="r_fixture_1"]');
+        const card = document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]');
+        return {
+          repliesOpen: !!(replies && replies.classList.contains('open')),
+          hasReply: !!reply,
+          cardOpen: !!(card && (card.classList.contains('tdoc-floating-open') || card.classList.contains('active')
+            || document.body.classList.contains('tdoc-narrow'))),
+        };
+      });
+      if (!st.hasReply) throw new Error('reply node missing');
+      if (!st.repliesOpen) throw new Error('reply deep-link must expand the thread');
+      if (!st.cardOpen) throw new Error('reply deep-link must open the root card');
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('?comment= on a phone opens the comment drawer', async () => {
+    const deep = await ctx.newPage();
+    try {
+      await deep.setViewportSize({ width: 375, height: 812 });
+      const u = URL.replace(/\/?$/, '') + '?comment=c_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => ({
+        narrow: document.body.classList.contains('tdoc-narrow'),
+        drawerOpen: !!document.getElementById('tdoc-comment-layer')?.classList.contains('open'),
+        hasCard: !!document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]'),
+      }));
+      if (!st.narrow) throw new Error(`expected tdoc-narrow at 375px, got narrow=${st.narrow}`);
+      if (!st.hasCard) throw new Error('phone deep-link missing comment card');
+      if (!st.drawerOpen) throw new Error('phone deep-link must open the comment drawer');
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('Clicking an inbox row does not unpin the open comment card', async () => {
+    // Regression #180: the inbox click used to bubble to the document
+    // "click outside card" handler and immediately close the card it opened.
+    const card = await openFirstCommentCard();
+    if (!card) { console.log('  (no comments, skipping)'); return; }
+    const pinned = await page.evaluate(() => {
+      const c = document.querySelector('.tdoc-margin-comment.tdoc-floating-open, .tdoc-margin-comment.active');
+      if (!c) return false;
+      const bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg';
+      bg.id = 'tdoc-aux-modal';
+      bg.innerHTML = '<div class="tdoc-modal"><div class="tdoc-cluster-row" id="tdoc-fake-inbox-row" role="button">fake notification</div></div>';
+      document.body.appendChild(bg);
+      return true;
+    });
+    if (!pinned) throw new Error('could not pin a comment card before fake inbox click');
+    await page.click('#tdoc-fake-inbox-row');
+    await page.waitForTimeout(150);
+    const still = await page.evaluate(() => {
+      const c = document.querySelector('.tdoc-margin-comment');
+      return !!(c && (c.classList.contains('tdoc-floating-open') || c.classList.contains('active')));
+    });
+    await page.evaluate(() => document.getElementById('tdoc-aux-modal')?.remove());
+    if (!still) throw new Error('inbox-row click unpinned the open comment card');
+  });
+
   await t('Clicking replies toggle expands replies', async () => {
     await openFirstCommentCard();
     const toggle = await page.$('.tdoc-replies-toggle');
