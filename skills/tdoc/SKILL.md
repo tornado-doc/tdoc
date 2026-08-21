@@ -251,10 +251,6 @@ Apply it unless the user names a different entry in `$SKILL_DIR/authoring/style/
 
 The other entries a user can name:
 
-- `$SKILL_DIR/authoring/style/research.md` — the research-note register: trusts
-  the overlay's reading typography and adds semantic components (risk / positive
-  / leveled block / pill / diagram) with an orange-means-risk, green-means-a-key-
-  finding palette. For considered analysis memos.
 - `$SKILL_DIR/authoring/style/technical.md` — a cold engineering-blog register:
   mono for identifiers and metrics, neutral greys for structure, a single
   sparing red-orange accent. For dense technical writeups.

@@ -13,8 +13,7 @@ file and `.claude-plugin/plugin.json`.
   oversized tight-tracked headline) with a full technical-diagram vocabulary —
   sharp black container frames, monospace pill labels, solid pastel accents with
   dot- and hatch-textured variants, and stacked-bar composition. Named styles a
-  doc can select: `research` (the previous research-note default, preserved),
-  `technical` (a theme-following engineering-blog register), `editorial` (a warm
+  doc can select: `technical` (a theme-following engineering-blog register), `editorial` (a warm
   serif long-read), and `paper` (a warm serif Anthropic-blog aesthetic). Brand
   aesthetics are approximated with open fonts — no proprietary fonts, no logo or
   byline, a look not an identity. `authoring/visuals.md` joins `voice.md` as a

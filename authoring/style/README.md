@@ -9,7 +9,6 @@ trusts it.
 
 | Entry | When it applies |
 |---|---|
-| `research.md` | When named. Research-note — trusts overlay typography, semantic risk/positive/leveled/pill blocks, orange+green palette. (Was the old default.) |
 | `default.md` | **When a doc selects nothing.** Stark sans — pure white/black, one sans, oversized tight-tracked headline, OpenAI-style diagram vocabulary (frames, mono labels, dot/hatch textures). OpenAI-index aesthetic via open fonts (no brand assets). |
 | `technical.md` | When named. Cold engineering-blog register — mono, neutral greys, one sparing red-orange accent. From `judgmentlabs.ai`. |
 | `editorial.md` | When named. Long-read essay — warm paper, serif body, electric-blue accent, colored inline underlines. From `cognition.com`. The one entry that overrides typography (ground + body font only). |

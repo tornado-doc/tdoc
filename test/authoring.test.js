@@ -57,16 +57,6 @@ t('style/ ships a default entry with its vocabulary', () => {
   assert(/diagram vocabulary/i.test(d), 'default.md lost its diagram vocabulary section');
 });
 
-t('the research-note style is preserved as a named entry', () => {
-  assert(exists('authoring/style/research.md'), 'authoring/style/research.md missing (the old default)');
-  const r = read('authoring/style/research.md');
-  for (const cls of ['.risk', '.good', '.lvl', '.pill']) {
-    assert(r.includes(cls), `research.md no longer defines the ${cls} component`);
-  }
-  assert(read('SKILL.md').includes('authoring/style/research.md'),
-    'SKILL.md does not offer research.md as a named style');
-});
-
 t('the default style sets its stark typography', () => {
   // The default is now the stark-sans aesthetic, which deliberately DOES set
   // typography: a clean sans everywhere and an oversized tight-tracked
