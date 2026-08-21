@@ -223,29 +223,44 @@ sleep 1
 
 ## Authoring contract — read before writing any doc
 
-**`$SKILL_DIR/authoring/voice.md` is required reading before you write doc
-HTML**, on every `/tdoc new` and every regeneration in `/tdoc edit`.
+Two files are required reading before you write doc HTML, on every
+`/tdoc new` and every regeneration in `/tdoc edit`:
+
+| File | Governs | Selectable? |
+|---|---|---|
+| `$SKILL_DIR/authoring/voice.md` | how the prose reads | No. A floor — no switch, no doc exempt. |
+| `$SKILL_DIR/authoring/style/default.md` | what the page looks like | Only by naming another entry in `style/`. |
+
 `$SKILL_DIR` is the installed skill directory resolved in "Setup check"
 above (`~/.claude/skills/tdoc`, or `~/.codex/skills/tdoc` under Codex) —
-**not** the current working directory, which is the user's project. It is a floor, not
-a user-selectable option: there is no switch, and no doc is exempt.
+**not** the current working directory, which is the user's project.
 
-It carries tdoc's adaptation of the vendored `no-ai-slop` rule set
+`voice.md` carries tdoc's adaptation of the vendored `no-ai-slop` rule set
 (`$SKILL_DIR/authoring/vendor/no-ai-slop.md`) — which prose the rules govern, which
 spans they must never rewrite (code, identifiers, quotes, data), and whose
 voice is being preserved when the agent is the one writing.
 
-`$SKILL_DIR/authoring/style/` and `$SKILL_DIR/authoring/structure/` are reserved mount points and
-are **empty today**. Empty means no choice to make: use the overlay's
-default reading template, and derive the document's shape from the prompt.
+`style/default.md` is the research-note style: it **trusts the overlay's
+reading typography** — no custom body size, no custom heading scale — and
+adds a small set of semantic components (a risk block, a positive-finding
+block, a leveled block, a metadata pill, a scrollable diagram box) with a
+two-hue palette where orange means risk and green means a key finding. Apply
+it unless the user names a different entry in `$SKILL_DIR/authoring/style/`.
+
+`$SKILL_DIR/authoring/structure/` is still an empty mount point. Empty means
+no choice to make: derive the document's shape from the prompt.
 
 ## Commands
 
 ### `/tdoc new <prompt>` — create a new doc
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. **Read `$SKILL_DIR/authoring/voice.md`** and hold it while you write. The prose
-   constraints apply as you generate, not as a later cleanup pass.
+2. **Read `$SKILL_DIR/authoring/voice.md` and `$SKILL_DIR/authoring/style/default.md`.**
+   Voice constrains the prose as you generate it, not as a later cleanup
+   pass. The style tells you which components to reach for and its palette —
+   apply it unless the user named another entry in `$SKILL_DIR/authoring/style/`.
+   The default style does not override reading typography, so do not set your
+   own body or heading sizes.
 3. Create `~/tdocs/<slug>/v1/index.html` — the host document:
    - All host CSS inline in `<style>`. **No JavaScript in the host** — those tags do not execute (CSP; see HTML generation rules). If the idea needs computation, also write `v1/widgets/<name>.html` and iframe it.
    - No external CDNs in the host unless requested. No build step.
@@ -338,7 +353,9 @@ silently is the #1 source of regression complaints.
 2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md`.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
-   version stays as it is — do not re-edit untouched sections for voice.
+   version stays as it is — do not re-edit untouched sections for voice, and
+   keep whichever style the existing version already uses rather than
+   restyling a doc the reader has been reading.
 3. For EACH open comment, decide one of three outcomes BEFORE writing:
    - **applied** — the comment is clear and you can act on it.
    - **partial** — you applied part of it but couldn't fully address it
@@ -712,9 +729,20 @@ the host document — it is inert under CSP. Two options:
 Download / Duplicate of a doc with islands is not supported in v1 (the
 downloaded file cannot fetch `/widget/` URLs; account copy is host HTML only).
 
-### Default styling — DO NOT re-style the doc
+### Default styling — trust the reading template, add components on top
 
-The overlay injects a complete default template modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only. **Download** is a menu: **Download HTML** (`/export`, reader CSS inlined as `<style id="tdoc-reader">`) and **Download PDF** (print that same reading column; use the browser's Save as PDF). Neither includes overlay chrome (bar, comments).
+**The house style (`$SKILL_DIR/authoring/style/default.md`) deliberately does
+not touch reading typography.** It trusts the overlay's injected template for
+body size, headings, and measure, and adds only semantic components (risk /
+positive / leveled block / pill / diagram box). So "do not re-style" and the
+house style agree: write component CSS and doc-specific CSS, but do not set
+your own `font-size` on `p`, `h1`, `h2` — the overlay already did.
+
+The values below are what the overlay injects, at `:where()` zero
+specificity, and what `/export` and Download PDF inline. The house style
+sits on top of them rather than replacing them.
+
+The overlay's template is modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only. **Download** is a menu: **Download HTML** (`/export`, reader CSS inlined as `<style id="tdoc-reader">`) and **Download PDF** (print that same reading column; use the browser's Save as PDF). Neither includes overlay chrome (bar, comments).
 
 - System font stack (`system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`)
 - Body: 17px / line-height 1.65 / `#111` on white
@@ -726,7 +754,11 @@ The overlay injects a complete default template modeled after the `conway-life` 
 - pre: mono 15px, light gray background, left-rule, scrolling overflow
 - Code (inline): 0.92em mono, light-gray rounded chip
 
-**Don't write your own CSS for these unless the doc genuinely needs a different aesthetic** (a presentation, a landing page, a doc with custom widgets). Reading docs, essays, and reports should not override the template.
+**Write CSS for the house style's components and for what the doc itself
+needs** — a chart, a diagram, a custom widget — and scope it tightly
+(`.risk { … }`, `.my-slider { … }`), never as a global element rule. A
+presentation or landing page may warrant overriding the reading typography
+itself; a reading doc, essay, or report should not.
 
 What to write:
 
