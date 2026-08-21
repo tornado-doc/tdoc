@@ -1,25 +1,37 @@
 # style/ — visual register
 
-**Empty. Reserved.**
+A style entry answers "what does this page look like": which components a
+doc reaches for, what the accent colors mean, and — the axis that most
+separates styles — whether it overrides the overlay's reading typography or
+trusts it.
 
-A style entry answers "what does this page look like": type family and
-size ramp, text and background color, line height and spacing, measure,
-heading-to-body contrast, how code and quotes are treated, whether there
-is any ornament.
+## Entries
 
-Until an entry exists here, docs use the overlay's default reading
-template and nothing needs to be chosen.
+| Entry | When it applies |
+|---|---|
+| `default.md` | **When a doc selects nothing.** The research-note style, extracted from `tdoc.dev/d/avgraph-auto-research/v/1`. Trusts the overlay's reading typography; adds semantic components (risk / positive / leveled block / pill / diagram) on top. |
+
+`default.md` is the house style — today every doc gets it. A future entry is
+an *opt-out*, so it has to be different enough to be worth naming.
+
+## The axis that matters most
+
+A style either **trusts** the overlay's reading typography or **overrides**
+it. The default trusts it, which is why it stays calm and collides with the
+overlay the least. A style that overrides typography (a presentation, a
+landing page) takes on the full weight of the "Author HTML compatibility
+contract" below, because it is now fighting the overlay for the same
+properties.
 
 ## Constraints any entry must satisfy
 
 The overlay injects its defaults at `:where()` zero specificity, so author
-CSS always wins. That makes a style entry powerful and dangerous in the
-same stroke: it can also break the overlay's own chrome. tdoc has already
-shipped that bug once (#96 — `padding: 0 24px` on the content root wiped
-the overlay's top reading space).
+CSS always wins. That makes a style entry powerful and dangerous in the same
+stroke: it can also break the overlay's own chrome. tdoc has already shipped
+that bug once (#96 — `padding: 0 24px` on the content root wiped the
+overlay's top reading space).
 
-An entry here must obey the "Author HTML compatibility contract" in
-`SKILL.md`. The parts a visual style is most likely to violate:
+An entry must obey the "Author HTML compatibility contract" in `SKILL.md`:
 
 - no `margin: 0 auto` and no top-level horizontal `padding` on the content
   container — the overlay owns those margins
@@ -28,13 +40,21 @@ An entry here must obey the "Author HTML compatibility contract" in
 - no page footer — the overlay injects its own
 - `tdoc-*` classes and ids stay reserved
 
-Rule of thumb when evaluating a look to adapt: styles carried by type,
-scale, spacing, and restrained color adapt cleanly. Styles carried by
-full-bleed hero sections, sticky navigation, card shadows, or an edge-to-edge
-background color fight the overlay.
+Rule of thumb: styles carried by left rules, pale fills, chips, type scale,
+and restrained color adapt cleanly. Styles carried by full-bleed hero
+sections, sticky navigation, card shadows, or an edge-to-edge background
+fight the overlay.
+
+## Adding an entry
+
+An entry is a markdown file naming its components, its palette, and the
+judgment calls they do not cover. Adding one is not just a new file:
+`SKILL.md` has to learn that the name is selectable, and
+`test/authoring.test.js` asserts the two stay in sync. A style the agent
+cannot be told to use is a file nobody reads.
 
 ## Dark mode
 
 `SKILL.md` currently states light mode only, and dark mode is in flight
-(`feat/dark-mode-switch`). Any entry added here needs a dark palette, or
-an explicit note that it is light-only and why.
+(`feat/dark-mode-switch`). Any entry needs a dark palette, or an explicit
+note that it is light-only and why.

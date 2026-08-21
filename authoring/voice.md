@@ -7,6 +7,16 @@ The full rule set is `vendor/no-ai-slop.md` (no-ai-slop by Peter Yang, MIT).
 Read it. This file only records how it applies to tdoc, because tdoc
 differs from the drafts that skill was written for in two ways.
 
+## No bullshit. Keep it efficient.
+
+Above every specific rule below, this is the stance: say the thing, then
+stop. Every sentence carries a fact, a mechanism, a number, or a judgment the
+reader can act on. If a sentence would survive being deleted, delete it.
+Don't pad to sound thorough, don't restate the point in different words, and
+don't warm up before getting to it. A shorter doc that a reader finishes
+beats a longer one they skim. This holds for every doc, by default — there is
+no version of a tdoc doc that is exempt from it.
+
 ## Apply at generation, not as a cleanup pass
 
 Upstream is written as an editor: a human pastes a draft, it gets fixed.

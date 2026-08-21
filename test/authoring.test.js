@@ -35,16 +35,60 @@ t('all three slots exist', () => {
   }
 });
 
-t('style/ and structure/ are still empty mount points', () => {
+t('structure/ is still an empty mount point', () => {
   // Adding entries is fine — but it must be a deliberate change that also
   // teaches SKILL.md how to select one, not a stray file. This test is the
   // reminder to do both.
-  for (const dir of ['authoring/style', 'authoring/structure']) {
-    const entries = fs.readdirSync(path.join(root, dir));
-    assert(entries.length === 1 && entries[0] === 'README.md',
-      `${dir} gained ${entries.filter(e => e !== 'README.md').join(', ')} — ` +
-      `if that is intended, teach SKILL.md how a doc selects one, then update this test`);
+  const entries = fs.readdirSync(path.join(root, 'authoring/structure'));
+  assert(entries.length === 1 && entries[0] === 'README.md',
+    `authoring/structure gained ${entries.filter(e => e !== 'README.md').join(', ')} — ` +
+    `if that is intended, teach SKILL.md how a doc selects one, then update this test`);
+});
+
+t('style/ ships a default entry with its components', () => {
+  assert(exists('authoring/style/default.md'), 'authoring/style/default.md missing');
+  const d = read('authoring/style/default.md');
+  // The components and their two-hue palette are the entry's whole point. An
+  // emptied-out file that still exists would pass a mere existence check.
+  for (const cls of ['.risk', '.good', '.lvl', '.pill', '.diagram-box']) {
+    assert(d.includes(cls), `default.md no longer defines the ${cls} component`);
   }
+  for (const hex of ['#c97b3d', '#4a8f5d']) {
+    assert(d.includes(hex), `default.md no longer carries the ${hex} accent`);
+  }
+});
+
+t('the default style does NOT override reading typography', () => {
+  // The defining property of this style. If default.md starts setting a body
+  // font-size, it has stopped being the research-note style and the whole
+  // "trust the overlay" contract is broken.
+  const d = read('authoring/style/default.md');
+  assert(/does not (touch|override)|trusts? the overlay|do not override/i.test(d),
+    'default.md no longer states that it trusts the overlay reading typography');
+});
+
+// Single source of truth. Every entry in style/ must be selectable by name
+// from SKILL.md — otherwise the agent is offered a style it cannot be told
+// to use, or a user names one the agent has never heard of. Both fail
+// silently: the doc still generates, just with the wrong look.
+t('every style/ entry is selectable from SKILL.md', () => {
+  const s = read('SKILL.md');
+  const entries = fs.readdirSync(path.join(root, 'authoring/style'))
+    .filter(e => e.endsWith('.md') && e !== 'README.md');
+  assert(entries.length > 0, 'authoring/style has no entries at all');
+  const unreferenced = entries.filter(e => !s.includes(`authoring/style/${e}`));
+  assert(unreferenced.length === 0,
+    `style entries SKILL.md never mentions: ${unreferenced.join(', ')}\n` +
+    '    An entry the agent cannot be told to use is a file nobody reads.');
+});
+
+t('the default style is applied on the generation path, not merely listed', () => {
+  const s = read('SKILL.md');
+  const a = s.indexOf('### `/tdoc new');
+  const b = s.indexOf('### `bin/tdoc-new');
+  assert(a !== -1 && b !== -1, '/tdoc new section not found');
+  assert(s.slice(a, b).includes('authoring/style/default.md'),
+    '/tdoc new does not read authoring/style/default.md');
 });
 
 t('SKILL.md makes voice.md required reading before generating', () => {
@@ -122,6 +166,16 @@ t('voice.md defers to the vendored rule set instead of forking it', () => {
   // voice.md would drift from upstream the first time it is updated.
   assert(!/^Banned outright:/m.test(v),
     'voice.md duplicates the banned-word list — it must cite vendor/no-ai-slop.md as the authority');
+});
+
+t('voice.md carries the no-bullshit / efficiency stance as a default', () => {
+  const v = read('authoring/voice.md');
+  assert(/no bullshit/i.test(v) || /keep it efficient/i.test(v),
+    'voice.md lost the explicit no-bullshit / keep-it-efficient stance');
+  // It was asked to be a DEFAULT on every doc — assert it says so, not just
+  // that the words appear once in passing.
+  assert(/every doc|no doc.*exempt|by default/i.test(v),
+    'the efficiency stance is present but not stated as applying to every doc by default');
 });
 
 t('voice.md fences off spans the prose rules must not rewrite', () => {
