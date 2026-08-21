@@ -221,26 +221,43 @@ nohup node "$SKILL_DIR/server/server.js" > "$TDOC_DIR/.server.log" 2>&1 &
 sleep 1
 ```
 
+## Authoring contract — read before writing any doc
+
+**`authoring/voice.md` is required reading before you write doc HTML**, on
+every `/tdoc new` and every regeneration in `/tdoc edit`. It is a floor, not
+a user-selectable option: there is no switch, and no doc is exempt.
+
+It carries tdoc's adaptation of the vendored `no-ai-slop` rule set
+(`authoring/vendor/no-ai-slop.md`) — which prose the rules govern, which
+spans they must never rewrite (code, identifiers, quotes, data), and whose
+voice is being preserved when the agent is the one writing.
+
+`authoring/style/` and `authoring/structure/` are reserved mount points and
+are **empty today**. Empty means no choice to make: use the overlay's
+default reading template, and derive the document's shape from the prompt.
+
 ## Commands
 
 ### `/tdoc new <prompt>` — create a new doc
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. Create `~/tdocs/<slug>/v1/index.html` — the host document:
+2. **Read `authoring/voice.md`** and hold it while you write. The prose
+   constraints apply as you generate, not as a later cleanup pass.
+3. Create `~/tdocs/<slug>/v1/index.html` — the host document:
    - All host CSS inline in `<style>`. **No JavaScript in the host** — those tags do not execute (CSP; see HTML generation rules). If the idea needs computation, also write `v1/widgets/<name>.html` and iframe it.
    - No external CDNs in the host unless requested. No build step.
    - Clean reading-typography (system font stack, generous line-height, max-width ~720px for prose) UNLESS the doc is primarily a diagram, in which case go full-bleed.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
-3. Write `meta.json`:
+4. Write `meta.json`:
    ```json
    { "title": "...", "slug": "...", "created": "<iso>", "versions": [{ "n": 1, "created": "<iso>", "prompt": "..." }] }
    ```
-4. Init `comments.json` as `[]`.
-5. Open `http://localhost:7878/d/<slug>/v/1` in the browser:
+5. Init `comments.json` as `[]`.
+6. Open `http://localhost:7878/d/<slug>/v/1` in the browser:
    ```bash
    open "http://localhost:7878/d/<slug>/v/1"
    ```
-6. Report the URL to the user.
+7. Report the URL to the user.
 
 ### `bin/tdoc-new` — programmatic entry for agents in other skills
 
@@ -315,7 +332,10 @@ comments you handled unless you reply on each one. Skipping comments
 silently is the #1 source of regression complaints.
 
 1. Read `~/tdocs/<slug>/comments.json` — filter to `status: "open"`.
-2. Read latest version's `index.html`.
+2. Read latest version's `index.html`, and re-read `authoring/voice.md`.
+   A regeneration writes new prose, so the contract applies here exactly as
+   it does on `/tdoc new`. Prose you carry over unchanged from the previous
+   version stays as it is — do not re-edit untouched sections for voice.
 3. For EACH open comment, decide one of three outcomes BEFORE writing:
    - **applied** — the comment is clear and you can act on it.
    - **partial** — you applied part of it but couldn't fully address it
@@ -563,6 +583,10 @@ When the user reports a problem, check these first:
 
 ## HTML generation rules
 
+- **The prose in the doc is governed by `authoring/voice.md`.** These rules
+  cover markup; that file covers the words inside it. Both apply to every
+  doc. It also fences off the spans the prose rules must never touch —
+  code, identifiers, quoted material, and data.
 - **Host HTML does not run author JavaScript.** Every host document is served under a nonce-based CSP (`script-src 'nonce-<n>' 'strict-dynamic'; object-src 'none'; base-uri 'none';`) and the nonce is stamped onto the two injected overlay scripts *only*. Host `<script>` tags (inline or `src`), `onclick=`/`onchange=` attributes, and `javascript:` URLs have no nonce, so the browser refuses them: no error in the page, no visible failure — just a control that never does anything. This is true on **both** the local server (`server/server.js` → `cspHeader`, `injectOverlay`) and published docs (`worker/worker.js` → `cspHeader`, `injectOverlayCfg`).
   **Exception — sandboxed island:** if the doc needs computation, write `v<n>/widgets/<name>.html` and embed `<iframe sandbox="allow-scripts" src="/d/<slug>/v/<n>/widget/<name>">`. Inline `<script>` in that widget file **does** run. Never put author JS in the host document. See "When the prompt wants something CSS can't express" below.
 - Host document is one HTML file (no imports). Optional islands are extra files under `v<n>/widgets/`. External `<script src>` in the host is blocked by the same CSP, so a CDN library (D3, Chart.js, …) will not load in the host — put it in a widget island or say so rather than shipping a dead reference.

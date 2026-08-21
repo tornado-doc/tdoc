@@ -8,6 +8,15 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Every generated doc goes through a voice contract.** New `authoring/`
+  directory, read at generation time. `authoring/voice.md` applies to
+  `/tdoc new` and every `/tdoc edit` regeneration — a floor, not a
+  user-selectable template, because nobody picks "make it sound like AI."
+  It adapts the vendored `no-ai-slop` rule set (Peter Yang, MIT) to
+  generation rather than editing, names the user's prompt as the voice
+  anchor, and fences off the spans prose rules must never rewrite: code,
+  identifiers, quoted material, and data. `authoring/style/` and
+  `authoring/structure/` ship as empty reserved mount points. `#194`.
 - **PR preview Worker (`tdoc-preview`).** Pull requests on tornado-doc/tdoc
   get a unique `pr-<N>` preview URL and a sticky comment pointing at
   `/d/conway-life/v/2` on that host — published chrome, not Local Studio,
