@@ -223,16 +223,19 @@ sleep 1
 
 ## Authoring contract — read before writing any doc
 
-**`authoring/voice.md` is required reading before you write doc HTML**, on
-every `/tdoc new` and every regeneration in `/tdoc edit`. It is a floor, not
+**`$SKILL_DIR/authoring/voice.md` is required reading before you write doc
+HTML**, on every `/tdoc new` and every regeneration in `/tdoc edit`.
+`$SKILL_DIR` is the installed skill directory resolved in "Setup check"
+above (`~/.claude/skills/tdoc`, or `~/.codex/skills/tdoc` under Codex) —
+**not** the current working directory, which is the user's project. It is a floor, not
 a user-selectable option: there is no switch, and no doc is exempt.
 
 It carries tdoc's adaptation of the vendored `no-ai-slop` rule set
-(`authoring/vendor/no-ai-slop.md`) — which prose the rules govern, which
+(`$SKILL_DIR/authoring/vendor/no-ai-slop.md`) — which prose the rules govern, which
 spans they must never rewrite (code, identifiers, quotes, data), and whose
 voice is being preserved when the agent is the one writing.
 
-`authoring/style/` and `authoring/structure/` are reserved mount points and
+`$SKILL_DIR/authoring/style/` and `$SKILL_DIR/authoring/structure/` are reserved mount points and
 are **empty today**. Empty means no choice to make: use the overlay's
 default reading template, and derive the document's shape from the prompt.
 
@@ -241,7 +244,7 @@ default reading template, and derive the document's shape from the prompt.
 ### `/tdoc new <prompt>` — create a new doc
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. **Read `authoring/voice.md`** and hold it while you write. The prose
+2. **Read `$SKILL_DIR/authoring/voice.md`** and hold it while you write. The prose
    constraints apply as you generate, not as a later cleanup pass.
 3. Create `~/tdocs/<slug>/v1/index.html` — the host document:
    - All host CSS inline in `<style>`. **No JavaScript in the host** — those tags do not execute (CSP; see HTML generation rules). If the idea needs computation, also write `v1/widgets/<name>.html` and iframe it.
@@ -332,7 +335,7 @@ comments you handled unless you reply on each one. Skipping comments
 silently is the #1 source of regression complaints.
 
 1. Read `~/tdocs/<slug>/comments.json` — filter to `status: "open"`.
-2. Read latest version's `index.html`, and re-read `authoring/voice.md`.
+2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md`.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice.
@@ -583,7 +586,7 @@ When the user reports a problem, check these first:
 
 ## HTML generation rules
 
-- **The prose in the doc is governed by `authoring/voice.md`.** These rules
+- **The prose in the doc is governed by `$SKILL_DIR/authoring/voice.md`.** These rules
   cover markup; that file covers the words inside it. Both apply to every
   doc. It also fences off the spans the prose rules must never touch —
   code, identifiers, quoted material, and data.

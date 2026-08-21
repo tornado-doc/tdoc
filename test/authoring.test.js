@@ -53,6 +53,45 @@ t('SKILL.md makes voice.md required reading before generating', () => {
   assert(/## Authoring contract/.test(s), 'SKILL.md lost the top-level Authoring contract section');
 });
 
+// The agent's cwd is the USER'S project, not the skill install. A bare
+// relative path like `authoring/voice.md` resolves to nothing there, so the
+// agent silently reads no contract and generation looks fine while being
+// completely ungoverned. Every reference must carry $SKILL_DIR.
+t('every authoring/ reference is $SKILL_DIR-anchored, never a bare relative path', () => {
+  const s = read('SKILL.md');
+  // Only real file paths -- not the prose phrase "Local skill is
+  // authoring/scaffold" in the source-of-truth line.
+  const PATHS = ['authoring/voice.md', 'authoring/style/',
+                 'authoring/structure/', 'authoring/vendor/'];
+  const bare = [];
+  for (const ref of PATHS) {
+    let i = 0;
+    while ((i = s.indexOf(ref, i)) !== -1) {
+      const prefix = s.slice(Math.max(0, i - 11), i);
+      if (!prefix.endsWith('$SKILL_DIR/')) {
+        const line = s.slice(0, i).split('\n').length;
+        bare.push(`${ref} (line ${line})`);
+      }
+      i += ref.length;
+    }
+  }
+  assert(bare.length === 0,
+    `bare authoring/ paths in SKILL.md: ${bare.join(', ')}\n` +
+    '    The agent runs in the user\'s project directory, so these resolve to nothing.\n' +
+    '    Prefix with $SKILL_DIR/ (resolved in the Setup check section).');
+});
+
+t('SKILL.md says what $SKILL_DIR is, so the variable is not dangling', () => {
+  const s = read('SKILL.md');
+  const i = s.indexOf('## Authoring contract');
+  assert(i !== -1, 'Authoring contract section missing');
+  const sect = s.slice(i, s.indexOf('\n## ', i + 10));
+  assert(/\.claude\/skills\/tdoc/.test(sect),
+    'the Authoring contract section never says where $SKILL_DIR points');
+  assert(/not.*working directory/i.test(sect),
+    'the section does not warn that $SKILL_DIR is not the cwd');
+});
+
 t('the reference sits on BOTH generation paths (/tdoc new and /tdoc edit)', () => {
   const s = read('SKILL.md');
   const section = (start, end) => {
