@@ -212,6 +212,11 @@
       "n": 42,
       "created": "2026-08-18T14:30:00Z",
       "prompt": "Docs that act on your comments: work-angle landing page with four real demo tabs"
+    },
+    {
+      "n": 43,
+      "created": "2026-08-20T00:00:00Z",
+      "prompt": "Redesign: clear value prop (agent writes, you comment, AI updates all), star to top, single CTA, drop font picker + fluff"
     }
   ],
   "access": {
