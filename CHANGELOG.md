@@ -18,10 +18,12 @@ file and `.claude-plugin/plugin.json`.
   identifiers, quoted material, and data. `authoring/style/` and
   `authoring/structure/` ship as empty reserved mount points. `#194`.
 - **PR preview Worker (`tdoc-preview`).** Pull requests on tornado-doc/tdoc
-  get a unique `pr-<N>` preview URL and a sticky comment pointing at
-  `/d/conway-life/v/2` on that host — published chrome, not Local Studio,
-  not tdoc.dev, not a personal Worker. Own R2 + KV, no Durable Object
-  (Cloudflare will not mint preview URLs for a DO Worker). `#148`.
+  get a unique `pr-<N>` preview URL. The sticky comment opens that host's
+  `/` (homepage from `tornado-doc` via the same `tdoc-landing-release`
+  payload production uses), plus `/start` and `/d/conway-life/v/2`.
+  Published chrome, not Local Studio, not tdoc.dev, not a personal Worker.
+  Own R2 + KV, no Durable Object (Cloudflare will not mint preview URLs
+  for a DO Worker). `#148` `#199`.
 - **Hosted tdoc.dev is multi-tenant.** GitHub sign-in mints a recoverable
   account-scoped upload token (`POST /api/hosted/token`). `/me` lists that
   user's slugs (`meta.hosted.github_login`), not the Worker operator's dump.

@@ -41,13 +41,31 @@ t('uses pr-<N> alias, not the branch name', () => {
     'must not alias from the branch name');
 });
 
-t('sticky comment matches the #148 template', () => {
+t('sticky comment opens the preview homepage, not only the overlay demo', () => {
   assert(wf.includes('<!-- tdoc-preview -->'), 'must use the sticky HTML marker');
-  assert(wf.includes('**Open this:**'), 'must lead with Open this');
-  assert(wf.includes('/d/conway-life/v/2'), 'Open this must be the demo doc, not the host root');
+  assert(wf.includes('**Open this:** https://${PREVIEW_HOST}/'),
+    'Open this must be the preview host root (homepage)');
+  assert(!/\*\*Open this:\*\* https:\/\/\$\{PREVIEW_HOST\}\/d\//.test(wf),
+    'Open this must not be a doc path; / is landingResponse after seed');
+  assert(wf.includes('/start'), 'must link the tutorial');
+  assert(wf.includes('/d/conway-life/v/2'), 'must still link the overlay demo');
   assert(wf.includes('It is not [tdoc.dev](https://tdoc.dev)'),
     'must say the link is not tdoc.dev');
   assert(wf.includes('issues/comments/'), 'must PATCH an existing comment rather than always POST');
+});
+
+t('seeds homepage as tornado-doc, plus /start, not a side slug', () => {
+  assert(/^\s+node bin\/tdoc-landing-release\s*$/m.test(wf),
+    'must collapse landing via tdoc-landing-release with the default tornado-doc slug');
+  assert(wf.includes('upload_doc tornado-doc .release/tornado-doc 1'),
+    'must upload the release payload as tornado-doc so / is landingResponse');
+  assert(wf.includes('upload_doc tdoc-start landing/tdoc-start 1'),
+    'must upload the tutorial');
+  assert(wf.includes('"slug":"tornado-doc"'), 'verify / is tornado-doc');
+  assert(wf.includes('"isLanding":true'), 'verify / is landingResponse');
+  assert(wf.includes('"slug":"tdoc-start"'), 'verify /start is tdoc-start');
+  assert(!/upload_doc tdoc-home/.test(wf) && !/tdoc-landing-release tdoc-home/.test(wf),
+    'must not upload as tdoc-home; that leaves / on the fallback');
 });
 
 t('preview storage is not production, and DO is stripped', () => {

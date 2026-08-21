@@ -1,8 +1,15 @@
 name: PR preview
 
-# Isolated preview Worker (tdoc-preview) for published-chrome checks (#148).
+# Isolated preview Worker (tdoc-preview) for published-chrome checks (#148 #199).
 # Not tdoc.dev, not anyone's BYOK Worker. Own KV + R2, no Durable Object
 # (Cloudflare will not mint preview URLs for a Worker that implements a DO).
+#
+# After the pr-N alias is up, seed the same docs production serves:
+#   tornado-doc — tdoc-landing-release collapse to v1, so `/` is landingResponse
+#   tdoc-start  — /start tutorial
+#   conway-life — overlay demo fixture
+# Preview KV is shared across aliases; the most recent seed is what `/` shows.
+# Do not publish as a side slug (tdoc-home): that leaves `/` on the fallback.
 #
 # Required GitHub secrets (same Cloudflare account as tdoc.dev CD):
 #   CLOUDFLARE_API_TOKEN
@@ -146,7 +153,7 @@ jobs:
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
           echo "Preview host: $HOST"
 
-      - name: Seed demo doc conway-life v1 + v2
+      - name: Seed homepage, tutorial, and overlay demo
         env:
           TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
           PREVIEW_HOST: ${{ steps.upload.outputs.host }}
@@ -165,7 +172,41 @@ jobs:
             echo "preview host never answered /api/ping: $BASE" >&2
             exit 1
           fi
-          seed() {
+
+          # Same collapse production uses: latest landing version -> v1, thread stripped.
+          # Upload as slug tornado-doc so this host's `/` is landingResponse, not a side slug.
+          node bin/tdoc-landing-release
+
+          upload_doc () {
+            local slug="$1" dir="$2" ver="$3"
+            local widgets='{}'
+            if [ -d "$dir/v$ver/widgets" ]; then
+              for wf in "$dir"/v$ver/widgets/*.html; do
+                [ -f "$wf" ] || continue
+                widgets="$(jq -n --argjson acc "$widgets" \
+                  --arg name "$(basename "$wf" .html)" --rawfile html "$wf" \
+                  '$acc + {($name): $html}')"
+              done
+            fi
+            jq -n --arg slug "$slug" --argjson version "$ver" \
+              --rawfile html "$dir/v$ver/index.html" \
+              --slurpfile meta "$dir/meta.json" \
+              --argjson widgets "$widgets" \
+              '{slug:$slug, version:$version, html:$html, meta:$meta[0]}
+               + (if $widgets == {} then {} else {widgets:$widgets} end)' \
+              > /tmp/tdoc-preview-upload.json
+            curl -sS --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \
+              -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-binary @/tmp/tdoc-preview-upload.json \
+              | tee /tmp/tdoc-preview-upload-resp.json
+            jq -e '.ok == true' /tmp/tdoc-preview-upload-resp.json >/dev/null
+          }
+
+          upload_doc tornado-doc .release/tornado-doc 1
+          upload_doc tdoc-start landing/tdoc-start 1
+
+          seed_fixture() {
             local v="$1" html="$2"
             jq -n \
               --arg slug conway-life \
@@ -181,8 +222,23 @@ jobs:
               | tee /tmp/tdoc-preview-upload-resp.json
             jq -e '.ok == true' /tmp/tdoc-preview-upload-resp.json >/dev/null
           }
-          seed 1 test/fixtures/tdocs/sample-doc/v1/index.html
-          seed 2 test/fixtures/tdocs/sample-doc/v2/index.html
+          seed_fixture 1 test/fixtures/tdocs/sample-doc/v1/index.html
+          seed_fixture 2 test/fixtures/tdocs/sample-doc/v2/index.html
+
+          for i in 1 2 3 4 5 6 7 8; do
+            home=$(curl -sS --max-time 15 "$BASE/" || true)
+            tour=$(curl -sS --max-time 15 "$BASE/start" || true)
+            if [[ "$home" == *'"slug":"tornado-doc"'* \
+              && "$home" == *'"isLanding":true'* \
+              && "$tour" == *'"slug":"tdoc-start"'* ]]; then
+              echo "preview / and /start are serving the landing docs"
+              exit 0
+            fi
+            echo "attempt $i: landing not both live yet" >&2
+            sleep 3
+          done
+          echo "preview host is not serving tornado-doc on / (or tdoc-start on /start)" >&2
+          exit 1
 
       - name: Sticky preview comment
         env:
@@ -194,7 +250,10 @@ jobs:
           BODY=$(cat <<EOF
           <!-- tdoc-preview -->
           ### Preview
-          **Open this:** https://${PREVIEW_HOST}/d/conway-life/v/2
+          **Open this:** https://${PREVIEW_HOST}/
+
+          - Tutorial: https://${PREVIEW_HOST}/start
+          - Overlay demo: https://${PREVIEW_HOST}/d/conway-life/v/2
 
           This link is unique to this PR. New commits update the same URL. It is not [tdoc.dev](https://tdoc.dev).
 
