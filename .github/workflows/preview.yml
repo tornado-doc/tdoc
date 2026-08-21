@@ -119,18 +119,19 @@ jobs:
           fi
 
       - name: Create tdoc-preview Worker if missing
-        working-directory: worker
-        run: |
-          set -euo pipefail
-          if ! wrangler deployments list --name tdoc-preview >/dev/null 2>&1; then
-            wrangler deploy --name tdoc-preview -c wrangler.preview.toml
-          fi
-
-      - name: Put preview-only upload token (never production)
         env:
           TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
         working-directory: worker
         run: |
+          set -euo pipefail
+          if wrangler deployments list --name tdoc-preview >/dev/null 2>&1; then
+            exit 0
+          fi
+          wrangler deploy --name tdoc-preview -c wrangler.preview.toml
+          # secret put only works while the latest version is the live deploy.
+          # Later PRs use versions upload (preview aliases), which leaves latest
+          # undeployed — wrangler secret put then refuses. The token is already
+          # on the Worker; new versions inherit it. Do not put on every run.
           printf '%s' "$TDOC_PREVIEW_UPLOAD_TOKEN" | wrangler secret put TDOC_UPLOAD_TOKEN --name tdoc-preview
 
       - name: Upload version with pr-N alias

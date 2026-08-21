@@ -85,6 +85,9 @@ t('never uses a personal Worker or the production upload token', () => {
   assert(!wf.includes('published.json'), 'must not read a laptop ~/.tdoc/published.json');
   assert(wf.includes('Do not deploy previews to a personal Worker'),
     'missing-secrets error must say not to use a personal Worker');
+  const afterUpload = wf.split('Upload version with pr-N alias')[1] || '';
+  assert(!/wrangler secret put/.test(afterUpload),
+    'must not wrangler-secret-put after versions exist (latest version is undeployed)');
 });
 
 t('Node and wrangler match production CD pins', () => {
