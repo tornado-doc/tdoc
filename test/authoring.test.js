@@ -45,26 +45,36 @@ t('structure/ is still an empty mount point', () => {
     `if that is intended, teach SKILL.md how a doc selects one, then update this test`);
 });
 
-t('style/ ships a default entry with its components', () => {
+t('style/ ships a default entry with its vocabulary', () => {
   assert(exists('authoring/style/default.md'), 'authoring/style/default.md missing');
   const d = read('authoring/style/default.md');
-  // The components and their two-hue palette are the entry's whole point. An
-  // emptied-out file that still exists would pass a mere existence check.
-  for (const cls of ['.risk', '.good', '.lvl', '.pill', '.diagram-box']) {
-    assert(d.includes(cls), `default.md no longer defines the ${cls} component`);
+  // The default is the stark-sans / OpenAI-diagram aesthetic. Its whole point
+  // is the diagram vocabulary and textured fills; an emptied file would pass a
+  // mere existence check.
+  for (const mark of ['Inter', 'pattern', 'hatch']) {
+    assert(d.includes(mark), `default.md no longer carries "${mark}"`);
   }
-  for (const hex of ['#c97b3d', '#4a8f5d']) {
-    assert(d.includes(hex), `default.md no longer carries the ${hex} accent`);
-  }
+  assert(/diagram vocabulary/i.test(d), 'default.md lost its diagram vocabulary section');
 });
 
-t('the default style does NOT override reading typography', () => {
-  // The defining property of this style. If default.md starts setting a body
-  // font-size, it has stopped being the research-note style and the whole
-  // "trust the overlay" contract is broken.
+t('the research-note style is preserved as a named entry', () => {
+  assert(exists('authoring/style/research.md'), 'authoring/style/research.md missing (the old default)');
+  const r = read('authoring/style/research.md');
+  for (const cls of ['.risk', '.good', '.lvl', '.pill']) {
+    assert(r.includes(cls), `research.md no longer defines the ${cls} component`);
+  }
+  assert(read('SKILL.md').includes('authoring/style/research.md'),
+    'SKILL.md does not offer research.md as a named style');
+});
+
+t('the default style sets its stark typography', () => {
+  // The default is now the stark-sans aesthetic, which deliberately DOES set
+  // typography: a clean sans everywhere and an oversized tight-tracked
+  // headline. (The research-note style, which trusts overlay typography, lives
+  // on as research.md.)
   const d = read('authoring/style/default.md');
-  assert(/does not (touch|override)|trusts? the overlay|do not override/i.test(d),
-    'default.md no longer states that it trusts the overlay reading typography');
+  assert(/letter-spacing/i.test(d) && /Inter/i.test(d),
+    'default.md no longer sets the stark sans typography (Inter + tight tracking)');
 });
 
 // Single source of truth. Every entry in style/ must be selectable by name
@@ -89,6 +99,20 @@ t('the default style is applied on the generation path, not merely listed', () =
   assert(a !== -1 && b !== -1, '/tdoc new section not found');
   assert(s.slice(a, b).includes('authoring/style/default.md'),
     '/tdoc new does not read authoring/style/default.md');
+});
+
+t('visuals.md is a wired-in visual-first floor', () => {
+  assert(exists('authoring/visuals.md'), 'authoring/visuals.md missing');
+  const v = read('authoring/visuals.md');
+  assert(/visual-first/i.test(v) && /flowchart/i.test(v),
+    'visuals.md is not the visual-first floor (no visual-first / flowchart guidance)');
+  // must be $SKILL_DIR-anchored and on both generation paths, like voice.md
+  const s = read('SKILL.md');
+  const seg=(a,b)=>{const x=s.indexOf(a);const y=b?s.indexOf(b,x):s.length;return s.slice(x,y===-1?s.length:y);};
+  assert(seg('### `/tdoc new','### `bin/tdoc-new').includes('authoring/visuals.md'),
+    '/tdoc new does not read authoring/visuals.md');
+  assert(seg('### `/tdoc edit','### `/tdoc fork').includes('authoring/visuals.md'),
+    '/tdoc edit does not read authoring/visuals.md');
 });
 
 t('SKILL.md makes voice.md required reading before generating', () => {
