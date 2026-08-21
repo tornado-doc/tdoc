@@ -8,6 +8,26 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Five house styles, a visual-first floor, and a new default.** The default
+  is now the stark-sans / OpenAI-index aesthetic (white, black, Inter, an
+  oversized tight-tracked headline) with a full technical-diagram vocabulary —
+  sharp black container frames, monospace pill labels, solid pastel accents with
+  dot- and hatch-textured variants, and stacked-bar composition. Named styles a
+  doc can select: `technical` (a theme-following engineering-blog register), `editorial` (a warm
+  serif long-read), and `paper` (a warm serif Anthropic-blog aesthetic). Brand
+  aesthetics are approximated with open fonts — no proprietary fonts, no logo or
+  byline, a look not an identity. `authoring/visuals.md` joins `voice.md` as a
+  required-reading floor: be visual-first, use many visuals of varied types, and
+  don't default to a flowchart. Every style states it works for ANY diagram type
+  and never limits which visuals a doc contains. `#194`.
+- **Two more house styles a doc can name.** `authoring/style/technical.md`
+  (cold engineering-blog register — mono, neutral greys, one sparing
+  red-orange accent; from judgmentlabs.ai) and `authoring/style/editorial.md`
+  (long-read essay — warm paper, serif body, electric-blue accent, colored
+  inline underlines; from cognition.com). Selected by naming them in a
+  `/tdoc new` prompt; `default.md` still applies when nothing is named.
+  `editorial.md` is the one style that overrides typography, and only the
+  ground color and body font. `#194`.
 - **Every generated doc goes through a voice contract.** New `authoring/`
   directory, read at generation time. `authoring/voice.md` applies to
   `/tdoc new` and every `/tdoc edit` regeneration — a floor, not a

@@ -223,12 +223,13 @@ sleep 1
 
 ## Authoring contract — read before writing any doc
 
-Two files are required reading before you write doc HTML, on every
+Three files are required reading before you write doc HTML, on every
 `/tdoc new` and every regeneration in `/tdoc edit`:
 
 | File | Governs | Selectable? |
 |---|---|---|
 | `$SKILL_DIR/authoring/voice.md` | how the prose reads | No. A floor — no switch, no doc exempt. |
+| `$SKILL_DIR/authoring/visuals.md` | how much of the doc is a picture | No. A floor — be visual-first, many visuals, varied types. |
 | `$SKILL_DIR/authoring/style/default.md` | what the page looks like | Only by naming another entry in `style/`. |
 
 `$SKILL_DIR` is the installed skill directory resolved in "Setup check"
@@ -240,22 +241,43 @@ above (`~/.claude/skills/tdoc`, or `~/.codex/skills/tdoc` under Codex) —
 spans they must never rewrite (code, identifiers, quotes, data), and whose
 voice is being preserved when the agent is the one writing.
 
-`style/default.md` is the research-note style: it **trusts the overlay's
-reading typography** — no custom body size, no custom heading scale — and
-adds a small set of semantic components (a risk block, a positive-finding
-block, a leveled block, a metadata pill, a scrollable diagram box) with a
-two-hue palette where orange means risk and green means a key finding. Apply
-it unless the user names a different entry in `$SKILL_DIR/authoring/style/`.
+`style/default.md` is the stark sans style: pure white, pure black, one clean
+sans everywhere (open Inter, standing in for the proprietary OpenAI Sans), an
+oversized tight-tracked headline, near-zero color, and a full technical-diagram
+vocabulary (thin frames, mono pill labels, numbered containers, solid/dashed
+arrows, one accent per figure, dot/hatch textured fills). The OpenAI-index
+aesthetic, done with open fonts — no brand assets, a look not an identity.
+Apply it unless the user names a different entry in `$SKILL_DIR/authoring/style/`.
+
+The other entries a user can name:
+
+- `$SKILL_DIR/authoring/style/technical.md` — a cold engineering-blog register:
+  mono for identifiers and metrics, neutral greys for structure, a single
+  sparing red-orange accent. For dense technical writeups.
+- `$SKILL_DIR/authoring/style/editorial.md` — a long-read essay register: warm
+  paper ground, a serif reading voice, electric-blue accent, and colored
+  underlines that mark terms inline. The one style that overrides typography,
+  and only the ground and body font.
+- `$SKILL_DIR/authoring/style/paper.md` — a warm serif long-read: off-white
+  paper ground, an open serif display (Fraunces) over a humanist sans body,
+  one clay accent. The Anthropic-blog aesthetic, done with open fonts (not
+  the proprietary brand fonts, no logo/byline — a look, not an identity).
 
 `$SKILL_DIR/authoring/structure/` is still an empty mount point. Empty means
 no choice to make: derive the document's shape from the prompt.
+
+`visuals.md` is the visual-first floor: lead with charts, diagrams, tables, and
+stat tiles rather than paragraphs; pick the visual type that fits the data
+(bar, line/scatter, quadrant, matrix, timeline, stacked bar, flow — not a
+flowchart by default); most docs carry several different types. The style
+colors them; this file decides there should be many.
 
 ## Commands
 
 ### `/tdoc new <prompt>` — create a new doc
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. **Read `$SKILL_DIR/authoring/voice.md` and `$SKILL_DIR/authoring/style/default.md`.**
+2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, and `$SKILL_DIR/authoring/style/default.md`.**
    Voice constrains the prose as you generate it, not as a later cleanup
    pass. The style tells you which components to reach for and its palette —
    apply it unless the user named another entry in `$SKILL_DIR/authoring/style/`.
@@ -350,7 +372,7 @@ comments you handled unless you reply on each one. Skipping comments
 silently is the #1 source of regression complaints.
 
 1. Read `~/tdocs/<slug>/comments.json` — filter to `status: "open"`.
-2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md`.
+2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md` and `$SKILL_DIR/authoring/visuals.md`.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice, and
