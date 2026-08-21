@@ -247,6 +247,16 @@ block, a leveled block, a metadata pill, a scrollable diagram box) with a
 two-hue palette where orange means risk and green means a key finding. Apply
 it unless the user names a different entry in `$SKILL_DIR/authoring/style/`.
 
+The other entries a user can name:
+
+- `$SKILL_DIR/authoring/style/technical.md` — a cold engineering-blog register:
+  mono for identifiers and metrics, neutral greys for structure, a single
+  sparing red-orange accent. For dense technical writeups.
+- `$SKILL_DIR/authoring/style/editorial.md` — a long-read essay register: warm
+  paper ground, a serif reading voice, electric-blue accent, and colored
+  underlines that mark terms inline. The one style that overrides typography,
+  and only the ground and body font.
+
 `$SKILL_DIR/authoring/structure/` is still an empty mount point. Empty means
 no choice to make: derive the document's shape from the prompt.
 

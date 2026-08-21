@@ -8,6 +8,14 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Two more house styles a doc can name.** `authoring/style/technical.md`
+  (cold engineering-blog register — mono, neutral greys, one sparing
+  red-orange accent; from judgmentlabs.ai) and `authoring/style/editorial.md`
+  (long-read essay — warm paper, serif body, electric-blue accent, colored
+  inline underlines; from cognition.com). Selected by naming them in a
+  `/tdoc new` prompt; `default.md` still applies when nothing is named.
+  `editorial.md` is the one style that overrides typography, and only the
+  ground color and body font. `#194`.
 - **Every generated doc goes through a voice contract.** New `authoring/`
   directory, read at generation time. `authoring/voice.md` applies to
   `/tdoc new` and every `/tdoc edit` regeneration — a floor, not a

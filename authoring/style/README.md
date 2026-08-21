@@ -10,6 +10,8 @@ trusts it.
 | Entry | When it applies |
 |---|---|
 | `default.md` | **When a doc selects nothing.** The research-note style, extracted from `tdoc.dev/d/avgraph-auto-research/v/1`. Trusts the overlay's reading typography; adds semantic components (risk / positive / leveled block / pill / diagram) on top. |
+| `technical.md` | When named. Cold engineering-blog register — mono, neutral greys, one sparing red-orange accent. From `judgmentlabs.ai`. |
+| `editorial.md` | When named. Long-read essay — warm paper, serif body, electric-blue accent, colored inline underlines. From `cognition.com`. The one entry that overrides typography (ground + body font only). |
 
 `default.md` is the house style — today every doc gets it. A future entry is
 an *opt-out*, so it has to be different enough to be worth naming.
