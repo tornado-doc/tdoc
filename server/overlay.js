@@ -120,6 +120,55 @@
     box.style.height = (r.height + inset * 2) + 'px';
   }
 
+  // Range.getBoundingClientRect() is the UNION of every line box. A wrapped
+  // selection is therefore a tall rectangle whose bottom-left is nowhere near
+  // the caret; WebKit also sometimes returns a 0×0 rect when the range
+  // crosses a block. The new-comment popup and pin Y used that union, so the
+  // card "sometimes" sat off the highlight. Prefer the live line box.
+  function isVisibleClientRect(r) {
+    return !!r && (r.width > 0 || r.height > 0);
+  }
+  function nearestClientRect(rects, x, y) {
+    let best = null, bestD = Infinity;
+    const list = rects && rects.length != null ? rects : [];
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (!isVisibleClientRect(r)) continue;
+      const dx = x - Math.max(r.left, Math.min(x, r.right));
+      const dy = y - Math.max(r.top, Math.min(y, r.bottom));
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best;
+  }
+  function firstVisibleClientRect(target) {
+    if (!target) return null;
+    if (target.getClientRects) {
+      const rects = target.getClientRects();
+      for (let i = 0; i < rects.length; i++) {
+        if (isVisibleClientRect(rects[i])) return rects[i];
+      }
+    }
+    if (!target.getBoundingClientRect) return null;
+    const r = target.getBoundingClientRect();
+    return isVisibleClientRect(r) ? r : null;
+  }
+  function clientRectNearPoint(target, x, y) {
+    if (!target) return null;
+    if (target.getClientRects && Number.isFinite(x) && Number.isFinite(y)) {
+      const near = nearestClientRect(target.getClientRects(), x, y);
+      if (near) return near;
+    }
+    return firstVisibleClientRect(target);
+  }
+  // A zero-width box on `line` at x — the caret / mouse-up, not the line origin.
+  function endRectOnLine(line, x) {
+    if (!line) return null;
+    const left = Number.isFinite(x) ? x : line.right;
+    const height = line.height || (line.bottom - line.top) || 0;
+    return { left, right: left, top: line.top, bottom: line.bottom, width: 0, height };
+  }
+
   // ========== Styles ==========
   // Each logical group is one comment block; rules within a group are tightly
   // packed. The narrow visual mode lives at the bottom and overrides base.
@@ -2237,7 +2286,7 @@
     const mark = state.anchorMarks.get(c.id);
     if (mark && (mark.ranges?.[0] || mark.el)) {
       const target = mark.ranges?.[0] || mark.el;
-      const r = target.getBoundingClientRect();
+      const r = firstVisibleClientRect(target) || target.getBoundingClientRect();
       // For element anchors expose the element + its rect so renderPins can
       // spread multiple comments DOWN a tall element instead of stacking them
       // all at its top edge. (targetEl is the live element; el may be the outline.)
@@ -2592,9 +2641,9 @@
     let anchorRect = null;
     // Prefer the underlying TARGET ELEMENT (canvas/img/video etc) over the
     // overlay outline div — same rect, but more semantically correct.
-    if (mark.ranges?.[0]) anchorRect = mark.ranges[0].getBoundingClientRect();
-    else if (mark.targetEl?.getBoundingClientRect) anchorRect = mark.targetEl.getBoundingClientRect();
-    else if (mark.el?.getBoundingClientRect) anchorRect = mark.el.getBoundingClientRect();
+    if (mark.ranges?.[0]) anchorRect = firstVisibleClientRect(mark.ranges[0]);
+    else if (mark.targetEl) anchorRect = firstVisibleClientRect(mark.targetEl);
+    else if (mark.el) anchorRect = firstVisibleClientRect(mark.el);
     if (!anchorRect) return;
 
     // We consider the anchor "comfortably visible" if its top is between the
@@ -3273,13 +3322,18 @@
     // body. The caller signals this by setting anchor._placeAbove = true.
     document.body.appendChild(popup);   // append first so offsetHeight is known
     const popupH = popup.offsetHeight || 140;
+    const popupW = popup.offsetWidth || 320;
     if (anchor._placeAbove && rect.top - 8 - popupH >= 8) {
       popup.style.top = (window.scrollY + rect.top - popupH - 8) + 'px';
     } else {
       popup.style.top = (window.scrollY + rect.bottom + 8) + 'px';
     }
-    const left = Math.min(rect.left + window.scrollX, window.innerWidth - 340);
-    popup.style.left = Math.max(8, left) + 'px';
+    // `rect.left` is the caret / mouse-up X for text selections (not the
+    // line-box origin). Clamp in document coords so a caret near the right
+    // edge still keeps the 320px sheet on screen.
+    const maxLeft = window.scrollX + window.innerWidth - popupW - 8;
+    const left = Math.min(Math.max(window.scrollX + 8, window.scrollX + rect.left), maxLeft);
+    popup.style.left = left + 'px';
 
     if (anchor.kind === 'text' && anchor._range) {
       setPendingTextHighlight(anchor._range);
@@ -3352,8 +3406,8 @@
     const articleTop = articleEl.getBoundingClientRect().top + window.scrollY;
     const articleHeight = Math.max(1, articleEl.scrollHeight);
     let rect = null;
-    if (anchor.kind === 'text' && anchor._range) rect = anchor._range.getBoundingClientRect();
-    else if (anchor.kind === 'element' && anchor._el) rect = anchor._el.getBoundingClientRect();
+    if (anchor.kind === 'text' && anchor._range) rect = firstVisibleClientRect(anchor._range);
+    else if (anchor.kind === 'element' && anchor._el) rect = firstVisibleClientRect(anchor._el) || anchor._el.getBoundingClientRect();
     if (!rect) return null;
     const centerY = rect.top + rect.height / 2 + window.scrollY;
     const ratio = Math.max(0, Math.min(1, (centerY - articleTop) / articleHeight));
@@ -3755,7 +3809,7 @@
         // Dragged but no artifact hit — likely a text selection. Fall through.
       }
     }
-    maybeOpenSelectionPopup(e.target);
+    maybeOpenSelectionPopup(e.target, e);
   }, true);
 
   // Mouse and touch both surface here. On iOS Safari long-press text-selection
@@ -3765,7 +3819,8 @@
   document.addEventListener('touchend', (e) => {
     const t = e.target || (e.changedTouches?.[0] && document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY));
     // Touchend fires before the OS finalizes selection — defer one tick.
-    setTimeout(() => maybeOpenSelectionPopup(t), 0);
+    const touch = e.changedTouches && e.changedTouches[0];
+    setTimeout(() => maybeOpenSelectionPopup(t, touch || e), 0);
   }, true);
 
   // An author can mark a phrase as an invitation: `data-tdoc-select`. Clicking
@@ -3785,7 +3840,7 @@
     maybeOpenSelectionPopup(invite);
   }, true);
 
-  function maybeOpenSelectionPopup(target) {
+  function maybeOpenSelectionPopup(target, event) {
     // Selected text wins over "comment whole artifact." If there's a real text
     // selection, open the text-selection popup regardless of whether the
     // selection lives inside a commentable artifact. The hover pill remains
@@ -3826,8 +3881,41 @@
       });
       return;
     }
-    const rect = range.getBoundingClientRect();
+    const rect = selectionEndRect(sel, range, event);
+    if (!rect) return;
     openPopup({ kind: 'text', text, context_before: ctx.before, context_after: ctx.after, _range: range }, rect);
+  }
+
+  // Where the user *finished* the selection — mouse-up / caret — not the
+  // left edge of the line box. That's what the popup must sit under.
+  function selectionEndRect(sel, range, event) {
+    const pointerX = event && Number.isFinite(event.clientX) ? event.clientX : NaN;
+    const pointerY = event && Number.isFinite(event.clientY) ? event.clientY : NaN;
+    if (Number.isFinite(pointerX) && Number.isFinite(pointerY)) {
+      const line = clientRectNearPoint(range, pointerX, pointerY);
+      const onLine = endRectOnLine(line, pointerX);
+      if (onLine) return onLine;
+    }
+    if (sel && sel.focusNode != null) {
+      try {
+        const caret = document.createRange();
+        caret.setStart(sel.focusNode, sel.focusOffset);
+        caret.collapse(true);
+        const cr = caret.getBoundingClientRect();
+        if (cr && (cr.height > 0 || cr.width > 0 || cr.left !== 0 || cr.top !== 0)) {
+          const line = clientRectNearPoint(range, cr.left, cr.top + cr.height / 2)
+            || { top: cr.top, bottom: cr.bottom || cr.top + 16, height: cr.height || 16, right: cr.left };
+          return endRectOnLine(line, cr.left);
+        }
+      } catch { /* focus not in a text node */ }
+    }
+    const rects = range.getClientRects ? range.getClientRects() : [];
+    let last = null;
+    for (let i = 0; i < rects.length; i++) {
+      if (isVisibleClientRect(rects[i])) last = rects[i];
+    }
+    if (last) return endRectOnLine(last, last.right);
+    return firstVisibleClientRect(range);
   }
 
   // Begin the re-anchor flow: future text selection on the doc will rebind
@@ -3851,9 +3939,9 @@
     const articleTop = articleEl.getBoundingClientRect().top + window.scrollY;
     const articleHeight = Math.max(1, articleEl.scrollHeight);
     let rect = null;
-    if (mark.ranges?.[0]) rect = mark.ranges[0].getBoundingClientRect();
-    else if (mark.el) rect = mark.el.getBoundingClientRect();
-    else if (mark.targetEl) rect = mark.targetEl.getBoundingClientRect();
+    if (mark.ranges?.[0]) rect = firstVisibleClientRect(mark.ranges[0]);
+    else if (mark.el) rect = firstVisibleClientRect(mark.el) || mark.el.getBoundingClientRect();
+    else if (mark.targetEl) rect = firstVisibleClientRect(mark.targetEl) || mark.targetEl.getBoundingClientRect();
     if (!rect) return null;
     const centerY = rect.top + rect.height / 2 + window.scrollY;
     return { ratio: Math.max(0, Math.min(1, (centerY - articleTop) / articleHeight)), nearestHeading: null };

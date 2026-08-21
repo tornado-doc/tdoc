@@ -352,6 +352,61 @@ async function tPub(name, fn) {
     await page.click('.tdoc-popup .head .x').catch(() => {});
   });
 
+  await t('Text-selection popup follows the caret line, not the union box', async () => {
+    // Regression: Range.getBoundingClientRect() is the union of every line.
+    // Selecting across blocks (or wrapping) then releasing on the last line
+    // used to park the popup at the union's bottom-left, away from the caret.
+    const pos = await page.evaluate(() => {
+      const h = document.querySelector('.wrap h2');
+      const p = document.querySelector('.wrap h2 + p, .wrap h2 ~ p');
+      if (!h || !p) return null;
+      const start = [...h.childNodes].find(n => n.nodeType === 3);
+      const endNode = [...p.childNodes].find(n => n.nodeType === 3 && n.textContent.trim().length > 8);
+      if (!start || !endNode) return null;
+      const r = document.createRange();
+      r.setStart(start, 0);
+      r.setEnd(endNode, Math.min(12, endNode.textContent.length));
+      const union = r.getBoundingClientRect();
+      const rects = [...r.getClientRects()].filter(x => x.width || x.height);
+      if (rects.length < 2) return null;
+      const last = rects[rects.length - 1];
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return {
+        unionTop: union.top,
+        lastTop: last.top,
+        lastBottom: last.bottom,
+        lineLeft: last.left,
+        x: last.right - 2,
+        y: last.top + last.height / 2,
+      };
+    });
+    if (!pos) { console.log('  (could not build a multi-line selection, skipping)'); return; }
+    await page.evaluate(({ x, y }) => {
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        clientX: x, clientY: y, bubbles: true, cancelable: true, view: window, button: 0,
+      }));
+    }, { x: pos.x, y: pos.y });
+    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
+    const popup = await page.$eval('.tdoc-popup', el => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left };
+    });
+    // Opened below the caret line (last.bottom + 8). Must not sit on the first
+    // line of a multi-block selection.
+    if (popup.top < pos.lastTop - 4) {
+      throw new Error(`popup top ${popup.top.toFixed(1)} is above the caret line (${pos.lastTop.toFixed(1)}–${pos.lastBottom.toFixed(1)}); union top was ${pos.unionTop.toFixed(1)}`);
+    }
+    // And at the mouse-up X, not the line's left edge.
+    const distEnd = Math.abs(popup.left - pos.x);
+    const distLeft = Math.abs(popup.left - pos.lineLeft);
+    if (distEnd > distLeft && distEnd > 48) {
+      throw new Error(`popup left ${popup.left.toFixed(1)} is nearer the line origin (${pos.lineLeft.toFixed(1)}) than the caret (${pos.x.toFixed(1)})`);
+    }
+    await page.click('.tdoc-popup .head .x').catch(() => {});
+  });
+
   await t('Drag STARTED INSIDE canvas does NOT open popup (passes through)', async () => {
     const canvas = await page.$('canvas');
     if (!canvas) { console.log('  (no canvas, skipping)'); return; }
