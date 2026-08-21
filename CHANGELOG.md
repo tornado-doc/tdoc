@@ -8,6 +8,11 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **PR preview Worker (`tdoc-preview`).** Pull requests on tornado-doc/tdoc
+  get a unique `pr-<N>` preview URL and a sticky comment pointing at
+  `/d/conway-life/v/2` on that host — published chrome, not Local Studio,
+  not tdoc.dev, not a personal Worker. Own R2 + KV, no Durable Object
+  (Cloudflare will not mint preview URLs for a DO Worker). `#148`.
 - **Hosted tdoc.dev is multi-tenant.** GitHub sign-in mints a recoverable
   account-scoped upload token (`POST /api/hosted/token`). `/me` lists that
   user's slugs (`meta.hosted.github_login`), not the Worker operator's dump.
@@ -31,6 +36,10 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **tdoc logo in the top bar goes to My docs (`/me`).** On tdoc.dev that is
+  https://tdoc.dev/me. It used to go to `/` (the marketing homepage).
+  Local studio 302s `/me` to `/` because there is no hosted catalog.
+  `#191`.
 - **Overlay top bar sits in document flow** instead of `position: fixed`.
   Page HTML no longer scrolls underneath a floating strip; the bar (and the
   old-version strip) occupy the top of the layout.

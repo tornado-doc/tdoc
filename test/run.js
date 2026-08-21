@@ -51,6 +51,7 @@ const OFFLINE = [
   'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)
+  'preview-workflow.test.js', // #148 PR preview GitHub Action contract
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'widget-island.test.js',    // #138 sandboxed widget route + host iframe rewrite
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)
