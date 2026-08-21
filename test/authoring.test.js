@@ -35,16 +35,58 @@ t('all three slots exist', () => {
   }
 });
 
-t('style/ and structure/ are still empty mount points', () => {
-  // Adding entries is fine — but it must be a deliberate change that also
+t('structure/ is still an empty mount point', () => {
+  // Adding entries is fine -- but it must be a deliberate change that also
   // teaches SKILL.md how to select one, not a stray file. This test is the
   // reminder to do both.
-  for (const dir of ['authoring/style', 'authoring/structure']) {
-    const entries = fs.readdirSync(path.join(root, dir));
-    assert(entries.length === 1 && entries[0] === 'README.md',
-      `${dir} gained ${entries.filter(e => e !== 'README.md').join(', ')} — ` +
-      `if that is intended, teach SKILL.md how a doc selects one, then update this test`);
+  const entries = fs.readdirSync(path.join(root, 'authoring/structure'));
+  assert(entries.length === 1 && entries[0] === 'README.md',
+    `authoring/structure gained ${entries.filter(e => e !== 'README.md').join(', ')} -- ` +
+    `if that is intended, teach SKILL.md how a doc selects one, then update this test`);
+});
+
+t('style/ ships a default entry', () => {
+  assert(exists('authoring/style/default.md'), 'authoring/style/default.md missing');
+  const d = read('authoring/style/default.md');
+  // The nine tokens are the entry's whole point. An emptied-out file that
+  // still exists would pass a mere existence check.
+  for (const tok of ['--td-accent', '--td-ink', '--td-muted', '--td-line',
+                     '--td-surface', '--td-danger', '--td-ok']) {
+    assert(d.includes(tok), `default.md no longer defines ${tok}`);
   }
+});
+
+// Single source of truth. Every entry in style/ must be selectable by name
+// from SKILL.md -- otherwise the agent is offered a style it cannot be told
+// to use, or worse, a user names one the agent has never heard of. Both fail
+// silently: the doc still generates, just with the wrong look.
+t('every style/ entry is selectable from SKILL.md', () => {
+  const s = read('SKILL.md');
+  const entries = fs.readdirSync(path.join(root, 'authoring/style'))
+    .filter(e => e.endsWith('.md') && e !== 'README.md');
+  assert(entries.length > 0, 'authoring/style has no entries at all');
+  const unreferenced = entries.filter(e => !s.includes(`authoring/style/${e}`));
+  assert(unreferenced.length === 0,
+    `style entries SKILL.md never mentions: ${unreferenced.join(', ')}\n` +
+    '    An entry the agent cannot be told to use is a file nobody reads.');
+});
+
+t('the default style is applied on the generation path, not merely listed', () => {
+  const s = read('SKILL.md');
+  const a = s.indexOf('### `/tdoc new');
+  const b = s.indexOf('### `bin/tdoc-new');
+  assert(a !== -1 && b !== -1, '/tdoc new section not found');
+  assert(s.slice(a, b).includes('authoring/style/default.md'),
+    '/tdoc new does not read authoring/style/default.md');
+});
+
+// SKILL.md used to say "Don't write your own CSS" while the house style IS a
+// CSS block every doc carries. Those two cannot both stand.
+t('SKILL.md no longer forbids the CSS the house style requires', () => {
+  const s = read('SKILL.md');
+  assert(!/\*\*Don't write your own CSS for these unless/.test(s),
+    'the old blanket "Don\'t write your own CSS" rule is back -- it contradicts ' +
+    'authoring/style/default.md, which every doc must write into its <style>');
 });
 
 t('SKILL.md makes voice.md required reading before generating', () => {

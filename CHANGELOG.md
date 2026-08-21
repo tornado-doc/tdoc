@@ -8,6 +8,18 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Docs now carry tdoc's own design system.** New
+  `authoring/style/default.md`, extracted from
+  `tdoc.dev/d/tdoc-design-tokens/v/1` and applied when a doc selects no
+  style -- which today is every doc. Nine `--td-*` color tokens (accent
+  reserved for links and the single primary action; red reserved for
+  destruction), a system-font type scale, and the principles that decide
+  what the tokens do not. **Newly generated docs are denser than before**
+  (body 15px rather than the overlay's 17px, h1 29px rather than 34px):
+  deliberate, so documents and product chrome are one system. Docs already
+  published are unaffected. `SKILL.md`'s blanket "don't write your own CSS"
+  rule is replaced -- the house style *is* CSS every doc carries; what
+  stays forbidden is inventing a scale or palette on top of it. `#197`.
 - **Every generated doc goes through a voice contract.** New `authoring/`
   directory, read at generation time. `authoring/voice.md` applies to
   `/tdoc new` and every `/tdoc edit` regeneration — a floor, not a
