@@ -1081,6 +1081,9 @@ const LANDING_SLUG = 'tornado-doc';
 // The doc behind `/start`: the same onboarding, written as a page, for anyone
 // who has scripting off or who wants to read the steps before running them.
 const START_SLUG = 'tdoc-start';
+// `/templates` — the template gallery: pick a look, copy a prompt, hand it to
+// your agent. Same landing-doc mechanism as `/start`.
+const TEMPLATES_SLUG = 'tdoc-templates';
 
 // The onboarding modal, bundled in by bin/tdoc-bundle. Kept as a placeholder
 // here so the source file stays readable and the bundle stays one artifact.
@@ -3021,6 +3024,13 @@ export default {
     // missing, the visitor gets the neutral page, never a 404.
     if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
       return landingResponse(env, req, START_SLUG);
+    }
+
+    // `/templates` — the template gallery. Same fail-safe as `/start`: a
+    // missing doc yields the neutral landing page, never a 404. No onboarding
+    // modal (TEMPLATES_SLUG is intentionally not in the withOnboard gate).
+    if (p === '/templates' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, TEMPLATES_SLUG);
     }
 
     // Web OAuth callback. With a `code` this is the redirect flow: exchange it
