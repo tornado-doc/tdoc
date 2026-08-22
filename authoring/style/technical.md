@@ -1,59 +1,47 @@
-# technical — the engineering-blog style (theme-following)
+# technical — the engineering-blog style (opens dark-first)
 
-A take on `judgmentlabs.ai`'s dark blog, adapted to tdoc's reality: the
-overlay owns theming — it has its own light/dark button in the bar — and a
-doc cannot restyle that chrome. So this style **follows the overlay's toggle**
-instead of hard-coding one look. Dark is the judgmentlabs dark look; light is
-its clean inverse. It never mismatches the chrome, because it reads the *same
-signal the chrome does*.
+A `judgmentlabs.ai`-flavored engineering-blog look: a system sans, mono for
+identifiers, one sparing red-orange accent. It **opens dark**, which in tdoc
+means one specific thing — read the next section before writing any CSS.
 
-**The signal is `data-tdoc-theme`, NOT `prefers-color-scheme`.** When the
-reader clicks the bar's dark button, the overlay sets
-`data-tdoc-theme="dark"` on `<html>` — it does **not** touch the OS
-`prefers-color-scheme`. A style that keys its dark rules off
-`@media (prefers-color-scheme: dark)` therefore ignores the button entirely:
-the chrome goes dark while the doc stays light (or the reverse), and half the
-components — SVG ink, code chips, table cells — end up the wrong color on the
-wrong ground. That is the bug that makes "everything invisible." Key every
-dark rule off `html[data-tdoc-theme="dark"]` and the doc moves as one with the
-button.
+## How tdoc dark mode works — author LIGHT, the overlay inverts
 
-**Open dark-first.** Put `data-tdoc-default-theme="dark"` on the `<html>`
-tag. The overlay reads it as the initial theme when the reader has no saved
-preference, so a judgmentlabs-style doc opens dark (its native look) and the
-button still flips it to light.
+**tdoc has no per-doc dark palette. Dark mode is a whole-page invert.** The
+overlay darkens by painting the page and applying, on `html[data-tdoc-theme="dark"]`,
+`filter: invert(1) hue-rotate(180deg)` (the Dark Reader trick). One transform
+flips the author CSS, the diagrams, the chrome — everything — as a unit.
+`hue-rotate` keeps hues roughly true; photos/video/canvas/iframe are inverted a
+second time so they stay true-color.
 
-The dark palette is verified 1:1 against the live judgmentlabs page.
+The consequence is the rule that governs this whole style:
 
-| Token | Light | Dark (`html[data-tdoc-theme="dark"]`) |
-|---|---|---|
-| ground | `#ffffff` | `#1a1a1a` |
-| body text | `rgba(10,10,10,.92)` | `rgba(250,250,250,.9)` |
-| headings | `#0a0a0a` | `rgba(250,250,250,.95)` |
-| muted / links | `#737373` | `#9a9a9a` |
-| code / table cell | `#f0f0f0` / `#f5f5f5` | `#232323` / `#202020` |
-| accent | `#ff4b2e` | `#ff6a4d` (hot on both) |
+> **Author the doc in LIGHT only. Never write a dark rule.** A
+> `html[data-tdoc-theme="dark"]` or `@media (prefers-color-scheme: dark)` block
+> that sets dark colors gets **inverted back to light** — so your "dark mode"
+> renders light. (This is exactly the bug that made the technical doc show
+> white in dark mode: it shipped a hand-built dark palette, and the invert
+> undid it.) Style the light look well; the dark look is its clean inverse,
+> for free.
 
-## The three rules that make it not-break
+Because the invert changes painted pixels and not computed values, you cannot
+verify dark mode with `getComputedStyle` — it will report the light values.
+**Verify dark mode from a screenshot** (or your eyes), not from computed style.
 
-1. **Headings must set color explicitly, in BOTH modes.** The overlay colors
-   `h1`/`h2` directly, at a level that beats inheritance from `.wrap`. A
-   heading with no explicit color takes the overlay's heading color — which
-   on the wrong ground is invisible (this is the bug that hid the title).
-   Set `.wrap h1, .wrap h2 { color: … }` in the base and again in dark.
-2. **Every themed rule lives under `html[data-tdoc-theme="dark"]`** — never
-   `@media (prefers-color-scheme: dark)`. The base rules are the light
-   palette; the dark block swaps grounds, text, and fills.
-3. **Cover EVERY surface, not just prose.** Prose, headings, links, code
-   chips, `<table>` cells, AND the SVG diagram all need a dark rule. A
-   surface you forget stays at its light value and vanishes on the dark
-   ground. Tables and inline `<code>` do **not** inherit a safe default here
-   — style them yourself in both modes.
+## Open dark-first
+
+Put `data-tdoc-default-theme="dark"` on the `<html>` tag. With no saved
+preference, the overlay opens the doc with the invert already applied, so a
+first-time reader sees the dark engineering-blog look; the bar's sun/moon
+button still flips it to the plain light version and remembers the choice.
+
+```html
+<html lang="en" data-tdoc-default-theme="dark">
+```
 
 ## Typography (this style sets it)
 
 Judgment Labs uses "Untitled Sans"; a system sans stands in at the same
-metrics. h1/h2 set family AND color explicitly (see rule 1).
+metrics. h1/h2 set family AND color explicitly (the overlay colors headings).
 
 ```
 body  16px / 26px   system-ui, -apple-system, "Segoe UI", Roboto, sans-serif
@@ -62,13 +50,22 @@ h2    24px / 500
 mono  ui-monospace, "SF Mono", Menlo, monospace   (theirs is "DM Mono")
 ```
 
+## The light palette (this is the ONLY palette — the invert makes the dark one)
+
+| Element | Value |
+|---|---|
+| ground | `#ffffff` |
+| body text | `rgba(10,10,10,.92)` |
+| headings | `#0a0a0a` |
+| muted / links | `#737373` |
+| code / table cell | `#f0f0f0` / `#f5f5f5` |
+| accent (rule, one highlighted node) | `#ff4b2e` |
+
 ## CSS
 
-```html
-<html lang="en" data-tdoc-default-theme="dark">   <!-- opens dark-first -->
-```
 ```css
-/* --- light (base) --- */
+/* LIGHT ONLY. No html[data-tdoc-theme="dark"], no @media prefers-color-scheme.
+   Dark is the overlay's invert of everything below. */
 body  { background:#fff; }
 .wrap { color:rgba(10,10,10,.92); font:16px/1.62 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
 .wrap h1 { color:#0a0a0a; font-size:36px; font-weight:500; letter-spacing:-.9px; line-height:1.25; }
@@ -81,70 +78,31 @@ table    { border-collapse:separate; border-spacing:3px; width:100%; }
 th       { color:#737373; text-align:left; font:600 11px/1 ui-monospace,Menlo,monospace; letter-spacing:.04em; text-transform:uppercase; padding:8px 10px; }
 td       { background:#f5f5f5; color:#171717; padding:9px 10px; border-radius:4px; }
 .callout { border-left:3px solid #ff4b2e; background:#fff5f3; padding:12px 16px; margin:16px 0; }
-.diagram-box { max-width:100%; overflow-x:auto; margin:20px 0; }
-
-/* --- dark: the overlay's toggle, keyed on the same attribute the chrome sets --- */
-html[data-tdoc-theme="dark"] body  { background:#1a1a1a; }
-html[data-tdoc-theme="dark"] .wrap { color:rgba(250,250,250,.9); }
-html[data-tdoc-theme="dark"] .wrap h1,
-html[data-tdoc-theme="dark"] .wrap h2 { color:rgba(250,250,250,.95); }
-html[data-tdoc-theme="dark"] .muted,
-html[data-tdoc-theme="dark"] .wrap a  { color:#9a9a9a; }
-html[data-tdoc-theme="dark"] .tag,
-html[data-tdoc-theme="dark"] code     { background:#232323; color:rgba(250,250,250,.92); }
-html[data-tdoc-theme="dark"] th       { color:#9a9a9a; }
-html[data-tdoc-theme="dark"] td       { background:#202020; color:rgba(250,250,250,.92); }
-html[data-tdoc-theme="dark"] .callout { background:#2a1a16; }
 ```
 
-## Diagrams follow the theme too — via role classes, not inline fills
+## Diagrams — draw them light; they invert with the page
 
-An SVG built with inline `fill="#0a0a0a"` cannot flip: those presentation
-attributes are baked for one ground. Give each shape a **role class** and
-keep the light hex as the attribute default (so it still reads in light and in
-an export); then a CSS rule beats the attribute in dark. This is the move that
-keeps the diagram from disappearing on the dark ground.
+Draw the diagram in ink on a white field: dark strokes/labels (`#0a0a0a`),
+light node fills (`#fafafa`), the `#ff4b2e` accent on the one highlighted node.
+An **inline `<svg>` inverts with the page**, so an ink-on-white figure becomes
+light-on-dark — correct — in dark mode with no extra work. Do not give the SVG
+its own dark colors (they would invert to light).
 
-```css
-/* light hex stays on the elements as the default; these bite only in dark */
-html[data-tdoc-theme="dark"] .wrap svg .d-frame { stroke:#5c5c5c; } /* box + arrow strokes */
-html[data-tdoc-theme="dark"] .wrap svg .d-ink   { fill:#eaeaea; }   /* labels, titles */
-html[data-tdoc-theme="dark"] .wrap svg .d-node  { fill:#242424; }   /* box / bar fills */
-html[data-tdoc-theme="dark"] .wrap svg .d-muted { fill:#9a9a9a; }
-/* the accent flips a touch warmer so it stays hot on the dark ground */
-html[data-tdoc-theme="dark"] .wrap svg .d-acc-stroke { stroke:#ff6a4d; }
-html[data-tdoc-theme="dark"] .wrap svg .d-acc-text   { fill:#ff8a6d; }
-```
-
-Do **not** put a fill class on a shape filled by a `<pattern>` (`fill="url(#…)"`)
-— that would override the pattern; instead flip the `<rect>`/`<circle>` *inside*
-the pattern (they are ordinary SVG elements a class can target). Never drop the
-diagram because the surface changed — draw it on-theme.
-
-## Reach for
-
-- **`.tag`** / `<code>` inline for every identifier, flag, metric value, or config key.
-- **`.metric`** for a standalone number; group several in a row.
-- **`.callout`** at most once or twice — the accent loses force if repeated.
+Only `img`/`video`/`canvas`/`iframe` are restored to true color by the overlay.
+If a `<canvas>` or `<iframe>` is a *drawing* (a chart, a simulation) that should
+darken with the page rather than glow as a white slab, mark it
+`data-tdoc-dark="invert"` so it inverts with everything else.
 
 ## Visuals are content-driven, never dictated by the style
 
-**This style's diagram vocabulary works for ANY diagram type** — a pipeline, an
-architecture, a flow, context bars, a chart. The style is the visual
-*treatment*, never a limit on which visuals appear. Draw diagrams on-theme
-(they flip with the doc via the role classes above): light — `#fafafa` fills,
-`#ccc`/`#0a0a0a` strokes; dark — `#242424` fills, `#5c5c5c` strokes; the
-`#ff4b2e`/`#ff6a4d` accent on the highlighted node; mono labels.
-
-This style says how a visual is *colored and treated* — it never decides
-whether a doc has one. A diagram, chart, table, image, or none: that follows
-the content. If the doc has one, draw it in this palette; if it has none, the
-style does not invent one. No style here requires, forbids, or limits any
-kind of visual.
+The style is a *treatment* — a system sans, mono identifiers, one red accent,
+ink-on-white diagrams — never a limit on which visuals a doc has. A pipeline,
+an architecture, a flow, context bars, a bar chart, a timeline, a matrix: draw
+whatever the content needs, in this light palette, and let the invert give the
+dark version.
 
 ## Style is visual only
 
 Governs how the page looks — never section numbering, language, tone, or
-structure. Keep the title and headings the doc would have in any style. Style
-tables explicitly in both modes (they do not inherit a safe default). Link
-generously.
+structure. Default output language is English. Keep the title and headings the
+doc would have in any style. Link generously.
