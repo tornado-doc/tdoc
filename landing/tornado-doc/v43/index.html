@@ -61,6 +61,11 @@
     .brand-name { font-weight:700; color:var(--ink); font-size:26px; letter-spacing:-.02em; }
     h1.tagline { font-size:56px; line-height:1.05; font-weight:700; color:var(--ink); margin:0 0 10px; letter-spacing:-.04em; }
     .subhead { font-size:25px; line-height:1.2; font-weight:650; color:var(--ink); letter-spacing:-.02em; margin:0 0 14px; }
+    .rot { display:inline-block; overflow:hidden; height:1.2em; vertical-align:-0.24em; }
+    .rot-in { display:flex; flex-direction:column; animation:rotwords 11s cubic-bezier(.7,0,.25,1) infinite; }
+    .rot-in b { height:1.2em; line-height:1.2em; white-space:nowrap; color:var(--accent); font-weight:inherit; }
+    @keyframes rotwords { 0%,13%{transform:translateY(0)} 16.6%,30%{transform:translateY(-1.2em)} 33.3%,47%{transform:translateY(-2.4em)} 50%,63%{transform:translateY(-3.6em)} 66.6%,80%{transform:translateY(-4.8em)} 83.3%,100%{transform:translateY(-6em)} }
+    @media (prefers-reduced-motion:reduce){ .rot-in{animation:none} }
     .sub span { display:block; }
     .sub { font-size:19px; max-width:680px; margin:0 0 40px; color:var(--body); }
     .cta { display:grid; grid-template-columns:232px; gap:12px; justify-content:start; }
@@ -604,7 +609,7 @@
 
 
     <h1 class="tagline">Your AI&#8209;native Notion.</h1>
-    <p class="subhead">Humans and agents collaborate over docs.</p>
+    <p class="subhead">Humans and agents collaborate over <span class="rot"><span class="rot-in"><b>docs</b><b>PRDs</b><b>design docs</b><b>reports</b><b>competitive analyses</b><b>docs</b></span></span></p>
     <p class="sub"><span>No more copy&#8209;pasting or endless formatting. Your agents draft; you and your team <span class="hsel" data-tdoc-select>just comment<i class="tcur"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M17 27V9a4 4 0 0 1 8 0v13h2.5a3.2 3.2 0 0 1 3.2 3.2V27h1.6a3 3 0 0 1 3 3v1.4a3 3 0 0 1 .7 2v4.1A7.5 7.5 0 0 1 28.5 45h-7.9a7.4 7.4 0 0 1-5.5-2.4l-6.8-7.6a3.4 3.4 0 0 1 5-4.6L17 33z" fill="#fff" stroke="#1F1E1D" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/></svg></i></span>; they rewrite everything.</span></p>
 
     <div class="cta">
@@ -718,8 +723,6 @@
   .hd-vbump .dot{width:5px;height:5px;border-radius:50%;background:var(--good)}
   .hd-vbump .f{color:var(--muted)}.hd-vbump em{color:var(--muted);font:500 11px/1 system-ui;font-style:normal}
   .hd-cap{text-align:center;color:var(--muted);font-size:13px;margin:20px 0 0}.hd-cap b{color:var(--ink);font-weight:600}
-  .ex-lead{max-width:660px;margin:38px 0 18px;font-size:15.5px;line-height:1.55;color:var(--muted)}
-  .ex-lead b{color:var(--ink);font-weight:600}
 
   @media (prefers-reduced-motion:reduce){
     .hd:not(:has(input:checked)) .hd-w1{opacity:1;visibility:visible;animation:none}
@@ -749,8 +752,7 @@
     .hd-cap{font-size:12px;margin-top:14px}
   }
 </style>
-    <p class="ex-lead">Perfect for <b>PRDs</b>, <b>design docs</b>, and the <b>reports</b> and <b>competitive analyses</b> you deliver to clients.</p>
-    <div class="hd" style="margin-top:0">
+    <div class="hd" style="margin-top:34px">
     <input type="radio" name="hd" id="hd1"><input type="radio" name="hd" id="hd2"><input type="radio" name="hd" id="hd3">
 
     <!-- window 1 : GTM report -->
