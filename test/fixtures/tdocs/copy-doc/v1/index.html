@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en" data-tdoc-default-theme="dark"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>copy + default-theme fixture</title>
+<style>
+  body{background:#fff}
+  html[data-tdoc-theme="dark"] body{background:#111}
+  .copybtn{font:600 13px system-ui;padding:8px 14px;border:1px solid #111;border-radius:6px;cursor:pointer}
+  .copybtn.tdoc-copied{background:#0a7d33;color:#fff;border-color:#0a7d33}
+</style></head><body>
+<div class="wrap">
+  <h1>Copy fixture</h1>
+  <pre id="theprompt">用 tdoc 写一份技术设计文档。主题是：</pre>
+  <button class="copybtn" data-tdoc-copy="#theprompt" data-tdoc-copy-done="Copied ✓">Copy the prompt</button>
+</div></body></html>

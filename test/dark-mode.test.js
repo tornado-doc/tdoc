@@ -1,7 +1,9 @@
 // Dark-mode switch contract (overlay.js). #120
 //
 // One bar button. Preference lives in localStorage after the user switches.
-// Default is light. No prefers-color-scheme auto-follow.
+// Default is light, unless the doc declares data-tdoc-default-theme="dark"
+// (a dark-first style opening dark before any choice). No prefers-color-scheme
+// auto-follow either way.
 //
 // Run with: node test/dark-mode.test.js
 
@@ -75,11 +77,18 @@ t('dark mode restores native emoji colors (not inverted)', () => {
   );
 });
 
-t('default is light — only dark if storage says dark', () => {
-  assert(
-    /getItem\(THEME_KEY\) === 'dark' \? 'dark' : 'light'/.test(src),
-    'readStoredTheme no longer defaults to light'
-  );
+t('default is light — dark only if storage says dark or the doc declares it', () => {
+  const m = /function readStoredTheme\(\)[\s\S]*?\n  \}/.exec(src);
+  assert(m, 'readStoredTheme not found');
+  const body = m[0];
+  // A saved choice still wins outright.
+  assert(/getItem\(THEME_KEY\)/.test(body) && /'dark'/.test(body) && /'light'/.test(body),
+    'a stored dark/light preference must win first');
+  // With no saved choice, honor a doc that declares its default look, else light.
+  assert(/data-tdoc-default-theme/.test(body),
+    'no stored pref → fall back to the doc-declared default theme');
+  assert(/=== 'dark' \? 'dark' : 'light'/.test(body),
+    'an absent/unknown declared theme still defaults to light — never a surprise dark');
 });
 
 t('does not auto-follow the OS theme', () => {

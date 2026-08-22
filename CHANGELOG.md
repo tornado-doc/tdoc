@@ -69,6 +69,9 @@ file and `.claude-plugin/plugin.json`.
   https://tdoc.dev/me. It used to go to `/` (the marketing homepage).
   Local studio 302s `/me` to `/` because there is no hosted catalog.
   `#191`.
+- **Project mark is SVG.** Overlay bar, unmatched agent avatars, and
+  `/tdoc_logo.svg` serve a vector Tornado Dog (`currentColor`, no embedded
+  bitmap). `/tdoc_logo.png` stays for Open Graph. `#161`.
 - **Overlay top bar sits in document flow** instead of `position: fixed`.
   Page HTML no longer scrolls underneath a floating strip; the bar (and the
   old-version strip) occupy the top of the layout.
@@ -93,6 +96,12 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **`tdoc-agent-reply` fails loudly.** A rejected reply used to exit 0, so a
+  comment that was never answered looked answered. `curl -sS` exits 0 on HTTP
+  4xx/5xx, and the server also reports rejections as a 200 body with an
+  `error` key, so a `post_reply` helper now gates on both and both transports
+  propagate its failure. Accepted replies still exit 0 and still print the
+  server body. `#141`.
 - **Notification clicks open the target doc and comment.** Inbox rows
   go to `/d/<slug>/v/<n>?comment=<id>` (including from `/me` and `/`).
   Same-doc clicks no longer pin the card and then immediately unpin it
