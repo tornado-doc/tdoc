@@ -31,6 +31,9 @@
     '.tds-copy{position:absolute;right:10px;bottom:10px;border:1px solid #d3d8e3;background:#fff;color:#10121a;border-radius:8px;padding:6px 13px;font:13px system-ui,-apple-system,sans-serif;font-weight:650;cursor:pointer}',
     '.tds-copy:hover{border-color:#b9c0cd}',
     '.tds-copy.done{background:#1a7340;border-color:#1a7340;color:#fff}',
+    '.tds-open{display:inline-flex;align-items:center;gap:7px;margin:2px 0 12px;background:#1652f0;color:#fff;border-radius:999px;padding:9px 16px;font:14px system-ui,-apple-system,sans-serif;font-weight:650;text-decoration:none}',
+    '.tds-open:hover{background:#0f43cc}',
+    '.tds-open svg{width:15px;height:15px;fill:currentColor}',
     '.tds-status{color:#767c8b;font-size:13px}',
     '.tds-err{color:#c3452f}',
     '.tds-ft{padding:13px 20px;border-top:1px solid #e4e7ee;background:#fafbfd;text-align:right}',
@@ -73,6 +76,19 @@
   }
 
   function run() {
+    var cfg = window.__TDOC__ || {};
+    // Web redirect flow: hand the whole tab to GitHub and let it bring the
+    // visitor back already signed in — the callback sets the cookie and 302s
+    // to `return`. This is the path phones need: no device code to copy, no
+    // second tab to find, no GitHub "Congratulations" dead end. The device-code
+    // modal below is the fallback when no client secret is configured
+    // (cfg.webAuth false) and for anything without a browser (the CLI). On this
+    // path the page navigates away, so the promise intentionally never settles.
+    if (cfg.webAuth) {
+      var ret = cfg.signinReturn || (location.pathname + location.search + location.hash);
+      location.href = '/api/auth/web/login?return=' + encodeURIComponent(ret);
+      return new Promise(function () {});
+    }
     styles();
     return new Promise(function (resolve, reject) {
       var timer = null, done = false;
@@ -115,8 +131,9 @@
         var code = document.getElementById('tds-code');
         code.textContent = d.user_code;
         var cbtn = document.getElementById('tds-copy');
+        var copied = false;
+        function mark() { copied = true; cbtn.textContent = 'Copied'; cbtn.className = 'tds-copy done'; }
         function copyCode() {
-          var mark = function () { cbtn.textContent = 'Copied'; cbtn.className = 'tds-copy done'; };
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(d.user_code).then(mark, function () { selectCode(); });
           } else { selectCode(); }
@@ -132,11 +149,59 @@
         }
         cbtn.onclick = copyCode;
         code.onclick = copyCode;
+
+        // Put the code on the clipboard the moment it exists, so a visitor who
+        // lands on GitHub's login first (which never shows the code) can paste
+        // it without coming back for it — the miss this whole flow is built to
+        // avoid. On desktop the click that opened this modal still counts as
+        // recent activation, so this lands silently and the button reads
+        // "Copied". Where activation is gone (Safari drops it across the
+        // device/start round-trip) it stays quiet: no false "Copied", and the
+        // Open-GitHub tap below copies again from a real gesture. Never fall
+        // back to the "Press Ctrl+C" hint here — that's only honest after a
+        // real click.
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(d.user_code).then(mark, function () {});
+        }
+
         var uri = d.verification_uri_complete || d.verification_uri;
-        document.getElementById('tds-where').innerHTML =
-          'Paste it at <b>' + esc(d.verification_uri) + '</b> and approve.';
-        if (isGithubHttpsUrl(uri)) window.open(uri, '_blank', 'noopener');
-        status('Waiting for you to approve…');
+        var prefilled = !!d.verification_uri_complete;
+        var where = document.getElementById('tds-where');
+        // One hop to GitHub, and the visitor takes it. We deliberately do not
+        // open it for them: a dialog that yanks you to a fresh GitHub tab
+        // the instant it appears reads as a hijack, not a sign-in — and on
+        // desktop that scripted open actually lands, so the visitor is gone
+        // before they've read a word. A native target=_blank anchor is the only
+        // hop every browser honours anyway (a scripted open() after this await
+        // is outside the click's activation window, so Safari and in-app
+        // webviews swallow it or open it in this tab, losing the poll). The tap is a
+        // fresh gesture, so the new tab is allowed on phones too, and it copies
+        // the code as the visitor leaves. The anchor cannot navigate this page.
+        if (isGithubHttpsUrl(uri)) {
+          where.innerHTML = (prefilled
+              ? 'Open GitHub and approve — the code is already filled in.'
+              : 'Open GitHub, paste the code, and approve.')
+            + '<a class="tds-open" id="tds-open" href="' + esc(uri) + '"'
+            + ' target="_blank" rel="noopener noreferrer">'
+            + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0'
+            + ' 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422'
+            + ' 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305'
+            + ' 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176'
+            + ' 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24'
+            + ' 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015'
+            + ' 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>Open GitHub</a>';
+          // The tap copies the code (reliable gesture, and the belt to the
+          // auto-copy's braces if activation was gone above) and flips the
+          // status to waiting; the anchor itself opens the tab.
+          document.getElementById('tds-open').addEventListener('click', function () {
+            if (!copied) copyCode();
+            status('Waiting for you to approve…');
+          });
+          status('Click Open GitHub to approve, then come back to this tab.');
+        } else {
+          where.innerHTML = 'Paste it at <b>' + esc(d.verification_uri) + '</b> and approve.';
+          status('Waiting for you to approve…');
+        }
 
         var interval = Math.max(5, Number(d.interval) || 5);
         (function poll() {

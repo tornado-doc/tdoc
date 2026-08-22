@@ -105,6 +105,39 @@ PAYLOAD="$(jq -n \
   + (if $avatar != "" then {agent_avatar_url: $avatar} else {} end)
 ')"
 
+# Post the reply and gate on the outcome.
+#
+# Two things have to be checked or a rejected reply is indistinguishable from a
+# posted one: `curl -sS` exits 0 on HTTP 4xx/5xx (no --fail), and the server
+# also reports rejections as a 200 body carrying an "error" key
+# (e.g. {"error":"parent_not_found"}). Same shape as cf_api() in tdoc-publish.
+post_reply() {
+  local url="$1" tok="${2:-}"
+  local resp http body
+  if [ -n "$tok" ]; then
+    resp="$(curl -sS --max-time 20 -w $'\n%{http_code}' \
+      -X POST "$url" -H "Authorization: Bearer $tok" \
+      -H "Content-Type: application/json" -d "$PAYLOAD" 2>&1)" || {
+        echo "[tdoc] agent reply NOT posted: network error calling $url" >&2; return 1; }
+  else
+    resp="$(curl -sS --max-time 20 -w $'\n%{http_code}' \
+      -X POST "$url" -H "Content-Type: application/json" -d "$PAYLOAD" 2>&1)" || {
+        echo "[tdoc] agent reply NOT posted: network error calling $url" >&2; return 1; }
+  fi
+  http="${resp##*$'\n'}"        # last line = status code
+  body="${resp%$'\n'*}"         # everything before it = body
+  printf '%s\n' "$body"
+  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
+    echo "[tdoc] agent reply NOT posted: $url returned HTTP $http" >&2
+    return 1
+  fi
+  if printf '%s' "$body" | jq -e 'type == "object" and has("error")' >/dev/null 2>&1; then
+    echo "[tdoc] agent reply NOT posted: $(printf '%s' "$body" | jq -r '.error')" >&2
+    return 1
+  fi
+  return 0
+}
+
 CONFIG_FILE="$HOME/.tdoc/published.json"
 if [ -f "$CONFIG_FILE" ]; then
   PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
@@ -117,17 +150,10 @@ if [ -f "$CONFIG_FILE" ]; then
     BASE="https://${WORKER}.${SUBDOMAIN}.workers.dev"
   fi
   if [ -n "$TOKEN" ] && [ -n "$BASE" ] && [ "$BASE" != "https://." ]; then
-    curl -sS --max-time 20 -X POST "${BASE}/api/agent/reply" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$PAYLOAD"
-    echo
+    post_reply "${BASE}/api/agent/reply" "$TOKEN" || exit 1
     exit 0
   fi
 fi
 
 TDOC_PORT="${TDOC_PORT:-7878}"
-curl -sS --max-time 20 -X POST "http://localhost:${TDOC_PORT}/api/agent/reply" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD"
-echo
+post_reply "http://localhost:${TDOC_PORT}/api/agent/reply" || exit 1

@@ -8,6 +8,40 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Five house styles, a visual-first floor, and a new default.** The default
+  is now the stark-sans / OpenAI-index aesthetic (white, black, Inter, an
+  oversized tight-tracked headline) with a full technical-diagram vocabulary —
+  sharp black container frames, monospace pill labels, solid pastel accents with
+  dot- and hatch-textured variants, and stacked-bar composition. Named styles a
+  doc can select: `technical` (a theme-following engineering-blog register), `editorial` (a warm
+  serif long-read), and `paper` (a warm serif Anthropic-blog aesthetic). Brand
+  aesthetics are approximated with open fonts — no proprietary fonts, no logo or
+  byline, a look not an identity. `authoring/visuals.md` joins `voice.md` as a
+  required-reading floor: be visual-first, use many visuals of varied types, and
+  don't default to a flowchart. Every style states it works for ANY diagram type
+  and never limits which visuals a doc contains. `#194`.
+- **Two more house styles a doc can name.** `authoring/style/technical.md`
+  (cold engineering-blog register — mono, neutral greys, one sparing
+  red-orange accent; from judgmentlabs.ai) and `authoring/style/editorial.md`
+  (long-read essay — warm paper, serif body, electric-blue accent, colored
+  inline underlines; from cognition.com). Selected by naming them in a
+  `/tdoc new` prompt; `default.md` still applies when nothing is named.
+  `editorial.md` is the one style that overrides typography, and only the
+  ground color and body font. `#194`.
+- **Every generated doc goes through a voice contract.** New `authoring/`
+  directory, read at generation time. `authoring/voice.md` applies to
+  `/tdoc new` and every `/tdoc edit` regeneration — a floor, not a
+  user-selectable template, because nobody picks "make it sound like AI."
+  It adapts the vendored `no-ai-slop` rule set (Peter Yang, MIT) to
+  generation rather than editing, names the user's prompt as the voice
+  anchor, and fences off the spans prose rules must never rewrite: code,
+  identifiers, quoted material, and data. `authoring/style/` and
+  `authoring/structure/` ship as empty reserved mount points. `#194`.
+- **PR preview Worker (`tdoc-preview`).** Pull requests on tornado-doc/tdoc
+  get a unique `pr-<N>` preview URL and a sticky comment pointing at
+  `/d/conway-life/v/2` on that host — published chrome, not Local Studio,
+  not tdoc.dev, not a personal Worker. Own R2 + KV, no Durable Object
+  (Cloudflare will not mint preview URLs for a DO Worker). `#148`.
 - **Hosted tdoc.dev is multi-tenant.** GitHub sign-in mints a recoverable
   account-scoped upload token (`POST /api/hosted/token`). `/me` lists that
   user's slugs (`meta.hosted.github_login`), not the Worker operator's dump.
@@ -31,6 +65,13 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **tdoc logo in the top bar goes to My docs (`/me`).** On tdoc.dev that is
+  https://tdoc.dev/me. It used to go to `/` (the marketing homepage).
+  Local studio 302s `/me` to `/` because there is no hosted catalog.
+  `#191`.
+- **Project mark is SVG.** Overlay bar, unmatched agent avatars, and
+  `/tdoc_logo.svg` serve a vector Tornado Dog (`currentColor`, no embedded
+  bitmap). `/tdoc_logo.png` stays for Open Graph. `#161`.
 - **Overlay top bar sits in document flow** instead of `position: fixed`.
   Page HTML no longer scrolls underneath a floating strip; the bar (and the
   old-version strip) occupy the top of the layout.
@@ -55,6 +96,19 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **`tdoc-agent-reply` fails loudly.** A rejected reply used to exit 0, so a
+  comment that was never answered looked answered. `curl -sS` exits 0 on HTTP
+  4xx/5xx, and the server also reports rejections as a 200 body with an
+  `error` key, so a `post_reply` helper now gates on both and both transports
+  propagate its failure. Accepted replies still exit 0 and still print the
+  server body. `#141`.
+- **Notification clicks open the target doc and comment.** Inbox rows
+  go to `/d/<slug>/v/<n>?comment=<id>` (including from `/me` and `/`).
+  Same-doc clicks no longer pin the card and then immediately unpin it
+  because the click bubbled as an outside click. `?comment=` expands the
+  thread before the card is built, pins it, and on a phone opens the
+  comment drawer. Same-doc clicks also add `.open` on the live replies
+  list, so a collapsed thread actually shows the target reply. `#180`.
 - **Download PDF uses the browser print engine.** The JPEG-page wrap was
   ~100 DPI and looked mushy. PDF now prints `/export` (reader CSS, no bar)
   so Save as PDF keeps vector text.
