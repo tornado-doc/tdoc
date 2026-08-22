@@ -603,8 +603,8 @@
 
 
     <p class="eyebrow" style="text-align:left;margin-bottom:14px;">AI-native docs for research, reports &amp; analysis</p>
-    <h1 class="tagline">Your agent writes the doc.<br>You just comment.</h1>
-    <p class="sub"><span>No more endless AI chat threads or copy&#8209;pasting between apps. Your agent drafts it; you <span class="hsel" data-tdoc-select>leave every piece of feedback as a comment<i class="tcur"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M17 27V9a4 4 0 0 1 8 0v13h2.5a3.2 3.2 0 0 1 3.2 3.2V27h1.6a3 3 0 0 1 3 3v1.4a3 3 0 0 1 .7 2v4.1A7.5 7.5 0 0 1 28.5 45h-7.9a7.4 7.4 0 0 1-5.5-2.4l-6.8-7.6a3.4 3.4 0 0 1 5-4.6L17 33z" fill="#fff" stroke="#1F1E1D" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/></svg></i></span>, and it rewrites all of them into the next version.</span></p>
+    <h1 class="tagline">Humans and agents<br>collaborate over docs.</h1>
+    <p class="sub"><span>No more copy&#8209;pasting across apps, no endless formatting. Your agent drafts and formats; you and your team <span class="hsel" data-tdoc-select>just comment<i class="tcur"><svg viewBox="0 0 40 46" aria-hidden="true"><path d="M17 27V9a4 4 0 0 1 8 0v13h2.5a3.2 3.2 0 0 1 3.2 3.2V27h1.6a3 3 0 0 1 3 3v1.4a3 3 0 0 1 .7 2v4.1A7.5 7.5 0 0 1 28.5 45h-7.9a7.4 7.4 0 0 1-5.5-2.4l-6.8-7.6a3.4 3.4 0 0 1 5-4.6L17 33z" fill="#fff" stroke="#1F1E1D" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/></svg></i></span>, and it rewrites all of it.</span></p>
 
     <p class="trustline">
       <span><svg aria-hidden="true"><use href="#i-code"/></svg>Open source</span>
@@ -669,8 +669,8 @@
   .hd-omni svg{width:11px;height:11px;flex:none;opacity:.5;display:block}
   .hd-omni b{color:var(--ink);font-weight:600}
 
-  .hd-canvas{display:grid;grid-template-columns:1fr 300px;height:454px}
-  .hd-doc{padding:32px 36px 26px;border-right:1px solid var(--rule);position:relative;overflow:hidden}
+  .hd-canvas{display:grid;grid-template-columns:1fr 300px;height:590px}
+  .hd-doc{padding:32px 36px 30px;border-right:1px solid var(--rule);position:relative;overflow:hidden}
   .hd-ey{font:700 10.5px/1 system-ui;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 12px}
   .hd-doc h3{font:600 29px/1.15 var(--serif);color:var(--ink);letter-spacing:-.01em;margin:0 0 6px}
   .hd-by{font-size:12.5px;color:var(--muted);margin:0 0 18px}
@@ -695,14 +695,14 @@
   .hd-bars .l{font-size:10.5px;color:var(--muted)}
   @keyframes hgrow{from{transform:scaleY(0)}}
   @keyframes hrise{from{opacity:0;transform:translateY(6px)}}
-  .hd-scatter{width:100%;max-width:360px;height:auto;animation:hfade .7s ease both}
+  .hd-scatter{width:100%;height:auto;animation:hfade .7s ease both}
   @keyframes hfade{from{opacity:0;transform:translateY(10px)}}
   .hd-stack{display:flex;height:34px;border-radius:7px;overflow:hidden;border:1px solid var(--rule);animation:hwipe .9s cubic-bezier(.2,.8,.2,1) both}
   @keyframes hwipe{from{clip-path:inset(0 100% 0 0)}}
   .hd-stack i{display:grid;place-items:center;font:600 10px/1 var(--mono);color:#fff}
   .hd-sleg{display:flex;flex-wrap:wrap;gap:9px 15px;margin:11px 0 0;font-size:11px;color:var(--muted)}
   .hd-sleg span{display:inline-flex;align-items:center;gap:5px}.hd-sleg em{width:9px;height:9px;border-radius:2px}
-  .hd-fade{position:absolute;left:0;right:301px;bottom:0;height:44px;background:linear-gradient(transparent,#fff);pointer-events:none}
+  .hd-fade{position:absolute;left:0;right:301px;bottom:0;height:96px;background:linear-gradient(to bottom,rgba(255,255,255,0),#fff 82%);pointer-events:none}
 
   .hd-notes{background:#fafbfc;padding:20px 18px;display:flex;flex-direction:column}
   .hd-thread{border:1px solid var(--rule);border-radius:12px;background:#fff;padding:13px 14px}
@@ -727,6 +727,7 @@
     .hd:not(:has(input:checked)) .hd-w2,.hd:not(:has(input:checked)) .hd-w3{animation:none}
     .hd-bars .b,.hd-bars .v,.hd-scatter,.hd-stack{animation:none}
   }
+  @media (max-width:780px){ .hd-addr{display:none} }
   @media (max-width:560px){
     .wrap{margin:20px auto;padding:0 12px}
     .hd-win{border-radius:13px}
@@ -856,6 +857,7 @@
             <div class="hd-sleg"><span><em style="background:#1652f0"></em>repo 68k</span><span><em style="background:#4f7bf7"></em>connectors 44k</span><span><em style="background:#7a9bf9"></em>threads 36k</span><span><em style="background:#a9c0fb"></em>this doc 28k</span><span><em style="background:#eef1f8;box-shadow:0 0 0 1px var(--rule) inset"></em>free 24k</span></div>
           </div>
           <p>Nothing here is a new integration. Every source is already open in the session before tdoc is asked for anything.</p>
+          <p>The budget is the design constraint: once the window fills, the oldest thread drops and nobody is told.</p>
           <div class="hd-fade"></div>
         </div>
         <aside class="hd-notes"><div class="hd-thread">
