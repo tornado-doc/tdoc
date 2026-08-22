@@ -63,8 +63,12 @@ function waitReady(port, ms = 5000) {
   const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-api-'));
   PORT = await freePort();
   const serverPath = path.join(__dirname, '..', 'server', 'server.js');
+  const hermetic = { ...process.env, TDOC_DIR: TMP_DIR, TDOC_PORT: String(PORT), TDOC_HOST: '127.0.0.1' };
+  for (const k of Object.keys(hermetic)) {
+    if (/^(GROK_|CLAUDE_|CLAUDECODE$|CODEX_|CURSOR_|COMPOSER_|GEMINI_|XAI_|TDOC_AGENT_)/.test(k)) delete hermetic[k];
+  }
   const srv = spawn(process.execPath, [serverPath], {
-    env: { ...process.env, TDOC_DIR: TMP_DIR, TDOC_PORT: String(PORT), TDOC_HOST: '127.0.0.1' },
+    env: hermetic,
     stdio: 'ignore',
   });
   const shutdown = () => { try { srv.kill('SIGKILL'); } catch {} try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch {} };
@@ -106,6 +110,17 @@ function waitReady(port, ms = 5000) {
     if (list[0].replies[0].id !== replyId) throw new Error('reply id mismatch');
   });
 
+  await t('POST /api/comments with parent_id of a reply nests under that reply', async () => {
+    const r = await req('POST', '/api/comments', { slug: SLUG, parent_id: replyId, text: 'a nested reply' });
+    if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
+    if (r.body.parent_id !== replyId) throw new Error(`nested parent_id ${r.body.parent_id}`);
+    const after = await req('GET', `/api/comments?slug=${SLUG}`);
+    const replies = after.body[0].replies || [];
+    if (replies.length !== 2) throw new Error(`expected 2 replies, got ${replies.length}`);
+    const nested = replies.find(x => x.id === r.body.id);
+    if (!nested || nested.parent_id !== replyId) throw new Error('nested reply missing or wrong parent');
+  });
+
   await t('POST /api/reactions adds 👍 to top comment', async () => {
     const r = await req('POST', '/api/reactions', { slug: SLUG, comment_id: topId, emoji: '👍' });
     if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
@@ -123,12 +138,31 @@ function waitReady(port, ms = 5000) {
     if (!r.body.reactions['🔥']) throw new Error('reaction not stored on reply');
   });
 
+  await t('POST /api/agent/reply preserves agent identity', async () => {
+    const r = await req('POST', '/api/agent/reply', {
+      slug: SLUG,
+      parent_id: topId,
+      text: 'Applied the requested edit.',
+      status: 'applied',
+      applied_in: 2,
+      agent_login: 'codex-pm',
+      agent_name: 'Codex PM',
+    });
+    if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
+    if (r.body.author?.login !== 'codex-pm') throw new Error(`wrong agent login ${r.body.author?.login}`);
+    if (r.body.author?.name !== 'Codex PM') throw new Error(`wrong agent name ${r.body.author?.name}`);
+    const after = await req('GET', `/api/comments?slug=${SLUG}`);
+    const c = after.body[0];
+    if (c.agent_actor !== 'codex-pm') throw new Error(`wrong parent agent_actor ${c.agent_actor}`);
+    if (!c.reactions['✅']?.includes('codex-pm')) throw new Error('agent verdict reaction did not use agent login');
+  });
+
   await t('DELETE /api/comments?id=<reply-id> removes the reply, leaves top', async () => {
     const r = await req('DELETE', `/api/comments?slug=${SLUG}&id=${replyId}`);
     if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
     if (after.body.length !== 1) throw new Error('top comment was removed');
-    if (after.body[0].replies.length !== 0) throw new Error('reply not removed');
+    if (after.body[0].replies.some(r => r.id === replyId)) throw new Error('reply not removed');
   });
 
   await t('DELETE /api/comments?id=<top-id> removes the top comment', async () => {
@@ -136,6 +170,40 @@ function waitReady(port, ms = 5000) {
     if (r.status !== 200) throw new Error(`status ${r.status}`);
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
     if (after.body.length !== 0) throw new Error('top comment not removed');
+  });
+
+  function rawGet(p) {
+    return new Promise((resolve, reject) => {
+      const r = http.get({ host: HOST, port: PORT, path: p }, (res) => {
+        const chunks = [];
+        res.on('data', (d) => chunks.push(d));
+        res.on('end', () => resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks),
+        }));
+      });
+      r.on('error', reject);
+    });
+  }
+
+  await t('GET /tdoc_logo.svg is the vector mark', async () => {
+    const r = await rawGet('/tdoc_logo.svg');
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    const ct = String(r.headers['content-type'] || '');
+    if (!ct.includes('image/svg+xml')) throw new Error(`content-type ${ct}`);
+    const text = r.body.toString('utf8');
+    if (!/<svg[\s>]/.test(text)) throw new Error('body is not SVG');
+    if (!/currentColor/.test(text)) throw new Error('SVG does not follow currentColor');
+    if (/<image[\s>]|data:image\//i.test(text)) throw new Error('SVG embeds a bitmap');
+  });
+
+  await t('GET /tdoc_logo.png stays as the Open Graph raster', async () => {
+    const r = await rawGet('/tdoc_logo.png');
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    const ct = String(r.headers['content-type'] || '');
+    if (!ct.includes('image/png')) throw new Error(`content-type ${ct}`);
+    if (r.body[0] !== 0x89 || r.body[1] !== 0x50) throw new Error('body is not PNG');
   });
 
   // Cleanup: kill the spawned server + remove the temp dir.

@@ -4,6 +4,199 @@ All notable changes to tdoc are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow the `VERSION`
 file and `.claude-plugin/plugin.json`.
 
+## [Unreleased]
+
+### Added
+
+- **Five house styles, a visual-first floor, and a new default.** The default
+  is now the stark-sans / OpenAI-index aesthetic (white, black, Inter, an
+  oversized tight-tracked headline) with a full technical-diagram vocabulary —
+  sharp black container frames, monospace pill labels, solid pastel accents with
+  dot- and hatch-textured variants, and stacked-bar composition. Named styles a
+  doc can select: `technical` (a theme-following engineering-blog register), `editorial` (a warm
+  serif long-read), and `paper` (a warm serif Anthropic-blog aesthetic). Brand
+  aesthetics are approximated with open fonts — no proprietary fonts, no logo or
+  byline, a look not an identity. `authoring/visuals.md` joins `voice.md` as a
+  required-reading floor: be visual-first, use many visuals of varied types, and
+  don't default to a flowchart. Every style states it works for ANY diagram type
+  and never limits which visuals a doc contains. `#194`.
+- **Two more house styles a doc can name.** `authoring/style/technical.md`
+  (cold engineering-blog register — mono, neutral greys, one sparing
+  red-orange accent; from judgmentlabs.ai) and `authoring/style/editorial.md`
+  (long-read essay — warm paper, serif body, electric-blue accent, colored
+  inline underlines; from cognition.com). Selected by naming them in a
+  `/tdoc new` prompt; `default.md` still applies when nothing is named.
+  `editorial.md` is the one style that overrides typography, and only the
+  ground color and body font. `#194`.
+- **Every generated doc goes through a voice contract.** New `authoring/`
+  directory, read at generation time. `authoring/voice.md` applies to
+  `/tdoc new` and every `/tdoc edit` regeneration — a floor, not a
+  user-selectable template, because nobody picks "make it sound like AI."
+  It adapts the vendored `no-ai-slop` rule set (Peter Yang, MIT) to
+  generation rather than editing, names the user's prompt as the voice
+  anchor, and fences off the spans prose rules must never rewrite: code,
+  identifiers, quoted material, and data. `authoring/style/` and
+  `authoring/structure/` ship as empty reserved mount points. `#194`.
+- **PR preview Worker (`tdoc-preview`).** Pull requests on tornado-doc/tdoc
+  get a unique `pr-<N>` preview URL and a sticky comment pointing at
+  `/d/conway-life/v/2` on that host — published chrome, not Local Studio,
+  not tdoc.dev, not a personal Worker. Own R2 + KV, no Durable Object
+  (Cloudflare will not mint preview URLs for a DO Worker). `#148`.
+- **Hosted tdoc.dev is multi-tenant.** GitHub sign-in mints a recoverable
+  account-scoped upload token (`POST /api/hosted/token`). `/me` lists that
+  user's slugs (`meta.hosted.github_login`), not the Worker operator's dump.
+  Per-account doc quota (default 50) and upload-size cap (default 2 MB).
+  tdoc.dev enables signup by hostname; BYOK Workers stay single-owner unless
+  `TDOC_HOSTED_REGISTRATION` is set. `#131` `#154`.
+- **Duplicate vs Download on published docs.** The published bar no longer
+  uses **Fork** (which only downloaded a file). **Duplicate** makes a
+  content-only account copy for the signed-in GitHub user on tdoc.dev
+  (self-host: worker owner only). **Download** is one control with **Download
+  HTML** (`slug-vN.html`, reader CSS inlined) and **Download PDF**
+  (browser print of that reading column — Save as PDF, real text). No comments,
+  history, or widget islands in v1.
+
+- **Sandboxed interactive widgets.** Author JS still does not run in the host
+  document. Computation lives in `/d/:slug/v/:n/widget/:name`, loaded only as
+  `Sec-Fetch-Dest: iframe`, with `sandbox="allow-scripts"` on the iframe and
+  `Content-Security-Policy: sandbox allow-scripts` on the widget response
+  (unique origin even if the host iframe rewrite misses). Overlay comments
+  on the iframe as one artifact.
+
+### Changed
+
+- **tdoc logo in the top bar goes to My docs (`/me`).** On tdoc.dev that is
+  https://tdoc.dev/me. It used to go to `/` (the marketing homepage).
+  Local studio 302s `/me` to `/` because there is no hosted catalog.
+  `#191`.
+- **Project mark is SVG.** Overlay bar, unmatched agent avatars, and
+  `/tdoc_logo.svg` serve a vector Tornado Dog (`currentColor`, no embedded
+  bitmap). `/tdoc_logo.png` stays for Open Graph. `#161`.
+- **Overlay top bar sits in document flow** instead of `position: fixed`.
+  Page HTML no longer scrolls underneath a floating strip; the bar (and the
+  old-version strip) occupy the top of the layout.
+- **Site chrome on `/` and `/me` is no longer a document toolbar.** The
+  bar title is gone (those pages already have an h1). `/` keeps the
+  tdoc logo, a GitHub icon, appearance, and sign-in. The mark is the same
+  logo as the favicon, not a text pill.
+- **Doc title sits in the left cluster**, after the logo and version, not
+  in a fake-centered middle slot. Left and right chrome are different
+  widths, so a flex "center" never looked viewport-centered. Google Docs
+  and Notion keep the title on the left.
+
+- **Default `/tdoc publish` target is hosted tdoc.dev** (Cloudflare/Vercel via
+  `--platform`). First hosted publish runs GitHub Device Flow, then mints a
+  token bound to that login. Closed signup on a host that left registration
+  unset still fails clearly and points at self-host flags.
+- **`--platform` after first setup switches for real.** A conflicting flag
+  rewrites `~/.tdoc/published.json` via full re-setup (previous config kept as
+  `published.json.bak.switch` and restored if setup fails). Cloudflare setup
+  now persists `platform:"cloudflare"`. Same Worker custom domain vs
+  `*.workers.dev` remains two hostnames, not a platform switch.
+
+### Fixed
+
+- **`tdoc-agent-reply` fails loudly.** A rejected reply used to exit 0, so a
+  comment that was never answered looked answered. `curl -sS` exits 0 on HTTP
+  4xx/5xx, and the server also reports rejections as a 200 body with an
+  `error` key, so a `post_reply` helper now gates on both and both transports
+  propagate its failure. Accepted replies still exit 0 and still print the
+  server body. `#141`.
+- **Notification clicks open the target doc and comment.** Inbox rows
+  go to `/d/<slug>/v/<n>?comment=<id>` (including from `/me` and `/`).
+  Same-doc clicks no longer pin the card and then immediately unpin it
+  because the click bubbled as an outside click. `?comment=` expands the
+  thread before the card is built, pins it, and on a phone opens the
+  comment drawer. Same-doc clicks also add `.open` on the live replies
+  list, so a collapsed thread actually shows the target reply. `#180`.
+- **Download PDF uses the browser print engine.** The JPEG-page wrap was
+  ~100 DPI and looked mushy. PDF now prints `/export` (reader CSS, no bar)
+  so Save as PDF keeps vector text.
+- **tdoc.dev homepage publish no longer dies on a present-but-unwritten token.**
+  `#129` merged and deployed the Worker, then `publish-landing.yml` got
+  `401 unauthorized` because `TDOC_DEV_UPLOAD_TOKEN` existed in GitHub
+  Actions and had never been `wrangler secret put` onto the Worker.
+  Re-running that workflow with `sync_upload_token` writes the secret
+  once. Automatic publishes still do not rotate it.
+- **Homepage verify no longer fails a live landing page.** `set -o pipefail`
+  plus `echo "$body" | grep -q` SIGPIPEs on the 300kB homepage, so a
+  successful ship looked like the fallback. The check now uses bash
+  `[[ ]]`.
+- **`DELETE /api/doc` fails closed when hosted `release_owner` fails** and the
+  Durable Object binding is present, so a 200 cannot leave the slug parked.
+  Vercel (no `COMMENTS`) still returns 200 — there was never a reservation.
+- **Tables and wide diagrams are no longer clipped in the reader.** Overlay
+  table styles used a -14px left margin that cropped the first column inside
+  any `overflow-x:auto` wrapper, and `display:block` on `<table>` broke row
+  layout on narrow viewports. Tables now keep real table layout and scroll in
+  a wrapper; document SVGs keep their viewBox aspect ratio with overflow
+  visible.
+- **Dark mode no longer erases document button labels.** `color-scheme: dark`
+  plus page invert made unselected chips like "Differences only" paint
+  light-on-light, so the text vanished. Form controls stay in the light
+  scheme and invert with the rest of the page.
+- **Dark mode no longer recolors reaction emoji.** The page invert was
+  turning ❤️ / 👍 into off-hue bitmaps. Color emoji in chips and the
+  picker are wrapped and inverted back to native colors. Text reactions
+  like LGTM still invert with the page so they stay readable.
+- **Opening one notification no longer marks siblings in the same thread.**
+  Mark-read matches the exact comment/reply id, not the thread root.
+- **Clicking Reply no longer collapses the comment.** A hover-opened card
+  used to vanish as soon as you hit Reply (the click never pinned it, then
+  the pointer leaving the pin hid the card). Reply now pins the card and
+  keeps the thread expanded.
+- **Posting a reply no longer folds the thread.** After submit, refresh
+  used to rebuild the card with replies collapsed. The thread you just
+  replied in stays open.
+- **Open comment cards no longer follow the viewport.** An expanded card
+  used to clamp itself to the camera on scroll. It now stays next to its
+  pin and scrolls away with the page.
+
+### Added
+
+- **Search and batch delete on My docs (`/me`).** Filter the owner catalog by
+  title or slug, multi-select rows, and delete the selection in one confirm.
+  Still client-side over the KV title list (no extra R2/comment work at render);
+  access policy stays on the doc Share panel. Feedback is a tiny inline
+  top-right toast (`Deleted`) — no third-party toast library on the owner
+  session surface.
+- **BYOK update nag.** User-facing CLIs and the skill preamble compare this
+  checkout to `origin/main` and point at `/tdoc update --yes` when main is
+  ahead. Ahead-only feature branches stay silent; a true diverge does not
+  print a destroy/re-clone command. `tdoc-doctor` reports the same state as
+  `.update` (not a `missing_step`).
+- **In-app inbox (API).** Signed-in users have a per-host notification inbox.
+  New top-level comments notify the doc owner; replies notify only the
+  direct parent (Reddit); reactions notify the item author. Same-thread
+  events collapse to one unread row. `#118`.
+- **Notification badge and panel.** The profile chip shows a red unread
+  dot; Notifications in the existing profile menu opens the existing modal
+  with the last 20 rows (cluster rows, unread highlighted; one-line
+  action plus relative time). The
+  page polls every 8s so a new comment/reply/reaction
+  updates the dot and the doc without a manual refresh. Clicking a row
+  (or the comment in the doc) marks it read and opens that comment. `#118`.
+- **Dark mode switch in the top bar.** One icon in the menu bar flips light/dark via a page invert (so author colors, artifacts, and replies flip together). After you switch, the choice is stored in `localStorage` on that host and restored on later visits. Default stays light until you switch. `#120`.
+- **tdoc.dev's homepage is itself a tdoc.** `/` renders the `tornado-doc`
+  landing doc (`landing/tornado-doc`) at its latest version instead of a
+  hardcoded page, so the homepage is authored, reviewed, and versioned through
+  tdoc — and publishing v2 changes what it says without changing the URL that
+  inbound links and search engines point at. The page carries a full SEO head
+  (title, description, canonical, Open Graph, Twitter card) and doubles as the
+  artifact demo: its diagram and install block are commentable like any other
+  tdoc. `/` falls back to the previous neutral page when the landing doc is
+  unpublished or access-gated, so self-hosted workers are unaffected. `#127`.
+- **Nested replies.** You can reply to a reply (and to that reply), the way
+  Reddit and Hacker News do. Each node in the thread has its own Reply.
+- **Host-runtime logos on agent replies.** Claude / Codex / Grok / Cursor /
+  Gemini replies show that product's mark. Claude uses the Claude star, not
+  the Anthropic company logo. Anything else (`tdoc-agent`, unknown names)
+  uses `tdoc_logo.png` (the tdoc dinosaur), not a lightning bolt. Detection reads the host environment
+  (`CLAUDE_SESSION_ID`, `CODEX_HOME`, `GROK_SESSION_ID`, …) so agents do not
+  have to remember to pass `agent_login`. `bin/tdoc-agent-reply` stamps
+  identity before the request leaves the machine (the published Worker cannot
+  see your env).
+
 ## [0.9.0] - 2026-07-13
 
 ### Added — Vercel as a second publish target
@@ -179,5 +372,5 @@ were stuck on the buggy 0.7.9 until this bump.
   the pending tdoc highlight but never called `getSelection().removeAllRanges()`.
   Now cleared on submit / cancel / Esc / click-away.
 
-[0.7.10]: https://github.com/serenakeyitan/tdoc/releases/tag/v0.7.10
-[0.7.9]: https://github.com/serenakeyitan/tdoc/releases/tag/v0.7.9
+[0.7.10]: https://github.com/tornado-doc/tdoc/releases/tag/v0.7.10
+[0.7.9]: https://github.com/tornado-doc/tdoc/releases/tag/v0.7.9

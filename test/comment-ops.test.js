@@ -41,6 +41,7 @@ vm.runInContext([
   fn('cyrb53'), fn('aidFor'), konst('STAMPABLE_TAGS'), fn('isFiniteVersion'),
   region('legacyToEvents', 'compactComments'), // event-log helpers
   fn('reconcileAnchors'),
+  fn('findCommentThread'),
   fn('applyCommentOp'),
 ].join('\n\n'), box);
 const apply = box.applyCommentOp;
@@ -66,6 +67,18 @@ t('reply: appends to parent; 404 if parent missing', () => {
   assert(r.status === 200 && r.body.id === 'r1', 'reply not created');
   const miss = apply(list, { kind: 'reply', parent_id: 'nope', reply_id: 'r2', author: mkAuthor('b'), text: 'x', version: 1 });
   assert(miss.status === 404, 'missing parent should 404');
+});
+
+t('reply: can nest under an existing reply (HN-style)', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('a'), text: 'p', version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('b'), text: 'child', version: 1, at: '2026-01-02' });
+  const r = apply(list, { kind: 'reply', parent_id: 'r1', reply_id: 'r2', author: mkAuthor('a'), text: 'grandchild', version: 1, at: '2026-01-03' });
+  assert(r.status === 200 && r.body.id === 'r2', 'nested reply not created');
+  assert(r.body.parent_id === 'r1', `parent_id should be r1, got ${r.body.parent_id}`);
+  assert(r.body.thread_id === 'c1', `thread_id should be c1, got ${r.body.thread_id}`);
+  const ev = (list[0].events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === 'r2');
+  assert(ev && ev.reply.parent_id === 'r1', 'event should record immediate parent');
 });
 
 // ---- react: the toggle is the race-prone one ----

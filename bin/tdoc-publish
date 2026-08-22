@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# tdoc-publish — first-time setup + upload doc to the user's own hosting.
+# tdoc-publish — first-time setup + upload doc.
 #
-# Usage: tdoc-publish [--platform cloudflare|vercel] <slug>
+# Usage: tdoc-publish [--platform hosted|cloudflare|vercel] <slug>
 #
-# Two publish targets share one flow (the worker code and the /api/upload
-# contract are identical on both):
-#   cloudflare (default) — wrangler deploy to a Worker + R2 + KV
+# Three publish targets share the same /api/upload contract:
+#   hosted (default)     — upload to a tdoc-managed host (tdoc.dev); no user deploy
+#   cloudflare           — wrangler deploy to a Worker + R2 + KV you own
 #   vercel               — vercel deploy of the vercel/ template + Blob + Upstash KV
-# The platform is chosen ONCE, on the first publish (flag or TDOC_PLATFORM
-# env), then persisted in ~/.tdoc/published.json and read from there.
+# Default platform is chosen on first publish (flag or TDOC_PLATFORM env),
+# then persisted in ~/.tdoc/published.json. Later publishes reuse that default.
+# Pass a different --platform any time to switch: full re-setup rewrites the
+# config (previous file kept as published.json.bak.switch). Same hostname pair
+# on one Worker (e.g. tdoc.dev + *.workers.dev) is NOT a platform switch.
+#
+# First run (hosted):
+#   1. Ask the tdoc-managed host for an account-scoped upload token
+#   2. Save the hosted base + token to ~/.tdoc/published.json
+#   3. Upload the doc. No Cloudflare/Vercel/OAuth app setup.
+#   If hosted signup is closed, fail clearly and point at --platform cloudflare|vercel.
 #
 # First run (cloudflare):
 #   1. Verify wrangler installed + logged in
@@ -20,19 +29,46 @@
 #
 # First run (vercel): see first_time_setup_vercel below.
 #
-# Subsequent runs:
+# Subsequent runs (same platform):
 #   Just upload the requested slug via /api/upload.
 
 set -euo pipefail
+# BYOK: tell the user immediately when this checkout is behind origin/main.
+# Human nag on stderr; discard the machine line (skill preamble / doctor).
+"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
 
-usage() { echo "usage: tdoc-publish [--platform cloudflare|vercel] <slug>" >&2; exit 1; }
+usage() {
+  cat >&2 <<'EOF'
+usage: tdoc-publish [options] <slug>
+
+Options:
+  --platform hosted|cloudflare|vercel    (default for first publish: hosted; re-pass to switch)
+  --visibility public|unlisted|private   (default for new access block: unlisted)
+  --history owner|invited|public         (default for new access block: owner)
+  --commenting owner|invited|signed_in|off  (default: signed_in)
+  --allow-user <github-login>            (repeatable; private/shared allowlist)
+EOF
+  exit 1
+}
 
 SLUG=""
 PLATFORM_FLAG="${TDOC_PLATFORM:-}"
+VISIBILITY_FLAG=""
+HISTORY_FLAG=""
+COMMENTING_FLAG=""
+ALLOW_USERS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)   PLATFORM_FLAG="${2:-}"; [ -n "$PLATFORM_FLAG" ] || usage; shift 2 ;;
     --platform=*) PLATFORM_FLAG="${1#--platform=}"; [ -n "$PLATFORM_FLAG" ] || usage; shift ;;
+    --visibility) VISIBILITY_FLAG="${2:-}"; [ -n "$VISIBILITY_FLAG" ] || usage; shift 2 ;;
+    --visibility=*) VISIBILITY_FLAG="${1#--visibility=}"; [ -n "$VISIBILITY_FLAG" ] || usage; shift ;;
+    --history) HISTORY_FLAG="${2:-}"; [ -n "$HISTORY_FLAG" ] || usage; shift 2 ;;
+    --history=*) HISTORY_FLAG="${1#--history=}"; [ -n "$HISTORY_FLAG" ] || usage; shift ;;
+    --commenting) COMMENTING_FLAG="${2:-}"; [ -n "$COMMENTING_FLAG" ] || usage; shift 2 ;;
+    --commenting=*) COMMENTING_FLAG="${1#--commenting=}"; [ -n "$COMMENTING_FLAG" ] || usage; shift ;;
+    --allow-user) [ -n "${2:-}" ] || usage; ALLOW_USERS+=("$2"); shift 2 ;;
+    --allow-user=*) ALLOW_USERS+=("${1#--allow-user=}"); shift ;;
     # Anything else is treated as the slug — including dash-leading junk,
     # which the kebab-case validator below rejects with a precise message.
     *)  [ -z "$SLUG" ] || usage; SLUG="$1"; shift ;;
@@ -173,6 +209,132 @@ require_vercel() {
       "Install the Vercel CLI globally so tdoc can publish: run 'npm i -g vercel' (or 'pnpm add -g vercel'). After it's installed, run '/tdoc publish $SLUG' again."
   fi
 }
+
+# GitHub Device Flow against the hosted Worker. Writes the session cookie into
+# $2 (curl cookie jar) so /api/hosted/token can bind the upload token to the
+# signed-in login. Same shape as the overlay sign-in, for the CLI.
+hosted_github_signin() {
+  local base="$1" cookiejar="$2"
+  local resp http payload
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+    -X POST "$base/api/auth/device/start" -H "Content-Type: application/json" -d '{}')" || {
+      fail_with_agent_prompt "hosted GitHub sign-in is unreachable" \
+        "The hosted tdoc service at $base did not start GitHub sign-in. Retry '/tdoc publish $SLUG' later, or self-host with '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+    }
+  http="${resp##*$'\n'}"
+  payload="${resp%$'\n'*}"
+  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
+    echo "[tdoc] GitHub device-flow start returned HTTP $http" >&2
+    printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+    exit 1
+  fi
+  local user_code device_code uri interval expires
+  user_code="$(printf '%s' "$payload" | jq -r '.user_code // empty')"
+  device_code="$(printf '%s' "$payload" | jq -r '.device_code // empty')"
+  uri="$(printf '%s' "$payload" | jq -r '.verification_uri_complete // .verification_uri // empty')"
+  interval="$(printf '%s' "$payload" | jq -r '.interval // 5')"
+  expires="$(printf '%s' "$payload" | jq -r '.expires_in // 900')"
+  if [ -z "$user_code" ] || [ -z "$device_code" ] || [ -z "$uri" ]; then
+    echo "[tdoc] GitHub device-flow start was missing user_code/device_code." >&2
+    printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+    exit 1
+  fi
+  case "$interval" in ''|*[!0-9]*) interval=5 ;; esac
+  [ "$interval" -lt 5 ] && interval=5
+  case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
+  echo "[tdoc] Sign in with GitHub to publish on $base" >&2
+  echo "[tdoc] Open: $uri" >&2
+  echo "[tdoc] Code: $user_code" >&2
+  echo "[tdoc] Waiting for GitHub approval…" >&2
+  local waited=0 err
+  while [ "$waited" -lt "$expires" ]; do
+    sleep "$interval"
+    waited=$((waited + interval))
+    resp="$(curl -sS --connect-timeout 10 --max-time 30 -c "$cookiejar" -b "$cookiejar" -w $'\n%{http_code}' \
+      -X POST "$base/api/auth/device/poll" -H "Content-Type: application/json" \
+      -d "{\"device_code\":\"$(printf '%s' "$device_code" | sed 's/"/\\"/g')\"}")" || continue
+    http="${resp##*$'\n'}"
+    payload="${resp%$'\n'*}"
+    if printf '%s' "$payload" | jq -e '.ok == true' >/dev/null 2>&1; then
+      echo "[tdoc] Signed in as $(printf '%s' "$payload" | jq -r '.identity.login // "github user"')" >&2
+      return 0
+    fi
+    err="$(printf '%s' "$payload" | jq -r '.error // empty')"
+    case "$err" in
+      authorization_pending|'') ;;
+      slow_down) interval=$((interval + 5)) ;;
+      expired_token|access_denied)
+        fail_with_agent_prompt "GitHub sign-in expired or was denied" \
+          "Retry '/tdoc publish $SLUG' and approve the GitHub device code shown in the terminal."
+        ;;
+      *)
+        echo "[tdoc] GitHub sign-in error: ${err:-HTTP $http}" >&2
+        printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+        exit 1
+        ;;
+    esac
+  done
+  fail_with_agent_prompt "GitHub sign-in timed out" \
+    "Retry '/tdoc publish $SLUG' and approve the GitHub device code before it expires. To self-host instead, run '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+}
+
+first_time_setup_hosted() {
+  local base="${TDOC_HOSTED_BASE:-https://tdoc.dev}"
+  base="${base%/}"
+  case "$base" in
+    http://*|https://*) ;;
+    *) echo "[tdoc] TDOC_HOSTED_BASE must start with http:// or https:// (got '$base')." >&2; exit 1 ;;
+  esac
+  local cookiejar resp http payload token account_id github_login
+  cookiejar="$(mktemp -t tdoc-hosted-cookie.XXXXXX)"
+  hosted_github_signin "$base" "$cookiejar"
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -b "$cookiejar" -w $'\n%{http_code}' \
+    -X POST "$base/api/hosted/token" -H "Content-Type: application/json" \
+    -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\"}" 2>&1)" || {
+      rm -f "$cookiejar"
+      fail_with_agent_prompt "hosted service is unreachable" \
+        "The hosted tdoc service at $base did not respond. Retry '/tdoc publish $SLUG' later, or set TDOC_HOSTED_BASE to the correct hosted URL. To self-host instead, run '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+    }
+  rm -f "$cookiejar"
+  http="${resp##*$'\n'}"
+  payload="${resp%$'\n'*}"
+  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
+    if printf '%s' "$payload" | grep -q 'hosted_registration_disabled'; then
+      fail_with_agent_prompt "hosted signup is not open on $base" \
+        "The default publish target is hosted tdoc ($base), but self-serve signup is not enabled there. Publish to your own account instead: '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+    fi
+    if printf '%s' "$payload" | grep -q 'sign_in_required'; then
+      fail_with_agent_prompt "hosted publish requires GitHub sign-in" \
+        "Retry '/tdoc publish $SLUG' and complete the GitHub device-flow prompt. To self-host instead, run '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+    fi
+    echo "[tdoc] hosted token request returned HTTP $http" >&2
+    printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+    exit 1
+  fi
+  token="$(printf '%s' "$payload" | jq -r '.token // empty')"
+  account_id="$(printf '%s' "$payload" | jq -r '.account_id // empty')"
+  github_login="$(printf '%s' "$payload" | jq -r '.github_login // empty')"
+  if [ -z "$token" ] || [ -z "$account_id" ]; then
+    echo "[tdoc] hosted token response was missing token/account_id." >&2
+    printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+    exit 1
+  fi
+  local public_host="${base#http://}"
+  public_host="${public_host#https://}"
+  (
+    umask 077
+    jq -n \
+      --arg tok "$token" \
+      --arg base "$base" \
+      --arg host "$public_host" \
+      --arg acct "$account_id" \
+      --arg gh "$github_login" \
+      '{platform:"hosted", upload_token:$tok, base:$base, public_host:$host, account_id:$acct, github_login:$gh, created: now | todate}' \
+      > "$CONFIG_FILE"
+  )
+  chmod 600 "$CONFIG_FILE"
+  echo "[tdoc] hosted publish configured: $base"
+}
 if ! command -v jq >/dev/null 2>&1; then
   fail_with_agent_prompt "jq is not installed" \
     "Install jq so tdoc can build its publish payload. On macOS: 'brew install jq'. On Debian/Ubuntu: 'sudo apt-get install -y jq'. Then run '/tdoc publish $SLUG' again."
@@ -189,28 +351,50 @@ fi
 
 # --- bundle overlay.js into worker source ---
 # Writes _worker.bundled.js into $1 (defaults to the wrangler worker dir; the
-# vercel path passes its own app dir).
+# vercel path passes its own app dir). Shared with the tdoc.dev CD workflow.
 bundle_worker() {
   local out_dir="${1:-$WORKER_DIR}"
-  local out="$out_dir/_worker.bundled.js"
-  OUT_DIR="$out_dir" node -e '
+  OUT_DIR="$out_dir" TDOC_GENERATED_BY="${TDOC_GENERATED_BY:-tdoc-publish}" \
+    node "$SKILL_DIR/bin/tdoc-bundle"
+}
+
+worker_bundle_sha() {
+  node -e '
     const fs = require("fs");
     const path = require("path");
+    const crypto = require("crypto");
     const skill = process.env.SKILL_DIR;
     const worker = fs.readFileSync(path.join(skill, "worker/worker.js"), "utf8");
     const overlay = fs.readFileSync(path.join(skill, "server/overlay.js"), "utf8");
-    // Replace the whole declaration so JSON.stringify safely escapes everything.
-    const replaced = worker.replace(
-      /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
-      "const OVERLAY_JS = " + JSON.stringify(overlay) + ";"
-    );
-    if (replaced === worker) {
-      console.error("bundle: failed to find OVERLAY_JS placeholder");
-      process.exit(1);
-    }
-    fs.writeFileSync(path.join(process.env.OUT_DIR, "_worker.bundled.js"), replaced);
+    process.stdout.write(crypto.createHash("sha256").update(worker + "\0" + overlay).digest("hex"));
   '
-  echo "bundled: $out"
+}
+
+vercel_bundle_sha() {
+  node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const crypto = require("crypto");
+    const skill = process.env.SKILL_DIR;
+    const h = crypto.createHash("sha256");
+    for (const rel of ["worker/worker.js", "server/overlay.js", "shared/github-oauth.js"]) {
+      h.update(rel); h.update("\0"); h.update(fs.readFileSync(path.join(skill, rel))); h.update("\0");
+    }
+    const dir = path.join(skill, "vercel");
+    const walk = (d) => {
+      for (const name of fs.readdirSync(d).sort()) {
+        const p = path.join(d, name);
+        const st = fs.statSync(p);
+        if (st.isDirectory()) walk(p);
+        else {
+          const rel = path.relative(skill, p);
+          h.update(rel); h.update("\0"); h.update(fs.readFileSync(p)); h.update("\0");
+        }
+      }
+    };
+    walk(dir);
+    process.stdout.write(h.digest("hex"));
+  '
 }
 
 first_time_setup() {
@@ -318,6 +502,8 @@ first_time_setup() {
   else
     echo "[tdoc] no GitHub login detected — doc catalog stays private (link-only)."
   fi
+  # GITHUB_CLIENT_ID comes from wrangler.toml.template (kept in sync with
+  # shared/github-oauth.js by test/no-drift.test.js).
   sed \
     -e "s/PLACEHOLDER_KV_ID/${kv_id}/g" \
     -e "s/PLACEHOLDER_OWNER/${owner_login}/g" \
@@ -344,7 +530,7 @@ first_time_setup() {
       --arg worker "$worker_name" \
       --arg host "$PUBLIC_HOST" \
       --arg custom "$CUSTOM_DOMAIN" \
-      '{subdomain:$sub, upload_token:$tok, kv_id:$kv, worker:$worker, public_host:$host, custom_domain:$custom, created: now | todate}' \
+      '{platform:"cloudflare", subdomain:$sub, upload_token:$tok, kv_id:$kv, worker:$worker, public_host:$host, custom_domain:$custom, created: now | todate}' \
       > "$CONFIG_FILE"
   )
   chmod 600 "$CONFIG_FILE"
@@ -379,6 +565,9 @@ sync_vercel_app() {
   mkdir -p "$VERCEL_APP_DIR/api" "$VERCEL_APP_DIR/lib"
   cp "$SKILL_DIR/vercel/api/"*.js "$VERCEL_APP_DIR/api/"
   cp "$SKILL_DIR/vercel/lib/"*.js "$VERCEL_APP_DIR/lib/"
+  # Flat-copy SoT so api/tdoc.js can require('../lib/github-oauth.js') without
+  # a ../../shared hop (vercel-app is outside the skill checkout).
+  cp "$SKILL_DIR/shared/github-oauth.js" "$VERCEL_APP_DIR/lib/github-oauth.js"
   cp "$SKILL_DIR/vercel/vercel.json" "$SKILL_DIR/vercel/package.json" "$VERCEL_APP_DIR/"
   SKILL_DIR="$SKILL_DIR" bundle_worker "$VERCEL_APP_DIR"
 }
@@ -490,24 +679,59 @@ first_time_setup_vercel() {
   echo "[tdoc] setup done. tdoc is live at: https://${public_host}"
 }
 
-if [ ! -f "$CONFIG_FILE" ]; then
-  case "${PLATFORM_FLAG:-cloudflare}" in
+run_platform_setup() {
+  case "$1" in
+    hosted)     first_time_setup_hosted ;;
     cloudflare) SKILL_DIR="$SKILL_DIR" first_time_setup ;;
     vercel)     SKILL_DIR="$SKILL_DIR" first_time_setup_vercel ;;
-    *) echo "[tdoc] unknown platform '${PLATFORM_FLAG}' — use 'cloudflare' or 'vercel'." >&2; exit 1 ;;
+    *) echo "[tdoc] unknown platform '${1}' — use 'hosted', 'cloudflare', or 'vercel'." >&2; exit 1 ;;
   esac
+}
+
+if [ ! -f "$CONFIG_FILE" ]; then
+  run_platform_setup "${PLATFORM_FLAG:-hosted}"
+else
+  # Existing config is the default. An explicit --platform that differs
+  # rewrites published.json via full re-setup (not a half-migrate).
+  PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
+  if [ -n "$PLATFORM_FLAG" ] && [ "$PLATFORM_FLAG" != "$PLATFORM" ]; then
+    echo "[tdoc] switching publish platform from '$PLATFORM' to '$PLATFORM_FLAG' (rewriting $CONFIG_FILE)."
+    CONFIG_BACKUP="${CONFIG_FILE}.bak.switch"
+    cp "$CONFIG_FILE" "$CONFIG_BACKUP"
+    chmod 600 "$CONFIG_BACKUP"
+    SETUP_OK=0
+    restore_config_on_fail() {
+      if [ "${SETUP_OK:-0}" != "1" ] && [ -f "$CONFIG_BACKUP" ]; then
+        mv "$CONFIG_BACKUP" "$CONFIG_FILE"
+        echo "[tdoc] platform switch failed — restored previous config." >&2
+      fi
+    }
+    trap restore_config_on_fail EXIT
+    run_platform_setup "$PLATFORM_FLAG"
+    SETUP_OK=1
+    trap - EXIT
+    echo "[tdoc] previous config kept at $CONFIG_BACKUP"
+  fi
 fi
 
-# The platform is whatever the config says from here on. A conflicting
-# --platform flag is ignored loudly rather than half-migrating state.
 PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
-if [ -n "$PLATFORM_FLAG" ] && [ "$PLATFORM_FLAG" != "$PLATFORM" ]; then
-  echo "[tdoc] already set up for '$PLATFORM' — ignoring '--platform $PLATFORM_FLAG'. To switch platforms, delete $CONFIG_FILE and publish again." >&2
-fi
 
 TOKEN="$(jq -r .upload_token "$CONFIG_FILE")"
 
-if [ "$PLATFORM" = "vercel" ]; then
+if [ "$PLATFORM" = "hosted" ]; then
+  BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
+  PUBLIC_HOST="$(jq -r '.public_host // empty' "$CONFIG_FILE")"
+  for _f in TOKEN:upload_token BASE:base PUBLIC_HOST:public_host; do
+    _var="${_f%%:*}"; _key="${_f##*:}"; _val="$(eval "printf '%s' \"\$$_var\"")"
+    if [ -z "$_val" ] || [ "$_val" = "null" ]; then
+      echo "[tdoc] $CONFIG_FILE is missing or has a null '$_key'. Delete it and re-run /tdoc publish --platform hosted to re-setup." >&2
+      exit 1
+    fi
+  done
+  UPLOAD_BASE="$BASE"
+  PUBLIC_BASE="$BASE"
+  CUSTOM_DOMAIN=""
+elif [ "$PLATFORM" = "vercel" ]; then
   BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
   # Validate like the cloudflare branch below: a corrupt or partial
   # published.json must fail loudly, not publish to "null".
@@ -522,14 +746,15 @@ if [ "$PLATFORM" = "vercel" ]; then
   CUSTOM_DOMAIN=""
   [ -n "$PUBLIC_HOST" ] || PUBLIC_HOST="${BASE#https://}"
 
-  # --- redeploy if worker/overlay/template is newer than the bundled file ---
+  # --- redeploy if worker/overlay/template content changed ---
   # Skipped via TDOC_SKIP_WORKER_DEPLOY=1 (useful for batch uploads in tests).
+  # Store a content hash in published.json so copied files, clock skew, or
+  # stale mtimes cannot make "already deployed" look true.
   BUNDLED="$VERCEL_APP_DIR/_worker.bundled.js"
   if [ "${TDOC_SKIP_WORKER_DEPLOY:-0}" != "1" ]; then
-    if [ ! -f "$BUNDLED" ] \
-      || [ "$SKILL_DIR/server/overlay.js" -nt "$BUNDLED" ] \
-      || [ "$SKILL_DIR/worker/worker.js" -nt "$BUNDLED" ] \
-      || [ -n "$(find "$SKILL_DIR/vercel" -type f -newer "$BUNDLED" 2>/dev/null | head -1)" ]; then
+    DESIRED_BUNDLE_SHA="$(SKILL_DIR="$SKILL_DIR" vercel_bundle_sha)"
+    DEPLOYED_BUNDLE_SHA="$(jq -r '.vercel_bundle_sha256 // empty' "$CONFIG_FILE")"
+    if [ ! -f "$BUNDLED" ] || [ "$DESIRED_BUNDLE_SHA" != "$DEPLOYED_BUNDLE_SHA" ]; then
       require_vercel
       echo "[tdoc] worker code changed locally — redeploying to Vercel..."
       sync_vercel_app
@@ -541,6 +766,8 @@ if [ "$PLATFORM" = "vercel" ]; then
           && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE" && chmod 600 "$CONFIG_FILE"
         BASE="$NEW_BASE"
       fi
+      jq --arg sha "$DESIRED_BUNDLE_SHA" '.vercel_bundle_sha256 = $sha' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" \
+        && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE" && chmod 600 "$CONFIG_FILE"
     fi
   fi
   UPLOAD_BASE="$BASE"
@@ -567,13 +794,15 @@ else
   UPLOAD_BASE="https://${WORKER_NAME}.${SUBDOMAIN}.workers.dev"
   PUBLIC_BASE="https://${PUBLIC_HOST}"
 
-  # --- redeploy worker if overlay.js / worker.js is newer than the bundled file ---
+  # --- redeploy worker if overlay.js / worker.js content changed ---
   # Skipped via TDOC_SKIP_WORKER_DEPLOY=1 (useful for batch uploads in tests).
+  # Do not trust mtimes here: copied files and branch switches can preserve or
+  # skew timestamps. The content hash is the release contract.
   BUNDLED="$WORKER_DIR/_worker.bundled.js"
   if [ "${TDOC_SKIP_WORKER_DEPLOY:-0}" != "1" ]; then
-    if [ ! -f "$BUNDLED" ] \
-      || [ "$SKILL_DIR/server/overlay.js" -nt "$BUNDLED" ] \
-      || [ "$SKILL_DIR/worker/worker.js" -nt "$BUNDLED" ]; then
+    DESIRED_BUNDLE_SHA="$(SKILL_DIR="$SKILL_DIR" worker_bundle_sha)"
+    DEPLOYED_BUNDLE_SHA="$(jq -r '.worker_bundle_sha256 // empty' "$CONFIG_FILE")"
+    if [ ! -f "$BUNDLED" ] || [ "$DESIRED_BUNDLE_SHA" != "$DEPLOYED_BUNDLE_SHA" ]; then
       require_wrangler
       echo "[tdoc] worker code changed locally — redeploying..."
       # Backfill TDOC_OWNER into an existing wrangler.toml that predates the
@@ -595,8 +824,24 @@ else
         [ -n "$_ol" ] && echo "[tdoc] backfilled TDOC_OWNER=$_ol into wrangler.toml" \
           || echo "[tdoc] TDOC_OWNER left empty (catalog stays private)."
       fi
+      # Retire the personal-account OAuth client id on existing BYOK workers.
+      if [ -f "$WORKER_DIR/wrangler.toml" ] && [ -f "$SKILL_DIR/shared/github-oauth.js" ]; then
+        _gh="$(node -e 'console.log(require(process.argv[1]).GITHUB_CLIENT_ID)' \
+          "$SKILL_DIR/shared/github-oauth.js" 2>/dev/null || true)"
+        if [ -n "$_gh" ] && grep -Eq 'Ov23liZ1UAGOchvKPmlS|PLACEHOLDER_GITHUB_CLIENT_ID' \
+          "$WORKER_DIR/wrangler.toml"; then
+          awk -v id="$_gh" '
+            /^GITHUB_CLIENT_ID[[:space:]]*=/ { print "GITHUB_CLIENT_ID = \"" id "\""; next }
+            { print }
+          ' "$WORKER_DIR/wrangler.toml" > "$WORKER_DIR/wrangler.toml.tmp" \
+            && mv "$WORKER_DIR/wrangler.toml.tmp" "$WORKER_DIR/wrangler.toml"
+          echo "[tdoc] updated GITHUB_CLIENT_ID to org OAuth SoT ($_gh)"
+        fi
+      fi
       SKILL_DIR="$SKILL_DIR" bundle_worker
       (cd "$WORKER_DIR" && wrangler deploy)
+      jq --arg sha "$DESIRED_BUNDLE_SHA" '.worker_bundle_sha256 = $sha' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" \
+        && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE" && chmod 600 "$CONFIG_FILE"
     fi
   fi
 fi
@@ -606,6 +851,43 @@ META_FILE="$DOC_DIR/meta.json"
 if [ ! -f "$META_FILE" ]; then
   echo "no meta.json at $META_FILE" >&2
   exit 1
+fi
+
+# JUL-31 access policy: merge flags into local meta.json so /api/upload
+# carries them. Defaults for a brand-new access block: unlisted + owner
+# history (pure publish). Existing access blocks keep unspecified fields.
+if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG" ] || [ ${#ALLOW_USERS[@]} -gt 0 ]; then
+  case "${VISIBILITY_FLAG:-}" in
+    ''|public|unlisted|private) ;;
+    *) echo "[tdoc] invalid --visibility '$VISIBILITY_FLAG' (public|unlisted|private)" >&2; exit 1 ;;
+  esac
+  case "${HISTORY_FLAG:-}" in
+    ''|owner|invited|public) ;;
+    *) echo "[tdoc] invalid --history '$HISTORY_FLAG' (owner|invited|public)" >&2; exit 1 ;;
+  esac
+  case "${COMMENTING_FLAG:-}" in
+    ''|owner|invited|signed_in|off) ;;
+    *) echo "[tdoc] invalid --commenting '$COMMENTING_FLAG' (owner|invited|signed_in|off)" >&2; exit 1 ;;
+  esac
+  ALLOW_JSON='[]'
+  if [ ${#ALLOW_USERS[@]} -gt 0 ]; then
+    ALLOW_JSON="$(printf '%s
+' "${ALLOW_USERS[@]}" | jq -R . | jq -s .)"
+  fi
+  tmp_meta="$(mktemp -t tdoc-meta.XXXXXX)"
+  jq     --arg vis "${VISIBILITY_FLAG}"     --arg hist "${HISTORY_FLAG}"     --arg comm "${COMMENTING_FLAG}"     --argjson allow "$ALLOW_JSON"     '
+      .access = (.access // {})
+      | .access.visibility = (if $vis != "" then $vis else (.access.visibility // "unlisted") end)
+      | .access.history_visibility = (if $hist != "" then $hist else (.access.history_visibility // "owner") end)
+      | .access.commenting = (if $comm != "" then $comm else (.access.commenting // "signed_in") end)
+      | .access.allowed_users = (
+          if ($allow|length) > 0 then
+            (((.access.allowed_users // []) + $allow) | map(ascii_downcase|sub("^github:";"")|sub("^@";"")) | unique)
+          else (.access.allowed_users // []) end
+        )
+    ' "$META_FILE" > "$tmp_meta"
+  mv "$tmp_meta" "$META_FILE"
+  echo "[tdoc] access → $(jq -c .access "$META_FILE")"
 fi
 
 VERSION="$(jq -r '.versions | sort_by(.n) | last | .n' "$META_FILE")"
@@ -626,6 +908,16 @@ upload_version() {
   # upload is safe. Default to [] when there's no local comments.json.
   local comments_file="$DOC_DIR/comments.json"
   local payload
+  local widgets_json="{}"
+  local wdir="$DOC_DIR/v${v}/widgets"
+  if [ -d "$wdir" ]; then
+    local wf wname
+    for wf in "$wdir"/*.html; do
+      [ -f "$wf" ] || continue
+      wname="$(basename "$wf" .html)"
+      widgets_json="$(jq -n --argjson acc "$widgets_json" --arg name "$wname" --rawfile html "$wf" '$acc + {($name): $html}')" || return 1
+    done
+  fi
   if [ -f "$comments_file" ] && jq -e 'type == "array" and length > 0' "$comments_file" >/dev/null 2>&1; then
     payload="$(jq -n \
       --arg slug "$SLUG" \
@@ -633,14 +925,16 @@ upload_version() {
       --rawfile html "$html_path" \
       --slurpfile meta "$META_FILE" \
       --slurpfile comments "$comments_file" \
-      '{slug:$slug, version:$version, html:$html, meta: $meta[0], comments: $comments[0]}')"
+      --argjson widgets "$widgets_json" \
+      '{slug:$slug, version:$version, html:$html, meta: $meta[0], comments: $comments[0]} + (if $widgets == {} then {} else {widgets:$widgets} end)')"
   else
     payload="$(jq -n \
       --arg slug "$SLUG" \
       --argjson version "$v" \
       --rawfile html "$html_path" \
       --slurpfile meta "$META_FILE" \
-      '{slug:$slug, version:$version, html:$html, meta: $meta[0]}')"
+      --argjson widgets "$widgets_json" \
+      '{slug:$slug, version:$version, html:$html, meta: $meta[0]} + (if $widgets == {} then {} else {widgets:$widgets} end)')"
   fi
   # Pass the payload via a temp file, not an argument — docs with embedded
   # images exceed ARG_MAX as a curl argument (curl: Argument list too long).

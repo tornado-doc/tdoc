@@ -10,8 +10,10 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const net = require('net');
 
-const PORT = 7895;
+const HOST = '127.0.0.1';
+let PORT = 0;
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-pub-'));
 const SLUG = 'publish-test';
 const DOC_DIR = path.join(TMP, SLUG, 'v1');
@@ -26,10 +28,19 @@ function ok(n) { console.log(`  ✓ ${n}`); pass++; }
 function bad(n, e) { console.log(`  ✗ ${n}\n    ${e.stack || e.message || e}`); fail++; }
 async function t(name, fn) { try { await fn(); ok(name); } catch (e) { bad(name, e); } }
 
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.listen(0, HOST, () => { const p = s.address().port; s.close(() => resolve(p)); });
+    s.on('error', reject);
+  });
+}
+
 (async () => {
+  PORT = await freePort();
   const serverBin = path.join(__dirname, '..', 'server', 'server.js');
   const proc = spawn('node', [serverBin], {
-    env: { ...process.env, TDOC_PORT: String(PORT), TDOC_DIR: TMP, TDOC_DRY_PUBLISH: '1' },
+    env: { ...process.env, TDOC_PORT: String(PORT), TDOC_HOST: HOST, TDOC_DIR: TMP, TDOC_DRY_PUBLISH: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Wait for "tdoc server:" line
@@ -45,7 +56,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (e) { bad(name,
     viewport: { width: 1400, height: 900 },
   });
   const page = await ctx.newPage();
-  await page.goto(`http://localhost:${PORT}/d/${SLUG}/v/1`, { waitUntil: 'networkidle' });
+  await page.goto(`http://${HOST}:${PORT}/d/${SLUG}/v/1`, { waitUntil: 'networkidle' });
 
   await t('Publish button visible on local doc', async () => {
     const btn = await page.$('#tdoc-publish-btn');
@@ -77,7 +88,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (e) { bad(name,
   });
 
   await t('GET /api/publish-style smoke (POST dry-run returns ok)', async () => {
-    const r = await fetch(`http://localhost:${PORT}/api/publish`, {
+    const r = await fetch(`http://${HOST}:${PORT}/api/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug: SLUG }),
@@ -88,7 +99,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (e) { bad(name,
   });
 
   await t('Invalid slug rejected by /api/publish', async () => {
-    const r = await fetch(`http://localhost:${PORT}/api/publish`, {
+    const r = await fetch(`http://${HOST}:${PORT}/api/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug: 'bad slug!' }),

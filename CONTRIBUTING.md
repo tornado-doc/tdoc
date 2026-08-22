@@ -9,7 +9,7 @@
 ├── SKILL.md                    ← canonical skill manifest (for `git clone` install)
 ├── .claude-plugin/
 │   ├── plugin.json             ← plugin manifest (for `/plugin install` install)
-│   └── marketplace.json        ← single-plugin marketplace (so `/plugin marketplace add serenakeyitan/tdoc` works)
+│   └── marketplace.json        ← single-plugin marketplace (so `/plugin marketplace add tornado-doc/tdoc` works)
 └── skills/tdoc/
     └── SKILL.md                ← MUST match root SKILL.md exactly (plugin-mode discovery)
 ```
@@ -26,14 +26,14 @@ before committing any change that touches `SKILL.md`. There is no automated hook
 
 We support two install paths and don't want either to break:
 
-1. **Plain git clone** — `git clone https://github.com/serenakeyitan/tdoc ~/.claude/skills/tdoc`. Claude Code finds `SKILL.md` at the root of `~/.claude/skills/tdoc/`. Simple, no plugin system needed.
-2. **Claude Code plugin marketplace** — `/plugin marketplace add serenakeyitan/tdoc` + `/plugin install tdoc@serenakeyitan-tdoc`. Claude Code reads `.claude-plugin/plugin.json` and discovers skills inside `skills/<name>/SKILL.md`.
+1. **Plain git clone** — `git clone https://github.com/tornado-doc/tdoc ~/.claude/skills/tdoc`. Claude Code finds `SKILL.md` at the root of `~/.claude/skills/tdoc/`. Simple, no plugin system needed.
+2. **Claude Code plugin marketplace** — `/plugin marketplace add tornado-doc/tdoc` + `/plugin install tdoc@tornado-tdoc`. Claude Code reads `.claude-plugin/plugin.json` and discovers skills inside `skills/<name>/SKILL.md`.
 
 Don't break either.
 
 ## Credit
 
-This project owes its concept to Jesse Pollak's bdocs at Coinbase. When you add to the docs or write release notes, keep the credit prominent. `tdoc` is a community implementation, not an original idea.
+When you add to the docs or write release notes, keep the credit prominent. `tdoc` is a community implementation, not an original idea.
 
 ## Tests
 
@@ -60,3 +60,8 @@ Install the optional browser dep with `npm i -D playwright && npx playwright ins
 ## Hard rule: run tests before every push
 
 The skill ships JS that runs in users' browsers and a worker that runs on Cloudflare, both deployed on every `/tdoc publish`. Run `npm test` before pushing; for overlay or worker changes also run the matching gated suite via `npm run test:all`. Doc-only changes still need a `grep` for stale references (counts, command names, version numbers).
+
+## AGENTS.md
+
+`AGENTS.md` only records what humans and agents have aligned on, and is intentionally kept short.
+

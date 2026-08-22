@@ -2,6 +2,8 @@
 // 320 to 1600 and asserts:
 //   - body.tdoc-has-comments && !body.tdoc-narrow  =>  cards sit ENTIRELY to
 //     the right of the doc article (no visual overlap with prose).
+//   - body.tdoc-pins && !body.tdoc-narrow => article stays centered in the
+//     viewport; comment pins are provider chrome and must not shift the doc.
 //   - top bar children all have offsetWidth > 0 (when expected visible).
 //   - no horizontal overflow on documentElement.
 //   - footer (.tdoc-footer) present + within viewport.
@@ -42,7 +44,10 @@ const REQUIRE_FOOTER = process.env.AUDIT_REQUIRE_FOOTER !== '0';
       const docEl = document.documentElement;
       const hasComments = body.classList.contains('tdoc-has-comments');
       const narrow = body.classList.contains('tdoc-narrow');
-      const cards = [...document.querySelectorAll('.tdoc-margin-comment')].map(c => {
+      const cards = [...document.querySelectorAll('.tdoc-margin-comment')].filter(c => {
+        const cs = getComputedStyle(c);
+        return cs.display !== 'none' && c.offsetWidth > 0 && c.offsetHeight > 0;
+      }).map(c => {
         const r = c.getBoundingClientRect();
         return { left: r.left, right: r.right, top: r.top, width: r.width };
       });
@@ -75,6 +80,8 @@ const REQUIRE_FOOTER = process.env.AUDIT_REQUIRE_FOOTER !== '0';
           left: r.left,
         };
       }) : [];
+      const docTitle = document.querySelector('.tdoc-bar .doc-title');
+      const docTitleVisible = !!(docTitle && docTitle.offsetWidth > 0 && docTitle.offsetHeight > 0);
 
       const footer = document.querySelector('.tdoc-footer');
       const footerRect = footer ? footer.getBoundingClientRect() : null;
@@ -88,10 +95,12 @@ const REQUIRE_FOOTER = process.env.AUDIT_REQUIRE_FOOTER !== '0';
         scrollWidth: docEl.scrollWidth,
         hasComments,
         narrow,
+        pinsMode: body.classList.contains('tdoc-pins'),
         cards,
         article: aRect ? { left: aRect.left, right: aRect.right, width: aRect.width } : null,
         bar: barRect ? { left: barRect.left, right: barRect.right } : null,
         barChildren,
+        docTitleVisible,
         footer: footerRect ? { left: footerRect.left, right: footerRect.right, width: footerRect.width } : null,
         footerLinks,
       };
@@ -103,9 +112,16 @@ const REQUIRE_FOOTER = process.env.AUDIT_REQUIRE_FOOTER !== '0';
     // legitimately overflow on phone widths; that's the doc author's call, not
     // the overlay's bug. Instead we assert overlay-owned elements stay in bounds.
 
-    // Overlap rule: when has-comments && !narrow, cards must sit to the right
-    // of the article (article.right <= card.left).
+    // Wide comment rules: pinned mode keeps the document centered in the
+    // viewport. If cards are visible, they still must sit to the right of the
+    // article without overlapping prose.
     if (m.hasComments && !m.narrow && m.article) {
+      const expectedCenter = m.pinsMode ? (m.innerWidth / 2) : ((m.innerWidth - 360) / 2);
+      const articleCenter = (m.article.left + m.article.right) / 2;
+      if (Math.abs(articleCenter - expectedCenter) > 2) {
+        const scope = m.pinsMode ? 'viewport' : 'reading area';
+        errs.push(`article center=${articleCenter.toFixed(0)} not centered in ${scope} center=${expectedCenter.toFixed(0)}`);
+      }
       for (const c of m.cards) {
         if (c.right > m.innerWidth + 1) errs.push(`card right=${c.right.toFixed(0)} overflows viewport ${m.innerWidth}`);
         if (c.left < m.article.right - 2) errs.push(`card overlaps article (card.left=${c.left.toFixed(0)} < article.right=${m.article.right.toFixed(0)})`);
@@ -120,18 +136,18 @@ const REQUIRE_FOOTER = process.env.AUDIT_REQUIRE_FOOTER !== '0';
     }
 
     // Top bar children: at minimum, the title + identity slot must be visible.
-    const title = m.barChildren.find(c => c.cls.includes('title'));
-    if (!title || !title.visible) errs.push('bar title not visible');
-    const identSlot = m.barChildren.find(c => c.id === 'tdoc-identity-slot');
+    if (!m.docTitleVisible) errs.push('bar title not visible');
+    const hasIdentSlot = m.barChildren.some(c => c.id === 'tdoc-identity-slot');
     // identity slot is a span wrapper; might collapse to 0 width before its
-    // child renders. Probe the actual chip/button instead.
+    // child renders. Probe the actual chip/button instead when this target has
+    // identity chrome at all; the anonymous local fixture does not.
     const chipVisible = await page.evaluate(() => {
       const slot = document.querySelector('#tdoc-identity-slot');
-      if (!slot || !slot.firstElementChild) return false;
+      if (!slot || !slot.firstElementChild) return null;
       const el = slot.firstElementChild;
       return el.offsetWidth > 0 && el.offsetHeight > 0;
     });
-    if (!chipVisible) errs.push('identity chip/signin not visible');
+    if (hasIdentSlot && chipVisible === false) errs.push('identity chip/signin not visible');
 
     if (REQUIRE_FOOTER) {
       if (!m.footer) errs.push('footer missing');

@@ -1,8 +1,8 @@
 ---
 name: tdoc
 description: |
-  Prompt-native interactive HTML docs. Generate a self-contained HTML
-  document from a prompt (interactive models, SVG diagrams, simulations,
+  Prompt-native HTML docs. Generate a self-contained HTML
+  document from a prompt (SVG diagrams, CSS-toggled models, explainers,
   strategy docs, research write-ups, product specs, explainer pages,
   design docs, RFCs, case studies, post-mortems, technical proposals,
   vision docs, one-pagers, decision frameworks), serve it at localhost
@@ -44,7 +44,7 @@ description: |
 
   Use this INSTEAD of generating raw markdown / Google Docs / Notion-style
   content when the user wants:
-    - something interactive (charts, simulations, sliders, live demos)
+    - something interactive (charts, diagrams, CSS toggles — author JS does not run)
     - something shareable via URL with commenting
     - something that benefits from being a real HTML page rather than text
     - any document where the artifacts (images, diagrams, code blocks, video)
@@ -152,8 +152,10 @@ triggers:
 
 # tdoc — Prompt-native HTML documents
 
-Open-source, collaborative take on Jesse Pollak's bdocs. Docs are HTML build
-artifacts, not files the user maintains. Authoring interface is a prompt.
+Open-source, collaborative. Docs are HTML build
+artifacts, not files the user maintains.
+
+**Source of truth (see `AGENTS.md`):** Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold. Authoring interface is a prompt.
 Every edit creates a new version. Comments anchor to highlighted text or to
 artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
@@ -166,6 +168,7 @@ sharing, with GitHub auth gating comments.
   <slug>/
     meta.json          # { title, created, versions: [...] }
     v1/index.html
+    v1/widgets/<name>.html  # optional; sandboxed JS island, served at /widget/<name>
     v2/index.html
     comments.json      # [{ id, version, anchor, text, status }]
 ```
@@ -173,6 +176,7 @@ sharing, with GitHub auth gating comments.
 Server runs at `http://localhost:7878` (override with `TDOC_PORT`) and serves:
 - `/` — index of all docs
 - `/d/<slug>/v/<n>` — a specific version (injects comment overlay)
+- `/d/<slug>/v/<n>/widget/<name>` — sandboxed interactive island (no overlay)
 - `/api/comments` GET/POST — comment persistence
 - `/api/ping` — health check; responds `{"ok":true,"service":"tdoc"}`. The
   `service` field is the identity marker — a foreign service answering 200 on
@@ -217,26 +221,99 @@ nohup node "$SKILL_DIR/server/server.js" > "$TDOC_DIR/.server.log" 2>&1 &
 sleep 1
 ```
 
+## Authoring contract — read before writing any doc
+
+Three files are required reading before you write doc HTML, on every
+`/tdoc new` and every regeneration in `/tdoc edit`:
+
+| File | Governs | Selectable? |
+|---|---|---|
+| `$SKILL_DIR/authoring/voice.md` | how the prose reads | No. A floor — no switch, no doc exempt. |
+| `$SKILL_DIR/authoring/visuals.md` | how much of the doc is a picture | No. A floor — be visual-first, many visuals, varied types. |
+| `$SKILL_DIR/authoring/style/default.md` | what the page looks like | Only by naming another entry in `style/`. |
+
+`$SKILL_DIR` is the installed skill directory resolved in "Setup check"
+above (`~/.claude/skills/tdoc`, or `~/.codex/skills/tdoc` under Codex) —
+**not** the current working directory, which is the user's project.
+
+`voice.md` carries tdoc's adaptation of the vendored `no-ai-slop` rule set
+(`$SKILL_DIR/authoring/vendor/no-ai-slop.md`) — which prose the rules govern, which
+spans they must never rewrite (code, identifiers, quotes, data), and whose
+voice is being preserved when the agent is the one writing.
+
+`style/default.md` is the stark sans style: pure white, pure black, one clean
+sans everywhere (open Inter, standing in for the proprietary OpenAI Sans), an
+oversized tight-tracked headline, near-zero color, and a full technical-diagram
+vocabulary (thin frames, mono pill labels, numbered containers, solid/dashed
+arrows, one accent per figure, dot/hatch textured fills). The OpenAI-index
+aesthetic, done with open fonts — no brand assets, a look not an identity.
+Apply it unless the user names a different entry in `$SKILL_DIR/authoring/style/`.
+
+The other entries a user can name:
+
+- `$SKILL_DIR/authoring/style/technical.md` — a cold engineering-blog register:
+  mono for identifiers and metrics, neutral greys for structure, a single
+  sparing red-orange accent. For dense technical writeups.
+- `$SKILL_DIR/authoring/style/editorial.md` — a long-read essay register: warm
+  paper ground, a serif reading voice, electric-blue accent, and colored
+  underlines that mark terms inline. The one style that overrides typography,
+  and only the ground and body font.
+- `$SKILL_DIR/authoring/style/paper.md` — a warm serif long-read: off-white
+  paper ground, an open serif display (Fraunces) over a humanist sans body,
+  one clay accent. The Anthropic-blog aesthetic, done with open fonts (not
+  the proprietary brand fonts, no logo/byline — a look, not an identity).
+
+`$SKILL_DIR/authoring/structure/` is still an empty mount point. Empty means
+no choice to make: derive the document's shape from the prompt.
+
+`visuals.md` is the visual-first floor: lead with charts, diagrams, tables, and
+stat tiles rather than paragraphs; pick the visual type that fits the data
+(bar, line/scatter, quadrant, matrix, timeline, stacked bar, flow — not a
+flowchart by default); most docs carry several different types. The style
+colors them; this file decides there should be many.
+
 ## Commands
 
 ### `/tdoc new <prompt>` — create a new doc
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. Create `~/tdocs/<slug>/v1/index.html` — a **fully self-contained** HTML file:
-   - All CSS inline in `<style>`, all JS inline in `<script>`.
-   - No external CDNs unless requested. No build step.
-   - Clean reading-typography (system font stack, generous line-height, max-width ~720px for prose) UNLESS the doc is primarily a simulation/diagram, in which case go full-bleed.
-   - Interactive: if the prompt implies a model, simulation, or diagram, build the live thing — don't just describe it.
-3. Write `meta.json`:
+2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, and `$SKILL_DIR/authoring/style/default.md`.**
+   Voice constrains the prose as you generate it, not as a later cleanup
+   pass. The style tells you which components to reach for and its palette —
+   apply it unless the user named another entry in `$SKILL_DIR/authoring/style/`.
+   The named style file is the complete visual contract: use its CSS, but do
+   not invent a second page-wide aesthetic on top of it.
+3. Create `~/tdocs/<slug>/v1/index.html` — the host document:
+   - All host CSS inline in `<style>`. **Never put JavaScript in the host.**
+     Host `<script>`, `on*=` handlers, and `javascript:` URLs are inert under
+     CSP and therefore create controls or empty panels that cannot work. If
+     the idea needs computation, write `v1/widgets/<name>.html` and iframe it.
+   - No external CDNs in the host unless requested. No build step.
+   - The default style is mandatory when the user names no style. A full-page
+     custom design is allowed only when the user explicitly requests one;
+     programmatic callers must make that exception visible with
+     `--custom-template`.
+   - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
+4. **Validate the host before recording or opening the doc. This is mandatory
+   for every generated version, including chat-driven `/tdoc new`:**
+   ```bash
+   "$SKILL_DIR/bin/tdoc-validate-template" \
+     "$TDOC_DIR/<slug>/v1/index.html" --style <selected-style>
+   ```
+   Use `--custom-template` only when the user explicitly requested a custom
+   whole-page design. It never permits host JavaScript. If validation fails,
+   fix the host or move computation into `v1/widgets/<name>.html`; do not open,
+   publish, or report the document as complete.
+5. Write `meta.json`:
    ```json
    { "title": "...", "slug": "...", "created": "<iso>", "versions": [{ "n": 1, "created": "<iso>", "prompt": "..." }] }
    ```
-4. Init `comments.json` as `[]`.
-5. Open `http://localhost:7878/d/<slug>/v/1` in the browser:
+6. Init `comments.json` as `[]`.
+7. Open `http://localhost:7878/d/<slug>/v/1` in the browser:
    ```bash
    open "http://localhost:7878/d/<slug>/v/1"
    ```
-6. Report the URL to the user.
+8. Report the URL to the user.
 
 ### `bin/tdoc-new` — programmatic entry for agents in other skills
 
@@ -281,12 +358,20 @@ TDOC_NEW_CALLER=document-release \
 - `--slug <kebab-case>` (required) — slug for `~/tdocs/<slug>/`.
 - `--title "<title>"` (required) — recorded in `meta.json`.
 - `--html-file <path>` OR `--html-stdin` (required) — full HTML for v1.
+- `--widgets-dir <path>` — optional directory of sandboxed widget HTML files.
+  Each `<name>.html` is stored as `v1/widgets/<name>.html`; JavaScript belongs
+  there, never in the host HTML.
 - `--prompt "<one-line>"` — prompt-of-record in `meta.json` (defaults
   to `Imported via tdoc-new by <caller>`).
 - `--publish` — also run `tdoc-publish` so a shareable URL is returned.
 - `--open` — open the resulting URL in the default browser.
 - `--quiet` — suppress informational output (the URL is still printed
   on the last line so callers can capture it).
+- `--style default|technical|editorial|paper` — selected house-style
+  contract. Omit it to use `default`.
+- `--custom-template` — explicit opt-out from the default template for a
+  user-requested presentation, landing page, or full-bleed simulation. Normal
+  docs must not pass it.
 - `--force` — overwrite an existing slug. Without this, an existing
   slug is a hard error (no silent clobber).
 
@@ -295,9 +380,13 @@ If `--publish` succeeded, the published URL appears on a second line.
 This is what callers should `tail -n 1` (or `tail -n 2`) to capture.
 
 **Guards built in:** refuses to clobber existing slugs without `--force`;
-validates that input contains a `<body>` tag (catches markdown handed
-in by mistake); restarts the local server if it's down so the URL is
-immediately reachable.
+validates the host before replacing an existing doc; copies explicitly
+supplied widget files; restarts the local server if needed. Host validation
+rejects `<script>`, `on*=` handlers, `javascript:` URLs, and `<canvas>` even in
+custom-template mode, because all of them are inert under the host CSP and can
+silently create empty UI. It also enforces the selected house-style boundary.
+Whole-page custom styling requires the deliberate `--custom-template` flag;
+that flag never permits host JavaScript.
 
 **Set `TDOC_NEW_CALLER`** (or rely on `CLAUDE_SKILL_NAME`) so `meta.json`
 records which skill scaffolded the doc — useful for later auditing or
@@ -311,7 +400,12 @@ comments you handled unless you reply on each one. Skipping comments
 silently is the #1 source of regression complaints.
 
 1. Read `~/tdocs/<slug>/comments.json` — filter to `status: "open"`.
-2. Read latest version's `index.html`.
+2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md` and `$SKILL_DIR/authoring/visuals.md`.
+   A regeneration writes new prose, so the contract applies here exactly as
+   it does on `/tdoc new`. Prose you carry over unchanged from the previous
+   version stays as it is — do not re-edit untouched sections for voice, and
+   keep whichever style the existing version already uses rather than
+   restyling a doc the reader has been reading.
 3. For EACH open comment, decide one of three outcomes BEFORE writing:
    - **applied** — the comment is clear and you can act on it.
    - **partial** — you applied part of it but couldn't fully address it
@@ -327,23 +421,35 @@ silently is the #1 source of regression complaints.
    - `anchor.context_before` / `anchor.context_after` — surrounding text
      (~60 chars each side) for disambiguation when the same text appears
      multiple times
-5. Append to `meta.json` versions array.
-6. **For each comment, post an agent reply** so the user sees the outcome
+5. **Validate `v<n+1>/index.html` before updating metadata or replying to
+   comments.** Run `bin/tdoc-validate-template` with the style already used by
+   the document. If validation fails, repair the host or move the computation
+   into `v<n+1>/widgets/<name>.html`; never publish or report a broken version.
+6. Append to `meta.json` versions array.
+7. **For each comment, post an agent reply** so the user sees the outcome
    in the doc UI. This is mandatory.
 
-   **For published docs** — POST to `https://<your-worker>/api/agent/reply`
-   with the upload token from `~/.tdoc/published.json`:
+   Use `bin/tdoc-agent-reply`. It auto-detects the host runtime (Claude Code,
+   Codex, Grok, Cursor, Gemini) from the process environment and stamps
+   `agent_login` so the comment shows that product's logo. Do **not** invent
+   a login or pass `tdoc-agent`. Only pass `--login` if you must override
+   detection. The published Worker cannot see your env, so do not raw-curl
+   `/api/agent/reply` yourself — the helper stamps identity before the
+   request leaves the machine.
+
    ```bash
-   TOKEN=$(jq -r .upload_token ~/.tdoc/published.json)
-   WORKER=$(jq -r '.worker + "." + .subdomain' ~/.tdoc/published.json)
-   curl -sS -X POST "https://${WORKER}.workers.dev/api/agent/reply" \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d "{\"slug\":\"<slug>\",\"parent_id\":\"<comment_id>\",\"text\":\"<one or two sentences>\",\"status\":\"applied\",\"applied_in\":<n+1>}"
+   "$SKILL_DIR/bin/tdoc-agent-reply" \
+     --slug "<slug>" \
+     --parent "<comment_id>" \
+     --text "<one or two sentences>" \
+     --status applied \
+     --applied-in <n+1>
    ```
 
-   **For local-only docs** — POST to `http://localhost:7878/api/agent/reply`
-   (no token needed).
+   It posts to the published Worker when `~/.tdoc/published.json` exists,
+   otherwise to `http://localhost:${TDOC_PORT:-7878}`. Users can also reply
+   to any reply (HN/Reddit-style nesting); `parent` is the comment or reply
+   you are answering.
 
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading
@@ -353,7 +459,7 @@ silently is the #1 source of regression complaints.
    - question: "Two of your comments asked for different tones — formal in
      the intro and casual in section II. Which should I prioritize?"
 
-7. Update `comments.json`: set `status: "applied"` (or leave `"open"` for
+8. Update `comments.json`: set `status: "applied"` (or leave `"open"` for
    partial/question) and `applied_in: n+1`. The agent-reply endpoint
    already flips the status server-side AND drops a status emoji on the
    parent comment (✅ applied, 🟡 partial, ❓ question), clearing any
@@ -364,7 +470,7 @@ silently is the #1 source of regression complaints.
    If a comment is later re-anchored by the user (anchor moved to new
    text), the server automatically clears the agent's emoji and resets
    `status: "open"`. Re-running `/tdoc edit` will pick it up again.
-6. Open `http://localhost:7878/d/<slug>/v/<n+1>`.
+9. Open `http://localhost:7878/d/<slug>/v/<n+1>`.
 
 If there are zero open comments AND no extra prompt, ask the user what to change before doing anything.
 
@@ -393,42 +499,65 @@ echo "tdoc server: http://localhost:7878"
 pkill -f "$SKILL_DIR/server/server.js"
 ```
 
-### `/tdoc publish <slug>` — publish to your Cloudflare Worker (or Vercel)
+### `/tdoc publish <slug>` — publish to hosted tdoc (default), or self-host
 
 Publishes the latest version of `<slug>` to a public URL.
 
-Local always stays $0/anonymous; publishing is opt-in. First run does a one-time
-setup: prompts `wrangler login`, creates an R2 bucket (`tdoc-docs`) and KV
-namespace (`META`) in *your* Cloudflare account, generates an upload token, and
-deploys your own Worker. Config is saved to `~/.tdoc/published.json`.
+Architecture — publish auth, multi-tenant scoping, GitHub-account/BYOK
+switching, and the client-version gap — is written up as a tdoc:
+`docs/publish-auth-architecture.html` (live: `tdoc.dev/d/tdoc-auth-arch`). Read
+it before changing `bin/tdoc-publish`, `bin/tdoc-update-nag`, or the worker
+auth/hosted-token routes.
 
-**Alternative host — Vercel**: `tdoc-publish --platform vercel <slug>` (first
-publish only; the choice is persisted). Needs the `vercel` CLI (`npm i -g
-vercel`). First run links a Vercel project named `tdoc`, then asks you (via an
-agent prompt) to connect a **Blob** store and an **Upstash Redis** store in the
-Vercel dashboard's Storage tab — both free tier, ~2 clicks each — and deploys.
-Subsequent publishes and all other commands (`pull`, `unpublish`, comments,
-GitHub sign-in) work identically on either host. Caveats: no per-doc write
-serialization (Cloudflare uses a Durable Object for that) and a ~4.5 MB upload
-cap per doc (Vercel request limit).
+Default target is **hosted** (`https://tdoc.dev`). First run signs in with
+GitHub (Device Flow), then asks the host for an account-scoped upload token
+bound to that login and stores it in `~/.tdoc/published.json`. That token can
+only mutate docs it owns. `/me` on tdoc.dev lists that GitHub user's docs. If
+hosted signup is not open on the target, the CLI fails with a clear prompt to
+self-host instead — do **not** tell the user to flip a Worker env flag.
 
-Subsequent runs upload the latest version of `<slug>`. The script also detects
-when `server/overlay.js` or `worker/worker.js` is newer than the bundled file
-and redeploys the Worker automatically so users get the latest overlay code.
-Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch uploads).
+**Self-host — Cloudflare**: `tdoc-publish --platform cloudflare <slug>`.
+First run (or an explicit switch onto cloudflare) prompts `wrangler login`,
+creates an R2 bucket (`tdoc-docs`) and KV namespace (`META`) in *your*
+Cloudflare account, generates an upload token, and deploys your own Worker.
+The choice is persisted in `~/.tdoc/published.json` as the default.
 
-On published docs, viewers sign in with GitHub (Device Flow, shared OAuth App
-`Ov23liZ1UAGOchvKPmlS`, scope `read:user`) before commenting.
+**Self-host — Vercel**: `tdoc-publish --platform vercel <slug>`. First run
+(or an explicit switch onto vercel) needs the `vercel` CLI (`npm i -g vercel`),
+links a Vercel project named `tdoc`, then asks you (via an agent prompt) to
+connect a **Blob** store and an **Upstash Redis** store in the Vercel
+dashboard's Storage tab — both free tier, ~2 clicks each — and deploys.
+Caveats: no per-doc write serialization (Cloudflare uses a Durable Object for
+that) and a ~4.5 MB upload cap per doc (Vercel request limit).
 
-Requires `jq`, plus `wrangler` (`npm i -g wrangler`) for the Cloudflare
-target or `vercel` (`npm i -g vercel`) for the Vercel target.
+Subsequent runs upload the latest version of `<slug>` using the saved default.
+Pass a different `--platform` any time to switch: full re-setup rewrites
+`published.json` (previous file kept as `published.json.bak.switch`). A custom
+domain and `*.workers.dev` on the same Worker are two hostnames, not two
+platforms. Self-host targets
+compare a content hash of the Worker/overlay bundle against the last deployed
+hash in `~/.tdoc/published.json` and redeploy automatically when runtime code
+changed. Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch
+uploads). Published pages expose runtime provenance at `/api/runtime` and in
+`window.__TDOC__.runtime`.
+
+Local preview (`tdoc serve`) does not need GitHub login. Published docs —
+hosted (`tdoc.dev`) and BYOK remote (your Cloudflare/Vercel worker) — use
+GitHub Device Flow for commenter sign-in via the org-owned OAuth App in
+`shared/github-oauth.js` (scope `read:user`). Viewers authorize that shared
+app; they do not register their own. Set the OAuth App callback URL to
+`https://<host>/auth/done` so GitHub's post-approve redirect is not a 404.
+
+Requires `jq`. Hosted needs no extra CLI. Cloudflare needs `wrangler`
+(`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
 
 ```bash
 "$SKILL_DIR/bin/tdoc-publish" <slug>
 ```
 
-Prints the published URL: `https://<worker>.<subdomain>.workers.dev/d/<slug>/v/<N>`
-(Cloudflare) or `https://tdoc-<scope>.vercel.app/d/<slug>/v/<N>` (Vercel).
+Prints the published URL: `https://tdoc.dev/d/<slug>/v/<N>` (hosted),
+`https://<worker>.<subdomain>.workers.dev/d/<slug>/v/<N>` (Cloudflare), or
+`https://tdoc-<scope>.vercel.app/d/<slug>/v/<N>` (Vercel).
 
 ### `/tdoc pull <slug>` — pull comments from the published doc
 
@@ -482,17 +611,22 @@ installed, or might be partway through. You **must** drive the flow from
 - ALWAYS show the user what you're running. Print the JSON status if helpful.
 - If a "click" step doesn't take effect after the user says "done", offer to
   re-check after waiting 10s (Cloudflare API can be slow to reflect changes).
-- The shared OAuth App client ID (`Ov23liZ1UAGOchvKPmlS`) is already baked
-  into the Worker — users do NOT register their own.
+- Published/BYOK remotes bake in the shared org OAuth client ID from
+  `shared/github-oauth.js` — users do NOT register their own. Local preview
+  never needs that login path.
 
 ### `/tdoc update` — check for updates and pull the latest
 
 Wraps `bin/tdoc-update`. Runs `git fetch + git merge --ff-only` against
-`origin/main` of `serenakeyitan/tdoc`.
+`origin/main` of `tornado-doc/tdoc`.
 
 - `tdoc-update --check` → report-only, prints incoming commits without changing anything
 - `tdoc-update` → apply, with auto-stash of local edits, **auto-restarts the running local server** so new routes / overlay code take effect
-- `tdoc-update --yes` → also redeploy the Worker so users see new overlay code
+- `tdoc-update --yes` → also redeploy the Worker so users get the new overlay
+
+BYOK CLIs (`tdoc-publish` / `pull` / `unpublish` / `new`) and every skill
+run also check origin/main and nag immediately when this checkout is
+behind. `tdoc-doctor` reports the same as `.update` (not a missing_step).
 
 ```bash
 "$SKILL_DIR/bin/tdoc-update" --check    # see what's new
@@ -523,16 +657,146 @@ When the user reports a problem, check these first:
 
 ## HTML generation rules
 
-- Self-contained: one HTML file. No imports, no external scripts (unless user explicitly wants e.g. D3 CDN).
+- **The prose in the doc is governed by `$SKILL_DIR/authoring/voice.md`.** These rules
+  cover markup; that file covers the words inside it. Both apply to every
+  doc. It also fences off the spans the prose rules must never touch —
+  code, identifiers, quoted material, and data.
+- **Host HTML does not run author JavaScript.** Every host document is served under a nonce-based CSP (`script-src 'nonce-<n>' 'strict-dynamic'; object-src 'none'; base-uri 'none';`) and the nonce is stamped onto the two injected overlay scripts *only*. Host `<script>` tags (inline or `src`), `onclick=`/`onchange=` attributes, and `javascript:` URLs have no nonce, so the browser refuses them: no error in the page, no visible failure — just a control that never does anything. This is true on **both** the local server (`server/server.js` → `cspHeader`, `injectOverlay`) and published docs (`worker/worker.js` → `cspHeader`, `injectOverlayCfg`).
+  **Exception — sandboxed island:** if the doc needs computation, write `v<n>/widgets/<name>.html` and embed `<iframe sandbox="allow-scripts" src="/d/<slug>/v/<n>/widget/<name>">`. Inline `<script>` in that widget file **does** run. Never put author JS in the host document. See "When the prompt wants something CSS can't express" below.
+- Host document is one HTML file (no imports). Optional islands are extra files under `v<n>/widgets/`. External `<script src>` in the host is blocked by the same CSP, so a CDN library (D3, Chart.js, …) will not load in the host — put it in a widget island or say so rather than shipping a dead reference.
 - Sandboxed-safe: the server serves docs inside an iframe overlay-host, so don't rely on top-level navigation or parent-frame access.
 - The comment overlay is injected by the server — **don't** add commenting UI yourself.
 - Don't add a "made with tdoc" footer, version selector, or share button. The shell handles those.
-- Prefer SVG over canvas for diagrams (commentable text). Use canvas for heavy simulations.
+- Use SVG for diagrams (commentable text, and CSS can animate it). **Don't use `<canvas>` in the host** — nothing can draw to it without JS. Draw inside a widget island if needed.
 - Default font stack: `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`. Mono: `ui-monospace, "SF Mono", Menlo, monospace`.
 
-### Default styling — DO NOT re-style the doc
+### Interactivity: CSS only
 
-The overlay injects a complete default template modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only.
+Author `<script>` in the **host** document never executes (see above), so every
+moving or switchable part of the host has to be declarative. The patterns below
+are verified on this runtime; a working reference doc using all three is at
+`~/tdocs/agent-gui-integration/v1/index.html`. Computed state belongs in a
+sandboxed island, not in the host.
+
+**1. Toggles and mode switches — `:checked` + sibling selectors**
+
+A hidden `<input type="radio">` (or checkbox), then `<label for="…">` controls and
+the panes it switches. Everything toggled must be a **sibling that comes after the
+input**: `~` only reaches forward, and only within one parent.
+
+```html
+<div class="fig" data-tdoc-artifact>
+  <input type="radio" name="mode" id="m-a" class="vis-radio" checked>
+  <input type="radio" name="mode" id="m-b" class="vis-radio">
+  <div class="fig-controls"><label for="m-a">Before</label><label for="m-b">After</label></div>
+  <div class="pane pane-a"> … </div>
+  <div class="pane pane-b"> … </div>
+</div>
+```
+```css
+/* off-screen, NOT display:none — that drops it out of the tab order */
+.vis-radio { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.pane-b { display: none; }
+#m-b:checked ~ .pane-a { display: none; }
+#m-b:checked ~ .pane-b { display: block; }
+#m-b:checked ~ .fig-controls label[for="m-b"] { background: #111; border-color: #111; color: #fff; }
+```
+
+**2. Motion — CSS `@keyframes`**
+
+For flow along a route, animate `stroke-dashoffset` on a dashed copy of the path
+drawn over a static base path:
+
+```css
+.flow { stroke-dasharray: 9 22; animation: flowdash 2.2s linear infinite; }
+@keyframes flowdash { to { stroke-dashoffset: -31; } }
+@media (prefers-reduced-motion: reduce) { .flow { animation: none; } }
+```
+
+Always ship the `prefers-reduced-motion` guard.
+
+**3. SVG styling — put `<style>` INSIDE the `<svg>` element**
+
+A `<style>` in `<head>` was observed **not** to reach elements inside inline SVG on
+this runtime. SVG-internal `<style>` is the reliable placement, so make each `<svg>`
+fully self-contained:
+
+```html
+<svg viewBox="0 0 720 400" role="img" aria-label="…">
+  <style>
+    .flow-a { stroke-dasharray: 9 22; animation: flowdash-a 2.2s linear infinite; }
+    @keyframes flowdash-a { to { stroke-dashoffset: -31; } }
+    @media (prefers-reduced-motion: reduce) { .flow-a { animation: none; } }
+  </style>
+  …
+</svg>
+```
+
+Give each SVG its own class names and `@keyframes` names (`flow-a` / `flowdash-a`,
+`flow-b` / `flowdash-b`) so two figures on one page don't collide.
+
+**What does NOT work in the host document**
+
+- `<script>` of any kind, `on*=` handler attributes, `javascript:` URLs — all inert
+  in the host. The same tags **do** run inside `v<n>/widgets/<name>.html`.
+- **SMIL** (`<animate>`, `<animateMotion>`, `<animateTransform>`): verified not to
+  run here — the SVG timeline stays frozen at `getCurrentTime() === 0`. Use CSS
+  animation instead.
+- `<canvas>` in the host: a blank box without JS. Draw inside a widget island if needed.
+- Computed state in the host — simulations, a slider that recalculates a model,
+  live data, sorting or filtering a table, form validation. Use a sandboxed island.
+
+**When the prompt wants something CSS can't express**
+
+Game of Life, a live calculator, a parameter sweep. Do **not** put `<script>` in
+the host document — it is inert under CSP. Two options:
+
+1. **Sandboxed island (preferred when it must compute).** Write a second HTML
+   file and embed it as an iframe. Overlay comments on the iframe as one
+   artifact (`iframe[src]` is already commentable). Do not walk into the frame.
+
+   ```
+   ~/tdocs/<slug>/v1/index.html
+   ~/tdocs/<slug>/v1/widgets/compound-interest.html
+   ```
+
+   Host document:
+
+   ```html
+   <iframe
+     sandbox="allow-scripts"
+     src="/d/<slug>/v/1/widget/compound-interest"
+     title="Compound interest"
+     style="width:100%;height:320px;border:0">
+   </iframe>
+   ```
+
+   The `sandbox` attribute must be `allow-scripts` only — never add
+   `allow-same-origin`. The server rewrites matching widget iframes to that
+   value even if the author HTML forgets or adds extra flags. Widget HTML is a
+   full document; inline `<script>` there **does** run. Do not use `srcdoc`,
+   `data:`, or `blob:` — those inherit the host CSP and the script stays dead.
+
+2. **Precompute** if an island is overkill: `:checked` panels, a static SVG, or
+   a CSS loop, and note in the doc what was simplified.
+
+Download / Duplicate of a doc with islands is not supported in v1 (the
+downloaded file cannot fetch `/widget/` URLs; account copy is host HTML only).
+
+### Default styling — trust the reading template, add components on top
+
+**The house style (`$SKILL_DIR/authoring/style/default.md`) deliberately does
+not touch reading typography.** It trusts the overlay's injected template for
+body size, headings, and measure, and adds only semantic components (risk /
+positive / leveled block / pill / diagram box). So "do not re-style" and the
+house style agree: write component CSS and doc-specific CSS, but do not set
+your own `font-size` on `p`, `h1`, `h2` — the overlay already did.
+
+The values below are what the overlay injects, at `:where()` zero
+specificity, and what `/export` and Download PDF inline. The house style
+sits on top of them rather than replacing them.
+
+The overlay's template is modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only. **Download** is a menu: **Download HTML** (`/export`, reader CSS inlined as `<style id="tdoc-reader">`) and **Download PDF** (print that same reading column; use the browser's Save as PDF). Neither includes overlay chrome (bar, comments).
 
 - System font stack (`system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`)
 - Body: 17px / line-height 1.65 / `#111` on white
@@ -544,7 +808,16 @@ The overlay injects a complete default template modeled after the `conway-life` 
 - pre: mono 15px, light gray background, left-rule, scrolling overflow
 - Code (inline): 0.92em mono, light-gray rounded chip
 
-**Don't write your own CSS for these unless the doc genuinely needs a different aesthetic** (a presentation, a landing page, a doc with custom widgets). Reading docs, essays, and reports should not override the template.
+**The default style is mandatory when the user names no other style.** Use the
+CSS from `$SKILL_DIR/authoring/style/default.md` as written. Add only the
+house style's components and tightly scoped CSS for content-specific charts,
+diagrams, and controls. Do not invent additional bare-element rules or change
+the content root's width, margins, or padding.
+
+A different file in `$SKILL_DIR/authoring/style/` applies only when the user
+names it. A presentation or landing page may replace the reading aesthetic
+only when the user explicitly asks; programmatic creation must mark that
+exception with `--custom-template`.
 
 What to write:
 
@@ -559,10 +832,9 @@ What to write:
     <h1>{title}</h1>
     <p class="meta">{subtitle or attribution}</p>
     <!-- content here using plain <h2>, <h3>, <p>, <ul>, <pre>, <table>, etc. -->
+    <!-- host interactivity goes in <style>, not <script>. Computation
+         belongs in v1/widgets/<name>.html. See HTML generation rules. -->
   </div>
-  <script>
-    /* any interactivity, inline */
-  </script>
 </body></html>
 ```
 
@@ -594,11 +866,12 @@ Always set `body { background: #fff; }` (or your chosen color) so the page doesn
 Every doc must work on mobile out of the box. The overlay injects defensive CSS for artifacts, but the doc itself should also be authored responsively:
 
 - **Always include** `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`. (The overlay injects this if you forget, but include it.)
-- **Use fluid widths**, not hardcoded pixels. Container: `max-width: 720px; padding: 0 24px;` (no `margin: 0 auto` — overlay handles it).
-- **Canvas / SVG / images**: do NOT hardcode width=N height=M. Either:
+- **Use fluid widths**, not hardcoded pixels. Container: `max-width: 720px;` (no `margin: 0 auto`; no top-level `padding: 0 ...` — overlay handles margins and top/bottom reading space). If you need custom inner spacing, put it on a child element inside the container.
+- **SVG / images**: do NOT hardcode width=N height=M. Either:
   - Use `width="100%"` + CSS aspect-ratio (`aspect-ratio: 16/9`), or
   - Use a wrapper with `max-width: 100%` and let the artifact scale.
-  - For canvas, set `width` and `height` attributes for the drawing buffer but ALSO `style="max-width:100%;height:auto"` so it scales down on narrow screens. Recompute the drawing buffer on resize if needed.
+  - For SVG, give the `<svg>` a `viewBox` and size it in CSS (`width: 100%; height: auto`). If the drawing needs more room than a phone gives it, put the `<svg>` in a wrapper with `overflow-x: auto` and a `min-width` on the SVG so it scrolls rather than squashing.
+  - (Canvas isn't an option — see "Interactivity: CSS only". Without JS there is nothing to draw into the buffer.)
 - **Tables**: wrap in `<div style="overflow-x:auto">` so they scroll instead of overflowing.
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
 - **Test at 375px wide** in your head before claiming done. If anything overflows the viewport on a phone, fix it before writing meta.json.
@@ -611,6 +884,38 @@ The overlay applies these as `:where()` defensive defaults so old docs degrade g
 - **Don't use these ids/classes** in your doc — they're reserved by the overlay: `tdoc-*`, `#tdoc-*`, and any class starting with `tdoc-`.
 - **Don't position-fixed elements at the top** — the overlay's 44px top bar lives there.
 - **Don't use a footer at the bottom** — the overlay injects its own.
+
+### Author HTML compatibility contract (invariant)
+
+Agents generate arbitrary HTML. Overlay defaults use **`:where()` zero-specificity** so **author CSS always wins**. That means a bad author rule can also silently break layout (e.g. `padding: 0 24px` on the content root wiped overlay top reading space — fixed in #96). Contract:
+
+- One primary content container: `.wrap` (preferred), `main`, `article`, `.content`, or `.container`.
+- **No** top-level container `padding: 0 ...` / `margin: 0 auto` — overlay owns chrome spacing.
+- Treat `tdoc-*` classes/ids as reserved.
+- Scope document UI rules to the document (never global `button:hover`).
+- Prefer fluid/`max-width` layouts over fixed pixel shells.
+
+### Access policy (published docs — invariant)
+
+Remote storage holds optional `meta.access`:
+
+```json
+{
+  "visibility": "public | unlisted | private",
+  "commenting": "owner | invited | signed_in | off",
+  "history_visibility": "owner | invited | public",
+  "allowed_users": ["github-login"]
+}
+```
+
+- **public / unlisted**: link-readable without login. Unlisted is not catalog-discovery; `/me` still lists the signed-in publisher's docs.
+- **private**: the doc publisher (hosted `github_login`, or `TDOC_OWNER` on BYOK/legacy) + `allowed_users`. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
+- **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
+- Legacy meta without `access` stays world-readable + full history (back-compat).
+- Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
+- After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
+- `/me` on hosted tdoc.dev lists the signed-in GitHub user's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
+
 
 ### Comment anchor stability (important for `/tdoc edit`)
 
@@ -782,11 +1087,10 @@ if [ "$TEL_EFFECTIVE" != "off" ]; then
   done
 fi
 
-# ─── Upgrade check (gstack-style lifecycle event) ───────────
-# Check installed version against latest release. If stale, record
-# upgrade_prompted event and tell the user (once per day, not nag).
-# TDOC_DIR is substituted at install time by postinstall-telemetry.sh
-# so this works no matter where tdoc is cloned.
+# ─── Upgrade check (BYOK: origin/main, every run) ───────────
+# GitHub releases lag (v0.9.0 sat while overlay kept shipping on main).
+# Compare this skill checkout to origin/main the same way tdoc-update does.
+# TDOC_DIR is substituted at install time by postinstall-telemetry.sh.
 TDOC_DIR="__TDOC_DIR__"
 
 # Resolve installed version, trying multiple sources in order:
@@ -799,26 +1103,22 @@ if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_DIR/.git" ]; then
 fi
 [ -z "$INSTALLED_VERSION" ] && INSTALLED_VERSION="0.0.0"
 
-UPGRADE_CHECK_FLAG="$TEL_HOME/.upgrade-checked-$(date +%Y-%m-%d)"
-if [ "$TEL_EFFECTIVE" != "off" ] && [ ! -f "$UPGRADE_CHECK_FLAG" ] && [ "$INSTALLED_VERSION" != "0.0.0" ]; then
-  LATEST=$(curl -s --max-time 3 https://api.github.com/repos/serenakeyitan/tdoc/releases/latest 2>/dev/null | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 | sed 's/^v//')
-  # Only fire upgrade prompt if installed is STRICTLY OLDER than latest.
-  # Use sort -V (version sort): if installed sorts first, installed < latest.
-  # If installed == latest or installed > latest (dev build), skip silently.
-  if [ -n "$LATEST" ] && [ "$LATEST" != "$INSTALLED_VERSION" ]; then
-    FIRST_VERSION=$(printf '%s\n%s\n' "$INSTALLED_VERSION" "$LATEST" | sort -V | head -1)
-    if [ "$FIRST_VERSION" = "$INSTALLED_VERSION" ]; then
+if [ -x "$TDOC_DIR/bin/tdoc-update-nag" ]; then
+  NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" 2>/dev/null || true)"
+  if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
+    echo "$NAG_LINE"
+    if [ "$TEL_EFFECTIVE" != "off" ]; then
       "$TDOC_DIR/telemetry/bin/telemetry-log" \
         --skill tdoc \
         --event-type upgrade_prompted \
         --outcome unknown \
         --skill-version "$INSTALLED_VERSION" \
-        --step "v$INSTALLED_VERSION→v$LATEST" \
+        --step "origin/main" \
         --session-id "$TEL_SESSION_ID" 2>/dev/null || true
-      echo "TDOC_UPGRADE_AVAILABLE: $INSTALLED_VERSION → $LATEST  (cd $TDOC_DIR && git pull && bin/postinstall-telemetry.sh)"
     fi
+  elif printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_DIVERGED:'; then
+    echo "$NAG_LINE"
   fi
-  touch "$UPGRADE_CHECK_FLAG" 2>/dev/null || true
 fi
 
 echo "TEL_PROMPTED: $TEL_PROMPTED"
@@ -859,6 +1159,19 @@ TEL_EFFECTIVE="$(cat "$TEL_CONFIG_FILE")"
 ```
 
 **If `TEL_PROMPTED` is `yes`**, do NOT ask again. Proceed silently.
+
+**If the preamble printed `TDOC_UPDATE_AVAILABLE`**, tell the user
+immediately (before the rest of the tdoc work). Do not wait until the
+end, and do not swallow it. Example:
+
+> tdoc on origin/main is newer than this skill checkout. Published docs
+> still serve the old overlay until we update. I can run `/tdoc update
+> --yes` now (pulls the skill and redeploys your worker).
+
+Encourage them to update. If they say no, continue with what they asked.
+If the line was `TDOC_UPDATE_DIVERGED`, tdoc-update cannot fast-forward —
+tell them to stash/commit local skill edits or re-clone; do not run
+`--yes`.
 
 ---
 

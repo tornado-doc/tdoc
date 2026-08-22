@@ -4,20 +4,23 @@
 //   DOCS   — R2 bucket (key: docs/<slug>/v<N>/index.html)
 //   META   — KV namespace
 // Vars:
-//   GITHUB_CLIENT_ID — hardcoded "Ov23liZ1UAGOchvKPmlS"
+//   GITHUB_CLIENT_ID — from wrangler [vars]; SoT is shared/github-oauth.js
 // Secrets:
 //   TDOC_UPLOAD_TOKEN — shared secret for /api/upload from `tdoc publish`
 //
-// IMPORTANT: This file contains a placeholder string `__TDOC_OVERLAY_JS__`.
-// The publish script reads server/overlay.js and replaces that placeholder
-// inline before deploy, producing worker/_worker.bundled.js. Do not deploy
-// worker.js directly — the overlay would be missing.
+// IMPORTANT: This file contains placeholder strings `__TDOC_OVERLAY_JS__` and
+// `__TDOC_BUILD_INFO__`. The publish script replaces them before deploy,
+// producing worker/_worker.bundled.js. Do not deploy worker.js directly — the
+// overlay/provenance would be missing.
 
 const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;
 
+
+const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type,Authorization',
 };
 
@@ -40,6 +43,21 @@ function html(body, init = {}) {
   });
 }
 
+function runtimeInfo() {
+  const b = TDOC_BUILD_INFO && typeof TDOC_BUILD_INFO === 'object' ? TDOC_BUILD_INFO : {};
+  return {
+    service: 'tdoc',
+    mode: 'published',
+    source_sha: b.source_sha || null,
+    source_dirty: !!b.source_dirty,
+    worker_sha: b.worker_sha || null,
+    overlay_sha: b.overlay_sha || null,
+    bundle_sha: b.bundle_sha || null,
+    built_at: b.built_at || null,
+    generated_by: b.generated_by || 'unknown',
+  };
+}
+
 function parseCookie(req) {
   const c = req.headers.get('cookie') || '';
   const m = c.match(/tdoc_sid=([a-f0-9]+)/);
@@ -55,10 +73,11 @@ async function getSession(env, req) {
     return { id: sid, ...data };
   } catch { return null; }
 }
-// The worker owner = the GitHub login configured in TDOC_OWNER at deploy.
-// Only that signed-in viewer may see the catalog of hosted docs. Case-
-// insensitive; if TDOC_OWNER is unset, nobody is owner (catalog stays
-// fully private — safe default).
+// The worker operator = the GitHub login configured in TDOC_OWNER at deploy.
+// On BYOK (hosted registration off) only that signed-in viewer sees /me.
+// On hosted tdoc.dev, /me is per signed-in GitHub user; TDOC_OWNER still
+// owns legacy docs with no hosted.github_login. Case-insensitive; if
+// TDOC_OWNER is unset, nobody is operator.
 function isOwnerSession(env, session) {
   const owner = (env.TDOC_OWNER || '').trim().toLowerCase();
   if (!owner || !session || !session.login) return false;
@@ -71,10 +90,390 @@ function isOwnerSession(env, session) {
 // pattern short-circuited to "allow" on null, letting any GitHub session
 // delete/re-anchor authorless legacy comments. Same logic for the three
 // mutation sites, in one place.
-function canMutate(record, session, env) {
-  if (isOwnerSession(env, session)) return true;
+function canMutate(record, session, env, meta) {
+  if (isDocOwnerSession(env, session, meta)) return true;
   const who = record && record.author && record.author.login;
   return !!(who && session && session.login && who === session.login);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Access policy (JUL-31)
+//
+// Product ladder on published docs:
+//   public   — anyone with the link can read; may appear in future discovery
+//   unlisted — anyone with the link can read; never listed in catalogs
+//   private  — owner + allowlisted GitHub logins only (sign-in required)
+//
+// Pure-publish default for NEW meta written by tdoc-publish:
+//   history_visibility = owner (readers see only the requested version)
+// Missing/legacy meta without `access` stays world-readable for back-compat.
+// ─────────────────────────────────────────────────────────────────────────
+const ACCESS_VISIBILITIES = new Set(['public', 'unlisted', 'private']);
+const ACCESS_COMMENTING = new Set(['owner', 'invited', 'signed_in', 'off']);
+const ACCESS_HISTORY = new Set(['owner', 'invited', 'public']);
+const ACCESS_PATCH_FIELDS = new Set(['visibility', 'commenting', 'history_visibility', 'allowed_users']);
+
+function sessionLogin(session) {
+  return session && typeof session.login === 'string' && session.login
+    ? session.login.trim().toLowerCase()
+    : null;
+}
+
+function normalizeGithubLogin(v) {
+  if (typeof v !== 'string') return null;
+  let s = v.trim().toLowerCase();
+  if (!s) return null;
+  if (s.startsWith('github:')) s = s.slice('github:'.length);
+  if (s.startsWith('@')) s = s.slice(1);
+  // GitHub logins: alphanumeric + hyphen
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(s)) return null;
+  return s;
+}
+
+// Publisher GitHub login stamped on hosted-tenant meta. Empty on BYOK / legacy
+// docs — those still belong to TDOC_OWNER.
+function hostedGithubLogin(meta) {
+  return meta && meta.hosted ? normalizeGithubLogin(meta.hosted.github_login) : null;
+}
+
+// True when this session owns this document:
+//   - hosted: meta.hosted.github_login matches the session
+//   - unhosted / legacy: the Worker operator (TDOC_OWNER)
+function isDocOwnerSession(env, session, meta) {
+  const login = sessionLogin(session);
+  if (!login) return false;
+  const hostedLogin = hostedGithubLogin(meta);
+  if (hostedLogin) return hostedLogin === login;
+  return isOwnerSession(env, session);
+}
+
+// Normalize meta.access. `legacy` chooses defaults when the field is absent:
+//   true  → back-compat for already-published docs (public + full history)
+//   false → product defaults for newly written policy objects
+function normalizeAccess(raw, { legacy = true } = {}) {
+  const a = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const visibility = ACCESS_VISIBILITIES.has(a.visibility)
+    ? a.visibility
+    : (legacy ? 'public' : 'unlisted');
+  const commenting = ACCESS_COMMENTING.has(a.commenting)
+    ? a.commenting
+    : 'signed_in';
+  const history_visibility = ACCESS_HISTORY.has(a.history_visibility)
+    ? a.history_visibility
+    : (legacy ? 'public' : 'owner');
+  const allowed = [];
+  const seen = new Set();
+  const srcList = Array.isArray(a.allowed_users) ? a.allowed_users : [];
+  for (const item of srcList) {
+    const login = normalizeGithubLogin(item);
+    if (!login || seen.has(login)) continue;
+    seen.add(login);
+    allowed.push(login);
+  }
+  return { visibility, commenting, history_visibility, allowed_users: allowed };
+}
+
+function accessFromMeta(meta) {
+  const has = meta && meta.access && typeof meta.access === 'object';
+  return normalizeAccess(has ? meta.access : null, { legacy: !has });
+}
+
+function validateAccessWrite(access) {
+  if (!access || typeof access !== 'object' || Array.isArray(access)) {
+    return { error: 'access object required' };
+  }
+  const keys = Object.keys(access);
+  const unknown = keys.filter((k) => !ACCESS_PATCH_FIELDS.has(k));
+  if (unknown.length) return { error: 'invalid_access_field', fields: unknown };
+
+  const out = {};
+  if ('visibility' in access) {
+    if (!ACCESS_VISIBILITIES.has(access.visibility)) {
+      return { error: 'invalid_access_value', field: 'visibility' };
+    }
+    out.visibility = access.visibility;
+  }
+  if ('commenting' in access) {
+    if (!ACCESS_COMMENTING.has(access.commenting)) {
+      return { error: 'invalid_access_value', field: 'commenting' };
+    }
+    out.commenting = access.commenting;
+  }
+  if ('history_visibility' in access) {
+    if (!ACCESS_HISTORY.has(access.history_visibility)) {
+      return { error: 'invalid_access_value', field: 'history_visibility' };
+    }
+    out.history_visibility = access.history_visibility;
+  }
+  if ('allowed_users' in access) {
+    if (!Array.isArray(access.allowed_users)) {
+      return { error: 'invalid_access_value', field: 'allowed_users' };
+    }
+    const allowed = [];
+    const seen = new Set();
+    for (const item of access.allowed_users) {
+      const login = normalizeGithubLogin(item);
+      if (!login) return { error: 'invalid_access_value', field: 'allowed_users' };
+      if (seen.has(login)) continue;
+      seen.add(login);
+      allowed.push(login);
+    }
+    out.allowed_users = allowed;
+  }
+  return { access: out };
+}
+
+function applyAccessPatch(meta, patch) {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+    return { error: 'missing_meta' };
+  }
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return { error: 'access object required' };
+  }
+  const keys = Object.keys(patch);
+  if (!keys.length) return { error: 'access patch required' };
+  const validated = validateAccessWrite(patch);
+  if (validated.error) return validated;
+
+  // A remote access mutation creates/updates only the access policy. If the doc
+  // has legacy meta without access, switch to product defaults instead of
+  // carrying public-history legacy defaults into a newly managed policy.
+  const base = meta.access && typeof meta.access === 'object'
+    ? normalizeAccess(meta.access, { legacy: false })
+    : normalizeAccess({}, { legacy: false });
+  const next = normalizeAccess({ ...base, ...validated.access }, { legacy: false });
+  return { meta: { ...meta, access: next }, access: next };
+}
+
+function isAllowlisted(access, session, env, meta) {
+  if (isDocOwnerSession(env, session, meta)) return true;
+  const login = sessionLogin(session);
+  if (!login) return false;
+  return (access.allowed_users || []).includes(login);
+}
+
+function canReadDoc(access, session, env, meta) {
+  if (access.visibility === 'public' || access.visibility === 'unlisted') return true;
+  return isAllowlisted(access, session, env, meta);
+}
+
+function canSeeHistory(access, session, env, meta) {
+  if (access.history_visibility === 'public') return true;
+  if (access.history_visibility === 'invited') return isAllowlisted(access, session, env, meta);
+  // owner — the doc publisher (hosted GitHub login) or TDOC_OWNER on legacy docs
+  return isDocOwnerSession(env, session, meta);
+}
+
+function canCommentOnDoc(access, session, env, meta) {
+  if (access.commenting === 'off') return false;
+  if (!sessionLogin(session)) return false;
+  if (access.commenting === 'signed_in') return true;
+  if (access.commenting === 'owner') return isDocOwnerSession(env, session, meta);
+  if (access.commenting === 'invited') return isAllowlisted(access, session, env, meta);
+  return false;
+}
+
+async function loadDocMeta(env, slug) {
+  try {
+    const raw = await env.META.get(`meta:${slug}`);
+    if (!raw) return null;
+    const meta = JSON.parse(raw);
+    return meta && typeof meta === 'object' ? meta : null;
+  } catch {
+    return null;
+  }
+}
+
+function accessDeniedHtml({ status, title, body, slug, version }) {
+  const next = slug && version ? `/d/${encodeURIComponent(slug)}/v/${version}` : '/';
+  return html(`<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)} · tdoc</title>
+<style>
+  body{font:15px/1.5 system-ui,-apple-system,sans-serif;margin:0;min-height:100vh;
+    display:flex;align-items:center;justify-content:center;background:#fff;color:#111}
+  .box{max-width:420px;padding:28px 24px;border:1px solid #e5e7eb;border-radius:12px}
+  h1{font-size:18px;margin:0 0 8px}
+  p{margin:0 0 14px;color:#444}
+  a{color:#1652f0}
+  .meta{font-size:12px;color:#888;margin-top:18px}
+</style></head><body><div class="box">
+  <h1>${escapeHtml(title)}</h1>
+  <p>${escapeHtml(body)}</p>
+  <p><a href="${escapeHtml(next)}">Retry this link</a> after signing in from any page on this host that shows the tdoc bar.</p>
+  <p class="meta">tdoc access control</p>
+</div></body></html>`, { status });
+}
+
+async function enforceDocAccess(env, req, slug, version) {
+  const meta = await loadDocMeta(env, slug);
+  // No meta yet (orphan R2 object) — treat as public so legacy uploads still work.
+  const access = accessFromMeta(meta || {});
+  const session = await getSession(env, req);
+  if (canReadDoc(access, session, env, meta)) {
+    return { ok: true, access, session, meta };
+  }
+  if (!sessionLogin(session)) {
+    return {
+      ok: false,
+      response: accessDeniedHtml({
+        status: 401,
+        title: 'Sign in required',
+        body: 'This document is private. Sign in with GitHub, then open the link again. Only allowlisted accounts can read it.',
+        slug, version,
+      }),
+    };
+  }
+  return {
+    ok: false,
+    response: accessDeniedHtml({
+      status: 403,
+      title: 'Access denied',
+      body: `Signed in as ${session.login}, but this private document does not include you on the allowlist.`,
+      slug, version,
+    }),
+  };
+}
+const TDOC_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-111.391 -301.011 1000 1000" role="img" aria-label="tdoc">
+  <g transform="translate(-123.097585,711.963561) scale(0.1,-0.1)" fill="currentColor" fill-rule="evenodd">
+    <path d="M2705 7105 c-33 -9 -110 -40 -171 -70 -102 -51 -116 -55 -180 -55
+-158 0 -289 -73 -356 -197 -14 -27 -24 -32 -65 -38 -243 -31 -434 -94 -511
+-168 -96 -92 -210 -405 -188 -518 15 -83 90 -156 177 -173 18 -4 44 -30 83
+-81 47 -63 61 -75 85 -75 34 0 42 9 66 73 20 53 30 63 48 50 7 -5 36 -19 65
+-32 63 -26 85 -18 108 40 20 48 20 48 100 3 96 -53 119 -43 144 64 13 55 20
+60 60 37 63 -36 113 -11 125 62 10 65 24 78 68 64 67 -22 110 -94 83 -136 -14
+-22 -24 -25 -72 -25 -71 0 -86 -9 -126 -75 -37 -62 -32 -60 -88 -40 -55 19
+-78 7 -109 -59 -23 -51 -26 -52 -67 -31 -69 36 -104 12 -104 -70 0 -33 -7 -57
+-22 -78 -37 -52 -33 -155 7 -198 34 -35 81 -59 120 -59 14 0 166 53 338 117
+171 64 319 116 327 116 9 -1 54 -20 102 -43 l86 -42 6 -45 c15 -108 16 -106
+-77 -142 -202 -78 -330 -178 -387 -303 -73 -158 -40 -288 72 -288 60 0 107 31
+192 125 94 103 188 155 321 178 l80 13 48 -35 c26 -19 47 -39 47 -44 0 -27
+-53 -101 -134 -186 -52 -53 -101 -111 -110 -129 -54 -104 38 -272 150 -272 56
+0 86 19 123 81 17 26 61 86 99 133 l70 84 47 -74 c80 -127 186 -229 316 -306
+252 -149 457 -294 536 -380 l22 -24 -28 -89 c-16 -50 -39 -122 -51 -162 -20
+-66 -26 -73 -56 -83 -81 -27 -242 -157 -298 -240 -24 -37 -21 -86 9 -115 l24
+-25 275 0 c325 0 298 -11 375 146 120 243 182 511 152 655 -21 102 -113 260
+-184 316 -33 26 -161 224 -150 233 30 29 306 170 316 162 7 -5 48 -38 92 -73
+235 -189 530 -365 810 -483 166 -70 244 -108 261 -128 20 -21 12 -91 -22 -196
+-52 -157 -97 -219 -182 -251 -75 -27 -140 -94 -187 -193 -43 -90 -44 -120 -6
+-159 l29 -29 284 0 c348 0 357 4 378 136 17 107 58 213 167 437 100 205 106
+223 110 290 7 128 -54 191 -233 241 -194 55 -245 88 -367 236 -39 47 -116 131
+-171 188 -61 62 -96 106 -90 110 6 4 102 79 213 167 419 332 586 415 1061 529
+223 53 411 85 985 167 727 103 1138 181 1187 226 152 138 -130 274 -677 328
+-180 17 -800 34 -1305 35 -558 1 -912 18 -1345 66 -336 37 -612 20 -1370 -82
+-522 -70 -620 -38 -710 228 -98 294 -216 468 -396 584 -130 84 -307 115 -454
+79z m351 -150 c122 -60 253 -195 324 -335 12 -24 42 -101 67 -170 119 -339
+210 -401 563 -377 93 6 446 50 586 72 358 59 802 72 1129 35 309 -36 621 -48
+1360 -55 1055 -10 1324 -26 1595 -97 85 -22 220 -76 220 -88 0 -4 -44 -18 -97
+-29 -54 -12 -116 -26 -138 -31 -112 -25 -547 -96 -855 -140 -955 -134 -1314
+-218 -1660 -389 -133 -66 -204 -114 -427 -293 -100 -81 -184 -144 -186 -142
+-3 3 -1 22 3 42 56 256 18 525 -65 464 -32 -23 -35 -39 -24 -123 17 -135 -4
+-294 -67 -502 l-17 -59 112 -105 c62 -58 150 -152 196 -208 154 -188 214 -229
+411 -286 231 -66 235 -85 85 -393 -119 -243 -146 -315 -178 -471 l-9 -40 -242
+-3 c-190 -2 -242 0 -242 10 0 44 101 168 136 168 119 0 283 297 284 513 0 97
+-35 126 -280 233 -356 156 -598 300 -878 523 -74 59 -101 91 -250 299 -174
+243 -193 262 -232 227 -34 -31 -24 -51 126 -257 80 -110 143 -205 141 -212 -6
+-13 -347 -198 -396 -215 -134 -44 -407 36 -668 198 -52 31 -52 31 -8 96 72
+109 96 223 55 260 -40 36 -90 -7 -90 -78 0 -40 -53 -125 -160 -257 -101 -123
+-172 -216 -216 -279 l-17 -24 -34 36 c-56 62 -49 80 73 208 138 145 146 163
+155 349 10 213 45 306 154 411 47 46 53 64 32 93 -71 98 -287 -216 -287 -417
+0 -55 -13 -53 -87 20 -88 87 -98 110 -115 267 -15 149 8 123 -186 215 l-112
+54 -103 -38 c-56 -20 -204 -75 -329 -121 -250 -92 -260 -94 -282 -62 -21 29
+-21 29 14 73 17 21 30 46 30 56 0 21 11 24 27 8 27 -27 67 -6 98 54 27 52 33
+57 55 52 93 -24 95 -23 144 54 l46 71 58 0 c64 0 100 26 137 99 68 134 -116
+318 -281 281 -43 -10 -51 -20 -60 -77 -7 -48 -14 -51 -74 -27 -62 25 -85 10
+-107 -66 -19 -70 -17 -69 -88 -29 -84 47 -113 37 -145 -54 l-10 -27 -53 30
+c-80 45 -104 39 -136 -35 l-13 -30 -21 30 c-37 51 -53 62 -97 69 -64 10 -100
+51 -100 113 0 95 69 303 122 367 60 74 225 132 465 164 l128 17 26 53 c61 126
+133 167 289 165 95 -1 107 1 135 23 152 116 386 146 541 69z m-143 -1797 c14
+-24 27 -47 28 -51 2 -5 -39 -23 -91 -41 -120 -40 -191 -87 -281 -187 -53 -59
+-78 -79 -96 -79 -24 0 -25 2 -19 41 19 119 108 219 260 292 168 82 166 81 199
+25z m675 -617 c233 -116 466 -166 596 -127 l47 14 70 -106 c39 -58 99 -136
+134 -173 109 -116 158 -256 135 -388 -22 -129 -87 -327 -144 -441 l-43 -85
+-216 -3 c-186 -2 -217 0 -217 12 0 25 120 115 216 161 l90 44 18 58 c10 32 38
+120 62 196 24 76 44 151 44 167 0 65 -298 294 -631 483 -55 31 -133 100 -189
+167 -49 58 -48 59 28 21z"/>
+    <path d="M2265 6675 c-37 -36 -34 -86 7 -120 39 -33 81 -29 117 12 68 78 -51
+182 -124 108z"/>
+  </g>
+</svg>
+`;
+const TDOC_LOGO_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAeGVYSWZNTQAqAAAACAAEARoABQAAAAEAAAA+ARsABQAAAAEAAABGASgAAwAAAAEAAgAAh2kABAAAAAEAAABOAAAAAAAAAEgAAAABAAAASAAAAAEAA6ABAAMAAAABAAEAAKACAAQAAAABAAABAKADAAQAAAABAAABAAAAAABUZS5+AAAACXBIWXMAAAsTAAALEwEAmpwYAAABWWlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNi4wLjAiPgogICA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogICAgICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgICAgICAgICB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iPgogICAgICAgICA8eG1wOkNyZWF0b3JUb29sPkZpZ21hPC94bXA6Q3JlYXRvclRvb2w+CiAgICAgIDwvcmRmOkRlc2NyaXB0aW9uPgogICA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgoE/1zIAAAmzUlEQVR4Ae2dB7xlNbXGA6JixYIVFBTFNsLYFREEUeyiiAq2AREFFBtWlEFEimIXFUYURVHEQreMOjBiB0Xsoij23nvLW//1Xvbb59x9+sk5OXd/+f3O3fvukmR/Sb4kK2utbBAtBAUhIARaicCGrfxqfbQQEAKOgAhAFUEItBgBEUCLC1+fLgREAKoDQqDFCIgAWlz4+nQhIAJQHRACLUZABNDiwtenCwERgOqAEGgxAiKAFhe+Pl0IiABUB4RAixEQAbS48PXpQkAEoDogBFqMgAigxYWvTxcCIgDVASHQYgREAC0ufH26EBABqA4IgRYjIAJoceHr04WACEB1QAi0GAERQIsLX58uBEQAqgNCoMUIiABaXPj6dCEgAlAdEAItRkAE0OLC16cLARGA6oAQaDECIoAWF74+XQiIAFQHhECLERABtLjw9elCQASgOiAEWoyACKDFha9PFwIiANUBIdBiBEQALS58fboQEAGoDgiBFiMgAmhx4evThYAIQHVACLQYARFAiwtfny4ERACqA0KgxQiIAFpc+Pp0ISACUB0QAi1GQATQ4sLXpwsBEYDqgBBoMQIigBYXvj5dCIgAVAeEQIsREAG0uPD16UJABKA6IARajIAIoMWFr08XAiIA1QEh0GIERAAtLnx9uhAQAagOCIEWIyACaHHh69OFgAhAdUAItBgBEUCLC1+fLgREAKoDQqDFCIgAWlz4+nQhIAJQHRACLUZABNDiwtenCwERgOqAEGgxAiKAFhe+Pl0IiABUB4RAixEQAbS48PXpQkAEoDogBFqMgAigxYWvTxcCIgDVASHQYgREAC0ufH26EBABqA4IgRYjIAJoceHr04WACEB1QAi0GAERQIsLX58uBEQAqgNCoMUIiABaXPj6dCEgAlAdEAItRkAE0OLC16cLARGA6oAQaDECIoAWF74+XQiIAFQHhECLERABtLjw9elCQASgOiAEWozARi3+9r6f/q9//Sv85z//CRtttJH/+j6sm0JgQREQAfxfwX3nO98JF1xwQbjooovC17/+9fCnP/0p/Pvf/w5XvOIVw6abbhrucIc7hO222y5sv/324drXvvaCFreyLQQ6EdggWui81J7//vGPf4Szzz47vOMd7wjr168Pf/jDHwZ+/K1udavwuMc9Luy7777hhje84cDn9YAQKBmB1hLAhz/84XDUUUeFT33qU43lc41rXCNc6UpX8mkAowGmA/Ww1VZbhZe+9KXhsY99bP2yzoXAQiGwrAngz3/+sw/nf/jDH4Zf/epXPqRn+P7pT386nHjiif5/Kq2rXe1q4W53u1vYZZddwooVK8KWW24Zrn71qwdGCT/96U/DN77xjXDOOeeE888/P/ztb3/z1zbYYIPw9Kc/PRx99NHhKle5SopKRyGwOAgwBVhu4cc//nFcvXp1tIYcbQ7PFKfn7zrXuU58xjOeEb/85S/H//73vwOh+NznPhcf+chHdsS3xx57xN///vcD39UDQqA0BEJpGZo0P2eddVa04XlHA+1FAI9+9KPj1772tbGSNLlBvP71r1+l85CHPCT+8Y9/HCsuvSQE5oXAspoCvPe9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';
+function isAnthropicCompanyMark(url) {
+  return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+}
+function logoForAgentLogin(login) {
+  const key = String(login || '').toLowerCase();
+  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
+  if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
+    return 'https://github.com/openai.png';
+  }
+  if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
+  if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
+  // tdoc project mark (assets/tdoc_logo.svg, served at /tdoc_logo.svg).
+  return '/tdoc_logo.svg';
+}
+
+function isGenericAgentLogin(login) {
+  const k = String(login || '').trim().toLowerCase();
+  return !k || k === 'tdoc-agent' || k === 'agent';
+}
+
+// Infer the host coding-agent from env (Claude Code, Codex, Grok, Cursor, Gemini).
+// The published Worker only sees request JSON, so local server + tdoc-agent-reply
+// run this against process.env and stamp login before the request leaves the machine.
+function detectAgentRuntime(env) {
+  const e = env || {};
+  const present = (names) => names.some((n) => {
+    const v = e[n];
+    return v != null && String(v).trim() !== '';
+  });
+  // Session/host markers only — never API keys. Order is the priority when
+  // more than one host is visible in the same process (rare).
+  if (present(['GROK_AGENT', 'GROK_SESSION_ID', 'GROK_BUILD', 'XAI_AGENT'])) {
+    return { login: 'grok', name: 'Grok' };
+  }
+  if (present(['CLAUDE_CODE', 'CLAUDE_SESSION_ID', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'])) {
+    return { login: 'claude', name: 'Claude' };
+  }
+  if (present(['CODEX_SESSION_ID', 'CODEX_CLI', 'OPENAI_CODEX', 'CODEX_HOME'])) {
+    return { login: 'codex', name: 'Codex' };
+  }
+  if (present(['CURSOR_TRACE_ID', 'CURSOR_AGENT', 'COMPOSER_SESSION'])) {
+    return { login: 'cursor', name: 'Cursor' };
+  }
+  if (present(['GEMINI_CLI', 'GEMINI_SESSION_ID'])) {
+    return { login: 'gemini', name: 'Gemini' };
+  }
+  return null;
+}
+
+function agentIdentity(body = {}, env = {}) {
+  const detected = detectAgentRuntime(env);
+  const clean = (v, fallback) => {
+    if (typeof v !== 'string') return fallback;
+    const s = v.trim().slice(0, 80);
+    return s || fallback;
+  };
+  const rawLogin = typeof (body.agent_login || body.agent_id) === 'string'
+    ? String(body.agent_login || body.agent_id).trim()
+    : '';
+  const rawName = typeof body.agent_name === 'string' ? body.agent_name.trim() : '';
+  const login = (!isGenericAgentLogin(rawLogin) ? rawLogin : '')
+    || (detected && detected.login)
+    || env.TDOC_AGENT_LOGIN
+    || 'tdoc-agent';
+  const name = (!isGenericAgentLogin(rawName) ? rawName : '')
+    || (detected && detected.name)
+    || env.TDOC_AGENT_NAME
+    || login;
+  let avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
+    ? body.agent_avatar_url
+    : null;
+  if (isAnthropicCompanyMark(avatar)) avatar = null;
+  if (!avatar) avatar = logoForAgentLogin(login);
+  return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
 }
 function rand(n) {
   const a = new Uint8Array(n);
@@ -598,32 +997,257 @@ function reconcileAnchors(comments, aidsInVersion, V) {
   return comments;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// CSP (owner-manage-via-session hardening)
+//
+// A published doc is arbitrary author HTML served on our own origin. Once
+// owner mutations (delete / access) can be authorized by the owner's SESSION
+// COOKIE alone (see authorizeOwnerMutation below), a malicious <script> or
+// onclick= embedded in a doc's HTML could ride that cookie to silently
+// delete/modify docs (confused-deputy) — the browser sends the cookie on any
+// same-origin fetch/XHR the page's own script issues, no user gesture needed.
+//
+// FIX: every doc-serving response carries a CSP that runs ONLY our own
+// nonced overlay script and blocks everything else — author <script> tags,
+// inline event-handler attributes (onclick=...), and javascript: URLs all
+// lack the nonce and there is no 'unsafe-inline' to fall back to. Verified
+// fact (2026-08): 0 of 36 published doc versions use <script>, so this
+// breaks no known content.
+//
+// 'strict-dynamic' lets the nonced overlay script load further scripts of
+// its own choosing (it doesn't today, but this keeps the policy from being
+// a maintenance trap if it ever needs to). object-src/base-uri are locked
+// down too (classic plugin/base-tag CSP-bypass vectors) — nothing else is
+// restricted, so author CSS/images/fonts/etc. are untouched.
+function cspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+}
+
+// Interactive islands (#138). Host documents keep cspHeader(); computation
+// lives in a separately served HTML resource framed with sandbox="allow-scripts"
+// (never allow-same-origin). srcdoc/blob inherit the parent CSP and cannot
+// run author JS — these must be real URLs.
+function isValidWidgetName(name) {
+  return typeof name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
+}
+function widgetCspHeader() {
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
+}
+function isWidgetFrameRequest(dest) {
+  return String(dest || '').toLowerCase() === 'iframe';
+}
+function forceWidgetSandbox(html) {
+  if (typeof html !== 'string') return html;
+  return html.replace(/<iframe\b([^>]*?)>/gi, (full, attrs) => {
+    const srcM = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
+    if (!srcM) return full;
+    const src = String(srcM[1] || srcM[2] || srcM[3] || '').trim();
+    let path;
+    try {
+      const u = new URL(src, 'https://tdoc-widget-src.invalid');
+      if (u.hostname !== 'tdoc-widget-src.invalid') return full;
+      path = u.pathname;
+    } catch {
+      return full;
+    }
+    if (!/^\/d\/[a-z0-9][a-z0-9-]{0,63}\/v\/\d+\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(path)) return full;
+    const stripped = attrs.replace(/\s*sandbox\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    return '<iframe sandbox="allow-scripts"' + stripped + '>';
+  });
+}
+
 // Inject the overlay boot + an arbitrary cfg into a document. Single source of
 // truth for "put window.__TDOC__ + overlay.js before </body>" — used by both
 // the published view and the /fork view (which previously re-implemented this
 // inline, risking drift).
-function injectOverlayCfg(rawHtml, cfg) {
+//
+// `nonce` (when supplied) is stamped onto BOTH injected <script> tags so they
+// — and only they — run under the CSP set by cspHeader() above. Callers that
+// don't pass a nonce (there are none left in this file, but keep the param
+// optional so a future caller can't silently omit CSP without an explicit
+// choice) get unnonced tags, which simply won't execute under a nonce-based
+// CSP — fail closed, not fail open.
+function injectOverlayCfg(rawHtml, cfg, nonce) {
+  rawHtml = forceWidgetSandbox(rawHtml);
+  const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const inject =
-    `<script>window.__TDOC__ = ${safeJsonForScript(cfg)};</script>\n` +
-    `<script>${OVERLAY_JS}</script>`;
+    `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
+    `<script${nonceAttr}>${OVERLAY_JS}</script>`;
   if (rawHtml.includes('</body>')) return rawHtml.replace('</body>', `${inject}\n</body>`);
   return rawHtml + inject;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner) {
-  return injectOverlayCfg(rawHtml, {
+// Download (/export) has no overlay JS, so the live reading-column CSS never
+// runs. Slice the marked Classic template out of overlay.js (same source as
+// the published view) and stamp it as a static <style>. Bar / comments stay
+// out — those need overlay JS. Empty when OVERLAY_JS is still the bundle
+// placeholder (unbundled worker.js in some tests).
+const READER_CSS_START = '/* TDOC_READER_CSS_START */';
+const READER_CSS_END = '/* TDOC_READER_CSS_END */';
+function readerCssFromOverlay() {
+  const src = typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '';
+  const i = src.indexOf(READER_CSS_START);
+  const j = src.indexOf(READER_CSS_END);
+  if (i < 0 || j < 0 || j <= i) return '';
+  return src.slice(i + READER_CSS_START.length, j).trim();
+}
+function injectReaderCss(html, css) {
+  if (!css) return html;
+  const tag = `<style id="tdoc-reader">${css}</style>\n`;
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${tag}</head>`);
+  return tag + html;
+}
+
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth) {
+  // The onboarding modal is product UI, so it ships from here under the page
+  // nonce. The doc's own <script> would never run (#138), which is why the
+  // landing CTA still carries a plain href: with scripting off the visitor
+  // gets the /start page instead of a dead button.
+  // The modal ships wherever its trigger is. Gating on the slug meant a doc
+  // could carry the CTA and get a dead link to /start instead — which is what
+  // happened the first time the landing page was drafted under another slug.
+  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml);
+  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce
+    ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
+    : rawHtml;
+  return injectOverlayCfg(withOnboard, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
+    // Hosted tdoc.dev: any signed-in GitHub user. BYOK: TDOC_OWNER only.
+    // Never fall back to isOwner — that hid My docs from hosted readers.
+    canSeeMyDocs: !!canSeeMyDocsFlag,
+    // `/` is the site itself, not a doc someone published. The slug and the
+    // version number are storage detail; printing them in the bar tells a
+    // first-time visitor they are looking at somebody's document.
+    isLanding: !!isLanding,
+    // /me catalog: same overlay bar, no Share / Duplicate / Copy.
+    isCatalog: !!isCatalog,
+    // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
+    // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
+    ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
+    // When the client secret is set, browsers use the redirect flow (signin.js
+    // sends them to /api/auth/web/login) instead of the device-code modal.
+    webAuth: !!webAuth,
     mode: 'published',
     versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
-  });
+  }, nonce);
 }
 
-// Neutral landing page served at `/`. No catalog, no slug list — just
-// brand + a link to the open-source project. Docs are link-only.
-function landingHtml() {
+// The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
+// this published tdoc rather than a hardcoded marketing page, so the landing
+// page is authored, reviewed, and versioned through tdoc itself.
+const LANDING_SLUG = 'tornado-doc';
+
+// The doc behind `/start`: the same onboarding, written as a page, for anyone
+// who has scripting off or who wants to read the steps before running them.
+const START_SLUG = 'tdoc-start';
+// `/templates` — the template gallery: pick a look, copy a prompt, hand it to
+// your agent. Same landing-doc mechanism as `/start`.
+const TEMPLATES_SLUG = 'tdoc-templates';
+
+// The onboarding modal, bundled in by bin/tdoc-bundle. Kept as a placeholder
+// here so the source file stays readable and the bundle stays one artifact.
+const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;
+
+// The one GitHub device-flow client, shared by the overlay and the neutral
+// landing page so a fix or a new provider lands once. See server/signin.js.
+const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;
+
+// Render one published doc version as a full overlay page. Extracted so `/`
+// (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
+// gate, version picker, owner-manage payload, nonce + CSP — instead of the
+// homepage growing a parallel copy that drifts.
+//
+// Returns { ok, response }. `ok:false` carries the real 401/403/404 response
+// for the /d/ route to pass through; the homepage ignores it and falls back to
+// the neutral page, because `/` must never dead-end on an access screen.
+async function serveDocVersion(env, req, slug, version, isLanding) {
+  const gate = await enforceDocAccess(env, req, slug, version);
+  if (!gate.ok) return { ok: false, response: gate.response };
+  const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+  if (!obj) return { ok: false, response: text(`Not found: ${slug} v${version}`, { status: 404 }) };
+  const raw = await obj.text();
+  const session = gate.session;
+  const identity = session ? { login: session.login, avatar_url: session.avatar_url, name: session.name } : null;
+  // Pure-publish: version picker only for callers allowed by history_visibility.
+  let versions = [{ n: version, created: null }];
+  try {
+    const meta = gate.meta;
+    if (meta && Array.isArray(meta.versions) && canSeeHistory(gate.access, session, env, meta)) {
+      versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
+    } else if (meta && Array.isArray(meta.versions)) {
+      const hit = meta.versions.find(v => Number(v.n) === version);
+      versions = [{ n: version, created: (hit && hit.created) || null }];
+    }
+  } catch {}
+  const isOwner = isDocOwnerSession(env, session, gate.meta);
+  // JUL-36: owner-only manage data (Delete / Unpublish / visibility switch),
+  // computed fresh on THIS request and embedded only for the owner. A
+  // non-owner's bootCfg carries `ownerManage: null` — the overlay's manage
+  // menu never builds a single DOM node without it, so there is nothing to
+  // hide, only nothing rendered. Kept separate from `isOwner` (also still
+  // sent) so the manage UI's data dependency is explicit and single-source.
+  let ownerManage = null;
+  if (isOwner) {
+    let commentCount = 0;
+    try {
+      const list = await readComments(env, slug);
+      ensureMigrated(list);
+      for (const c of historyList(list)) {
+        commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+      }
+    } catch {}
+    ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
+  }
+  const nonce = rand(16);
+  return {
+    ok: true,
+    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET), {
+      headers: { 'Content-Security-Policy': cspHeader(nonce) },
+    }),
+  };
+}
+
+// `/` — the homepage. Renders the LANDING_SLUG doc at its LATEST version, so
+// the canonical URL stays `https://tdoc.dev/` forever: publishing v2 changes
+// what the homepage says without changing the URL that search engines and
+// inbound links point at.
+//
+// Fails safe. If the doc was never published to this worker, was unpublished,
+// or is access-gated, the visitor gets the neutral branded page below rather
+// than a 404 or a sign-in wall. Every worker deployed from this repo runs this
+// code, but only tdoc.dev has the doc — everyone else's `/` keeps the neutral
+// page with no configuration.
+async function landingResponse(env, req, slug = LANDING_SLUG) {
+  try {
+    const meta = await loadDocMeta(env, slug);
+    const latest = meta?.versions?.[meta.versions.length - 1]?.n;
+    if (!latest) return html(landingHtml(env));
+    const res = await serveDocVersion(env, req, slug, Number(latest), true);
+    return res.ok ? res.response : html(landingHtml(env));
+  } catch {
+    return html(landingHtml(env));
+  }
+}
+
+// Neutral landing page served at `/` when the landing doc is unavailable, and
+// on every self-hosted worker that has no such doc. No catalog, no slug list —
+// just brand + sign-in (when auth is configured) + a link to the open-source
+// project. Docs are link-only. `notice` is an optional toast reason when we
+// bounce users here from /me or an unknown path.
+function landingHtml(env, notice) {
+  const authOk = !!(env && String(env.GITHUB_CLIENT_ID || '').trim());
+  const authWeb = !!(env && env.GITHUB_CLIENT_SECRET);
+  const toastMsg = ({
+    me: 'My docs is only available after you sign in as the worker owner.',
+    signin: 'Sign in with GitHub to continue.',
+    notfound: 'That page was not found. Sign in or open a doc from its shared link.',
+  })[notice] || '';
+  const toastJson = JSON.stringify(toastMsg);
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tdoc</title>
@@ -636,16 +1260,124 @@ function landingHtml() {
   a { color: #1652f0; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .sub { margin-top: 14px; font-size: 13px; color: #888; }
+  .actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+  button.signin { font: inherit; padding: 8px 16px; border-radius: 8px; border: none;
+    background: #1652f0; color: #fff; font-weight: 600; cursor: pointer; }
+  button.signin:hover { background: #1245d0; }
+  button.signin:disabled { opacity: 0.6; cursor: default; }
+  #toast { position: fixed; top: 16px; right: 16px; max-width: min(360px, calc(100vw - 32px));
+    background: #111; color: #fff; padding: 12px 14px; border-radius: 10px; font-size: 13px;
+    line-height: 1.4; box-shadow: 0 8px 24px rgba(0,0,0,0.18); opacity: 0;
+    transform: translateY(-6px); transition: opacity .18s, transform .18s; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  .status { font-size: 13px; color: #888; min-height: 1.2em; }
 </style></head><body>
   <h1>tdoc</h1>
   <p>Prompt-native, commentable documents.</p>
+  <div class="actions">
+    ${authOk ? '<button type="button" class="signin" id="signin">Sign in with GitHub</button>' : ''}
+  </div>
+  <p class="status" id="status"></p>
   <p class="sub">Open a document from its shared link ·
-    <a href="https://github.com/serenakeyitan/tdoc">github.com/serenakeyitan/tdoc</a></p>
+    <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
+  <div id="toast" role="status" aria-live="polite"></div>
+<script>window.__TDOC__ = { authConfigured: true, webAuth: ${authWeb ? 'true' : 'false'}, signinReturn: '/me' };</script>
+<script>${SIGNIN_JS}</script>
+<script>
+  // One shared sign-in (server/signin.js): web redirect flow when webAuth is on,
+  // else the device-code modal. On the redirect path __tdocSignIn navigates away
+  // and never resolves, so the .then below only runs on the device path.
+  (function () {
+    var btn = document.getElementById('signin');
+    if (!btn || !window.__tdocSignIn) return;
+    btn.onclick = function () {
+      btn.disabled = true;
+      window.__tdocSignIn().then(function () { location.href = '/me'; },
+        function () { btn.disabled = false; });
+    };
+  })();
+</script>
 </body></html>`;
 }
 
-async function indexHtml(env, session) {
-  // List all `meta:` keys.
+function authDoneHtml() {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — signed in</title>
+<style>
+  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh; margin: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #111; background: #fff; gap: 8px; }
+  h1 { font-size: 22px; margin: 0; color: #1652f0; }
+  p { color: #666; margin: 0; }
+</style></head><body>
+  <h1>You're signed in</h1>
+  <p>You can close this tab and return to tdoc.</p>
+</body></html>`;
+}
+
+// Web OAuth redirect flow (browsers). Device flow stays for CLIs; this is the
+// hop that phones need — GitHub sends the visitor straight back here after
+// Approve, so nobody is stranded on GitHub's "Congratulations" page. Active
+// only when GITHUB_CLIENT_SECRET is set (the token exchange requires it), so a
+// deploy without the secret silently keeps the device flow.
+function authErrorHtml(msg) {
+  const safe = String(msg || 'Sign-in failed.').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]);
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — sign-in</title>
+<style>
+  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh; margin: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #111; background: #fff; gap: 8px; text-align: center; padding: 0 20px; }
+  h1 { font-size: 22px; margin: 0; color: #c3452f; }
+  p { color: #666; margin: 0; }
+  a { color: #1652f0; }
+</style></head><body>
+  <h1>Sign-in failed</h1>
+  <p>${safe}</p>
+  <p><a href="/">Back to tdoc</a></p>
+</body></html>`;
+}
+
+// Only ever redirect to a same-origin path we produced. Reject absolute URLs
+// and protocol-relative (`//evil.com`) targets so a crafted `?return=` can't
+// bounce a signed-in visitor off-site. Falls back to the site root.
+function sanitizeReturn(raw) {
+  if (typeof raw !== 'string' || !raw) return '/';
+  if (raw[0] !== '/' || raw[1] === '/' || raw[1] === '\\') return '/';
+  if (/[\x00-\x1f]/.test(raw)) return '/';
+  return raw;
+}
+
+// 302 that can also set cookies — no existing helper does both at once.
+function redirectTo(location, cookies) {
+  const h = new Headers({ Location: location });
+  (cookies || []).forEach((c) => h.append('Set-Cookie', c));
+  return new Response(null, { status: 302, headers: h });
+}
+
+// /me — the owner's doc catalog. JUL-36 tail (2026-08-13): this used to be a
+// dense access-control table (visibility/history/commenting/allowed_users
+// dropdowns + Save) gated by an admin-token field. Both are GONE now:
+//   - access controls moved to the doc-page Share panel (overlay.js
+//     showManageModal, PATCH /api/doc/access) — a single doc's own page is
+//     the right place to manage that doc, not a spreadsheet of every doc.
+//   - the admin-token field is gone because DELETE /api/doc now accepts the
+//     owner's session cookie (authorizeOwnerMutation) — safe because of the
+//     CSP set on every doc response (see cspHeader()). /me is gated by
+//     canSeeMyDocs (hosted: any signed-in GitHub user; BYOK: TDOC_OWNER),
+//     so its own fetches are already same-origin + cookied.
+// What's left: title, slug, version, search, multi-select batch delete, and
+// a quiet ⋯ Delete. No access data of any kind is computed or emitted here
+// (gate: response HTML must not contain `allowed_users` — there is nothing
+// here that could).
+async function indexHtml(env, session, origin, nonce) {
+  // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
+  // comment logs here — that was N serial Durable-Object + R2 round trips
+  // per page load. Search + batch select are client-side over the rendered
+  // rows (no extra KV/R2 work). Delete confirm is immediate (no comment
+  // pre-flight) so the catalog stays snappy.
   let list = [];
   let cursor;
   do {
@@ -655,43 +1387,374 @@ async function indexHtml(env, session) {
     if (r.list_complete) break;
   } while (cursor);
 
-  const rows = [];
-  for (const k of list) {
+  const hosted = hostedRegistrationEnabled(env, origin);
+  const docs = (await Promise.all(list.map(async (k) => {
     const slug = k.name.slice('meta:'.length);
     const metaRaw = await env.META.get(k.name);
     let meta = {};
     try { meta = JSON.parse(metaRaw || '{}'); } catch {}
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
-    // Only list docs whose latest version actually exists in R2 — otherwise
-    // the index advertises 404s. (We hit this when R2 writes silently failed
-    // while KV meta updates succeeded; defense in depth.)
-    const exists = await env.DOCS.head(`docs/${slug}/v${latest}/index.html`);
-    if (!exists) continue;
-    rows.push(`<tr>
-      <td><a href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(meta.title || slug)}</a></td>
-      <td>${escapeHtml(slug)}</td>
-      <td>v${latest}</td>
-    </tr>`);
+    return { slug, title: meta.title || slug, latest, meta };
+  }))).filter((row) => {
+    if (hosted) return isDocOwnerSession(env, session, row.meta);
+    // BYOK operator catalog: keep other people's hosted copies off the list (#146).
+    const hostedLogin = hostedGithubLogin(row.meta);
+    if (hostedLogin && hostedLogin !== sessionLogin(session)) return false;
+    return true;
+  });
+  const visible = docs;
+
+  const rows = visible.map(({ slug, title, latest }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">
+      <label class="row-check">
+        <input type="checkbox" class="doc-check" aria-label="Select ${escapeHtml(title)}">
+      </label>
+      <div class="doc-info">
+        <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(title)}</a>
+        <div class="doc-meta">${escapeHtml(slug)} · v${latest}</div>
+      </div>
+      <div class="row-actions">
+        <button class="row-menu-btn" aria-label="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>
+        <div class="row-menu" hidden>
+          <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">Delete…</button>
+        </div>
+      </div>
+    </div>`);
+
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My docs</title>
+<style>
+  :root {
+    --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
+    --td-danger: #b42318; --td-danger-hover: #931c14; --td-danger-tint: #fdeceb; --td-ok: #087443;
+    --td-ink: #111; --td-muted: #666; --td-line: #eee; --td-surface: #f7f7f7;
+  }
+  body { font: 15px system-ui, -apple-system, sans-serif; margin: 0; color: var(--td-ink); }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 24px 20px 48px; }
+  h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
+  a { color: var(--td-accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
+  .toolbar input[type="search"] { flex: 1 1 220px; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
+  .toolbar input[type="search"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
+  .batch-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin: 0 0 8px; min-height: 32px; }
+  .select-all { display: inline-flex; align-items: center; gap: 8px; color: var(--td-muted); font-size: 13px; cursor: pointer; user-select: none; }
+  .batch-delete { display: none; font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-danger); background: #fff; color: var(--td-danger); }
+  .batch-delete.is-visible { display: inline-block; }
+  .batch-delete:hover { background: var(--td-danger); color: #fff; }
+  .batch-delete:disabled { opacity: 0.5; cursor: default; }
+  .doc-list { display: flex; flex-direction: column; }
+  .doc-list[hidden], .doc-row[hidden], .empty[hidden] { display: none !important; }
+  /* Create-a-doc: /me is where someone lands after publishing, so it is also
+     where they come back to make the next one. The button teaches rather than
+     creates, because nothing here can create a doc — their agent writes it. */
+  .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+  .page-hd h1 { margin: 0; }
+  .mk-btn { margin-left: auto; border: 0; border-radius: 999px; background: var(--td-accent); color: #fff;
+    font: inherit; font-weight: 650; padding: 9px 16px; cursor: pointer; }
+  .mk-bg { position: fixed; inset: 0; background: rgba(16,18,26,.55); display: grid; place-items: center;
+    z-index: 99999; padding: 20px; }
+  .mk-bg[hidden] { display: none; }
+  .mk { width: min(480px, 100%); background: #fff; border-radius: 16px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(16,18,26,.28); text-align: left; }
+  .mk-hd { display: flex; align-items: center; padding: 17px 20px; border-bottom: 1px solid var(--td-line); }
+  .mk-hd strong { font-size: 15px; }
+  .mk-hd button { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1;
+    color: #767c8b; cursor: pointer; }
+  .mk-bd { padding: 18px 20px; }
+  .mk-bd ol { margin: 0; padding-left: 18px; color: #5b6070; font-size: 14px; }
+  .mk-bd li { margin: 0 0 9px; }
+  .mk-bd b { color: var(--td-ink); }
+  .mk-say { display: block; margin: 6px 0 0; padding: 9px 11px; background: #f5f6f8;
+    border: 1px solid var(--td-line); border-radius: 8px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--td-ink); }
+  .mk-ft { padding: 14px 20px; border-top: 1px solid var(--td-line); font-size: 12.5px; color: #767c8b; }
+  .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
+  .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
+  .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+  .row-check input, .select-all input { width: 15px; height: 15px; accent-color: var(--td-accent); cursor: pointer; }
+  .doc-info { min-width: 0; flex: 1 1 auto; }
+  .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
+  button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
+  /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
+     not a management console. Faint by default, clearer on row hover. */
+  .row-actions { position: relative; flex-shrink: 0; margin-left: auto; }
+  .row-menu-btn { border: none; background: none; color: #ccc; font-size: 20px; line-height: 1; padding: 2px 8px; border-radius: 6px; }
+  .doc-row:hover .row-menu-btn { color: var(--td-muted); }
+  .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
+  .row-menu { position: absolute; right: 0; top: 100%; margin-top: 4px; min-width: 128px; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 4px; z-index: 10; }
+  .row-menu[hidden] { display: none; }
+  .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
+  .row-delete:hover { background: var(--td-danger-tint); }
+  /* Styled confirm modal — replaces window.confirm() (JUL-36). Overlay.js
+     supplies the site bar; this modal stays local because catalog delete
+     is not a document Share flow. */
+  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
+  .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
+  .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
+  .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
+</style>
+</head><body>
+<div class="wrap">
+<div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
+${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how, or <a href="/templates">browse templates</a> for a look to start from.</p>' :
+  `<div class="toolbar">
+    <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
+  </div>
+  <div class="batch-bar">
+    <label class="select-all"><input type="checkbox" id="select-all"> <span id="select-all-label">Select all</span></label>
+    <button type="button" id="batch-delete" class="batch-delete">Delete selected</button>
+  </div>
+  <div class="doc-list">${rows.join('')}</div>
+  <p id="no-match" class="empty" hidden>No matches.</p>`}
+</div>
+
+<div class="mk-bg" id="mk-bg" hidden>
+  <div class="mk" role="dialog" aria-modal="true" aria-label="Create a doc">
+    <div class="mk-hd"><strong>Create a doc</strong><button type="button" id="mk-x" aria-label="Close">&times;</button></div>
+    <div class="mk-bd">
+      <ol>
+        <li>Open the AI you already use.
+          <span class="mk-say">Use tdoc to make me a one page summary of this quarter, with a chart of weekly signups.</span>
+        </li>
+        <li>It writes the page and opens it for you.</li>
+        <li>Hit <b>Publish</b>, top right, to put it online.</li>
+        <li>Send the link to anyone. They comment on the page, and your AI answers them.</li>
+      </ol>
+    </div>
+    <div class="mk-ft">Want a specific look first? <a href="/templates">Browse templates</a>. &nbsp;·&nbsp; Not set up yet? <a href="/start">Start here</a>.</div>
+  </div>
+</div>
+<script${nonce ? ` nonce="${nonce}"` : ''}>
+  // Create-a-doc tutorial. /me cannot create anything — the doc is written by
+  // the user's own agent — so this explains where creation actually happens.
+  (function () {
+    var bg = document.getElementById('mk-bg');
+    var openBtn = document.getElementById('mk-open');
+    if (!bg || !openBtn) return;
+    function show(on) { bg.hidden = !on; if (on) document.getElementById('mk-x').focus(); }
+    openBtn.onclick = function () { show(true); };
+    document.getElementById('mk-x').onclick = function () { show(false); };
+    bg.addEventListener('click', function (e) { if (e.target === bg) show(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !bg.hidden) show(false); });
+  })();
+
+(() => {
+  // Tiny top-right toast — no third-party runtime on the privileged /me page.
+  function toast(message, kind = '') {
+    if (!message) return;
+    document.querySelectorAll('.tdoc-toast').forEach((n) => n.remove());
+    const t = document.createElement('div');
+    t.className = 'tdoc-toast';
+    t.textContent = message;
+    t.setAttribute('role', 'status');
+    t.style.cssText = 'position:fixed;top:62px;right:18px;z-index:1000001;background:' +
+      (kind === 'error' ? '#b42318' : '#1652f0') +
+      ';color:#fff;padding:12px 16px;border-radius:8px;font:14px system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.18)';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+  }
+  // Styled confirm — replaces window.confirm(). Resolves true/false; never
+  // silently proceeds (Cancel and the backdrop both resolve false).
+  function showConfirm({ title, body, confirmLabel, danger }) {
+    return new Promise((resolve) => {
+      const bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg';
+      bg.innerHTML = '<div class="tdoc-modal">' +
+        '<h3></h3><p></p>' +
+        '<div class="actions">' +
+          '<button type="button" data-act="cancel">Cancel</button>' +
+          '<button type="button" data-act="go"></button>' +
+        '</div></div>';
+      bg.querySelector('h3').textContent = title;
+      bg.querySelector('p').innerHTML = body;
+      const goBtn = bg.querySelector('[data-act="go"]');
+      goBtn.textContent = confirmLabel;
+      if (danger) goBtn.className = 'danger';
+      const done = (v) => { bg.remove(); resolve(v); };
+      bg.querySelector('[data-act="cancel"]').onclick = () => done(false);
+      bg.addEventListener('click', (e) => { if (e.target === bg) done(false); });
+      goBtn.onclick = () => done(true);
+      document.body.appendChild(bg);
+    });
+  }
+  // ⋯ overflow menu — one open at a time; a click anywhere else closes it.
+  function closeMenus(except) {
+    document.querySelectorAll('.row-menu').forEach((m) => {
+      if (m === except) return;
+      m.hidden = true;
+      m.previousElementSibling.setAttribute('aria-expanded', 'false');
+    });
+  }
+  document.querySelectorAll('.row-menu-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = btn.nextElementSibling;
+      const willOpen = menu.hidden;
+      closeMenus(willOpen ? menu : null);
+      menu.hidden = !willOpen;
+      btn.setAttribute('aria-expanded', String(willOpen));
+    });
+  });
+  document.addEventListener('click', () => closeMenus(null));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(null); });
+
+  // Delete: no token — the browser is already signed in as the owner (this
+  // page 302s away for anyone else), so the session cookie alone authorizes
+  // DELETE /api/doc (authorizeOwnerMutation in worker.js). Plain same-origin
+  // fetch sends the cookie automatically; no Authorization header needed.
+  // Confirm copy stays quiet ("This can't be undone.") — no version/comment
+  // inventory, no infra jargon, no pre-flight comment fetch.
+  async function deleteDoc(slug) {
+    const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (!res.ok) {
+      let body = {};
+      try { body = await res.json(); } catch {}
+      throw new Error(body.error || ('HTTP ' + res.status));
+    }
+  }
+  document.querySelectorAll('.row-delete').forEach((button) => {
+    button.addEventListener('click', async () => {
+      closeMenus(null);
+      const slug = button.dataset.slug;
+      const title = button.dataset.title || slug;
+      const proceed = await showConfirm({
+        title: 'Delete "' + title + '"?',
+        body: "This can't be undone.",
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!proceed) return;
+      try {
+        await deleteDoc(slug);
+      } catch {
+        toast("Couldn't delete", 'error');
+        return;
+      }
+      button.closest('.doc-row').remove();
+      applySearch();
+      toast('Deleted');
+    });
+  });
+
+  // Search + batch select — client-side only over the already-rendered rows.
+  // No access data, no extra KV/R2; keep the catalog fast (#115).
+  const listEl = document.querySelector('.doc-list');
+  if (!listEl) return;
+  const search = document.getElementById('doc-search');
+  const selectAll = document.getElementById('select-all');
+  const selectAllLabel = document.getElementById('select-all-label');
+  const batchDelete = document.getElementById('batch-delete');
+  const noMatch = document.getElementById('no-match');
+
+  function visibleRows() {
+    return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => !row.hidden);
+  }
+  function selectedRows() {
+    return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+  }
+  function syncBatchUi() {
+    const visible = visibleRows();
+    const selected = selectedRows();
+    const n = selected.length;
+    selected.forEach((row) => row.classList.add('is-selected'));
+    listEl.querySelectorAll('.doc-row').forEach((row) => {
+      const box = row.querySelector('.doc-check');
+      if (!(box && box.checked)) row.classList.remove('is-selected');
+    });
+    batchDelete.classList.toggle('is-visible', n > 0);
+    batchDelete.textContent = n <= 1 ? 'Delete' : ('Delete ' + n);
+    const allVisibleChecked = visible.length > 0 && visible.every((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+    const someVisibleChecked = visible.some((row) => {
+      const box = row.querySelector('.doc-check');
+      return box && box.checked;
+    });
+    selectAll.checked = allVisibleChecked;
+    selectAll.indeterminate = someVisibleChecked && !allVisibleChecked;
+    selectAllLabel.textContent = allVisibleChecked ? 'Deselect all' : 'Select all';
+    selectAll.disabled = visible.length === 0;
+    if (!listEl.querySelector('.doc-row')) {
+      search.closest('.toolbar').hidden = true;
+      selectAll.closest('.batch-bar').hidden = true;
+      listEl.insertAdjacentHTML('afterend', '<p class="empty">No published docs yet.</p>');
+      listEl.remove();
+      if (noMatch) noMatch.hidden = true;
+    }
+  }
+  function applySearch() {
+    const q = (search.value || '').trim().toLowerCase();
+    let shown = 0;
+    listEl.querySelectorAll('.doc-row').forEach((row) => {
+      const hay = ((row.dataset.title || '') + ' ' + (row.dataset.slug || '')).toLowerCase();
+      const match = !q || hay.includes(q);
+      row.hidden = !match;
+      if (match) shown += 1;
+      else {
+        const box = row.querySelector('.doc-check');
+        if (box) box.checked = false;
+      }
+    });
+    if (noMatch) noMatch.hidden = shown > 0;
+    listEl.hidden = shown === 0;
+    syncBatchUi();
   }
 
-  return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
-<style>
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 760px; margin: 60px auto; padding: 0 20px; color: #111; }
-  h1 { font-size: 28px; margin: 0 0 4px; color: #1652f0; }
-  .sub { color: #666; margin: 0 0 32px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; }
-  th { font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 0.04em; }
-  a { color: #1652f0; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .empty { color: #888; padding: 40px 0; text-align: center; }
-  .who { color: #888; font-size: 13px; margin: 0 0 32px; }
-  .who b { color: #444; font-weight: 600; }
-</style></head><body>
-<h1>My docs</h1>
-<p class="who">Documents hosted on this worker${session && session.login ? ` · signed in as <b>${escapeHtml(session.login)}</b>` : ''}.</p>
-${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
-  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th></tr></thead><tbody>${rows.join('')}</tbody></table>`}
+  search.addEventListener('input', applySearch);
+  listEl.addEventListener('change', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('doc-check')) syncBatchUi();
+  });
+  selectAll.addEventListener('change', () => {
+    const on = selectAll.checked;
+    visibleRows().forEach((row) => {
+      const box = row.querySelector('.doc-check');
+      if (box) box.checked = on;
+    });
+    syncBatchUi();
+  });
+  batchDelete.addEventListener('click', async () => {
+    const rows = selectedRows();
+    if (!rows.length) return;
+    const proceed = await showConfirm({
+      title: rows.length === 1
+        ? ('Delete "' + (rows[0].dataset.title || rows[0].dataset.slug) + '"?')
+        : ('Delete ' + rows.length + ' docs?'),
+      body: "This can't be undone.",
+      confirmLabel: rows.length === 1 ? 'Delete' : ('Delete ' + rows.length),
+      danger: true,
+    });
+    if (!proceed) return;
+    batchDelete.disabled = true;
+    let ok = 0, failed = 0;
+    for (const row of rows) {
+      try {
+        await deleteDoc(row.dataset.slug);
+        row.remove();
+        ok += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    batchDelete.disabled = false;
+    applySearch();
+    if (failed && ok) toast("Deleted " + ok + " · couldn't delete " + failed, 'error');
+    else if (failed) toast("Couldn't delete", 'error');
+    else toast('Deleted');
+  });
+  syncBatchUi();
+})();
+</script>
 </body></html>`;
 }
 
@@ -878,11 +1941,13 @@ function snapshotAt(c, V) {
         snap.status = 'applied';
         snap.applied_in = e.applied_in || e.at_version;
         snap._agentVerdict = e.agent_status || 'applied';
+        snap._agentActor = e.by || 'tdoc-agent';
         break;
       case 'marked_open':
         snap.status = 'open';
         snap.applied_in = undefined;
         snap._agentVerdict = e.agent_status || null;
+        snap._agentActor = e.by || 'tdoc-agent';
         break;
       case 'deleted':
         snap.deleted = true;
@@ -905,7 +1970,7 @@ function snapshotAt(c, V) {
       case 'reply_added': {
         if (!e.reply || !e.reply.id) break;
         const r = {
-          id: e.reply.id, parent_id: c.id,
+          id: e.reply.id, parent_id: e.reply.parent_id || c.id,
           author: e.reply.author || null,
           text: e.reply.text || '',
           agent_status: e.reply.agent_status || null,
@@ -950,8 +2015,9 @@ function snapshotAt(c, V) {
   // parent card) matches today without storing it as a real reaction event.
   if (snap._agentVerdict && AGENT_STATUS_EMOJI[snap._agentVerdict]) {
     const emoji = AGENT_STATUS_EMOJI[snap._agentVerdict];
+    const actor = snap._agentActor || 'tdoc-agent';
     const u = snap.reactions[emoji] || [];
-    if (!u.includes('tdoc-agent')) u.push('tdoc-agent');
+    if (!u.includes(actor)) u.push(actor);
     snap.reactions[emoji] = u;
   }
   delete snap._agentVerdict;
@@ -1167,13 +2233,319 @@ async function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
+async function sha256Hex(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(s || '')));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function requestOrigin(reqOrUrl) {
+  if (typeof reqOrUrl === 'string') {
+    try { return new URL(reqOrUrl).origin; } catch { return ''; }
+  }
+  if (reqOrUrl && reqOrUrl.url) {
+    try { return new URL(reqOrUrl.url).origin; } catch { return ''; }
+  }
+  return '';
+}
+
+// Explicit 1/true/yes: on (wrangler dev). Explicit 0/false/no: off.
+// Unset: only the hosted product hostname (tdoc.dev) — BYOK stays single-owner.
+function hostedRegistrationEnabled(env, origin) {
+  const v = String((env && (env.TDOC_HOSTED_REGISTRATION || env.TDOC_HOSTED_SIGNUP)) || '').toLowerCase();
+  if (v === '1' || v === 'true' || v === 'yes') return true;
+  if (v === '0' || v === 'false' || v === 'no') return false;
+  return origin === 'https://tdoc.dev';
+}
+
+function canSeeMyDocs(env, session, origin) {
+  if (!sessionLogin(session)) return false;
+  if (hostedRegistrationEnabled(env, origin)) return true;
+  return isOwnerSession(env, session);
+}
+
+function hostedMaxDocs(env) {
+  const n = Number(env && env.TDOC_HOSTED_MAX_DOCS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 50;
+}
+
+function hostedMaxUploadBytes(env) {
+  const n = Number(env && env.TDOC_HOSTED_MAX_UPLOAD_BYTES);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2 * 1024 * 1024;
+}
+
+function utf8ByteLength(s) {
+  return new TextEncoder().encode(String(s || '')).byteLength;
+}
+
+async function countHostedDocs(env, accountId, stopAt) {
+  if (!accountId || !env.META) return 0;
+  let n = 0;
+  let cursor;
+  do {
+    const r = await env.META.list({ prefix: 'meta:', cursor });
+    for (const k of r.keys || []) {
+      let meta = null;
+      try {
+        const raw = await env.META.get(k.name);
+        if (raw) meta = JSON.parse(raw);
+      } catch {}
+      if (meta && meta.hosted && meta.hosted.account_id === accountId) {
+        n++;
+        if (stopAt && n >= stopAt) return n;
+      }
+    }
+    cursor = r.cursor;
+    if (r.list_complete) break;
+  } while (cursor);
+  return n;
+}
+
+function envFlagTrue(v) {
+  const s = String(v || '').toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes';
+}
+
+// Browser "Duplicate" may write a new slug for a signed-in GitHub user.
+// Open that path on the hosted product (tdoc.dev) and when an operator
+// explicitly opts in. Self-host / BYOK stays owner-only so a personal
+// worker is not a write surface for every GitHub login. CLI hosted
+// signup (TDOC_HOSTED_REGISTRATION) remains a separate, closed switch.
+function hostedAccountCopiesEnabled(env, req) {
+  if (envFlagTrue(env && env.TDOC_ACCOUNT_COPY)) return true;
+  if (hostedRegistrationEnabled(env, requestOrigin(req))) return true;
+  try {
+    const host = new URL(req.url).hostname.toLowerCase();
+    return host === 'tdoc.dev' || host.endsWith('.tdoc.dev');
+  } catch {
+    return false;
+  }
+}
+
+// `${source}-copy`, `${source}-copy-2`, … clipped to isValidSlug's 64-char cap.
+function nextDuplicateSlug(sourceSlug, n) {
+  if (!isValidSlug(sourceSlug) || !Number.isInteger(n) || n < 1) return null;
+  const suffix = n === 1 ? '-copy' : `-copy-${n}`;
+  const maxBase = 64 - suffix.length;
+  if (maxBase < 1) return null;
+  const base = sourceSlug.slice(0, maxBase).replace(/-+$/g, '');
+  if (!base) return null;
+  const candidate = `${base}${suffix}`;
+  return isValidSlug(candidate) ? candidate : null;
+}
+
+async function hostedAccountForGithub(env, login) {
+  const norm = normalizeGithubLogin(login);
+  if (!norm || !env || !env.META) return null;
+  const primary = `hosted-account:${norm}`;
+  const legacy = `hosted-github:${norm}`;
+  let rec = null;
+  try {
+    const raw = await env.META.get(primary);
+    if (raw) rec = JSON.parse(raw);
+  } catch {}
+  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+    try {
+      const raw = await env.META.get(legacy);
+      if (raw) rec = JSON.parse(raw);
+    } catch {}
+  }
+  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+    rec = {
+      account_id: `acct_${rand(12)}`,
+      github_login: norm,
+      created: new Date().toISOString(),
+    };
+  } else {
+    rec = {
+      account_id: rec.account_id,
+      github_login: norm,
+      created: rec.created || new Date().toISOString(),
+    };
+  }
+  await env.META.put(primary, JSON.stringify(rec));
+  return rec;
+}
+
+async function sourceHasWidgets(env, slug, version) {
+  try {
+    const r = await env.DOCS.list({ prefix: `docs/${slug}/v${version}/widgets/` });
+    return { ok: true, has: Array.isArray(r.objects) && r.objects.length > 0 };
+  } catch (e) {
+    return { ok: false, response: json({ error: 'doc_bytes_check_failed', message: e.message || String(e) }, { status: 503 }) };
+  }
+}
+
+async function issueHostedToken(env, body = {}) {
+  const github_login = normalizeGithubLogin(body.login);
+  if (!github_login) {
+    return { error: 'sign_in_required', status: 401 };
+  }
+  const account = await hostedAccountForGithub(env, github_login);
+  if (!account) return { error: 'sign_in_required', status: 401 };
+  const token = `tdoc_${rand(24)}`;
+  const tokenHash = await sha256Hex(token);
+  const record = {
+    account_id: account.account_id,
+    github_login,
+    created: new Date().toISOString(),
+  };
+  if (typeof body.label === 'string' && body.label.trim()) {
+    record.label = body.label.trim().slice(0, 80);
+  }
+  await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record));
+  return { token, record };
+}
+
+async function hostedTokenActor(env, token) {
+  if (!env || !env.META) return null;
+  const tokenHash = await sha256Hex(token);
+  let record = null;
+  try {
+    const raw = await env.META.get(`hosted-token:${tokenHash}`);
+    if (raw) record = JSON.parse(raw);
+  } catch {}
+  if (!record || typeof record.account_id !== 'string' || !record.account_id) return null;
+  const github_login = normalizeGithubLogin(record.github_login);
+  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash, github_login };
+}
+
+async function hostedOwnerOp(env, slug, op) {
+  if (!env.COMMENTS) {
+    return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
+  }
+  try {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+    const r = await stub.fetch('https://do/owner', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, op }),
+    });
+    let body;
+    try {
+      body = await r.json();
+    } catch {
+      return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
+    }
+    if (!body || typeof body !== 'object') {
+      return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
+    }
+    return body;
+  } catch (e) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'hosted_owner_store_unavailable',
+      message: e.message || String(e),
+    };
+  }
+}
+
+async function docBytesExist(env, slug) {
+  try {
+    const r = await env.DOCS.list({ prefix: `docs/${slug}/` });
+    return { ok: true, exists: Array.isArray(r.objects) && r.objects.length > 0 };
+  } catch (e) {
+    return { ok: false, response: json({ error: 'doc_bytes_check_failed', message: e.message || String(e) }, { status: 503 }) };
+  }
+}
+
+// Returns { ok, actor, response }. Admin = the provider-wide TDOC_UPLOAD_TOKEN
+// (self-host CLI). Hosted = an account-scoped token minted at /api/hosted/token.
+// Hosted success here is identity only — slug ACL is requireDocWriteAccess /
+// authorizeOwnerMutation. Do not treat a hosted actor as a global owner.
 async function requireUploadAuth(req, env) {
   const auth = req.headers.get('authorization') || '';
   const m = auth.match(/^Bearer\s+(.+)$/);
-  if (!m || !env.TDOC_UPLOAD_TOKEN || !(await timingSafeEqual(m[1], env.TDOC_UPLOAD_TOKEN))) {
-    return json({ error: 'unauthorized' }, { status: 401 });
+  if (!m) return { ok: false, response: json({ error: 'unauthorized' }, { status: 401 }) };
+  const token = m[1];
+  if (env.TDOC_UPLOAD_TOKEN && await timingSafeEqual(token, env.TDOC_UPLOAD_TOKEN)) return { ok: true, actor: { kind: 'admin' } };
+  const hostedActor = await hostedTokenActor(env, token);
+  if (hostedActor) return { ok: true, actor: hostedActor };
+  return { ok: false, response: json({ error: 'unauthorized' }, { status: 401 }) };
+}
+
+// Slug-scoped write ACL for a hosted account token. Admin actors skip it.
+// opts.create: first publish / retry. Does NOT claim an empty slug — the
+// upload route claims after validation so a 400 cannot park the slug forever.
+async function requireDocWriteAccess(env, actor, slug, opts = {}) {
+  const meta = await loadDocMeta(env, slug);
+  if (!actor || actor.kind === 'admin') return { ok: true, meta };
+  const accountId = meta && meta.hosted && meta.hosted.account_id;
+  if (opts.create) {
+    if (!meta) {
+      const bytes = await docBytesExist(env, slug);
+      if (!bytes.ok) return { ok: false, response: bytes.response };
+      if (bytes.exists) {
+        const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+        if (verified.ok) return { ok: true, meta: null };
+        // Orphan / other-owner bytes are "slug taken" (409), not "not doc
+        // owner" (403). Preserve DO/store failures as 503 so callers fail closed.
+        if (
+          verified.status === 503
+          || verified.error === 'hosted_owner_store_unavailable'
+          || verified.error === 'owner_store_conflict'
+        ) {
+          return {
+            ok: false,
+            response: json(
+              { error: verified.error || 'hosted_owner_store_unavailable' },
+              { status: verified.status || 503 },
+            ),
+          };
+        }
+        return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+      }
+      return { ok: true, meta: null };
+    }
+    if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+    if (accountId !== actor.account_id) {
+      return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+    }
+    const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+    if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
+    return { ok: true, meta };
   }
-  return null;
+  if (!meta) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
+  if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+  if (accountId !== actor.account_id) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+  if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
+  return { ok: true, meta };
+}
+
+function stampHostedOwnership(meta, actor) {
+  if (!actor || actor.kind !== 'hosted') return meta;
+  const hosted = {
+    ...((meta && meta.hosted && typeof meta.hosted === 'object') ? meta.hosted : {}),
+    account_id: actor.account_id,
+  };
+  if (actor.github_login) hosted.github_login = actor.github_login;
+  return {
+    ...(meta || {}),
+    hosted,
+  };
+}
+
+// Combined write gate for browser-facing admin routes (DELETE /api/doc,
+// PATCH /api/doc/access). One of:
+//   - signed in as the doc publisher (hosted.github_login, or TDOC_OWNER on
+//     unhosted/legacy docs; CSP makes the cookie path safe);
+//   - provider-wide upload token (self-host CLI, global admin);
+//   - hosted account token AND requireDocWriteAccess for `slug`.
+//
+// Hosted tokens are NOT global owners. `slug` must be known before this
+// runs whenever a hosted token might be in play. Returns { ok: true, actor,
+// session, meta? } or { ok: false, response }.
+async function authorizeOwnerMutation(req, env, slug) {
+  const session = await getSession(env, req);
+  const meta = slug ? await loadDocMeta(env, slug) : null;
+  if (isDocOwnerSession(env, session, meta)) return { ok: true, session, actor: { kind: 'owner_session' }, meta };
+  const auth = await requireUploadAuth(req, env);
+  if (!auth.ok) return { ok: false, response: auth.response };
+  if (auth.actor.kind === 'admin') return { ok: true, session: null, actor: auth.actor, meta };
+  if (!slug) return { ok: false, response: json({ error: 'slug required' }, { status: 400 }) };
+  const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+  if (!writeGate.ok) return writeGate;
+  return { ok: true, session: null, actor: auth.actor, meta: writeGate.meta };
 }
 
 // ===========================================================================
@@ -1196,6 +2568,130 @@ async function requireUploadAuth(req, env) {
 // before/without the migration — same code path, just not serialized.
 // ===========================================================================
 
+// Resolve a comment id that may be a top-level thread OR a reply inside one.
+// Nested replies still live on the root thread's event log; parent_id on the
+// reply record is the immediate parent (HN/Reddit-style threading).
+function findCommentThread(list, id) {
+  if (!id || !Array.isArray(list)) return null;
+  const top = list.find(c => c && c.id === id);
+  if (top) return { root: top, parentId: id, parentIsRoot: true };
+  for (const c of list) {
+    const ev = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
+    if (ev) return { root: c, parentId: id, parentIsRoot: false };
+  }
+  return null;
+}
+
+function recordAuthor(list, id) {
+  if (!id || !Array.isArray(list)) return null;
+  const top = list.find(c => c && c.id === id);
+  if (top) return top.author || null;
+  for (const c of list) {
+    const ev = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
+    if (ev) return ev.reply.author || null;
+  }
+  return null;
+}
+
+// Per-user inbox (same host, cross-doc). KV key inbox:<github-login>.
+// Rows are aggregated by group_key so a viral doc does not write 40 lines.
+const INBOX_MAX = 200;
+const INBOX_PAGE = 20;
+
+function inboxKey(login) {
+  const n = normalizeGithubLogin(login);
+  return n ? `inbox:${n}` : null;
+}
+
+function inboxGroupKey(kind, slug, targetId) {
+  if (kind === 'comment') return `comment:${slug}`;
+  if (kind === 'reply') return `reply:${targetId}`;
+  if (kind === 'reaction') return `reaction:${targetId}`;
+  return `other:${slug || 'x'}`;
+}
+
+function emptyInbox() { return { items: [] }; }
+
+function inboxUnread(inbox) {
+  const items = inbox && Array.isArray(inbox.items) ? inbox.items : [];
+  return items.filter(i => i && !i.read).length;
+}
+
+function applyInboxEvent(inbox, ev) {
+  const items = inbox && Array.isArray(inbox.items) ? inbox.items.slice() : [];
+  const gk = inboxGroupKey(ev.kind, ev.slug, ev.target_id || ev.comment_id);
+  const existing = items.find(i => i && !i.read && i.group_key === gk);
+  if (existing) {
+    existing.count = (Number(existing.count) || 1) + 1;
+    existing.at = ev.at;
+    existing.actor = ev.actor || existing.actor;
+    existing.comment_id = ev.comment_id || existing.comment_id;
+    existing.thread_id = ev.thread_id || existing.thread_id;
+    existing.preview = ev.preview != null ? ev.preview : existing.preview;
+    if (ev.emoji) existing.emoji = ev.emoji;
+    existing.version = ev.version || existing.version;
+    const rest = items.filter(i => i !== existing);
+    return { items: [existing, ...rest].slice(0, INBOX_MAX) };
+  }
+  const row = {
+    id: ev.id,
+    kind: ev.kind,
+    group_key: gk,
+    slug: ev.slug,
+    version: ev.version || 1,
+    comment_id: ev.comment_id,
+    thread_id: ev.thread_id || ev.comment_id,
+    actor: ev.actor || null,
+    preview: ev.preview || '',
+    title: ev.title || ev.slug,
+    at: ev.at,
+    read: false,
+    count: 1,
+    emoji: ev.emoji || null,
+  };
+  return { items: [row, ...items].slice(0, INBOX_MAX) };
+}
+
+function markInboxRead(inbox, { ids, comment_id } = {}) {
+  const items = (inbox && Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
+    if (!i) return i;
+    if (Array.isArray(ids) && ids.includes(i.id)) return { ...i, read: true };
+    if (comment_id && i.comment_id === comment_id) return { ...i, read: true };
+    return i;
+  });
+  return { items };
+}
+
+function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE } = {}) {
+  const items = inbox && Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
+  const unread = items.filter(i => !i.read);
+  const read = items.filter(i => i.read);
+  const ordered = unread.concat(read);
+  const off = Math.max(0, Number(offset) || 0);
+  const lim = Math.min(50, Math.max(1, Number(limit) || INBOX_PAGE));
+  return {
+    items: ordered.slice(off, off + lim),
+    unread: unread.length,
+    has_more: off + lim < ordered.length,
+  };
+}
+
+// Reddit-style: top-level comment → doc owner; reply → direct parent author
+// only; reaction → author of that item. Never notify the actor.
+function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targetAuthorLogin }) {
+  const actor = sessionLogin({ login: actorLogin });
+  const out = [];
+  const push = (login) => {
+    const n = sessionLogin({ login });
+    if (!n || n === actor) return;
+    if (!out.includes(n)) out.push(n);
+  };
+  if (kind === 'comment') push(ownerLogin);
+  else if (kind === 'reply') push(parentAuthorLogin);
+  else if (kind === 'reaction') push(targetAuthorLogin);
+  return out;
+}
+
 // Apply one comment operation to the in-memory list. PURE w.r.t. I/O: it only
 // mutates `list` and returns { status, body }. Both the DO path and the KV
 // fallback call this, so mutation logic is defined exactly once.
@@ -1214,11 +2710,11 @@ function applyCommentOp(list, op) {
       return { status: 200, body: snapshotAt(entry, op.version) };
     }
     case 'reply': {
-      const parent = list.find(c => c.id === op.parent_id);
-      if (!parent) return { status: 404, body: { error: 'parent_not_found' } };
-      appendEvent(parent, { kind: 'reply_added', at_version: op.version, at: now,
-        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null } });
-      return { status: 200, body: { id: op.reply_id, parent_id: op.parent_id, author: op.author, text: op.text, created: now, version: op.version } };
+      const thread = findCommentThread(list, op.parent_id);
+      if (!thread) return { status: 404, body: { error: 'parent_not_found' } };
+      appendEvent(thread.root, { kind: 'reply_added', at_version: op.version, at: now,
+        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null, parent_id: op.parent_id } });
+      return { status: 200, body: { id: op.reply_id, parent_id: op.parent_id, thread_id: thread.root.id, author: op.author, text: op.text, created: now, version: op.version } };
     }
     case 'patch_anchor': {
       // Authorization is enforced UPSTREAM in the worker (canMutate, which needs
@@ -1252,7 +2748,7 @@ function applyCommentOp(list, op) {
       appendEvent(host, evt);
       const fresh = snapshotAt(host, op.version);
       const reactions = isReply ? (fresh.replies.find(r => r.id === replyId)?.reactions || {}) : fresh.reactions;
-      return { status: 200, body: { ok: true, reactions } };
+      return { status: 200, body: { ok: true, reactions, added: !had } };
     }
     case 'delete': {
       // Authorization enforced upstream (worker resolves target + canMutate
@@ -1338,6 +2834,40 @@ function safeParseList(raw) {
 // requests, which silently loses updates (the bug a KV-based DO had). With
 // state.storage the get→mutate→put is gated and concurrent same-slug writes
 // serialize correctly.
+async function loadInbox(env, login) {
+  const key = inboxKey(login);
+  if (!key) return { key: null, inbox: emptyInbox() };
+  try {
+    const raw = await env.META.get(key);
+    if (!raw) return { key, inbox: emptyInbox() };
+    const parsed = JSON.parse(raw);
+    return { key, inbox: parsed && Array.isArray(parsed.items) ? parsed : emptyInbox() };
+  } catch {
+    return { key, inbox: emptyInbox() };
+  }
+}
+
+async function deliverInbox(env, recipientLogin, ev) {
+  const recips = inboxRecipients({
+    kind: ev.kind,
+    actorLogin: ev.actor && ev.actor.login,
+    ownerLogin: ev.kind === 'comment' ? recipientLogin : '',
+    parentAuthorLogin: ev.kind === 'reply' ? recipientLogin : '',
+    targetAuthorLogin: ev.kind === 'reaction' ? recipientLogin : '',
+  });
+  const at = ev.at || new Date().toISOString();
+  for (const who of recips) {
+    const { key, inbox } = await loadInbox(env, who);
+    if (!key) continue;
+    const next = applyInboxEvent(inbox, {
+      ...ev,
+      id: ev.id || `n_${Date.now()}_${rand(4)}`,
+      at,
+    });
+    await env.META.put(key, JSON.stringify(next));
+  }
+}
+
 async function mutateComments(env, slug, op) {
   if (env.COMMENTS) {
     const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
@@ -1414,6 +2944,47 @@ export class CommentsStore {
     try { payload = await req.json(); } catch { return Response.json({ list: [] }); }
     const { slug, op } = payload;
 
+    // OWNER: atomic hosted slug ownership claim/verify/release. Lives in the
+    // same per-slug Durable Object as comments so first-publish claim is
+    // strongly serialized; KV is not the authority. release_owner runs from
+    // DELETE /api/doc so a deleted slug can be republished.
+    if (u.pathname === '/owner') {
+      let out = { ok: false, status: 400, error: 'bad_owner_op' };
+      try {
+        await this.state.storage.transaction(async (txn) => {
+          const current = await txn.get('hostedOwner');
+          if (op && op.kind === 'release_owner') {
+            await txn.delete('hostedOwner');
+            out = { ok: true };
+            return;
+          }
+          const accountId = op && typeof op.account_id === 'string' ? op.account_id : '';
+          if (!accountId) {
+            out = { ok: false, status: 400, error: 'account_id_required' };
+            return;
+          }
+          if (op.kind === 'claim_owner') {
+            if (current === undefined) {
+              await txn.put('hostedOwner', accountId);
+              out = { ok: true };
+            } else if (current === accountId) {
+              out = { ok: true };
+            } else {
+              out = { ok: false, status: 403, error: 'not_doc_owner' };
+            }
+            return;
+          }
+          if (op.kind === 'verify_owner') {
+            if (current === accountId) out = { ok: true };
+            else out = { ok: false, status: 403, error: 'not_doc_owner' };
+          }
+        });
+      } catch (e) {
+        return Response.json({ ok: false, status: 409, error: 'owner_store_conflict', message: e.message || String(e) });
+      }
+      return Response.json(out);
+    }
+
     // READ: resolve inside a transaction so a concurrent first-touch mutation
     // can't commit between a non-transactional get and a write-back (Codex P1:
     // the old _load() seeded KV→DO storage outside any txn, so a read could
@@ -1461,8 +3032,27 @@ export class CommentsStore {
   }
 }
 
+// Preview Worker (#148): KV has no bucket-level TTL. Cap every META write at
+// 14 days when TDOC_PREVIEW=1 so ghost meta cannot outlive the R2 lifecycle.
+const PREVIEW_KV_TTL_SECONDS = 14 * 24 * 60 * 60;
+function applyPreviewKvTtl(env) {
+  if (!env || env.TDOC_PREVIEW !== '1' || !env.META || env.META.__tdocPreviewTtl) return;
+  const inner = env.META.put.bind(env.META);
+  env.META.put = (key, value, extra) => {
+    const opts = extra ? { ...extra } : {};
+    if (opts.expirationTtl == null && opts.expiration == null) {
+      opts.expirationTtl = PREVIEW_KV_TTL_SECONDS;
+    } else if (typeof opts.expirationTtl === 'number') {
+      opts.expirationTtl = Math.min(opts.expirationTtl, PREVIEW_KV_TTL_SECONDS);
+    }
+    return inner(key, value, opts);
+  };
+  env.META.__tdocPreviewTtl = true;
+}
+
 export default {
   async fetch(req, env, ctx) {
+    applyPreviewKvTtl(env);
     const url = new URL(req.url);
     const p = url.pathname;
     const method = req.method;
@@ -1470,52 +3060,170 @@ export default {
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
     if (p === '/api/ping') return json({ ok: true, service: 'tdoc' });
+    if (p === '/api/runtime') return json({ ok: true, runtime: runtimeInfo() });
+    if (p === '/tdoc_logo.svg' && method === 'GET') {
+      return new Response(TDOC_LOGO_SVG, {
+        headers: {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+    if (p === '/tdoc_logo.png' && method === 'GET') {
+      const bin = Uint8Array.from(atob(TDOC_LOGO_PNG_B64), (c) => c.charCodeAt(0));
+      return new Response(bin, {
+        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' },
+      });
+    }
 
     // ---- landing (NO public catalog) ----
     // `/` never lists docs. Docs are only reachable via their direct link.
-    // A neutral branded page points at the open-source project.
-    if (p === '/' && method === 'GET') return html(landingHtml());
+    // The homepage itself is a published tdoc (see landingResponse), falling
+    // back to a neutral branded page pointing at the open-source project.
+    //
+    // `?notice=…` keeps the neutral page. It is a toast for someone we
+    // bounced here from /me or an unknown path, and the landing doc has
+    // nowhere to show it — losing the message would be worse than losing
+    // the marketing page for that one request.
+    if (p === '/' && (method === 'GET' || method === 'HEAD')) {
+      const notice = (url.searchParams.get('notice') || '').trim();
+      if (notice) return html(landingHtml(env, notice));
+      return landingResponse(env, req);
+    }
 
-    // ---- owner-only doc catalog ----
-    // `/me` returns the list of every doc hosted on THIS worker, but only
-    // to the configured owner (TDOC_OWNER) when signed in. Everyone else
-    // gets redirected to the GitHub repo — no slug enumeration.
+    // `/start` is the homepage CTA's no-script destination: the same
+    // onboarding written as a page. Same fail-safe as `/` — if that doc is
+    // missing, the visitor gets the neutral page, never a 404.
+    if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, START_SLUG);
+    }
+
+    // `/templates` — the template gallery. Same fail-safe as `/start`: a
+    // missing doc yields the neutral landing page, never a 404. No onboarding
+    // modal (TEMPLATES_SLUG is intentionally not in the withOnboard gate).
+    if (p === '/templates' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, TEMPLATES_SLUG);
+    }
+
+    // Web OAuth callback. With a `code` this is the redirect flow: exchange it
+    // for a token (needs the client secret), mint the same session the device
+    // flow does, and 302 the visitor back to the page they started from — one
+    // tab, no "Congratulations" dead end. Without a code it's the device-flow
+    // soft landing GitHub may bounce to after Approve; keep the friendly page.
+    if (p === '/auth/github/callback' && method === 'GET') {
+      const code = url.searchParams.get('code');
+      if (!code) return html(authDoneHtml());
+      const state = url.searchParams.get('state');
+      // Anchor to a cookie-pair boundary so a cookie merely ending in
+      // "tdoc_oauth" (e.g. "xtdoc_oauth=") can't supply the nonce.
+      const cookieNonce = (/(?:^|;\s*)tdoc_oauth=([a-f0-9]+)/.exec(req.headers.get('cookie') || '') || [])[1];
+      if (!state || !cookieNonce || state !== cookieNonce) {
+        return html(authErrorHtml('Sign-in could not be verified (state mismatch). Please try again.'), { status: 400 });
+      }
+      if (!env.GITHUB_CLIENT_SECRET) {
+        return html(authErrorHtml('Web sign-in is not configured on this host.'), { status: 500 });
+      }
+      const ret = sanitizeReturn(await env.META.get(`oauthstate:${state}`));
+      await env.META.delete(`oauthstate:${state}`);
+      try {
+        const r = await ghPost('/login/oauth/access_token', {
+          client_id: env.GITHUB_CLIENT_ID,
+          client_secret: env.GITHUB_CLIENT_SECRET,
+          code,
+          redirect_uri: `${url.origin}/auth/github/callback`,
+        });
+        if (r.error || !r.access_token) {
+          return html(authErrorHtml('GitHub sign-in failed: ' + (r.error_description || r.error || 'no token returned')), { status: 400 });
+        }
+        const user = await ghUser(r.access_token);
+        if (!user.login) return html(authErrorHtml('GitHub returned no account.'), { status: 500 });
+        const sid = rand(24);
+        const session = {
+          login: user.login,
+          avatar_url: user.avatar_url,
+          name: user.name || user.login,
+          created: new Date().toISOString(),
+        };
+        await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+        return redirectTo(ret, [
+          `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+          'tdoc_oauth=; Path=/; Max-Age=0',
+        ]);
+      } catch (e) {
+        return html(authErrorHtml('Sign-in error: ' + e.message), { status: 500 });
+      }
+    }
+    // Static soft landing (device flow, or the OAuth App's callback URL).
+    if (p === '/auth/done' && method === 'GET') {
+      return html(authDoneHtml());
+    }
+
+    // ---- owner catalog ----
+    // BYOK (registration off): `/me` lists every doc on THIS worker, but only
+    // for TDOC_OWNER. Hosted tdoc.dev (registration on): any signed-in GitHub
+    // user sees *their* slugs (meta.hosted.github_login). Everyone else is
+    // sent to the landing page (with a toast) — never to github.com, and
+    // never a public catalog.
     if (p === '/me' && method === 'GET') {
       const s = await getSession(env, req);
-      if (!isOwnerSession(env, s)) {
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        const notice = sessionLogin(s) ? 'me' : 'signin';
         return new Response(null, {
           status: 302,
-          headers: { Location: 'https://github.com/serenakeyitan/tdoc' },
+          headers: { Location: `/?notice=${notice}` },
         });
       }
-      return html(await indexHtml(env, s));
+      const nonce = rand(16);
+      const page = await indexHtml(env, s, url.origin, nonce);
+      const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
+      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true, !!env.GITHUB_CLIENT_SECRET), {
+        headers: { 'Content-Security-Policy': cspHeader(nonce) },
+      });
+    }
+
+    // ---- interactive island (sandboxed widget) ----
+    // Separate HTML resource so author JS can run without inheriting the host
+    // document CSP (srcdoc/blob cannot). Must be Dest=iframe: top-level,
+    // embed, and frame loads are 403 so this URL cannot become a same-origin
+    // script gadget. Unique origin is also on the widget CSP (sandbox). No overlay.
+    const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
+    if (widgetMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr, name] = widgetMatch;
+      if (!isValidSlug(slug) || !isValidWidgetName(name)) {
+        return text('invalid slug or widget', { status: 400 });
+      }
+      const dest = req.headers.get('sec-fetch-dest');
+      if (!isWidgetFrameRequest(dest)) {
+        return text('widget must be framed', { status: 403 });
+      }
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
+      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/widgets/${name}.html`);
+      if (!obj) return text(`Not found: ${slug} v${vStr} widget ${name}`, { status: 404 });
+      const raw = method === 'HEAD' ? '' : await obj.text();
+      return html(raw, {
+        headers: {
+          'Content-Security-Policy': widgetCspHeader(),
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'no-store',
+          'Vary': 'Sec-Fetch-Dest',
+        },
+      });
     }
 
     // ---- doc view ----
     const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
     if (docMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr] = docMatch;
-      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
-      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
-      const raw = await obj.text();
-      const session = await getSession(env, req);
-      const identity = session ? { login: session.login, avatar_url: session.avatar_url, name: session.name } : null;
-      // Pull the full versions array from meta so the bar can render a
-      // version picker. Falls back to single-version if meta is missing.
-      let versions = null;
-      try {
-        const metaRaw = await env.META.get(`meta:${slug}`);
-        if (metaRaw) {
-          const meta = JSON.parse(metaRaw);
-          if (Array.isArray(meta.versions)) versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
-        }
-      } catch {}
-      return html(injectOverlay(raw, slug, Number(vStr), identity, versions, isOwnerSession(env, session)));
+      const res = await serveDocVersion(env, req, slug, Number(vStr));
+      return res.response;
     }
 
     // ---- doc export / fork ----
     // /export → forces a file download (Content-Disposition: attachment) unless
-    //           ?download=0. Used for "save a copy" links.
+    //           ?download=0. Stamps overlay reader CSS (no bar/comments) so the
+    //           file matches the published reading column.
     // /fork   → returns the SAME bundled HTML but boots the overlay in
     //           mode:"fork" (read-only renderable view with comments mirrored
     //           from the embedded JSON). No /api calls, no auth, no publish.
@@ -1531,6 +3239,8 @@ export default {
     const exportMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/(export|fork)\/?$/);
     if (exportMatch && method === 'GET') {
       const [, slug, vStr, kind] = exportMatch;
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
       const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
       if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
       let html = await obj.text();
@@ -1604,12 +3314,23 @@ export default {
       // The fork route boots the overlay in read-only "fork" mode so the
       // user can SEE what they just downloaded — comments rendered as cards,
       // anchors highlighted — without any backend.
+      // Same confused-deputy surface as the doc-view route (same-origin
+      // cookie, arbitrary author HTML) even though fork/export don't expose
+      // owner-manage UI — a script here could still ride the viewer's session
+      // cookie to hit /api/doc*. Nonce the injected overlay script the same
+      // way; author content stays unnonced and inert under the CSP below.
+      const nonce = rand(16);
       let bodyHtml = html;
+      if (kind === 'export') {
+        // File save has no overlay JS. Bake the reading-column CSS so a
+        // downloaded slug-vN.html still looks like the published doc.
+        bodyHtml = injectReaderCss(bodyHtml, readerCssFromOverlay());
+      }
       if (kind === 'fork') {
         bodyHtml = injectOverlayCfg(bodyHtml, {
           slug, version: Number(vStr), identity: null,
           authConfigured: false, mode: 'fork', originalSlug: slug,
-        });
+        }, nonce);
       }
 
       const finalHtml = banner + jsonBlock + bodyHtml;
@@ -1618,9 +3339,119 @@ export default {
       // overridden with ?download=1 / ?download=0.
       const defaultAttach = kind === 'export';
       const forceDownload = dl === '1' || (defaultAttach && dl !== '0');
-      const headers = { 'Content-Type': 'text/html; charset=utf-8' };
-      if (forceDownload) headers['Content-Disposition'] = `attachment; filename="${slug}-v${vStr}-fork.html"`;
+      const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': cspHeader(nonce) };
+      if (forceDownload) headers['Content-Disposition'] = `attachment; filename="${slug}-v${vStr}.html"`;
       return new Response(finalHtml, { status: 200, headers });
+    }
+
+    // ---- account duplicate (published reader) ----
+    // Content snapshot only: one new slug, v1, no comments, no history, no
+    // widget islands. Download stays on /export. This is the hosted "make a
+    // copy in my account" path (#146), not a file download.
+    if (p === '/api/doc/duplicate' && method === 'POST') {
+      const session = await getSession(env, req);
+      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body && body.slug;
+      const version = Number(body && body.version);
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      if (!Number.isInteger(version) || version < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      const gate = await enforceDocAccess(env, req, slug, version);
+      if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
+      const ownerCopy = isOwnerSession(env, session);
+      if (!ownerCopy && !hostedAccountCopiesEnabled(env, req)) {
+        return json({
+          error: 'account_copy_unavailable',
+          message: 'Account copies on this host are limited to the worker owner. Use Download for an offline HTML file.',
+        }, { status: 403 });
+      }
+      const widgets = await sourceHasWidgets(env, slug, version);
+      if (!widgets.ok) return widgets.response;
+      if (widgets.has) {
+        return json({
+          error: 'islands_not_supported',
+          message: 'Docs with interactive widgets cannot be duplicated in v1. Use Download for the host HTML.',
+        }, { status: 409 });
+      }
+      const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+      if (!obj) return json({ error: 'not_found' }, { status: 404 });
+      const rawHtml = await obj.text();
+
+      let actor = { kind: 'owner_session' };
+      if (!ownerCopy) {
+        const acct = await hostedAccountForGithub(env, session.login);
+        if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+      }
+      if (actor.kind === 'hosted') {
+        const maxBytes = hostedMaxUploadBytes(env);
+        const size = utf8ByteLength(rawHtml);
+        if (size > maxBytes) {
+          return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
+        }
+        const limit = hostedMaxDocs(env);
+        const used = await countHostedDocs(env, actor.account_id, limit);
+        if (used >= limit) {
+          return json({ error: 'quota_docs', limit, used }, { status: 403 });
+        }
+      }
+
+      let newSlug = null;
+      for (let n = 1; n <= 99; n++) {
+        const candidate = nextDuplicateSlug(slug, n);
+        if (!candidate) continue;
+        const existsMeta = await loadDocMeta(env, candidate);
+        if (existsMeta) continue;
+        const bytes = await docBytesExist(env, candidate);
+        if (!bytes.ok) return bytes.response;
+        if (bytes.exists) continue;
+        if (actor.kind === 'hosted') {
+          const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: actor.account_id });
+          if (!claimed.ok) {
+            if (
+              claimed.status === 503
+              || claimed.error === 'hosted_owner_store_unavailable'
+              || claimed.error === 'owner_store_conflict'
+            ) {
+              return json({ error: claimed.error || 'hosted_owner_store_unavailable' }, { status: claimed.status || 503 });
+            }
+            continue;
+          }
+        }
+        newSlug = candidate;
+        break;
+      }
+      if (!newSlug) return json({ error: 'slug_exhausted' }, { status: 409 });
+
+      const now = new Date().toISOString();
+      const srcMeta = gate.meta || {};
+      const srcTitle = typeof srcMeta.title === 'string' && srcMeta.title.trim() ? srcMeta.title.trim() : slug;
+      const title = / \(copy\)$/i.test(srcTitle) ? srcTitle : `${srcTitle} (copy)`;
+      let incoming = {
+        title,
+        slug: newSlug,
+        created: now,
+        versions: [{ n: 1, created: now, prompt: `Duplicated from ${slug} v${version}` }],
+        source: { slug, version },
+        duplicated_by: session.login,
+        access: normalizeAccess({}, { legacy: false }),
+      };
+      incoming = stampHostedOwnership(incoming, actor);
+
+      const { html: stampedHtml } = stampAids(rawHtml);
+      const r2Key = `docs/${newSlug}/v1/index.html`;
+      try {
+        await env.DOCS.put(r2Key, stampedHtml, {
+          httpMetadata: { contentType: 'text/html; charset=utf-8' },
+        });
+      } catch (e) {
+        return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+      }
+      const verify = await env.DOCS.head(r2Key);
+      if (!verify) return json({ error: 'r2_write_lost' }, { status: 500 });
+      await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
+      return json({ ok: true, slug: newSlug, version: 1, url: `/d/${newSlug}/v/1` });
     }
 
     // ---- auth ----
@@ -1628,9 +3459,29 @@ export default {
       const s = await getSession(env, req);
       return json({
         identity: s ? { login: s.login, avatar_url: s.avatar_url, name: s.name } : null,
-        isOwner: isOwnerSession(env, s),
+        isOwner: isOwnerSession(env, s), // worker operator; overlay must not clobber per-doc isOwner
+        canSeeMyDocs: canSeeMyDocs(env, s, url.origin),
         authConfigured: true,
       });
+    }
+
+    // Web redirect flow, step 1: stash where to land afterwards against a CSRF
+    // nonce, then send the browser to GitHub's authorize page. The browser only
+    // reaches here when cfg.webAuth is on (secret configured); the guard keeps a
+    // stray hit from 500ing.
+    if (p === '/api/auth/web/login' && method === 'GET') {
+      if (!env.GITHUB_CLIENT_SECRET) return redirectTo('/?notice=signin');
+      const ret = sanitizeReturn(url.searchParams.get('return'));
+      const nonce = rand(16);
+      await env.META.put(`oauthstate:${nonce}`, ret, { expirationTtl: 600 });
+      const gh = new URL('https://github.com/login/oauth/authorize');
+      gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
+      gh.searchParams.set('redirect_uri', `${url.origin}/auth/github/callback`);
+      gh.searchParams.set('scope', 'read:user');
+      gh.searchParams.set('state', nonce);
+      return redirectTo(gh.toString(), [
+        `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+      ]);
     }
 
     if (p === '/api/auth/device/start' && method === 'POST') {
@@ -1644,6 +3495,7 @@ export default {
           device_code: r.device_code,
           user_code: r.user_code,
           verification_uri: r.verification_uri,
+          verification_uri_complete: r.verification_uri_complete || null,
           expires_in: r.expires_in,
           interval: r.interval,
         });
@@ -1708,10 +3560,90 @@ export default {
       return json({ ok: true }, { headers: { 'Set-Cookie': 'tdoc_sid=; Path=/; Max-Age=0' } });
     }
 
+    // ---- inbox (signed-in, this host, all docs) ----
+    if (p === '/api/notifications' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      const key = inboxKey(s.login);
+      if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
+      let inbox = emptyInbox();
+      try {
+        const raw = await env.META.get(key);
+        if (raw) inbox = JSON.parse(raw);
+      } catch { inbox = emptyInbox(); }
+      const offset = Number(url.searchParams.get('offset') || 0);
+      return json(pageInbox(inbox, { offset }));
+    }
+    if (p === '/api/notifications/unread' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      const key = inboxKey(s.login);
+      if (!key) return json({ unread: 0 });
+      let inbox = emptyInbox();
+      try {
+        const raw = await env.META.get(key);
+        if (raw) inbox = JSON.parse(raw);
+      } catch { inbox = emptyInbox(); }
+      return json({ unread: inboxUnread(inbox) });
+    }
+    if (p === '/api/notifications/read' && method === 'POST') {
+      const s = await getSession(env, req);
+      if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      const key = inboxKey(s.login);
+      if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      let inbox = emptyInbox();
+      try {
+        const raw = await env.META.get(key);
+        if (raw) inbox = JSON.parse(raw);
+      } catch { inbox = emptyInbox(); }
+      inbox = markInboxRead(inbox, { ids: body.ids, comment_id: body.comment_id });
+      await env.META.put(key, JSON.stringify(inbox));
+      return json({ ok: true, unread: inboxUnread(inbox) });
+    }
+
+    // ---- hosted publish token bootstrap ----
+    // Hosted/OOB users should not create Cloudflare resources or receive the
+    // provider-wide TDOC_UPLOAD_TOKEN. The central Worker mints an account-
+    // scoped upload token bound to the caller's GitHub login. Same login
+    // remints the same account_id so a lost ~/.tdoc/published.json is
+    // recoverable. Unset env: on for https://tdoc.dev only; explicit 0 disables.
+    if (p === '/api/hosted/token' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_registration_disabled' }, { status: 403 });
+      }
+      const session = await getSession(env, req);
+      const login = sessionLogin(session);
+      // Additive `hint` so a stale CLI that just prints the error body still
+      // gets an actionable next step. A current CLI ran the device flow and
+      // sent a session cookie, so it never lands here; one that hits this
+      // without showing a device code is out of date. Fail-open: no new
+      // rejection, just a clearer 401.
+      if (!login) return json({
+        error: 'sign_in_required',
+        hint: 'Hosted publish needs a GitHub sign-in. If your tdoc CLI did not show a device code to approve, it is out of date — run: /tdoc update --yes',
+      }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const issued = await issueHostedToken(env, { ...body, login });
+      if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
+      return json({
+        ok: true,
+        token: issued.token,
+        account_id: issued.record.account_id,
+        github_login: issued.record.github_login,
+        base: url.origin,
+      });
+    }
+
     // ---- comments ----
     if (p === '/api/comments' && method === 'GET') {
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      // Same read gate as the HTML routes: private docs don't leak comments.
+      const gate = await enforceDocAccess(env, req, slug, parseVersionParam(url) || 1);
+      if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
       // Read from the DO (source of truth; it lazily migrates from KV on first
       // touch). Migrate-in-memory for this response only — never persist from a
       // read (writes go through the DO).
@@ -1732,6 +3664,12 @@ export default {
       const { slug, version, anchor, text: commentText, parent_id } = body;
       if (!slug || !commentText) return json({ error: 'slug and text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      {
+        const meta = await loadDocMeta(env, slug);
+        const access = accessFromMeta(meta || {});
+        if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+        if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
+      }
       const author = { login: s.login, avatar_url: s.avatar_url, name: s.name };
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
@@ -1742,6 +3680,24 @@ export default {
         ? { kind: 'reply', slug, parent_id, reply_id: `r_${Date.now()}_${rand(4)}`, author, text: commentText, version: V, at: created }
         : { kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author, text: commentText, anchor: anchor || null, version: V, at: created };
       const res = await mutateComments(env, slug, op);
+      if (res.status === 200) {
+        const meta = await loadDocMeta(env, slug);
+        const title = (meta && meta.title) || slug;
+        if (!parent_id) {
+          await deliverInbox(env, hostedGithubLogin(meta) || env.TDOC_OWNER, {
+            kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
+            actor: author, preview: commentText, title, at: created,
+          });
+        } else {
+          const list = await readComments(env, slug);
+          const parentA = recordAuthor(list, parent_id);
+          await deliverInbox(env, parentA && parentA.login, {
+            kind: 'reply', slug, version: V, comment_id: op.reply_id,
+            thread_id: res.body && res.body.thread_id, target_id: parent_id,
+            actor: author, preview: commentText, title, at: created,
+          });
+        }
+      }
       return json(res.body, { status: res.status });
     }
 
@@ -1762,7 +3718,8 @@ export default {
       ensureMigrated(authList);
       const target = authList.find(c => c.id === id);
       if (!target) return json({ error: 'not_found' }, { status: 404 });
-      if (!canMutate(target, s, env)) return json({ error: 'not_author' }, { status: 403 });
+      const meta = await loadDocMeta(env, slug);
+      if (!canMutate(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const V = coerceBodyVersion(version, target.created_in || 1);
       const res = await mutateComments(env, slug, {
         kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: s.login },
@@ -1772,14 +3729,18 @@ export default {
 
     // Admin: wipe ALL comments for a slug (doc owner only — uses the same
     // upload token as /api/upload, so it can be invoked from the publish
-    // tooling or an agent that holds the token; the worker's KV is single-
-    // tenant so this is safe). Triggered by ?all=1 on DELETE /api/comments.
+    // tooling or an agent that holds the token). Hosted tokens are
+    // slug-scoped via requireDocWriteAccess below; the provider admin
+    // token remains global. Triggered by ?all=1 on DELETE /api/comments.
     if (p === '/api/comments' && method === 'DELETE'
         && url.searchParams.get('all') === '1') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
       return json(res.body, { status: res.status });
@@ -1803,17 +3764,18 @@ export default {
       // is harmless (applyCommentOp returns 404).
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
+      const meta = await loadDocMeta(env, slug);
       let authorized = false;
       const top = authList.find(c => c.id === id);
       if (top) {
-        if (!canMutate(top, s, env)) return json({ error: 'not_author' }, { status: 403 });
+        if (!canMutate(top, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
         authorized = true;
       } else {
         for (const c of authList) {
           ensureEventLog(c);
           const reply = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
           if (reply) {
-            if (!canMutate(reply.reply, s, env)) return json({ error: 'not_author' }, { status: 403 });
+            if (!canMutate(reply.reply, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
             authorized = true;
             break;
           }
@@ -1850,67 +3812,85 @@ export default {
       const res = await mutateComments(env, slug, {
         kind: 'react', slug, comment_id, emoji, by: s.login, version: V,
       });
+      if (res.status === 200 && res.body && res.body.added) {
+        const list = await readComments(env, slug);
+        const target = recordAuthor(list, comment_id);
+        const thread = findCommentThread(list, comment_id);
+        const meta = await loadDocMeta(env, slug);
+        await deliverInbox(env, target && target.login, {
+          kind: 'reaction', slug, version: V, comment_id,
+          thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
+          actor: { login: s.login, avatar_url: s.avatar_url, name: s.name },
+          title: (meta && meta.title) || slug, emoji,
+        });
+      }
       return json(res.body, { status: res.status });
     }
 
     // ---- agent reply (from `tdoc edit` after applying a comment) ----
     // Authenticated with the same upload token as /api/upload — only the doc
     // owner's machine has it, so this can't be spoofed by readers. Posts a
-    // reply on the parent comment, attributed to the `tdoc-agent` identity.
+    // reply on the parent comment, attributed to the supplied agent identity
+    // with `tdoc-agent` kept as the compatibility fallback.
     // status values: 'applied', 'partial', 'question'. The status appears as
     // a visible badge on the reply and also flips the parent comment's
     // status to 'applied' / 'open' so the dashboard reflects it.
     if (p === '/api/agent/reply' && method === 'POST') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, parent_id, text: replyText, status: agentStatus, applied_in,
               bind_anchor_aid } = body;
       if (!slug || !parent_id || !replyText) return json({ error: 'slug, parent_id, text required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
       // Resolve parent + its current anchor up front (the optional rebind needs
       // the folded anchor for label/fallback). agent/reply is upload-token-authed
       // (owner-only), so concurrency here is negligible; the serialized write
       // still funnels through the DO so it can't clobber a concurrent user write.
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
-      const parent = authList.find(c => c.id === parent_id);
-      if (!parent) return json({ error: 'parent_not_found' }, { status: 404 });
+      const thread = findCommentThread(authList, parent_id);
+      if (!thread) return json({ error: 'parent_not_found' }, { status: 404 });
+      const parent = thread.root;
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
+      const agent = agentIdentity(body, env);
       const V = coerceBodyVersion(applied_in, parent.created_in || 1);
       const now = new Date().toISOString();
       const replyId = `r_${Date.now()}_${rand(4)}`;
 
       const events = [{
         kind: 'reply_added', at_version: V, at: now,
-        reply: { id: replyId, author: { kind: 'agent', login: 'tdoc-agent', name: 'tdoc-agent', avatar_url: null }, text: replyText, agent_status: verdict },
+        reply: { id: replyId, author: agent, text: replyText, agent_status: verdict, parent_id },
       }];
       if (verdict === 'applied') {
-        events.push({ kind: 'marked_applied', at_version: V, at: now, applied_in: V, by: 'tdoc-agent', agent_status: 'applied' });
+        events.push({ kind: 'marked_applied', at_version: V, at: now, applied_in: V, by: agent.login, agent_status: 'applied' });
       } else if (verdict === 'partial' || verdict === 'question') {
-        events.push({ kind: 'marked_open', at_version: V, at: now, by: 'tdoc-agent', agent_status: verdict });
+        events.push({ kind: 'marked_open', at_version: V, at: now, by: agent.login, agent_status: verdict });
       }
       if (bind_anchor_aid && typeof bind_anchor_aid === 'string') {
         const cur = snapshotAt(parent, V) || {};
         const fallback = cur.anchor?.fallback;
         const label = cur.anchor?.label || 'svg';
         events.push({
-          kind: 'anchor_changed', at_version: V, at: now, by: 'tdoc-agent', reset_status: false,
+          kind: 'anchor_changed', at_version: V, at: now, by: agent.login, reset_status: false,
           anchor: { kind: 'element', aid: bind_anchor_aid, selector: `[data-tdoc-aid="${bind_anchor_aid}"]`, label, ...(fallback ? { fallback } : {}) },
         });
       }
       const res = await mutateComments(env, slug, {
-        kind: 'raw_events', slug, id: parent_id, events,
-        responseBody: { id: replyId, parent_id, text: replyText, author: { kind: 'agent', login: 'tdoc-agent', name: 'tdoc-agent', avatar_url: null }, agent_status: verdict, created: now, reactions: {} },
+        kind: 'raw_events', slug, id: parent.id, events,
+        responseBody: { id: replyId, parent_id, thread_id: parent.id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
       });
       return json(res.body, { status: res.status });
     }
 
     // ---- admin upload (from `tdoc publish`) ----
     if (p === '/api/upload' && method === 'POST') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, version, html: doc, meta, comments: localComments } = body;
@@ -1924,6 +3904,45 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
+      if (!writeGate.ok) return writeGate.response;
+      if (auth.actor && auth.actor.kind === 'hosted') {
+        const maxBytes = hostedMaxUploadBytes(env);
+        const size = utf8ByteLength(doc);
+        if (size > maxBytes) {
+          return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
+        }
+        if (!writeGate.meta) {
+          const limit = hostedMaxDocs(env);
+          const used = await countHostedDocs(env, auth.actor.account_id, limit);
+          if (used >= limit) {
+            return json({ error: 'quota_docs', limit, used }, { status: 403 });
+          }
+        }
+      }
+      // Validate write-side access policy before writing doc bytes. Read paths
+      // stay tolerant for legacy/corrupt stored meta; writes must fail closed.
+      // Hosted claim happens AFTER this so a 400 cannot park the slug.
+      let incoming = null;
+      if (meta || (auth.actor && auth.actor.kind === 'hosted')) {
+        incoming = (meta && typeof meta === 'object') ? { ...meta } : {};
+        const prev = writeGate.meta;
+        if (!incoming.access && prev && prev.access) {
+          incoming.access = prev.access;
+        }
+        if (incoming.access) {
+          const validatedAccess = validateAccessWrite(incoming.access);
+          if (validatedAccess.error) {
+            return json({ error: validatedAccess.error, ...(validatedAccess.field ? { field: validatedAccess.field } : {}), ...(validatedAccess.fields ? { fields: validatedAccess.fields } : {}) }, { status: 400 });
+          }
+          incoming.access = normalizeAccess(validatedAccess.access, { legacy: false });
+        }
+        incoming = stampHostedOwnership(incoming, auth.actor);
+      }
+      if (auth.actor && auth.actor.kind === 'hosted') {
+        const claimed = await hostedOwnerOp(env, slug, { kind: 'claim_owner', account_id: auth.actor.account_id });
+        if (!claimed.ok) return json({ error: claimed.error || 'owner_claim_failed' }, { status: claimed.status || 409 });
+      }
       // Identity-stamp every commentable artifact with a content-hashed
       // data-tdoc-aid. The SAME artifact in a different version has the
       // SAME aid — so a comment anchored by aid resolves identity-first
@@ -1946,7 +3965,37 @@ export default {
         console.error('[upload] R2 write did not persist:', r2Key);
         return json({ error: 'r2_write_lost', message: 'PUT succeeded but the key is not readable. Re-deploy the worker; the R2 binding may be stale.' }, { status: 500 });
       }
-      if (meta) await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+      const widgets = body.widgets;
+      if (widgets != null) {
+        if (typeof widgets !== 'object' || Array.isArray(widgets)) {
+          return json({ error: 'widgets must be an object of name → html' }, { status: 400 });
+        }
+        const names = Object.keys(widgets);
+        if (names.length > 32) return json({ error: 'too many widgets' }, { status: 400 });
+        for (const wname of names) {
+          if (!isValidWidgetName(wname)) return json({ error: 'invalid_widget_name', name: wname }, { status: 400 });
+          const whtml = widgets[wname];
+          if (typeof whtml !== 'string') return json({ error: 'widget html must be a string', name: wname }, { status: 400 });
+          if (whtml.length > 512 * 1024) return json({ error: 'widget too large', name: wname }, { status: 400 });
+          const wKey = `docs/${slug}/v${verNum}/widgets/${wname}.html`;
+          try {
+            await env.DOCS.put(wKey, whtml, {
+              httpMetadata: { contentType: 'text/html; charset=utf-8' },
+            });
+          } catch (e) {
+            console.error('[upload] R2 widget put failed:', e.message);
+            return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+          }
+        }
+      }
+      if (incoming) {
+        try {
+          await env.META.put(`meta:${slug}`, JSON.stringify(incoming));
+        } catch (e) {
+          console.error('[upload] META put failed:', e.message);
+          return json({ error: 'meta_put_failed', message: e.message || String(e) }, { status: 500 });
+        }
+      }
       // Reconcile existing open comments against the new artifact set:
       // bind by aid where possible; mark lost where the artifact is gone
       // or ambiguous. This is the ENFORCED publish-time invariant — no
@@ -1981,12 +4030,55 @@ export default {
       return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, mergedComments: mergedLocal });
     }
 
+    // ---- admin access mutation ----
+    // Remote storage is the source of truth: access policy must be mutable
+    // without a local meta.json or full document re-upload. Authorized by
+    // authorizeOwnerMutation: the owner's session (browser, doc-page Share
+    // panel / /me) OR the upload token (CLI) — see its doc comment for why
+    // the session path is safe (CSP blocks author scripts on every response).
+    if (p === '/api/doc/access' && method === 'PATCH') {
+      // Body is parsed before auth so we can pass slug into the hosted ACL
+      // gate. Cap Content-Length first — an access patch is always tiny; do
+      // not buffer an arbitrary JSON body for an anonymous caller.
+      const ACCESS_PATCH_MAX_BYTES = 16 * 1024;
+      const clRaw = req.headers.get('content-length');
+      if (clRaw != null && clRaw !== '') {
+        const cl = Number(clRaw);
+        if (!Number.isFinite(cl) || cl < 0 || cl > ACCESS_PATCH_MAX_BYTES) {
+          return json({ error: 'payload_too_large' }, { status: 413 });
+        }
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const topKeys = Object.keys(body || {});
+      const unknownTop = topKeys.filter((k) => k !== 'slug' && k !== 'access');
+      if (unknownTop.length) return json({ error: 'invalid_field', fields: unknownTop }, { status: 400 });
+      const { slug, access } = body || {};
+      if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      // Slug must be known before the hosted ACL check inside the shared gate.
+      const auth = await authorizeOwnerMutation(req, env, slug);
+      if (!auth.ok) return auth.response;
+      const meta = auth.meta || await loadDocMeta(env, slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      const next = applyAccessPatch(meta, access);
+      if (next.error) {
+        return json({ error: next.error, ...(next.field ? { field: next.field } : {}), ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
+      }
+      await env.META.put(`meta:${slug}`, JSON.stringify(next.meta));
+      return json({ ok: true, slug, access: next.access });
+    }
+
     // ---- admin delete ----
+    // Authorized by authorizeOwnerMutation: the owner's session (browser,
+    // /me or the doc-page Share panel) OR the upload token (CLI's
+    // tdoc-delete) — see its doc comment for why the session path is safe.
     if (p === '/api/doc' && method === 'DELETE') {
-      const unauth = await requireUploadAuth(req, env);
-      if (unauth) return unauth;
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const auth = await authorizeOwnerMutation(req, env, slug);
+      if (!auth.ok) return auth.response;
       // delete all R2 versions
       let cursor;
       do {
@@ -2001,9 +4093,29 @@ export default {
       // state.storage; the legacy KV value is removed too as cleanup.
       await mutateComments(env, slug, { kind: 'wipe' });
       await env.META.delete(`comments:${slug}`);
+      // Free the hosted slug reservation so the original owner (or anyone)
+      // can republish. Data is already gone; do this last. If COMMENTS is
+      // absent (Vercel), there was never a hostedOwner key — ignore the 503.
+      // If the DO is present and release fails, do not report success: the
+      // slug would stay parked while the API lied.
+      const released = await hostedOwnerOp(env, slug, { kind: 'release_owner' });
+      if (env.COMMENTS && released && released.ok === false) {
+        return json(
+          { error: released.error || 'owner_release_failed' },
+          { status: released.status || 503 },
+        );
+      }
       return json({ ok: true });
     }
 
+    // Browser navigations to unknown paths bounce to the landing page with a
+    // toast — not a raw 404 and never github.com. API-ish methods stay 404.
+    if (method === 'GET' || method === 'HEAD') {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: '/?notice=notfound' },
+      });
+    }
     return text('Not found', { status: 404 });
   },
 };

@@ -1,7 +1,7 @@
 // Shared test harness for the browser-driven UI suites (#15).
 //
 // Before: ui/responsive/dimensions tests defaulted to a hardcoded LIVE deploy
-// (tdoc-serenatan.serenatan.workers.dev/d/conway-life/v/2). That meant they (a)
+// (a live personal workers.dev deployment/d/conway-life/v/2). That meant they (a)
 // couldn't run offline, (b) tested the SHIPPED bundle instead of the working
 // tree — defeating the pre-push gate — and (c) silently no-op'd when offline.
 //

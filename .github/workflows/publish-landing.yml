@@ -1,0 +1,198 @@
+name: publish tdoc.dev homepage
+
+# deploy-tdoc-dev.yml ships the Worker CODE. It does not ship the homepage,
+# because the homepage is a doc: landingResponse() reads it out of that
+# Worker's KV. Deploying the route without the doc leaves tdoc.dev/ on the
+# neutral branded page, which is the designed fallback and also a silent way
+# to think you shipped.
+#
+# This workflow ships the CONTENT. It builds the release payload from
+# landing/tornado-doc (latest version collapsed to v1, review thread dropped)
+# and POSTs it to the same /api/upload contract `tdoc publish` uses.
+#
+# Required GitHub secret:
+#   TDOC_DEV_UPLOAD_TOKEN — the tdoc.dev Worker's TDOC_UPLOAD_TOKEN
+#
+# The token never leaves Actions. Nobody needs a copy on a laptop to ship the
+# homepage, and no laptop's Cloudflare login has to own tdoc.dev.
+
+# The homepage route only exists after deploy-tdoc-dev.yml ships the Worker.
+# A parallel push trigger would upload, then GET tdoc.dev/ against the OLD
+# worker (no landingResponse), fail the verify, and look like a miss even
+# when the upload landed. Wait for that deploy instead. deploy-tdoc-dev
+# already runs on every main push, so a landing-only change still publishes
+# after the Worker job finishes.
+on:
+  workflow_run:
+    workflows: ['deploy tdoc.dev']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      sync_upload_token:
+        description: >
+          Overwrite the Worker TDOC_UPLOAD_TOKEN with GitHub's
+          TDOC_DEV_UPLOAD_TOKEN. Use when /api/upload returns 401 because
+          the GitHub secret was never written onto the Worker. Automatic
+          workflow_run publishes never rotate the secret.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two runs uploading the same slug would race on the same KV keys.
+  group: publish-landing
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish landing doc to tdoc.dev
+    if: >
+      github.repository == 'tornado-doc/tdoc' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Pair the payload with the commit the Worker deploy just shipped.
+          # workflow_dispatch has no workflow_run, so fall back to github.sha.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Require the upload token
+        env:
+          TDOC_DEV_UPLOAD_TOKEN: ${{ secrets.TDOC_DEV_UPLOAD_TOKEN }}
+        run: |
+          if [ -z "$TDOC_DEV_UPLOAD_TOKEN" ]; then
+            echo "TDOC_DEV_UPLOAD_TOKEN is not set." >&2
+            echo "Add it under Settings -> Secrets and variables -> Actions, then re-run." >&2
+            exit 1
+          fi
+
+      # A broken homepage is worse than a stale one. The landing suite checks
+      # the page itself and the release payload it produces.
+      - name: Offline test suite
+        run: npm test
+
+      - name: Build the release payload
+        run: node bin/tdoc-landing-release
+
+      # First ship (#129): TDOC_DEV_UPLOAD_TOKEN was present in GitHub and
+      # still 401'd, because nothing had ever `wrangler secret put` that
+      # value onto the Worker. deploy-tdoc-dev.yml must not rotate the
+      # secret on every CD. This step is dispatch-only and opt-in.
+      - name: Align Worker TDOC_UPLOAD_TOKEN with the GitHub secret
+        if: github.event_name == 'workflow_dispatch' && inputs.sync_upload_token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TDOC_DEV_KV_ID: ${{ secrets.TDOC_DEV_KV_ID }}
+          TDOC_DEV_OWNER: ${{ secrets.TDOC_DEV_OWNER }}
+          TDOC_DEV_UPLOAD_TOKEN: ${{ secrets.TDOC_DEV_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+          missing=
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          [ -n "$TDOC_DEV_KV_ID" ] || missing="$missing TDOC_DEV_KV_ID"
+          [ -n "$TDOC_DEV_OWNER" ] || missing="$missing TDOC_DEV_OWNER"
+          [ -n "$TDOC_DEV_UPLOAD_TOKEN" ] || missing="$missing TDOC_DEV_UPLOAD_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "token sync is missing GitHub secrets:$missing" >&2
+            exit 1
+          fi
+          sed \
+            -e "s/PLACEHOLDER_KV_ID/${TDOC_DEV_KV_ID}/g" \
+            -e "s/PLACEHOLDER_OWNER/${TDOC_DEV_OWNER}/g" \
+            worker/wrangler.toml.template > worker/wrangler.toml
+          # stdin is the secret. Do not echo it. Do not print wrangler
+          # debug that might replay env.
+          # CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID come from env.
+          # --cwd is the worker dir so name=tdoc is read from wrangler.toml.
+          printf '%s' "$TDOC_DEV_UPLOAD_TOKEN" | npx --yes wrangler@4.90.1 secret put TDOC_UPLOAD_TOKEN \
+            --cwd worker
+
+      - name: Upload the homepage and the tutorial to tdoc.dev
+        env:
+          TDOC_DEV_UPLOAD_TOKEN: ${{ secrets.TDOC_DEV_UPLOAD_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Two docs, not one. `/` is the homepage and `/start` is the full
+          # tutorial it links to — shipping only the first leaves that link on
+          # the neutral fallback page, which looks like the tour does not exist.
+          #   tornado-doc : release payload, latest version collapsed to v1
+          #   tdoc-start  : already a single version with no thread, ship as is
+          upload () {
+            local slug="$1" dir="$2" ver="$3"
+
+            local widgets='{}'
+            if [ -d "$dir/v$ver/widgets" ]; then
+              for wf in "$dir"/v$ver/widgets/*.html; do
+                [ -f "$wf" ] || continue
+                widgets="$(jq -n --argjson acc "$widgets" \
+                  --arg name "$(basename "$wf" .html)" --rawfile html "$wf" \
+                  '$acc + {($name): $html}')"
+              done
+            fi
+
+            # Same shape tdoc-publish sends. comments is omitted on purpose:
+            # the payload's comments.json is empty and the worker merges rather
+            # than replaces, so sending an empty list would read as intent to
+            # clear a thread it must not touch.
+            jq -n --arg slug "$slug" --argjson version "$ver" \
+              --rawfile html "$dir/v$ver/index.html" \
+              --slurpfile meta "$dir/meta.json" \
+              --argjson widgets "$widgets" \
+              '{slug:$slug, version:$version, html:$html, meta:$meta[0]}
+               + (if $widgets == {} then {} else {widgets:$widgets} end)' > payload.json
+
+            code=$(curl -sS -o resp.json -w '%{http_code}' -X POST https://tdoc.dev/api/upload \
+              -H "Authorization: Bearer $TDOC_DEV_UPLOAD_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data-binary @payload.json)
+            # The response body carries no secret; the request is never echoed.
+            echo "$slug v$ver -> HTTP $code"; cat resp.json; echo
+            [ "$code" = "200" ] || { echo "upload failed for $slug" >&2; exit 1; }
+            [ "$(jq -r '.ok // false' resp.json)" = "true" ] || { echo "worker rejected $slug" >&2; exit 1; }
+          }
+
+          upload tornado-doc .release/tornado-doc 1
+          upload tdoc-start  landing/tdoc-start  1
+          upload tdoc-templates landing/tdoc-templates 1
+
+      - name: Verify tdoc.dev serves the doc, not the fallback
+        run: |
+          set -euo pipefail
+          # landingHtml() is the neutral page. If it comes back, the route is
+          # deployed but the doc is not readable, and the run must not be green.
+          # KV is eventually consistent; retry so a one-second lag is not red.
+          # Do not pipe the body into a quiet grep under pipefail: quiet
+          # grep closes the pipe on the first match, the writer gets SIGPIPE,
+          # and a successful homepage looks like a miss. Bash [[ ]] does not.
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            home=$(curl -sS https://tdoc.dev/ || true)
+            # The homepage links to the tutorial, so a homepage that works
+            # while /start is still on the fallback is a broken hand-off, not
+            # a success. Both, or keep waiting.
+            tour=$(curl -sS https://tdoc.dev/start || true)
+            # Match on what proves the doc rendered, not on its wording: the
+            # slug and the landing flag come from the overlay config, and the
+            # neutral fallback carries neither. Keying on the headline meant
+            # every homepage rewrite failed its own deploy.
+            if [[ "$home" == *'"slug":"tornado-doc"'* \
+              && "$home" == *'"isLanding":true'* \
+              && "$tour" == *'"slug":"tdoc-start"'* ]]; then
+              echo "tdoc.dev/ and /start are both serving their docs."
+              exit 0
+            fi
+            echo "attempt $i: not both live yet" >&2
+            sleep 6
+          done
+          echo "tdoc.dev/ or /start is still serving the neutral fallback" >&2
+          exit 1

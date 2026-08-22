@@ -21,6 +21,8 @@
 #   --html-file <path>         path to the full HTML for v1
 #     OR
 #   --html-stdin               read HTML for v1 from stdin
+#   --widgets-dir <path>       optional directory of sandboxed widget HTML
+#                              files; copied to v1/widgets/<name>.html.
 #
 # Optional:
 #   --prompt "<one-line>"      prompt-of-record stored in meta.json (defaults
@@ -31,6 +33,12 @@
 #   --open                     open the local URL in the default browser.
 #   --quiet                    suppress informational output (still prints
 #                              the resulting URL on the last line).
+#   --style <name>             house style contract: default (the default),
+#                              technical, editorial, or paper.
+#   --custom-template          explicitly allow a whole-page custom design.
+#                              Without this flag, author HTML must use tdoc's
+#                              injected default template and may only add CSS
+#                              scoped to document-specific widgets.
 #   --force                    overwrite an existing slug directory. Without
 #                              this, an existing slug is a hard error.
 #
@@ -48,11 +56,14 @@ SLUG=""
 TITLE=""
 HTML_FILE=""
 HTML_STDIN=0
+WIDGETS_DIR=""
 PROMPT=""
 PUBLISH=0
 OPEN_URL=0
 QUIET=0
 FORCE=0
+CUSTOM_TEMPLATE=0
+STYLE="default"
 
 err() { echo "tdoc-new: $*" >&2; }
 info() { [ "$QUIET" = "1" ] || echo "[tdoc-new] $*"; }
@@ -64,13 +75,16 @@ while [ $# -gt 0 ]; do
     --title)      TITLE="${2:-}"; shift 2 ;;
     --html-file)  HTML_FILE="${2:-}"; shift 2 ;;
     --html-stdin) HTML_STDIN=1; shift ;;
+    --widgets-dir) WIDGETS_DIR="${2:-}"; shift 2 ;;
     --prompt)     PROMPT="${2:-}"; shift 2 ;;
     --publish)    PUBLISH=1; shift ;;
     --open)       OPEN_URL=1; shift ;;
     --quiet)      QUIET=1; shift ;;
+    --style)      STYLE="${2:-}"; shift 2 ;;
+    --custom-template) CUSTOM_TEMPLATE=1; shift ;;
     --force)      FORCE=1; shift ;;
     -h|--help)
-      sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -78,6 +92,13 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+# After --quiet/--help so help and programmatic callers stay silent.
+# Human nag on stderr; discard the machine line (skill preamble captures
+# it; doctor uses --json). `tail -n 1` / `tail -n 2` stay URL-only.
+if [ "$QUIET" != "1" ]; then
+  "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
+fi
 
 [ -n "$SLUG" ]  || die "--slug required"
 [ -n "$TITLE" ] || die "--title required"
@@ -95,12 +116,23 @@ fi
 if [ -n "$HTML_FILE" ] && [ ! -f "$HTML_FILE" ]; then
   die "--html-file not found: $HTML_FILE"
 fi
+if [ -n "$WIDGETS_DIR" ] && [ ! -d "$WIDGETS_DIR" ]; then
+  die "--widgets-dir not found: $WIDGETS_DIR"
+fi
+case "$STYLE" in
+  default|technical|editorial|paper) ;;
+  *) die "--style must be one of: default, technical, editorial, paper" ;;
+esac
+if [ "$CUSTOM_TEMPLATE" = "1" ] && [ "$STYLE" != "default" ]; then
+  die "use --style OR --custom-template, not both"
+fi
 
 # ─────────────────────────────── paths + env ──────────────────────────────
 TDOC_DIR="${TDOC_DIR:-$HOME/tdocs}"
 SKILL_DIR="$HOME/.claude/skills/tdoc"
 DOC_DIR="$TDOC_DIR/$SLUG"
 V1_DIR="$DOC_DIR/v1"
+mkdir -p "$TDOC_DIR"
 
 if [ -d "$DOC_DIR" ] && [ "$FORCE" != "1" ]; then
   die "slug '$SLUG' already exists at $DOC_DIR; use --force to overwrite, or a different slug"
@@ -122,12 +154,37 @@ else
   cp "$HTML_FILE" "$STAGE_HTML" || die "could not read --html-file '$HTML_FILE'"
 fi
 
+if [ -n "$WIDGETS_DIR" ]; then
+  mkdir -p "$STAGE_DIR/v1/widgets"
+  WIDGET_COUNT=0
+  while IFS= read -r WIDGET_FILE; do
+    WIDGET_NAME="$(basename "$WIDGET_FILE" .html)"
+    [[ "$WIDGET_NAME" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] \
+      || die "invalid widget filename '$WIDGET_NAME.html' (use lowercase kebab-case, max 64 chars)"
+    cp "$WIDGET_FILE" "$STAGE_DIR/v1/widgets/$WIDGET_NAME.html" \
+      || die "could not read widget '$WIDGET_FILE'"
+    WIDGET_COUNT=$((WIDGET_COUNT + 1))
+  done < <(find "$WIDGETS_DIR" -maxdepth 1 -type f -name '*.html' -print | sort)
+  [ "$WIDGET_COUNT" -gt 0 ] || die "--widgets-dir contains no .html files"
+  [ "$WIDGET_COUNT" -le 32 ] || die "--widgets-dir contains more than 32 widgets"
+fi
+
 if [ ! -s "$STAGE_HTML" ]; then
   die "html content was empty (existing doc, if any, left untouched)"
 fi
 # Cheap sanity check: catches "agent handed us markdown instead of HTML"
 if ! grep -qi '<body' "$STAGE_HTML"; then
   die "html does not contain a <body> tag — did you pass markdown by mistake? (existing doc left untouched)"
+fi
+
+# Default-template is the normal contract. The overlay owns typography,
+# article width, headings, prose, tables, and code blocks. Authors may style
+# named widgets, but broad page restyling requires an explicit opt-out.
+VALIDATOR="$(cd "$(dirname "$0")" && pwd)/tdoc-validate-template"
+VALIDATOR_ARGS=("$STAGE_HTML" --style "$STYLE")
+[ "$CUSTOM_TEMPLATE" = "1" ] && VALIDATOR_ARGS+=(--custom-template)
+if ! "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
+  die "default-template validation failed (existing doc, if any, left untouched)"
 fi
 
 # Validation passed — NOW it's safe to replace. Swap the existing doc out only
@@ -243,4 +300,6 @@ fi
 # Local URL is always printed; published URL appears on a second line iff
 # --publish succeeded.
 echo "$LOCAL_URL"
-[ -n "$PUBLISHED_URL" ] && echo "$PUBLISHED_URL"
+if [ -n "$PUBLISHED_URL" ]; then
+  echo "$PUBLISHED_URL"
+fi

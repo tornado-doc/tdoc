@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/serenakeyitan/tdoc/security/advisories/new
+    url: https://github.com/tornado-doc/tdoc/security/advisories/new
     about: Report security issues privately here, not as a public issue.
   - name: Question / how-to
-    url: https://github.com/serenakeyitan/tdoc/issues
+    url: https://github.com/tornado-doc/tdoc/issues
     about: Search existing issues first; open a new one with the "question" label if needed.

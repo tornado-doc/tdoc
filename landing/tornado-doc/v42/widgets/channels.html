@@ -1,0 +1,49 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Signups by channel</title>
+<style>
+  html,body{margin:0;height:100%;background:#FAF9F5;color:#1F1E1D;
+    font:13px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+  body{padding:15px 17px 16px;display:flex;flex-direction:column;gap:11px;box-sizing:border-box}
+  .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+  .ttl{font-size:14px;font-weight:600;letter-spacing:-.012em}
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:3px 9px;
+    font-size:11px;font-weight:600;color:#1246CC;background:#EEF3FF;border:1px solid #D6E2FF}
+  .pulse{width:6px;height:6px;border-radius:50%;background:#1652f0;animation:pl 2s ease-in-out infinite}
+  @keyframes pl{0%,100%{opacity:1}50%{opacity:.3}}
+  @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+  .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+  .src{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
+    background:#F2F0E9;border:1px solid #E5E2D8;font-size:11px;color:#5F5C55}
+  .src svg{width:13px;height:13px;display:block;flex:none}
+  .card{flex:1;min-height:0;padding:14px;background:#fff;
+    border:1px solid #E0B96E;box-shadow:0 0 0 3px #FAEFD2;overflow:hidden}
+  .src i{font-style:normal}
+  /* the phone stage is one screen, so the island keeps its data and
+     drops its chrome */
+  @media (max-width:430px){.srcs{display:none}.foot{display:none}.card{flex:0 0 auto;padding:10px}body{justify-content:flex-start;gap:8px;padding:11px 12px 12px}.ttl{font-size:12.5px}.src i{display:none}.src{padding:4px 7px}.srcs{gap:5px}}
+  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#8B8781;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+     color:#96918A;padding:0 10px 8px 0;border-bottom:1px solid #E8E5DC;white-space:nowrap}
+  th.n,td.n{text-align:right;padding-right:0;padding-left:11px}
+  td{padding:7px 10px 7px 0;border-bottom:1px solid #F1EFE8}
+  tr:last-child td{border-bottom:0}
+  .ch{display:flex;align-items:center;gap:7px;font-size:12px;color:#3D3A34;white-space:nowrap}
+  .sw{width:8px;height:8px;flex:none}
+  .srccell{font-size:10.5px;color:#A5A099;white-space:nowrap}
+  .srccell svg{vertical-align:-2.5px;margin-right:5px;flex:none}
+  .n{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;color:#1F1E1D}
+  .big{font-size:14px;font-weight:600}
+  .nil{font:11px ui-sans-serif,system-ui,sans-serif;color:#A5A099}
+ .nil{font:11px ui-sans-serif,system-ui,sans-serif;color:#A5A099}
+ .up{color:#3F7A52}.dn{color:#B4432C}.warn{color:#B4432C}
+  @media (max-width:430px){th:nth-child(2),td.srccell{display:none}.lg{display:none}
+   th.n,td.n{padding-left:8px}.big{font-size:12.5px}td{padding:4px 8px 4px 0}
+   th{font-size:9px;letter-spacing:.02em}
+   th:nth-child(4),td.n:nth-child(4){display:none}
+   th.n,td.n{padding-left:10px}th,td{font-size:11px}.ch{font-size:11.5px}}
+</style></head><body>
+<div class="hd"><span class="ttl">Signups by channel</span></div>
+<div class="srcs"><span class="src"><svg viewBox="0 0 33 34" width="12.6" height="13.0"><path fill="#F9AB00" d="M22.84 4.6v24.15a4.6 4.6 0 0 0 9.16.72V4.79A4.6 4.6 0 0 0 27.4.02a4.6 4.6 0 0 0-4.56 4.58z"/><path fill="#E37400" d="M10.87 17a4.6 4.6 0 1 1 9.2 0v11.75a4.6 4.6 0 0 1-9.2 0V17z"/><circle fill="#E37400" cx="4.6" cy="29.35" r="4.6"/></svg><i>Google Analytics</i></span><span class="src"><svg viewBox="0 0 48 48" width="13.0" height="13.0"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><i>Organic</i></span><span class="src"><svg viewBox="0 0 36 24" width="13.0" height="8.7"><path fill="#0081FB" d="M3.2 15.6c0-5.3 2.7-9.4 6.1-9.4 2.1 0 3.7 1.4 5.3 4l1.7 2.9c1.3 2.2 2.1 3.5 3.2 3.5 1 0 1.8-1.2 1.8-3.6 0-2.9-.9-5-2.7-5-1 0-2.1.8-3.4 2.4l-1.4-2.1C15.6 6 17.3 4.8 19.4 4.8c3.3 0 5.5 3.2 5.5 7.9 0 4.4-1.9 7-4.8 7-2 0-3.5-1.2-5.2-4.1l-1.9-3.2c-1.4-2.3-2.2-3.4-3.4-3.4-1.3 0-2.5 2-2.5 5.3 0 2.4.8 4 2.1 4 .9 0 1.7-.5 2.8-1.8l1.4 2.1c-1.2 1.7-2.7 2.6-4.4 2.6-3.3 0-5.8-3.2-5.8-8.3z"/></svg><i>Meta Ads</i></span><span class="src"><svg viewBox="0 0 24 24" width="13.0" height="13.0"><rect x="1" y="1" width="10" height="10" fill="#F25022"/><rect x="13" y="1" width="10" height="10" fill="#7FBA00"/><rect x="1" y="13" width="10" height="10" fill="#00A4EF"/><rect x="13" y="13" width="10" height="10" fill="#FFB900"/></svg><i>Microsoft Ads</i></span></div>
+<div class="card"><table><thead><tr><th>Channel</th><th>Source</th><th class="n">Signups</th><th class="n">vs prev</th><th class="n">Cost<span class="lg"> / signup</span></th></tr></thead><tbody><tr><td class="ch"><span class="sw" style="background:#1652f0"></span>Referral</td><td class="srccell"><svg viewBox="0 0 33 34" width="12.6" height="13.0"><path fill="#F9AB00" d="M22.84 4.6v24.15a4.6 4.6 0 0 0 9.16.72V4.79A4.6 4.6 0 0 0 27.4.02a4.6 4.6 0 0 0-4.56 4.58z"/><path fill="#E37400" d="M10.87 17a4.6 4.6 0 1 1 9.2 0v11.75a4.6 4.6 0 0 1-9.2 0V17z"/><circle fill="#E37400" cx="4.6" cy="29.35" r="4.6"/></svg>Google Analytics</td><td class="n big">322</td><td class="n up">+34%</td><td class="n big ">$11</td></tr><tr><td class="ch"><span class="sw" style="background:#3F7A52"></span>Organic</td><td class="srccell"><svg viewBox="0 0 48 48" width="13.0" height="13.0"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Google Search</td><td class="n big">246</td><td class="n up">+12%</td><td class="n big ">$4</td></tr><tr><td class="ch"><span class="sw" style="background:#B4432C"></span>Paid social</td><td class="srccell"><svg viewBox="0 0 36 24" width="13.0" height="8.7"><path fill="#0081FB" d="M3.2 15.6c0-5.3 2.7-9.4 6.1-9.4 2.1 0 3.7 1.4 5.3 4l1.7 2.9c1.3 2.2 2.1 3.5 3.2 3.5 1 0 1.8-1.2 1.8-3.6 0-2.9-.9-5-2.7-5-1 0-2.1.8-3.4 2.4l-1.4-2.1C15.6 6 17.3 4.8 19.4 4.8c3.3 0 5.5 3.2 5.5 7.9 0 4.4-1.9 7-4.8 7-2 0-3.5-1.2-5.2-4.1l-1.9-3.2c-1.4-2.3-2.2-3.4-3.4-3.4-1.3 0-2.5 2-2.5 5.3 0 2.4.8 4 2.1 4 .9 0 1.7-.5 2.8-1.8l1.4 2.1c-1.2 1.7-2.7 2.6-4.4 2.6-3.3 0-5.8-3.2-5.8-8.3z"/></svg>Meta Ads</td><td class="n big">180</td><td class="n dn">&#8722;18%</td><td class="n big warn">$63</td></tr><tr><td class="ch"><span class="sw" style="background:#7A6FB0"></span>Partnerships</td><td class="srccell"><svg viewBox="0 0 24 24" width="13.0" height="13.0"><path fill="#FF7A59" d="M17.9 8.2V5.9a2.6 2.6 0 1 0-2.6-2.6c0 .5.1.9.3 1.3L11 7.3a5.9 5.9 0 0 0-1.9-.6V3.4a2.2 2.2 0 1 0-2.3 0v3.3A5.9 5.9 0 1 0 9.1 18a5.8 5.8 0 0 0 2.7-.7l3.4 2.7a2.5 2.5 0 1 0 1.3-1.6l-3.3-2.6a5.9 5.9 0 0 0 .7-2.8 5.9 5.9 0 0 0-3.6-5.4l4.4-2.6c.4.2.8.3 1.3.3zM9.1 15.1a2.9 2.9 0 1 1 0-5.8 2.9 2.9 0 0 1 0 5.8z"/></svg>HubSpot</td><td class="n big">123</td><td class="n up">+8%</td><td class="n big ">$19</td></tr><tr><td class="ch"><span class="sw" style="background:#96918A"></span>Direct</td><td class="srccell"><svg viewBox="0 0 33 34" width="12.6" height="13.0"><path fill="#F9AB00" d="M22.84 4.6v24.15a4.6 4.6 0 0 0 9.16.72V4.79A4.6 4.6 0 0 0 27.4.02a4.6 4.6 0 0 0-4.56 4.58z"/><path fill="#E37400" d="M10.87 17a4.6 4.6 0 1 1 9.2 0v11.75a4.6 4.6 0 0 1-9.2 0V17z"/><circle fill="#E37400" cx="4.6" cy="29.35" r="4.6"/></svg>Google Analytics</td><td class="n big">76</td><td class="n dn">&#8722;3%</td><td class="n nil">no spend</td></tr></tbody></table></div>
+<div class="foot"><span>947 signups &middot; 8&ndash;14 Sep</span><span>Updated 2 min ago</span></div>
+</body></html>

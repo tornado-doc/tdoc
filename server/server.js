@@ -7,11 +7,20 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
+const ONBOARD_PATH = path.join(__dirname, 'onboard.js');
+const SIGNIN_PATH = path.join(__dirname, 'signin.js');
+// Slugs that carry the onboarding modal. Product UI, injected under the same
+// nonce as the overlay, because a doc's own <script> never runs.
+const ONBOARD_SLUGS = new Set(['tornado-doc', 'tdoc-start']);
+// Optional two-person local inbox (browser e2e). Off unless TDOC_E2E_USER is set.
+const E2E_USER = String(process.env.TDOC_E2E_USER || '').trim();
+const E2E_OWNER = String(process.env.TDOC_E2E_OWNER || E2E_USER || '').trim();
 
 fs.mkdirSync(ROOT, { recursive: true });
 
@@ -26,6 +35,53 @@ function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
 }
 function writeJson(p, obj) { fs.writeFileSync(p, JSON.stringify(obj, null, 2)); }
+function e2eIdentity() {
+  if (!E2E_USER) return null;
+  return { login: E2E_USER, name: E2E_USER, avatar_url: '' };
+}
+function inboxFile(login) {
+  return path.join(ROOT, `.inbox-${String(login).toLowerCase()}.json`);
+}
+function localRecordAuthor(comments, id) {
+  for (const c of comments) {
+    if (c.id === id) return c.author || null;
+    for (const r of (c.replies || [])) if (r.id === id) return r.author || null;
+  }
+  return null;
+}
+function localDeliver(recipient, ev) {
+  const who = recipient && String(recipient).trim().toLowerCase();
+  const actor = ev.actor && ev.actor.login && String(ev.actor.login).trim().toLowerCase();
+  if (!who || who === actor) return;
+  const file = inboxFile(who);
+  const inbox = readJson(file, { items: [] });
+  const items = Array.isArray(inbox.items) ? inbox.items : [];
+  const gk = ev.kind === 'comment' ? `comment:${ev.slug}`
+    : ev.kind === 'reply' ? `reply:${ev.target_id}`
+    : ev.kind === 'reaction' ? `reaction:${ev.target_id}`
+    : `other:${ev.slug}`;
+  const existing = items.find(i => i && !i.read && i.group_key === gk);
+  if (existing) {
+    existing.count = (Number(existing.count) || 1) + 1;
+    existing.at = ev.at;
+    existing.actor = ev.actor;
+    existing.comment_id = ev.comment_id || existing.comment_id;
+    existing.thread_id = ev.thread_id || existing.thread_id;
+    existing.preview = ev.preview != null ? ev.preview : existing.preview;
+    existing.version = ev.version || existing.version;
+    const rest = items.filter(i => i !== existing);
+    writeJson(file, { items: [existing, ...rest].slice(0, 200) });
+    return;
+  }
+  items.unshift({
+    id: ev.id || `n_${Date.now()}`,
+    kind: ev.kind, group_key: gk, slug: ev.slug, version: ev.version || 1,
+    comment_id: ev.comment_id, thread_id: ev.thread_id || ev.comment_id,
+    actor: ev.actor || null, preview: ev.preview || '', title: ev.title || ev.slug,
+    at: ev.at || new Date().toISOString(), read: false, count: 1, emoji: ev.emoji || null,
+  });
+  writeJson(file, { items: items.slice(0, 200) });
+}
 // Cap request bodies so a hostile/buggy client can't OOM the local server.
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — comments are small
 function readBody(req) {
@@ -70,27 +126,102 @@ function isLocalMutation(req) {
 
 // Escape `</script>` and HTML comment terminators so a malicious or stray value
 // inside the JSON payload can't break out of the surrounding <script> block.
-// Replace `tdoc-agent`'s reaction on a comment with the emoji for the new
-// status. Removes any existing tdoc-agent reactions first so old state
+// Replace the acting agent's reaction on a comment with the emoji for the new
+// status. Also removes legacy `tdoc-agent` reactions first so old state
 // can't outlive the new outcome (e.g. an "applied" ✅ after a later
 // "question" outcome on the same comment).
 const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
 // The emoji set the agent uses as a verdict marker — used by the per-version
 // fold to strip a stale verdict off snapshots where the comment reads 'open'.
 const AGENT_VERDICT_EMOJI = new Set(Object.values(AGENT_STATUS_EMOJI));
-function setAgentReaction(target, status) {
+function isAnthropicCompanyMark(url) {
+  return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+}
+function logoForAgentLogin(login) {
+  const key = String(login || '').toLowerCase();
+  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
+  if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
+    return 'https://github.com/openai.png';
+  }
+  if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
+  if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
+  // tdoc project mark (assets/tdoc_logo.svg, served at /tdoc_logo.svg).
+  return '/tdoc_logo.svg';
+}
+
+function isGenericAgentLogin(login) {
+  const k = String(login || '').trim().toLowerCase();
+  return !k || k === 'tdoc-agent' || k === 'agent';
+}
+
+function detectAgentRuntime(env) {
+  const e = env || {};
+  const present = (names) => names.some((n) => {
+    const v = e[n];
+    return v != null && String(v).trim() !== '';
+  });
+  // Session/host markers only — never API keys. Order is the priority when
+  // more than one host is visible in the same process (rare).
+  if (present(['GROK_AGENT', 'GROK_SESSION_ID', 'GROK_BUILD', 'XAI_AGENT'])) {
+    return { login: 'grok', name: 'Grok' };
+  }
+  if (present(['CLAUDE_CODE', 'CLAUDE_SESSION_ID', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT'])) {
+    return { login: 'claude', name: 'Claude' };
+  }
+  if (present(['CODEX_SESSION_ID', 'CODEX_CLI', 'OPENAI_CODEX', 'CODEX_HOME'])) {
+    return { login: 'codex', name: 'Codex' };
+  }
+  if (present(['CURSOR_TRACE_ID', 'CURSOR_AGENT', 'COMPOSER_SESSION'])) {
+    return { login: 'cursor', name: 'Cursor' };
+  }
+  if (present(['GEMINI_CLI', 'GEMINI_SESSION_ID'])) {
+    return { login: 'gemini', name: 'Gemini' };
+  }
+  return null;
+}
+
+function agentIdentity(body = {}, env = {}) {
+  const detected = detectAgentRuntime(env);
+  const clean = (v, fallback) => {
+    if (typeof v !== 'string') return fallback;
+    const s = v.trim().slice(0, 80);
+    return s || fallback;
+  };
+  const rawLogin = typeof (body.agent_login || body.agent_id) === 'string'
+    ? String(body.agent_login || body.agent_id).trim()
+    : '';
+  const rawName = typeof body.agent_name === 'string' ? body.agent_name.trim() : '';
+  const login = (!isGenericAgentLogin(rawLogin) ? rawLogin : '')
+    || (detected && detected.login)
+    || env.TDOC_AGENT_LOGIN
+    || 'tdoc-agent';
+  const name = (!isGenericAgentLogin(rawName) ? rawName : '')
+    || (detected && detected.name)
+    || env.TDOC_AGENT_NAME
+    || login;
+  let avatar = typeof body.agent_avatar_url === 'string' && /^https:\/\/[^ \n\r\t]+$/i.test(body.agent_avatar_url)
+    ? body.agent_avatar_url
+    : null;
+  if (isAnthropicCompanyMark(avatar)) avatar = null;
+  if (!avatar) avatar = logoForAgentLogin(login);
+  return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
+}
+function setAgentReaction(target, status, actor = 'tdoc-agent') {
   if (!target.reactions) target.reactions = {};
+  const agentUsers = new Set(['tdoc-agent', actor].filter(Boolean));
   for (const emoji of Object.keys(target.reactions)) {
     const users = target.reactions[emoji] || [];
-    const idx = users.indexOf('tdoc-agent');
-    if (idx >= 0) users.splice(idx, 1);
+    for (let i = users.length - 1; i >= 0; i--) {
+      if (agentUsers.has(users[i])) users.splice(i, 1);
+    }
     if (users.length === 0) delete target.reactions[emoji];
     else target.reactions[emoji] = users;
   }
   const next = AGENT_STATUS_EMOJI[status];
   if (!next) return;
   const u = target.reactions[next] || [];
-  if (!u.includes('tdoc-agent')) u.push('tdoc-agent');
+  if (!u.includes(actor)) u.push(actor);
   target.reactions[next] = u;
 }
 
@@ -98,7 +229,66 @@ function safeJsonForScript(obj) {
   return JSON.stringify(obj).replace(/<\/script>/gi, '<\\/script>').replace(/<!--/g, '<\\!--');
 }
 
-function injectOverlay(html, slug, version) {
+// CSP (owner-manage-via-session hardening, mirrors worker/worker.js).
+//
+// Local docs are anonymous/no-auth by design, so this route isn't guarding a
+// session cookie today — but the local server shares overlay.js with the
+// published worker, and a doc authored locally is the same bytes that later
+// get published. Blocking author <script>/onclick here too means what a doc
+// author sees locally matches what ships (no "worked in dev, XSS in prod"
+// surprise), and costs nothing since 0 published docs use <script>.
+function cspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+}
+
+// Interactive islands (#138). Host documents keep cspHeader(); computation
+// lives in a separately served HTML resource framed with sandbox="allow-scripts"
+// (never allow-same-origin). srcdoc/blob inherit the parent CSP and cannot
+// run author JS — these must be real URLs.
+function isValidWidgetName(name) {
+  return typeof name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
+}
+function widgetCspHeader() {
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
+}
+function isWidgetFrameRequest(dest) {
+  return String(dest || '').toLowerCase() === 'iframe';
+}
+function forceWidgetSandbox(html) {
+  if (typeof html !== 'string') return html;
+  return html.replace(/<iframe\b([^>]*?)>/gi, (full, attrs) => {
+    const srcM = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
+    if (!srcM) return full;
+    const src = String(srcM[1] || srcM[2] || srcM[3] || '').trim();
+    let path;
+    try {
+      const u = new URL(src, 'https://tdoc-widget-src.invalid');
+      if (u.hostname !== 'tdoc-widget-src.invalid') return full;
+      path = u.pathname;
+    } catch {
+      return full;
+    }
+    if (!/^\/d\/[a-z0-9][a-z0-9-]{0,63}\/v\/\d+\/widget\/[a-z0-9][a-z0-9-]{0,63}\/?$/i.test(path)) return full;
+    const stripped = attrs.replace(/\s*sandbox\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    return '<iframe sandbox="allow-scripts"' + stripped + '>';
+  });
+}
+
+function injectOverlay(html, slug, version, nonce) {
+  html = forceWidgetSandbox(html);
+  if (ONBOARD_SLUGS.has(slug)) {
+    try {
+      const onboard = fs.readFileSync(ONBOARD_PATH, 'utf8');
+      const tag = `<script${nonce ? ` nonce="${nonce}"` : ''}>${onboard}</script>`;
+      html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
+    } catch {}
+  }
+  // The shared device flow goes in before the overlay, which calls into it.
+  try {
+    const signin = fs.readFileSync(SIGNIN_PATH, 'utf8');
+    const tag = `<script${nonce ? ` nonce="${nonce}"` : ''}>${signin}</script>`;
+    html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
+  } catch {}
   const overlay = fs.readFileSync(OVERLAY_PATH, 'utf8');
   // Hand the overlay the full version list so the bar can offer a version
   // picker. Read straight from meta.json; ignore failures and fall back to
@@ -110,10 +300,18 @@ function injectOverlay(html, slug, version) {
       versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
     }
   } catch {}
-  const cfg = `<script>window.__TDOC__ = ${safeJsonForScript({
-    slug, version, identity: null, authConfigured: false, mode: 'local', versions,
+  // nonce is stamped onto BOTH injected <script> tags so only they run under
+  // the CSP set by cspHeader() above — author content in `html` has no nonce
+  // and is inert.
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const ident = e2eIdentity();
+  const cfg = `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript({
+    slug, version,
+    identity: ident,
+    isOwner: !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase()),
+    authConfigured: !!ident, mode: 'local', versions,
   })};</script>`;
-  const inject = `${cfg}\n<script>${overlay}</script>`;
+  const inject = `${cfg}\n<script${nonceAttr}>${overlay}</script>`;
   if (html.includes('</body>')) return html.replace('</body>', `${inject}\n</body>`);
   return html + inject;
 }
@@ -149,12 +347,13 @@ function foldCommentsAtVersion(comments, version) {
     // would carry the CURRENT reactions — including the agent verdict emoji
     // (✅/🟡/❓ written by setAgentReaction) — onto every past snapshot. On a
     // version where the comment folds to 'open' that's a contradictory
-    // "resolved" emoji, so drop the tdoc-agent verdict there.
+    // "resolved" emoji, so drop the agent verdict there.
     let reactions = c.reactions;
     if (!resolvedByV && reactions) {
       const filtered = {};
       for (const [emoji, users] of Object.entries(reactions)) {
-        const rest = Array.isArray(users) ? users.filter(u => !(u === 'tdoc-agent' && AGENT_VERDICT_EMOJI.has(emoji))) : users;
+        const agentActor = c.agent_actor || 'tdoc-agent';
+        const rest = Array.isArray(users) ? users.filter(u => !((u === 'tdoc-agent' || u === agentActor) && AGENT_VERDICT_EMOJI.has(emoji))) : users;
         if (rest && rest.length) filtered[emoji] = rest;
       }
       reactions = filtered;
@@ -184,30 +383,99 @@ function indexPage() {
   const rows = slugs.map(slug => {
     const meta = readJson(path.join(ROOT, slug, 'meta.json'), { title: slug, versions: [] });
     const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
-    const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
-    const open = comments.filter(c => c.status === 'open').length;
+    const versionCount = Array.isArray(meta.versions) && meta.versions.length ? meta.versions.length : 1;
     return `<tr>
       <td><a href="/d/${encodeURIComponent(slug)}/v/${latest}">${escHtml(meta.title || slug)}</a></td>
       <td>${escHtml(slug)}</td>
       <td>v${latest}</td>
-      <td>${open ? `<b>${open} open</b>` : '—'}</td>
+      <td><button class="del" data-slug="${escHtml(slug)}" data-versions="${versionCount}">Delete</button></td>
     </tr>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>tdoc</title>
 <style>
-  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 760px; margin: 60px auto; padding: 0 20px; color: #111; }
-  h1 { font-size: 28px; margin: 0 0 4px; color: #1652f0; }
-  .sub { color: #666; margin: 0 0 32px; }
+  :root {
+    --td-accent: #1652f0; --td-accent-hover: #1245d0;
+    --td-danger: #b42318; --td-danger-hover: #931c14;
+    --td-ink: #111; --td-muted: #666; --td-line: #eee;
+  }
+  body { font: 15px system-ui, -apple-system, sans-serif; max-width: 760px; margin: 60px auto; padding: 0 20px; color: var(--td-ink); }
+  h1 { font-size: 28px; margin: 0 0 4px; color: var(--td-accent); }
+  .sub { color: var(--td-muted); margin: 0 0 32px; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--td-line); }
   th { font-size: 12px; text-transform: uppercase; color: #888; letter-spacing: 0.04em; }
-  a { color: #1652f0; text-decoration: none; }
+  a { color: var(--td-accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .empty { color: #888; padding: 40px 0; text-align: center; }
+  .del { font: 12px system-ui; color: var(--td-danger); background: none; border: 1px solid #e0c9c9; border-radius: 6px; padding: 3px 9px; cursor: pointer; transition: background .12s, color .12s; }
+  .del:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
+  /* Styled confirm modal — replaces window.confirm() (JUL-36). Standalone
+     copy of the doc overlay's .tdoc-modal-bg/.tdoc-modal visual language;
+     this page doesn't load overlay.js. */
+  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
+  .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
+  .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
+  .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  .tdoc-modal button { font: inherit; cursor: pointer; padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
 </style></head><body>
 <h1>tdoc</h1><p class="sub">Prompt-native documents.</p>
 ${slugs.length === 0 ? '<p class="empty">No docs yet. Try <code>/tdoc new &lt;prompt&gt;</code>.</p>' :
-  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th>Comments</th></tr></thead><tbody>${rows}</tbody></table>`}
+  `<table><thead><tr><th>Title</th><th>Slug</th><th>Version</th><th></th></tr></thead><tbody>${rows}</tbody></table>`}
+<script>
+function showConfirm({ title, body, confirmLabel, danger }) {
+  return new Promise((resolve) => {
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.innerHTML = '<div class="tdoc-modal">' +
+      '<h3></h3><p></p>' +
+      '<div class="actions">' +
+        '<button type="button" data-act="cancel">Cancel</button>' +
+        '<button type="button" data-act="go"></button>' +
+      '</div></div>';
+    bg.querySelector('h3').textContent = title;
+    bg.querySelector('p').innerHTML = body;
+    const goBtn = bg.querySelector('[data-act="go"]');
+    goBtn.textContent = confirmLabel;
+    if (danger) goBtn.className = 'danger';
+    const done = (v) => { bg.remove(); resolve(v); };
+    bg.querySelector('[data-act="cancel"]').onclick = () => done(false);
+    bg.addEventListener('click', (e) => { if (e.target === bg) done(false); });
+    goBtn.onclick = () => done(true);
+    document.body.appendChild(bg);
+  });
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('.del');
+  if (!b) return;
+  const slug = b.dataset.slug;
+  let comments = 0;
+  try {
+    const r = await fetch('/api/comments?slug=' + encodeURIComponent(slug));
+    if (r.ok) {
+      const list = await r.json();
+      if (Array.isArray(list)) {
+        for (const c of list) comments += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+      }
+    }
+  } catch {}
+  // Irreversible: name exactly what disappears before acting.
+  const proceed = await showConfirm({
+    title: 'Delete "' + slug + '"?',
+    body: 'This permanently removes <b>' + b.dataset.versions + ' version(s)</b> and <b>' + comments +
+      ' comment(s)</b> — the local copy AND the published copy (if any). No undo.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!proceed) return;
+  b.disabled = true; b.textContent = 'Deleting…';
+  const r = await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
+  if (r.ok) { b.closest('tr').remove(); }
+  else { const d = await r.json().catch(() => ({})); alert('Delete failed: ' + (d.error || r.status)); b.disabled = false; b.textContent = 'Delete'; }
+});
+</script>
 </body></html>`;
 }
 
@@ -221,7 +489,90 @@ const server = http.createServer(async (req, res) => {
   // wild: a daemon from another product bound 7878).
   if (p === '/api/ping') return json(res, 200, { ok: true, service: 'tdoc' });
 
+  if (p === '/api/notifications' && req.method === 'GET') {
+    const ident = e2eIdentity();
+    if (!ident) return json(res, 401, { error: 'sign_in_required' });
+    const inbox = readJson(inboxFile(ident.login), { items: [] });
+    const items = Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
+    const unread = items.filter(i => !i.read);
+    const ordered = unread.concat(items.filter(i => i.read));
+    const offset = Math.max(0, Number(url.searchParams.get('offset') || 0));
+    return json(res, 200, {
+      items: ordered.slice(offset, offset + 20),
+      unread: unread.length,
+      has_more: offset + 20 < ordered.length,
+    });
+  }
+  if (p === '/api/notifications/unread' && req.method === 'GET') {
+    const ident = e2eIdentity();
+    if (!ident) return json(res, 401, { error: 'sign_in_required' });
+    const inbox = readJson(inboxFile(ident.login), { items: [] });
+    const items = Array.isArray(inbox.items) ? inbox.items : [];
+    return json(res, 200, { unread: items.filter(i => i && !i.read).length });
+  }
+  if (p === '/api/notifications/read' && req.method === 'POST') {
+    const ident = e2eIdentity();
+    if (!ident) return json(res, 401, { error: 'sign_in_required' });
+    const body = await readBody(req);
+    const file = inboxFile(ident.login);
+    const inbox = readJson(file, { items: [] });
+    const items = (Array.isArray(inbox.items) ? inbox.items : []).map((i) => {
+      if (!i) return i;
+      if (Array.isArray(body.ids) && body.ids.includes(i.id)) return { ...i, read: true };
+      if (body.comment_id && i.comment_id === body.comment_id) return { ...i, read: true };
+      return i;
+    });
+    writeJson(file, { items });
+    return json(res, 200, { ok: true, unread: items.filter(i => i && !i.read).length });
+  }
+
+  if (p === '/tdoc_logo.svg') {
+    const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.svg');
+    if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(logoPath), {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+  if (p === '/tdoc_logo.png') {
+    const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
+    if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(logoPath), {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=86400',
+    });
+  }
+
   if (p === '/') return send(res, 200, indexPage(), { 'Content-Type': 'text/html; charset=utf-8' });
+  // Overlay mark always goes to /me. Local studio has no hosted catalog, so
+  // send them to the local index — the analog of My docs.
+  if (p === '/me') {
+    res.writeHead(302, { Location: '/' });
+    return res.end();
+  }
+
+  const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
+  if (widgetMatch) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return send(res, 405, 'method not allowed', { Allow: 'GET, HEAD' });
+    }
+    const [, rawSlug, vStr, rawName] = widgetMatch;
+    const slug = safeSlug(rawSlug);
+    if (!slug || !isValidWidgetName(rawName)) return send(res, 400, 'invalid slug or widget');
+    const dest = req.headers['sec-fetch-dest'];
+    if (!isWidgetFrameRequest(dest)) return send(res, 403, 'widget must be framed');
+    const file = path.join(ROOT, slug, `v${vStr}`, 'widgets', `${rawName}.html`);
+    if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr} widget ${rawName}`);
+    const body = req.method === 'HEAD' ? '' : fs.readFileSync(file, 'utf8');
+    return send(res, 200, body, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': widgetCspHeader(),
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+      'Vary': 'Sec-Fetch-Dest',
+    });
+  }
 
   const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
   if (docMatch) {
@@ -231,7 +582,11 @@ const server = http.createServer(async (req, res) => {
     const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
     if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
     const html = fs.readFileSync(file, 'utf8');
-    return send(res, 200, injectOverlay(html, slug, Number(vStr)), { 'Content-Type': 'text/html; charset=utf-8' });
+    const nonce = crypto.randomBytes(16).toString('hex');
+    return send(res, 200, injectOverlay(html, slug, Number(vStr), nonce), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': cspHeader(nonce),
+    });
   }
 
   // --- COMMENTS (anonymous) ---
@@ -255,16 +610,27 @@ const server = http.createServer(async (req, res) => {
     const comments = readCommentFile(file);
     const created = new Date().toISOString();
     if (parent_id) {
-      const parent = comments.find(c => c.id === parent_id);
-      if (!parent) return json(res, 404, { error: 'parent_not_found' });
-      if (!Array.isArray(parent.replies)) parent.replies = [];
+      const thread = comments.find(c => c.id === parent_id)
+        || comments.find(c => (c.replies || []).some(r => r.id === parent_id));
+      if (!thread) return json(res, 404, { error: 'parent_not_found' });
+      if (!Array.isArray(thread.replies)) thread.replies = [];
       // Persist the version the reply was made at so foldCommentsAtVersion can
       // scope it — without this the reply record has no `version` and the fold's
       // `r.version` check falls back to the parent's created_in, so replies were
       // never hidden on older versions (diverging from the worker).
-      const reply = { id: `r_${Date.now()}`, parent_id, text, version: Number(version) || 1, author: null, created, reactions: {} };
-      parent.replies.push(reply);
+      // parent_id is the immediate parent (top-level or another reply).
+      const reply = { id: `r_${Date.now()}`, parent_id, text, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
+      thread.replies.push(reply);
       writeJson(file, comments);
+      if (E2E_USER) {
+        const parentA = localRecordAuthor(comments, parent_id);
+        let title = slug;
+        try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
+        localDeliver(parentA && parentA.login, {
+          kind: 'reply', slug, version: Number(version) || 1, comment_id: reply.id,
+          thread_id: thread.id, target_id: parent_id, actor: reply.author, preview: text, title, at: created,
+        });
+      }
       return json(res, 200, reply);
     }
     const entry = {
@@ -272,7 +638,7 @@ const server = http.createServer(async (req, res) => {
       version: version || 1,
       anchor: anchor || null,
       text,
-      author: null,
+      author: e2eIdentity(),
       status: 'open',
       created,
       replies: [],
@@ -280,10 +646,18 @@ const server = http.createServer(async (req, res) => {
     };
     comments.push(entry);
     writeJson(file, comments);
+    if (E2E_USER && E2E_OWNER) {
+      let title = slug;
+      try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
+      localDeliver(E2E_OWNER, {
+        kind: 'comment', slug, version: Number(version) || 1, comment_id: entry.id,
+        thread_id: entry.id, actor: entry.author, preview: text, title, at: created,
+      });
+    }
     return json(res, 200, entry);
   }
 
-  // Agent reply: posts a reply attributed to `tdoc-agent`, updates the
+  // Agent reply: posts a reply attributed to the acting agent, updates the
   // parent comment's status, AND drops a status emoji on the parent's
   // reactions row. Each status maps to a different emoji so the user can
   // tell at a glance from the comment list which were addressed:
@@ -300,9 +674,12 @@ const server = http.createServer(async (req, res) => {
     if (!slug || !parent_id || !text) return json(res, 400, { error: 'invalid slug or missing parent_id/text' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
-    const parent = all.find(c => c.id === parent_id);
+    const parent = all.find(c => c.id === parent_id)
+      || all.find(c => (c.replies || []).some(r => r.id === parent_id));
     if (!parent) return json(res, 404, { error: 'parent_not_found' });
     if (!Array.isArray(parent.replies)) parent.replies = [];
+    const agent = agentIdentity(body, process.env);
+    parent.agent_actor = agent.login;
     const reply = {
       id: `r_${Date.now()}`,
       parent_id,
@@ -310,7 +687,7 @@ const server = http.createServer(async (req, res) => {
       // Scope the agent reply to the version it was applied at (falls back to
       // the request version, then 1) so the fold can hide it on earlier ones.
       version: Number(applied_in != null ? applied_in : body.version) || 1,
-      author: { kind: 'agent', login: 'tdoc-agent', name: 'tdoc-agent', avatar_url: null },
+      author: agent,
       agent_status: ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null,
       created: new Date().toISOString(),
       reactions: {},
@@ -322,7 +699,7 @@ const server = http.createServer(async (req, res) => {
     } else if (agentStatus === 'question' || agentStatus === 'partial') {
       parent.status = 'open';
     }
-    setAgentReaction(parent, agentStatus);
+    setAgentReaction(parent, agentStatus, agent.login);
     writeJson(file, all);
     return json(res, 200, reply);
   }
@@ -345,7 +722,8 @@ const server = http.createServer(async (req, res) => {
     target.anchor = anchor;
     target.status = 'open';
     delete target.applied_in;
-    setAgentReaction(target, null);
+    setAgentReaction(target, null, target.agent_actor || 'tdoc-agent');
+    delete target.agent_actor;
     writeJson(file, all);
     return json(res, 200, target);
   }
@@ -403,13 +781,24 @@ const server = http.createServer(async (req, res) => {
     if (!target) return json(res, 404, { error: 'not_found' });
     if (!target.reactions) target.reactions = {};
     const users = target.reactions[emoji] || [];
-    const me = 'anon';
+    const me = E2E_USER || 'anon';
     const idx = users.indexOf(me);
+    const added = idx < 0;
     if (idx >= 0) users.splice(idx, 1);
     else users.push(me);
     if (users.length === 0) delete target.reactions[emoji];
     else target.reactions[emoji] = users;
     writeJson(file, all);
+    if (added && E2E_USER && target.author && target.author.login) {
+      let title = slug;
+      try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
+      const thread = all.find(c => c.id === comment_id || (c.replies || []).some(r => r.id === comment_id));
+      const V = Number(body.version) || Number(target.version) || Number(thread && thread.version) || 1;
+      localDeliver(target.author.login, {
+        kind: 'reaction', slug, version: V, comment_id, thread_id: thread && thread.id,
+        target_id: comment_id, actor: e2eIdentity(), title, emoji,
+      });
+    }
     return json(res, 200, { ok: true, reactions: target.reactions });
   }
 
@@ -418,6 +807,34 @@ const server = http.createServer(async (req, res) => {
   // first run); the browser modal shows a "this can take a minute" hint.
   // Honor TDOC_DRY_PUBLISH=1 for tests — echoes "would publish <slug>" and
   // returns a fake URL without invoking wrangler.
+  if (p === '/api/delete' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const slug = safeSlug(body.slug);
+    if (!slug) return json(res, 400, { error: 'invalid slug' });
+    if (!fs.existsSync(path.join(ROOT, slug))) return json(res, 404, { error: 'not found' });
+    const bin = path.join(__dirname, '..', 'bin', 'tdoc-delete');
+    if (!fs.existsSync(bin)) return json(res, 500, { error: 'tdoc-delete script not found' });
+    // Same spawn hardening as /api/publish: error listener, hard timeout,
+    // bounded output. Deleting is quick; 60s covers a slow unpublish curl.
+    const args = body.published === false ? [slug, '--local-only'] : [slug];
+    const proc = spawn(bin, args, { env: process.env });
+    let out = '', err = '', settled = false, killed = false;
+    const CAP = 64 * 1024;
+    const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
+    const settle = (status, obj) => { if (settled) return; settled = true; clearTimeout(timer); json(res, status, obj); };
+    const timer = setTimeout(() => { killed = true; proc.kill('SIGTERM'); setTimeout(() => proc.kill('SIGKILL'), 3000); }, 60000);
+    proc.on('error', (e) => settle(500, { error: 'delete_spawn_failed', detail: String(e && e.message || e) }));
+    proc.stdout.on('data', d => { out = append(out, d); });
+    proc.stderr.on('data', d => { err = append(err, d); });
+    proc.on('close', (code) => {
+      if (killed) return settle(504, { error: 'delete_timeout', stdout: out, stderr: err });
+      if (code !== 0) return settle(500, { error: 'delete_failed', code, stdout: out, stderr: err });
+      settle(200, { ok: true, stdout: out });
+    });
+    return;
+  }
+
   if (p === '/api/publish' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);

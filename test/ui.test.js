@@ -40,8 +40,161 @@ async function tPub(name, fn) {
 
   await page.goto(URL, { waitUntil: 'networkidle' });
 
+  async function openFirstCommentCard() {
+    const card = await page.$('.tdoc-margin-comment');
+    if (!card) return null;
+    if (await card.isVisible()) return card;
+    const pin = await page.$('.tdoc-pin');
+    if (!pin) return card;
+    await pin.click();
+    await page.waitForSelector('.tdoc-margin-comment.tdoc-floating-open', { timeout: 1000 });
+    return page.$('.tdoc-margin-comment.tdoc-floating-open');
+  }
+
   await t('top bar renders', async () => {
     await page.waitForSelector('.tdoc-bar', { timeout: 5000 });
+  });
+
+  await t('top bar occupies layout instead of floating over the document', async () => {
+    const info = await page.evaluate(() => {
+      const bar = document.querySelector('.tdoc-bar');
+      const cs = getComputedStyle(bar);
+      return {
+        position: cs.position,
+        firstChildIsBar: document.body.firstElementChild === bar,
+      };
+    });
+    if (info.position === 'fixed' || info.position === 'sticky') {
+      throw new Error(`bar must be in document flow, got position:${info.position}`);
+    }
+    if (!info.firstChildIsBar) throw new Error('bar must be the first body element');
+  });
+
+  await t('Dark mode switch is in the top bar', async () => {
+    const btn = await page.$('#tdoc-theme-btn');
+    if (!btn) throw new Error('no #tdoc-theme-btn');
+    const inBar = await page.$('.tdoc-bar #tdoc-theme-btn');
+    if (!inBar) throw new Error('theme button is not inside .tdoc-bar');
+  });
+
+  await t('Default theme is light and storage is empty until switch', async () => {
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme && theme !== 'light') throw new Error(`expected light, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== null) throw new Error(`storage should be empty before switch, got "${stored}"`);
+  });
+
+  await t('Clicking the switch turns dark and remembers', async () => {
+    await page.click('#tdoc-theme-btn');
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'dark') throw new Error(`expected dark after click, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'dark') throw new Error(`storage should be dark, got "${stored}"`);
+    const pressed = await page.getAttribute('#tdoc-theme-btn', 'aria-pressed');
+    if (pressed !== 'true') throw new Error(`aria-pressed should be true, got "${pressed}"`);
+  });
+
+  await t('Reload restores the remembered dark theme', async () => {
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('#tdoc-theme-btn', { timeout: 5000 });
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'dark') throw new Error(`expected dark after reload, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'dark') throw new Error(`storage lost on reload: "${stored}"`);
+  });
+
+  await t('Clicking again returns to light and remembers', async () => {
+    await page.click('#tdoc-theme-btn');
+    const theme = await page.getAttribute('html', 'data-tdoc-theme');
+    if (theme !== 'light') throw new Error(`expected light after second click, got "${theme}"`);
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    if (stored !== 'light') throw new Error(`storage should be light, got "${stored}"`);
+  });
+
+  // data-tdoc-default-theme + [data-tdoc-copy] primitive. Fresh context so
+  // there is no stored tdoc-theme from the tests above (default only applies
+  // when the reader has made no choice).
+  const copyDocUrl = URL.slice(0, URL.indexOf('/d/')) + '/d/copy-doc/v/1';
+
+  await t('A doc declaring data-tdoc-default-theme="dark" opens dark', async () => {
+    const c = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1200, height: 800 } });
+    const p = await c.newPage();
+    await p.goto(copyDocUrl, { waitUntil: 'networkidle' });
+    const theme = await p.getAttribute('html', 'data-tdoc-theme');
+    const stored = await p.evaluate(() => localStorage.getItem('tdoc-theme'));
+    await c.close();
+    if (theme !== 'dark') throw new Error(`expected dark from the default hint, got "${theme}"`);
+    if (stored !== null) throw new Error(`the hint must not persist a preference, got "${stored}"`);
+  });
+
+  await t('A [data-tdoc-copy] button copies the target text and flashes', async () => {
+    const c = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1200, height: 800 } });
+    const p = await c.newPage();
+    await p.goto(copyDocUrl, { waitUntil: 'networkidle' });
+    await p.click('[data-tdoc-copy]');
+    await p.waitForFunction(() => document.querySelector('[data-tdoc-copy]').classList.contains('tdoc-copied'), { timeout: 3000 });
+    const flashed = await p.textContent('[data-tdoc-copy]');
+    const clip = await p.evaluate(() => navigator.clipboard.readText());
+    await c.close();
+    if (!/✓/.test(flashed)) throw new Error(`button should flash a check mark, got "${flashed}"`);
+    if (!clip.includes('技术设计文档')) throw new Error(`clipboard should hold the prompt, got "${clip}"`);
+  });
+
+  await t('Table in overflow-x:auto wrapper is not clipped on the left', async () => {
+    const m = await page.evaluate(() => {
+      const table = document.querySelector('.wrap table');
+      const wrap = table && table.parentElement;
+      const th = table && table.querySelector('th');
+      if (!table || !wrap || !th) return { missing: true };
+      const t = table.getBoundingClientRect();
+      const w = wrap.getBoundingClientRect();
+      const h = th.getBoundingClientRect();
+      return {
+        tableLeft: t.left,
+        wrapLeft: w.left,
+        thLeft: h.left,
+        thText: th.textContent.trim(),
+        tableMarginLeft: getComputedStyle(table).marginLeft,
+        wrapOverflowX: getComputedStyle(wrap).overflowX,
+      };
+    });
+    if (m.missing) throw new Error('fixture table/wrapper missing');
+    if (m.wrapOverflowX !== 'auto' && m.wrapOverflowX !== 'scroll') {
+      throw new Error(`expected overflow-x auto wrapper, got ${m.wrapOverflowX}`);
+    }
+    if (m.tableLeft < m.wrapLeft - 1) {
+      throw new Error(`table left ${m.tableLeft.toFixed(1)} is clipped inside wrapper ${m.wrapLeft.toFixed(1)}`);
+    }
+    if (m.thLeft < m.wrapLeft - 1) {
+      throw new Error(`first th left ${m.thLeft.toFixed(1)} is clipped inside wrapper ${m.wrapLeft.toFixed(1)}`);
+    }
+    if (parseFloat(m.tableMarginLeft) < 0) {
+      throw new Error(`table still has negative margin-left ${m.tableMarginLeft}`);
+    }
+    if (m.thText !== 'Key') throw new Error(`first th text was "${m.thText}"`);
+  });
+
+  await t('Doc SVG keeps viewBox aspect ratio and is not overflow-clipped', async () => {
+    const m = await page.evaluate(() => {
+      const svg = document.querySelector('.wrap svg[viewBox]');
+      if (!svg) return { missing: true };
+      const r = svg.getBoundingClientRect();
+      const parts = svg.getAttribute('viewBox').trim().split(/[\s,]+/).map(Number);
+      const vw = parts[2], vh = parts[3];
+      return {
+        w: r.width, h: r.height, vw, vh,
+        overflow: getComputedStyle(svg).overflow,
+        aspect: svg.style.aspectRatio,
+      };
+    });
+    if (m.missing) throw new Error('fixture svg missing');
+    if (m.overflow !== 'visible') throw new Error(`svg overflow is ${m.overflow}, expected visible`);
+    if (!(m.w > 8 && m.h > 8)) throw new Error(`svg collapsed to ${m.w}x${m.h}`);
+    const used = m.w / m.h;
+    const box = m.vw / m.vh;
+    if (Math.abs(used - box) / box > 0.05) {
+      throw new Error(`svg ratio ${used.toFixed(3)} != viewBox ${box.toFixed(3)}`);
+    }
   });
 
   await t('Copy button exists with icon + label', async () => {
@@ -228,6 +381,61 @@ async function tPub(name, fn) {
     await page.click('.tdoc-popup .head .x').catch(() => {});
   });
 
+  await t('Text-selection popup follows the caret line, not the union box', async () => {
+    // Regression: Range.getBoundingClientRect() is the union of every line.
+    // Selecting across blocks (or wrapping) then releasing on the last line
+    // used to park the popup at the union's bottom-left, away from the caret.
+    const pos = await page.evaluate(() => {
+      const h = document.querySelector('.wrap h2');
+      const p = document.querySelector('.wrap h2 + p, .wrap h2 ~ p');
+      if (!h || !p) return null;
+      const start = [...h.childNodes].find(n => n.nodeType === 3);
+      const endNode = [...p.childNodes].find(n => n.nodeType === 3 && n.textContent.trim().length > 8);
+      if (!start || !endNode) return null;
+      const r = document.createRange();
+      r.setStart(start, 0);
+      r.setEnd(endNode, Math.min(12, endNode.textContent.length));
+      const union = r.getBoundingClientRect();
+      const rects = [...r.getClientRects()].filter(x => x.width || x.height);
+      if (rects.length < 2) return null;
+      const last = rects[rects.length - 1];
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return {
+        unionTop: union.top,
+        lastTop: last.top,
+        lastBottom: last.bottom,
+        lineLeft: last.left,
+        x: last.right - 2,
+        y: last.top + last.height / 2,
+      };
+    });
+    if (!pos) { console.log('  (could not build a multi-line selection, skipping)'); return; }
+    await page.evaluate(({ x, y }) => {
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        clientX: x, clientY: y, bubbles: true, cancelable: true, view: window, button: 0,
+      }));
+    }, { x: pos.x, y: pos.y });
+    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
+    const popup = await page.$eval('.tdoc-popup', el => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left };
+    });
+    // Opened below the caret line (last.bottom + 8). Must not sit on the first
+    // line of a multi-block selection.
+    if (popup.top < pos.lastTop - 4) {
+      throw new Error(`popup top ${popup.top.toFixed(1)} is above the caret line (${pos.lastTop.toFixed(1)}–${pos.lastBottom.toFixed(1)}); union top was ${pos.unionTop.toFixed(1)}`);
+    }
+    // And at the mouse-up X, not the line's left edge.
+    const distEnd = Math.abs(popup.left - pos.x);
+    const distLeft = Math.abs(popup.left - pos.lineLeft);
+    if (distEnd > distLeft && distEnd > 48) {
+      throw new Error(`popup left ${popup.left.toFixed(1)} is nearer the line origin (${pos.lineLeft.toFixed(1)}) than the caret (${pos.x.toFixed(1)})`);
+    }
+    await page.click('.tdoc-popup .head .x').catch(() => {});
+  });
+
   await t('Drag STARTED INSIDE canvas does NOT open popup (passes through)', async () => {
     const canvas = await page.$('canvas');
     if (!canvas) { console.log('  (no canvas, skipping)'); return; }
@@ -252,7 +460,7 @@ async function tPub(name, fn) {
   });
 
   await t('Click on existing comment card adds .active to card + anchor', async () => {
-    const card = await page.$('.tdoc-margin-comment');
+    const card = await openFirstCommentCard();
     if (!card) { console.log('  (no comments to test, skipping)'); return; }
     // Click the author row (text), not the body — avoids hitting reaction chips
     // and other interactive children that stopPropagation.
@@ -292,7 +500,7 @@ async function tPub(name, fn) {
 
   await t('Clicking outside any card / anchor deselects the active card', async () => {
     // Activate a card via its author row (avoid reaction chip stopPropagation)
-    const card = await page.$('.tdoc-margin-comment');
+    const card = await openFirstCommentCard();
     if (!card) { console.log('  (no cards, skipping)'); return; }
     const author = await card.$('.author');
     if (author) await author.click();
@@ -313,14 +521,14 @@ async function tPub(name, fn) {
   });
 
   await t('Comment card renders Reply button', async () => {
-    const card = await page.$('.tdoc-margin-comment, #tdoc-comment-layer .tdoc-margin-comment');
+    const card = await openFirstCommentCard();
     if (!card) { console.log('  (no comments on this doc, skipping)'); return; }
     const reply = await page.$('.tdoc-reply-toggle');
     if (!reply) throw new Error('no Reply button on comment card');
   });
 
   await t('Comment card renders + React button', async () => {
-    const card = await page.$('.tdoc-margin-comment, #tdoc-comment-layer .tdoc-margin-comment');
+    const card = await openFirstCommentCard();
     if (!card) { console.log('  (no comments on this doc, skipping)'); return; }
     const addReact = await page.$('.tdoc-react-add');
     if (!addReact) throw new Error('no + React button on comment card');
@@ -341,7 +549,164 @@ async function tPub(name, fn) {
     if (!/\d+ repl(y|ies)/.test(text)) throw new Error(`toggle text was "${text}"`);
   });
 
+  await t('?comment= deep-link opens the target comment card', async () => {
+    const deep = await ctx.newPage();
+    try {
+      const u = URL.replace(/\/?$/, '') + '?comment=c_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const card = document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]');
+        const narrow = document.body.classList.contains('tdoc-narrow');
+        const drawerOpen = !!document.getElementById('tdoc-comment-layer')?.classList.contains('open');
+        return {
+          hasCard: !!card,
+          active: !!(card && card.classList.contains('active')),
+          floating: !!(card && card.classList.contains('tdoc-floating-open')),
+          visible: !!(card && card.getClientRects().length > 0),
+          narrow, drawerOpen,
+        };
+      });
+      if (!st.hasCard) throw new Error('deep-linked comment card missing');
+      if (st.narrow) {
+        if (!st.drawerOpen) throw new Error('narrow deep-link must open the comment drawer');
+      } else if (!st.floating && !st.active) {
+        throw new Error('wide deep-link must pin or activate the card');
+      } else if (!st.visible) {
+        throw new Error('deep-linked card is not visible');
+      }
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('?comment= on a reply expands the thread', async () => {
+    const deep = await ctx.newPage();
+    try {
+      const u = URL.replace(/\/?$/, '') + '?comment=r_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const reply = document.querySelector('[data-comment-id="r_fixture_1"]');
+        const card = document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]');
+        return {
+          repliesOpen: !!(replies && replies.classList.contains('open')),
+          hasReply: !!reply,
+          cardOpen: !!(card && (card.classList.contains('tdoc-floating-open') || card.classList.contains('active')
+            || document.body.classList.contains('tdoc-narrow'))),
+        };
+      });
+      if (!st.hasReply) throw new Error('reply node missing');
+      if (!st.repliesOpen) throw new Error('reply deep-link must expand the thread');
+      if (!st.cardOpen) throw new Error('reply deep-link must open the root card');
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('?comment= on a phone opens the comment drawer', async () => {
+    const deep = await ctx.newPage();
+    try {
+      await deep.setViewportSize({ width: 375, height: 812 });
+      const u = URL.replace(/\/?$/, '') + '?comment=c_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => ({
+        narrow: document.body.classList.contains('tdoc-narrow'),
+        drawerOpen: !!document.getElementById('tdoc-comment-layer')?.classList.contains('open'),
+        hasCard: !!document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]'),
+      }));
+      if (!st.narrow) throw new Error(`expected tdoc-narrow at 375px, got narrow=${st.narrow}`);
+      if (!st.hasCard) throw new Error('phone deep-link missing comment card');
+      if (!st.drawerOpen) throw new Error('phone deep-link must open the comment drawer');
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('without ?comment= the fixture reply thread stays collapsed', async () => {
+    const deep = await ctx.newPage();
+    try {
+      await deep.goto(URL, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const reply = document.querySelector('[data-comment-id="r_fixture_1"]');
+        return {
+          hasReplies: !!replies,
+          hasReply: !!reply,
+          repliesOpen: !!(replies && replies.classList.contains('open')),
+          repliesDisplay: replies ? getComputedStyle(replies).display : null,
+        };
+      });
+      if (!st.hasReplies || !st.hasReply) throw new Error('fixture reply thread missing');
+      if (st.repliesOpen) throw new Error('replies must start collapsed without ?comment=');
+      if (st.repliesDisplay !== 'none') throw new Error(`expected display:none, got ${st.repliesDisplay}`);
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('adding .open on a live replies list reveals the hidden reply', async () => {
+    // Same-doc inbox clicks cannot wait for a rebuild. They have to flip
+    // .tdoc-replies.open on the card that is already in the DOM.
+    // Check the list's own computed display, not the reply's client rects —
+    // in pins mode the parent card is hidden until it is pinned.
+    const deep = await ctx.newPage();
+    try {
+      await deep.goto(URL, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const toggle = document.querySelector('.tdoc-replies-toggle');
+        if (!replies) return { missing: true };
+        const before = getComputedStyle(replies).display;
+        replies.classList.add('open');
+        toggle?.classList.add('open');
+        return { before, after: getComputedStyle(replies).display };
+      });
+      if (st.missing) throw new Error('fixture reply thread missing');
+      if (st.before !== 'none') throw new Error(`expected display:none before .open, got ${st.before}`);
+      if (st.after === 'none') throw new Error('replies stayed display:none after .open');
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('Clicking an inbox row does not unpin the open comment card', async () => {
+    // Regression #180: the inbox click used to bubble to the document
+    // "click outside card" handler and immediately close the card it opened.
+    const card = await openFirstCommentCard();
+    if (!card) { console.log('  (no comments, skipping)'); return; }
+    const pinned = await page.evaluate(() => {
+      const c = document.querySelector('.tdoc-margin-comment.tdoc-floating-open, .tdoc-margin-comment.active');
+      if (!c) return false;
+      const bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg';
+      bg.id = 'tdoc-aux-modal';
+      bg.innerHTML = '<div class="tdoc-modal"><div class="tdoc-cluster-row" id="tdoc-fake-inbox-row" role="button">fake notification</div></div>';
+      document.body.appendChild(bg);
+      return true;
+    });
+    if (!pinned) throw new Error('could not pin a comment card before fake inbox click');
+    await page.click('#tdoc-fake-inbox-row');
+    await page.waitForTimeout(150);
+    const still = await page.evaluate(() => {
+      const c = document.querySelector('.tdoc-margin-comment');
+      return !!(c && (c.classList.contains('tdoc-floating-open') || c.classList.contains('active')));
+    });
+    await page.evaluate(() => document.getElementById('tdoc-aux-modal')?.remove());
+    if (!still) throw new Error('inbox-row click unpinned the open comment card');
+  });
+
   await t('Clicking replies toggle expands replies', async () => {
+    await openFirstCommentCard();
     const toggle = await page.$('.tdoc-replies-toggle');
     if (!toggle) { console.log('  (no replies in fixture, skipping)'); return; }
     await toggle.click();
@@ -356,15 +721,17 @@ async function tPub(name, fn) {
   await tPub('Clicking + React on anon view triggers sign-in (no picker)', async () => {
     // Anon: should NOT open the emoji picker — should redirect to sign-in modal.
     await page.click('.tdoc-react-add');
-    // Modal appears after the device/start network round-trip (~1-2s).
+    // Modal appears after the device/start network round-trip (~1-2s). It is
+    // the shared server/signin.js dialog (.tds-bg), not the old inline overlay
+    // modal those selectors predate.
     try {
-      await page.waitForSelector('#tdoc-device-modal', { timeout: 5000 });
+      await page.waitForSelector('.tds-bg', { timeout: 5000 });
     } catch {
       throw new Error('expected device-flow modal to appear');
     }
     const picker = await page.$('.tdoc-emoji-picker');
     if (picker) throw new Error('emoji picker opened without sign-in');
-    await page.click('#tdoc-modal-cancel');
+    await page.click('#tds-cancel');
     await page.waitForTimeout(150);
   });
 
@@ -378,7 +745,7 @@ async function tPub(name, fn) {
 
   await tPub('Click Share opens modal with URL + Copy button', async () => {
     await page.click('#tdoc-share-btn');
-    await page.waitForSelector('#tdoc-aux-modal', { timeout: 2000 });
+    await page.waitForSelector('#tdoc-share-url', { timeout: 2000 });
     const url = await page.$eval('#tdoc-share-url', el => el.textContent.trim());
     if (!url.startsWith('http')) throw new Error(`url didn't look right: "${url}"`);
     const copyBtn = await page.$('#tdoc-share-copy');
@@ -386,20 +753,34 @@ async function tPub(name, fn) {
     // "Open in new tab" was removed in v0.1.16 — explicitly assert it's gone.
     const openBtn = await page.$('#tdoc-share-open');
     if (openBtn) throw new Error('Share modal still has stale Open-in-new-tab button');
-    const unpub = await page.$('#tdoc-share-unpub');
-    if (!unpub) throw new Error('Share modal missing unpublish hint');
-    const unpubText = await unpub.textContent();
-    if (!unpubText.includes('/tdoc unpublish')) throw new Error(`unpublish text was "${unpubText}"`);
+    // CLI unpublish hint lived in the old copy-link-only modal; owners now
+    // unpublish from this same Share panel, readers never saw a working path.
+    const unpubCli = await page.$('#tdoc-share-unpub');
+    if (unpubCli) throw new Error('Share modal still has stale CLI unpublish hint');
   });
 
   await tPub('Share modal closes', async () => {
     await page.click('#tdoc-share-close');
     await page.waitForTimeout(150);
-    const m = await page.$('#tdoc-aux-modal');
+    const m = await page.$('#tdoc-share-url');
     if (m) throw new Error('Share modal did not close');
   });
 
-  // ----- Feature: Fork mode renderable URL -----
+  await tPub('Duplicate and Download replace Fork on published chrome', async () => {
+    const dup = await page.$('#tdoc-duplicate-btn');
+    const dl = await page.$('#tdoc-download-btn');
+    if (!dup) throw new Error('no #tdoc-duplicate-btn on published doc');
+    if (!dl) throw new Error('no #tdoc-download-btn on published doc');
+    if (!(await page.$('#tdoc-download-menu'))) throw new Error('no #tdoc-download-menu on published doc');
+    if (await page.$('#tdoc-pdf-btn')) throw new Error('PDF must be in the Download menu, not its own button');
+    if (await page.$('#tdoc-fork-btn')) throw new Error('legacy #tdoc-fork-btn still present');
+    const dupText = await dup.textContent();
+    const dlText = await dl.textContent();
+    if (!dupText.includes('Duplicate')) throw new Error(`Duplicate label was "${dupText}"`);
+    if (!dlText.includes('Download')) throw new Error(`Download label was "${dlText}"`);
+  });
+
+  // ----- Feature: offline export view (legacy /fork URL) -----
   await tPub('Fork URL loads in fork mode (read-only, comments mirrored)', async () => {
     const forkPage = await ctx.newPage();
     const u = URL.replace(/\/?$/, '') + '/fork';

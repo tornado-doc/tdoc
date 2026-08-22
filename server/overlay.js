@@ -5,7 +5,9 @@
 //
 // External contract preserved verbatim:
 //   - Endpoints: /api/comments, /api/reactions, /api/auth/device/start,
-//     /api/auth/device/poll, /api/auth/logout, /d/<slug>/v/<n>/export
+//     /api/auth/device/poll, /api/auth/logout, /api/notifications,
+//     /api/notifications/unread, /api/notifications/read,
+//     /d/<slug>/v/<n>/export, POST /api/doc/duplicate
 //   - Globals: window.__tdocCopyDocMd(includeComments), window.__tdocCopyCommentMd(id, btn)
 //   - Body classes: tdoc-has-comments, tdoc-narrow
 //   - Keyboard: ⌘/Ctrl-Enter submits, Esc cancels.
@@ -29,10 +31,32 @@
   // embedded #tdoc-fork-comments JSON. No /api calls, no auth, no publish.
   // The original published slug is in cfg.originalSlug so we can label it.
   let identity = cfg.identity || null;
-  let isOwner = !!cfg.isOwner; // true only for the configured TDOC_OWNER
-  if (!slug) return;
+  let isOwner = !!cfg.isOwner; // true when this session owns THIS doc
+  // Worker sends this explicitly. Do not infer from isOwner — on hosted
+  // tdoc.dev a signed-in reader may not own the current doc and still has /me.
+  let canSeeMyDocs = !!cfg.canSeeMyDocs;
+  // /me catalog reuses this overlay for the bar (mark, theme, identity) and
+  // hides Share / Duplicate / Copy. No slug — it is not a document.
+  const isCatalog = !!cfg.isCatalog;
+  if (!slug && !isCatalog) return;
+  if (isCatalog) document.body.classList.add('tdoc-catalog');
 
   const HIGHLIGHT_API = typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function';
+
+  // Broken-avatar fallback, delegated (CSP-safe). Doc responses now carry a
+  // nonce-based script-src CSP (see worker.js cspHeader()) with no
+  // 'unsafe-inline', so an inline `onerror="..."` attribute — which this used
+  // to be — can never run. `error` events on <img> don't bubble, so this must
+  // be a CAPTURE-phase listener on document, not a delegated bubble listener.
+  // avatarHTML() below marks fallback-eligible images with
+  // data-tdoc-fallback-anon instead of an inline handler.
+  document.addEventListener('error', (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== 'IMG' || !img.dataset || !img.dataset.tdocFallbackAnon) return;
+    const span = document.createElement('span');
+    span.className = img.dataset.tdocFallbackAnon;
+    img.replaceWith(span);
+  }, true);
 
   // Phones need this or they render at a virtual ~980px viewport.
   if (!document.querySelector('meta[name="viewport"]')) {
@@ -40,6 +64,101 @@
     m.name = 'viewport';
     m.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
     document.head.appendChild(m);
+  }
+
+  // Theme: light until the user flips the bar switch. After a switch, persist
+  // on this origin via localStorage and restore on later visits. No OS follow.
+  const THEME_KEY = 'tdoc-theme';
+  function readStoredTheme() {
+    try {
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored === 'dark' || stored === 'light') return stored;
+    } catch (e) { /* private mode */ }
+    // No saved choice yet — honor a doc that declares its default look
+    // (data-tdoc-default-theme="dark", e.g. a dark-first engineering style),
+    // otherwise light. The bar button still overrides and persists.
+    const declared = document.documentElement.getAttribute('data-tdoc-default-theme');
+    return declared === 'dark' ? 'dark' : 'light';
+  }
+  function currentTheme() {
+    return document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light';
+  }
+  function persistTheme(theme) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* private mode */ }
+  }
+  function paintTheme(theme) {
+    document.documentElement.setAttribute('data-tdoc-theme', theme);
+    document.documentElement.style.colorScheme = theme;
+    const btn = document.getElementById('tdoc-theme-btn');
+    if (!btn) return;
+    const dark = theme === 'dark';
+    btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.title = dark ? 'Light mode' : 'Dark mode';
+  }
+  paintTheme(readStoredTheme());
+
+  // ========== Copy-to-clipboard primitive (author opt-in) ==========
+  // A doc runs under a nonce CSP, so the doc's OWN <script> can never wire a
+  // copy button. The overlay (nonced, trusted) provides one instead: any
+  // element carrying data-tdoc-copy becomes a working "click to copy" trigger.
+  //   <button data-tdoc-copy="literal text …">Copy</button>   copies the literal
+  //   <button data-tdoc-copy="#promptId">Copy the prompt</button>
+  //                                     copies #promptId's text (trimmed)
+  // On success the trigger briefly shows data-tdoc-copy-done (default "Copied ✓")
+  // and gets a .tdoc-copied class the doc can style. Delegated + capture-phase
+  // so it fires before (and suppresses) the doc's artifact/comment handlers,
+  // and is a no-op for every click that is not on a copy trigger.
+  function fallbackCopy(text) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      return true;
+    } catch (e) { return false; }
+  }
+  function flashCopyTrigger(trigger) {
+    const done = trigger.getAttribute('data-tdoc-copy-done') || 'Copied ✓';
+    if (trigger.getAttribute('data-tdoc-copy-label') == null) {
+      trigger.setAttribute('data-tdoc-copy-label', trigger.textContent);
+    }
+    trigger.textContent = done;
+    trigger.classList.add('tdoc-copied');
+    clearTimeout(trigger._tdocCopyTimer);
+    trigger._tdocCopyTimer = setTimeout(() => {
+      const orig = trigger.getAttribute('data-tdoc-copy-label');
+      if (orig != null) trigger.textContent = orig;
+      trigger.classList.remove('tdoc-copied');
+    }, 1600);
+  }
+  function wireCopyTriggers() {
+    document.addEventListener('click', (e) => {
+      const trigger = e.target.closest && e.target.closest('[data-tdoc-copy]');
+      if (!trigger) return;                       // not a copy click — leave alone
+      e.preventDefault();
+      e.stopPropagation();
+      const raw = trigger.getAttribute('data-tdoc-copy') || '';
+      let text = raw;
+      if (raw.charAt(0) === '#') {
+        const src = document.getElementById(raw.slice(1));
+        if (src) text = (src.innerText || src.textContent || '').replace(/\u00a0/g, ' ').trim();
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          () => flashCopyTrigger(trigger),
+          () => { if (fallbackCopy(text)) flashCopyTrigger(trigger); }
+        );
+      } else if (fallbackCopy(text)) {
+        flashCopyTrigger(trigger);
+      }
+    }, true);
   }
 
   // ========== UI selector registry ==========
@@ -54,7 +173,7 @@
   // NOTE: #tdoc-pin-layer and .tdoc-cluster-pop are tdoc's OWN comment-pins UI.
   // They MUST be in UI_CONTAINERS so artifact detection / the hover comment-pill
   // never treats a pin avatar <img> (or a cluster row) as a commentable artifact.
-  const UI_CONTAINERS = '.tdoc-bar, .tdoc-oldver-strip, .tdoc-popup, .tdoc-margin-comment, .tdoc-modal-bg, #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop, .tdoc-footer';
+  const UI_CONTAINERS = '.tdoc-bar, .tdoc-oldver-strip, .tdoc-popup, .tdoc-margin-comment, .tdoc-modal-bg, .tdo-bg, .tds-bg, #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop, .tdoc-footer';
   const UI_ALL = UI_CONTAINERS + ', .tdoc-anchor-mark, .tdoc-element-outline, .tdoc-hover-outline, .tdoc-comment-pill, .tdoc-emoji-picker, .tdoc-secondary-menu';
 
   // ========== Geometry helpers ==========
@@ -68,6 +187,55 @@
     box.style.height = (r.height + inset * 2) + 'px';
   }
 
+  // Range.getBoundingClientRect() is the UNION of every line box. A wrapped
+  // selection is therefore a tall rectangle whose bottom-left is nowhere near
+  // the caret; WebKit also sometimes returns a 0×0 rect when the range
+  // crosses a block. The new-comment popup and pin Y used that union, so the
+  // card "sometimes" sat off the highlight. Prefer the live line box.
+  function isVisibleClientRect(r) {
+    return !!r && (r.width > 0 || r.height > 0);
+  }
+  function nearestClientRect(rects, x, y) {
+    let best = null, bestD = Infinity;
+    const list = rects && rects.length != null ? rects : [];
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (!isVisibleClientRect(r)) continue;
+      const dx = x - Math.max(r.left, Math.min(x, r.right));
+      const dy = y - Math.max(r.top, Math.min(y, r.bottom));
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best;
+  }
+  function firstVisibleClientRect(target) {
+    if (!target) return null;
+    if (target.getClientRects) {
+      const rects = target.getClientRects();
+      for (let i = 0; i < rects.length; i++) {
+        if (isVisibleClientRect(rects[i])) return rects[i];
+      }
+    }
+    if (!target.getBoundingClientRect) return null;
+    const r = target.getBoundingClientRect();
+    return isVisibleClientRect(r) ? r : null;
+  }
+  function clientRectNearPoint(target, x, y) {
+    if (!target) return null;
+    if (target.getClientRects && Number.isFinite(x) && Number.isFinite(y)) {
+      const near = nearestClientRect(target.getClientRects(), x, y);
+      if (near) return near;
+    }
+    return firstVisibleClientRect(target);
+  }
+  // A zero-width box on `line` at x — the caret / mouse-up, not the line origin.
+  function endRectOnLine(line, x) {
+    if (!line) return null;
+    const left = Number.isFinite(x) ? x : line.right;
+    const height = line.height || (line.bottom - line.top) || 0;
+    return { left, right: left, top: line.top, bottom: line.bottom, width: 0, height };
+  }
+
   // ========== Styles ==========
   // Each logical group is one comment block; rules within a group are tightly
   // packed. The narrow visual mode lives at the bottom and overrides base.
@@ -78,15 +246,14 @@
      artifacts like transcript panes). UI chrome opts out explicitly via
      .tdoc-* selectors below. Media artifacts (img/svg/canvas/video) are
      non-selectable by their nature so they don't need an exception. */
-  body { padding-top: 44px !important; padding-bottom: 24px; -webkit-user-select: text; user-select: text; }
+  body { margin: 0; padding-bottom: 24px; -webkit-user-select: text; user-select: text; }
   body .tdoc-bar, body .tdoc-bar *, body #tdoc-comment-layer, body #tdoc-comment-layer *, body #tdoc-pin-layer, body #tdoc-pin-layer *, body .tdoc-cluster-pop, body .tdoc-cluster-pop *, body .tdoc-hover-outline, body .tdoc-comment-pill, body .tdoc-emoji-picker, body .tdoc-secondary-menu, body .tdoc-anchor-mark.tdoc-anchor-mark-element, body .tdoc-drag-marquee, body .tdoc-modal, body .tdoc-modal * { -webkit-user-select: none !important; user-select: none !important; }
   body .tdoc-modal .code, body .tdoc-modal textarea, body .tdoc-modal input { -webkit-user-select: text !important; user-select: text !important; }
-  /* Reserve the 320px comment column on the right. The article centers
-     itself inside the remaining (viewport - 320px) space via margin auto
-     (applied below in :where()). Adding a left padding keeps it from
-     hugging the screen edge on wide windows. */
-  body.tdoc-has-comments:not(.tdoc-narrow) { padding-right: 360px !important; padding-left: 80px !important; }
-  body.tdoc-narrow { padding-right: 0 !important; }
+  /* Comment pins/cards are provider chrome, not document layout. Keep the
+     document centered in the viewport; if the comment UI cannot fit beside it,
+     narrow mode switches comments into the drawer. */
+  body.tdoc-pins:not(.tdoc-narrow) { padding-right: 0 !important; padding-left: 0 !important; }
+  body.tdoc-narrow { padding-right: 0 !important; padding-left: 0 !important; }
   /* Center the article container in the reading column. :where() so any
      doc-defined margin wins. Applies only on wide layouts; narrow mode
      uses the full body width via the drawer. */
@@ -94,47 +261,78 @@
     margin-left: auto !important;
     margin-right: auto !important;
   }
-  /* The body right-padding reserves space for the comment column. The
-     article centers itself naturally inside the remaining (viewport minus
-     320px) space via its own margin auto. As the window shrinks, the symmetric
-     margins shrink with it; once they hit the article's min width, narrow-mode
-     takes over and the drawer kicks in. */
+  /* The article stays centered in the viewport. As the window shrinks, narrow
+     mode takes over and the drawer kicks in before comment chrome overlaps it. */
   /* ========== Default doc template (single typography template) ==========
      One canonical look for every tdoc doc: same font stack, sizes, spacing,
      headings, lists, code, tables, quotes. Wrapped in :where() so a doc that
      truly needs a different aesthetic can override per element. Future
      templates would live alongside this block, switched by a body class. */
-  /* Default template, modeled after Claude Code's markdown rendering.
-     Readable, system-fonts, rounded-cell tables, circle task checkboxes. */
+  /* ===== Theme tokens (JUL-21 v2). Every themable color in the doc template
+     AND the overlay UI goes through these variables — no stray literals, so a
+     single place to change a colour instead of hunting literals. These are the
+     Classic values — the look is unchanged. Alternate palettes and any picker
+     UI are deliberately out of scope for this CSS block. ===== */
+  /* TDOC_READER_CSS_START */
+  :root {
+    --td-accent: #1652f0;
+    --td-accent-hover: #1245d0;
+    --td-accent-ring: rgba(22,82,240,0.35);
+    --td-accent-ring-soft: rgba(22,82,240,0.18);
+    --td-accent-wash: rgba(22,82,240,0.06);
+    --td-accent-tint: #e8eeff;
+    --td-danger: #b42318;
+    --td-danger-hover: #931c14;
+    --td-danger-tint: #fdeceb;
+    --td-ground: #fff;
+    --td-ink: #1a1a1a;
+    --td-heading: #1a1a1a;
+    --td-muted: #6b6a66;
+    --td-line: #e8e7e3;
+    --td-surface: #f0f0ee;
+    --td-surface-2: #f7f7f5;
+    --td-pre-ink: #1a1a1a;
+    --td-th-bg: #f0f0ee;
+    --td-th-ink: #1a1a1a;
+    --td-check: #1a1a1a;
+    --td-font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --td-h2-rule: transparent;
+    --td-selection: #cfe0ff;
+    --td-quote: #d9d8d3;
+  }
+  /* Default template ("Classic" = original tdoc look), all colors via tokens. */
   :where(body) {
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     font-size: 17px;
     line-height: 1.6;
-    color: #1a1a1a;
-    background: #fff;
+    color: var(--td-ink);
+    background: var(--td-ground);
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
   }
-  :where(body h1) { font-size: 38px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 20px; color: #1a1a1a; }
-  :where(body h2) { font-size: 27px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 44px 0 14px; color: #1a1a1a; }
-  :where(body h3) { font-size: 21px; line-height: 1.35; font-weight: 700; margin: 32px 0 10px; color: #1a1a1a; }
-  :where(body h4) { font-size: 17px; font-weight: 700; margin: 22px 0 6px; color: #1a1a1a; }
-  :where(body h5, body h6) { font-size: 14px; font-weight: 600; margin: 16px 0 4px; color: #1a1a1a; text-transform: uppercase; letter-spacing: 0.06em; }
+  :where(body h1) { font-family: var(--td-font-display); font-size: 38px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 20px; color: var(--td-heading); }
+  :where(body h2) { font-family: var(--td-font-display); font-size: 27px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 44px 0 14px; color: var(--td-heading); padding-bottom: 6px; border-bottom: 1px solid var(--td-h2-rule); }
+  :where(body h3) { font-family: var(--td-font-display); font-size: 21px; line-height: 1.35; font-weight: 700; margin: 32px 0 10px; color: var(--td-heading); }
+  :where(body h4) { font-size: 17px; font-weight: 700; margin: 22px 0 6px; color: var(--td-heading); }
+  :where(body h5, body h6) { font-size: 14px; font-weight: 600; margin: 16px 0 4px; color: var(--td-heading); text-transform: uppercase; letter-spacing: 0.06em; }
   :where(body p) { margin: 0 0 16px; }
-  :where(body a) { color: #1652f0; text-decoration: underline; text-underline-offset: 2px; }
+  :where(body a) { color: var(--td-accent); text-decoration: underline; text-underline-offset: 2px; }
   :where(body a:hover) { text-decoration-thickness: 2px; }
   :where(body ul, body ol) { margin: 0 0 18px; padding-left: 26px; }
   :where(body li) { margin: 8px 0; }
-  :where(body blockquote) { margin: 20px 0; padding: 2px 0 2px 20px; border-left: 3px solid #d9d8d3; color: #6b6a66; }
-  :where(body code) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; background: #f0f0ee; padding: 2px 6px; border-radius: 6px; }
-  :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: #f7f7f5; border: 1px solid #e8e7e3; border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
-  :where(body pre code) { background: transparent; padding: 0; border-radius: 0; }
-  :where(body hr) { border: 0; border-top: 1px solid #e8e7e3; margin: 36px 0; }
-  /* Tables: Claude-style rounded cells with white gutters — no rules/borders. */
-  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px -14px; font-size: 16px; }
-  :where(body th, body td) { padding: 10px 14px; background: #f0f0ee; border-radius: 8px; border: 0; text-align: left; }
-  :where(body th) { font-weight: 600; color: #1a1a1a; }
-  :where(body figcaption) { font-size: 13px; color: #6b6a66; margin-top: 6px; text-align: center; }
+  :where(body blockquote) { margin: 20px 0; padding: 2px 0 2px 20px; border-left: 3px solid var(--td-quote); color: var(--td-muted); }
+  :where(body code) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; background: var(--td-surface); padding: 2px 6px; border-radius: 6px; }
+  :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: var(--td-surface-2); color: var(--td-pre-ink); border: 1px solid var(--td-line); border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
+  :where(body pre code) { background: transparent; color: inherit; padding: 0; border-radius: 0; }
+  :where(body hr) { border: 0; border-top: 1px solid var(--td-line); margin: 36px 0; }
+  /* Tables: rounded cells with gutters — header tint comes from the theme.
+     No negative horizontal margin: that clips the first column inside any
+     overflow-x:auto wrapper (author skill tells agents to wrap tables). */
+  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
+  :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
+  :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
+  :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
+  :where(body) ::selection { background: var(--td-selection); }
   /* Task lists: circle checkboxes, Claude Code style. Works for raw
      <input type=checkbox> in lists and markdown-converted .task-list-item. */
   :where(body li:has(> input[type="checkbox"]), body li.task-list-item) { list-style: none; margin-left: -26px; }
@@ -143,18 +341,32 @@
     width: 17px; height: 17px;
     border: 1.5px solid #c9c8c3; border-radius: 50%;
     vertical-align: -3px; margin: 0 8px 0 0;
-    background: #fff; cursor: default;
+    background: var(--td-ground); cursor: default;
   }
   :where(body input[type="checkbox"]:checked) {
-    background: #1a1a1a center / 11px no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 5" stroke="white" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
-    border-color: #1a1a1a;
+    background: var(--td-check) center / 11px no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 5" stroke="white" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    border-color: var(--td-check);
   }
   /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
      buttons / cards keep their inline layout instead of stacking to 16px tall. */
-  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; }
-  /* Reading column for the doc container. :where() so a doc's own rule wins. */
+  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(.tdo *):not(.tds *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
+  /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
+     column, wrapper or not. Two halves: (a) recognized wrappers get max-width
+     AND margin:auto (previously margin was missing, so wrapped docs without
+     their own margin rule sat left-aligned); (b) docs with no wrapper at all
+     get the same column applied to body itself via :has(). :where() keeps both
+     at zero specificity so a doc that truly wants full-bleed can override. */
   :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
     max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 56px 24px 80px;
+    box-sizing: border-box;
+  }
+  :where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
     padding: 56px 24px 80px;
     box-sizing: border-box;
   }
@@ -172,38 +384,52 @@
   /* Canvas needs special handling: scaling its CSS size doesn't change its
      drawing-buffer size, but at least the box won't overflow. */
   :where(body canvas) { display: block; }
-  /* Wide tables: keep TRUE table layout on desktop — display:block on a
-     table element discards real table layout for anonymous-box fixup, which
-     some engines render with uneven row heights and gaps (seen on published
-     docs). Only degrade to a scrollable block on narrow viewports, where
-     horizontal overflow is the bigger evil. NOTE: no backticks in comments
-     here — this CSS lives inside a JS template literal. */
+  /* Wide tables: keep TRUE table layout always — display:block on a table
+     discards real table layout for anonymous-box fixup (uneven row heights).
+     Scroll a wrapper instead of the table element. NOTE: no backticks in
+     comments here — this CSS lives inside a JS template literal. */
   :where(body table) { max-width: 100%; }
-  @media (max-width: 760px) {
-    :where(body table) { display: block; overflow-x: auto; }
-  }
+  .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tdoc-table-scroll > table { max-width: none; }
   /* Pre/code blocks scroll horizontally instead of breaking the layout. */
   :where(body pre) { max-width: 100%; overflow-x: auto; }
+  @media print {
+    .tdoc-bar, .tdoc-fab, .tdoc-footer, .tdoc-oldver-strip,
+    #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop,
+    .tdoc-popup, .tdoc-modal-bg, .tdoc-hover-outline,
+    .tdoc-comment-pill, .tdoc-drag-marquee, .tdoc-emoji-picker,
+    .tdoc-reanchor-banner { display: none !important; }
+    body { padding-top: 0 !important; padding-right: 0 !important; padding-left: 0 !important; }
+    :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
+      padding-top: 24px;
+    }
+    @page { margin: 14mm; }
+  }
+  /* TDOC_READER_CSS_END */
 
-  /* ========== Top bar (HackMD-inspired rhythm) ==========
-     Three groups: left breadcrumb (workspace + slug + version), center
-     doc title (truncates), right cluster (identity, primary CTA, more).
-     No borders on individual buttons — uses hover background instead, so
-     the bar reads as a clean strip rather than a row of chiclets.
-     Light theme to match the doc body. */
-  .tdoc-bar { position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
-  .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 1; }
-  .tdoc-bar-center { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; padding: 0 8px; }
-  .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  /* ========== Top bar ==========
+     Two groups, Google Docs / Notion style: left (logo + crumb + title)
+     and right (identity, primary CTA, more). The title is NOT viewport-
+     centered — left and right chrome are different widths, so a flex
+     "center" slot always looks off. Title truncates in the left group.
+     No borders on individual buttons — hover background instead. */
+  /* In document flow, not position:fixed: the bar occupies the top of the
+     layout so page HTML cannot scroll underneath a floating strip. */
+  .tdoc-bar { position: relative; width: 100%; height: 48px; box-sizing: border-box; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+  .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+  .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
 
-  /* Workspace mark — circular dot like HackMD's logo. Clicks → /. */
-  .tdoc-bar-mark { display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 12px; border-radius: 999px; background: #1652f0; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: -0.01em; cursor: pointer; flex-shrink: 0; border: none; }
-  .tdoc-bar-mark:hover { background: #1245d0; }
+  /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
+  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; }
+  .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
+  .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; color: #555; }
+  .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
+  .tdoc-bar .tdoc-github-btn svg { display: block; }
 
   /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
   .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-bar .crumb-sep { color: #c0c0c4; user-select: none; padding: 0 1px; }
-  .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
@@ -212,8 +438,8 @@
   .tdoc-bar button svg { flex-shrink: 0; }
 
   /* Primary CTA (Share / Publish) — filled blue button at the right. */
-  .tdoc-bar button.primary { background: #1652f0; color: #fff; padding: 7px 14px; font-weight: 600; }
-  .tdoc-bar button.primary:hover { background: #1245d0; color: #fff; }
+  .tdoc-bar button.primary { background: var(--td-accent); color: #fff; padding: 7px 14px; font-weight: 600; }
+  .tdoc-bar button.primary:hover { background: var(--td-accent-hover); color: #fff; }
 
   /* Version picker chip — pill in the left breadcrumb. */
   .tdoc-version-wrap { position: relative; display: inline-block; flex-shrink: 0; }
@@ -229,24 +455,27 @@
   .tdoc-menu button, .tdoc-secondary-menu button, .tdoc-version-menu button { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 4px; color: #1a1a1a; font: 13px system-ui, sans-serif; }
   .tdoc-version-menu button { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
   .tdoc-menu button:hover, .tdoc-secondary-menu button:hover, .tdoc-version-menu button:hover { background: #f0f1f4; }
-  .tdoc-version-menu button.current { color: #1652f0; font-weight: 600; }
+  .tdoc-version-menu button.current { color: var(--td-accent); font-weight: 600; }
 
   .tdoc-menu-wrap { position: relative; display: inline-block; }
   /* Overflow ⋯ button shows on narrow viewports. */
   .tdoc-bar .tdoc-secondary-toggle { display: none; padding: 6px 10px; }
-
   /* Identity chip — avatar + name (name hides on narrow). */
-  .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; }
+  .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; position: relative; }
   .tdoc-chip:hover { background: #e5e6ea; }
   .tdoc-chip img { width: 26px; height: 26px; border-radius: 50%; }
   .tdoc-chip .name { font-size: 13px; font-weight: 500; }
-  .tdoc-chip.signin { padding: 7px 14px; background: #1652f0; color: #fff; font-weight: 600; }
-  .tdoc-chip.signin:hover { background: #1245d0; }
+  .tdoc-chip.signin { padding: 7px 14px; background: var(--td-accent); color: #fff; font-weight: 600; }
+  .tdoc-chip.signin:hover { background: var(--td-accent-hover); }
+  /* Only new inbox chrome: a red dot on the existing identity chip. */
+  .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; border: 1.5px solid #fff; pointer-events: none; }
+  /* Inbox rows reuse cluster-row: action + preview stacked, relative time on the right. */
+  #tdoc-inbox-list .tdoc-cluster-row > .muted { flex-shrink: 0; white-space: nowrap; font-size: 12px; }
 
   /* Comment cards */
   #tdoc-comment-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; z-index: 999996; }
   .tdoc-margin-comment { position: absolute; width: 280px; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font: 13px system-ui, sans-serif; transition: box-shadow .15s, transform .15s; z-index: 999996; pointer-events: auto; }
-  .tdoc-margin-comment.active { box-shadow: 0 4px 16px rgba(22,82,240,0.18); border-color: #1652f0; }
+  .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
   .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
   /* A resolved (agent-applied) comment whose anchor text was rewritten is the
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
@@ -259,7 +488,7 @@
   .tdoc-margin-comment.tdoc-unanchored .tdoc-reanchor-btn { display: block; }
   /* Anchored cards also expose a "move anchor" action when they're active. */
   .tdoc-margin-comment.active .tdoc-reanchor-btn { display: block; }
-  .tdoc-reanchor-btn:hover { color: #1652f0; }
+  .tdoc-reanchor-btn:hover { color: var(--td-accent); }
   /* Label swap: "unanchored" wording on unanchored cards, "move anchor" on
      active anchored cards. */
   .tdoc-reanchor-btn .tdoc-reanchor-unanchored,
@@ -272,7 +501,7 @@
      user to select. */
   /* Re-anchor banner: pinned below the bar with three actions. Visible
      only while body.tdoc-reanchoring is set. */
-  .tdoc-reanchor-banner { display: none; position: fixed; top: 56px; left: 50%; transform: translateX(-50%); background: #1652f0; color: #fff; padding: 6px 10px 6px 14px; border-radius: 999px; font: 12px system-ui; z-index: 999999; align-items: center; gap: 6px; box-shadow: 0 4px 16px rgba(22,82,240,0.35); }
+  .tdoc-reanchor-banner { display: none; position: fixed; top: 56px; left: 50%; transform: translateX(-50%); background: var(--td-accent); color: #fff; padding: 6px 10px 6px 14px; border-radius: 999px; font: 12px system-ui; z-index: 999999; align-items: center; gap: 6px; box-shadow: 0 4px 16px var(--td-accent-ring); }
   body.tdoc-reanchoring .tdoc-reanchor-banner { display: inline-flex; }
   .tdoc-reanchor-banner .label { padding: 0 4px; }
   .tdoc-reanchor-banner button { background: rgba(255,255,255,0.15); border: none; color: #fff; padding: 4px 10px; border-radius: 999px; font: 12px system-ui; cursor: pointer; }
@@ -282,10 +511,9 @@
   /* Old-version strip — a thin, quiet bar just under the top bar shown when
      the viewer is on a non-latest version. Single-direction nudge: it only
      points forward to the latest version. Hidden by default; the bar-setup
-     code reveals it (and adds the body padding) only when version < latest. */
-  .tdoc-oldver-strip { display: none; position: fixed; top: 44px; left: 0; right: 0; height: 28px; background: #fbf6e9; color: #6b5e3a; border-bottom: 1px solid #efe6cd; font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; align-items: center; justify-content: center; gap: 6px; z-index: 999998; padding: 0 12px; }
+     code reveals it only when version < latest. In flow under the top bar. */
+  .tdoc-oldver-strip { display: none; position: relative; width: 100%; height: 28px; box-sizing: border-box; background: #fbf6e9; color: #6b5e3a; border-bottom: 1px solid #efe6cd; font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; align-items: center; justify-content: center; gap: 6px; z-index: 999998; padding: 0 12px; }
   body.tdoc-has-oldver-strip .tdoc-oldver-strip { display: flex; }
-  body.tdoc-has-oldver-strip { padding-top: 72px !important; }
   .tdoc-oldver-strip a { color: #8a6d1f; font-weight: 600; text-decoration: none; border-bottom: 1px solid currentColor; }
   .tdoc-oldver-strip a:hover { color: #6b5413; }
   /* Ghost marker — a faint horizontal line at the unanchored comment's
@@ -297,10 +525,11 @@
   .tdoc-margin-comment .author img { width: 24px; height: 24px; border-radius: 50%; }
   .tdoc-margin-comment .author .login { font-weight: 600; color: #111; font-size: 13px; }
   .tdoc-margin-comment .author .anon { color: #888; font-style: italic; }
-  /* Agent identity — a simple "⚡ tdoc-agent" badge in place of an avatar.
-     The status chip on agent replies (applied / partial / question) lets
-     the user tell at a glance whether their comment was addressed. */
-  .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #111; color: #fff; align-items: center; justify-content: center; font-size: 13px; }
+  /* Agent identity — runtime logo when we know the host (Grok / Claude /
+     Codex / …), otherwise the tdoc project mark. Status chips still carry
+     applied / partial / question. */
+  .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #f2f2f2; flex-shrink: 0; }
+  .tdoc-agent-author img { width: 24px; height: 24px; border-radius: 50%; object-fit: contain; background: #fff; flex-shrink: 0; }
   .tdoc-agent-reply { background: #fafafb; border-left: 3px solid #111; padding-left: 8px; }
   .tdoc-agent-status { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; margin: 0 0 6px; font-weight: 600; }
   .tdoc-agent-status-applied { background: #e8f5ed; color: #1a7340; }
@@ -313,9 +542,9 @@
   .tdoc-margin-comment .del:hover { text-decoration: underline; }
   .tdoc-margin-comment .actions { display: inline-flex; gap: 8px; align-items: center; flex-shrink: 0; }
   .tdoc-margin-comment .copy-md { cursor: pointer; color: #888; display: inline-flex; align-items: center; }
-  .tdoc-margin-comment .copy-md:hover { color: #1652f0; }
+  .tdoc-margin-comment .copy-md:hover { color: var(--td-accent); }
   .tdoc-margin-comment .copy-md svg { width: 14px; height: 14px; display: block; }
-  .tdoc-margin-comment .tdoc-reply-toggle { cursor: pointer; color: #1652f0; }
+  .tdoc-margin-comment .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); }
   .tdoc-margin-comment .tdoc-reply-toggle:hover { text-decoration: underline; }
 
   /* ===== Pins model (wide mode only) =====
@@ -332,14 +561,14 @@
   body.tdoc-pins:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { display: block; }
 
   .tdoc-pin { position: absolute; pointer-events: auto; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #cdd3dc; box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; transition: transform .12s, border-color .12s, box-shadow .12s; box-sizing: border-box; }
-  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active { transform: scale(1.12); border-color: #1652f0; box-shadow: 0 2px 8px rgba(22,82,240,0.25); z-index: 1; }
+  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active { transform: scale(1.12); border-color: var(--td-accent); box-shadow: 0 2px 8px var(--td-accent-ring-soft); z-index: 1; }
   .tdoc-pin img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
   .tdoc-pin .tdoc-pin-anon { width: 100%; height: 100%; border-radius: 50%; background: #8a93a2; }
   /* Resolved pins get a green ring + a small ✓ overlay badge. */
   .tdoc-pin.tdoc-pin-resolved { border-color: #1a7340; }
   .tdoc-pin.tdoc-pin-resolved::after { content: "✓"; position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; background: #1a7340; color: #fff; font-size: 9px; line-height: 14px; text-align: center; font-weight: 700; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
-  .tdoc-pin.tdoc-pin-cluster { background: #1652f0; border-color: #1652f0; color: #fff; font: 600 12px system-ui; }
+  .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
   .tdoc-pin.tdoc-pin-cluster::after { content: none; }
 
@@ -363,7 +592,7 @@
   .tdoc-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; align-items: center; }
   .tdoc-react-chip { position: relative; display: inline-flex; align-items: center; gap: 4px; font: 12px system-ui; background: #f5f6f8; border: 1px solid #e5e5e5; border-radius: 999px; padding: 2px 8px; cursor: pointer; color: #333; transition: background .12s, border-color .12s; }
   .tdoc-react-chip:hover { background: #eef0f3; }
-  .tdoc-react-chip.mine { background: #e8eeff; border-color: #1652f0; color: #1652f0; }
+  .tdoc-react-chip.mine { background: var(--td-accent-tint); border-color: var(--td-accent); color: var(--td-accent); }
   /* Agent reactions get a tinted background so users can scan a long doc
      and spot which comments the agent has already responded to. */
   .tdoc-react-chip.agent { background: #f3eaff; border-color: #c3a8f0; color: #5a2da8; }
@@ -394,21 +623,25 @@
   .tdoc-margin-comment:hover .tdoc-reactions .tdoc-react-add, .tdoc-reply:hover .tdoc-reactions .tdoc-react-add, .tdoc-reactions:has(.tdoc-react-chip) .tdoc-react-add { opacity: 1; }
   .tdoc-react-add.inline svg { width: 14px; height: 14px; }
   .tdoc-react-add.inline { opacity: 0.55; vertical-align: middle; }
-  .tdoc-react-add:hover { color: #1652f0; opacity: 1; }
+  .tdoc-react-add:hover { color: var(--td-accent); opacity: 1; }
   .tdoc-emoji-picker { position: absolute; background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 6px; display: grid; grid-template-columns: repeat(6, 32px); gap: 2px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 1000001; }
   .tdoc-emoji-picker button { background: transparent; border: none; padding: 0; cursor: pointer; border-radius: 4px; width: 32px; height: 32px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
   .tdoc-emoji-picker button:hover { background: #f5f6f8; }
-  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: #1652f0; }
-  .tdoc-emoji-picker button.tdoc-emoji-text:hover { background: #e8eeff; }
+  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: var(--td-accent); }
+  .tdoc-emoji-picker button.tdoc-emoji-text:hover { background: var(--td-accent-tint); }
 
   /* Replies + reply form */
-  .tdoc-replies-toggle { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: #1652f0; user-select: none; }
+  .tdoc-replies-toggle { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: var(--td-accent); user-select: none; }
   .tdoc-replies-toggle:hover { text-decoration: underline; }
   .tdoc-replies-toggle .chev { transition: transform .15s; }
   .tdoc-replies-toggle.open .chev { transform: rotate(90deg); }
   .tdoc-replies { display: none; flex-direction: column; gap: 10px; margin-top: 10px; }
   .tdoc-replies.open { display: flex; }
   .tdoc-reply { padding-left: 12px; border-left: 2px solid #e5e5e5; }
+  .tdoc-reply-kids { margin: 8px 0 0 10px; display: flex; flex-direction: column; gap: 10px; }
+  .tdoc-reply .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
+  .tdoc-reply .tdoc-reply-toggle:hover { text-decoration: underline; }
+  .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
   .tdoc-reply .author { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
   .tdoc-reply .author .login { font-weight: 600; font-size: 12px; color: #111; }
@@ -420,11 +653,11 @@
   .tdoc-reply-form { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; }
   .tdoc-reply-form.open { display: block; }
   .tdoc-reply-form textarea { width: 100%; min-height: 48px; box-sizing: border-box; padding: 6px 8px; font: 13px system-ui; border: 1px solid #ccc; border-radius: 6px; resize: vertical; outline: none; }
-  .tdoc-reply-form textarea:focus { border-color: #1652f0; }
+  .tdoc-reply-form textarea:focus { border-color: var(--td-accent); }
   .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
   .tdoc-reply-form-foot .hint { color: #888; font-size: 11px; }
-  .tdoc-reply-form-foot .tdoc-reply-submit { background: #1652f0; color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
-  .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: #1245d0; }
+  .tdoc-reply-form-foot .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
+  .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: var(--td-accent-hover); }
 
   /* Anchor highlights (Custom Highlight API + fallback span) */
   ::highlight(tdoc-pending) { background-color: #fff3a8; }
@@ -443,62 +676,62 @@
   .tdoc-anchor-mark.active { background: #ffd84d; box-shadow: 0 -3px 0 -1px #b8860b inset; }
 
   /* Element outlines + hover affordance */
-  .tdoc-element-outline { position: absolute; pointer-events: none; border: 1.5px solid rgba(22,82,240,0.35); border-radius: 4px; box-sizing: border-box; z-index: 999995; transition: border-color .15s, box-shadow .15s, border-width .15s; }
+  .tdoc-element-outline { position: absolute; pointer-events: none; border: 1.5px solid var(--td-accent-ring); border-radius: 4px; box-sizing: border-box; z-index: 999995; transition: border-color .15s, box-shadow .15s, border-width .15s; }
   .tdoc-element-outline.pending { border-color: #f0d000; border-width: 2px; background: transparent; }
-  .tdoc-element-outline.active { border-color: #1652f0; border-width: 2px; box-shadow: 0 0 0 4px rgba(22,82,240,0.18); }
-  .tdoc-hover-outline { position: absolute; pointer-events: none; z-index: 999995; border: 2px dashed #1652f0; border-radius: 4px; background: rgba(22,82,240,0.06); box-sizing: border-box; transition: opacity .12s; }
-  /* Clickable pill that appears NEXT TO commentable artifacts (img/canvas/svg/video/pre).
+  .tdoc-element-outline.active { border-color: var(--td-accent); border-width: 2px; box-shadow: 0 0 0 4px var(--td-accent-ring-soft); }
+  .tdoc-hover-outline { position: absolute; pointer-events: none; z-index: 999995; border: 2px dashed var(--td-accent); border-radius: 4px; background: var(--td-accent-wash); box-sizing: border-box; transition: opacity .12s; }
+  /* Icon-only button that appears on commentable artifacts (img/canvas/svg/video/pre).
      Positioned just outside the artifact's right edge so it can't obscure
      content. Uses !important on the visible colors to defend against doc-side
      button:hover rules that would otherwise repaint our background. */
   .tdoc-comment-pill {
     position: absolute !important; z-index: 999998 !important;
-    background: #1652f0 !important; color: #fff !important;
-    font: 600 11px system-ui !important;
-    padding: 4px 10px !important;
-    border: none !important; border-radius: 999px !important;
+    width: 30px !important; height: 30px !important; padding: 0 !important;
+    background: rgba(255,255,255,0.96) !important; color: var(--td-accent) !important;
+    border: 1px solid #dedee3 !important; border-radius: 999px !important;
     cursor: pointer !important;
-    box-shadow: 0 2px 8px rgba(22,82,240,0.38) !important;
-    display: inline-flex !important; align-items: center !important; gap: 4px !important;
-    transition: transform .12s, background-color .12s, box-shadow .12s, opacity .12s !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 3px 10px rgba(0,0,0,0.08) !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    transition: transform .12s, background-color .12s, border-color .12s, color .12s, box-shadow .12s !important;
     line-height: 1 !important;
     text-decoration: none !important;
-    opacity: 0.92 !important; visibility: visible !important;
+    visibility: visible !important;
   }
   .tdoc-comment-pill:hover {
-    background: #1245d0 !important; color: #fff !important;
-    opacity: 1 !important;
+    background: var(--td-accent) !important; color: #fff !important;
+    border-color: var(--td-accent) !important;
     transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(22,82,240,0.50) !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 8px 22px var(--td-accent-ring-soft) !important;
   }
-  .tdoc-comment-pill:active { background: #0f3bb0 !important; transform: translateY(0) !important; }
-  .tdoc-comment-pill svg { width: 12px !important; height: 12px !important; flex-shrink: 0 !important; stroke: #fff !important; }
-  .tdoc-drag-marquee { position: absolute; pointer-events: none; z-index: 999997; border: 1.5px solid #1652f0; background: rgba(22,82,240,0.1); box-sizing: border-box; }
+  .tdoc-comment-pill:active { background: var(--td-accent-hover) !important; transform: translateY(0) !important; }
+  .tdoc-comment-pill svg { width: 14px !important; height: 14px !important; flex-shrink: 0 !important; stroke: currentColor !important; margin: 0 !important; }
+  .tdoc-comment-pill:hover svg { stroke: #fff !important; }
+  .tdoc-drag-marquee { position: absolute; pointer-events: none; z-index: 999997; border: 1.5px solid var(--td-accent); background: var(--td-accent-wash); box-sizing: border-box; }
 
   /* Popup (new-comment) */
   .tdoc-popup { position: absolute; background: #0a0a0a; color: #fff; border-radius: 10px; padding: 14px; width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); z-index: 999998; font: 13px system-ui, sans-serif; }
   .tdoc-popup .head { display: flex; justify-content: space-between; margin-bottom: 8px; }
   .tdoc-popup .head .h { color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
-  .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid #1652f0; border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
+  .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
   .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
-  .tdoc-popup .submit { background: #1652f0; border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
-  .tdoc-popup .submit:hover { background: #1245d0; }
+  .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
+  .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
   .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
 
   /* Modal (sign-in) */
   .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
-  .tdoc-modal { background: #fff; color: #111; border-radius: 12px; padding: 28px; width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .tdoc-modal { background: #fff; color: #111; border-radius: 12px; padding: 28px; width: min(460px, calc(100vw - 48px)); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
   .tdoc-modal h3 { margin: 0 0 8px; font-size: 20px; }
   .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
   .tdoc-modal .code { background: #0a0a0a; color: #fff; padding: 18px; border-radius: 8px; font: 24px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.15em; text-align: center; margin: 0 0 14px; user-select: all; cursor: copy; }
   .tdoc-modal .step { display: flex; gap: 10px; margin-bottom: 8px; color: #444; }
-  .tdoc-modal .step .n { width: 22px; height: 22px; border-radius: 50%; background: #1652f0; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .tdoc-modal .step .n { width: 22px; height: 22px; border-radius: 50%; background: var(--td-accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
   .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
   .tdoc-modal button { padding: 8px 16px; border-radius: 6px; font: inherit; cursor: pointer; border: 1px solid #ccc; background: #fff; }
-  .tdoc-modal button.primary { background: #1652f0; border-color: #1652f0; color: #fff; }
-  .tdoc-modal button.primary:hover { background: #1245d0; }
+  .tdoc-modal button.primary { background: var(--td-accent); border-color: var(--td-accent); color: #fff; }
+  .tdoc-modal button.primary:hover { background: var(--td-accent-hover); }
   .tdoc-modal .status { color: #888; font-size: 13px; }
   /* Modal helper classes used by Publish/Share so dark-mode can override. */
   .tdoc-modal .muted { color: #666; font-size: 13px; }
@@ -506,20 +739,38 @@
   .tdoc-modal .danger { color: #c33; font-size: 13px; }
   .tdoc-modal code { background: #f5f6f8; padding: 1px 5px; border-radius: 3px; }
 
+  /* Share panel (copy link for everyone; owners also get visibility/history/
+     commenting/allowed_users + Delete/Unpublish — session-authorized). */
+  .tdoc-modal .manage-section { margin: 16px 0; }
+  .tdoc-modal .manage-section:first-of-type { margin-top: 4px; }
+  .tdoc-modal label.field { display: block; font-size: 12px; color: #666; margin: 0 0 4px; font-weight: 600; }
+  .tdoc-modal input[type="password"], .tdoc-modal input[type="text"] { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; }
+  .tdoc-modal input[type="password"]:focus, .tdoc-modal input[type="text"]:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-seg { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+  .tdoc-seg button { border: none; border-radius: 0; padding: 7px 14px; background: #fff; color: #444; }
+  .tdoc-seg button + button { border-left: 1px solid #ddd; }
+  .tdoc-seg button.active { background: var(--td-accent); color: #fff; }
+  .tdoc-modal .manage-hint { font-size: 12px; color: #888; margin: 6px 0 0; }
+  .tdoc-modal .manage-action { width: 100%; text-align: left; }
+  .tdoc-modal .manage-action.danger-btn { color: var(--td-danger); border-color: #f1b8b2; }
+  .tdoc-modal .manage-action.danger-btn:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
+
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
      stays elegant at every size.
-       ≥1100px: workspace · slug · v · | title | identity · share · ⋯
-       <1100px: workspace ·          v · | title | identity · share · ⋯  (slug hides)
-       < 900px: workspace ·          v · | title | avatar   · share · ⋯  (name hides)
-       < 700px: workspace             · | title |            share · ⋯  (version+identity into ⋯) */
+       ≥1100px: logo · slug · v · title ……………… identity · share · ⋯
+       <1100px: logo ·      · v · title ……………… identity · share · ⋯  (slug hides)
+       < 900px: logo ·      · v · title ……………… avatar   · share · ⋯  (name hides)
+       < 700px: logo ·          title ………………            share · ⋯  (version+identity into ⋯) */
   @media (max-width: 1100px) {
     .tdoc-bar .crumb-slug, .tdoc-bar .crumb-sep-slug { display: none; }
   }
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
-    .tdoc-bar #tdoc-fork-btn, .tdoc-bar #tdoc-saveas-btn { display: none; }
+    .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
     .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   }
   @media (max-width: 700px) {
@@ -532,15 +783,17 @@
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
+  body.tdoc-narrow .tdoc-bar #tdoc-duplicate-btn, body.tdoc-narrow .tdoc-bar #tdoc-download-wrap, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
+  body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle { display: block; width: 36px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 12px; cursor: grab; touch-action: none; user-select: none; }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
-  body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: #1652f0; color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px rgba(22,82,240,0.35); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
-  body.tdoc-narrow .tdoc-modal { width: calc(100vw - 32px); padding: 20px; }
+  body.tdoc-narrow .tdoc-modal { padding: 20px; }
   body.tdoc-narrow .tdoc-modal .code { font-size: 20px; }
   body.tdoc-narrow .tdoc-hover-outline, body.tdoc-narrow .tdoc-comment-pill, body.tdoc-narrow .tdoc-drag-marquee { display: none; }
   body.tdoc-narrow .tdoc-emoji-picker { grid-template-columns: repeat(6, 36px); }
@@ -554,11 +807,61 @@
     .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 5; }
   }
 
+  /* Theme toggle — icon-only, lives in the bar's right cluster. */
+  .tdoc-theme-btn { flex-shrink: 0; }
+  .tdoc-theme-icon-sun { display: none; }
+  html[data-tdoc-theme="dark"] .tdoc-theme-icon-moon { display: none; }
+  html[data-tdoc-theme="dark"] .tdoc-theme-icon-sun { display: block; }
+
+  /* Dark mode: invert the painted page (Dark Reader / "filter" style).
+     One transform hits author CSS, artifacts, replies, and chrome — no
+     per-color list. hue-rotate keeps blues roughly blue. Photos / video /
+     canvas / iframes are inverted back so they don't look like negatives. */
+  html[data-tdoc-theme="dark"] {
+    color-scheme: dark;
+    background: #fff;
+    filter: invert(1) hue-rotate(180deg);
+  }
+  /* Native buttons/inputs follow color-scheme. Dark UA styles paint light
+     text onto an author light fill; invert then makes the label vanish
+     (e.g. "Differences only" on a white chip). Keep form controls in the
+     light scheme so invert can flip their author colors as a unit. */
+  html[data-tdoc-theme="dark"] button,
+  html[data-tdoc-theme="dark"] input,
+  html[data-tdoc-theme="dark"] select,
+  html[data-tdoc-theme="dark"] textarea {
+    color-scheme: light;
+  }
+  html[data-tdoc-theme="dark"] img:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] video:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] canvas:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] iframe:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] .tdoc-emoji {
+    filter: invert(1) hue-rotate(180deg);
+  }
+  /* Opt out via data-tdoc-dark="invert": this is a drawing, not a
+     photograph. Photos and video have to come back to their true colours or
+     they look like negatives, but a chart or a simulation drawn in ink on a
+     white field should go dark with everything else — otherwise it sits in a
+     dark page as a glowing white slab. */
+  /* The site mark is a black-on-white PNG. Let it invert with the page
+     instead of restoring, or it becomes a white tile on the dark bar. */
+  html[data-tdoc-theme="dark"] .tdoc-bar-mark img { filter: none; }
+  /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
+     them in .tdoc-emoji so they get the same restore as photos. */
+  .tdoc-emoji { display: inline-block; line-height: 1; }
+
+  /* /me catalog: overlay reader template would otherwise restyle the list. */
+  body.tdoc-catalog :where(body) { font-size: 15px; line-height: 1.5; }
+  body.tdoc-catalog :where(body h1) { font-size: 28px; line-height: 1.2; color: var(--td-accent); margin: 0 0 24px; letter-spacing: -0.01em; }
+  body.tdoc-catalog :where(body a) { text-decoration: none; }
+  body.tdoc-catalog :where(body a):hover { text-decoration: underline; }
+
   /* Footer */
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
   .tdoc-footer .tdoc-footer-row { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; row-gap: 4px; }
   .tdoc-footer a { color: #666; text-decoration: none; }
-  .tdoc-footer a:hover { color: #1652f0; text-decoration: underline; }
+  .tdoc-footer a:hover { color: var(--td-accent); text-decoration: underline; }
   .tdoc-footer .sep { color: #ccc; }
   @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
 
@@ -577,6 +880,7 @@
     reanchoringId: null,           // comment id awaiting a new selection for re-anchoring
     pinnedId: null,                // comment whose floating card is click-pinned open (wide mode)
     hoverId: null,                 // comment whose card is open via hover (wide mode)
+    openReplyThreads: new Set(),   // top-level comment ids whose reply lists stay expanded
   };
 
   // Highlight API: one shared registry for pending, one per saved comment.
@@ -606,7 +910,7 @@
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  // ========== Top bar (HackMD-style three-group layout) ==========
+  // ========== Top bar (left title + right actions) ==========
   const bar = document.createElement('div');
   bar.className = 'tdoc-bar';
 
@@ -614,9 +918,14 @@
   versions.sort((a, b) => (a.n || 0) - (b.n || 0));
   const slugCrumbLabel = isFork ? `fork of ${cfg.originalSlug || slug}` : slug;
 
-  // Left group: workspace mark + slug crumb + version picker.
+  // Left group: site mark + slug crumb + version picker + title.
+  // Title lives here (not a fake viewport-center) because left and right
+  // chrome are different widths. `/` and `/me` drop crumb/picker/title —
+  // those pages already name themselves in the document.
+  const isSiteBar = !!(cfg.isLanding || isCatalog);
   const leftHtml = `
-    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc on GitHub" aria-label="tdoc on GitHub">tdoc</button>
+    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="My docs" aria-label="My docs"><img src="/tdoc_logo.svg" alt="" width="24" height="24"></button>
+    ${isSiteBar ? '' : `
     <span class="crumb crumb-slug" title="${escapeHtml(slugCrumbLabel)}">${escapeHtml(slugCrumbLabel)}</span>
     <span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>
     <div class="tdoc-version-wrap">
@@ -626,10 +935,8 @@
           ${versions.map(v => `<button role="option" data-version="${v.n}" class="${v.n === version ? 'current' : ''}">v${v.n}${v.n === version ? ' · current' : ''}</button>`).join('')}
         </div>
       ` : ''}
-    </div>`;
-
-  // Center: doc title (pulled from <title>). Hidden on very narrow.
-  const centerHtml = `<span class="doc-title" id="tdoc-title">tdoc</span>`;
+    </div>
+    <span class="doc-title" id="tdoc-title">tdoc</span>`}`;
 
   // Right: copy menu + primary CTA (Share or Publish) + ⋯ overflow + identity.
   const copyMenuHtml = `
@@ -645,7 +952,7 @@
     </div>`;
 
   const primaryCtaHtml = isFork ? '' : (isPublished
-    ? `<button id="tdoc-share-btn" class="primary" title="Share link" aria-label="Share">
+    ? `<button id="tdoc-share-btn" class="primary" title="Share" aria-label="Share">
          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
          <span>Share</span>
        </button>`
@@ -654,32 +961,50 @@
          <span>Publish</span>
        </button>`);
 
-  // Fork / Save-as live in the ⋯ menu on narrow viewports.
+  // Duplicate + Download live in the ⋯ menu on narrow viewports.
+  const downloadMenuHtml = (isPublished || isFork) ? `
+    <div class="tdoc-menu-wrap" id="tdoc-download-wrap">
+      <button id="tdoc-download-btn" title="Download" aria-haspopup="menu" aria-expanded="false">Download</button>
+      <div class="tdoc-menu" id="tdoc-download-menu" role="menu">
+        <button data-format="html" role="menuitem">Download HTML</button>
+        <button data-format="pdf" role="menuitem">Download PDF</button>
+      </div>
+    </div>` : '';
   const forkBtnHtml = isPublished
-    ? '<button id="tdoc-fork-btn">Fork</button>'
-    : (isFork ? '<button id="tdoc-saveas-btn">Save As New Local Doc</button>' : '');
+    ? '<button id="tdoc-duplicate-btn" title="Make a copy in your account">Duplicate</button>' + downloadMenuHtml
+    : downloadMenuHtml;
+
+  const themeBtnHtml = `
+    <button type="button" id="tdoc-theme-btn" class="tdoc-theme-btn" aria-pressed="false" title="Dark mode" aria-label="Switch to dark mode">
+      <svg class="tdoc-theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 7 7 0 0 0 21 14.5z"/></svg>
+      <svg class="tdoc-theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>`;
+
+  const githubBtnHtml = `
+    <a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="tdoc on GitHub" aria-label="tdoc on GitHub">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>`;
 
   const rightHtml = `
-    ${copyMenuHtml}
-    ${forkBtnHtml}
-    ${primaryCtaHtml}
-    <div class="tdoc-menu-wrap">
+    ${cfg.isLanding ? githubBtnHtml : ''}
+    ${themeBtnHtml}
+    ${isSiteBar ? '' : copyMenuHtml}
+    ${isSiteBar ? '' : forkBtnHtml}
+    ${isSiteBar ? '' : primaryCtaHtml}
+    ${!isSiteBar && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
-        ${isPublished ? '<button data-action="share">Share</button><button data-action="fork">Fork</button>' : ''}
-        ${isLocal ? '<button data-action="publish">Publish</button>' : ''}
-        ${isFork ? '<button data-action="saveas">Save copy</button>' : ''}
-        <button data-action="repo">tdoc on GitHub</button>
+        ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
+        ${isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
       </div>
-    </div>
+    </div>` : ''}
     <span id="tdoc-identity-slot"></span>`;
 
   bar.innerHTML = `
     <div class="tdoc-bar-left">${leftHtml}</div>
-    <div class="tdoc-bar-center">${centerHtml}</div>
     <div class="tdoc-bar-right">${rightHtml}</div>
   `;
-  document.body.appendChild(bar);
+  document.body.insertBefore(bar, document.body.firstChild);
 
   // Old-version strip — a quiet, single-direction nudge shown only when a
   // published viewer is looking at a non-latest version. `versions` is already
@@ -692,7 +1017,7 @@
       strip.className = 'tdoc-oldver-strip';
       const latestUrl = `/d/${encodeURIComponent(slug)}/v/${latestVersion}`;
       strip.innerHTML = `<span>You're viewing v${version} — the latest is <a href="${latestUrl}">v${latestVersion}</a></span>`;
-      document.body.appendChild(strip);
+      bar.insertAdjacentElement('afterend', strip);
       document.body.classList.add('tdoc-has-oldver-strip');
     }
   }
@@ -700,66 +1025,165 @@
   // Re-anchor banner — shown while a re-anchor action is in flight. Three
   // explicit actions to avoid the gesture conflict (clicking empty space
   // would otherwise be ambiguous with "deselect").
-  const reanchorBanner = document.createElement('div');
-  reanchorBanner.className = 'tdoc-reanchor-banner';
-  reanchorBanner.innerHTML = `
+  if (!isCatalog) {
+    const reanchorBanner = document.createElement('div');
+    reanchorBanner.className = 'tdoc-reanchor-banner';
+    reanchorBanner.innerHTML = `
     <span class="label">Select text to move anchor</span>
     <button type="button" id="tdoc-reanchor-remove">Remove anchor</button>
     <button type="button" id="tdoc-reanchor-cancel" class="danger">Cancel</button>
   `;
-  document.body.appendChild(reanchorBanner);
+    document.body.appendChild(reanchorBanner);
+  }
 
   const titleEl = document.querySelector('title');
-  if (titleEl && titleEl.textContent) document.getElementById('tdoc-title').textContent = titleEl.textContent;
+  const barTitle = document.getElementById('tdoc-title');
+  if (barTitle && titleEl && titleEl.textContent) barTitle.textContent = titleEl.textContent;
 
-  // Workspace mark in the bar's left → the open-source project. There is
-  // no public catalog; the owner reaches their doc list via the profile
-  // chip menu instead.
-  document.getElementById('tdoc-bar-mark').onclick = () =>
-    window.open('https://github.com/serenakeyitan/tdoc', '_blank', 'noopener');
+  // Site mark → hub. On tdoc.dev that is /me. Local studio has no /me
+  // catalog, so the local server 302s /me → /. GitHub lives in its own
+  // icon on `/`.
+  document.getElementById('tdoc-bar-mark').onclick = () => { location.href = '/me'; };
 
-  // Fork: opens the renderable /fork view in a new tab AND triggers a download
-  // (one click, both happen). We use a hidden iframe to fire the download so
-  // the user keeps focus on the new fork tab.
-  async function forkAndDownload() {
-    // Fetch the fork HTML once, then both download AND open it via a blob URL.
-    // This way the new tab shows exactly the SAME bytes the user has on disk —
-    // a real local copy, not the worker-hosted /fork page. Self-contained:
-    // closing the tab doesn't lose the file, and the tab has no worker
-    // dependency (uses blob: not https:).
-    const base = `/d/${encodeURIComponent(slug)}/v/${version}`;
-    let bodyText;
-    try {
-      const resp = await fetch(`${base}/fork`);
-      if (!resp.ok) throw new Error(`fork fetch failed: ${resp.status}`);
-      bodyText = await resp.text();
-    } catch (e) {
-      // Fallback: old behavior (let the worker route handle download)
-      window.location.href = `${base}/export?download=1`;
-      return;
-    }
-    const blob = new Blob([bodyText], { type: 'text/html;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
+  paintTheme(currentTheme());
+  document.getElementById('tdoc-theme-btn').onclick = () => {
+    const next = currentTheme() === 'dark' ? 'light' : 'dark';
+    persistTheme(next);
+    paintTheme(next);
+  };
 
-    // 1. Trigger the file download via <a download>.
+  wireCopyTriggers();
+
+  // Duplicate = hosted account copy. Download HTML = /export file.
+  // Download PDF = print the export (browser Save as PDF), not a JPEG wrap.
+  let pendingDuplicate = false;
+  function downloadExport() {
     const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = `${slug}-v${version}-fork.html`;
+    a.href = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=1`;
+    a.download = `${slug}-v${version}.html`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-
-    // 2. Open the same blob in a new tab so the user sees their fork rendered.
-    //    Small delay so the download starts before the new tab steals focus.
-    setTimeout(() => {
-      window.open(blobUrl, '_blank');
-      // Revoke after a generous interval — the new tab may still be parsing.
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-    }, 250);
+  }
+  async function downloadPdf() {
+    const src = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=0`;
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('title', 'Print');
+    iframe.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:100vh;border:0;opacity:0;pointer-events:none;';
+    document.body.appendChild(iframe);
+    const drop = () => { if (iframe.parentNode) iframe.remove(); };
+    try {
+      await new Promise((resolve, reject) => {
+        iframe.onload = resolve;
+        iframe.onerror = () => reject(new Error('could not load export'));
+        iframe.src = src;
+        setTimeout(() => reject(new Error('pdf export timed out')), 20000);
+      });
+      const doc = iframe.contentDocument;
+      const win = iframe.contentWindow;
+      if (!doc || !win || !doc.body) throw new Error('empty export');
+      doc.title = `${slug}-v${version}`;
+      await Promise.all([...doc.images].map((img) => img.decode ? img.decode().catch(() => {}) : Promise.resolve()));
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      win.addEventListener('afterprint', drop, { once: true });
+      setTimeout(drop, 120000);
+      win.focus();
+      win.print();
+    } catch (e) {
+      drop();
+      throw e;
+    }
+  }
+  async function startDownload(format) {
+    if (format === 'pdf') {
+      try { await downloadPdf(); }
+      catch (e) {
+        showAccountCopyModal({
+          title: 'Could not download PDF',
+          body: e.message || 'PDF export failed. Try Download HTML.',
+          offerDownload: true,
+        });
+      }
+      return;
+    }
+    downloadExport();
+  }
+  function showAccountCopyModal({ title, body, offerDownload }) {
+    closeAuxModal();
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-aux-modal';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(body)}</p>
+        <div class="actions">
+          ${offerDownload ? '<button class="primary" id="tdoc-dup-dl">Download HTML</button>' : ''}
+          <button id="tdoc-dup-close">Close</button>
+        </div>
+      </div>`;
+    document.body.appendChild(bg);
+    document.getElementById('tdoc-dup-close').onclick = closeAuxModal;
+    const dl = document.getElementById('tdoc-dup-dl');
+    if (dl) dl.onclick = () => { downloadExport(); closeAuxModal(); };
+  }
+  async function duplicateDoc() {
+    if (!isPublished) return;
+    if (!identity) {
+      pendingDuplicate = true;
+      startDeviceFlow();
+      return;
+    }
+    try {
+      const r = await fetch('/api/doc/duplicate', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, version }),
+      });
+      let data = {};
+      try { data = await r.json(); } catch {}
+      if (r.status === 401 || data.error === 'sign_in_required') {
+        pendingDuplicate = true;
+        startDeviceFlow();
+        return;
+      }
+      if (data.error === 'account_copy_unavailable') {
+        showAccountCopyModal({
+          title: 'Account copy is not available here',
+          body: data.message || 'This host only lets the worker owner make an account copy. Download the HTML to take the doc offline.',
+          offerDownload: true,
+        });
+        return;
+      }
+      if (data.error === 'islands_not_supported') {
+        showAccountCopyModal({
+          title: 'This doc has interactive widgets',
+          body: data.message || 'Widget islands cannot be duplicated in v1. Download the host HTML instead.',
+          offerDownload: true,
+        });
+        return;
+      }
+      if (!r.ok || !data.ok || !data.url) {
+        showAccountCopyModal({
+          title: 'Could not duplicate',
+          body: data.message || data.error || (`HTTP ${r.status}`),
+          offerDownload: true,
+        });
+        return;
+      }
+      location.href = data.url;
+    } catch (e) {
+      showAccountCopyModal({
+        title: 'Could not duplicate',
+        body: e.message || 'network error',
+        offerDownload: true,
+      });
+    }
   }
   if (isPublished) {
-    const fb = document.getElementById('tdoc-fork-btn');
-    if (fb) fb.onclick = forkAndDownload;
+    const dup = document.getElementById('tdoc-duplicate-btn');
+    if (dup) dup.onclick = (e) => { e.stopPropagation(); duplicateDoc(); };
     const sb = document.getElementById('tdoc-share-btn');
     if (sb) sb.onclick = (e) => { e.stopPropagation(); showShareModal(); };
   }
@@ -767,17 +1191,24 @@
     const pb = document.getElementById('tdoc-publish-btn');
     if (pb) pb.onclick = (e) => { e.stopPropagation(); showPublishModal(); };
   }
-  function triggerForkDownload(slug, version) {
-    const a = document.createElement('a');
-    a.href = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=1`;
-    a.download = `${slug}-v${version}-fork.html`;
-    document.body.appendChild(a); a.click(); a.remove();
-  }
-  if (isFork) {
-    // Save As: same download as Fork, but from within fork mode (no /fork open
-    // since we ARE the fork tab already).
-    const sa = document.getElementById('tdoc-saveas-btn');
-    if (sa) sa.onclick = () => triggerForkDownload(slug, version);
+
+  const dlBtn = document.getElementById('tdoc-download-btn');
+  const dlMenu = document.getElementById('tdoc-download-menu');
+  if (dlBtn && dlMenu) {
+    dlBtn.onclick = (e) => {
+      e.stopPropagation();
+      const open = dlMenu.classList.toggle('open');
+      dlBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (copyMenu) copyMenu.classList.remove('open');
+    };
+    dlMenu.querySelectorAll('button').forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        dlMenu.classList.remove('open');
+        dlBtn.setAttribute('aria-expanded', 'false');
+        startDownload(b.dataset.format);
+      };
+    });
   }
 
   // Version picker — clicking a row navigates to /d/<slug>/v/<n>. The
@@ -804,43 +1235,269 @@
 
   const copyBtn = document.getElementById('tdoc-copy-md-btn');
   const copyMenu = document.getElementById('tdoc-copy-md-menu');
-  copyBtn.onclick = (e) => { e.stopPropagation(); copyMenu.classList.toggle('open'); };
-  copyMenu.querySelectorAll('button').forEach(b => {
-    b.onclick = async (e) => {
+  if (copyBtn && copyMenu) {
+    copyBtn.onclick = (e) => {
       e.stopPropagation();
-      copyMenu.classList.remove('open');
-      await window.__tdocCopyDocMd(b.dataset.mode === 'doc-comments');
+      copyMenu.classList.toggle('open');
+      if (dlMenu) dlMenu.classList.remove('open');
+      if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
     };
-  });
+    copyMenu.querySelectorAll('button').forEach(b => {
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        copyMenu.classList.remove('open');
+        await window.__tdocCopyDocMd(b.dataset.mode === 'doc-comments');
+      };
+    });
+  }
 
   const moreBtn = document.getElementById('tdoc-more-btn');
   const secMenu = document.getElementById('tdoc-secondary-menu');
-  moreBtn.onclick = (e) => { e.stopPropagation(); secMenu.classList.toggle('open'); };
-  secMenu.querySelectorAll('button').forEach(b => {
-    b.onclick = (e) => {
-      e.stopPropagation();
-      secMenu.classList.remove('open');
-      if (b.dataset.action === 'repo') window.open('https://github.com/serenakeyitan/tdoc', '_blank', 'noopener');
-      if (b.dataset.action === 'fork') forkAndDownload();
-      if (b.dataset.action === 'share') showShareModal();
-      if (b.dataset.action === 'publish') showPublishModal();
-      if (b.dataset.action === 'saveas') triggerForkDownload(slug, version);
-    };
-  });
+  if (moreBtn && secMenu) {
+    moreBtn.onclick = (e) => { e.stopPropagation(); secMenu.classList.toggle('open'); };
+    secMenu.querySelectorAll('button').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        secMenu.classList.remove('open');
+        if (b.dataset.action === 'duplicate') duplicateDoc();
+        if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
+        if (b.dataset.action === 'download-pdf') startDownload('pdf');
+      };
+    });
+  }
 
+
+  let inboxUnreadN = 0;
+  let inboxSig = '';
+  let inboxPollTimer = null;
+  const INBOX_POLL_MS = 8000;
+  function inboxBadgeText(n) {
+    if (!n) return '';
+    return n > 99 ? '99+' : String(n);
+  }
+  function inboxMenuLabel(n) {
+    const txt = inboxBadgeText(n);
+    return txt ? `Notifications (${txt})` : 'Notifications';
+  }
+  function formatRelativeTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const sec = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+    if (sec < 60) return 'now';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+    if (sec < 86400 * 7) return Math.floor(sec / 86400) + 'd';
+    return d.toLocaleString([], { month: 'short', day: 'numeric' });
+  }
+  function inboxRowLabel(row) {
+    const n = row.count || 1;
+    const who = (row.actor && (row.actor.login || row.actor.name)) || 'someone';
+    const title = row.title || row.slug || 'a doc';
+    if (row.kind === 'comment') return n > 1 ? `${n} new comments on ${title}` : `${who} commented on ${title}`;
+    if (row.kind === 'reply') return n > 1 ? `${n} new replies to your comment` : `${who} replied to your comment`;
+    if (row.kind === 'reaction') return n > 1 ? `${n} people reacted to your comment` : `${who} reacted to your comment`;
+    return 'Notification';
+  }
+  // Canonical inbox destination. Never returns /d/undefined — empty slug is ''.
+  function inboxTargetUrl(row, current) {
+    row = row || {};
+    current = current || {};
+    const destSlug = row.slug || current.slug || '';
+    if (!destSlug) return '';
+    const rawVer = row.version != null && row.version !== '' ? row.version : current.version;
+    const destVer = Number(rawVer);
+    const ver = Number.isFinite(destVer) && destVer > 0 ? destVer : 1;
+    const target = row.comment_id || row.thread_id || '';
+    let href = '/d/' + encodeURIComponent(destSlug) + '/v/' + ver;
+    if (target) href += '?comment=' + encodeURIComponent(target);
+    return href;
+  }
+  // Map a comment or reply id to the top-level card that holds it.
+  function findCommentRoot(list, want) {
+    if (!want) return null;
+    const comments = Array.isArray(list) ? list : [];
+    for (let i = 0; i < comments.length; i++) {
+      const c = comments[i];
+      if (!c) continue;
+      if (c.id === want) return c.id;
+      const replies = c.replies || [];
+      for (let j = 0; j < replies.length; j++) {
+        if (replies[j] && replies[j].id === want) return c.id;
+      }
+    }
+    return want;
+  }
+  function inboxFingerprint(body) {
+    const items = (body && Array.isArray(body.items)) ? body.items : [];
+    return `${body && body.unread}|${items.map(i => [i.id, i.count, i.at, i.read].join(':')).join(',')}`;
+  }
+  function paintInboxChrome() {
+    const dot = document.getElementById('tdoc-inbox-dot');
+    if (dot) dot.hidden = !inboxUnreadN;
+    const menu = document.getElementById('tdoc-inbox-open');
+    if (menu) menu.textContent = inboxMenuLabel(inboxUnreadN);
+  }
+  function writeInboxRows(listEl, items, append) {
+    if (!listEl) return;
+    if (!items.length && !append) {
+      listEl.innerHTML = '<p class="muted">No notifications yet.</p>';
+      return;
+    }
+    const html = items.map(row => {
+      const when = formatRelativeTime(row.at);
+      const whenFull = row.at ? new Date(row.at).toLocaleString() : '';
+      const cur = row.read ? '' : ' tdoc-cluster-current';
+      return `<div class="tdoc-cluster-row${cur}" role="button" tabindex="0" data-id="${escapeHtml(row.id)}">
+        ${avatarHTML(row.actor, 'tdoc-cluster-anon')}
+        <span class="tdoc-cluster-snip">${escapeHtml(inboxRowLabel(row))}</span>
+        ${when ? `<span class="muted" title="${escapeHtml(whenFull)}">${escapeHtml(when)}</span>` : ''}
+      </div>`;
+    }).join('');
+    if (!append) listEl.innerHTML = html;
+    else listEl.insertAdjacentHTML('beforeend', html);
+    items.forEach(row => {
+      const btn = listEl.querySelector(`.tdoc-cluster-row[data-id="${CSS.escape(row.id)}"]`);
+      if (!btn) return;
+      btn.dataset.slug = row.slug || '';
+      btn.dataset.version = String(row.version || 1);
+      btn.dataset.comment = row.comment_id || '';
+      btn.dataset.thread = row.thread_id || '';
+      if (btn._bound) return;
+      btn._bound = true;
+      const go = (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        openInboxTarget({
+          slug: btn.dataset.slug, version: btn.dataset.version,
+          comment_id: btn.dataset.comment, thread_id: btn.dataset.thread,
+        });
+        closeAuxModal();
+      };
+      btn.onclick = go;
+      btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); } };
+    });
+  }
+  async function refreshInboxBadge() {
+    if (!identity) return;
+    try {
+      const r = await fetch('/api/notifications/unread', { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const body = await r.json();
+      inboxUnreadN = Number(body.unread) || 0;
+    } catch { return; }
+    paintInboxChrome();
+  }
+  async function tickInbox() {
+    if (!identity || document.hidden) return;
+    if (document.querySelector('.tdoc-reply-form.open, .tdoc-popup, textarea:focus')) return;
+    try {
+      const r = await fetch('/api/notifications?offset=0', { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const body = await r.json();
+      const sig = inboxFingerprint(body);
+      const first = !inboxSig;
+      const changed = sig !== inboxSig;
+      if (typeof body.unread === 'number') inboxUnreadN = body.unread;
+      inboxSig = sig;
+      paintInboxChrome();
+      if (!first && changed) refreshComments({ deepLink: false });
+      const listEl = document.getElementById('tdoc-inbox-list');
+      if (listEl && changed) {
+        const more = document.getElementById('tdoc-inbox-more');
+        if (more) { more.dataset.offset = '0'; more.hidden = !body.has_more; }
+        writeInboxRows(listEl, Array.isArray(body.items) ? body.items : [], false);
+      }
+    } catch {}
+  }
+  function startInboxPoll() {
+    if (inboxPollTimer) return;
+    inboxPollTimer = setInterval(tickInbox, INBOX_POLL_MS);
+  }
+  function stopInboxPoll() {
+    if (inboxPollTimer) { clearInterval(inboxPollTimer); inboxPollTimer = null; }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tickInbox(); });
+  async function markInboxSeen(commentId) {
+    if (!identity || !commentId) return;
+    try {
+      await fetch('/api/notifications/read', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment_id: commentId }),
+      });
+    } catch {}
+    refreshInboxBadge();
+  }
+  function openInboxTarget(row) {
+    const href = inboxTargetUrl(row, { slug, version });
+    if (!href) return;
+    const q = href.indexOf('?');
+    const destPath = q >= 0 ? href.slice(0, q) : href;
+    const destSearch = q >= 0 ? href.slice(q) : '';
+    const herePath = (typeof location !== 'undefined' && location.pathname) || '';
+    // /me and `/` always assign /d/<slug>/v/<n>?comment=. Same-doc stays
+    // in place and only replaceState-s the query.
+    if (!isCatalog && herePath === destPath) {
+      const want = (row && (row.comment_id || row.thread_id)) || '';
+      applyCommentDeepLink(want);
+      try {
+        if (destSearch && location.search !== destSearch) history.replaceState(null, '', href);
+      } catch {}
+      return;
+    }
+    location.assign(href);
+  }
+  async function showInboxPanel() {
+    closeAuxModal();
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-aux-modal';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>Notifications</h3>
+        <div id="tdoc-inbox-list"><p class="muted">Loading…</p></div>
+        <div class="actions"><button type="button" id="tdoc-inbox-more" hidden>Load more</button><button type="button" id="tdoc-inbox-close">Close</button></div>
+      </div>`;
+    document.body.appendChild(bg);
+    document.getElementById('tdoc-inbox-close').onclick = closeAuxModal;
+    const more = document.getElementById('tdoc-inbox-more');
+    more.dataset.offset = '0';
+    const paint = async () => {
+      const listEl = document.getElementById('tdoc-inbox-list');
+      const offset = Number(more.dataset.offset) || 0;
+      try {
+        const r = await fetch(`/api/notifications?offset=${offset}`, { credentials: 'same-origin' });
+        if (!r.ok) { listEl.innerHTML = '<p class="muted">Could not load notifications.</p>'; return; }
+        const body = await r.json();
+        const items = Array.isArray(body.items) ? body.items : [];
+        writeInboxRows(listEl, items, offset > 0);
+        more.hidden = !body.has_more;
+        more.onclick = () => { more.dataset.offset = String(offset + items.length); paint(); };
+        if (typeof body.unread === 'number') {
+          inboxUnreadN = body.unread;
+          inboxSig = inboxFingerprint(body);
+          paintInboxChrome();
+        }
+      } catch {
+        listEl.innerHTML = '<p class="muted">Could not load notifications.</p>';
+      }
+    };
+    paint();
+  }
   function renderIdentity() {
     const slot = document.getElementById('tdoc-identity-slot');
-    if (!isPublished) { slot.innerHTML = ''; return; }
+    if (!slot) return;
+    if (!isPublished && !identity) { slot.innerHTML = ''; return; }
     if (identity) {
-      // Profile chip → dropdown. "My docs" is owner-only (the configured
-      // TDOC_OWNER); everyone signed in still gets Sign out.
       slot.innerHTML =
         `<div class="tdoc-menu-wrap">
           <button class="tdoc-chip" id="tdoc-me" aria-haspopup="menu" aria-expanded="false">
             <img src="${escapeHtml(identity.avatar_url || '')}" alt=""><span class="name">${escapeHtml(identity.login)}</span>
+            <span class="tdoc-unread-dot" id="tdoc-inbox-dot" ${inboxUnreadN ? '' : 'hidden'}></span>
           </button>
           <div class="tdoc-menu" id="tdoc-me-menu" role="menu">
-            ${isOwner ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
+            <button id="tdoc-inbox-open" role="menuitem">${escapeHtml(inboxMenuLabel(inboxUnreadN))}</button>
+            ${canSeeMyDocs && !isCatalog ? `<button id="tdoc-my-docs" role="menuitem">My docs</button>` : ''}
             <button id="tdoc-signout" role="menuitem">Sign out</button>
           </div>
         </div>`;
@@ -851,7 +1508,8 @@
         const open = meMenu.classList.toggle('open');
         meBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       };
-      if (isOwner) {
+      document.getElementById('tdoc-inbox-open').onclick = () => { meMenu.classList.remove('open'); showInboxPanel(); };
+      if (canSeeMyDocs && !isCatalog) {
         document.getElementById('tdoc-my-docs').onclick = () => {
           window.open('/me', '_blank', 'noopener');
         };
@@ -860,15 +1518,39 @@
         await fetch('/api/auth/logout', { method: 'POST' });
         identity = null;
         isOwner = false;
+        canSeeMyDocs = false;
+        inboxUnreadN = 0;
+        inboxSig = '';
+        stopInboxPoll();
         renderIdentity();
-        refreshComments();
+        if (!isCatalog) refreshComments();
       };
-    } else {
+      tickInbox();
+      startInboxPoll();
+    } else if (isPublished) {
       slot.innerHTML = `<button class="tdoc-chip signin" id="tdoc-signin">Sign in with GitHub</button>`;
       document.getElementById('tdoc-signin').onclick = startDeviceFlow;
+    } else {
+      slot.innerHTML = '';
     }
   }
   renderIdentity();
+
+  // Catalog (/me): bar + identity only. Comment pins, FAB, and selection
+  // are document chrome and would fetch /api/comments for a fake slug.
+  if (isCatalog) {
+    document.addEventListener('click', (e) => {
+      const t = e.target;
+      if (!t || t.nodeType !== 1) return;
+      if (!t.closest('#tdoc-me') && !t.closest('#tdoc-me-menu')) {
+        const mm = document.getElementById('tdoc-me-menu');
+        const mb = document.getElementById('tdoc-me');
+        if (mm) mm.classList.remove('open');
+        if (mb) mb.setAttribute('aria-expanded', 'false');
+      }
+    });
+    return;
+  }
 
   // ========== Comment layer + FAB ==========
   const commentLayer = document.createElement('div');
@@ -965,11 +1647,10 @@
   footer.className = 'tdoc-footer';
   footer.innerHTML =
     '<div class="tdoc-footer-row">' +
-      '<a href="https://github.com/serenakeyitan/tdoc" target="_blank" rel="noopener">github.com/serenakeyitan/tdoc</a>' +
+      '<a href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener">github.com/tornado-doc/tdoc</a>' +
       '<span class="sep">·</span>' +
-      '<span>built with <a href="https://github.com/serenakeyitan/tdoc" target="_blank" rel="noopener">tdoc</a></span>' +
+      '<span>built with <a href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener">tdoc</a></span>' +
       '<span class="sep">·</span>' +
-      '<span>inspired by <a href="https://x.com/jessepollak/status/2054313757543964857" target="_blank" rel="noopener">bdocs by @jessepollak</a></span>' +
     '</div>';
   document.body.appendChild(footer);
 
@@ -1265,14 +1946,49 @@
   // ========== Reactions + comment cards ==========
   const QUICK_EMOJIS = ['👍', '❤️', '🔥', '🎉', '😂', '🤔', '👀', '🚀', '✅', '❌', '❓', '❗'];
   const QUICK_TEXT_REACTIONS = ['LGTM'];
+  // Text reactions (LGTM) must invert with the page so they stay readable.
+  // Color emoji are bitmaps — wrap them so dark mode can restore native colors.
+  function renderReactionGlyph(s) {
+    const safe = escapeHtml(s);
+    if (QUICK_TEXT_REACTIONS.includes(s)) return safe;
+    return `<span class="tdoc-emoji">${safe}</span>`;
+  }
   const REACT_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="19" y1="6" x2="19" y2="10"/><line x1="21" y1="8" x2="17" y2="8"/></svg>`;
 
+  // Known coding-agent runtimes → brand mark. Honor an explicit avatar_url
+  // first; otherwise map login/name. Unmatched names use the tdoc project
+  // mark (not a lightning bolt). Never show github.com/anthropics.png —
+  // that is Anthropic's "AI" wordmark, not Claude's product star.
+  function isAnthropicCompanyMark(url) {
+    return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
+  }
+  function tdocLogoUrl() {
+    return '/tdoc_logo.svg';
+  }
+  function agentLogoUrl(author) {
+    const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))
+      ? author.avatar_url : null;
+    const key = String((author && (author.login || author.name)) || '').toLowerCase();
+    if (key.includes('claude') || key.includes('anthropic') || isAnthropicCompanyMark(stored)) {
+      return 'https://cdn.simpleicons.org/claude/d97757';
+    }
+    if (stored) return stored;
+    if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+    if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
+      return 'https://github.com/openai.png';
+    }
+    if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
+    if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
+    return tdocLogoUrl();
+  }
   function renderAuthor(author) {
     if (!author) return `<div class="author"><span class="anon">anonymous</span></div>`;
     if (author.kind === 'agent') {
-      // Agent identity (currently always 'tdoc-agent'). No avatar URL — use
-      // a generic icon-circle to differentiate from human commenters.
-      return `<div class="author tdoc-agent-author"><span class="tdoc-agent-badge">⚡</span><span class="login">${escapeHtml(author.login || 'tdoc-agent')}</span></div>`;
+      const label = author.name || author.login || 'tdoc-agent';
+      const title = author.login && author.name && author.login !== author.name ? author.login : label;
+      const logo = agentLogoUrl(author);
+      const mark = `<img src="${escapeHtml(logo)}" alt="" data-tdoc-fallback-anon="tdoc-agent-badge">`;
+      return `<div class="author tdoc-agent-author" title="${escapeHtml(title)}">${mark}<span class="login">${escapeHtml(label)}</span></div>`;
     }
     const avatar = author.avatar_url ? `<img src="${escapeHtml(author.avatar_url)}" alt="">` : '';
     return `<div class="author">${avatar}<span class="login">${escapeHtml(author.login || 'anonymous')}</span></div>`;
@@ -1284,16 +2000,30 @@
     if (!entries.length) return '';
     const chips = entries.map(([emoji, users]) => {
       const mine = users.includes(me);
-      const hasAgent = users.includes('tdoc-agent');
+      const hasAgent = users.some(u => u === 'tdoc-agent' || /agent|codex|claude/i.test(u));
       const cls = [`tdoc-react-chip`, mine ? 'mine' : '', hasAgent ? 'agent' : ''].filter(Boolean).join(' ');
-      return `<span class="${cls}" data-emoji="${escapeHtml(emoji)}" data-target-id="${escapeHtml(target.id)}" data-users="${users.map(escapeHtml).join('\n')}">${escapeHtml(emoji)} ${users.length}</span>`;
+      return `<span class="${cls}" data-emoji="${escapeHtml(emoji)}" data-target-id="${escapeHtml(target.id)}" data-users="${users.map(escapeHtml).join('\n')}">${renderReactionGlyph(emoji)} ${users.length}</span>`;
     }).join('');
     return `<div class="tdoc-reactions" data-target-id="${escapeHtml(target.id)}">${chips}<button class="tdoc-react-add" data-target-id="${escapeHtml(target.id)}" title="Add reaction" aria-label="Add reaction">${REACT_ICON_SVG}</button></div>`;
   }
   function renderReactInline(target) {
     return `<button class="tdoc-react-add inline" data-target-id="${escapeHtml(target.id)}" title="Add reaction" aria-label="Add reaction">${REACT_ICON_SVG}</button>`;
   }
-  function renderReply(reply) {
+  function childrenOf(replies, parentId, rootId) {
+    return (replies || []).filter(r => (r.parent_id || rootId) === parentId);
+  }
+  function replyFormHTML(parentId, hint) {
+    if (isFork) return '';
+    return `<div class="tdoc-reply-form" data-parent-id="${escapeHtml(parentId)}">
+      ${hint ? `<div class="tdoc-reply-to">${escapeHtml(hint)}</div>` : ''}
+      <textarea placeholder="Reply…"></textarea>
+      <div class="tdoc-reply-form-foot">
+        <span class="hint">⌘+Enter to submit · Esc to cancel</span>
+        <button class="tdoc-reply-submit">Reply</button>
+      </div>
+    </div>`;
+  }
+  function renderReply(reply, allReplies, rootId, depth) {
     const canDelete = !isFork && (!isPublished || (identity && reply.author && identity.login === reply.author.login));
     const hasReactions = reply.reactions && Object.values(reply.reactions).some(u => u && u.length > 0);
     const isAgent = reply.author?.kind === 'agent';
@@ -1306,7 +2036,10 @@
           '? question'
         }</span>`
       : '';
-    return `<div class="tdoc-reply${isAgent ? ' tdoc-agent-reply' : ''}" data-comment-id="${escapeHtml(reply.id)}">
+    const kids = childrenOf(allReplies, reply.id, rootId);
+    const who = reply.author?.login || reply.author?.name || 'this reply';
+    const hint = reply.id !== rootId ? `Replying to @${who}` : '';
+    return `<div class="tdoc-reply${isAgent ? ' tdoc-agent-reply' : ''}" data-comment-id="${escapeHtml(reply.id)}" data-depth="${depth}">
       ${renderAuthor(reply.author)}
       ${statusChip}
       <div class="text">${escapeHtml(reply.text)}</div>
@@ -1315,9 +2048,12 @@
         <span>${new Date(reply.created).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
         <span class="actions">
           ${!hasReactions && !isFork ? renderReactInline(reply) : ''}
+          ${isFork ? '' : `<span class="tdoc-reply-toggle" data-id="${escapeHtml(reply.id)}">Reply</span>`}
           ${canDelete ? `<span class="del" data-id="${escapeHtml(reply.id)}">delete</span>` : ''}
         </span>
       </div>
+      ${replyFormHTML(reply.id, hint)}
+      ${kids.length ? `<div class="tdoc-reply-kids">${kids.map(k => renderReply(k, allReplies, rootId, depth + 1)).join('')}</div>` : ''}
     </div>`;
   }
   function buildCard(comment) {
@@ -1332,8 +2068,9 @@
     // and expand its replies so the agent's resolution is visible, not buried.
     const isResolved = comment.status === 'applied';
     const verdict = comment._agentVerdict || 'applied';
+    const resolvedBy = comment._agentActor || comment.agent_actor || 'tdoc-agent';
     const resolvedChip = isResolved
-      ? `<span class="tdoc-resolved-chip" title="Resolved by tdoc-agent${comment.applied_in ? ' in v' + escapeHtml(String(comment.applied_in)) : ''}">✓ ${
+      ? `<span class="tdoc-resolved-chip" title="Resolved by ${escapeHtml(resolvedBy)}${comment.applied_in ? ' in v' + escapeHtml(String(comment.applied_in)) : ''}">✓ ${
           verdict === 'partial' ? 'partially fixed' : verdict === 'question' ? 'needs input' : 'fixed'
         }${comment.applied_in ? ' · v' + escapeHtml(String(comment.applied_in)) : ''}</span>`
       : '';
@@ -1361,21 +2098,20 @@
         // so the resolution is visible at a glance; the full agent reply stays
         // folded under "N reply" until the reader expands it. Keeps the margin
         // column quiet instead of stacking long bot replies inline.
-        const autoOpen = false;
+        const autoOpen = state.openReplyThreads.has(comment.id);
+        const tops = childrenOf(replies, comment.id, comment.id);
+        // Orphans (parent reply deleted) still show under the thread root.
+        const ids = new Set(replies.map(r => r.id).concat([comment.id]));
+        const orphans = replies.filter(r => r.parent_id && !ids.has(r.parent_id));
+        const roots = tops.concat(orphans.filter(o => !tops.includes(o)));
         return `
         <div class="tdoc-replies-toggle${autoOpen ? ' open' : ''}" data-id="${escapeHtml(comment.id)}">
           <svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}
         </div>
-        <div class="tdoc-replies${autoOpen ? ' open' : ''}">${replies.map(r => renderReply(r)).join('')}</div>
+        <div class="tdoc-replies${autoOpen ? ' open' : ''}">${roots.map(r => renderReply(r, replies, comment.id, 1)).join('')}</div>
       `; })() : ''}
-      ${isFork ? '' : `<div class="tdoc-reply-form" data-parent-id="${escapeHtml(comment.id)}">
-        <textarea placeholder="Reply…"></textarea>
-        <div class="tdoc-reply-form-foot">
-          <span class="hint">⌘+Enter to submit · Esc to cancel</span>
-          <button class="tdoc-reply-submit">Reply</button>
-        </div>
-      </div>`}
+      ${replyFormHTML(comment.id, '')}
     `;
 
     const repliesToggle = card.querySelector('.tdoc-replies-toggle');
@@ -1385,6 +2121,8 @@
         e.stopPropagation();
         const open = repliesEl.classList.toggle('open');
         repliesToggle.classList.toggle('open', open);
+        if (open) state.openReplyThreads.add(comment.id);
+        else state.openReplyThreads.delete(comment.id);
         requestAnimationFrame(repositionCards);
       };
     }
@@ -1413,18 +2151,32 @@
       };
     });
 
-    const replyToggle = card.querySelector('.tdoc-reply-toggle');
-    const replyForm = card.querySelector('.tdoc-reply-form');
-    if (replyToggle && replyForm) {
-      replyToggle.onclick = (e) => {
-        e.stopPropagation();
-        if (isPublished && !identity) { startDeviceFlow(); return; }
-        replyForm.classList.toggle('open');
-        if (replyForm.classList.contains('open')) {
-          replyForm.querySelector('textarea').focus();
-          requestAnimationFrame(repositionCards);
-        }
-      };
+    const wireReplyForm = (replyForm) => {
+      const parentId = replyForm.dataset.parentId;
+      const toggle = card.querySelector(`.tdoc-reply-toggle[data-id="${CSS.escape(parentId)}"]`);
+      if (toggle) {
+        toggle.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (isPublished && !identity) { startDeviceFlow(); return; }
+          // Pin so a hover-opened card does not collapse when the pointer
+          // leaves the pin or the form opening shifts layout.
+          pinOpenCard(comment.id);
+          state.openReplyThreads.add(comment.id);
+          const repliesEl = card.querySelector('.tdoc-replies');
+          const repliesToggle = card.querySelector('.tdoc-replies-toggle');
+          if (repliesEl && repliesEl.childElementCount) {
+            repliesEl.classList.add('open');
+            repliesToggle?.classList.add('open');
+          }
+          card.querySelectorAll('.tdoc-reply-form.open').forEach(f => { if (f !== replyForm) f.classList.remove('open'); });
+          replyForm.classList.toggle('open');
+          if (replyForm.classList.contains('open')) {
+            replyForm.querySelector('textarea').focus();
+            requestAnimationFrame(() => positionFloatingCard(comment.id));
+          }
+        };
+      }
       const replyTa = replyForm.querySelector('textarea');
       const submitReply = async () => {
         const text = replyTa.value.trim();
@@ -1434,7 +2186,7 @@
           r = await fetch('/api/comments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug, parent_id: comment.id, text, version })
+            body: JSON.stringify({ slug, parent_id: parentId, text, version })
           });
         } catch (e) {
           alert('Could not post reply: network error'); // keep the text — don't clear
@@ -1448,6 +2200,10 @@
         }
         replyTa.value = '';
         replyForm.classList.remove('open');
+        // Keep this thread expanded after refresh — posting a reply must
+        // not fold the list the user was just looking at.
+        state.openReplyThreads.add(comment.id);
+        pinOpenCard(comment.id);
         await refreshComments();
       };
       replyForm.querySelector('.tdoc-reply-submit').onclick = (e) => { e.stopPropagation(); submitReply(); };
@@ -1455,7 +2211,8 @@
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitReply(); }
         if (e.key === 'Escape') { replyForm.classList.remove('open'); requestAnimationFrame(repositionCards); }
       });
-    }
+    };
+    card.querySelectorAll('.tdoc-reply-form').forEach(wireReplyForm);
 
     card.querySelectorAll('.tdoc-react-chip').forEach(chip => {
       chip.onclick = async (e) => {
@@ -1509,7 +2266,7 @@
     emojiPicker = document.createElement('div');
     emojiPicker.className = 'tdoc-emoji-picker';
     emojiPicker.innerHTML =
-      QUICK_EMOJIS.map(e => `<button data-emoji="${e}">${e}</button>`).join('') +
+      QUICK_EMOJIS.map(e => `<button data-emoji="${e}">${renderReactionGlyph(e)}</button>`).join('') +
       QUICK_TEXT_REACTIONS.map(t => `<button class="tdoc-emoji-text" data-emoji="${t}">${t}</button>`).join('');
     document.body.appendChild(emojiPicker);
     const r = anchorBtn.getBoundingClientRect();
@@ -1598,7 +2355,7 @@
     const mark = state.anchorMarks.get(c.id);
     if (mark && (mark.ranges?.[0] || mark.el)) {
       const target = mark.ranges?.[0] || mark.el;
-      const r = target.getBoundingClientRect();
+      const r = firstVisibleClientRect(target) || target.getBoundingClientRect();
       // For element anchors expose the element + its rect so renderPins can
       // spread multiple comments DOWN a tall element instead of stacking them
       // all at its top edge. (targetEl is the live element; el may be the outline.)
@@ -1624,7 +2381,8 @@
     // its Y; pins within SAME_LINE_GAP px merge into one count badge. The floating
     // card (hover/click) is positioned separately by openFloatingCard().
     renderPins();
-    // Keep any currently-open floating card glued to its pin on scroll/resize.
+    // Re-place an open card next to its pin. Do not lock it to the viewport —
+    // the card is document-absolute and should scroll away with the page.
     if (state.pinnedId) positionFloatingCard(state.pinnedId);
     else if (state.hoverId) positionFloatingCard(state.hoverId);
   }
@@ -1736,11 +2494,13 @@
   }
 
   function avatarHTML(author, anonClass) {
-    const url = author?.avatar_url;
-    // onerror: if the avatar 404s / is CORS-blocked, swap the broken <img> for
-    // the anon placeholder so the pin/row never shows a broken-image glyph.
+    const url = (author && author.kind === 'agent') ? agentLogoUrl(author) : author?.avatar_url;
+    // If the avatar 404s / is CORS-blocked, the document-level capture-phase
+    // 'error' listener installed at boot swaps the broken <img> for the anon
+    // placeholder (data-tdoc-fallback-anon carries which class to use) — no
+    // inline onerror= attribute, which a nonce-based CSP would block anyway.
     return url
-      ? `<img src="${escapeHtml(url)}" alt="" onerror="this.outerHTML='&lt;span class=&quot;${anonClass}&quot;&gt;&lt;/span&gt;'">`
+      ? `<img src="${escapeHtml(url)}" alt="" data-tdoc-fallback-anon="${anonClass}">`
       : `<span class="${anonClass}"></span>`;
   }
 
@@ -1788,25 +2548,28 @@
   function hideCardIfIdle(id) {
     if (state.pinnedId === id || state.hoverId === id) return;
     const card = state.cardEls.get(id);
+    // A Reply form in progress must keep the card up — clicking Reply used
+    // to close a hover-opened card as soon as the cursor left the pin.
+    if (card && card.querySelector('.tdoc-reply-form.open')) return;
     if (card) card.classList.remove('tdoc-floating-open');
+  }
+  function pinOpenCard(id) {
+    if (state.narrow || !id) return;
+    state.pinnedId = id;
+    state.hoverId = id;
+    showCard(id);
+    markPinActive(id, true);
   }
   function positionFloatingCard(id) {
     const card = state.cardEls.get(id);
     if (!card) return;
     const geo = gutterGeometry();
     const row = commentY(state.activeComments.find(c => c.id === id), geo);
-    let y = row ? row.y : geo.articleTop;
+    const y = row ? row.y : geo.articleTop;
     card.style.left = geo.cardLeft + 'px';
-    // Flip up if the card would run past the bottom of the viewport.
+    // Park at the pin's document Y. Do not clamp to the viewport — that made
+    // an expanded card stick to the camera as the user scrolled.
     card.style.top = y + 'px';
-    requestAnimationFrame(() => {
-      const h = card.offsetHeight;
-      const vpBottom = window.scrollY + window.innerHeight - 12;
-      // Top floor must clear the fixed bar (and the old-version strip when shown)
-      // so a flipped-up card isn't occluded by them.
-      const topFloor = window.scrollY + (document.body.classList.contains('tdoc-has-oldver-strip') ? 84 : 56);
-      if (y + h > vpBottom) card.style.top = Math.max(topFloor, vpBottom - h) + 'px';
-    });
   }
   function hoverOpen(id) {
     state.hoverId = id;
@@ -1869,6 +2632,10 @@
   function closeClusterPopover() { clusterPop.classList.remove('open'); clusterPop._key = null; }
   document.addEventListener('click', (e) => {
     if (!clusterPop.contains(e.target) && !e.target.closest?.('.tdoc-pin-cluster')) closeClusterPopover();
+    // Inbox / Share / profile chrome is overlay UI. A click there must not
+    // count as "outside the card" or opening a notification would pin the
+    // comment and the same click would immediately unpin it.
+    if (isInUI(e.target)) return;
     // Click outside an open pinned card (and not on a pin) unpins it.
     if (state.pinnedId && !e.target.closest?.('.tdoc-margin-comment') && !e.target.closest?.('.tdoc-pin')) {
       const id = state.pinnedId; state.pinnedId = null; hideCardIfIdle(id); markPinActive(id, false);
@@ -1881,7 +2648,12 @@
   }, true);
   commentLayer.addEventListener('mouseleave', (e) => {
     const card = e.target.closest?.('.tdoc-margin-comment.tdoc-floating-open');
-    if (card) { const id = [...state.cardEls.entries()].find(([, el]) => el === card)?.[0]; if (id) hoverClose(id); }
+    if (!card) return;
+    // Capture-phase mouseleave fires for every child. Ignore moves that stay
+    // inside the same card (Reply → textarea, layout shift, etc.).
+    if (e.relatedTarget && card.contains(e.relatedTarget)) return;
+    const id = [...state.cardEls.entries()].find(([, el]) => el === card)?.[0];
+    if (id) hoverClose(id);
   }, true);
 
   function renderGhostMarker(commentId, pageY) {
@@ -1929,6 +2701,7 @@
     // stable positions and just the visual cue swap. Cards keep whatever
     // layout repositionCards() established at refresh/resize time.
     scrollAnchorIntoView(id);
+    markInboxSeen(id);
   }
 
   function scrollAnchorIntoView(id) {
@@ -1937,9 +2710,9 @@
     let anchorRect = null;
     // Prefer the underlying TARGET ELEMENT (canvas/img/video etc) over the
     // overlay outline div — same rect, but more semantically correct.
-    if (mark.ranges?.[0]) anchorRect = mark.ranges[0].getBoundingClientRect();
-    else if (mark.targetEl?.getBoundingClientRect) anchorRect = mark.targetEl.getBoundingClientRect();
-    else if (mark.el?.getBoundingClientRect) anchorRect = mark.el.getBoundingClientRect();
+    if (mark.ranges?.[0]) anchorRect = firstVisibleClientRect(mark.ranges[0]);
+    else if (mark.targetEl) anchorRect = firstVisibleClientRect(mark.targetEl);
+    else if (mark.el) anchorRect = firstVisibleClientRect(mark.el);
     if (!anchorRect) return;
 
     // We consider the anchor "comfortably visible" if its top is between the
@@ -1990,7 +2763,8 @@
   }
 
   // ========== refreshComments ==========
-  async function refreshComments() {
+  async function refreshComments(opts) {
+    const allowDeepLink = !opts || opts.deepLink !== false;
     // Preserve which comment had its floating card pinned open (wide mode) so a
     // reply/react/re-anchor that triggers a refresh doesn't make the card the
     // user is interacting with vanish. resetAnchors() nulls state.pinnedId, so
@@ -2022,6 +2796,13 @@
 
     const fabCount = document.getElementById('tdoc-fab-count');
     if (fabCount) fabCount.textContent = state.activeComments.length;
+
+    const want = allowDeepLink
+      ? (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })()
+      : null;
+    const deepRoot = findCommentRoot(state.activeComments, want);
+    // Expand the thread before buildCard so a reply deep-link is not born collapsed.
+    if (deepRoot) state.openReplyThreads.add(deepRoot);
 
     let textCache = state.activeComments.some(c => (c.anchor?.kind || (c.anchor?.text ? 'text' : null)) === 'text')
       ? collectTextNodes() : null;
@@ -2084,10 +2865,10 @@
     evaluateLayout();
     requestAnimationFrame(() => {
       repositionCards();
-      // Restore the pinned floating card if its comment survived the refresh
-      // and we're in wide (pins) mode. Runs after repositionCards so the pin
-      // elements exist to mark active.
-      if (keepPinnedId && !state.narrow && state.cardEls.has(keepPinnedId)) {
+      if (want) {
+        applyCommentDeepLink(want);
+      } else if (keepPinnedId && !state.narrow && state.cardEls.has(keepPinnedId)) {
+        // Restore the pinned floating card if its comment survived the refresh.
         // Use setActiveComment (not the manual pin/show/mark trio) so the
         // card's .active class, anchor highlight, activeId, AND the pin state
         // are all re-established together. The manual version desynced activeId
@@ -2095,6 +2876,31 @@
         setActiveComment(keepPinnedId);
       }
     });
+  }
+
+  function applyCommentDeepLink(want) {
+    if (!want) return;
+    const root = findCommentRoot(state.activeComments, want);
+    if (root) {
+      state.openReplyThreads.add(root);
+      // Same-doc inbox clicks run after cards already exist. The set is
+      // only consulted at buildCard — collapsed threads stay display:none
+      // until .tdoc-replies.open is on the live card.
+      const card = state.cardEls.get(root);
+      if (card) {
+        card.querySelector('.tdoc-replies')?.classList.add('open');
+        card.querySelector('.tdoc-replies-toggle')?.classList.add('open');
+      }
+    }
+    if (state.narrow) commentLayer.classList.add('open');
+    // Opening a reply must not activate the root — that would mark the
+    // root's own notifications (e.g. a reaction) as read.
+    if (want === root && state.cardEls.has(root)) setActiveComment(root);
+    else if (root && state.cardEls.has(root)) pinOpenCard(root);
+    const el = document.querySelector(`[data-comment-id="${CSS.escape(want)}"]`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+    if (root) requestAnimationFrame(repositionCards);
+    markInboxSeen(want);
   }
 
   // Click on a Highlight-API range → activate. Highlight API has no per-range
@@ -2156,62 +2962,40 @@
   // and once it does, we must bump our interval by ≥5s or it will keep
   // refusing forever. Use a chained setTimeout so each tick can adjust the
   // delay before scheduling the next.
-  let pollTimer = null;
-  let pollInterval = 5;
+  // Whoever ran the shared flow — this bar, or the onboarding dialog — the
+  // page has to stop showing a signed-out state. signin.js announces success
+  // once; this is the overlay's half of that.
+  document.addEventListener('tdoc:signedin', function (e) {
+    if (!e.detail) return;
+    identity = e.detail;
+    // Deliberately not refreshing isOwner here: since #162 it means "owns THIS
+    // doc" and the worker sends it explicitly, so inferring it from
+    // /api/auth/me would put the worker-owner sense back on a per-doc field.
+    // canSeeMyDocs is the flag that governs the My docs entry.
+    if (e.detail.canSeeMyDocs != null) canSeeMyDocs = !!e.detail.canSeeMyDocs;
+    renderIdentity();
+    refreshComments();
+  });
+
+  // Sign-in lives in server/signin.js, shared with the neutral landing page so
+  // the protocol, the backoff and the copy exist once. This wrapper only says
+  // what the overlay does afterwards.
   async function startDeviceFlow() {
     if (!isPublished) return;
-    let data;
+    if (!window.__tdocSignIn) return;
+    let ident;
     try {
-      const r = await fetch('/api/auth/device/start', { method: 'POST' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      data = await r.json();
+      ident = await window.__tdocSignIn();
     } catch (e) {
-      // Network failure or a non-JSON edge error (e.g. an HTML 502) must not
-      // leave an unhandled promise rejection with no feedback.
-      alert('Sign-in error: could not reach the sign-in service. Please try again.');
-      return;
+      return;  // cancelled
     }
-    if (!data || data.error || !data.user_code || !data.verification_uri) {
-      alert('Sign-in error: ' + ((data && (data.message || data.error)) || 'unexpected response'));
-      return;
+    identity = ident;
+    renderIdentity();
+    refreshComments();
+    if (pendingDuplicate) {
+      pendingDuplicate = false;
+      duplicateDoc();
     }
-    showDeviceModal(data);
-    // Only open the verification URL if it's an https GitHub URL — never window.open an
-    // arbitrary string from the response.
-    if (isGithubHttpsUrl(data.verification_uri)) window.open(data.verification_uri, '_blank');
-    pollInterval = Math.max(5, data.interval || 5);
-    schedulePoll(data.device_code);
-  }
-  function isGithubHttpsUrl(u) {
-    try {
-      const url = new URL(String(u));
-      return url.protocol === 'https:' && /(^|\.)github\.com$/.test(url.hostname);
-    } catch { return false; }
-  }
-  function schedulePoll(device_code) {
-    pollTimer = setTimeout(() => pollDevice(device_code), pollInterval * 1000);
-  }
-  function showDeviceModal(data) {
-    const bg = document.createElement('div');
-    bg.className = 'tdoc-modal-bg';
-    bg.id = 'tdoc-device-modal';
-    bg.innerHTML = `
-      <div class="tdoc-modal">
-        <h3>Sign in with GitHub</h3>
-        <div class="step"><span class="n">1</span><span>Copy this code:</span></div>
-        <div class="code" id="tdoc-user-code">${escapeHtml(data.user_code)}</div>
-        <div class="step"><span class="n">2</span><span>Paste it at <b>${escapeHtml(data.verification_uri)}</b> (opened in a new tab) and approve.</span></div>
-        <div class="step"><span class="n">3</span><span class="status" id="tdoc-poll-status">Waiting for you to approve…</span></div>
-        <div class="actions"><button id="tdoc-modal-cancel">Cancel</button></div>
-      </div>`;
-    document.body.appendChild(bg);
-    document.getElementById('tdoc-user-code').onclick = () => navigator.clipboard?.writeText(data.user_code);
-    document.getElementById('tdoc-modal-cancel').onclick = closeDeviceModal;
-  }
-  function closeDeviceModal() {
-    const m = document.getElementById('tdoc-device-modal');
-    if (m) m.remove();
-    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   }
 
   // ========== Publish / Share modals ==========
@@ -2276,80 +3060,276 @@
       }
     };
   }
+  function publicShareUrl() {
+    // `/` is the site. Copying the storage path tells a visitor they are
+    // looking at somebody's document, which is the same leak the bar crumb
+    // was. /d/ keeps the versioned URL.
+    return cfg.isLanding
+      ? `${location.origin}/`
+      : `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+  }
   function showShareModal() {
+    // One Share button: owners get copy-link + access settings in the same
+    // panel; everyone else gets copy-link only. No separate "Share settings".
+    if (cfg.ownerManage) { showManageModal(); return; }
     closeAuxModal();
-    const url = `${location.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+    const url = publicShareUrl();
     const bg = document.createElement('div');
     bg.className = 'tdoc-modal-bg';
     bg.id = 'tdoc-aux-modal';
     bg.innerHTML = `
       <div class="tdoc-modal">
-        <h3>Share this doc</h3>
+        <h3>Share</h3>
         <div class="code" id="tdoc-share-url" style="font-size:14px;letter-spacing:0;text-align:left;cursor:copy;">${escapeHtml(url)}</div>
         <div class="actions" style="justify-content:flex-start;gap:8px;margin-top:0;margin-bottom:10px;">
           <button class="primary" id="tdoc-share-copy">Copy link</button>
         </div>
         <p class="muted">Anyone with this link can read. To comment, they sign in with GitHub.</p>
-        <div class="divider">
-          <p class="danger" style="margin:0 0 6px;"><b>Unpublish</b></p>
-          <p class="muted" style="margin:0 0 6px;font-size:12px;">Unpublish requires the upload token, which only lives on your laptop. Run this locally:</p>
-          <div class="code" style="font-size:13px;letter-spacing:0;text-align:left;cursor:copy;" id="tdoc-share-unpub">/tdoc unpublish ${escapeHtml(slug)}</div>
-        </div>
         <div class="actions"><button id="tdoc-share-close">Close</button></div>
       </div>`;
     document.body.appendChild(bg);
     document.getElementById('tdoc-share-close').onclick = closeAuxModal;
     document.getElementById('tdoc-share-copy').onclick = () => navigator.clipboard?.writeText(url);
     document.getElementById('tdoc-share-url').onclick = () => navigator.clipboard?.writeText(url);
-    document.getElementById('tdoc-share-unpub').onclick = (e) => {
-      navigator.clipboard?.writeText(e.currentTarget.textContent);
+  }
+  // ========== Owner manage / Share panel (Delete / Unpublish / access) =====
+  // JUL-36, reworked 2026-08-13 (julie: browser owner management should work
+  // off the GitHub login, like Google Docs — no pasted token). Opened from
+  // the single Share button (showShareModal dispatches here when
+  // cfg.ownerManage is set). Gated on cfg.ownerManage, which the worker only
+  // populates in the per-request boot config when THIS request's session
+  // passed isDocOwnerSession() server-side (worker.js's /d/ route). A
+  // non-owner's config carries cfg.ownerManage === null — every function
+  // below bails before creating any DOM, so there is no hidden button, just
+  // nothing rendered for them.
+  //
+  // A published doc is arbitrary HTML the owner authored, so this being
+  // session-authorized (no token) is safe ONLY because the worker now sends
+  // a CSP (see worker.js cspHeader()) on every doc response that blocks
+  // author <script>/onclick content outright — a doc can't ride the owner's
+  // session cookie into these routes anymore. ownerFetch() below relies on
+  // the browser's default same-origin credential behavior (cookie sent
+  // automatically); `credentials: 'same-origin'` is passed explicitly for
+  // clarity, not because it changes behavior here.
+  function closeManageModal() {
+    const m = document.getElementById('tdoc-manage-modal');
+    if (m) m.remove();
+  }
+  function closeManageConfirm() {
+    const m = document.getElementById('tdoc-manage-confirm');
+    if (m) m.remove();
+  }
+  function showManageConfirm({ title, body, confirmLabel, danger, onConfirm }) {
+    closeManageConfirm();
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-manage-confirm';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${body}</p>
+        <div class="status" id="tdoc-manage-confirm-status" style="display:none;"></div>
+        <div class="actions">
+          <button type="button" id="tdoc-manage-confirm-cancel">Cancel</button>
+          <button type="button" id="tdoc-manage-confirm-go" class="${danger ? 'danger' : 'primary'}">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(bg);
+    document.getElementById('tdoc-manage-confirm-cancel').onclick = closeManageConfirm;
+    bg.addEventListener('click', (e) => { if (e.target === bg) closeManageConfirm(); });
+    document.getElementById('tdoc-manage-confirm-go').onclick = async () => {
+      const status = document.getElementById('tdoc-manage-confirm-status');
+      const go = document.getElementById('tdoc-manage-confirm-go');
+      go.disabled = true;
+      status.style.display = 'block';
+      status.textContent = 'Working…';
+      try {
+        await onConfirm(status);
+      } catch (e) {
+        status.textContent = 'Failed: ' + e.message;
+        go.disabled = false;
+      }
     };
   }
-  async function pollDevice(device_code) {
-    const status = document.getElementById('tdoc-poll-status');
-    pollTimer = null;
-    try {
-      const r = await fetch('/api/auth/device/poll', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code })
-      });
-      const data = await r.json();
-      if (data.ok && data.identity) {
-        identity = data.identity;
-        closeDeviceModal();
-        renderIdentity();
-        refreshComments();
-        return;
-      }
-      // slow_down: GitHub explicitly told us to back off. Bump interval by 5s
-      // (per RFC 8628 §3.5) before scheduling the next poll, otherwise GitHub
-      // will keep rejecting at the same cadence forever.
-      if (data.error === 'slow_down') {
-        // GitHub may suggest a new interval; otherwise add 5s.
-        pollInterval = Math.max(pollInterval + 5, Number(data.interval) || 0);
-        schedulePoll(device_code);
-        return;
-      }
-      if (data.error === 'authorization_pending' || (data.pending && !data.error)) {
-        schedulePoll(device_code);
-        return;
-      }
-      if (data.error === 'expired_token' || data.error === 'access_denied') {
-        if (status) status.textContent = 'Code expired or denied. Try again.';
-        return;
-      }
-      // Any other error (no_user, github_unreachable, 500) — show it and stop.
-      if (data.error || !r.ok) {
-        if (status) status.textContent = 'Sign-in failed: ' + (data.message || data.error || `HTTP ${r.status}`) + '. Try again.';
-        return;
-      }
-      // Fallback: unknown shape, keep polling at current interval.
-      schedulePoll(device_code);
-    } catch (e) {
-      if (status) status.textContent = 'Network error: ' + e.message + ' — retrying…';
-      schedulePoll(device_code);
+  // No Authorization header, no token — the owner's session cookie is sent
+  // automatically on this same-origin request (see doc comment above).
+  async function ownerFetch(url, opts) {
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const r = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || err.message || ('HTTP ' + r.status));
     }
+    return r.json().catch(() => ({}));
   }
+  const VIS_OPTIONS = [['public', 'Public'], ['unlisted', 'Unlisted'], ['private', 'Private']];
+  const HISTORY_OPTIONS = [['owner', 'Owner only'], ['invited', 'Invited'], ['public', 'Everyone']];
+  const COMMENTING_OPTIONS = [['signed_in', 'Signed in'], ['invited', 'Invited'], ['owner', 'Owner only'], ['off', 'Off']];
+  function renderSeg(id, current) {
+    const seg = document.getElementById(id);
+    if (!seg) return;
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.value === current));
+  }
+  function showManageModal() {
+    if (!cfg.ownerManage) return; // no owner data for this request → nothing to render
+    closeAuxModal();
+    const om = cfg.ownerManage;
+    const url = publicShareUrl();
+    const access = {
+      visibility: 'unlisted', history_visibility: 'owner', commenting: 'signed_in', allowed_users: [],
+      ...(om.access || {}),
+    };
+    const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+    const bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg';
+    bg.id = 'tdoc-manage-modal';
+    bg.innerHTML = `
+      <div class="tdoc-modal">
+        <h3>Share</h3>
+        <div class="code" id="tdoc-share-url" style="font-size:14px;letter-spacing:0;text-align:left;cursor:copy;">${escapeHtml(url)}</div>
+        <div class="actions" style="justify-content:flex-start;gap:8px;margin-top:0;margin-bottom:4px;">
+          <button type="button" class="primary" id="tdoc-share-copy">Copy link</button>
+        </div>
+        <p class="muted">${escapeHtml(slug)} · ${plural(om.versionCount, 'version')} · ${plural(om.commentCount, 'comment')}</p>
+        <div class="manage-section">
+          <label class="field">Visibility</label>
+          <div class="tdoc-seg" id="tdoc-vis-seg">
+            ${VIS_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          </div>
+          <p class="manage-hint" id="tdoc-vis-status">&nbsp;</p>
+        </div>
+        <div class="manage-section">
+          <label class="field">Who can see version history</label>
+          <div class="tdoc-seg" id="tdoc-hist-seg">
+            ${HISTORY_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          </div>
+        </div>
+        <div class="manage-section">
+          <label class="field">Who can comment</label>
+          <div class="tdoc-seg" id="tdoc-comment-seg">
+            ${COMMENTING_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          </div>
+        </div>
+        <div class="manage-section">
+          <label class="field" for="tdoc-mgmt-allowed">Allowed users (private / invited)</label>
+          <input type="text" id="tdoc-mgmt-allowed" autocomplete="off" placeholder="github-login, another-login" value="${escapeHtml((access.allowed_users || []).join(', '))}">
+          <p class="manage-hint" id="tdoc-allowed-status">&nbsp;</p>
+        </div>
+        <div class="manage-section">
+          <button type="button" id="tdoc-mgmt-unpublish" class="manage-action">Unpublish</button>
+          <p class="manage-hint">Sets this doc to Private. Versions and comments are kept — republish anytime.</p>
+        </div>
+        <div class="manage-section">
+          <button type="button" id="tdoc-mgmt-delete" class="manage-action danger-btn">Delete doc…</button>
+          <p class="manage-hint">Permanently removes this doc, every version, and every comment. No undo.</p>
+        </div>
+        <div class="actions"><button type="button" id="tdoc-share-close">Close</button></div>
+      </div>`;
+    document.body.appendChild(bg);
+    renderSeg('tdoc-vis-seg', access.visibility);
+    renderSeg('tdoc-hist-seg', access.history_visibility);
+    renderSeg('tdoc-comment-seg', access.commenting);
+    document.getElementById('tdoc-share-close').onclick = closeManageModal;
+    document.getElementById('tdoc-share-copy').onclick = () => navigator.clipboard?.writeText(url);
+    document.getElementById('tdoc-share-url').onclick = () => navigator.clipboard?.writeText(url);
+    bg.addEventListener('click', (e) => { if (e.target === bg) closeManageModal(); });
+
+    // Shared PATCH /api/doc/access helper — merges `patch` into the local
+    // `access` mirror on success so re-renders (renderSeg) reflect it.
+    async function patchAccess(patch, statusEl, successMsg) {
+      statusEl.textContent = 'Saving…';
+      try {
+        await ownerFetch('/api/doc/access', {
+          method: 'PATCH',
+          body: JSON.stringify({ slug, access: patch }),
+        });
+        Object.assign(access, patch);
+        statusEl.textContent = successMsg;
+      } catch (e) {
+        statusEl.textContent = 'Failed: ' + e.message;
+      }
+    }
+
+    document.getElementById('tdoc-vis-seg').querySelectorAll('button').forEach(b => {
+      b.onclick = async () => {
+        const value = b.dataset.value;
+        if (value === access.visibility) return;
+        const status = document.getElementById('tdoc-vis-status');
+        const commit = async () => {
+          await patchAccess({ visibility: value }, status, 'Saved: ' + VIS_OPTIONS.find(([v]) => v === value)[1]);
+          renderSeg('tdoc-vis-seg', access.visibility);
+        };
+        // Switching TO private is the same effect as Unpublish (takes the
+        // doc offline) — worth a confirm even though it's reversible.
+        if (value === 'private') {
+          showManageConfirm({
+            title: 'Switch to Private?',
+            body: 'Only you (and anyone on the allowlist) will be able to open this doc.',
+            confirmLabel: 'Switch to Private',
+            onConfirm: async (confirmStatus) => {
+              await commit();
+              confirmStatus.textContent = 'Done.';
+              closeManageConfirm();
+            },
+          });
+        } else {
+          await commit();
+        }
+      };
+    });
+
+    document.getElementById('tdoc-hist-seg').querySelectorAll('button').forEach(b => {
+      b.onclick = async () => {
+        const value = b.dataset.value;
+        if (value === access.history_visibility) return;
+        await patchAccess({ history_visibility: value }, document.getElementById('tdoc-vis-status'), 'Saved.');
+        renderSeg('tdoc-hist-seg', access.history_visibility);
+      };
+    });
+
+    document.getElementById('tdoc-comment-seg').querySelectorAll('button').forEach(b => {
+      b.onclick = async () => {
+        const value = b.dataset.value;
+        if (value === access.commenting) return;
+        await patchAccess({ commenting: value }, document.getElementById('tdoc-vis-status'), 'Saved.');
+        renderSeg('tdoc-comment-seg', access.commenting);
+      };
+    });
+
+    const allowedInput = document.getElementById('tdoc-mgmt-allowed');
+    allowedInput.addEventListener('change', async () => {
+      const list = allowedInput.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+      await patchAccess({ allowed_users: list }, document.getElementById('tdoc-allowed-status'), 'Saved.');
+    });
+
+    document.getElementById('tdoc-mgmt-unpublish').onclick = () => {
+      showManageConfirm({
+        title: 'Take this doc offline?',
+        body: 'This sets visibility to <b>Private</b> — only you can open it until you publish again. Comments and version history are kept.',
+        confirmLabel: 'Unpublish',
+        onConfirm: async (status) => {
+          await patchAccess({ visibility: 'private' }, status, 'Unpublished.');
+          renderSeg('tdoc-vis-seg', 'private');
+          setTimeout(closeManageConfirm, 700);
+        },
+      });
+    };
+
+    document.getElementById('tdoc-mgmt-delete').onclick = () => {
+      showManageConfirm({
+        title: 'Delete this doc?',
+        body: `This permanently removes <b>${escapeHtml(slug)}</b> — all <b>${plural(om.versionCount, 'version')}</b> and <b>${plural(om.commentCount, 'comment')}</b> are deleted. This cannot be undone.`,
+        confirmLabel: 'Delete',
+        danger: true,
+        onConfirm: async (status) => {
+          await ownerFetch(`/api/doc?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
+          status.textContent = 'Deleted. Redirecting…';
+          setTimeout(() => { window.location.href = '/'; }, 900);
+        },
+      });
+    };
+  }
+
 
   // ========== Popup (new-comment): text + element anchors ==========
   let popup = null;
@@ -2411,13 +3391,18 @@
     // body. The caller signals this by setting anchor._placeAbove = true.
     document.body.appendChild(popup);   // append first so offsetHeight is known
     const popupH = popup.offsetHeight || 140;
+    const popupW = popup.offsetWidth || 320;
     if (anchor._placeAbove && rect.top - 8 - popupH >= 8) {
       popup.style.top = (window.scrollY + rect.top - popupH - 8) + 'px';
     } else {
       popup.style.top = (window.scrollY + rect.bottom + 8) + 'px';
     }
-    const left = Math.min(rect.left + window.scrollX, window.innerWidth - 340);
-    popup.style.left = Math.max(8, left) + 'px';
+    // `rect.left` is the caret / mouse-up X for text selections (not the
+    // line-box origin). Clamp in document coords so a caret near the right
+    // edge still keeps the 320px sheet on screen.
+    const maxLeft = window.scrollX + window.innerWidth - popupW - 8;
+    const left = Math.min(Math.max(window.scrollX + 8, window.scrollX + rect.left), maxLeft);
+    popup.style.left = left + 'px';
 
     if (anchor.kind === 'text' && anchor._range) {
       setPendingTextHighlight(anchor._range);
@@ -2490,8 +3475,8 @@
     const articleTop = articleEl.getBoundingClientRect().top + window.scrollY;
     const articleHeight = Math.max(1, articleEl.scrollHeight);
     let rect = null;
-    if (anchor.kind === 'text' && anchor._range) rect = anchor._range.getBoundingClientRect();
-    else if (anchor.kind === 'element' && anchor._el) rect = anchor._el.getBoundingClientRect();
+    if (anchor.kind === 'text' && anchor._range) rect = firstVisibleClientRect(anchor._range);
+    else if (anchor.kind === 'element' && anchor._el) rect = firstVisibleClientRect(anchor._el) || anchor._el.getBoundingClientRect();
     if (!rect) return null;
     const centerY = rect.top + rect.height / 2 + window.scrollY;
     const ratio = Math.max(0, Math.min(1, (centerY - articleTop) / articleHeight));
@@ -2893,7 +3878,7 @@
         // Dragged but no artifact hit — likely a text selection. Fall through.
       }
     }
-    maybeOpenSelectionPopup(e.target);
+    maybeOpenSelectionPopup(e.target, e);
   }, true);
 
   // Mouse and touch both surface here. On iOS Safari long-press text-selection
@@ -2903,10 +3888,28 @@
   document.addEventListener('touchend', (e) => {
     const t = e.target || (e.changedTouches?.[0] && document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY));
     // Touchend fires before the OS finalizes selection — defer one tick.
-    setTimeout(() => maybeOpenSelectionPopup(t), 0);
+    const touch = e.changedTouches && e.changedTouches[0];
+    setTimeout(() => maybeOpenSelectionPopup(t, touch || e), 0);
   }, true);
 
-  function maybeOpenSelectionPopup(target) {
+  // An author can mark a phrase as an invitation: `data-tdoc-select`. Clicking
+  // it selects that phrase and hands off to the same popup a drag-select
+  // opens, so the page teaches the gesture without shipping a second
+  // composer that could drift from this one. A click costs less than a drag,
+  // and a reader who will not drag will still tap.
+  document.addEventListener('click', (e) => {
+    const invite = e.target?.closest?.('[data-tdoc-select]');
+    if (!invite || isInUI(invite)) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(invite);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    maybeOpenSelectionPopup(invite);
+  }, true);
+
+  function maybeOpenSelectionPopup(target, event) {
     // Selected text wins over "comment whole artifact." If there's a real text
     // selection, open the text-selection popup regardless of whether the
     // selection lives inside a commentable artifact. The hover pill remains
@@ -2947,8 +3950,41 @@
       });
       return;
     }
-    const rect = range.getBoundingClientRect();
+    const rect = selectionEndRect(sel, range, event);
+    if (!rect) return;
     openPopup({ kind: 'text', text, context_before: ctx.before, context_after: ctx.after, _range: range }, rect);
+  }
+
+  // Where the user *finished* the selection — mouse-up / caret — not the
+  // left edge of the line box. That's what the popup must sit under.
+  function selectionEndRect(sel, range, event) {
+    const pointerX = event && Number.isFinite(event.clientX) ? event.clientX : NaN;
+    const pointerY = event && Number.isFinite(event.clientY) ? event.clientY : NaN;
+    if (Number.isFinite(pointerX) && Number.isFinite(pointerY)) {
+      const line = clientRectNearPoint(range, pointerX, pointerY);
+      const onLine = endRectOnLine(line, pointerX);
+      if (onLine) return onLine;
+    }
+    if (sel && sel.focusNode != null) {
+      try {
+        const caret = document.createRange();
+        caret.setStart(sel.focusNode, sel.focusOffset);
+        caret.collapse(true);
+        const cr = caret.getBoundingClientRect();
+        if (cr && (cr.height > 0 || cr.width > 0 || cr.left !== 0 || cr.top !== 0)) {
+          const line = clientRectNearPoint(range, cr.left, cr.top + cr.height / 2)
+            || { top: cr.top, bottom: cr.bottom || cr.top + 16, height: cr.height || 16, right: cr.left };
+          return endRectOnLine(line, cr.left);
+        }
+      } catch { /* focus not in a text node */ }
+    }
+    const rects = range.getClientRects ? range.getClientRects() : [];
+    let last = null;
+    for (let i = 0; i < rects.length; i++) {
+      if (isVisibleClientRect(rects[i])) last = rects[i];
+    }
+    if (last) return endRectOnLine(last, last.right);
+    return firstVisibleClientRect(range);
   }
 
   // Begin the re-anchor flow: future text selection on the doc will rebind
@@ -2972,9 +4008,9 @@
     const articleTop = articleEl.getBoundingClientRect().top + window.scrollY;
     const articleHeight = Math.max(1, articleEl.scrollHeight);
     let rect = null;
-    if (mark.ranges?.[0]) rect = mark.ranges[0].getBoundingClientRect();
-    else if (mark.el) rect = mark.el.getBoundingClientRect();
-    else if (mark.targetEl) rect = mark.targetEl.getBoundingClientRect();
+    if (mark.ranges?.[0]) rect = firstVisibleClientRect(mark.ranges[0]);
+    else if (mark.el) rect = firstVisibleClientRect(mark.el) || mark.el.getBoundingClientRect();
+    else if (mark.targetEl) rect = firstVisibleClientRect(mark.targetEl) || mark.targetEl.getBoundingClientRect();
     if (!rect) return null;
     const centerY = rect.top + rect.height / 2 + window.scrollY;
     return { ratio: Math.max(0, Math.min(1, (centerY - articleTop) / articleHeight)), nearestHeading: null };
@@ -3024,11 +4060,12 @@
     commentPill = document.createElement('button');
     commentPill.className = 'tdoc-comment-pill';
     commentPill.type = 'button';
-    commentPill.setAttribute('aria-label', 'Comment on this');
-    commentPill.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Comment`;
+    commentPill.setAttribute('aria-label', 'Comment on this section');
+    commentPill.title = 'Comment on this section';
+    commentPill.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
     // Top-right corner of the SECTION, so it visually belongs to the whole
     // artifact regardless of where inside it the cursor is.
-    const pillW = 110;
+    const pillW = 30;
     commentPill.style.top = (window.scrollY + r.top + 8) + 'px';
     commentPill.style.left = (window.scrollX + Math.max(r.left + 8, r.right - pillW - 8)) + 'px';
     commentPill.onclick = (e) => {
@@ -3089,8 +4126,12 @@
     if (!t || t.nodeType !== 1) return;
 
     // Close menus that aren't under the cursor
-    if (!t.closest('#tdoc-more-btn') && !t.closest('#tdoc-secondary-menu')) secMenu.classList.remove('open');
-    if (!t.closest('.tdoc-menu-wrap')) copyMenu.classList.remove('open');
+    if (secMenu && !t.closest('#tdoc-more-btn') && !t.closest('#tdoc-secondary-menu')) secMenu.classList.remove('open');
+    if (!t.closest('.tdoc-menu-wrap')) {
+      copyMenu.classList.remove('open');
+      if (dlMenu) dlMenu.classList.remove('open');
+      if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
+    }
     // Close the profile menu on any click outside its wrapper.
     if (!t.closest('#tdoc-me') && !t.closest('#tdoc-me-menu')) {
       const mm = document.getElementById('tdoc-me-menu');
@@ -3287,6 +4328,38 @@
     } else if (!ok) flashToast('Copy failed');
   };
 
+  // Document tables/SVGs must stay fully visible in the 720px reading column.
+  // Negative-margin table styles used to clip the first column inside author
+  // overflow-x:auto wrappers; display:block on <table> broke row layout.
+  // Wrap remaining tables so wide ones scroll instead of overflowing or clipping.
+  function wrapScrollableTables() {
+    document.querySelectorAll('body table').forEach(table => {
+      if (table.closest(UI_CONTAINERS)) return;
+      if (table.parentElement && table.parentElement.closest('table')) return;
+      const parent = table.parentElement;
+      if (!parent) return;
+      if (parent.classList.contains('tdoc-table-scroll')) return;
+      const ox = getComputedStyle(parent).overflowX;
+      if (ox === 'auto' || ox === 'scroll') return;
+      const wrap = document.createElement('div');
+      wrap.className = 'tdoc-table-scroll';
+      parent.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    });
+  }
+  function preserveSvgAspect() {
+    document.querySelectorAll('body svg[viewBox]').forEach(svg => {
+      if (svg.closest(UI_CONTAINERS)) return;
+      const parts = String(svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/);
+      if (parts.length !== 4) return;
+      const w = parseFloat(parts[2]), h = parseFloat(parts[3]);
+      if (!(w > 0 && h > 0)) return;
+      if (!svg.style.aspectRatio) svg.style.aspectRatio = w + ' / ' + h;
+    });
+  }
+
   // ========== Wire it up ==========
+  wrapScrollableTables();
+  preserveSvgAspect();
   refreshComments();
 })();

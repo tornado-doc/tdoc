@@ -4,7 +4,7 @@
 
 **Please report security issues privately — do not open a public issue.**
 
-Use GitHub's [private vulnerability reporting](https://github.com/serenakeyitan/tdoc/security/advisories/new)
+Use GitHub's [private vulnerability reporting](https://github.com/tornado-doc/tdoc/security/advisories/new)
 (Security → Advisories → "Report a vulnerability"). That keeps the report
 confidential until a fix is available.
 

@@ -6,15 +6,15 @@
 
 `tdoc` is a Claude Code skill that gives the user prompt-native HTML documents with text- and artifact-anchored comments. After install + onboarding, the user can:
 
-- `/tdoc new <prompt>` → generate an interactive HTML doc
-- `/tdoc publish <slug>` → publish to their own Cloudflare Worker (free, always-on)
+- `/tdoc new <prompt>` → generate a commentable HTML doc
+- `/tdoc publish <slug>` → publish (default target is hosted tdoc.dev; first publish signs in with GitHub)
 - Share the live URL; commenters sign in with GitHub
 
 Install + onboarding takes ~3 minutes on a clean machine. Most steps are automatic. The user only has to click ~2 things in a browser.
 
 ## Step 1 — Install the skill (if not already installed)
 
-First check whether the user has already installed via the plugin marketplace. The marketplace install is a separate path the user runs themselves (`/plugin marketplace add serenakeyitan/tdoc`) and does NOT need you to clone anything.
+First check whether the user has already installed via the plugin marketplace. The marketplace install is a separate path the user runs themselves (`/plugin marketplace add tornado-doc/tdoc`) and does NOT need you to clone anything.
 
 ```bash
 ls ~/.claude/skills/tdoc/SKILL.md 2>/dev/null && echo "already installed"
@@ -25,7 +25,7 @@ If that prints "already installed" → skip to Step 2.
 Otherwise, the user reached this doc via Option B or Option C and you need to clone:
 
 ```bash
-git clone https://github.com/serenakeyitan/tdoc ~/.claude/skills/tdoc
+git clone https://github.com/tornado-doc/tdoc ~/.claude/skills/tdoc
 ```
 
 If the user already has `~/.claude/skills/tdoc/` from a prior install, update instead:
@@ -37,8 +37,8 @@ cd ~/.claude/skills/tdoc && git pull --ff-only origin main
 **Important about the plugin marketplace path:** if the user said they want the "one-line marketplace install," that's a direct slash-command they run themselves in Claude Code — NOT an agent task. The two commands are:
 
 ```
-/plugin marketplace add serenakeyitan/tdoc
-/plugin install tdoc@serenakeyitan-tdoc
+/plugin marketplace add tornado-doc/tdoc
+/plugin install tdoc@tornado-tdoc
 ```
 
 Don't try to run these for the user via Bash — they're Claude Code slash commands.
@@ -82,9 +82,20 @@ The JSON has these fields you care about:
   "ready_to_publish": true/false,
   "missing_steps": [
     { "id": "...", "label": "...", "kind": "install|login|click", "cmd": "..." }
-  ]
+  ],
+  "update": {
+    "ok": true/false,
+    "checked": true/false,
+    "behind": 0,
+    "diverged": true/false,
+    "cmd": "…/bin/tdoc-update --yes"
+  }
 }
 ```
+
+`.update` is informational (this skill checkout vs `origin/main`), not a
+`missing_step`. If `ok` is false and the checkout has not diverged, suggest
+`/tdoc update --yes`. Do not treat a stale overlay as a Cloudflare dep.
 
 ## Step 4 — Walk the user through `missing_steps`
 
@@ -128,7 +139,9 @@ cat > ~/tdocs/$SLUG/meta.json <<EOF
 {"title":"Hello tdoc","slug":"$SLUG","versions":[{"n":1,"created":"$(date -Iseconds)"}]}
 EOF
 echo '[]' > ~/tdocs/$SLUG/comments.json
-# Publish
+# Publish to hosted tdoc.dev. First run signs in with GitHub Device Flow
+# (open the printed URL and enter the code), then uploads.
+# To self-host instead: --platform cloudflare or --platform vercel.
 ~/.claude/skills/tdoc/bin/tdoc-publish $SLUG
 ```
 
@@ -141,7 +154,7 @@ Tell the user:
 - They can now run `/tdoc new <prompt>` for any new doc
 - Run `/tdoc update` to pull the latest skill code anytime
 - Run `/tdoc doctor` if anything feels off
-- Visit `https://github.com/serenakeyitan/tdoc` for the source, issues, contributions
+- Visit `https://github.com/tornado-doc/tdoc` for the source, issues, contributions
 
 ## Idempotency
 
@@ -154,7 +167,7 @@ If the user says they only want local docs (no publishing, no Cloudflare), stop 
 ```bash
 # Test that local works
 node --version  # should be v18 or higher
-/tdoc new "a doc that explains compound interest with a slider"
+/tdoc new "a doc that explains compound interest with a stepped diagram"
 ```
 
 ## Failure modes you might hit
@@ -168,4 +181,4 @@ node --version  # should be v18 or higher
 
 ## Credit
 
-`tdoc` is an open-source community implementation of Jesse Pollak's bdocs idea ([source](https://x.com/jessepollak/status/2054313757543964857)). All credit for the original concept and framing goes to Jesse.
+`tdoc` is an open-source project by [Tornado](https://github.com/tornado-doc). The original concept and framing come from [Jesse Pollak](https://x.com/jessepollak)'s [bdocs](https://x.com/jessepollak/status/2054313757543964857) — full credit to him for the idea tdoc builds on.
