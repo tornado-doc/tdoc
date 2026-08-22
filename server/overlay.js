@@ -924,7 +924,7 @@
   // those pages already name themselves in the document.
   const isSiteBar = !!(cfg.isLanding || isCatalog);
   const leftHtml = `
-    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="My docs" aria-label="My docs"><img src="/tdoc_logo.png" alt="" width="24" height="24"></button>
+    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="My docs" aria-label="My docs"><img src="/tdoc_logo.svg" alt="" width="24" height="24"></button>
     ${isSiteBar ? '' : `
     <span class="crumb crumb-slug" title="${escapeHtml(slugCrumbLabel)}">${escapeHtml(slugCrumbLabel)}</span>
     <span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>
@@ -1963,7 +1963,7 @@
     return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
   }
   function tdocLogoUrl() {
-    return '/tdoc_logo.png';
+    return '/tdoc_logo.svg';
   }
   function agentLogoUrl(author) {
     const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))
