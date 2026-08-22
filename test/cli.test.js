@@ -13,7 +13,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync, spawnSync } = require('child_process');
+const { execFileSync, spawn, spawnSync } = require('child_process');
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -343,6 +343,87 @@ t('tdoc-update-nag real git: ahead-only is silent, behind nags, both diverge', (
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+// ---- tdoc-agent-reply must not report success on a rejected reply (#141) ----
+
+t('tdoc-agent-reply gates on HTTP status and on 200-with-error bodies', () => {
+  const src = readBin('tdoc-agent-reply');
+  assert(/post_reply\(\)/.test(src), 'post_reply helper missing');
+  assert(/http_code/.test(src) && /grep -qE '\^2/.test(src),
+    'post_reply does not gate on 2xx HTTP status');
+  assert(/has\("error"\)/.test(src),
+    'post_reply does not reject a 200 body carrying an "error" key');
+  // Both transports must go through the helper and propagate its failure.
+  const calls = src.split('\n').filter(l => /^\s*post_reply /.test(l));
+  assert(calls.length === 2, `expected 2 post_reply call sites, got ${calls.length}`);
+  for (const c of calls) assert(/\|\| exit 1/.test(c), `call site swallows failure: ${c.trim()}`);
+  // No raw curl POST to the reply endpoint left outside the helper.
+  const raw = src.split('\n').filter(l =>
+    /\bcurl\b/.test(l) && /api\/agent\/reply/.test(l) && !l.trim().startsWith('#'));
+  assert(raw.length === 0, `raw curl to /api/agent/reply outside post_reply:\n      ${raw.join('\n      ')}`);
+});
+
+t('tdoc-agent-reply exits non-zero when the server rejects the reply', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
+  const port = 7900 + Math.floor(Math.random() * 300);
+  // Stub the reply endpoint: 200 with an error body, exactly what the server
+  // returns for an unknown parent. That is the case the bug reported.
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({error:'parent_not_found'}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_missing',
+      '--text', 'applied', '--status', 'applied'], {
+      env: { ...process.env, HOME: home, TDOC_PORT: String(port) },
+      encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status !== 0,
+      `rejected reply still exited ${r.status}; stdout=${r.stdout} stderr=${r.stderr}`);
+    assert(/parent_not_found/.test(r.stdout + r.stderr),
+      `server error not surfaced: ${r.stdout} ${r.stderr}`);
+    assert(/NOT posted/.test(r.stderr), `no failure line on stderr: ${r.stderr}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-agent-reply still exits 0 when the reply is accepted', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
+  const port = 8300 + Math.floor(Math.random() * 300);
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({id:'c_1',replies:[],reactions:{}}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
+      env: { ...process.env, HOME: home, TDOC_PORT: String(port) },
+      encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `accepted reply exited ${r.status}; stderr=${r.stderr}`);
+    assert(/"id":"c_1"/.test(r.stdout), `server body not passed through: ${r.stdout}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
