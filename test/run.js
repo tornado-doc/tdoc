@@ -68,6 +68,7 @@ const GATED = [
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright
   'csp-xss.test.js',     // playwright: author <script>/onclick blocked, overlay still works
+  'artifact-shell.test.js', // playwright: cross-origin iframe shell boundary (RED until the re-arch lands; see PLAN.md)
 ];
 
 const runAll = process.argv.includes('--all');
