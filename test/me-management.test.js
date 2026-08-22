@@ -159,6 +159,11 @@ t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
     'title must not sit in a fake-centered middle slot');
   assert(overlay.includes('src="/tdoc_logo.svg"'),
     'bar mark must be the tdoc logo, not a text pill');
+  assert(overlay.includes("tdoc-bar-mark').onclick = () => { location.href = '/me'; }"),
+    'tdoc logo must go to /me (the hub), not /');
+  const localServer = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf8');
+  assert(/p === '\/me'[\s\S]{0,180}Location: '\/'/.test(localServer),
+    'local studio must 302 /me to / so the logo click does not 404');
   assert(index.includes('class="wrap"'), 'catalog content must sit in a wrap so the bar can be full-bleed');
   const catalogGate = overlay.indexOf('if (isCatalog) {');
   const commentsBoot = overlay.indexOf('// ========== Comment layer + FAB ==========');

@@ -312,7 +312,11 @@ async function main() {
 
   t('overlay.js manage flow never uses window.confirm() either', () => {
     const start = overlay.indexOf('// ========== Owner manage');
-    const end = overlay.indexOf('async function pollDevice');
+    // End marker was `async function pollDevice`, which left with the
+    // device-flow merge into server/signin.js. startDeviceFlow now sits
+    // ABOVE this section, so anchor on the next section header instead.
+    const after = overlay.indexOf('// ==========', start + 20);
+    const end = after > start ? after : overlay.length;
     const section = overlay.slice(start, end);
     assert(start >= 0 && end > start, 'owner manage section not found');
     assert(!nativeConfirmCall.test(stripLineComments(section)), 'owner manage flow must use showManageConfirm(), not native confirm()');

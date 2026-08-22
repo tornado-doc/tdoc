@@ -117,42 +117,54 @@ jobs:
           printf '%s' "$TDOC_DEV_UPLOAD_TOKEN" | npx --yes wrangler@4.90.1 secret put TDOC_UPLOAD_TOKEN \
             --cwd worker
 
-      - name: Upload v1 to tdoc.dev
+      - name: Upload the homepage and the tutorial to tdoc.dev
         env:
           TDOC_DEV_UPLOAD_TOKEN: ${{ secrets.TDOC_DEV_UPLOAD_TOKEN }}
         run: |
           set -euo pipefail
-          DIR=.release/tornado-doc
 
-          # Same shape tdoc-publish sends: slug, version, html, meta, widgets.
-          # comments is omitted on purpose. The payload's comments.json is
-          # empty and the worker merges rather than replaces, so sending an
-          # empty list would be a no-op that reads like an intent to clear.
-          WIDGETS='{}'
-          if [ -d "$DIR/v1/widgets" ]; then
-            for wf in "$DIR"/v1/widgets/*.html; do
-              [ -f "$wf" ] || continue
-              WIDGETS="$(jq -n --argjson acc "$WIDGETS" \
-                --arg name "$(basename "$wf" .html)" --rawfile html "$wf" \
-                '$acc + {($name): $html}')"
-            done
-          fi
+          # Two docs, not one. `/` is the homepage and `/start` is the full
+          # tutorial it links to — shipping only the first leaves that link on
+          # the neutral fallback page, which looks like the tour does not exist.
+          #   tornado-doc : release payload, latest version collapsed to v1
+          #   tdoc-start  : already a single version with no thread, ship as is
+          upload () {
+            local slug="$1" dir="$2" ver="$3"
 
-          jq -n --arg slug tornado-doc --argjson version 1 \
-            --rawfile html "$DIR/v1/index.html" \
-            --slurpfile meta "$DIR/meta.json" \
-            --argjson widgets "$WIDGETS" \
-            '{slug:$slug, version:$version, html:$html, meta:$meta[0]}
-             + (if $widgets == {} then {} else {widgets:$widgets} end)' > payload.json
+            local widgets='{}'
+            if [ -d "$dir/v$ver/widgets" ]; then
+              for wf in "$dir"/v$ver/widgets/*.html; do
+                [ -f "$wf" ] || continue
+                widgets="$(jq -n --argjson acc "$widgets" \
+                  --arg name "$(basename "$wf" .html)" --rawfile html "$wf" \
+                  '$acc + {($name): $html}')"
+              done
+            fi
 
-          code=$(curl -sS -o resp.json -w '%{http_code}' -X POST https://tdoc.dev/api/upload \
-            -H "Authorization: Bearer $TDOC_DEV_UPLOAD_TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data-binary @payload.json)
-          # The response body carries no secret; the request is never echoed.
-          echo "HTTP $code"; cat resp.json; echo
-          [ "$code" = "200" ] || { echo "upload failed" >&2; exit 1; }
-          [ "$(jq -r '.ok // false' resp.json)" = "true" ] || { echo "worker rejected the upload" >&2; exit 1; }
+            # Same shape tdoc-publish sends. comments is omitted on purpose:
+            # the payload's comments.json is empty and the worker merges rather
+            # than replaces, so sending an empty list would read as intent to
+            # clear a thread it must not touch.
+            jq -n --arg slug "$slug" --argjson version "$ver" \
+              --rawfile html "$dir/v$ver/index.html" \
+              --slurpfile meta "$dir/meta.json" \
+              --argjson widgets "$widgets" \
+              '{slug:$slug, version:$version, html:$html, meta:$meta[0]}
+               + (if $widgets == {} then {} else {widgets:$widgets} end)' > payload.json
+
+            code=$(curl -sS -o resp.json -w '%{http_code}' -X POST https://tdoc.dev/api/upload \
+              -H "Authorization: Bearer $TDOC_DEV_UPLOAD_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data-binary @payload.json)
+            # The response body carries no secret; the request is never echoed.
+            echo "$slug v$ver -> HTTP $code"; cat resp.json; echo
+            [ "$code" = "200" ] || { echo "upload failed for $slug" >&2; exit 1; }
+            [ "$(jq -r '.ok // false' resp.json)" = "true" ] || { echo "worker rejected $slug" >&2; exit 1; }
+          }
+
+          upload tornado-doc .release/tornado-doc 1
+          upload tdoc-start  landing/tdoc-start  1
+          upload tdoc-templates landing/tdoc-templates 1
 
       - name: Verify tdoc.dev serves the doc, not the fallback
         run: |
@@ -164,14 +176,23 @@ jobs:
           # grep closes the pipe on the first match, the writer gets SIGPIPE,
           # and a successful homepage looks like a miss. Bash [[ ]] does not.
           for i in 1 2 3 4 5 6 7 8 9 10; do
-            body=$(curl -sS https://tdoc.dev/)
-            if [[ "$body" == *'A doc that answers its own comments'* \
-              && "$body" == *'"isLanding":true'* ]]; then
-              echo "tdoc.dev/ is serving the landing doc."
+            home=$(curl -sS https://tdoc.dev/ || true)
+            # The homepage links to the tutorial, so a homepage that works
+            # while /start is still on the fallback is a broken hand-off, not
+            # a success. Both, or keep waiting.
+            tour=$(curl -sS https://tdoc.dev/start || true)
+            # Match on what proves the doc rendered, not on its wording: the
+            # slug and the landing flag come from the overlay config, and the
+            # neutral fallback carries neither. Keying on the headline meant
+            # every homepage rewrite failed its own deploy.
+            if [[ "$home" == *'"slug":"tornado-doc"'* \
+              && "$home" == *'"isLanding":true'* \
+              && "$tour" == *'"slug":"tdoc-start"'* ]]; then
+              echo "tdoc.dev/ and /start are both serving their docs."
               exit 0
             fi
-            echo "attempt $i: tdoc.dev/ is not the landing doc yet" >&2
+            echo "attempt $i: not both live yet" >&2
             sleep 6
           done
-          echo "tdoc.dev/ is still serving the neutral fallback" >&2
+          echo "tdoc.dev/ or /start is still serving the neutral fallback" >&2
           exit 1

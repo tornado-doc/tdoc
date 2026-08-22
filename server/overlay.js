@@ -71,10 +71,14 @@
   const THEME_KEY = 'tdoc-theme';
   function readStoredTheme() {
     try {
-      return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
-    } catch (e) {
-      return 'light';
-    }
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored === 'dark' || stored === 'light') return stored;
+    } catch (e) { /* private mode */ }
+    // No saved choice yet — honor a doc that declares its default look
+    // (data-tdoc-default-theme="dark", e.g. a dark-first engineering style),
+    // otherwise light. The bar button still overrides and persists.
+    const declared = document.documentElement.getAttribute('data-tdoc-default-theme');
+    return declared === 'dark' ? 'dark' : 'light';
   }
   function currentTheme() {
     return document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light';
@@ -94,6 +98,69 @@
   }
   paintTheme(readStoredTheme());
 
+  // ========== Copy-to-clipboard primitive (author opt-in) ==========
+  // A doc runs under a nonce CSP, so the doc's OWN <script> can never wire a
+  // copy button. The overlay (nonced, trusted) provides one instead: any
+  // element carrying data-tdoc-copy becomes a working "click to copy" trigger.
+  //   <button data-tdoc-copy="literal text …">Copy</button>   copies the literal
+  //   <button data-tdoc-copy="#promptId">Copy the prompt</button>
+  //                                     copies #promptId's text (trimmed)
+  // On success the trigger briefly shows data-tdoc-copy-done (default "Copied ✓")
+  // and gets a .tdoc-copied class the doc can style. Delegated + capture-phase
+  // so it fires before (and suppresses) the doc's artifact/comment handlers,
+  // and is a no-op for every click that is not on a copy trigger.
+  function fallbackCopy(text) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      return true;
+    } catch (e) { return false; }
+  }
+  function flashCopyTrigger(trigger) {
+    const done = trigger.getAttribute('data-tdoc-copy-done') || 'Copied ✓';
+    if (trigger.getAttribute('data-tdoc-copy-label') == null) {
+      trigger.setAttribute('data-tdoc-copy-label', trigger.textContent);
+    }
+    trigger.textContent = done;
+    trigger.classList.add('tdoc-copied');
+    clearTimeout(trigger._tdocCopyTimer);
+    trigger._tdocCopyTimer = setTimeout(() => {
+      const orig = trigger.getAttribute('data-tdoc-copy-label');
+      if (orig != null) trigger.textContent = orig;
+      trigger.classList.remove('tdoc-copied');
+    }, 1600);
+  }
+  function wireCopyTriggers() {
+    document.addEventListener('click', (e) => {
+      const trigger = e.target.closest && e.target.closest('[data-tdoc-copy]');
+      if (!trigger) return;                       // not a copy click — leave alone
+      e.preventDefault();
+      e.stopPropagation();
+      const raw = trigger.getAttribute('data-tdoc-copy') || '';
+      let text = raw;
+      if (raw.charAt(0) === '#') {
+        const src = document.getElementById(raw.slice(1));
+        if (src) text = (src.innerText || src.textContent || '').replace(/\u00a0/g, ' ').trim();
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          () => flashCopyTrigger(trigger),
+          () => { if (fallbackCopy(text)) flashCopyTrigger(trigger); }
+        );
+      } else if (fallbackCopy(text)) {
+        flashCopyTrigger(trigger);
+      }
+    }, true);
+  }
+
   // ========== UI selector registry ==========
   // One source of truth for "is this part of the tdoc overlay UI?".
   //   UI_CONTAINERS — top-level overlay regions: bar, popups, comment column,
@@ -106,7 +173,7 @@
   // NOTE: #tdoc-pin-layer and .tdoc-cluster-pop are tdoc's OWN comment-pins UI.
   // They MUST be in UI_CONTAINERS so artifact detection / the hover comment-pill
   // never treats a pin avatar <img> (or a cluster row) as a commentable artifact.
-  const UI_CONTAINERS = '.tdoc-bar, .tdoc-oldver-strip, .tdoc-popup, .tdoc-margin-comment, .tdoc-modal-bg, #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop, .tdoc-footer';
+  const UI_CONTAINERS = '.tdoc-bar, .tdoc-oldver-strip, .tdoc-popup, .tdoc-margin-comment, .tdoc-modal-bg, .tdo-bg, .tds-bg, #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop, .tdoc-footer';
   const UI_ALL = UI_CONTAINERS + ', .tdoc-anchor-mark, .tdoc-element-outline, .tdoc-hover-outline, .tdoc-comment-pill, .tdoc-emoji-picker, .tdoc-secondary-menu';
 
   // ========== Geometry helpers ==========
@@ -118,6 +185,55 @@
     box.style.left = (window.scrollX + r.left - inset) + 'px';
     box.style.width = (r.width + inset * 2) + 'px';
     box.style.height = (r.height + inset * 2) + 'px';
+  }
+
+  // Range.getBoundingClientRect() is the UNION of every line box. A wrapped
+  // selection is therefore a tall rectangle whose bottom-left is nowhere near
+  // the caret; WebKit also sometimes returns a 0×0 rect when the range
+  // crosses a block. The new-comment popup and pin Y used that union, so the
+  // card "sometimes" sat off the highlight. Prefer the live line box.
+  function isVisibleClientRect(r) {
+    return !!r && (r.width > 0 || r.height > 0);
+  }
+  function nearestClientRect(rects, x, y) {
+    let best = null, bestD = Infinity;
+    const list = rects && rects.length != null ? rects : [];
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (!isVisibleClientRect(r)) continue;
+      const dx = x - Math.max(r.left, Math.min(x, r.right));
+      const dy = y - Math.max(r.top, Math.min(y, r.bottom));
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best;
+  }
+  function firstVisibleClientRect(target) {
+    if (!target) return null;
+    if (target.getClientRects) {
+      const rects = target.getClientRects();
+      for (let i = 0; i < rects.length; i++) {
+        if (isVisibleClientRect(rects[i])) return rects[i];
+      }
+    }
+    if (!target.getBoundingClientRect) return null;
+    const r = target.getBoundingClientRect();
+    return isVisibleClientRect(r) ? r : null;
+  }
+  function clientRectNearPoint(target, x, y) {
+    if (!target) return null;
+    if (target.getClientRects && Number.isFinite(x) && Number.isFinite(y)) {
+      const near = nearestClientRect(target.getClientRects(), x, y);
+      if (near) return near;
+    }
+    return firstVisibleClientRect(target);
+  }
+  // A zero-width box on `line` at x — the caret / mouse-up, not the line origin.
+  function endRectOnLine(line, x) {
+    if (!line) return null;
+    const left = Number.isFinite(x) ? x : line.right;
+    const height = line.height || (line.bottom - line.top) || 0;
+    return { left, right: left, top: line.top, bottom: line.bottom, width: 0, height };
   }
 
   // ========== Styles ==========
@@ -233,7 +349,7 @@
   }
   /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
      buttons / cards keep their inline layout instead of stacking to 16px tall. */
-  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
+  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(.tdo *):not(.tds *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
   /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
      column, wrapper or not. Two halves: (a) recognized wrappers get max-width
      AND margin:auto (previously margin was missing, so wrapped docs without
@@ -716,13 +832,18 @@
   html[data-tdoc-theme="dark"] textarea {
     color-scheme: light;
   }
-  html[data-tdoc-theme="dark"] img,
-  html[data-tdoc-theme="dark"] video,
-  html[data-tdoc-theme="dark"] canvas,
-  html[data-tdoc-theme="dark"] iframe,
+  html[data-tdoc-theme="dark"] img:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] video:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] canvas:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] iframe:not([data-tdoc-dark="invert"]),
   html[data-tdoc-theme="dark"] .tdoc-emoji {
     filter: invert(1) hue-rotate(180deg);
   }
+  /* Opt out via data-tdoc-dark="invert": this is a drawing, not a
+     photograph. Photos and video have to come back to their true colours or
+     they look like negatives, but a chart or a simulation drawn in ink on a
+     white field should go dark with everything else — otherwise it sits in a
+     dark page as a glowing white slab. */
   /* The site mark is a black-on-white PNG. Let it invert with the page
      instead of restoring, or it becomes a white tile on the dark bar. */
   html[data-tdoc-theme="dark"] .tdoc-bar-mark img { filter: none; }
@@ -803,7 +924,7 @@
   // those pages already name themselves in the document.
   const isSiteBar = !!(cfg.isLanding || isCatalog);
   const leftHtml = `
-    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="tdoc home" aria-label="tdoc home"><img src="/tdoc_logo.svg" alt="" width="24" height="24"></button>
+    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="My docs" aria-label="My docs"><img src="/tdoc_logo.svg" alt="" width="24" height="24"></button>
     ${isSiteBar ? '' : `
     <span class="crumb crumb-slug" title="${escapeHtml(slugCrumbLabel)}">${escapeHtml(slugCrumbLabel)}</span>
     <span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>
@@ -919,8 +1040,10 @@
   const barTitle = document.getElementById('tdoc-title');
   if (barTitle && titleEl && titleEl.textContent) barTitle.textContent = titleEl.textContent;
 
-  // Site mark → home. GitHub lives in its own icon on `/`.
-  document.getElementById('tdoc-bar-mark').onclick = () => { location.href = '/'; };
+  // Site mark → hub. On tdoc.dev that is /me. Local studio has no /me
+  // catalog, so the local server 302s /me → /. GitHub lives in its own
+  // icon on `/`.
+  document.getElementById('tdoc-bar-mark').onclick = () => { location.href = '/me'; };
 
   paintTheme(currentTheme());
   document.getElementById('tdoc-theme-btn').onclick = () => {
@@ -929,7 +1052,10 @@
     paintTheme(next);
   };
 
-  // Duplicate = hosted account copy. Download = HTML file or PDF snapshot.
+  wireCopyTriggers();
+
+  // Duplicate = hosted account copy. Download HTML = /export file.
+  // Download PDF = print the export (browser Save as PDF), not a JPEG wrap.
   let pendingDuplicate = false;
   function downloadExport() {
     const a = document.createElement('a');
@@ -939,140 +1065,13 @@
     a.click();
     a.remove();
   }
-  function utf8Bytes(s) { return new TextEncoder().encode(s); }
-  function concatBytes(parts) {
-    const len = parts.reduce((n, p) => n + p.length, 0);
-    const out = new Uint8Array(len);
-    let o = 0;
-    for (const p of parts) { out.set(p, o); o += p.length; }
-    return out;
-  }
-  function jpegPagesToPdf(pages) {
-    const PW = 612, PH = 792, M = 36;
-    const innerW = PW - 2 * M, innerH = PH - 2 * M;
-    const parts = [];
-    const offsets = [0];
-    let size = 0;
-    function add(chunk) {
-      if (typeof chunk === 'string') chunk = utf8Bytes(chunk);
-      parts.push(chunk);
-      size += chunk.length;
-    }
-    function addObj(body, stream) {
-      offsets.push(size);
-      add(body);
-      if (stream) {
-        add('stream\n');
-        add(stream);
-        add('endstream\nendobj\n');
-      }
-    }
-    add('%PDF-1.4\n');
-    const pageIds = [];
-    let obj = 3;
-    const pageMeta = [];
-    for (const p of pages) {
-      const scale = Math.min(innerW / p.width, innerH / p.height);
-      const dw = p.width * scale, dh = p.height * scale;
-      const x = M + (innerW - dw) / 2;
-      const y = PH - M - dh;
-      pageMeta.push({ pageId: obj, contentId: obj + 1, imageId: obj + 2, dw, dh, x, y, p });
-      pageIds.push(obj);
-      obj += 3;
-    }
-    addObj('1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n');
-    addObj(`2 0 obj << /Type /Pages /Kids [${pageIds.map((id) => id + ' 0 R').join(' ')}] /Count ${pages.length} >> endobj\n`);
-    for (const m of pageMeta) {
-      addObj(`${m.pageId} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im${m.imageId} ${m.imageId} 0 R >> >> /Contents ${m.contentId} 0 R >> endobj\n`);
-      const content = `q ${m.dw.toFixed(2)} 0 0 ${m.dh.toFixed(2)} ${m.x.toFixed(2)} ${m.y.toFixed(2)} cm /Im${m.imageId} Do Q\n`;
-      addObj(`${m.contentId} 0 obj << /Length ${content.length} >>\n`, utf8Bytes(content));
-      addObj(`${m.imageId} 0 obj << /Type /XObject /Subtype /Image /Width ${m.p.width} /Height ${m.p.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${m.p.jpeg.length} >>\n`, m.p.jpeg);
-    }
-    const xrefAt = size;
-    add(`xref\n0 ${obj}\n0000000000 65535 f \n`);
-    for (let i = 1; i < obj; i++) {
-      add(String(offsets[i]).padStart(10, '0') + ' 00000 n \n');
-    }
-    add(`trailer << /Size ${obj} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`);
-    return new Blob([concatBytes(parts)], { type: 'application/pdf' });
-  }
-  function paintTextNode(ctx, node, ox, oy, sliceTop, sliceH) {
-    const text = node.textContent;
-    if (!text || !/\S/.test(text)) return;
-    const parent = node.parentElement;
-    if (!parent) return;
-    const view = parent.ownerDocument.defaultView;
-    const st = view.getComputedStyle(parent);
-    if (st.visibility === 'hidden') return;
-    ctx.fillStyle = st.color || '#111';
-    ctx.font = st.font;
-    ctx.textBaseline = 'top';
-    let i = 0;
-    while (i < text.length) {
-      while (i < text.length && text[i] === '\n') i++;
-      if (i >= text.length) break;
-      const range = node.ownerDocument.createRange();
-      range.setStart(node, i);
-      range.setEnd(node, i + 1);
-      const first = range.getBoundingClientRect();
-      let end = i + 1;
-      while (end < text.length && text[end] !== '\n') {
-        range.setEnd(node, end + 1);
-        const r = range.getBoundingClientRect();
-        if (Math.abs(r.top - first.top) > 1) break;
-        end++;
-      }
-      range.setEnd(node, end);
-      const r = range.getBoundingClientRect();
-      if (r.bottom > sliceTop && r.top < sliceTop + sliceH) {
-        ctx.fillText(text.slice(i, end), r.left - ox, r.top - oy);
-      }
-      i = end;
-    }
-  }
-  function paintElement(ctx, el, ox, oy, sliceTop, sliceH) {
-    const tag = el.tagName;
-    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return;
-    const view = el.ownerDocument.defaultView;
-    const st = view.getComputedStyle(el);
-    if (st.display === 'none' || st.visibility === 'hidden') return;
-    const r = el.getBoundingClientRect();
-    if (r.bottom < sliceTop || r.top > sliceTop + sliceH) {
-      if (!el.children.length) return;
-    }
-    const bg = st.backgroundColor;
-    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-      ctx.fillStyle = bg;
-      ctx.fillRect(r.left - ox, r.top - oy, r.width, r.height);
-    }
-    const bw = parseFloat(st.borderTopWidth) || 0;
-    if (bw > 0 && st.borderTopStyle !== 'none') {
-      ctx.strokeStyle = st.borderTopColor || '#ddd';
-      ctx.lineWidth = bw;
-      ctx.strokeRect(r.left - ox + bw / 2, r.top - oy + bw / 2, Math.max(0, r.width - bw), Math.max(0, r.height - bw));
-    }
-    if ((tag === 'IMG' || tag === 'CANVAS') && r.width && r.height) {
-      try { ctx.drawImage(el, r.left - ox, r.top - oy, r.width, r.height); } catch (e) { /* tainted */ }
-    }
-    if (tag === 'RECT' || tag === 'rect') {
-      const fill = el.getAttribute('fill');
-      if (fill && fill !== 'none') {
-        ctx.fillStyle = fill;
-        ctx.fillRect(r.left - ox, r.top - oy, r.width, r.height);
-      }
-      return;
-    }
-    for (const child of el.childNodes) {
-      if (child.nodeType === 3) paintTextNode(ctx, child, ox, oy, sliceTop, sliceH);
-      else if (child.nodeType === 1) paintElement(ctx, child, ox, oy, sliceTop, sliceH);
-    }
-  }
   async function downloadPdf() {
     const src = `/d/${encodeURIComponent(slug)}/v/${version}/export?download=0`;
     const iframe = document.createElement('iframe');
-    iframe.setAttribute('title', 'tdoc pdf snapshot');
-    iframe.style.cssText = 'position:fixed;left:-12000px;top:0;width:800px;height:1200px;border:0;opacity:0;pointer-events:none;';
+    iframe.setAttribute('title', 'Print');
+    iframe.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:100vh;border:0;opacity:0;pointer-events:none;';
     document.body.appendChild(iframe);
+    const drop = () => { if (iframe.parentNode) iframe.remove(); };
     try {
       await new Promise((resolve, reject) => {
         iframe.onload = resolve;
@@ -1081,43 +1080,18 @@
         setTimeout(() => reject(new Error('pdf export timed out')), 20000);
       });
       const doc = iframe.contentDocument;
-      if (!doc || !doc.body) throw new Error('empty export');
+      const win = iframe.contentWindow;
+      if (!doc || !win || !doc.body) throw new Error('empty export');
+      doc.title = `${slug}-v${version}`;
       await Promise.all([...doc.images].map((img) => img.decode ? img.decode().catch(() => {}) : Promise.resolve()));
-      const fullH = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1);
-      iframe.style.height = fullH + 'px';
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const width = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth, 720);
-      const height = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1);
-      const innerW = 540, innerH = 720;
-      const sliceH = Math.max(1, Math.round(width * innerH / innerW));
-      const origin = doc.documentElement.getBoundingClientRect();
-      const pages = [];
-      for (let y = 0; y < height; y += sliceH) {
-        const h = Math.min(sliceH, height - y);
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, width, h);
-        paintElement(ctx, doc.body, origin.left, origin.top + y, y, h);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        const bin = atob(dataUrl.split(',')[1]);
-        const jpeg = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) jpeg[i] = bin.charCodeAt(i);
-        pages.push({ width, height: h, jpeg });
-      }
-      const blob = jpegPagesToPdf(pages);
-      const a = document.createElement('a');
-      const blobUrl = URL.createObjectURL(blob);
-      a.href = blobUrl;
-      a.download = `${slug}-v${version}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
-    } finally {
-      iframe.remove();
+      win.addEventListener('afterprint', drop, { once: true });
+      setTimeout(drop, 120000);
+      win.focus();
+      win.print();
+    } catch (e) {
+      drop();
+      throw e;
     }
   }
   async function startDownload(format) {
@@ -1325,6 +1299,35 @@
     if (row.kind === 'reaction') return n > 1 ? `${n} people reacted to your comment` : `${who} reacted to your comment`;
     return 'Notification';
   }
+  // Canonical inbox destination. Never returns /d/undefined — empty slug is ''.
+  function inboxTargetUrl(row, current) {
+    row = row || {};
+    current = current || {};
+    const destSlug = row.slug || current.slug || '';
+    if (!destSlug) return '';
+    const rawVer = row.version != null && row.version !== '' ? row.version : current.version;
+    const destVer = Number(rawVer);
+    const ver = Number.isFinite(destVer) && destVer > 0 ? destVer : 1;
+    const target = row.comment_id || row.thread_id || '';
+    let href = '/d/' + encodeURIComponent(destSlug) + '/v/' + ver;
+    if (target) href += '?comment=' + encodeURIComponent(target);
+    return href;
+  }
+  // Map a comment or reply id to the top-level card that holds it.
+  function findCommentRoot(list, want) {
+    if (!want) return null;
+    const comments = Array.isArray(list) ? list : [];
+    for (let i = 0; i < comments.length; i++) {
+      const c = comments[i];
+      if (!c) continue;
+      if (c.id === want) return c.id;
+      const replies = c.replies || [];
+      for (let j = 0; j < replies.length; j++) {
+        if (replies[j] && replies[j].id === want) return c.id;
+      }
+    }
+    return want;
+  }
   function inboxFingerprint(body) {
     const items = (body && Array.isArray(body.items)) ? body.items : [];
     return `${body && body.unread}|${items.map(i => [i.id, i.count, i.at, i.read].join(':')).join(',')}`;
@@ -1362,7 +1365,8 @@
       btn.dataset.thread = row.thread_id || '';
       if (btn._bound) return;
       btn._bound = true;
-      const go = () => {
+      const go = (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
         openInboxTarget({
           slug: btn.dataset.slug, version: btn.dataset.version,
           comment_id: btn.dataset.comment, thread_id: btn.dataset.thread,
@@ -1370,7 +1374,7 @@
         closeAuxModal();
       };
       btn.onclick = go;
-      btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+      btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); } };
     });
   }
   async function refreshInboxBadge() {
@@ -1425,22 +1429,23 @@
     refreshInboxBadge();
   }
   function openInboxTarget(row) {
-    const target = row.comment_id || row.thread_id;
-    const root = row.thread_id || row.comment_id;
-    const destSlug = row.slug || slug;
-    const destVer = row.version || version;
-    if (destSlug === slug && Number(destVer) === Number(version)) {
-      if (root) {
-        state.openReplyThreads.add(root);
-        pinOpenCard(root);
-        if (target === root) setActiveComment(root);
-      }
-      const el = document.querySelector(`[data-comment-id="${CSS.escape(target || '')}"]`);
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-      markInboxSeen(target);
+    const href = inboxTargetUrl(row, { slug, version });
+    if (!href) return;
+    const q = href.indexOf('?');
+    const destPath = q >= 0 ? href.slice(0, q) : href;
+    const destSearch = q >= 0 ? href.slice(q) : '';
+    const herePath = (typeof location !== 'undefined' && location.pathname) || '';
+    // /me and `/` always assign /d/<slug>/v/<n>?comment=. Same-doc stays
+    // in place and only replaceState-s the query.
+    if (!isCatalog && herePath === destPath) {
+      const want = (row && (row.comment_id || row.thread_id)) || '';
+      applyCommentDeepLink(want);
+      try {
+        if (destSearch && location.search !== destSearch) history.replaceState(null, '', href);
+      } catch {}
       return;
     }
-    location.href = `/d/${encodeURIComponent(destSlug)}/v/${destVer}?comment=${encodeURIComponent(target || root || '')}`;
+    location.assign(href);
   }
   async function showInboxPanel() {
     closeAuxModal();
@@ -2350,7 +2355,7 @@
     const mark = state.anchorMarks.get(c.id);
     if (mark && (mark.ranges?.[0] || mark.el)) {
       const target = mark.ranges?.[0] || mark.el;
-      const r = target.getBoundingClientRect();
+      const r = firstVisibleClientRect(target) || target.getBoundingClientRect();
       // For element anchors expose the element + its rect so renderPins can
       // spread multiple comments DOWN a tall element instead of stacking them
       // all at its top edge. (targetEl is the live element; el may be the outline.)
@@ -2627,6 +2632,10 @@
   function closeClusterPopover() { clusterPop.classList.remove('open'); clusterPop._key = null; }
   document.addEventListener('click', (e) => {
     if (!clusterPop.contains(e.target) && !e.target.closest?.('.tdoc-pin-cluster')) closeClusterPopover();
+    // Inbox / Share / profile chrome is overlay UI. A click there must not
+    // count as "outside the card" or opening a notification would pin the
+    // comment and the same click would immediately unpin it.
+    if (isInUI(e.target)) return;
     // Click outside an open pinned card (and not on a pin) unpins it.
     if (state.pinnedId && !e.target.closest?.('.tdoc-margin-comment') && !e.target.closest?.('.tdoc-pin')) {
       const id = state.pinnedId; state.pinnedId = null; hideCardIfIdle(id); markPinActive(id, false);
@@ -2701,9 +2710,9 @@
     let anchorRect = null;
     // Prefer the underlying TARGET ELEMENT (canvas/img/video etc) over the
     // overlay outline div — same rect, but more semantically correct.
-    if (mark.ranges?.[0]) anchorRect = mark.ranges[0].getBoundingClientRect();
-    else if (mark.targetEl?.getBoundingClientRect) anchorRect = mark.targetEl.getBoundingClientRect();
-    else if (mark.el?.getBoundingClientRect) anchorRect = mark.el.getBoundingClientRect();
+    if (mark.ranges?.[0]) anchorRect = firstVisibleClientRect(mark.ranges[0]);
+    else if (mark.targetEl) anchorRect = firstVisibleClientRect(mark.targetEl);
+    else if (mark.el) anchorRect = firstVisibleClientRect(mark.el);
     if (!anchorRect) return;
 
     // We consider the anchor "comfortably visible" if its top is between the
@@ -2788,6 +2797,13 @@
     const fabCount = document.getElementById('tdoc-fab-count');
     if (fabCount) fabCount.textContent = state.activeComments.length;
 
+    const want = allowDeepLink
+      ? (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })()
+      : null;
+    const deepRoot = findCommentRoot(state.activeComments, want);
+    // Expand the thread before buildCard so a reply deep-link is not born collapsed.
+    if (deepRoot) state.openReplyThreads.add(deepRoot);
+
     let textCache = state.activeComments.some(c => (c.anchor?.kind || (c.anchor?.text ? 'text' : null)) === 'text')
       ? collectTextNodes() : null;
     for (const comment of state.activeComments) {
@@ -2849,33 +2865,42 @@
     evaluateLayout();
     requestAnimationFrame(() => {
       repositionCards();
-      // Restore the pinned floating card if its comment survived the refresh
-      // and we're in wide (pins) mode. Runs after repositionCards so the pin
-      // elements exist to mark active.
-      if (keepPinnedId && !state.narrow && state.cardEls.has(keepPinnedId)) {
+      if (want) {
+        applyCommentDeepLink(want);
+      } else if (keepPinnedId && !state.narrow && state.cardEls.has(keepPinnedId)) {
+        // Restore the pinned floating card if its comment survived the refresh.
         // Use setActiveComment (not the manual pin/show/mark trio) so the
         // card's .active class, anchor highlight, activeId, AND the pin state
         // are all re-established together. The manual version desynced activeId
         // and lost the card's .active state (+ the "move anchor" affordance).
         setActiveComment(keepPinnedId);
       }
-      const want = allowDeepLink
-        ? (() => { try { return new URLSearchParams(location.search).get('comment'); } catch { return null; } })()
-        : null;
-      if (want) {
-        const hit = state.activeComments.find(c => c.id === want)
-          || state.activeComments.find(c => (c.replies || []).some(r => r.id === want));
-        const root = hit ? hit.id : want;
-        state.openReplyThreads.add(root);
-        // Opening a reply must not activate the root — that would mark the
-        // root's own notifications (e.g. a reaction) as read.
-        if (want === root && state.cardEls.has(root)) setActiveComment(root);
-        else if (state.cardEls.has(root)) pinOpenCard(root);
-        const el = document.querySelector(`[data-comment-id="${CSS.escape(want)}"]`);
-        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-        markInboxSeen(want);
-      }
     });
+  }
+
+  function applyCommentDeepLink(want) {
+    if (!want) return;
+    const root = findCommentRoot(state.activeComments, want);
+    if (root) {
+      state.openReplyThreads.add(root);
+      // Same-doc inbox clicks run after cards already exist. The set is
+      // only consulted at buildCard — collapsed threads stay display:none
+      // until .tdoc-replies.open is on the live card.
+      const card = state.cardEls.get(root);
+      if (card) {
+        card.querySelector('.tdoc-replies')?.classList.add('open');
+        card.querySelector('.tdoc-replies-toggle')?.classList.add('open');
+      }
+    }
+    if (state.narrow) commentLayer.classList.add('open');
+    // Opening a reply must not activate the root — that would mark the
+    // root's own notifications (e.g. a reaction) as read.
+    if (want === root && state.cardEls.has(root)) setActiveComment(root);
+    else if (root && state.cardEls.has(root)) pinOpenCard(root);
+    const el = document.querySelector(`[data-comment-id="${CSS.escape(want)}"]`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+    if (root) requestAnimationFrame(repositionCards);
+    markInboxSeen(want);
   }
 
   // Click on a Highlight-API range → activate. Highlight API has no per-range
@@ -2937,63 +2962,40 @@
   // and once it does, we must bump our interval by ≥5s or it will keep
   // refusing forever. Use a chained setTimeout so each tick can adjust the
   // delay before scheduling the next.
-  let pollTimer = null;
-  let pollInterval = 5;
+  // Whoever ran the shared flow — this bar, or the onboarding dialog — the
+  // page has to stop showing a signed-out state. signin.js announces success
+  // once; this is the overlay's half of that.
+  document.addEventListener('tdoc:signedin', function (e) {
+    if (!e.detail) return;
+    identity = e.detail;
+    // Deliberately not refreshing isOwner here: since #162 it means "owns THIS
+    // doc" and the worker sends it explicitly, so inferring it from
+    // /api/auth/me would put the worker-owner sense back on a per-doc field.
+    // canSeeMyDocs is the flag that governs the My docs entry.
+    if (e.detail.canSeeMyDocs != null) canSeeMyDocs = !!e.detail.canSeeMyDocs;
+    renderIdentity();
+    refreshComments();
+  });
+
+  // Sign-in lives in server/signin.js, shared with the neutral landing page so
+  // the protocol, the backoff and the copy exist once. This wrapper only says
+  // what the overlay does afterwards.
   async function startDeviceFlow() {
     if (!isPublished) return;
-    let data;
+    if (!window.__tdocSignIn) return;
+    let ident;
     try {
-      const r = await fetch('/api/auth/device/start', { method: 'POST' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      data = await r.json();
+      ident = await window.__tdocSignIn();
     } catch (e) {
-      // Network failure or a non-JSON edge error (e.g. an HTML 502) must not
-      // leave an unhandled promise rejection with no feedback.
-      alert('Sign-in error: could not reach the sign-in service. Please try again.');
-      return;
+      return;  // cancelled
     }
-    if (!data || data.error || !data.user_code || !data.verification_uri) {
-      alert('Sign-in error: ' + ((data && (data.message || data.error)) || 'unexpected response'));
-      return;
+    identity = ident;
+    renderIdentity();
+    refreshComments();
+    if (pendingDuplicate) {
+      pendingDuplicate = false;
+      duplicateDoc();
     }
-    showDeviceModal(data);
-    // Prefer the complete URI (code pre-filled) when GitHub provides it.
-    // Only open https GitHub URLs — never window.open an arbitrary string.
-    const verifyUrl = data.verification_uri_complete || data.verification_uri;
-    if (isGithubHttpsUrl(verifyUrl)) window.open(verifyUrl, '_blank');
-    pollInterval = Math.max(5, data.interval || 5);
-    schedulePoll(data.device_code);
-  }
-  function isGithubHttpsUrl(u) {
-    try {
-      const url = new URL(String(u));
-      return url.protocol === 'https:' && /(^|\.)github\.com$/.test(url.hostname);
-    } catch { return false; }
-  }
-  function schedulePoll(device_code) {
-    pollTimer = setTimeout(() => pollDevice(device_code), pollInterval * 1000);
-  }
-  function showDeviceModal(data) {
-    const bg = document.createElement('div');
-    bg.className = 'tdoc-modal-bg';
-    bg.id = 'tdoc-device-modal';
-    bg.innerHTML = `
-      <div class="tdoc-modal">
-        <h3>Sign in with GitHub</h3>
-        <div class="step"><span class="n">1</span><span>Copy this code:</span></div>
-        <div class="code" id="tdoc-user-code">${escapeHtml(data.user_code)}</div>
-        <div class="step"><span class="n">2</span><span>Paste it at <b>${escapeHtml(data.verification_uri)}</b> (opened in a new tab) and approve.</span></div>
-        <div class="step"><span class="n">3</span><span class="status" id="tdoc-poll-status">Waiting for you to approve…</span></div>
-        <div class="actions"><button id="tdoc-modal-cancel">Cancel</button></div>
-      </div>`;
-    document.body.appendChild(bg);
-    document.getElementById('tdoc-user-code').onclick = () => navigator.clipboard?.writeText(data.user_code);
-    document.getElementById('tdoc-modal-cancel').onclick = closeDeviceModal;
-  }
-  function closeDeviceModal() {
-    const m = document.getElementById('tdoc-device-modal');
-    if (m) m.remove();
-    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   }
 
   // ========== Publish / Share modals ==========
@@ -3328,61 +3330,6 @@
     };
   }
 
-  async function pollDevice(device_code) {
-    const status = document.getElementById('tdoc-poll-status');
-    pollTimer = null;
-    try {
-      const r = await fetch('/api/auth/device/poll', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code })
-      });
-      const data = await r.json();
-      if (data.ok && data.identity) {
-        identity = data.identity;
-        // Page may have booted signed-out (canSeeMyDocs false). Refresh so
-        // "My docs" appears without a full reload on hosted tdoc.dev.
-        try {
-          const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((x) => x.json());
-          if (me && typeof me.canSeeMyDocs === 'boolean') canSeeMyDocs = me.canSeeMyDocs;
-        } catch { /* keep bootCfg flags */ }
-        closeDeviceModal();
-        renderIdentity();
-        refreshComments();
-        if (pendingDuplicate) {
-          pendingDuplicate = false;
-          duplicateDoc();
-        }
-        return;
-      }
-      // slow_down: GitHub explicitly told us to back off. Bump interval by 5s
-      // (per RFC 8628 §3.5) before scheduling the next poll, otherwise GitHub
-      // will keep rejecting at the same cadence forever.
-      if (data.error === 'slow_down') {
-        // GitHub may suggest a new interval; otherwise add 5s.
-        pollInterval = Math.max(pollInterval + 5, Number(data.interval) || 0);
-        schedulePoll(device_code);
-        return;
-      }
-      if (data.error === 'authorization_pending' || (data.pending && !data.error)) {
-        schedulePoll(device_code);
-        return;
-      }
-      if (data.error === 'expired_token' || data.error === 'access_denied') {
-        if (status) status.textContent = 'Code expired or denied. Try again.';
-        return;
-      }
-      // Any other error (no_user, github_unreachable, 500) — show it and stop.
-      if (data.error || !r.ok) {
-        if (status) status.textContent = 'Sign-in failed: ' + (data.message || data.error || `HTTP ${r.status}`) + '. Try again.';
-        return;
-      }
-      // Fallback: unknown shape, keep polling at current interval.
-      schedulePoll(device_code);
-    } catch (e) {
-      if (status) status.textContent = 'Network error: ' + e.message + ' — retrying…';
-      schedulePoll(device_code);
-    }
-  }
 
   // ========== Popup (new-comment): text + element anchors ==========
   let popup = null;
@@ -3444,13 +3391,18 @@
     // body. The caller signals this by setting anchor._placeAbove = true.
     document.body.appendChild(popup);   // append first so offsetHeight is known
     const popupH = popup.offsetHeight || 140;
+    const popupW = popup.offsetWidth || 320;
     if (anchor._placeAbove && rect.top - 8 - popupH >= 8) {
       popup.style.top = (window.scrollY + rect.top - popupH - 8) + 'px';
     } else {
       popup.style.top = (window.scrollY + rect.bottom + 8) + 'px';
     }
-    const left = Math.min(rect.left + window.scrollX, window.innerWidth - 340);
-    popup.style.left = Math.max(8, left) + 'px';
+    // `rect.left` is the caret / mouse-up X for text selections (not the
+    // line-box origin). Clamp in document coords so a caret near the right
+    // edge still keeps the 320px sheet on screen.
+    const maxLeft = window.scrollX + window.innerWidth - popupW - 8;
+    const left = Math.min(Math.max(window.scrollX + 8, window.scrollX + rect.left), maxLeft);
+    popup.style.left = left + 'px';
 
     if (anchor.kind === 'text' && anchor._range) {
       setPendingTextHighlight(anchor._range);
@@ -3523,8 +3475,8 @@
     const articleTop = articleEl.getBoundingClientRect().top + window.scrollY;
     const articleHeight = Math.max(1, articleEl.scrollHeight);
     let rect = null;
-    if (anchor.kind === 'text' && anchor._range) rect = anchor._range.getBoundingClientRect();
-    else if (anchor.kind === 'element' && anchor._el) rect = anchor._el.getBoundingClientRect();
+    if (anchor.kind === 'text' && anchor._range) rect = firstVisibleClientRect(anchor._range);
+    else if (anchor.kind === 'element' && anchor._el) rect = firstVisibleClientRect(anchor._el) || anchor._el.getBoundingClientRect();
     if (!rect) return null;
     const centerY = rect.top + rect.height / 2 + window.scrollY;
     const ratio = Math.max(0, Math.min(1, (centerY - articleTop) / articleHeight));
@@ -3926,7 +3878,7 @@
         // Dragged but no artifact hit — likely a text selection. Fall through.
       }
     }
-    maybeOpenSelectionPopup(e.target);
+    maybeOpenSelectionPopup(e.target, e);
   }, true);
 
   // Mouse and touch both surface here. On iOS Safari long-press text-selection
@@ -3936,10 +3888,28 @@
   document.addEventListener('touchend', (e) => {
     const t = e.target || (e.changedTouches?.[0] && document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY));
     // Touchend fires before the OS finalizes selection — defer one tick.
-    setTimeout(() => maybeOpenSelectionPopup(t), 0);
+    const touch = e.changedTouches && e.changedTouches[0];
+    setTimeout(() => maybeOpenSelectionPopup(t, touch || e), 0);
   }, true);
 
-  function maybeOpenSelectionPopup(target) {
+  // An author can mark a phrase as an invitation: `data-tdoc-select`. Clicking
+  // it selects that phrase and hands off to the same popup a drag-select
+  // opens, so the page teaches the gesture without shipping a second
+  // composer that could drift from this one. A click costs less than a drag,
+  // and a reader who will not drag will still tap.
+  document.addEventListener('click', (e) => {
+    const invite = e.target?.closest?.('[data-tdoc-select]');
+    if (!invite || isInUI(invite)) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(invite);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    maybeOpenSelectionPopup(invite);
+  }, true);
+
+  function maybeOpenSelectionPopup(target, event) {
     // Selected text wins over "comment whole artifact." If there's a real text
     // selection, open the text-selection popup regardless of whether the
     // selection lives inside a commentable artifact. The hover pill remains
@@ -3980,8 +3950,41 @@
       });
       return;
     }
-    const rect = range.getBoundingClientRect();
+    const rect = selectionEndRect(sel, range, event);
+    if (!rect) return;
     openPopup({ kind: 'text', text, context_before: ctx.before, context_after: ctx.after, _range: range }, rect);
+  }
+
+  // Where the user *finished* the selection — mouse-up / caret — not the
+  // left edge of the line box. That's what the popup must sit under.
+  function selectionEndRect(sel, range, event) {
+    const pointerX = event && Number.isFinite(event.clientX) ? event.clientX : NaN;
+    const pointerY = event && Number.isFinite(event.clientY) ? event.clientY : NaN;
+    if (Number.isFinite(pointerX) && Number.isFinite(pointerY)) {
+      const line = clientRectNearPoint(range, pointerX, pointerY);
+      const onLine = endRectOnLine(line, pointerX);
+      if (onLine) return onLine;
+    }
+    if (sel && sel.focusNode != null) {
+      try {
+        const caret = document.createRange();
+        caret.setStart(sel.focusNode, sel.focusOffset);
+        caret.collapse(true);
+        const cr = caret.getBoundingClientRect();
+        if (cr && (cr.height > 0 || cr.width > 0 || cr.left !== 0 || cr.top !== 0)) {
+          const line = clientRectNearPoint(range, cr.left, cr.top + cr.height / 2)
+            || { top: cr.top, bottom: cr.bottom || cr.top + 16, height: cr.height || 16, right: cr.left };
+          return endRectOnLine(line, cr.left);
+        }
+      } catch { /* focus not in a text node */ }
+    }
+    const rects = range.getClientRects ? range.getClientRects() : [];
+    let last = null;
+    for (let i = 0; i < rects.length; i++) {
+      if (isVisibleClientRect(rects[i])) last = rects[i];
+    }
+    if (last) return endRectOnLine(last, last.right);
+    return firstVisibleClientRect(range);
   }
 
   // Begin the re-anchor flow: future text selection on the doc will rebind
@@ -4005,9 +4008,9 @@
     const articleTop = articleEl.getBoundingClientRect().top + window.scrollY;
     const articleHeight = Math.max(1, articleEl.scrollHeight);
     let rect = null;
-    if (mark.ranges?.[0]) rect = mark.ranges[0].getBoundingClientRect();
-    else if (mark.el) rect = mark.el.getBoundingClientRect();
-    else if (mark.targetEl) rect = mark.targetEl.getBoundingClientRect();
+    if (mark.ranges?.[0]) rect = firstVisibleClientRect(mark.ranges[0]);
+    else if (mark.el) rect = firstVisibleClientRect(mark.el) || mark.el.getBoundingClientRect();
+    else if (mark.targetEl) rect = firstVisibleClientRect(mark.targetEl) || mark.targetEl.getBoundingClientRect();
     if (!rect) return null;
     const centerY = rect.top + rect.height / 2 + window.scrollY;
     return { ratio: Math.max(0, Math.min(1, (centerY - articleTop) / articleHeight)), nearestHeading: null };

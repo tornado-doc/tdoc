@@ -1073,6 +1073,7 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const inject =
     `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
     `<script${nonceAttr}>${OVERLAY_JS}</script>`;
   if (rawHtml.includes('</body>')) return rawHtml.replace('</body>', `${inject}\n</body>`);
   return rawHtml + inject;
@@ -1099,8 +1100,19 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog) {
-  return injectOverlayCfg(rawHtml, {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth) {
+  // The onboarding modal is product UI, so it ships from here under the page
+  // nonce. The doc's own <script> would never run (#138), which is why the
+  // landing CTA still carries a plain href: with scripting off the visitor
+  // gets the /start page instead of a dead button.
+  // The modal ships wherever its trigger is. Gating on the slug meant a doc
+  // could carry the CTA and get a dead link to /start instead — which is what
+  // happened the first time the landing page was drafted under another slug.
+  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml);
+  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce
+    ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
+    : rawHtml;
+  return injectOverlayCfg(withOnboard, {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
@@ -1117,6 +1129,9 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
     ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
+    // When the client secret is set, browsers use the redirect flow (signin.js
+    // sends them to /api/auth/web/login) instead of the device-code modal.
+    webAuth: !!webAuth,
     mode: 'published',
     versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
   }, nonce);
@@ -1126,6 +1141,21 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
 // this published tdoc rather than a hardcoded marketing page, so the landing
 // page is authored, reviewed, and versioned through tdoc itself.
 const LANDING_SLUG = 'tornado-doc';
+
+// The doc behind `/start`: the same onboarding, written as a page, for anyone
+// who has scripting off or who wants to read the steps before running them.
+const START_SLUG = 'tdoc-start';
+// `/templates` — the template gallery: pick a look, copy a prompt, hand it to
+// your agent. Same landing-doc mechanism as `/start`.
+const TEMPLATES_SLUG = 'tdoc-templates';
+
+// The onboarding modal, bundled in by bin/tdoc-bundle. Kept as a placeholder
+// here so the source file stays readable and the bundle stays one artifact.
+const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;
+
+// The one GitHub device-flow client, shared by the overlay and the neutral
+// landing page so a fix or a new provider lands once. See server/signin.js.
+const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -1176,7 +1206,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   const nonce = rand(16);
   return {
     ok: true,
-    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req))), {
+    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1192,12 +1222,12 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
 // than a 404 or a sign-in wall. Every worker deployed from this repo runs this
 // code, but only tdoc.dev has the doc — everyone else's `/` keeps the neutral
 // page with no configuration.
-async function landingResponse(env, req) {
+async function landingResponse(env, req, slug = LANDING_SLUG) {
   try {
-    const meta = await loadDocMeta(env, LANDING_SLUG);
+    const meta = await loadDocMeta(env, slug);
     const latest = meta?.versions?.[meta.versions.length - 1]?.n;
     if (!latest) return html(landingHtml(env));
-    const res = await serveDocVersion(env, req, LANDING_SLUG, Number(latest), true);
+    const res = await serveDocVersion(env, req, slug, Number(latest), true);
     return res.ok ? res.response : html(landingHtml(env));
   } catch {
     return html(landingHtml(env));
@@ -1211,6 +1241,7 @@ async function landingResponse(env, req) {
 // bounce users here from /me or an unknown path.
 function landingHtml(env, notice) {
   const authOk = !!(env && String(env.GITHUB_CLIENT_ID || '').trim());
+  const authWeb = !!(env && env.GITHUB_CLIENT_SECRET);
   const toastMsg = ({
     me: 'My docs is only available after you sign in as the worker owner.',
     signin: 'Sign in with GitHub to continue.',
@@ -1250,82 +1281,21 @@ function landingHtml(env, notice) {
   <p class="sub">Open a document from its shared link ·
     <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
   <div id="toast" role="status" aria-live="polite"></div>
+<script>window.__TDOC__ = { authConfigured: true, webAuth: ${authWeb ? 'true' : 'false'}, signinReturn: '/me' };</script>
+<script>${SIGNIN_JS}</script>
 <script>
-(function () {
-  var toastMsg = ${toastJson};
-  var toastEl = document.getElementById('toast');
-  if (toastMsg && toastEl) {
-    toastEl.textContent = toastMsg;
-    toastEl.classList.add('show');
-    setTimeout(function () { toastEl.classList.remove('show'); }, 5200);
-  }
-  var btn = document.getElementById('signin');
-  var status = document.getElementById('status');
-  if (!btn) return;
-  var pollTimer = null;
-  var pollInterval = 5;
-  function setStatus(t) { if (status) status.textContent = t || ''; }
-  function schedule(code) {
-    pollTimer = setTimeout(function () { poll(code); }, pollInterval * 1000);
-  }
-  async function poll(code) {
-    pollTimer = null;
-    try {
-      var r = await fetch('/api/auth/device/poll', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code: code })
-      });
-      var data = await r.json();
-      if (data.ok) {
-        setStatus('Signed in. Opening My docs…');
-        window.location.href = '/me';
-        return;
-      }
-      if (data.error === 'slow_down') {
-        pollInterval = Math.max(pollInterval + 5, Number(data.interval) || 0);
-        schedule(code); return;
-      }
-      if (data.error === 'authorization_pending' || (data.pending && !data.error)) {
-        schedule(code); return;
-      }
-      if (data.error === 'expired_token' || data.error === 'access_denied') {
-        setStatus('Code expired or denied. Try again.');
-        btn.disabled = false; return;
-      }
-      if (data.error || !r.ok) {
-        setStatus('Sign-in failed: ' + (data.message || data.error || ('HTTP ' + r.status)));
-        btn.disabled = false; return;
-      }
-      schedule(code);
-    } catch (e) {
-      setStatus('Network error — retrying…');
-      schedule(code);
-    }
-  }
-  btn.onclick = async function () {
-    btn.disabled = true;
-    setStatus('Starting GitHub sign-in…');
-    try {
-      var r = await fetch('/api/auth/device/start', { method: 'POST' });
-      var data = await r.json();
-      if (!r.ok || data.error || !data.user_code || !data.verification_uri) {
-        setStatus('Sign-in error: ' + ((data && (data.message || data.error)) || ('HTTP ' + r.status)));
-        btn.disabled = false; return;
-      }
-      var uri = data.verification_uri_complete || data.verification_uri;
-      setStatus('Code ' + data.user_code + ' — approve in the GitHub tab, then return here.');
-      try {
-        var u = new URL(String(uri));
-        if (u.protocol === 'https:' && /(^|\\.)github\\.com$/.test(u.hostname)) window.open(uri, '_blank');
-      } catch (_) {}
-      pollInterval = Math.max(5, data.interval || 5);
-      schedule(data.device_code);
-    } catch (e) {
-      setStatus('Sign-in error: could not reach the sign-in service.');
-      btn.disabled = false;
-    }
-  };
-})();
+  // One shared sign-in (server/signin.js): web redirect flow when webAuth is on,
+  // else the device-code modal. On the redirect path __tdocSignIn navigates away
+  // and never resolves, so the .then below only runs on the device path.
+  (function () {
+    var btn = document.getElementById('signin');
+    if (!btn || !window.__tdocSignIn) return;
+    btn.onclick = function () {
+      btn.disabled = true;
+      window.__tdocSignIn().then(function () { location.href = '/me'; },
+        function () { btn.disabled = false; });
+    };
+  })();
 </script>
 </body></html>`;
 }
@@ -1344,6 +1314,47 @@ function authDoneHtml() {
   <h1>You're signed in</h1>
   <p>You can close this tab and return to tdoc.</p>
 </body></html>`;
+}
+
+// Web OAuth redirect flow (browsers). Device flow stays for CLIs; this is the
+// hop that phones need — GitHub sends the visitor straight back here after
+// Approve, so nobody is stranded on GitHub's "Congratulations" page. Active
+// only when GITHUB_CLIENT_SECRET is set (the token exchange requires it), so a
+// deploy without the secret silently keeps the device flow.
+function authErrorHtml(msg) {
+  const safe = String(msg || 'Sign-in failed.').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]);
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — sign-in</title>
+<style>
+  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh; margin: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #111; background: #fff; gap: 8px; text-align: center; padding: 0 20px; }
+  h1 { font-size: 22px; margin: 0; color: #c3452f; }
+  p { color: #666; margin: 0; }
+  a { color: #1652f0; }
+</style></head><body>
+  <h1>Sign-in failed</h1>
+  <p>${safe}</p>
+  <p><a href="/">Back to tdoc</a></p>
+</body></html>`;
+}
+
+// Only ever redirect to a same-origin path we produced. Reject absolute URLs
+// and protocol-relative (`//evil.com`) targets so a crafted `?return=` can't
+// bounce a signed-in visitor off-site. Falls back to the site root.
+function sanitizeReturn(raw) {
+  if (typeof raw !== 'string' || !raw) return '/';
+  if (raw[0] !== '/' || raw[1] === '/' || raw[1] === '\\') return '/';
+  if (/[\x00-\x1f]/.test(raw)) return '/';
+  return raw;
+}
+
+// 302 that can also set cookies — no existing helper does both at once.
+function redirectTo(location, cookies) {
+  const h = new Headers({ Location: location });
+  (cookies || []).forEach((c) => h.append('Set-Cookie', c));
+  return new Response(null, { status: 302, headers: h });
 }
 
 // /me — the owner's doc catalog. JUL-36 tail (2026-08-13): this used to be a
@@ -1433,6 +1444,29 @@ async function indexHtml(env, session, origin, nonce) {
   .batch-delete:disabled { opacity: 0.5; cursor: default; }
   .doc-list { display: flex; flex-direction: column; }
   .doc-list[hidden], .doc-row[hidden], .empty[hidden] { display: none !important; }
+  /* Create-a-doc: /me is where someone lands after publishing, so it is also
+     where they come back to make the next one. The button teaches rather than
+     creates, because nothing here can create a doc — their agent writes it. */
+  .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+  .page-hd h1 { margin: 0; }
+  .mk-btn { margin-left: auto; border: 0; border-radius: 999px; background: var(--td-accent); color: #fff;
+    font: inherit; font-weight: 650; padding: 9px 16px; cursor: pointer; }
+  .mk-bg { position: fixed; inset: 0; background: rgba(16,18,26,.55); display: grid; place-items: center;
+    z-index: 99999; padding: 20px; }
+  .mk-bg[hidden] { display: none; }
+  .mk { width: min(480px, 100%); background: #fff; border-radius: 16px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(16,18,26,.28); text-align: left; }
+  .mk-hd { display: flex; align-items: center; padding: 17px 20px; border-bottom: 1px solid var(--td-line); }
+  .mk-hd strong { font-size: 15px; }
+  .mk-hd button { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1;
+    color: #767c8b; cursor: pointer; }
+  .mk-bd { padding: 18px 20px; }
+  .mk-bd ol { margin: 0; padding-left: 18px; color: #5b6070; font-size: 14px; }
+  .mk-bd li { margin: 0 0 9px; }
+  .mk-bd b { color: var(--td-ink); }
+  .mk-say { display: block; margin: 6px 0 0; padding: 9px 11px; background: #f5f6f8;
+    border: 1px solid var(--td-line); border-radius: 8px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--td-ink); }
+  .mk-ft { padding: 14px 20px; border-top: 1px solid var(--td-line); font-size: 12.5px; color: #767c8b; }
   .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
   .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
   .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
@@ -1465,8 +1499,8 @@ async function indexHtml(env, session, origin, nonce) {
 </style>
 </head><body>
 <div class="wrap">
-<h1>My docs</h1>
-${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
+<div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
+${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how, or <a href="/templates">browse templates</a> for a look to start from.</p>' :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
   </div>
@@ -1477,7 +1511,37 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet.</p>' :
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
 </div>
+
+<div class="mk-bg" id="mk-bg" hidden>
+  <div class="mk" role="dialog" aria-modal="true" aria-label="Create a doc">
+    <div class="mk-hd"><strong>Create a doc</strong><button type="button" id="mk-x" aria-label="Close">&times;</button></div>
+    <div class="mk-bd">
+      <ol>
+        <li>Open the AI you already use.
+          <span class="mk-say">Use tdoc to make me a one page summary of this quarter, with a chart of weekly signups.</span>
+        </li>
+        <li>It writes the page and opens it for you.</li>
+        <li>Hit <b>Publish</b>, top right, to put it online.</li>
+        <li>Send the link to anyone. They comment on the page, and your AI answers them.</li>
+      </ol>
+    </div>
+    <div class="mk-ft">Want a specific look first? <a href="/templates">Browse templates</a>. &nbsp;·&nbsp; Not set up yet? <a href="/start">Start here</a>.</div>
+  </div>
+</div>
 <script${nonce ? ` nonce="${nonce}"` : ''}>
+  // Create-a-doc tutorial. /me cannot create anything — the doc is written by
+  // the user's own agent — so this explains where creation actually happens.
+  (function () {
+    var bg = document.getElementById('mk-bg');
+    var openBtn = document.getElementById('mk-open');
+    if (!bg || !openBtn) return;
+    function show(on) { bg.hidden = !on; if (on) document.getElementById('mk-x').focus(); }
+    openBtn.onclick = function () { show(true); };
+    document.getElementById('mk-x').onclick = function () { show(false); };
+    bg.addEventListener('click', function (e) { if (e.target === bg) show(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !bg.hidden) show(false); });
+  })();
+
 (() => {
   // Tiny top-right toast — no third-party runtime on the privileged /me page.
   function toast(message, kind = '') {
@@ -2968,8 +3032,27 @@ export class CommentsStore {
   }
 }
 
+// Preview Worker (#148): KV has no bucket-level TTL. Cap every META write at
+// 14 days when TDOC_PREVIEW=1 so ghost meta cannot outlive the R2 lifecycle.
+const PREVIEW_KV_TTL_SECONDS = 14 * 24 * 60 * 60;
+function applyPreviewKvTtl(env) {
+  if (!env || env.TDOC_PREVIEW !== '1' || !env.META || env.META.__tdocPreviewTtl) return;
+  const inner = env.META.put.bind(env.META);
+  env.META.put = (key, value, extra) => {
+    const opts = extra ? { ...extra } : {};
+    if (opts.expirationTtl == null && opts.expiration == null) {
+      opts.expirationTtl = PREVIEW_KV_TTL_SECONDS;
+    } else if (typeof opts.expirationTtl === 'number') {
+      opts.expirationTtl = Math.min(opts.expirationTtl, PREVIEW_KV_TTL_SECONDS);
+    }
+    return inner(key, value, opts);
+  };
+  env.META.__tdocPreviewTtl = true;
+}
+
 export default {
   async fetch(req, env, ctx) {
+    applyPreviewKvTtl(env);
     const url = new URL(req.url);
     const p = url.pathname;
     const method = req.method;
@@ -3009,10 +3092,70 @@ export default {
       return landingResponse(env, req);
     }
 
-    // Soft landing for the OAuth App "Authorization callback URL". Device
-    // Flow does not need a callback, but GitHub may still redirect here
-    // after Approve — serve a friendly page instead of a 404.
-    if ((p === '/auth/done' || p === '/auth/github/callback') && method === 'GET') {
+    // `/start` is the homepage CTA's no-script destination: the same
+    // onboarding written as a page. Same fail-safe as `/` — if that doc is
+    // missing, the visitor gets the neutral page, never a 404.
+    if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, START_SLUG);
+    }
+
+    // `/templates` — the template gallery. Same fail-safe as `/start`: a
+    // missing doc yields the neutral landing page, never a 404. No onboarding
+    // modal (TEMPLATES_SLUG is intentionally not in the withOnboard gate).
+    if (p === '/templates' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, TEMPLATES_SLUG);
+    }
+
+    // Web OAuth callback. With a `code` this is the redirect flow: exchange it
+    // for a token (needs the client secret), mint the same session the device
+    // flow does, and 302 the visitor back to the page they started from — one
+    // tab, no "Congratulations" dead end. Without a code it's the device-flow
+    // soft landing GitHub may bounce to after Approve; keep the friendly page.
+    if (p === '/auth/github/callback' && method === 'GET') {
+      const code = url.searchParams.get('code');
+      if (!code) return html(authDoneHtml());
+      const state = url.searchParams.get('state');
+      // Anchor to a cookie-pair boundary so a cookie merely ending in
+      // "tdoc_oauth" (e.g. "xtdoc_oauth=") can't supply the nonce.
+      const cookieNonce = (/(?:^|;\s*)tdoc_oauth=([a-f0-9]+)/.exec(req.headers.get('cookie') || '') || [])[1];
+      if (!state || !cookieNonce || state !== cookieNonce) {
+        return html(authErrorHtml('Sign-in could not be verified (state mismatch). Please try again.'), { status: 400 });
+      }
+      if (!env.GITHUB_CLIENT_SECRET) {
+        return html(authErrorHtml('Web sign-in is not configured on this host.'), { status: 500 });
+      }
+      const ret = sanitizeReturn(await env.META.get(`oauthstate:${state}`));
+      await env.META.delete(`oauthstate:${state}`);
+      try {
+        const r = await ghPost('/login/oauth/access_token', {
+          client_id: env.GITHUB_CLIENT_ID,
+          client_secret: env.GITHUB_CLIENT_SECRET,
+          code,
+          redirect_uri: `${url.origin}/auth/github/callback`,
+        });
+        if (r.error || !r.access_token) {
+          return html(authErrorHtml('GitHub sign-in failed: ' + (r.error_description || r.error || 'no token returned')), { status: 400 });
+        }
+        const user = await ghUser(r.access_token);
+        if (!user.login) return html(authErrorHtml('GitHub returned no account.'), { status: 500 });
+        const sid = rand(24);
+        const session = {
+          login: user.login,
+          avatar_url: user.avatar_url,
+          name: user.name || user.login,
+          created: new Date().toISOString(),
+        };
+        await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+        return redirectTo(ret, [
+          `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+          'tdoc_oauth=; Path=/; Max-Age=0',
+        ]);
+      } catch (e) {
+        return html(authErrorHtml('Sign-in error: ' + e.message), { status: 500 });
+      }
+    }
+    // Static soft landing (device flow, or the OAuth App's callback URL).
+    if (p === '/auth/done' && method === 'GET') {
       return html(authDoneHtml());
     }
 
@@ -3034,7 +3177,7 @@ export default {
       const nonce = rand(16);
       const page = await indexHtml(env, s, url.origin, nonce);
       const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
-      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true), {
+      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true, !!env.GITHUB_CLIENT_SECRET), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
       });
     }
@@ -3322,6 +3465,25 @@ export default {
       });
     }
 
+    // Web redirect flow, step 1: stash where to land afterwards against a CSRF
+    // nonce, then send the browser to GitHub's authorize page. The browser only
+    // reaches here when cfg.webAuth is on (secret configured); the guard keeps a
+    // stray hit from 500ing.
+    if (p === '/api/auth/web/login' && method === 'GET') {
+      if (!env.GITHUB_CLIENT_SECRET) return redirectTo('/?notice=signin');
+      const ret = sanitizeReturn(url.searchParams.get('return'));
+      const nonce = rand(16);
+      await env.META.put(`oauthstate:${nonce}`, ret, { expirationTtl: 600 });
+      const gh = new URL('https://github.com/login/oauth/authorize');
+      gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
+      gh.searchParams.set('redirect_uri', `${url.origin}/auth/github/callback`);
+      gh.searchParams.set('scope', 'read:user');
+      gh.searchParams.set('state', nonce);
+      return redirectTo(gh.toString(), [
+        `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+      ]);
+    }
+
     if (p === '/api/auth/device/start' && method === 'POST') {
       try {
         const r = await ghPost('/login/device/code', {
@@ -3453,7 +3615,15 @@ export default {
       }
       const session = await getSession(env, req);
       const login = sessionLogin(session);
-      if (!login) return json({ error: 'sign_in_required' }, { status: 401 });
+      // Additive `hint` so a stale CLI that just prints the error body still
+      // gets an actionable next step. A current CLI ran the device flow and
+      // sent a session cookie, so it never lands here; one that hits this
+      // without showing a device code is out of date. Fail-open: no new
+      // rejection, just a clearer 401.
+      if (!login) return json({
+        error: 'sign_in_required',
+        hint: 'Hosted publish needs a GitHub sign-in. If your tdoc CLI did not show a device code to approve, it is out of date — run: /tdoc update --yes',
+      }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const issued = await issueHostedToken(env, { ...body, login });
