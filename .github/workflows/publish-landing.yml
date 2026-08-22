@@ -164,6 +164,7 @@ jobs:
 
           upload tornado-doc .release/tornado-doc 1
           upload tdoc-start  landing/tdoc-start  1
+          upload tdoc-templates landing/tdoc-templates 1
 
       - name: Verify tdoc.dev serves the doc, not the fallback
         run: |

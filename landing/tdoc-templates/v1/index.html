@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — templates</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fraunces:opsz,wght@9..144,400;9..144,500&display=swap">
+<style>
+body { background:#fff; }
+  .wrap { font-family:"Inter",system-ui,-apple-system,sans-serif; color:#0a0a0a; font-size:17px; line-height:1.65; }
+  .wrap h1 { font-weight:600; font-size:clamp(34px,5vw,48px); letter-spacing:-.03em; line-height:1.08; margin:0 0 10px; }
+  .wrap h2 { font-weight:600; letter-spacing:-.015em; font-size:24px; margin:38px 0 10px; }
+  .sub { color:#555; font-size:19px; margin:0 0 26px; }
+  .note { border-top:1px solid #e5e5e5; padding-top:12px; margin:22px 0; color:#555; font-size:15px; }
+  .wrap a { color:rgba(10,10,10,.6); text-decoration:none; border-bottom:1px solid rgba(10,10,10,.2); }
+  code { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.86em; background:#f5f5f5; padding:1px 5px; border-radius:3px; }
+  .diagram-box { max-width:100%; overflow-x:auto; margin:22px 0; }
+  .scroll { overflow-x:auto; max-width:100%; }
+  table { border-collapse:separate; border-spacing:3px; width:100%; font-size:14px; margin:8px 0; }
+  th { font:600 11px/1 ui-monospace,Menlo,monospace; letter-spacing:.04em; text-transform:uppercase; color:#555; padding:8px 10px; text-align:left; }
+  td { padding:9px 10px; background:#f5f5f5; border-radius:4px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; margin:24px 0; }
+.card { border:1px solid #e5e5e5; border-radius:6px; overflow:hidden; }
+.card .pv { height:120px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.card .bd { padding:14px 16px; }
+.card h3 { font-size:16px; font-weight:600; letter-spacing:-.01em; margin:0; }
+.card .desc { font-size:13.5px; color:#555; margin:6px 0 12px; line-height:1.5; }
+.card .promptlabel { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#999; margin-bottom:4px; }
+.card .prompt { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; background:#f5f5f5; border:1px solid #e5e5e5; border-radius:4px; padding:8px 10px; color:#111; user-select:all; -webkit-user-select:all; line-height:1.6; }
+.card .link { font-size:12.5px; margin-top:10px; }
+.step { display:flex; gap:14px; align-items:flex-start; padding:10px 0; border-top:1px solid #eee; }
+.step .n { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:#999; padding-top:2px; min-width:20px; }
+.step .t { font-size:15px; color:#333; line-height:1.6; }
+</style>
+</head><body>
+<div class="wrap">
+<h1>Templates</h1>
+<p class="sub">Pick a look, copy one line, hand it to your agent. tdoc has no editor — you describe the doc, the agent writes it in the style you name.</p>
+
+<h2>How it works</h2>
+<div class="step"><span class="n">1</span><span class="t">Pick a card below and <b>copy its prompt line</b> (it's one selectable line).</span></div>
+<div class="step"><span class="n">2</span><span class="t">Paste it to your agent, then just <b>type your topic at the end</b> — no mid-line editing.</span></div>
+<div class="step"><span class="n">3</span><span class="t">The agent generates the doc in that style, serves it locally, and can publish it here. Comment on it, and it regenerates.</span></div>
+
+<h2>The looks</h2>
+<div class="grid">
+
+  <div class="card">
+    <div class="pv" style="background:#fff">
+      <svg width="180" height="88" viewBox="0 0 180 88"><defs><pattern id="dg" width="6" height="6" patternUnits="userSpaceOnUse"><rect width="6" height="6" fill="#f7d7d1"/><circle cx="3" cy="3" r="1" fill="#e0a99e"/></pattern></defs><rect x="8" y="14" width="164" height="60" fill="none" stroke="#111" stroke-width="1.3"/><rect x="18" y="26" width="60" height="16" fill="none" stroke="#111"/><rect x="18" y="48" width="60" height="16" fill="url(#dg)" stroke="#e0a99e"/><rect x="96" y="26" width="66" height="38" fill="#dde7f9" stroke="#a9c0ee"/></svg>
+    </div>
+    <div class="bd">
+      <h3>default — stark sans</h3>
+      <p class="desc">White, black, one clean sans, an oversized headline, and a technical-diagram vocabulary (frames, mono labels, dot/hatch textures). The house default.</p>
+      <div class="promptlabel">copy this →</div>
+      <div class="prompt">用 tdoc 写一份技术设计文档，用 default（stark sans）风格，尽量多用图表。主题是：</div>
+      <div class="link"><a href="/d/tdoc-sys-default/v/1">see a live sample →</a></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="pv" style="background:linear-gradient(90deg,#fff 50%,#1a1a1a 50%)">
+      <svg width="180" height="88" viewBox="0 0 180 88"><text x="24" y="40" font-family="Inter,sans-serif" font-size="15" font-weight="600" fill="#0a0a0a">Aa</text><rect x="20" y="52" width="54" height="14" fill="#fafafa" stroke="#e5e5e5"/><text x="114" y="40" font-family="Inter,sans-serif" font-size="15" font-weight="600" fill="#fafafa">Aa</text><rect x="110" y="52" width="54" height="14" fill="#202020" stroke="#2e2e2e"/><rect x="150" y="18" width="12" height="12" fill="#ff4b2e"/></svg>
+    </div>
+    <div class="bd">
+      <h3>technical — engineering blog</h3>
+      <p class="desc">Follows the theme: dark like a research blog, light as its inverse. Mono for identifiers, one sparing red-orange accent.</p>
+      <div class="promptlabel">copy this →</div>
+      <div class="prompt">用 tdoc 写一份技术设计文档，用 technical 风格，尽量多用图表。主题是：</div>
+      <div class="link"><a href="/d/tdoc-sys-technical/v/1">see a live sample →</a></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="pv" style="background:#f7f6f5">
+      <svg width="180" height="88" viewBox="0 0 180 88"><text x="20" y="38" font-family="Fraunces,Georgia,serif" font-weight="300" font-size="26" fill="#000">Aa</text><text x="20" y="62" font-family="Inter,sans-serif" font-size="13" fill="#2200ff">a link</text><rect x="20" y="66" width="42" height="2" fill="#2200ff"/></svg>
+    </div>
+    <div class="bd">
+      <h3>editorial — long read</h3>
+      <p class="desc">Warm paper, a thin serif headline over sans subheads, electric-blue underlined links, bold emphasis. For essays and explainers.</p>
+      <div class="promptlabel">copy this →</div>
+      <div class="prompt">用 tdoc 写一篇长文，用 editorial 风格，尽量多用图表。主题是：</div>
+      <div class="link"><a href="/d/tdoc-sys-editorial/v/1">see a live sample →</a></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="pv" style="background:#faf9f5">
+      <svg width="180" height="88" viewBox="0 0 180 88"><text x="20" y="42" font-family="Fraunces,Georgia,serif" font-weight="500" font-size="28" fill="#141413">Aa</text><text x="20" y="66" font-family="Inter,sans-serif" font-size="13" fill="#c15f3c">a clay link</text><rect x="20" y="70" width="60" height="1" fill="#e3c4b6"/></svg>
+    </div>
+    <div class="bd">
+      <h3>paper — warm serif</h3>
+      <p class="desc">Off-white paper, an open serif display over a humanist sans, one clay accent. A warm, book-ish register.</p>
+      <div class="promptlabel">copy this →</div>
+      <div class="prompt">用 tdoc 写一篇文档，用 paper 风格，尽量多用图表。主题是：</div>
+      <div class="link"><a href="/d/tdoc-sys-paper/v/1">see a live sample →</a></div>
+    </div>
+  </div>
+
+</div>
+
+<h2>Notes</h2>
+<div class="step"><span class="n">·</span><span class="t">Name no style and you get <b>default</b>. Every style follows the same floor: no AI-slop prose, and visual-first — many charts and diagrams, not walls of text.</span></div>
+<div class="step"><span class="n">·</span><span class="t">The style sets the look; it never limits which visuals a doc has. Ask for a bar chart, a timeline, a matrix — any style draws them in its own palette.</span></div>
+</div>
+</body></html>
