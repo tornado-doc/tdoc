@@ -102,6 +102,144 @@ t('tdoc-new fails loudly if the local server never comes up', () => {
     'ping-loop success is not checked');
 });
 
+t('chat-driven new and edit flows require host validation', () => {
+  const rootSkill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const packagedSkill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'tdoc', 'SKILL.md'), 'utf8');
+  assert(rootSkill === packagedSkill, 'root and packaged SKILL.md copies must stay identical');
+  assert(/mandatory[\s\S]*tdoc-validate-template[\s\S]*do not open,\s*publish, or report/.test(rootSkill),
+    '/tdoc new must validate before completion');
+  assert(/Validate `v<n\+1>\/index\.html`[\s\S]*tdoc-validate-template[\s\S]*never publish or report a broken version/.test(rootSkill),
+    '/tdoc edit must validate every generated version');
+});
+
+t('tdoc default-template validator accepts scoped widget CSS', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-template-'));
+  try {
+    const html = path.join(dir, 'valid.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } .cost-widget { display:grid } .cost-widget p { color:#333 }</style>
+      </head><body><div class="wrap"><h1>Title</h1><div class="cost-widget"><p>x</p></div></div></body></html>`);
+    const r = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(r.status === 0, `valid default-template HTML rejected: ${r.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc default-template validator rejects global restyling by default', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-template-'));
+  try {
+    const html = path.join(dir, 'custom.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } h1 { font-size:72px } .wrap { max-width:1200px }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`);
+    const rejected = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(rejected.status !== 0, 'global h1/.wrap restyling should be rejected');
+    assert(/default template/i.test(rejected.stderr), rejected.stderr);
+    const explicit = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html, '--custom-template'], { encoding: 'utf8' });
+    assert(explicit.status === 0, `explicit custom template should pass: ${explicit.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc host validator rejects inert JavaScript even for a custom template', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-host-js-'));
+  try {
+    const html = path.join(dir, 'broken.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff }</style></head>
+      <body><div class="wrap"><button onclick="go()">Run</button>
+      <a href="javascript:go()">again</a><canvas></canvas><script>go()</script></div></body></html>`);
+    const r = spawnSync(path.join(BIN, 'tdoc-validate-template'),
+      [html, '--custom-template'], { encoding: 'utf8' });
+    assert(r.status !== 0, 'custom-template must not make host JavaScript executable');
+    assert(/host <script> is inert/.test(r.stderr), r.stderr);
+    assert(/event handlers are inert/.test(r.stderr), r.stderr);
+    assert(/javascript: URLs are inert/.test(r.stderr), r.stderr);
+    assert(/host <canvas> cannot render/.test(r.stderr), r.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc host validator accepts the named editorial house-style background', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-style-'));
+  try {
+    const html = path.join(dir, 'editorial.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#f7f6f5 } .wrap { font-family:Georgia,serif; color:#000 }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`);
+    const wrong = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(wrong.status !== 0, 'editorial background should not pass as default');
+    const right = spawnSync(path.join(BIN, 'tdoc-validate-template'),
+      [html, '--style', 'editorial'], { encoding: 'utf8' });
+    assert(right.status === 0, right.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-new copies sandboxed widget files while keeping host HTML script-free', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-widget-new-'));
+  try {
+    const fakeBin = path.join(dir, 'fake-bin');
+    const widgets = path.join(dir, 'widgets');
+    fs.mkdirSync(fakeBin);
+    fs.mkdirSync(widgets);
+    const fakeCurl = path.join(fakeBin, 'curl');
+    fs.writeFileSync(fakeCurl, '#!/bin/sh\nprintf \'{"service":"tdoc"}\'\n');
+    fs.chmodSync(fakeCurl, 0o755);
+    fs.writeFileSync(path.join(widgets, 'calculator.html'),
+      '<!doctype html><html><body><output id="x"></output><script>document.querySelector("#x").textContent="ok"</script></body></html>');
+    const host = `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff }</style></head><body><div class="wrap">
+      <h1>Calculator</h1><iframe sandbox="allow-scripts" src="/d/widget-doc/v/1/widget/calculator"></iframe>
+      </div></body></html>`;
+    const env = { ...process.env, HOME: dir, TDOC_DIR: path.join(dir, 'tdocs'),
+      PATH: `${fakeBin}:${process.env.PATH}` };
+    const r = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', 'widget-doc', '--title', 'Widget', '--html-stdin', '--widgets-dir', widgets, '--quiet'],
+      { input: host, env, encoding: 'utf8', timeout: 20000 });
+    assert(r.status === 0, `tdoc-new widget handoff failed (exit ${r.status})\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    const copied = fs.readFileSync(path.join(dir, 'tdocs', 'widget-doc', 'v1', 'widgets', 'calculator.html'), 'utf8');
+    assert(copied.includes('<script>'), 'widget JavaScript was not preserved in the island file');
+    const savedHost = fs.readFileSync(path.join(dir, 'tdocs', 'widget-doc', 'v1', 'index.html'), 'utf8');
+    assert(!savedHost.includes('<script>'), 'host unexpectedly gained JavaScript');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-new validates the default template before replacing an existing doc', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cli-'));
+  try {
+    const env = { ...process.env, TDOC_DIR: dir, TDOC_PORT: '0' };
+    const docDir = path.join(dir, 'mydoc');
+    fs.mkdirSync(path.join(docDir, 'v1'), { recursive: true });
+    fs.writeFileSync(path.join(docDir, 'v1', 'index.html'), '<!doctype html><body>ORIGINAL</body>');
+    fs.writeFileSync(path.join(docDir, 'meta.json'), JSON.stringify({ slug: 'mydoc', versions: [{ n: 1 }] }));
+    fs.writeFileSync(path.join(docDir, 'comments.json'), JSON.stringify([{ id: 'c1', text: 'precious' }]));
+    const custom = `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff } h1 { font-size:72px }</style>
+      </head><body><div class="wrap"><h1>Custom</h1></div></body></html>`;
+    const r = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', 'mydoc', '--title', 'x', '--html-stdin', '--force'],
+      { input: custom, env, encoding: 'utf8', timeout: 20000 });
+    assert(r.status !== 0 && /default-template validation failed/i.test(r.stderr), r.stderr);
+    assert(/ORIGINAL/.test(fs.readFileSync(path.join(docDir, 'v1', 'index.html'), 'utf8')),
+      'existing doc was replaced before template validation');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ---- live behavior: --force must not destroy an existing doc on bad input ----
 t('tdoc-new --force preserves the existing doc when new HTML is INVALID [the bug]', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cli-'));
