@@ -13,23 +13,27 @@ body { background:#fff; }
   .note { border-top:1px solid #e5e5e5; padding-top:12px; margin:22px 0; color:#555; font-size:15px; }
   .wrap a { color:rgba(10,10,10,.6); text-decoration:none; border-bottom:1px solid rgba(10,10,10,.2); }
   code { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.86em; background:#f5f5f5; padding:1px 5px; border-radius:3px; }
-.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; margin:24px 0; }
-.card { border:1px solid #e5e5e5; border-radius:6px; overflow:hidden; display:flex; flex-direction:column; }
-.card .pv { height:120px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:center; overflow:hidden; }
-.card .bd { padding:14px 16px; display:flex; flex-direction:column; flex:1; }
-.card h3 { font-size:16px; font-weight:600; letter-spacing:-.01em; margin:0; }
-.card .desc { font-size:13.5px; color:#555; margin:6px 0 14px; line-height:1.5; }
-/* Primary CTA — see the look live in a real doc. */
-.card .cta { display:inline-block; align-self:flex-start; background:#0a0a0a; color:#fff; font-weight:600; font-size:14px; padding:9px 16px; border-radius:6px; border-bottom:none; }
-.card .cta:hover { opacity:.9; }
-/* Secondary — copy the prompt. The button is wired by tdoc's overlay
-   ([data-tdoc-copy]); the doc CSP blocks author JS, so the platform does it. */
-.card .copyrow { margin-top:auto; padding-top:14px; border-top:1px solid #eee; }
-.card .promptlabel { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:#999; margin:14px 0 6px; }
-.card .prompt { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; background:#f5f5f5; border:1px solid #e5e5e5; border-radius:4px; padding:8px 10px; color:#111; user-select:all; -webkit-user-select:all; line-height:1.6; }
-.card .copybtn { font:600 12.5px system-ui,-apple-system,sans-serif; background:#f0f0f0; color:#111; border:1px solid #dcdcdc; border-radius:5px; padding:7px 13px; margin-top:9px; cursor:pointer; }
-.card .copybtn:hover { background:#e8e8e8; }
-.card .copybtn.tdoc-copied { background:#0a7d33; color:#fff; border-color:#0a7d33; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px; margin:24px 0; }
+.card { border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; background:#fff; transition:border-color .15s, box-shadow .15s; }
+.card:hover { border-color:#d1d5db; box-shadow:0 6px 20px rgba(0,0,0,.06); }
+.card .pv { height:148px; border-bottom:1px solid #f0f1f2; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.card .bd { padding:16px 18px 18px; display:flex; flex-direction:column; flex:1; }
+.card h3 { font-size:15.5px; font-weight:600; letter-spacing:-.01em; margin:0 0 6px; }
+.card .desc { font-size:13.5px; color:#6b7280; margin:0 0 18px; line-height:1.55; }
+/* One action row, aligned to the card bottom so every card lines up:
+   a filled primary (see it) + a ghost secondary (copy the prompt). */
+.card .actions { display:flex; gap:8px; margin-top:auto; }
+.actions .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; font:600 13px/1 system-ui,-apple-system,sans-serif; height:36px; padding:0 14px; border-radius:8px; cursor:pointer; border:1px solid transparent; text-decoration:none; box-sizing:border-box; white-space:nowrap; }
+.actions .btn-primary { background:#0a0a0a; color:#fff; border-bottom:none; }
+.actions .btn-primary:hover { background:#262626; }
+.actions .btn-ghost { background:#fff; color:#374151; border-color:#d5d7db; }
+.actions .btn-ghost:hover { background:#f7f8f9; border-color:#a9adb3; }
+.actions .btn-ghost .ic { width:13px; height:13px; opacity:.65; }
+.actions .btn-ghost.tdoc-copied { background:#ecfdf3; color:#067647; border-color:#a6f4c5; }
+.actions .btn-ghost.tdoc-copied .ic { display:none; }
+/* the prompt travels with the card but is copied, not shown (it's on display
+   in the live example); kept in the DOM so [data-tdoc-copy] can read it. */
+.vh { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
 .step { display:flex; gap:14px; align-items:flex-start; padding:10px 0; border-top:1px solid #eee; }
 .step .n { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:#999; padding-top:2px; min-width:20px; }
 .step .t { font-size:15px; color:#333; line-height:1.6; }
@@ -54,12 +58,11 @@ body { background:#fff; }
     <div class="bd">
       <h3>default — stark sans</h3>
       <p class="desc">White, black, one clean sans, an oversized headline, and a technical-diagram vocabulary (frames, mono labels, dot/hatch textures). The house default.</p>
-      <a class="cta" href="/d/tdoc-sys-default/v/1">See live example →</a>
-      <div class="copyrow">
-        <div class="promptlabel">or copy the prompt</div>
-        <div class="prompt" id="pr-default">用 tdoc 写一份技术设计文档，用 default（stark sans）风格，尽量多用图表。主题是：</div>
-        <button class="copybtn" data-tdoc-copy="#pr-default" data-tdoc-copy-done="Copied ✓">Copy the prompt</button>
+      <div class="actions">
+        <a class="btn btn-primary" href="/d/tdoc-sys-default/v/1">See live example →</a>
+        <button class="btn btn-ghost" data-tdoc-copy="#pr-default" data-tdoc-copy-done="Copied ✓"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy prompt</button>
       </div>
+      <span class="vh" id="pr-default">用 tdoc 写一份技术设计文档，用 default（stark sans）风格，尽量多用图表。主题是：</span>
     </div>
   </div>
 
@@ -70,12 +73,11 @@ body { background:#fff; }
     <div class="bd">
       <h3>technical — engineering blog</h3>
       <p class="desc">Follows the theme: opens dark like a research blog, light as its inverse. Mono for identifiers, one sparing red-orange accent.</p>
-      <a class="cta" href="/d/tdoc-sys-technical/v/1">See live example →</a>
-      <div class="copyrow">
-        <div class="promptlabel">or copy the prompt</div>
-        <div class="prompt" id="pr-technical">用 tdoc 写一份技术设计文档，用 technical 风格，尽量多用图表。主题是：</div>
-        <button class="copybtn" data-tdoc-copy="#pr-technical" data-tdoc-copy-done="Copied ✓">Copy the prompt</button>
+      <div class="actions">
+        <a class="btn btn-primary" href="/d/tdoc-sys-technical/v/1">See live example →</a>
+        <button class="btn btn-ghost" data-tdoc-copy="#pr-technical" data-tdoc-copy-done="Copied ✓"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy prompt</button>
       </div>
+      <span class="vh" id="pr-technical">用 tdoc 写一份技术设计文档，用 technical 风格，尽量多用图表。主题是：</span>
     </div>
   </div>
 
@@ -86,12 +88,11 @@ body { background:#fff; }
     <div class="bd">
       <h3>editorial — long read</h3>
       <p class="desc">Warm paper, a thin serif headline over sans subheads, electric-blue underlined links, bold emphasis. For essays and explainers.</p>
-      <a class="cta" href="/d/tdoc-sys-editorial/v/1">See live example →</a>
-      <div class="copyrow">
-        <div class="promptlabel">or copy the prompt</div>
-        <div class="prompt" id="pr-editorial">用 tdoc 写一篇长文，用 editorial 风格，尽量多用图表。主题是：</div>
-        <button class="copybtn" data-tdoc-copy="#pr-editorial" data-tdoc-copy-done="Copied ✓">Copy the prompt</button>
+      <div class="actions">
+        <a class="btn btn-primary" href="/d/tdoc-sys-editorial/v/1">See live example →</a>
+        <button class="btn btn-ghost" data-tdoc-copy="#pr-editorial" data-tdoc-copy-done="Copied ✓"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy prompt</button>
       </div>
+      <span class="vh" id="pr-editorial">用 tdoc 写一篇长文，用 editorial 风格，尽量多用图表。主题是：</span>
     </div>
   </div>
 
@@ -102,12 +103,11 @@ body { background:#fff; }
     <div class="bd">
       <h3>paper — warm serif</h3>
       <p class="desc">Off-white paper, an open serif display over a humanist sans, one clay accent. A warm, book-ish register.</p>
-      <a class="cta" href="/d/tdoc-sys-paper/v/1">See live example →</a>
-      <div class="copyrow">
-        <div class="promptlabel">or copy the prompt</div>
-        <div class="prompt" id="pr-paper">用 tdoc 写一篇文档，用 paper 风格，尽量多用图表。主题是：</div>
-        <button class="copybtn" data-tdoc-copy="#pr-paper" data-tdoc-copy-done="Copied ✓">Copy the prompt</button>
+      <div class="actions">
+        <a class="btn btn-primary" href="/d/tdoc-sys-paper/v/1">See live example →</a>
+        <button class="btn btn-ghost" data-tdoc-copy="#pr-paper" data-tdoc-copy-done="Copied ✓"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy prompt</button>
       </div>
+      <span class="vh" id="pr-paper">用 tdoc 写一篇文档，用 paper 风格，尽量多用图表。主题是：</span>
     </div>
   </div>
 
