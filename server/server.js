@@ -13,6 +13,7 @@ const { spawn } = require('child_process');
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
+const FRAME_PROBE_PATH = path.join(__dirname, 'frame-probe.js');
 const ONBOARD_PATH = path.join(__dirname, 'onboard.js');
 const SIGNIN_PATH = path.join(__dirname, 'signin.js');
 // Slugs that carry the onboarding modal. Product UI, injected under the same
@@ -295,6 +296,8 @@ function shellDocument(slug, version, nonce) {
   } catch {}
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const cfgJson = safeJsonForScript({ slug, version, mode: 'shell' });
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
@@ -305,11 +308,78 @@ function shellDocument(slug, version, nonce) {
   .tdoc-bar .tdoc-ver{color:#6b6a66;}
   .tdoc-bar .tdoc-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .tdoc-doc-frame{flex:1 1 auto;width:100%;border:0;display:block;}
+  .tdoc-popup{position:absolute;z-index:10;width:320px;max-width:calc(100vw - 16px);background:#fff;border:1px solid #e5e5e7;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.14);padding:12px;font:14px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .tdoc-popup .head{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;}
+  .tdoc-popup .quote{flex:1 1 auto;color:#6b6a66;font-size:13px;max-height:48px;overflow:hidden;border-left:3px solid #e5e5e7;padding-left:8px;}
+  .tdoc-popup .x{flex:0 0 auto;border:0;background:none;font-size:18px;line-height:1;color:#888;cursor:pointer;}
+  .tdoc-popup textarea{width:100%;box-sizing:border-box;min-height:64px;resize:vertical;border:1px solid #e5e5e7;border-radius:8px;padding:8px;font:inherit;}
+  .tdoc-popup .foot{display:flex;justify-content:flex-end;margin-top:8px;}
+  .tdoc-popup .submit{border:0;background:#1652f0;color:#fff;border-radius:8px;padding:6px 14px;font:inherit;font-weight:600;cursor:pointer;}
+  .tdoc-popup .submit[disabled]{opacity:.5;cursor:default;}
 </style>
 </head><body>
   <div class="tdoc-bar"><span class="tdoc-ver">v${version}</span><span class="tdoc-title">${esc(title)}</span></div>
   <iframe class="tdoc-doc-frame" title="Document content" sandbox="allow-scripts" src="${esc(frameSrc)}"></iframe>
+  <script${nonceAttr}>window.__TDOC_SHELL__ = ${cfgJson};</script>
+  <script${nonceAttr}>${shellScript()}</script>
 </body></html>`;
+}
+
+// Shell-side chrome logic (P2): consume anchoring messages from the frame probe
+// and drive the composer. P3 adds pins/cards/highlights + scroll sync. Kept as
+// a string so it inlines under the shell nonce (author docs never run JS).
+function shellScript() {
+  return `(function(){
+  'use strict';
+  var cfg = window.__TDOC_SHELL__ || {};
+  var frame = document.querySelector('.tdoc-doc-frame');
+  var BAR = 48; // top bar height; frame viewport coords + BAR = shell coords
+  var pending = null; // last selection anchor awaiting a comment
+  function frameWin(){ return frame && frame.contentWindow; }
+  function close(){ var el = document.querySelector('.tdoc-popup'); if (el) el.remove(); pending = null; }
+  function open(d){
+    close();
+    pending = { text: d.text, context_before: d.context_before, context_after: d.context_after };
+    var pop = document.createElement('div');
+    pop.className = 'tdoc-popup';
+    var head = document.createElement('div'); head.className='head';
+    var q = document.createElement('span'); q.className='quote'; q.textContent = (d.text||'').slice(0,120);
+    var x = document.createElement('button'); x.className='x'; x.setAttribute('aria-label','Close'); x.textContent='\\u00d7';
+    head.appendChild(q); head.appendChild(x);
+    var ta = document.createElement('textarea'); ta.placeholder = 'Comment\\u2026';
+    var foot = document.createElement('div'); foot.className='foot';
+    var submit = document.createElement('button'); submit.className='submit'; submit.textContent='Comment';
+    foot.appendChild(submit);
+    pop.appendChild(head); pop.appendChild(ta); pop.appendChild(foot);
+    document.body.appendChild(pop);
+    var r = d.rect || { bottom: 0, left: 8 };
+    var top = BAR + (r.bottom || 0) + 8 + window.scrollY;
+    var left = Math.max(8, Math.min((r.left || 8), window.innerWidth - pop.offsetWidth - 8));
+    pop.style.top = top + 'px'; pop.style.left = left + 'px';
+    x.addEventListener('click', close);
+    ta.focus();
+    submit.addEventListener('click', function(){ postComment(ta.value, submit); });
+    ta.addEventListener('keydown', function(e){ if ((e.metaKey||e.ctrlKey) && e.key==='Enter') postComment(ta.value, submit); });
+  }
+  function postComment(text, btn){
+    text = (text||'').trim();
+    if (!text || !pending) { close(); return; }
+    btn.disabled = true;
+    fetch('/api/comments', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ slug: cfg.slug, version: cfg.version, text: text,
+        anchor: { kind:'text', text: pending.text, context_before: pending.context_before, context_after: pending.context_after } })
+    }).then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function(){ close(); /* P3: render the new pin via the frame */ })
+      .catch(function(){ btn.disabled = false; btn.textContent = 'Retry'; });
+  }
+  window.addEventListener('message', function(e){
+    if (!frameWin() || e.source !== frameWin()) return;      // validate by window identity (opaque origin)
+    var d = e.data; if (!d || d.source !== 'tdoc-frame') return;
+    if (d.type === 'tdoc:selection') open(d);
+    else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); }
+  });
+})();`;
 }
 
 function injectOverlay(html, slug, version, nonce) {
@@ -627,7 +697,18 @@ const server = http.createServer(async (req, res) => {
     const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
     if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
     const nonce = crypto.randomBytes(16).toString('hex');
-    const body = req.method === 'HEAD' ? '' : forceWidgetSandbox(fs.readFileSync(file, 'utf8'));
+    let body = '';
+    if (req.method !== 'HEAD') {
+      body = forceWidgetSandbox(fs.readFileSync(file, 'utf8'));
+      // Inject the anchoring probe — the only tdoc code allowed into the author
+      // DOM. Nonced so it runs under the frame CSP while author <script> stays
+      // inert (same guarantee as the single-origin path).
+      try {
+        const probe = fs.readFileSync(FRAME_PROBE_PATH, 'utf8');
+        const tag = `<script nonce="${nonce}">${probe}</script>`;
+        body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
+      } catch {}
+    }
     return send(res, 200, body, {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': frameCspHeader(nonce),
