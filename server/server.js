@@ -274,6 +274,44 @@ function forceWidgetSandbox(html) {
   });
 }
 
+// --- Cross-origin iframe "shell" (flag: ?shell=1). See PLAN.md. ---
+// The author document is served from /d/<slug>/v/<n>/frame under a CSP `sandbox`
+// (opaque origin) so its CSS/DOM can never touch the overlay chrome, which lives
+// in the shell document. Same isolation mechanism as widget islands, applied to
+// the whole doc. Only our own nonced scripts run in the frame (author JS stays
+// inert, exactly as in the single-origin path); the sandbox directive is what
+// makes the origin opaque.
+function frameCspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts`;
+}
+
+// P1: the shell renders a top bar + embeds the author frame. P2 adds the
+// postMessage anchoring bridge + comment chrome (composer/pins/cards) here.
+function shellDocument(slug, version, nonce) {
+  let title = slug;
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8'));
+    if (meta && meta.title) title = meta.title;
+  } catch {}
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
+  return `<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#fff;color:#1a1a1a;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  body{display:flex;flex-direction:column;min-height:100vh;}
+  .tdoc-bar{position:relative;width:100%;height:48px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 12px;background:#fff;border-bottom:1px solid #e5e5e7;font:13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;z-index:2;flex:0 0 auto;}
+  .tdoc-bar .tdoc-ver{color:#6b6a66;}
+  .tdoc-bar .tdoc-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .tdoc-doc-frame{flex:1 1 auto;width:100%;border:0;display:block;}
+</style>
+</head><body>
+  <div class="tdoc-bar"><span class="tdoc-ver">v${version}</span><span class="tdoc-title">${esc(title)}</span></div>
+  <iframe class="tdoc-doc-frame" title="Document content" sandbox="allow-scripts" src="${esc(frameSrc)}"></iframe>
+</body></html>`;
+}
+
 function injectOverlay(html, slug, version, nonce) {
   html = forceWidgetSandbox(html);
   if (ONBOARD_SLUGS.has(slug)) {
@@ -574,6 +612,31 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Author document frame (shell mode). Served under a CSP `sandbox` (opaque
+  // origin), gated on Sec-Fetch-Dest: iframe like widgets, so it can only be
+  // loaded inside the shell — never top-level.
+  const frameMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/frame\/?$/);
+  if (frameMatch) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return send(res, 405, 'method not allowed', { Allow: 'GET, HEAD' });
+    }
+    const [, rawSlug, vStr] = frameMatch;
+    const slug = safeSlug(rawSlug);
+    if (!slug) return send(res, 400, 'invalid slug');
+    if (!isWidgetFrameRequest(req.headers['sec-fetch-dest'])) return send(res, 403, 'document frame must be framed');
+    const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
+    if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const body = req.method === 'HEAD' ? '' : forceWidgetSandbox(fs.readFileSync(file, 'utf8'));
+    return send(res, 200, body, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': frameCspHeader(nonce),
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+      'Vary': 'Sec-Fetch-Dest',
+    });
+  }
+
   const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
   if (docMatch) {
     const [, rawSlug, vStr] = docMatch;
@@ -581,8 +644,16 @@ const server = http.createServer(async (req, res) => {
     if (!slug) return send(res, 400, 'invalid slug');
     const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
     if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
-    const html = fs.readFileSync(file, 'utf8');
     const nonce = crypto.randomBytes(16).toString('hex');
+    // Shell mode (opt-in): render chrome + embed the author frame instead of
+    // inlining the overlay into the author document. Default path unchanged.
+    if (url.searchParams.get('shell') === '1') {
+      return send(res, 200, shellDocument(slug, Number(vStr), nonce), {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': cspHeader(nonce),
+      });
+    }
+    const html = fs.readFileSync(file, 'utf8');
     return send(res, 200, injectOverlay(html, slug, Number(vStr), nonce), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': cspHeader(nonce),
