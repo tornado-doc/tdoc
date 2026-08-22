@@ -663,12 +663,13 @@
   .hd-tab .hd-x{opacity:0;font-size:14px;margin-left:2px}
   .hd-tab.on{background:#fff;color:var(--ink);font-weight:600;border:1px solid var(--rule);border-bottom-color:#fff}
   .hd-tab.on .hd-x{opacity:.4}
-  .hd-addr{flex:1;display:flex;justify-content:center}
-  .hd-omni{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 16px;max-width:340px;background:#fff;border:1px solid var(--rule);border-radius:8px;font-size:12.5px;color:var(--muted)}
+  .hd-addr{flex:1;display:flex;justify-content:center;min-width:0}
+  .hd-omni{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 14px;max-width:340px;min-width:0;background:#fff;border:1px solid var(--rule);border-radius:8px;font-size:12.5px;color:var(--muted)}
+  .hd-url{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
   .hd-omni svg{width:11px;height:11px;flex:none;opacity:.5;display:block}
   .hd-omni b{color:var(--ink);font-weight:600}
 
-  .hd-canvas{display:grid;grid-template-columns:1fr 300px;min-height:434px}
+  .hd-canvas{display:grid;grid-template-columns:1fr 300px;height:454px}
   .hd-doc{padding:32px 36px 26px;border-right:1px solid var(--rule);position:relative;overflow:hidden}
   .hd-ey{font:700 10.5px/1 system-ui;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 12px}
   .hd-doc h3{font:600 29px/1.15 var(--serif);color:var(--ink);letter-spacing:-.01em;margin:0 0 6px}
@@ -694,7 +695,7 @@
   .hd-bars .l{font-size:10.5px;color:var(--muted)}
   @keyframes hgrow{from{transform:scaleY(0)}}
   @keyframes hrise{from{opacity:0;transform:translateY(6px)}}
-  .hd-scatter{width:100%;height:auto;animation:hfade .7s ease both}
+  .hd-scatter{width:100%;max-width:360px;height:auto;animation:hfade .7s ease both}
   @keyframes hfade{from{opacity:0;transform:translateY(10px)}}
   .hd-stack{display:flex;height:34px;border-radius:7px;overflow:hidden;border:1px solid var(--rule);animation:hwipe .9s cubic-bezier(.2,.8,.2,1) both}
   @keyframes hwipe{from{clip-path:inset(0 100% 0 0)}}
@@ -703,7 +704,7 @@
   .hd-sleg span{display:inline-flex;align-items:center;gap:5px}.hd-sleg em{width:9px;height:9px;border-radius:2px}
   .hd-fade{position:absolute;left:0;right:301px;bottom:0;height:44px;background:linear-gradient(transparent,#fff);pointer-events:none}
 
-  .hd-notes{background:#fafbfc;padding:20px 18px}
+  .hd-notes{background:#fafbfc;padding:20px 18px;display:flex;flex-direction:column}
   .hd-thread{border:1px solid var(--rule);border-radius:12px;background:#fff;padding:13px 14px}
   .hd-chip{display:inline-flex;align-items:center;gap:5px;font:700 10px/1 system-ui;letter-spacing:.04em;text-transform:uppercase;color:var(--good);background:#e8f6ee;border-radius:5px;padding:4px 7px;margin:0 0 10px}
   .hd-chip.b{color:var(--accent);background:var(--soft)}
@@ -716,7 +717,7 @@
   .hd-msg{font-size:12.5px;line-height:1.5;color:var(--body);margin:0 0 9px}.hd-msg b{color:var(--ink)}
   .hd-reply{margin-top:11px;padding-top:12px;border-top:1px solid var(--rule)}
   .hd-r{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);background:var(--wash);border:1px solid var(--rule);border-radius:20px;padding:2px 8px}
-  .hd-vbump{display:flex;align-items:center;gap:7px;margin:13px 2px 0;font:600 11px/1 var(--mono);color:var(--accent)}
+  .hd-vbump{display:flex;align-items:center;gap:7px;margin:auto 2px 0;font:600 11px/1 var(--mono);color:var(--accent)}
   .hd-vbump .dot{width:5px;height:5px;border-radius:50%;background:var(--good)}
   .hd-vbump .f{color:var(--muted)}.hd-vbump em{color:var(--muted);font:500 11px/1 system-ui;font-style:normal}
   .hd-cap{text-align:center;color:var(--muted);font-size:13px;margin:20px 0 0}.hd-cap b{color:var(--ink);font-weight:600}
@@ -754,7 +755,7 @@
           <label class="hd-tab" for="hd2"><span class="hd-fav" style="background:#f3eefe;color:#7c3aed"><svg viewBox="0 0 24 24"><use href="#hd-fscan"/></svg></span>Competitor analysis</label>
           <label class="hd-tab" for="hd3"><span class="hd-fav" style="background:#eefaf1;color:#1a7340"><svg viewBox="0 0 24 24"><use href="#hd-fcode"/></svg></span>Tech design doc</label>
         </div>
-        <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg>tdoc.dev/d/<b>gtm-weekly</b></span></div>
+        <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg><span class="hd-url">tdoc.dev/d/<b>gtm-weekly</b></span></span></div>
       </div>
       <div class="hd-canvas">
         <div class="hd-doc">
@@ -796,7 +797,7 @@
           <label class="hd-tab on" for="hd2"><span class="hd-fav" style="background:#f3eefe;color:#7c3aed"><svg viewBox="0 0 24 24"><use href="#hd-fscan"/></svg></span>Competitor analysis<span class="hd-x">×</span></label>
           <label class="hd-tab" for="hd3"><span class="hd-fav" style="background:#eefaf1;color:#1a7340"><svg viewBox="0 0 24 24"><use href="#hd-fcode"/></svg></span>Tech design doc</label>
         </div>
-        <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg>tdoc.dev/d/<b>competitor-analysis</b></span></div>
+        <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg><span class="hd-url">tdoc.dev/d/<b>competitor-analysis</b></span></span></div>
       </div>
       <div class="hd-canvas">
         <div class="hd-doc">
@@ -841,7 +842,7 @@
           <label class="hd-tab" for="hd2"><span class="hd-fav" style="background:#f3eefe;color:#7c3aed"><svg viewBox="0 0 24 24"><use href="#hd-fscan"/></svg></span>Competitor analysis</label>
           <label class="hd-tab on" for="hd3"><span class="hd-fav" style="background:#eefaf1;color:#1a7340"><svg viewBox="0 0 24 24"><use href="#hd-fcode"/></svg></span>Tech design doc<span class="hd-x">×</span></label>
         </div>
-        <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg>tdoc.dev/d/<b>agent-context</b></span></div>
+        <div class="hd-addr"><span class="hd-omni"><svg viewBox="0 0 24 24"><use href="#hd-lock"/></svg><span class="hd-url">tdoc.dev/d/<b>agent-context</b></span></span></div>
       </div>
       <div class="hd-canvas">
         <div class="hd-doc">
