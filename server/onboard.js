@@ -121,10 +121,10 @@
   // ---- page 2: the line, with Copy inside the box ------------------------
   function stepPaste() {
     var bd = shell('Paste this into your AI', st.selfHost
-      ? 'It installs tdoc, builds your first doc, and sets up your own Cloudflare account to publish it. Two browser clicks, no card.'
+      ? 'Your AI installs tdoc, writes your first doc — a live, commentable web page, not a chat reply — and sets up your own Cloudflare to publish it, then hands back a link to share. Two browser clicks, no card.'
       : (st.hosted
-        ? 'It installs tdoc, builds your first doc, and publishes it.'
-        : 'It installs tdoc, builds your first doc, and publishes it to a free Cloudflare account you own. No card.'));
+        ? 'Your AI installs tdoc, writes your first doc — a live, commentable web page, not a chat reply — publishes it, and hands back a link you can share.'
+        : 'Your AI installs tdoc, writes your first doc — a live, commentable web page, not a chat reply — and publishes it to a free Cloudflare account you own, then hands back a link to share. No sign-up here, no card.'));
 
     var wrap = el('div', 'tdo-linewrap');
     var pre = el('div', 'tdo-line');

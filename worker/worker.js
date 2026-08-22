@@ -334,6 +334,70 @@ async function enforceDocAccess(env, req, slug, version) {
     }),
   };
 }
+const TDOC_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-111.391 -301.011 1000 1000" role="img" aria-label="tdoc">
+  <g transform="translate(-123.097585,711.963561) scale(0.1,-0.1)" fill="currentColor" fill-rule="evenodd">
+    <path d="M2705 7105 c-33 -9 -110 -40 -171 -70 -102 -51 -116 -55 -180 -55
+-158 0 -289 -73 -356 -197 -14 -27 -24 -32 -65 -38 -243 -31 -434 -94 -511
+-168 -96 -92 -210 -405 -188 -518 15 -83 90 -156 177 -173 18 -4 44 -30 83
+-81 47 -63 61 -75 85 -75 34 0 42 9 66 73 20 53 30 63 48 50 7 -5 36 -19 65
+-32 63 -26 85 -18 108 40 20 48 20 48 100 3 96 -53 119 -43 144 64 13 55 20
+60 60 37 63 -36 113 -11 125 62 10 65 24 78 68 64 67 -22 110 -94 83 -136 -14
+-22 -24 -25 -72 -25 -71 0 -86 -9 -126 -75 -37 -62 -32 -60 -88 -40 -55 19
+-78 7 -109 -59 -23 -51 -26 -52 -67 -31 -69 36 -104 12 -104 -70 0 -33 -7 -57
+-22 -78 -37 -52 -33 -155 7 -198 34 -35 81 -59 120 -59 14 0 166 53 338 117
+171 64 319 116 327 116 9 -1 54 -20 102 -43 l86 -42 6 -45 c15 -108 16 -106
+-77 -142 -202 -78 -330 -178 -387 -303 -73 -158 -40 -288 72 -288 60 0 107 31
+192 125 94 103 188 155 321 178 l80 13 48 -35 c26 -19 47 -39 47 -44 0 -27
+-53 -101 -134 -186 -52 -53 -101 -111 -110 -129 -54 -104 38 -272 150 -272 56
+0 86 19 123 81 17 26 61 86 99 133 l70 84 47 -74 c80 -127 186 -229 316 -306
+252 -149 457 -294 536 -380 l22 -24 -28 -89 c-16 -50 -39 -122 -51 -162 -20
+-66 -26 -73 -56 -83 -81 -27 -242 -157 -298 -240 -24 -37 -21 -86 9 -115 l24
+-25 275 0 c325 0 298 -11 375 146 120 243 182 511 152 655 -21 102 -113 260
+-184 316 -33 26 -161 224 -150 233 30 29 306 170 316 162 7 -5 48 -38 92 -73
+235 -189 530 -365 810 -483 166 -70 244 -108 261 -128 20 -21 12 -91 -22 -196
+-52 -157 -97 -219 -182 -251 -75 -27 -140 -94 -187 -193 -43 -90 -44 -120 -6
+-159 l29 -29 284 0 c348 0 357 4 378 136 17 107 58 213 167 437 100 205 106
+223 110 290 7 128 -54 191 -233 241 -194 55 -245 88 -367 236 -39 47 -116 131
+-171 188 -61 62 -96 106 -90 110 6 4 102 79 213 167 419 332 586 415 1061 529
+223 53 411 85 985 167 727 103 1138 181 1187 226 152 138 -130 274 -677 328
+-180 17 -800 34 -1305 35 -558 1 -912 18 -1345 66 -336 37 -612 20 -1370 -82
+-522 -70 -620 -38 -710 228 -98 294 -216 468 -396 584 -130 84 -307 115 -454
+79z m351 -150 c122 -60 253 -195 324 -335 12 -24 42 -101 67 -170 119 -339
+210 -401 563 -377 93 6 446 50 586 72 358 59 802 72 1129 35 309 -36 621 -48
+1360 -55 1055 -10 1324 -26 1595 -97 85 -22 220 -76 220 -88 0 -4 -44 -18 -97
+-29 -54 -12 -116 -26 -138 -31 -112 -25 -547 -96 -855 -140 -955 -134 -1314
+-218 -1660 -389 -133 -66 -204 -114 -427 -293 -100 -81 -184 -144 -186 -142
+-3 3 -1 22 3 42 56 256 18 525 -65 464 -32 -23 -35 -39 -24 -123 17 -135 -4
+-294 -67 -502 l-17 -59 112 -105 c62 -58 150 -152 196 -208 154 -188 214 -229
+411 -286 231 -66 235 -85 85 -393 -119 -243 -146 -315 -178 -471 l-9 -40 -242
+-3 c-190 -2 -242 0 -242 10 0 44 101 168 136 168 119 0 283 297 284 513 0 97
+-35 126 -280 233 -356 156 -598 300 -878 523 -74 59 -101 91 -250 299 -174
+243 -193 262 -232 227 -34 -31 -24 -51 126 -257 80 -110 143 -205 141 -212 -6
+-13 -347 -198 -396 -215 -134 -44 -407 36 -668 198 -52 31 -52 31 -8 96 72
+109 96 223 55 260 -40 36 -90 -7 -90 -78 0 -40 -53 -125 -160 -257 -101 -123
+-172 -216 -216 -279 l-17 -24 -34 36 c-56 62 -49 80 73 208 138 145 146 163
+155 349 10 213 45 306 154 411 47 46 53 64 32 93 -71 98 -287 -216 -287 -417
+0 -55 -13 -53 -87 20 -88 87 -98 110 -115 267 -15 149 8 123 -186 215 l-112
+54 -103 -38 c-56 -20 -204 -75 -329 -121 -250 -92 -260 -94 -282 -62 -21 29
+-21 29 14 73 17 21 30 46 30 56 0 21 11 24 27 8 27 -27 67 -6 98 54 27 52 33
+57 55 52 93 -24 95 -23 144 54 l46 71 58 0 c64 0 100 26 137 99 68 134 -116
+318 -281 281 -43 -10 -51 -20 -60 -77 -7 -48 -14 -51 -74 -27 -62 25 -85 10
+-107 -66 -19 -70 -17 -69 -88 -29 -84 47 -113 37 -145 -54 l-10 -27 -53 30
+c-80 45 -104 39 -136 -35 l-13 -30 -21 30 c-37 51 -53 62 -97 69 -64 10 -100
+51 -100 113 0 95 69 303 122 367 60 74 225 132 465 164 l128 17 26 53 c61 126
+133 167 289 165 95 -1 107 1 135 23 152 116 386 146 541 69z m-143 -1797 c14
+-24 27 -47 28 -51 2 -5 -39 -23 -91 -41 -120 -40 -191 -87 -281 -187 -53 -59
+-78 -79 -96 -79 -24 0 -25 2 -19 41 19 119 108 219 260 292 168 82 166 81 199
+25z m675 -617 c233 -116 466 -166 596 -127 l47 14 70 -106 c39 -58 99 -136
+134 -173 109 -116 158 -256 135 -388 -22 -129 -87 -327 -144 -441 l-43 -85
+-216 -3 c-186 -2 -217 0 -217 12 0 25 120 115 216 161 l90 44 18 58 c10 32 38
+120 62 196 24 76 44 151 44 167 0 65 -298 294 -631 483 -55 31 -133 100 -189
+167 -49 58 -48 59 28 21z"/>
+    <path d="M2265 6675 c-37 -36 -34 -86 7 -120 39 -33 81 -29 117 12 68 78 -51
+182 -124 108z"/>
+  </g>
+</svg>
+`;
 const TDOC_LOGO_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAeGVYSWZNTQAqAAAACAAEARoABQAAAAEAAAA+ARsABQAAAAEAAABGASgAAwAAAAEAAgAAh2kABAAAAAEAAABOAAAAAAAAAEgAAAABAAAASAAAAAEAA6ABAAMAAAABAAEAAKACAAQAAAABAAABAKADAAQAAAABAAABAAAAAABUZS5+AAAACXBIWXMAAAsTAAALEwEAmpwYAAABWWlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNi4wLjAiPgogICA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogICAgICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgICAgICAgICB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iPgogICAgICAgICA8eG1wOkNyZWF0b3JUb29sPkZpZ21hPC94bXA6Q3JlYXRvclRvb2w+CiAgICAgIDwvcmRmOkRlc2NyaXB0aW9uPgogICA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgoE/1zIAAAmzUlEQVR4Ae2dB7xlNbXGA6JixYIVFBTFNsLYFREEUeyiiAq2AREFFBtWlEFEimIXFUYURVHEQreMOjBiB0Xsoij23nvLW//1Xvbb59x9+sk5OXd/+f3O3fvukmR/Sb4kK2utbBAtBAUhIARaicCGrfxqfbQQEAKOgAhAFUEItBgBEUCLC1+fLgREAKoDQqDFCIgAWlz4+nQhIAJQHRACLUZABNDiwtenCwERgOqAEGgxAiKAFhe+Pl0IiABUB4RAixEQAbS48PXpQkAEoDogBFqMgAigxYWvTxcCIgDVASHQYgREAC0ufH26EBABqA4IgRYjIAJoceHr04WACEB1QAi0GAERQIsLX58uBEQAqgNCoMUIiABaXPj6dCEgAlAdEAItRkAE0OLC16cLARGA6oAQaDECIoAWF74+XQiIAFQHhECLERABtLjw9elCQASgOiAEWoyACKDFha9PFwIiANUBIdBiBEQALS58fboQEAGoDgiBFiMgAmhx4evThYAIQHVACLQYARFAiwtfny4ERACqA0KgxQiIAFpc+Pp0ISACUB0QAi1GQATQ4sLXpwsBEYDqgBBoMQIigBYXvj5dCIgAVAeEQIsREAG0uPD16UJABKA6IARajIAIoMWFr08XAiIA1QEh0GIERAAtLnx9uhAQAagOCIEWIyACaHHh69OFgAhAdUAItBgBEUCLC1+fLgREAKoDQqDFCIgAWlz4+nQhIAJQHRACLUZABNDiwtenCwERgOqAEGgxAiKAFhe+Pl0IiABUB4RAixEQAbS48PXpQkAEoDogBFqMgAigxYWvTxcCIgDVASHQYgREAC0ufH26EBABqA4IgRYjIAJoceHr04WACEB1QAi0GAERQIsLX58uBEQAqgNCoMUIiABaXPj6dCEgAlAdEAItRkAE0OLC16cLARGA6oAQaDECIoAWF74+XQiIAFQHhECLERABtLjw9elCQASgOiAEWozARi3+9r6f/q9//Sv85z//CRtttJH/+j6sm0JgQREQAfxfwX3nO98JF1xwQbjooovC17/+9fCnP/0p/Pvf/w5XvOIVw6abbhrucIc7hO222y5sv/324drXvvaCFreyLQQ6EdggWui81J7//vGPf4Szzz47vOMd7wjr168Pf/jDHwZ+/K1udavwuMc9Luy7777hhje84cDn9YAQKBmB1hLAhz/84XDUUUeFT33qU43lc41rXCNc6UpX8mkAowGmA/Ww1VZbhZe+9KXhsY99bP2yzoXAQiGwrAngz3/+sw/nf/jDH4Zf/epXPqRn+P7pT386nHjiif5/Kq2rXe1q4W53u1vYZZddwooVK8KWW24Zrn71qwdGCT/96U/DN77xjXDOOeeE888/P/ztb3/z1zbYYIPw9Kc/PRx99NHhKle5SopKRyGwOAgwBVhu4cc//nFcvXp1tIYcbQ7PFKfn7zrXuU58xjOeEb/85S/H//73vwOh+NznPhcf+chHdsS3xx57xN///vcD39UDQqA0BEJpGZo0P2eddVa04XlHA+1FAI9+9KPj1772tbGSNLlBvP71r1+l85CHPCT+8Y9/HCsuvSQE5oXAspoCvPe9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';
 function isAnthropicCompanyMark(url) {
   return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
@@ -347,8 +411,8 @@ function logoForAgentLogin(login) {
   }
   if (key.includes('gemini') || key.includes('bard')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
   if (key.includes('cursor') || key.includes('composer')) return 'https://cdn.simpleicons.org/cursor/000000';
-  // tdoc project mark (assets/tdoc_logo.png, served at /tdoc_logo.png).
-  return '/tdoc_logo.png';
+  // tdoc project mark (assets/tdoc_logo.svg, served at /tdoc_logo.svg).
+  return '/tdoc_logo.svg';
 }
 
 function isGenericAgentLogin(login) {
@@ -1036,12 +1100,16 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth) {
   // The onboarding modal is product UI, so it ships from here under the page
   // nonce. The doc's own <script> would never run (#138), which is why the
   // landing CTA still carries a plain href: with scripting off the visitor
   // gets the /start page instead of a dead button.
-  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG) && nonce
+  // The modal ships wherever its trigger is. Gating on the slug meant a doc
+  // could carry the CTA and get a dead link to /start instead — which is what
+  // happened the first time the landing page was drafted under another slug.
+  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml);
+  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce
     ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
     : rawHtml;
   return injectOverlayCfg(withOnboard, {
@@ -1061,6 +1129,9 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
     ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
+    // When the client secret is set, browsers use the redirect flow (signin.js
+    // sends them to /api/auth/web/login) instead of the device-code modal.
+    webAuth: !!webAuth,
     mode: 'published',
     versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
   }, nonce);
@@ -1074,6 +1145,9 @@ const LANDING_SLUG = 'tornado-doc';
 // The doc behind `/start`: the same onboarding, written as a page, for anyone
 // who has scripting off or who wants to read the steps before running them.
 const START_SLUG = 'tdoc-start';
+// `/templates` — the template gallery: pick a look, copy a prompt, hand it to
+// your agent. Same landing-doc mechanism as `/start`.
+const TEMPLATES_SLUG = 'tdoc-templates';
 
 // The onboarding modal, bundled in by bin/tdoc-bundle. Kept as a placeholder
 // here so the source file stays readable and the bundle stays one artifact.
@@ -1132,7 +1206,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   const nonce = rand(16);
   return {
     ok: true,
-    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req))), {
+    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1167,6 +1241,7 @@ async function landingResponse(env, req, slug = LANDING_SLUG) {
 // bounce users here from /me or an unknown path.
 function landingHtml(env, notice) {
   const authOk = !!(env && String(env.GITHUB_CLIENT_ID || '').trim());
+  const authWeb = !!(env && env.GITHUB_CLIENT_SECRET);
   const toastMsg = ({
     me: 'My docs is only available after you sign in as the worker owner.',
     signin: 'Sign in with GitHub to continue.',
@@ -1206,10 +1281,12 @@ function landingHtml(env, notice) {
   <p class="sub">Open a document from its shared link ·
     <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
   <div id="toast" role="status" aria-live="polite"></div>
+<script>window.__TDOC__ = { authConfigured: true, webAuth: ${authWeb ? 'true' : 'false'}, signinReturn: '/me' };</script>
 <script>${SIGNIN_JS}</script>
 <script>
-  // One shared device flow (server/signin.js). This page used to carry its own
-  // copy with its own retry loop and its own error strings.
+  // One shared sign-in (server/signin.js): web redirect flow when webAuth is on,
+  // else the device-code modal. On the redirect path __tdocSignIn navigates away
+  // and never resolves, so the .then below only runs on the device path.
   (function () {
     var btn = document.getElementById('signin');
     if (!btn || !window.__tdocSignIn) return;
@@ -1237,6 +1314,47 @@ function authDoneHtml() {
   <h1>You're signed in</h1>
   <p>You can close this tab and return to tdoc.</p>
 </body></html>`;
+}
+
+// Web OAuth redirect flow (browsers). Device flow stays for CLIs; this is the
+// hop that phones need — GitHub sends the visitor straight back here after
+// Approve, so nobody is stranded on GitHub's "Congratulations" page. Active
+// only when GITHUB_CLIENT_SECRET is set (the token exchange requires it), so a
+// deploy without the secret silently keeps the device flow.
+function authErrorHtml(msg) {
+  const safe = String(msg || 'Sign-in failed.').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]);
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — sign-in</title>
+<style>
+  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh; margin: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #111; background: #fff; gap: 8px; text-align: center; padding: 0 20px; }
+  h1 { font-size: 22px; margin: 0; color: #c3452f; }
+  p { color: #666; margin: 0; }
+  a { color: #1652f0; }
+</style></head><body>
+  <h1>Sign-in failed</h1>
+  <p>${safe}</p>
+  <p><a href="/">Back to tdoc</a></p>
+</body></html>`;
+}
+
+// Only ever redirect to a same-origin path we produced. Reject absolute URLs
+// and protocol-relative (`//evil.com`) targets so a crafted `?return=` can't
+// bounce a signed-in visitor off-site. Falls back to the site root.
+function sanitizeReturn(raw) {
+  if (typeof raw !== 'string' || !raw) return '/';
+  if (raw[0] !== '/' || raw[1] === '/' || raw[1] === '\\') return '/';
+  if (/[\x00-\x1f]/.test(raw)) return '/';
+  return raw;
+}
+
+// 302 that can also set cookies — no existing helper does both at once.
+function redirectTo(location, cookies) {
+  const h = new Headers({ Location: location });
+  (cookies || []).forEach((c) => h.append('Set-Cookie', c));
+  return new Response(null, { status: 302, headers: h });
 }
 
 // /me — the owner's doc catalog. JUL-36 tail (2026-08-13): this used to be a
@@ -1382,7 +1500,7 @@ async function indexHtml(env, session, origin, nonce) {
 </head><body>
 <div class="wrap">
 <div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
-${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how.</p>' :
+${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how, or <a href="/templates">browse templates</a> for a look to start from.</p>' :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
   </div>
@@ -1407,7 +1525,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
         <li>Send the link to anyone. They comment on the page, and your AI answers them.</li>
       </ol>
     </div>
-    <div class="mk-ft">Not set up yet? <a href="/start">Start here</a>.</div>
+    <div class="mk-ft">Want a specific look first? <a href="/templates">Browse templates</a>. &nbsp;·&nbsp; Not set up yet? <a href="/start">Start here</a>.</div>
   </div>
 </div>
 <script${nonce ? ` nonce="${nonce}"` : ''}>
@@ -2943,6 +3061,15 @@ export default {
 
     if (p === '/api/ping') return json({ ok: true, service: 'tdoc' });
     if (p === '/api/runtime') return json({ ok: true, runtime: runtimeInfo() });
+    if (p === '/tdoc_logo.svg' && method === 'GET') {
+      return new Response(TDOC_LOGO_SVG, {
+        headers: {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     if (p === '/tdoc_logo.png' && method === 'GET') {
       const bin = Uint8Array.from(atob(TDOC_LOGO_PNG_B64), (c) => c.charCodeAt(0));
       return new Response(bin, {
@@ -2972,10 +3099,63 @@ export default {
       return landingResponse(env, req, START_SLUG);
     }
 
-    // Soft landing for the OAuth App "Authorization callback URL". Device
-    // Flow does not need a callback, but GitHub may still redirect here
-    // after Approve — serve a friendly page instead of a 404.
-    if ((p === '/auth/done' || p === '/auth/github/callback') && method === 'GET') {
+    // `/templates` — the template gallery. Same fail-safe as `/start`: a
+    // missing doc yields the neutral landing page, never a 404. No onboarding
+    // modal (TEMPLATES_SLUG is intentionally not in the withOnboard gate).
+    if (p === '/templates' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, TEMPLATES_SLUG);
+    }
+
+    // Web OAuth callback. With a `code` this is the redirect flow: exchange it
+    // for a token (needs the client secret), mint the same session the device
+    // flow does, and 302 the visitor back to the page they started from — one
+    // tab, no "Congratulations" dead end. Without a code it's the device-flow
+    // soft landing GitHub may bounce to after Approve; keep the friendly page.
+    if (p === '/auth/github/callback' && method === 'GET') {
+      const code = url.searchParams.get('code');
+      if (!code) return html(authDoneHtml());
+      const state = url.searchParams.get('state');
+      // Anchor to a cookie-pair boundary so a cookie merely ending in
+      // "tdoc_oauth" (e.g. "xtdoc_oauth=") can't supply the nonce.
+      const cookieNonce = (/(?:^|;\s*)tdoc_oauth=([a-f0-9]+)/.exec(req.headers.get('cookie') || '') || [])[1];
+      if (!state || !cookieNonce || state !== cookieNonce) {
+        return html(authErrorHtml('Sign-in could not be verified (state mismatch). Please try again.'), { status: 400 });
+      }
+      if (!env.GITHUB_CLIENT_SECRET) {
+        return html(authErrorHtml('Web sign-in is not configured on this host.'), { status: 500 });
+      }
+      const ret = sanitizeReturn(await env.META.get(`oauthstate:${state}`));
+      await env.META.delete(`oauthstate:${state}`);
+      try {
+        const r = await ghPost('/login/oauth/access_token', {
+          client_id: env.GITHUB_CLIENT_ID,
+          client_secret: env.GITHUB_CLIENT_SECRET,
+          code,
+          redirect_uri: `${url.origin}/auth/github/callback`,
+        });
+        if (r.error || !r.access_token) {
+          return html(authErrorHtml('GitHub sign-in failed: ' + (r.error_description || r.error || 'no token returned')), { status: 400 });
+        }
+        const user = await ghUser(r.access_token);
+        if (!user.login) return html(authErrorHtml('GitHub returned no account.'), { status: 500 });
+        const sid = rand(24);
+        const session = {
+          login: user.login,
+          avatar_url: user.avatar_url,
+          name: user.name || user.login,
+          created: new Date().toISOString(),
+        };
+        await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+        return redirectTo(ret, [
+          `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+          'tdoc_oauth=; Path=/; Max-Age=0',
+        ]);
+      } catch (e) {
+        return html(authErrorHtml('Sign-in error: ' + e.message), { status: 500 });
+      }
+    }
+    // Static soft landing (device flow, or the OAuth App's callback URL).
+    if (p === '/auth/done' && method === 'GET') {
       return html(authDoneHtml());
     }
 
@@ -2997,7 +3177,7 @@ export default {
       const nonce = rand(16);
       const page = await indexHtml(env, s, url.origin, nonce);
       const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
-      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true), {
+      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true, !!env.GITHUB_CLIENT_SECRET), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
       });
     }
@@ -3285,6 +3465,25 @@ export default {
       });
     }
 
+    // Web redirect flow, step 1: stash where to land afterwards against a CSRF
+    // nonce, then send the browser to GitHub's authorize page. The browser only
+    // reaches here when cfg.webAuth is on (secret configured); the guard keeps a
+    // stray hit from 500ing.
+    if (p === '/api/auth/web/login' && method === 'GET') {
+      if (!env.GITHUB_CLIENT_SECRET) return redirectTo('/?notice=signin');
+      const ret = sanitizeReturn(url.searchParams.get('return'));
+      const nonce = rand(16);
+      await env.META.put(`oauthstate:${nonce}`, ret, { expirationTtl: 600 });
+      const gh = new URL('https://github.com/login/oauth/authorize');
+      gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
+      gh.searchParams.set('redirect_uri', `${url.origin}/auth/github/callback`);
+      gh.searchParams.set('scope', 'read:user');
+      gh.searchParams.set('state', nonce);
+      return redirectTo(gh.toString(), [
+        `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+      ]);
+    }
+
     if (p === '/api/auth/device/start' && method === 'POST') {
       try {
         const r = await ghPost('/login/device/code', {
@@ -3416,7 +3615,15 @@ export default {
       }
       const session = await getSession(env, req);
       const login = sessionLogin(session);
-      if (!login) return json({ error: 'sign_in_required' }, { status: 401 });
+      // Additive `hint` so a stale CLI that just prints the error body still
+      // gets an actionable next step. A current CLI ran the device flow and
+      // sent a session cookie, so it never lands here; one that hits this
+      // without showing a device code is out of date. Fail-open: no new
+      // rejection, just a clearer 401.
+      if (!login) return json({
+        error: 'sign_in_required',
+        hint: 'Hosted publish needs a GitHub sign-in. If your tdoc CLI did not show a device code to approve, it is out of date — run: /tdoc update --yes',
+      }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const issued = await issueHostedToken(env, { ...body, login });

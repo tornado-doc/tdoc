@@ -111,6 +111,35 @@ async function tPub(name, fn) {
     if (stored !== 'light') throw new Error(`storage should be light, got "${stored}"`);
   });
 
+  // data-tdoc-default-theme + [data-tdoc-copy] primitive. Fresh context so
+  // there is no stored tdoc-theme from the tests above (default only applies
+  // when the reader has made no choice).
+  const copyDocUrl = URL.slice(0, URL.indexOf('/d/')) + '/d/copy-doc/v/1';
+
+  await t('A doc declaring data-tdoc-default-theme="dark" opens dark', async () => {
+    const c = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1200, height: 800 } });
+    const p = await c.newPage();
+    await p.goto(copyDocUrl, { waitUntil: 'networkidle' });
+    const theme = await p.getAttribute('html', 'data-tdoc-theme');
+    const stored = await p.evaluate(() => localStorage.getItem('tdoc-theme'));
+    await c.close();
+    if (theme !== 'dark') throw new Error(`expected dark from the default hint, got "${theme}"`);
+    if (stored !== null) throw new Error(`the hint must not persist a preference, got "${stored}"`);
+  });
+
+  await t('A [data-tdoc-copy] button copies the target text and flashes', async () => {
+    const c = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1200, height: 800 } });
+    const p = await c.newPage();
+    await p.goto(copyDocUrl, { waitUntil: 'networkidle' });
+    await p.click('[data-tdoc-copy]');
+    await p.waitForFunction(() => document.querySelector('[data-tdoc-copy]').classList.contains('tdoc-copied'), { timeout: 3000 });
+    const flashed = await p.textContent('[data-tdoc-copy]');
+    const clip = await p.evaluate(() => navigator.clipboard.readText());
+    await c.close();
+    if (!/✓/.test(flashed)) throw new Error(`button should flash a check mark, got "${flashed}"`);
+    if (!clip.includes('技术设计文档')) throw new Error(`clipboard should hold the prompt, got "${clip}"`);
+  });
+
   await t('Table in overflow-x:auto wrapper is not clipped on the left', async () => {
     const m = await page.evaluate(() => {
       const table = document.querySelector('.wrap table');
@@ -352,6 +381,61 @@ async function tPub(name, fn) {
     await page.click('.tdoc-popup .head .x').catch(() => {});
   });
 
+  await t('Text-selection popup follows the caret line, not the union box', async () => {
+    // Regression: Range.getBoundingClientRect() is the union of every line.
+    // Selecting across blocks (or wrapping) then releasing on the last line
+    // used to park the popup at the union's bottom-left, away from the caret.
+    const pos = await page.evaluate(() => {
+      const h = document.querySelector('.wrap h2');
+      const p = document.querySelector('.wrap h2 + p, .wrap h2 ~ p');
+      if (!h || !p) return null;
+      const start = [...h.childNodes].find(n => n.nodeType === 3);
+      const endNode = [...p.childNodes].find(n => n.nodeType === 3 && n.textContent.trim().length > 8);
+      if (!start || !endNode) return null;
+      const r = document.createRange();
+      r.setStart(start, 0);
+      r.setEnd(endNode, Math.min(12, endNode.textContent.length));
+      const union = r.getBoundingClientRect();
+      const rects = [...r.getClientRects()].filter(x => x.width || x.height);
+      if (rects.length < 2) return null;
+      const last = rects[rects.length - 1];
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return {
+        unionTop: union.top,
+        lastTop: last.top,
+        lastBottom: last.bottom,
+        lineLeft: last.left,
+        x: last.right - 2,
+        y: last.top + last.height / 2,
+      };
+    });
+    if (!pos) { console.log('  (could not build a multi-line selection, skipping)'); return; }
+    await page.evaluate(({ x, y }) => {
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        clientX: x, clientY: y, bubbles: true, cancelable: true, view: window, button: 0,
+      }));
+    }, { x: pos.x, y: pos.y });
+    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
+    const popup = await page.$eval('.tdoc-popup', el => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left };
+    });
+    // Opened below the caret line (last.bottom + 8). Must not sit on the first
+    // line of a multi-block selection.
+    if (popup.top < pos.lastTop - 4) {
+      throw new Error(`popup top ${popup.top.toFixed(1)} is above the caret line (${pos.lastTop.toFixed(1)}–${pos.lastBottom.toFixed(1)}); union top was ${pos.unionTop.toFixed(1)}`);
+    }
+    // And at the mouse-up X, not the line's left edge.
+    const distEnd = Math.abs(popup.left - pos.x);
+    const distLeft = Math.abs(popup.left - pos.lineLeft);
+    if (distEnd > distLeft && distEnd > 48) {
+      throw new Error(`popup left ${popup.left.toFixed(1)} is nearer the line origin (${pos.lineLeft.toFixed(1)}) than the caret (${pos.x.toFixed(1)})`);
+    }
+    await page.click('.tdoc-popup .head .x').catch(() => {});
+  });
+
   await t('Drag STARTED INSIDE canvas does NOT open popup (passes through)', async () => {
     const canvas = await page.$('canvas');
     if (!canvas) { console.log('  (no canvas, skipping)'); return; }
@@ -465,6 +549,162 @@ async function tPub(name, fn) {
     if (!/\d+ repl(y|ies)/.test(text)) throw new Error(`toggle text was "${text}"`);
   });
 
+  await t('?comment= deep-link opens the target comment card', async () => {
+    const deep = await ctx.newPage();
+    try {
+      const u = URL.replace(/\/?$/, '') + '?comment=c_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const card = document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]');
+        const narrow = document.body.classList.contains('tdoc-narrow');
+        const drawerOpen = !!document.getElementById('tdoc-comment-layer')?.classList.contains('open');
+        return {
+          hasCard: !!card,
+          active: !!(card && card.classList.contains('active')),
+          floating: !!(card && card.classList.contains('tdoc-floating-open')),
+          visible: !!(card && card.getClientRects().length > 0),
+          narrow, drawerOpen,
+        };
+      });
+      if (!st.hasCard) throw new Error('deep-linked comment card missing');
+      if (st.narrow) {
+        if (!st.drawerOpen) throw new Error('narrow deep-link must open the comment drawer');
+      } else if (!st.floating && !st.active) {
+        throw new Error('wide deep-link must pin or activate the card');
+      } else if (!st.visible) {
+        throw new Error('deep-linked card is not visible');
+      }
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('?comment= on a reply expands the thread', async () => {
+    const deep = await ctx.newPage();
+    try {
+      const u = URL.replace(/\/?$/, '') + '?comment=r_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const reply = document.querySelector('[data-comment-id="r_fixture_1"]');
+        const card = document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]');
+        return {
+          repliesOpen: !!(replies && replies.classList.contains('open')),
+          hasReply: !!reply,
+          cardOpen: !!(card && (card.classList.contains('tdoc-floating-open') || card.classList.contains('active')
+            || document.body.classList.contains('tdoc-narrow'))),
+        };
+      });
+      if (!st.hasReply) throw new Error('reply node missing');
+      if (!st.repliesOpen) throw new Error('reply deep-link must expand the thread');
+      if (!st.cardOpen) throw new Error('reply deep-link must open the root card');
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('?comment= on a phone opens the comment drawer', async () => {
+    const deep = await ctx.newPage();
+    try {
+      await deep.setViewportSize({ width: 375, height: 812 });
+      const u = URL.replace(/\/?$/, '') + '?comment=c_fixture_1';
+      await deep.goto(u, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => ({
+        narrow: document.body.classList.contains('tdoc-narrow'),
+        drawerOpen: !!document.getElementById('tdoc-comment-layer')?.classList.contains('open'),
+        hasCard: !!document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]'),
+      }));
+      if (!st.narrow) throw new Error(`expected tdoc-narrow at 375px, got narrow=${st.narrow}`);
+      if (!st.hasCard) throw new Error('phone deep-link missing comment card');
+      if (!st.drawerOpen) throw new Error('phone deep-link must open the comment drawer');
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('without ?comment= the fixture reply thread stays collapsed', async () => {
+    const deep = await ctx.newPage();
+    try {
+      await deep.goto(URL, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const reply = document.querySelector('[data-comment-id="r_fixture_1"]');
+        return {
+          hasReplies: !!replies,
+          hasReply: !!reply,
+          repliesOpen: !!(replies && replies.classList.contains('open')),
+          repliesDisplay: replies ? getComputedStyle(replies).display : null,
+        };
+      });
+      if (!st.hasReplies || !st.hasReply) throw new Error('fixture reply thread missing');
+      if (st.repliesOpen) throw new Error('replies must start collapsed without ?comment=');
+      if (st.repliesDisplay !== 'none') throw new Error(`expected display:none, got ${st.repliesDisplay}`);
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('adding .open on a live replies list reveals the hidden reply', async () => {
+    // Same-doc inbox clicks cannot wait for a rebuild. They have to flip
+    // .tdoc-replies.open on the card that is already in the DOM.
+    // Check the list's own computed display, not the reply's client rects —
+    // in pins mode the parent card is hidden until it is pinned.
+    const deep = await ctx.newPage();
+    try {
+      await deep.goto(URL, { waitUntil: 'networkidle' });
+      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
+      await deep.waitForTimeout(250);
+      const st = await deep.evaluate(() => {
+        const replies = document.querySelector('.tdoc-replies');
+        const toggle = document.querySelector('.tdoc-replies-toggle');
+        if (!replies) return { missing: true };
+        const before = getComputedStyle(replies).display;
+        replies.classList.add('open');
+        toggle?.classList.add('open');
+        return { before, after: getComputedStyle(replies).display };
+      });
+      if (st.missing) throw new Error('fixture reply thread missing');
+      if (st.before !== 'none') throw new Error(`expected display:none before .open, got ${st.before}`);
+      if (st.after === 'none') throw new Error('replies stayed display:none after .open');
+    } finally {
+      await deep.close();
+    }
+  });
+
+  await t('Clicking an inbox row does not unpin the open comment card', async () => {
+    // Regression #180: the inbox click used to bubble to the document
+    // "click outside card" handler and immediately close the card it opened.
+    const card = await openFirstCommentCard();
+    if (!card) { console.log('  (no comments, skipping)'); return; }
+    const pinned = await page.evaluate(() => {
+      const c = document.querySelector('.tdoc-margin-comment.tdoc-floating-open, .tdoc-margin-comment.active');
+      if (!c) return false;
+      const bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg';
+      bg.id = 'tdoc-aux-modal';
+      bg.innerHTML = '<div class="tdoc-modal"><div class="tdoc-cluster-row" id="tdoc-fake-inbox-row" role="button">fake notification</div></div>';
+      document.body.appendChild(bg);
+      return true;
+    });
+    if (!pinned) throw new Error('could not pin a comment card before fake inbox click');
+    await page.click('#tdoc-fake-inbox-row');
+    await page.waitForTimeout(150);
+    const still = await page.evaluate(() => {
+      const c = document.querySelector('.tdoc-margin-comment');
+      return !!(c && (c.classList.contains('tdoc-floating-open') || c.classList.contains('active')));
+    });
+    await page.evaluate(() => document.getElementById('tdoc-aux-modal')?.remove());
+    if (!still) throw new Error('inbox-row click unpinned the open comment card');
+  });
+
   await t('Clicking replies toggle expands replies', async () => {
     await openFirstCommentCard();
     const toggle = await page.$('.tdoc-replies-toggle');
@@ -481,15 +721,17 @@ async function tPub(name, fn) {
   await tPub('Clicking + React on anon view triggers sign-in (no picker)', async () => {
     // Anon: should NOT open the emoji picker — should redirect to sign-in modal.
     await page.click('.tdoc-react-add');
-    // Modal appears after the device/start network round-trip (~1-2s).
+    // Modal appears after the device/start network round-trip (~1-2s). It is
+    // the shared server/signin.js dialog (.tds-bg), not the old inline overlay
+    // modal those selectors predate.
     try {
-      await page.waitForSelector('#tdoc-device-modal', { timeout: 5000 });
+      await page.waitForSelector('.tds-bg', { timeout: 5000 });
     } catch {
       throw new Error('expected device-flow modal to appear');
     }
     const picker = await page.$('.tdoc-emoji-picker');
     if (picker) throw new Error('emoji picker opened without sign-in');
-    await page.click('#tdoc-modal-cancel');
+    await page.click('#tds-cancel');
     await page.waitForTimeout(150);
   });
 

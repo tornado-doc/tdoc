@@ -1,0 +1,60 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>What fills the context window</title>
+<style>
+  html,body{margin:0;height:100%;background:#FAF9F5;color:#1F1E1D;
+    font:13px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+  body{padding:15px 17px 16px;display:flex;flex-direction:column;gap:11px;box-sizing:border-box}
+  .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:none}
+  .ttl{font-size:14px;font-weight:600;letter-spacing:-.012em}
+  .live{display:inline-flex;align-items:center;gap:6px;margin-left:auto;padding:3px 9px;
+    font-size:11px;font-weight:600;color:#1246CC;background:#EEF3FF;border:1px solid #D6E2FF}
+  .pulse{width:6px;height:6px;border-radius:50%;background:#1652f0;animation:pl 2s ease-in-out infinite}
+  @keyframes pl{0%,100%{opacity:1}50%{opacity:.3}}
+  @media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+  .srcs{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+  .src{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
+    background:#F2F0E9;border:1px solid #E5E2D8;font-size:11px;color:#5F5C55}
+  .src svg{width:13px;height:13px;display:block;flex:none}
+  .card{flex:1;min-height:0;padding:14px;background:#fff;
+    border:1px solid #E5E2D8;overflow:hidden}
+  .src i{font-style:normal}
+  /* the phone stage is one screen, so the island keeps its data and
+     drops its chrome */
+  @media (max-width:430px){.srcs{display:none}.foot{display:none}.card{flex:0 0 auto;padding:10px}body{justify-content:flex-start;gap:8px;padding:11px 12px 12px}.ttl{font-size:12.5px}.src i{display:none}.src{padding:4px 7px}.srcs{gap:5px}}
+  .foot{flex:none;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#8B8781;flex-wrap:wrap}
+  .card{display:flex;flex-direction:column;justify-content:center;overflow:hidden}
+  pre{margin:0;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;
+    color:#3D3A34;white-space:pre;overflow:hidden;letter-spacing:0}
+  pre b{font-weight:600;color:#1F1E1D}
+  pre u{text-decoration:none;color:#1652f0}
+  .narrow{display:none}
+  @media (max-width:700px){pre{font-size:11px}}
+  @media (max-width:430px){.wide{display:none}.narrow{display:block}pre{font-size:11px}}
+</style></head><body>
+<div class="hd"><span class="ttl">Context assembly</span><span class="live">Figure 1</span></div>
+<div class="card"><pre class="wide">   ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
+   │    repo    │  │  threads   │  │ connectors │  │  this doc  │
+   └──────┬─────┘  └──────┬─────┘  └──────┬─────┘  └──────┬─────┘
+          └───────────────┴───────┬───────┴───────────────┘
+                       ┌──────────▼──────────┐
+                       │ <b>context builder</b>     │
+                       │ rank · trim · pin   │
+                       └──────────┬──────────┘
+ ┌────────────────────────────────▼───────────────────┐
+ │<b>200k window</b>   repo 68k · threads 36k · conn 44k     │
+ │              doc 28k · <u>free 24k</u>                    │
+ └────────────────────────────────────────────────────┘</pre><pre class="narrow"> ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐
+ │ repo │ │threads│ │ conn │ │ doc  │
+ └───┬──┘ └───┬──┘ └───┬──┘ └───┬──┘
+     └────────┴───┬────┴────────┘
+       ┌──────────▼──────────┐
+       │ <b>context builder</b>     │
+       │ rank·trim·pin       │
+       └──────────┬──────────┘
+┌─────────────────▼─────────┐
+│<b>200k window</b>                │
+│ repo 68k  threads 36k     │
+│ conn 44k  doc 28k         │
+│ <u>free 24k</u>                  │
+└───────────────────────────┘</pre></div>
+<div class="foot"><span>Measured over 40 sessions</span><span>Design v5</span></div>
+</body></html>

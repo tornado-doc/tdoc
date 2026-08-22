@@ -54,62 +54,19 @@ t('runs no author JavaScript', () => {
   assert(!hrefs.some((h) => /^javascript:/i.test(h)), 'page contains a javascript: URL');
 });
 
-t('hero board is a sandboxed widget island', () => {
-  // v39: the board is a real Game of Life, not a five-cell sprite on a
-  // CSS keyframe. Computation lives in widgets/conway.html, framed with
-  // sandbox="allow-scripts" and no allow-same-origin. The host stays
-  // script-free; the island is a unique origin.
-  assert(/<iframe\b[^>]*class="[^"]*\blife\b/.test(html), 'missing iframe.life');
-  assert(/src="\/d\/tornado-doc\/v\/\d+\/widget\/conway"/.test(html),
-    'iframe must point at this doc\'s /widget/conway route');
-  const iframe = html.match(/<iframe\b[^>]*class="[^"]*\blife\b[^>]*>/);
-  assert(iframe, 'could not isolate the life iframe');
-  assert(/sandbox="allow-scripts"/.test(iframe[0]),
-    `widget iframe sandbox must be allow-scripts only: ${iframe[0]}`);
-  assert(!/allow-same-origin/.test(iframe[0]),
-    'widget iframe must not include allow-same-origin');
-  const widgetPath = path.join(root, 'landing', 'tornado-doc', `v${latest}`, 'widgets', 'conway.html');
-  assert(fs.existsSync(widgetPath), `missing ${widgetPath}`);
-  const widget = fs.readFileSync(widgetPath, 'utf8');
-  assert(/<script\b/.test(widget), 'widget file must contain the generation script');
-  assert(/nxt\[/.test(widget) && /cur\[/.test(widget),
-    'widget must step a neighbour grid (nxt/cur), not animate a sprite');
-  // The CSS-sprite workaround must stay gone on the host.
-  assert(!/<g class="glider"/.test(html), 'CSS-sprite glider group still in the host');
-  assert(!/@keyframes\s+glide/.test(html),
-    'host CSS still has the sprite @keyframes glide; the island does not use it');
-  // The board ran forever with no way to stop it. Control cannot live on
-  // the host (no author script), so it has to live in the widget.
-  assert(/<button\b[^>]*id="t"/.test(widget),
-    'widget must ship a play/pause button; the host cannot reach the loop');
-  assert(/timer \? 'Pause' : 'Play'/.test(widget),
-    'widget button must flip between Pause and Play');
-  assert(/function halt\(/.test(widget) && /function run\(/.test(widget),
-    'widget must expose run/halt so the loop can stop');
-  // Dark mode is one invert on html. Reaction emoji are OS bitmaps and
-  // the agent mark is a brand colour, so both come back wrong unless
-  // flipped a second time (same restore as overlay .tdoc-emoji).
-  assert(/html\[data-tdoc-theme="dark"\]\s*\.emo/.test(html),
-    'dark mode must restore mock reaction emoji after the page invert');
-  assert(/html\[data-tdoc-theme="dark"\]\s*\.mc-av\.mc-logo/.test(html),
-    'dark mode must restore the terracotta agent mark after the page invert');
-  // e5a7d7c / e58124a: the gold ring belongs to the board, not the island.
-  // The play bar sits outside .board. The island card stays opaque so a
-  // dark-mode invert-of-invert does not flash a white slab.
-  assert(/\.board\s*\{[^}]*border:\s*1px solid #e0b93a/.test(widget),
-    'widget .board must carry the reader ring; it must not sit on iframe.life');
-  assert(/iframe\.life\s*\{[^}]*background:\s*#fff/.test(html),
-    'island card must stay opaque (#fff); transparent iframe comes back white in dark mode');
-  assert(!/iframe\.life\s*\{[^}]*background:\s*transparent/.test(html),
-    'iframe.life must not be transparent');
-  assert(!/\.life\.anchored\s*\{/.test(html),
-    'host must not ring the whole island; that enclosed the play control');
-  // Demo chrome: blue is the page CTA. The mock bar uses a plain wordmark
-  // and a grey version pill so it does not steal those two buttons.
-  assert(!/\.tbar-mark\s*\{[^}]*background:\s*var\(--accent\)/.test(html),
-    'demo tbar-mark must not spend the CTA blue');
-  assert(/\.tbar-v\s*\{[^}]*background:\s*#f0f1f4/.test(html),
-    'demo version chip must be the reader grey pill, not a blue one');
+t('hero demo is a static mock, no iframe or author script', () => {
+  // The demo used to frame live widget islands. It is a refined STATIC mock
+  // now (crafted SVG/CSS charts), because the job is to sell the value-prop
+  // loop, not to rebuild the product. So: no iframe, no author <script>.
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  assert(demo.length > 1000, 'the hd demo block is missing');
+  assert(!/<iframe/i.test(html), 'the page frames an iframe; the demo is a static mock now');
+  assert(!/<script\b/i.test(html), 'a published tdoc runs no author script');
+  assert(/class="hd-bars"/.test(demo) && /class="hd-scatter"/.test(demo) && /class="hd-stack"/.test(demo),
+    'each demo window needs its crafted artifact (bars / scatter / stack)');
+  // The old CSS-sprite glider workaround must stay gone from the host.
+  assert(!/<g class="glider"/.test(html), 'CSS-sprite glider group still present');
+  assert(!/@keyframes\s+glide/.test(html), 'host CSS still has the sprite @keyframes glide');
 });
 
 t('carries the SEO head', () => {
@@ -155,81 +112,60 @@ t('links to the GitHub repo and install path', () => {
     'a CTA points at a raw GitHub file; that is a repo, not an onboarding');
 });
 
-t('hero stage-notes is a sibling of stage-doc', () => {
-  // Nesting the notes inside .stage-doc makes the two-column grid a no-op:
-  // the grid has one child, so the cards stack under the board. v2 and v3
-  // both shipped that bug. stage-doc must be closed before the aside.
-  const iDoc = html.indexOf('<div class="stage-doc">');
-  const iAside = html.indexOf('<aside class="stage-notes">');
-  assert(iDoc >= 0 && iAside > iDoc, 'missing stage-doc or stage-notes');
-  const mid = html.slice(iDoc + '<div class="stage-doc">'.length, iAside);
+t('demo doc and thread are siblings, not nested', () => {
+  // Nesting the thread inside the doc collapses the two-column canvas.
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const iDoc = demo.indexOf('<div class="hd-doc">');
+  const iAside = demo.indexOf('<aside class="hd-notes">');
+  assert(iDoc >= 0 && iAside > iDoc, 'missing hd-doc or hd-notes');
+  const mid = demo.slice(iDoc + '<div class="hd-doc">'.length, iAside);
   const opens = (mid.match(/<div\b/g) || []).length;
   const closes = (mid.match(/<\/div>/g) || []).length;
-  assert(closes === opens + 1, `stage-doc still open when notes start (div net ${opens - closes})`);
+  assert(closes === opens + 1, `hd-doc still open when the thread starts (div net ${opens - closes})`);
 });
 
-t('phone rules actually override the desktop headline and CTA grid', () => {
+t('phone rules override the headline, and no redundant Star pill in the doc', () => {
   // Desktop is `h1.tagline { font-size:56px }` (specificity 0,1,1). A
-  // `@media { .tagline { font-size:38px } }` rule never wins, so v6
+  // `@media { .tagline { font-size:38px } }` rule never wins, so the headline
   // wrapped to three lines at 375px. The phone override must target
   // `h1.tagline`.
   const phone = html.match(/@media \(max-width:640px\)\s*\{([\s\S]*?)\n    \}/);
   assert(phone, 'missing @media (max-width:640px)');
   assert(/h1\.tagline\s*\{[^}]*font-size:\s*\d+px/.test(phone[1]),
     '640px breakpoint must set h1.tagline font-size, not just .tagline');
-  // v35: share the row. Two 232px tracks still overflow 375, so the
-  // columns become 1fr 1fr and ".btn-long" ("on GitHub") hides, leaving
-  // "Star 102". A lone 1fr restack is also overflow-safe but drops the
-  // second button under the first; lock the two-column share.
-  assert(/\.cta\s*\{[^}]*grid-template-columns:\s*1fr\s+1fr/.test(phone[1]),
-    '640px breakpoint must share the CTA row (1fr 1fr); 232+232 overflows 375');
-  assert(/\.btn-long\s*\{[^}]*display:\s*none/.test(phone[1]),
-    '640px must hide .btn-long so Star 102 fits the half-width track');
-  // v28: loop stayed 3 col (98px, one word per line), proof-wall stayed
-  // 3 col (min-content 164px, page scrollWidth 545), feature cards stayed
-  // 2 col (156px). All three must become one column with the CTAs.
+  // v43: one CTA, and the GitHub star moved to the top bar. There is no second
+  // pill to share the row, so the phone CTA is a single full-width 1fr track.
+  assert(/\.cta\s*\{[^}]*grid-template-columns:\s*1fr(\s|;|\})/.test(phone[1]),
+    '640px .cta must be a single 1fr track now that the hero has one CTA');
+  // v28: loop stayed 3 col (98px, one word per line), proof-wall stayed 3 col
+  // (164px), feature cards 2/3 col. All must become one column with the CTA.
   assert(/\.loop,\s*\.sm-grid,\s*\.proof-wall\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1])
       || (/\.loop\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1])
         && /\.sm-grid\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1])
         && /\.proof-wall\s*\{[^}]*grid-template-columns:\s*1fr/.test(phone[1])),
     '640px breakpoint must restack .loop, .sm-grid and .proof-wall to 1fr');
-  // v12 lengthened the ghost label to "Star on GitHub 102". The v7 216px
-  // cap wraps that label (77px vs 52px). Phone max-width must match the
-  // desktop track (232px), or be absent so 1fr uses the wrap.
-  const ctaRule = phone[1].match(/\.cta\s*\{[^}]*\}/);
-  const maxW = ctaRule && ctaRule[0].match(/max-width:\s*(\d+)px/);
-  assert(!maxW || Number(maxW[1]) >= 232,
-    `640px .cta max-width is ${maxW && maxW[1]}px; "Star on GitHub 102" wraps below 232`);
-  // The GitHub mark is a <use> of a 24x24 symbol. Without a viewBox the
-  // used path overflows the 1em box and the grid row grows to ~77px.
-  // Matched inside the button rather than immediately after it: the contents
-  // are wrapped in one centring child now, so adjacency is not the invariant.
-  // The invariant is that the icon carries a viewBox.
-  const ghost = html.match(/<a class="btn btn-ghost"[\s\S]*?<\/a>/);
-  assert(ghost, 'ghost CTA not found');
-  assert(/<svg[^>]*viewBox="0 0 24 24"/.test(ghost[0]),
-    'Star button icon must set viewBox so the used mark cannot stretch the pill');
-  // v39 phone bug: icon / label / pill were direct flex children of the
-  // button. Hiding .btn-long left an anonymous text node that collected
-  // its own gap, so Star read as icon-left / pill-right. Contents must
-  // be one .btn-in child; the button then centres a single item.
+  // v43: the GitHub star is neither a hero CTA nor a pill in the doc body.
+  // The published overlay top bar already renders a GitHub button for the
+  // landing (cfg.isLanding in overlay.js), so an oversized "Star on GitHub"
+  // pill in the page is redundant (issue: "Should only have one CTA. Non
+  // technical should not open GitHub"). The repo link survives in the footer.
+  assert(!/class="btn btn-ghost"/.test(html),
+    'the GitHub Star must not be a page CTA');
+  assert(!/class="tb-star"/.test(html),
+    'no Star pill in the doc; the overlay top bar carries GitHub for the landing');
+  assert(/github\.com\/tornado-doc\/tdoc/.test(html),
+    'the repo link should still appear on the page (footer)');
+  // The single primary CTA still wraps its label in one .btn-in child and
+  // locks its pill height, so the used marks cannot stretch the row.
   assert(/\.btn-in\s*\{[^}]*display:\s*inline-flex/.test(html),
-    'CTA contents must sit in one .btn-in child so a hidden .btn-long cannot become a flex gap');
-  const ghosts = [...html.matchAll(/<a class="btn btn-ghost"[\s\S]*?<\/a>/g)].map((m) => m[0]);
-  assert(ghosts.length >= 2, `expected two ghost CTAs, found ${ghosts.length}`);
-  for (const g of ghosts) {
-    assert(/<span class="btn-in">/.test(g),
-      'ghost CTA must wrap icon+label+pill in .btn-in so the row stays centred on phones');
-  }
-  // v14 dropped height/nowrap. The used mark then overflowed 1em and the
-  // Star pill measured 77px (Create stretched with it on desktop). Lock both.
+    'CTA contents must sit in one .btn-in child');
   assert(/\.btn\s*\{[^}]*height:\s*52px/.test(html),
-    'CTA pills must lock height:52px; without it the used GitHub mark stretches Star to ~77px');
+    'CTA pills must lock height:52px');
   assert(/\.btn\s*\{[^}]*white-space:\s*nowrap/.test(html),
-    'CTA pills must nowrap so Star on GitHub 102 stays one line');
-  // Same class of bug as the original .tagline vs h1.tagline miss: an
-  // earlier 640px size is a no-op if a later 840px block also sets
-  // h1.tagline. The last media query that sets h1.tagline must be 640.
+    'CTA pills must nowrap');
+  // Same class of bug as the .tagline vs h1.tagline miss: an earlier 640px
+  // size is a no-op if a later 840px block also sets h1.tagline. The last
+  // media query that sets h1.tagline must be 640.
   const mediaH1 = [...html.matchAll(/@media \(max-width:(\d+)px\)\s*\{([\s\S]*?)\n    \}/g)]
     .filter((m) => /h1\.tagline\s*\{[^}]*font-size:/.test(m[2]));
   const last = mediaH1[mediaH1.length - 1];
@@ -237,36 +173,26 @@ t('phone rules actually override the desktop headline and CTA grid', () => {
     `last h1.tagline media query is ${last && last[1]}px; 640 must come last so phones do not inherit the 840px size`);
 });
 
-t('hero comment count matches the mock thread', () => {
-  // v8 nested Claude's answer as a reply. The notes column is one thread,
-  // so "2 comments" is a leftover from the sibling-card layout.
-  const notes = html.match(/<aside class="stage-notes">[\s\S]*?<\/aside>/);
-  assert(notes, 'missing stage-notes');
-  const threads = (notes[0].match(/<div class="mc">/g) || []).length;
-  const replies = (notes[0].match(/<div class="mc-reply">/g) || []).length;
-  assert(threads === 1, `expected 1 mock thread, found ${threads}`);
-  assert(replies === 1, `expected Claude's answer as a reply, found ${replies}`);
-  // v10: checked against the published conway-life doc. The real reader has
-  // no "N comments" header at all; the margin holds pins, and a pin opens the
-  // card. The mock follows that, so there is no label left to count.
-  assert(!/class="lbl-n"/.test(notes[0]), 'the real margin has no comment-count header');
-  assert(/move anchor/i.test(notes[0]), 'real cards lead with the move-anchor row');
-  assert(/mc-meta/.test(notes[0]), 'real cards carry a version and date meta row');
-  // Play/Pause lives in the board next to this card. Asking for the
-  // absence of that control reads as a bug, not a demo.
-  assert(!/without a play button/i.test(notes[0]),
-    'Anna must not ask for no play button while Pause sits in the island');
+t('each demo thread is one comment with one agent reply', () => {
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  const threads = demo.match(/<aside class="hd-notes">[\s\S]*?<\/aside>/g) || [];
+  assert(threads.length === 3, `expected 3 threads, found ${threads.length}`);
+  for (const th of threads) {
+    const humans = (th.match(/<b>Jesse Pollak<\/b>/g) || []).length;
+    const replies = (th.match(/<div class="hd-reply">/g) || []).length;
+    assert(humans === 1, `expected 1 human comment per thread, found ${humans}`);
+    assert(replies === 1, `expected 1 agent reply per thread, found ${replies}`);
+  }
 });
 
-t('agent avatar is a filled Claude disc, not a small glyph', () => {
-  // The sunburst path is hollow in the middle. v11/v12 put an 18–20px
-  // terracotta mark on a transparent disc; at 22px that reads as a broken
-  // image. The runtime tiles already use a filled disc.
-  assert(/mc-av mc-logo/.test(html), 'missing agent logo avatar');
-  assert(/\.mc-av\.mc-logo\s*\{[^}]*background:\s*#D97757/i.test(html),
-    'agent avatar disc must be Claude terracotta, not transparent');
-  assert(/\.mc-logo svg\s*\{[^}]*fill:\s*#fff/i.test(html),
-    'agent mark must be white on the terracotta disc');
+t('agent avatars are filled brand discs, not hollow glyphs', () => {
+  // The sunburst is hollow; on a transparent disc it reads as a broken image.
+  // Each agent mark sits filled-white on its own brand-coloured disc.
+  const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
+  assert(/background:#d97757"><svg[^>]*><use href="#hd-claude"/.test(demo),
+    'Claude reply needs a terracotta disc with the claude mark');
+  assert(/#hd-openai/.test(demo) && /#hd-x/.test(demo), 'Codex and Grok marks must be present');
+  assert(/#hd-claude"[\s\S]*?fill="#fff"/.test(html), 'the claude mark must be white on its disc');
 });
 
 t('loop step 2 svg is well-formed', () => {
@@ -305,7 +231,7 @@ t('has a compare table that admits a loss', () => {
   // lose outright. A `part` cell ("Coming soon") is equally honest: the reader
   // sees a row we do not win, which is what makes the other rows believable.
   const lost = rows.filter((r) => {
-    const ours = r.match(/<td class="us">[\s\S]*?<\/td>/);
+    const ours = r.match(/<td [^>]*class="us"[^>]*>[\s\S]*?<\/td>/);
     return !!ours && /class="(no|part)"/.test(ours[0]);
   });
   assert(lost.length >= 1, 'every compare row favours tdoc — keep at least one row we do not win');
@@ -339,11 +265,8 @@ t('carries no unfinished placeholder content', () => {
   const drafts = (visible.match(/PLACEHOLDER/gi) || []).length;
   assert(drafts === 0, `${drafts} visible PLACEHOLDER line(s) on the latest version`);
 
-  // People stay. Quotes must mention tdoc-shaped work, not the leftover
-  // OpenTag wording. Trusted-by leftovers from that site must stay gone.
-  for (const name of ['Josh', 'Brandon', 'Angela F', 'Bruce Z', 'Sam H', 'Sammy']) {
-    assert(visible.includes(name), `missing ${name} on the proof wall`);
-  }
+  // The social-proof wall was removed; the OpenTag trusted-by leftovers must
+  // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
   assert(/Works with/.test(visible), 'trusted-by label should be Works with, not a borrowed user list');
 });
@@ -405,7 +328,7 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'overlay still renders the slug crumb and version picker on the homepage');
   assert(/tdoc-bar-mark/.test(left[0].split('isSiteBar')[0]),
     'the tdoc mark must stay outside the landing conditional');
-  assert(/tdoc_logo\.png/.test(left[0]),
+  assert(/tdoc_logo\.svg/.test(left[0]),
     'the mark must be the tdoc logo, not a text pill');
   assert(/tdoc-title/.test(left[0]) && /isSiteBar \? '' :/.test(left[0]),
     'homepage bar must not repeat the page title');
@@ -432,16 +355,15 @@ t('homepage bar is site chrome, not a document toolbar', () => {
 console.log('tdoc.dev / release payload');
 
 t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
-  // The working copy under landing/tornado-doc keeps 39 versions and the
-  // review thread. Publishing that as-is would put a version picker and
-  // somebody else's notes on tdoc.dev/. The release script copies only
-  // the latest HTML to v1, rewrites the widget iframe, and writes [].
+  // The working copy keeps every version and the review thread. Publishing
+  // that as-is would put a version picker and somebody else's notes on
+  // tdoc.dev/. The release script copies only the latest HTML to v1 and
+  // writes []. (The demo is a static mock now, so there is no widget island
+  // to rewrite or copy.)
   const { execFileSync } = require('child_process');
   const script = path.join(root, 'bin', 'tdoc-landing-release');
   const outDir = path.join(root, '.release', 'tornado-doc');
-  const previewDir = path.join(root, '.release', 'tdoc-home');
   execFileSync(process.execPath, [script], { cwd: root, encoding: 'utf8' });
-  execFileSync(process.execPath, [script, 'tdoc-home'], { cwd: root, encoding: 'utf8' });
 
   const ignore = fs.readFileSync(path.join(root, '.gitignore'), 'utf8');
   assert(/^\.release\/$/m.test(ignore), '.release/ must be gitignored so the payload cannot be committed by mistake');
@@ -450,7 +372,7 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
   assert(Array.isArray(srcComments) && srcComments.length > 0,
     'working copy has no comments to strip; the release script would be a no-op');
   assert(meta.versions.length > 1,
-    'working copy is a single version; the v39→v1 collapse would be invisible');
+    'working copy is a single version; the vN->v1 collapse would be invisible');
 
   const relMeta = JSON.parse(fs.readFileSync(path.join(outDir, 'meta.json'), 'utf8'));
   const relComments = JSON.parse(fs.readFileSync(path.join(outDir, 'comments.json'), 'utf8'));
@@ -461,20 +383,11 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
   assert(!fs.existsSync(path.join(outDir, 'v2')), 'release payload still has a v2 directory');
   assert(Array.isArray(relComments) && relComments.length === 0,
     `release comments.json must be empty, got ${relComments.length} thread(s)`);
-  assert(/src="\/d\/tornado-doc\/v\/1\/widget\/conway"/.test(relHtml),
-    'release iframe must point at /d/tornado-doc/v/1/widget/conway');
-  assert(!new RegExp(`/d/tornado-doc/v/${latest}/widget/`).test(relHtml),
-    `release iframe still points at working-copy v${latest}`);
-  assert(fs.existsSync(path.join(outDir, 'v1', 'widgets', 'conway.html')),
-    'release payload must copy widgets/conway.html or the board 404s');
-
-  const previewHtml = fs.readFileSync(path.join(previewDir, 'v1', 'index.html'), 'utf8');
-  assert(/src="\/d\/tdoc-home\/v\/1\/widget\/conway"/.test(previewHtml),
-    'custom-slug release must rewrite the iframe to that slug');
+  // The static mock brings its own charts: the payload must not frame an iframe.
+  assert(!/<iframe/i.test(relHtml), 'release HTML frames an iframe; the demo is a static mock');
+  assert(/class="hd-win hd-w1"/.test(relHtml), 'release HTML lost the demo component');
 
   // tdoc-publish only attaches comments.json when it is a non-empty array.
-  // An empty file is the right local signal; it does not wipe a remote
-  // thread that already exists (preview). First publish to tdoc.dev is clean.
   const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
   assert(/type == "array" and length > 0/.test(publish),
     'tdoc-publish must skip empty comments.json so the release payload does not send a dummy list');
@@ -537,12 +450,12 @@ t('shipping the homepage ships content, not just worker code', () => {
   // gate, wrong slug). Green must mean the homepage actually renders.
   assert(/is still serving the neutral fallback/.test(content),
     'publish workflow must fail when tdoc.dev/ falls back to the neutral page');
-  assert(/\[\[ "\$home" == \*'A doc that answers its own comments'\*/.test(content),
-    'homepage verify must use bash [[ ]], not echo|grep -q under pipefail');
+  assert(/\[\[ "\$home" == \*'"slug":"tornado-doc"'\*/.test(content),
+    'homepage verify must use bash [[ ]] on the slug, not echo|grep -q under pipefail');
   // The homepage links to /start. Shipping one without the other leaves that
   // link on the neutral fallback, which reads as "the tour does not exist".
   assert(/upload tdoc-start/.test(content), 'the tutorial is never uploaded to tdoc.dev');
-  assert(/"\$tour" == \*'Everything tdoc does'\*/.test(content),
+  assert(/"\$tour" == \*'"slug":"tdoc-start"'\*/.test(content),
     'a green run must mean /start renders too, not just the homepage');
   assert(!/echo "\$body" \| grep -q/.test(content),
     'echo|grep -q SIGPIPEs on a 300kB landing page and fails a successful ship');
