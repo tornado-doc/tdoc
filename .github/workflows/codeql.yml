@@ -37,7 +37,7 @@ jobs:
       # analyze steps MUST stay on the same codeql-action version/SHA — a
       # mismatch fails the run ("Not all workflow steps … use the same
       # version"), which is why these bump together, never one at a time.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Initialize CodeQL
         uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
