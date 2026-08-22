@@ -1436,7 +1436,7 @@ async function indexHtml(env, session, origin, nonce) {
 </head><body>
 <div class="wrap">
 <div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
-${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how.</p>' :
+${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how, or <a href="/templates">browse templates</a> for a look to start from.</p>' :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
   </div>
@@ -1461,7 +1461,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
         <li>Send the link to anyone. They comment on the page, and your AI answers them.</li>
       </ol>
     </div>
-    <div class="mk-ft">Not set up yet? <a href="/start">Start here</a>.</div>
+    <div class="mk-ft">Want a specific look first? <a href="/templates">Browse templates</a>. &nbsp;·&nbsp; Not set up yet? <a href="/start">Start here</a>.</div>
   </div>
 </div>
 <script${nonce ? ` nonce="${nonce}"` : ''}>
