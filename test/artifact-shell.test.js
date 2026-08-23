@@ -325,6 +325,21 @@ const SLUG = 'hostile-body-css';
       }
     });
 
+    await t('?comment= deep-link opens the target comment card on load', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl + '&comment=c_fixture_1', { waitUntil: 'networkidle' });
+      // no click — the card for the deep-linked comment opens by itself
+      await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]', { timeout: 4000 });
+    });
+
+    await t('?comment= on a reply opens the parent card with the thread expanded', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl + '&comment=r_fixture_1a', { waitUntil: 'networkidle' });
+      await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]', { timeout: 4000 });
+      // the reply thread is expanded (not born collapsed) so the reply is visible
+      await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"] .tdoc-replies.open', { timeout: 2000 });
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

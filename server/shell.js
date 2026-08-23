@@ -47,6 +47,8 @@
     var copyReq = null; // { includeComments } awaiting tdoc:docMarkdown
     var frameScrollY = 0;
     var reanchoringId = null; // comment id awaiting a new frame selection to rebind its anchor
+    var pendingDeepLink = null; // ?comment=<id> awaiting its pin so we can open+scroll to it
+    var deepLinkTries = 0;      // guard against a scroll loop when the pin never comes into view
     function copyText(t){
       if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function(){return true;}).catch(function(){return false;});
       try { var ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); var ok=document.execCommand('copy'); ta.remove(); return Promise.resolve(ok); } catch(e){ return Promise.resolve(false); }
@@ -70,7 +72,7 @@
     function loadComments(){
       return fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&version=' + encodeURIComponent(cfg.version))
         .then(function(r){ return r.ok ? r.json() : []; })
-        .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); return list; })
+        .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); captureDeepLink(); return list; })
         .catch(function(){ return []; });
     }
     // On a 401 (auth required — production/worker), run the shared sign-in modal
@@ -162,6 +164,43 @@
     // A comment is unanchored when its anchor didn't resolve in this doc version —
     // i.e. no pin was reported for it. (pinData holds only resolved anchors.)
     function isUnanchored(id){ for (var i=0;i<pinData.length;i++){ if (pinData[i].id===id) return false; } return true; }
+    // ?comment=<id> deep-link (1:1 with overlay). Open the target comment's card
+    // after its pin resolves, scrolling the frame so the anchor is in view; for a
+    // reply target, open the parent card and expand the thread. Only fires once
+    // per load (the URL is captured after comments arrive).
+    function captureDeepLink(){
+      var want = null; try { want = new URLSearchParams(location.search).get('comment'); } catch (e) {}
+      if (want && commentsById && findCommentRoot(want)) { pendingDeepLink = want; deepLinkTries = 0; }
+    }
+    function findCommentRoot(want){
+      if (!want) return null;
+      for (var i=0;i<commentList.length;i++){
+        var c = commentList[i]; if (c.id === want) return c.id;
+        var reps = c.replies || []; for (var j=0;j<reps.length;j++){ if (reps[j].id === want) return c.id; }
+      }
+      return null;
+    }
+    function clusterForId(id){ for (var i=0;i<pinClusters.length;i++){ var it=pinClusters[i].items; for (var j=0;j<it.length;j++){ if (it[j].c.id===id) return pinClusters[i]; } } return null; }
+    function tryDeepLink(){
+      if (!pendingDeepLink) return;
+      var root = findCommentRoot(pendingDeepLink);
+      if (!root) { pendingDeepLink = null; return; }
+      var cl = clusterForId(root);
+      if (!cl) { if (++deepLinkTries > 40) pendingDeepLink = null; return; } // pin not resolved yet
+      var top = BAR + (cl.y - frameScrollY);
+      if ((top < BAR + 20 || top > window.innerHeight - 60) && deepLinkTries < 40) {
+        deepLinkTries++;
+        sendFrame({ type:'tdoc:scrollTo', docY: Math.max(0, Math.round(cl.y - window.innerHeight / 3)) });
+        return; // reopen check after the frame reports the new scroll position
+      }
+      var target = pendingDeepLink; pendingDeepLink = null;
+      openCard(root);
+      if (target !== root) {   // a reply deep-link — expand the thread
+        var card = document.querySelector('.tdoc-margin-comment');
+        if (card){ var rl = card.querySelector('.tdoc-replies'), rt = card.querySelector('.tdoc-replies-toggle');
+          if (rl){ rl.classList.add('open'); if (rt) rt.classList.add('open'); positionCard(); } }
+      }
+    }
     // Re-anchor flow (1:1 with overlay startReanchor/exitReanchor): the shell holds
     // reanchoringId; the next tdoc:selection from the frame PATCHes the anchor
     // instead of opening the composer. A banner near the bar exposes cancel/remove.
@@ -221,6 +260,7 @@
       });
       Object.keys(pinEls).forEach(function(k){ if (!seen[k]){ pinEls[k].remove(); delete pinEls[k]; } });
       repositionPins();
+      tryDeepLink();
     }
     // Cheap — on every scroll frame. No DOM query/rebuild: just move cached pins.
     function repositionPins(){
@@ -337,7 +377,7 @@
       else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); closeEmojiPicker(); closeClusterPopover(); }
       else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
       else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; if (d.docHeight) docHeight = d.docHeight; positionPins(); }
-      else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); }
+      else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); tryDeepLink(); }
       else if (d.type === 'tdoc:docMarkdown' && copyReq) {
         var md = d.markdown || '';
         if (copyReq.includeComments && commentList.length) md += '\\n\\n---\\n\\n## Comments\\n\\n' + commentList.map(commentToMd).join('\\n---\\n\\n');
