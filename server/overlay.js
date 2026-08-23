@@ -407,6 +407,7 @@
   }
   /* TDOC_READER_CSS_END */
 
+  /* TDOC_CHROME_CSS_START */
   /* ========== Top bar ==========
      Two groups, Google Docs / Notion style: left (logo + crumb + title)
      and right (identity, primary CTA, more). The title is NOT viewport-
@@ -864,6 +865,7 @@
   .tdoc-footer a:hover { color: var(--td-accent); text-decoration: underline; }
   .tdoc-footer .sep { color: #ccc; }
   @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
+  /* TDOC_CHROME_CSS_END */
 
   `;
   const style = document.createElement('style');

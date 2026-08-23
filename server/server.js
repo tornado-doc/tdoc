@@ -287,6 +287,29 @@ function frameCspHeader(nonce) {
   return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts`;
 }
 
+// The CHROME-only CSS for the shell: the :root design tokens + the chrome CSS
+// block (bar/footer/composer/cards/pins/drawer/menus) sliced from overlay.js
+// between the TDOC_CHROME_CSS_START/END markers. Excludes the reader/content-
+// column rules (those would wrongly constrain the shell body). Single source
+// (overlay.js) so the shell chrome stays 1:1 with the overlay, no drift.
+function chromeCss() {
+  try {
+    const src = fs.readFileSync(OVERLAY_PATH, 'utf8');
+    let root = '';
+    const ri = src.indexOf(':root {');
+    if (ri !== -1) { const re = src.indexOf('}', ri); if (re !== -1) root = src.slice(ri, re + 1); }
+    let chrome = '';
+    const s = src.indexOf('TDOC_CHROME_CSS_START');
+    const e = src.indexOf('TDOC_CHROME_CSS_END');
+    if (s !== -1 && e !== -1 && e > s) {
+      const from = src.indexOf('*/', s);
+      const to = src.lastIndexOf('/*', e);
+      if (from !== -1 && to !== -1 && to > from) chrome = src.slice(from + 2, to);
+    }
+    return root + '\n' + chrome;
+  } catch { return ''; }
+}
+
 // P1: the shell renders a top bar + embeds the author frame. P2 adds the
 // postMessage anchoring bridge + comment chrome (composer/pins/cards) here.
 function shellDocument(slug, version, nonce) {
