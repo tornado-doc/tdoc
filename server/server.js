@@ -369,7 +369,21 @@ function shellScript() {
   var pending = null; // last selection anchor awaiting a comment
   var pinData = []; // [{id, docY, login}]
   var commentsById = {}; // id -> comment (for the floating card)
+  var commentList = []; // ordered comments (for Copy: doc + comments)
+  var copyReq = null; // { includeComments } awaiting tdoc:docMarkdown
   var frameScrollY = 0;
+  function copyText(t){
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function(){return true;}).catch(function(){return false;});
+    try { var ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); var ok=document.execCommand('copy'); ta.remove(); return Promise.resolve(ok); } catch(e){ return Promise.resolve(false); }
+  }
+  function reactionsToMd(r){ if(!r) return ''; var out=Object.keys(r).filter(function(k){return r[k]&&r[k].length;}).map(function(k){return k+' '+r[k].length;}); return out.length?('\\n'+out.join('  ')+'\\n'):''; }
+  function commentToMd(c){
+    var who=c.author?('**@'+c.author.login+'**'):'*anonymous*'; var when=''; try{when=new Date(c.created).toLocaleString();}catch(e){}
+    var anchorLine=''; if(c.anchor){ if(c.anchor.kind==='element'||c.anchor.selector) anchorLine='> _on '+(c.anchor.label||c.anchor.selector)+'_\\n'; else if(c.anchor.text) anchorLine='> "'+c.anchor.text.replace(/\\n/g,' ').slice(0,200)+'"\\n'; }
+    var md=who+' — _'+when+'_\\n'+anchorLine+'\\n'+(c.text||'')+'\\n'+reactionsToMd(c.reactions);
+    if(Array.isArray(c.replies)) c.replies.forEach(function(r){ var rwho=r.author?('**@'+r.author.login+'**'):'*anonymous*'; md+='  ↳ '+rwho+'\\n    '+(r.text||'')+'\\n'; });
+    return md;
+  }
   function frameWin(){ return frame && frame.contentWindow; }
   function sendFrame(msg){ var w = frameWin(); if (w) w.postMessage(Object.assign({source:'tdoc-shell'}, msg), '*'); }
 
@@ -381,7 +395,7 @@ function shellScript() {
   function loadComments(){
     fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&version=' + encodeURIComponent(cfg.version))
       .then(function(r){ return r.ok ? r.json() : []; })
-      .then(function(list){ list = Array.isArray(list) ? list : []; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); })
+      .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); })
       .catch(function(){});
   }
   // Floating comment card (real .tdoc-margin-comment markup + CSS).
@@ -461,6 +475,12 @@ function shellScript() {
     else if (d.type === 'tdoc:ready') { layout(); loadComments(); }
     else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; positionPins(); }
     else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); }
+    else if (d.type === 'tdoc:docMarkdown' && copyReq) {
+      var md = d.markdown || '';
+      if (copyReq.includeComments && commentList.length) md += '\\n\\n---\\n\\n## Comments\\n\\n' + commentList.map(commentToMd).join('\\n---\\n\\n');
+      var btn = document.getElementById('tdoc-copy-md-btn'); copyReq = null;
+      copyText(md).then(function(ok){ if (btn){ var s=btn.querySelector('span'); if(s){ var o=s.textContent; s.textContent=ok?'Copied':'Copy failed'; setTimeout(function(){ s.textContent=o; },1200);} } });
+    }
   });
   // --- bar handlers (shell-safe subset; Copy-markdown/Publish/Share deferred
   //     until the probe supplies doc text / the publish flow is ported) ---
@@ -474,13 +494,16 @@ function shellScript() {
   })();
   // My docs
   wire('#tdoc-bar-mark','click',function(){ location.href='/me'; });
-  // Version picker: toggle menu + navigate on option click.
-  wire('#tdoc-version-toggle','click',function(e){ e.stopPropagation(); var w=e.currentTarget.closest('.tdoc-version-wrap'); if(w) w.classList.toggle('open'); });
+  // Menus open by toggling .open on the MENU element (matches the real CSS
+  // .tdoc-menu.open / .tdoc-version-menu.open).
+  function toggleMenu(id){ var m=document.getElementById(id); if(!m) return; var was=m.classList.contains('open'); closeMenus(); if(!was) m.classList.add('open'); }
+  function closeMenus(){ document.querySelectorAll('.tdoc-menu.open, .tdoc-version-menu.open, .tdoc-secondary-menu.open').forEach(function(m){ m.classList.remove('open'); }); }
+  wire('#tdoc-version-toggle','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-version-menu'); });
   document.querySelectorAll('.tdoc-version-menu [data-version]').forEach(function(b){ b.addEventListener('click', function(){ location.href='/d/'+encodeURIComponent(cfg.slug)+'/v/'+b.getAttribute('data-version'); }); });
-  // Copy / secondary menus: toggle open (actions deferred).
-  wire('#tdoc-copy-md-btn','click',function(e){ e.stopPropagation(); var w=e.currentTarget.closest('.tdoc-menu-wrap'); if(w) w.classList.toggle('open'); });
-  wire('#tdoc-more-btn','click',function(e){ e.stopPropagation(); var w=e.currentTarget.closest('.tdoc-menu-wrap'); if(w) w.classList.toggle('open'); });
-  document.addEventListener('click', function(){ document.querySelectorAll('.tdoc-menu-wrap.open, .tdoc-version-wrap.open').forEach(function(w){ w.classList.remove('open'); }); closeCard(); });
+  wire('#tdoc-copy-md-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-copy-md-menu'); });
+  document.querySelectorAll('#tdoc-copy-md-menu [data-mode]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); copyReq={ includeComments: b.getAttribute('data-mode')==='doc-comments' }; sendFrame({ type:'tdoc:copyDoc', requestId: Date.now() }); }); });
+  wire('#tdoc-more-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-secondary-menu'); });
+  document.addEventListener('click', function(){ closeMenus(); closeCard(); });
   layout();
 })();`;
 }

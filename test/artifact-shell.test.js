@@ -34,7 +34,7 @@ const SLUG = 'hostile-body-css';
   console.log(`artifact-shell boundary — ${shellUrl}\n`);
 
   const browser = await chromium.launch({ headless: true });
-  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await ctx.newPage();
 
   try {
@@ -137,6 +137,18 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-margin-comment .text', { timeout: 2000 });
       const txt = await page.$eval('.tdoc-margin-comment .text', el => el.textContent);
       if (!/pin should appear/.test(txt)) throw new Error('card text mismatch: ' + txt);
+    });
+
+    await t('Copy → Doc only puts the doc markdown on the clipboard', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.click('#tdoc-copy-md-btn');
+      await page.click('#tdoc-copy-md-menu [data-mode="doc"]');
+      await page.waitForTimeout(400);
+      const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+      if (!/Hostile body CSS fixture/.test(clip) || !/quick brown fox/.test(clip)) {
+        throw new Error('clipboard missing doc markdown: ' + JSON.stringify(clip.slice(0, 120)));
+      }
     });
 
     // --- #3 MOBILE ------------------------------------------------------------
