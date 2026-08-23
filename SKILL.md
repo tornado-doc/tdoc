@@ -293,6 +293,11 @@ or Vercel is NOT asking for localhost — that path still ends at a public URL.
 If publishing cannot complete, say so and leave the doc in `$TDOC_DIR/<slug>/`;
 do not substitute a local URL for the link the user was promised.
 
+This rule is about **what you hand over**, not about the local server, which is
+untouched. `/tdoc serve` still works for everyone, and previewing locally while
+iterating is fine whenever the user asks for it — it is simply not what a
+finished doc is delivered as.
+
 **Step 0 — start the sign-in before you start writing.** Hosted publishing
 needs a one-time GitHub sign-in. Generating a doc takes 30–60 s and the device
 flow is a poll loop, so run them at the same time rather than interrupting the
@@ -364,6 +369,13 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
 
    *Self-host.* `"$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
    (or `vercel`). Report the worker URL.
+
+   **Local preview stays available to self-hosting users** — `/tdoc serve` and
+   `http://localhost:7878` are unchanged, and iterating locally before pushing
+   to your own worker is a perfectly good loop. That is an *authoring* step the
+   user can ask for at any time; it does not change what gets handed over at
+   the end, which is still the worker URL. Nothing about the local server was
+   removed.
 
    *Local only — because the user asked.* Start the server if needed and open
    the local URL:
