@@ -375,7 +375,18 @@
       var d = e.data; if (!d || d.source !== 'tdoc-frame') return;
       if (d.type === 'tdoc:selection') { if (reanchoringId) reanchorTo(d); else open(d); }
       else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); closeEmojiPicker(); closeClusterPopover(); }
-      else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
+      else if (d.type === 'tdoc:ready') {
+        layout(); loadComments();
+        // Honor a doc that declares data-tdoc-default-theme="dark" when the
+        // visitor has no saved preference (1:1 with overlay readStoredTheme).
+        // The hint applies but does NOT persist — the bar toggle still wins.
+        var storedTheme = null; try { storedTheme = localStorage.getItem('tdoc-theme'); } catch (e) {}
+        if (!storedTheme && d.defaultTheme === 'dark' && document.documentElement.getAttribute('data-tdoc-theme') !== 'dark') {
+          document.documentElement.setAttribute('data-tdoc-theme', 'dark');
+          var tb = document.getElementById('tdoc-theme-btn'); if (tb) tb.setAttribute('aria-pressed', 'true');
+        }
+        sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' });
+      }
       else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; if (d.docHeight) docHeight = d.docHeight; positionPins(); }
       else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); tryDeepLink(); }
       else if (d.type === 'tdoc:docMarkdown' && copyReq) {

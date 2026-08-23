@@ -340,6 +340,22 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"] .tdoc-replies.open', { timeout: 2000 });
     });
 
+    await t('author data-tdoc-default-theme="dark" opens the shell dark (no stored pref)', async () => {
+      const darkDocUrl = `${base}/d/copy-doc/v/1`;
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(darkDocUrl, { waitUntil: 'networkidle' });
+      await page.evaluate(() => { try { localStorage.removeItem('tdoc-theme'); } catch (e) {} });
+      await page.goto(darkDocUrl, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(300);
+      const shellTheme = await page.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme'));
+      const stored = await page.evaluate(() => { try { return localStorage.getItem('tdoc-theme'); } catch (e) { return null; } });
+      const frame = page.frames().find(f => f.url().includes('copy-doc') && f !== page.mainFrame());
+      const frameTheme = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
+      if (shellTheme !== 'dark') throw new Error(`shell did not honor the author default theme, got ${shellTheme}`);
+      if (frameTheme !== 'dark') throw new Error(`frame did not receive the default dark theme, got ${frameTheme}`);
+      if (stored) throw new Error(`the default-theme hint must not persist a preference, got ${stored}`);
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

@@ -253,6 +253,6 @@
     requestAnimationFrame(function () { ticking = false; reportScroll(); });
   }, { passive: true });
 
-  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight });
+  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();
