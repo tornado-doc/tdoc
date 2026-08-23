@@ -420,7 +420,11 @@
   .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
 
   /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
-  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; }
+  /* justify-content is required: the generic .tdoc-bar button rule supplies
+     display:inline-flex + align-items:center but no horizontal centring, so a
+     24px mark in a 32px padding-0 box sits flush left and the hover highlight
+     lands 8px off to the right of the drawing. */
+  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; justify-content: center; }
   .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
   .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; }
   .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
@@ -889,9 +893,10 @@
      they look like negatives, but a chart or a simulation drawn in ink on a
      white field should go dark with everything else — otherwise it sits in a
      dark page as a glowing white slab. */
-  /* The site mark is a black-on-white PNG. Let it invert with the page
-     instead of restoring, or it becomes a white tile on the dark bar. */
-  html[data-tdoc-theme="dark"] .tdoc-bar-mark img { filter: none; }
+  /* The site mark keeps its white field in dark mode. It is ink on an opaque
+     white field, so it is restored like a photograph by the rule above rather
+     than inverted with the page: inverting turned the field black, which is the
+     bar's own dark colour, and the drawing read as a see-through outline. */
   /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
      them in .tdoc-emoji so they get the same restore as photos. */
   .tdoc-emoji { display: inline-block; line-height: 1; }
