@@ -174,6 +174,19 @@ const SLUG = 'hostile-body-css';
       await page.evaluate(() => { try { localStorage.removeItem('tdoc-theme'); } catch (e) {} });
     });
 
+    await t('footer is hidden while reading and reveals at the doc bottom', async () => {
+      await page.setViewportSize({ width: 1400, height: 600 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(300);
+      const shownAtTop = await page.evaluate(() => document.querySelector('.tdoc-footer').classList.contains('tdoc-footer-show'));
+      if (shownAtTop) throw new Error('footer should be hidden while reading (not at bottom)');
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      await frame.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.waitForTimeout(300);
+      const shownAtBottom = await page.evaluate(() => document.querySelector('.tdoc-footer').classList.contains('tdoc-footer-show'));
+      if (!shownAtBottom) throw new Error('footer should reveal at the doc bottom');
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

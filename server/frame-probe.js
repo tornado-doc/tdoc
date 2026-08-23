@@ -190,14 +190,17 @@
   });
 
   // --- scroll sync ---------------------------------------------------------
+  // innerH (frame viewport height) lets the shell tell when the doc is scrolled
+  // to the bottom, so the footer reveals only there.
+  function reportScroll() {
+    post({ type: 'tdoc:scroll', scrollY: window.scrollY || window.pageYOffset || 0, innerH: window.innerHeight, height: document.documentElement.scrollHeight });
+  }
   var ticking = false;
   window.addEventListener('scroll', function () {
     if (ticking) return; ticking = true;
-    requestAnimationFrame(function () {
-      ticking = false;
-      post({ type: 'tdoc:scroll', scrollY: window.scrollY || window.pageYOffset || 0, height: document.documentElement.scrollHeight });
-    });
+    requestAnimationFrame(function () { ticking = false; reportScroll(); });
   }, { passive: true });
 
   post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight });
+  reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();

@@ -343,7 +343,11 @@ function shellDocument(slug, version, nonce) {
   html,body{margin:0;padding:0;min-height:100vh;background:#fff;}
   body{display:flex;flex-direction:column;}
   .tdoc-doc-frame{flex:1 1 auto;width:100%;border:0;display:block;}
-  .tdoc-footer{margin-top:0;}            /* the frame fills the column; no gap above the footer */
+  /* Footer: floats at the viewport bottom, revealed only when the doc is scrolled
+     to its end (like the old "footer at end of document"). Fixed + fade so it
+     never steals reading height and toggling it causes no layout shift. */
+  .tdoc-footer{margin-top:0;position:fixed;left:0;right:0;bottom:0;z-index:4;background:#fff;opacity:0;transform:translateY(100%);transition:opacity .18s ease,transform .18s ease;pointer-events:none;}
+  .tdoc-footer.tdoc-footer-show{opacity:1;transform:none;pointer-events:auto;}
   /* Narrow: one line — just "built with tdoc" (don't stack to two rows). */
   @media (max-width:700px){
     .tdoc-footer .tdoc-footer-row{flex-direction:row;}
@@ -403,6 +407,13 @@ function shellScript() {
       .then(function(r){ return r.ok ? r.json() : []; })
       .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); })
       .catch(function(){});
+  }
+  // Footer reveals only when the doc is scrolled to its end (or the doc is short
+  // enough to fit). d = {scrollY, innerH, height} from the frame probe.
+  function updateFooter(d){
+    var f = document.querySelector('.tdoc-footer'); if (!f) return;
+    var atBottom = !d || !d.innerH || (d.scrollY + d.innerH) >= (d.height - 4);
+    f.classList.toggle('tdoc-footer-show', !!atBottom);
   }
   // Floating comment card (real .tdoc-margin-comment markup + CSS).
   function closeCard(){ var el = document.querySelector('.tdoc-margin-comment'); if (el) el.remove(); }
@@ -480,7 +491,7 @@ function shellScript() {
     else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); }
     else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
     else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; positionPins(); }
-    else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); }
+    else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); updateFooter(d); }
     else if (d.type === 'tdoc:docMarkdown' && copyReq) {
       var md = d.markdown || '';
       if (copyReq.includeComments && commentList.length) md += '\\n\\n---\\n\\n## Comments\\n\\n' + commentList.map(commentToMd).join('\\n---\\n\\n');
