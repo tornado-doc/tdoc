@@ -1030,8 +1030,19 @@ function reconcileAnchors(comments, aidsInVersion, V) {
 // a maintenance trap if it ever needs to). object-src/base-uri are locked
 // down too (classic plugin/base-tag CSP-bypass vectors) — nothing else is
 // restricted, so author CSS/images/fonts/etc. are untouched.
+// frame-src 'self': the shell document embeds author content only via the
+// same-origin /frame route (itself sandboxed to an opaque origin), and can
+// never be made to frame anything else.
 function cspHeader(nonce) {
-  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; frame-src 'self'; object-src 'none'; base-uri 'none';`;
+}
+
+// The author document is served from /d/<slug>/v/<n>/frame under a CSP
+// `sandbox` (opaque origin) so its CSS/DOM can never touch the shell chrome.
+// Same isolation the widget islands use, applied to the whole author doc; only
+// our own nonced probe runs inside (author JS stays inert).
+function frameCspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts`;
 }
 
 // Interactive islands (#138). Host documents keep cspHeader(); computation
@@ -1148,6 +1159,52 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
   }, nonce);
 }
 
+// Render one published doc version as the cross-origin SHELL: chrome (bar,
+// footer, composer, pins, cards) in this outer document; the author content
+// isolated in the same-origin, sandboxed /frame iframe. Mirrors the local
+// server's shellDocument, built from the SAME shared modules (SHELL/CHROME) so
+// local and production render 1:1. The published-mode bar + client cfg carry
+// the same fields injectOverlay used, so identity/owner/manage/share behave as
+// before once the shell client wires them.
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth) {
+  if (!SHELL) return injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth);
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const vlist = Array.isArray(versions) && versions.length ? versions : [{ n: version }];
+  let title = slug;
+  const cfg = {
+    slug, version,
+    identity: identity || null,
+    isOwner: !!isOwner,
+    canSeeMyDocs: !!canSeeMyDocsFlag,
+    isLanding: !!isLanding,
+    isCatalog: !!isCatalog,
+    ownerManage: isOwner ? (ownerManage || null) : null,
+    authConfigured: true,
+    webAuth: !!webAuth,
+    mode: 'published',
+    versions: vlist,
+    runtime: runtimeInfo(),
+  };
+  // Onboarding modal ships wherever its trigger is (landing/start slug, or any
+  // doc carrying the /start CTA) — same rule injectOverlay uses.
+  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
+  const onboardJs = ((slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce) ? ONBOARD_JS : '';
+  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog }) : '';
+  const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
+  return SHELL.shellHtml({
+    title,
+    frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame`,
+    nonceAttr,
+    chromeCssStr: SHELL.sliceChromeCss(typeof OVERLAY_JS === 'string' ? OVERLAY_JS : ''),
+    barInner, footerInner,
+    chromeJs: CHROME_JS,
+    authCfgJson: safeJsonForScript(cfg),
+    cfgJson: safeJsonForScript(cfg),
+    signinJs: SIGNIN_JS,
+    onboardJs,
+  });
+}
+
 // The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
 // this published tdoc rather than a hardcoded marketing page, so the landing
 // page is authored, reviewed, and versioned through tdoc itself.
@@ -1215,9 +1272,13 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
   }
   const nonce = rand(16);
+  // Docs render as the cross-origin shell (chrome outside, author content in the
+  // /frame iframe). The homepage (isLanding) stays a normal overlay page: its
+  // marketing copy must be crawlable, not buried in an opaque-origin iframe.
+  const render = isLanding ? injectOverlay : shellDocumentWorker;
   return {
     ok: true,
-    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -3216,6 +3277,39 @@ export default {
       return html(raw, {
         headers: {
           'Content-Security-Policy': widgetCspHeader(),
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'no-store',
+          'Vary': 'Sec-Fetch-Dest',
+        },
+      });
+    }
+
+    // ---- author document frame (shell mode) ----
+    // The author content, isolated in an opaque-origin sandboxed iframe that the
+    // shell embeds. Gated on Sec-Fetch-Dest: iframe like widgets, so it can never
+    // be loaded top-level — only inside the shell. Access-gated identically to
+    // the doc view. Only our nonced probe runs inside; author JS stays inert.
+    const frameMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/frame\/?$/);
+    if (frameMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr] = frameMatch;
+      if (!isValidSlug(slug)) return text('invalid slug', { status: 400 });
+      if (!isWidgetFrameRequest(req.headers.get('sec-fetch-dest'))) {
+        return text('document frame must be framed', { status: 403 });
+      }
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
+      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
+      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+      const nonce = rand(16);
+      let body = '';
+      if (method !== 'HEAD') {
+        body = forceWidgetSandbox(await obj.text());
+        const tag = `<script nonce="${nonce}">${PROBE_JS}</script>`;
+        body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
+      }
+      return html(body, {
+        headers: {
+          'Content-Security-Policy': frameCspHeader(nonce),
           'X-Content-Type-Options': 'nosniff',
           'Cache-Control': 'no-store',
           'Vary': 'Sec-Fetch-Dest',

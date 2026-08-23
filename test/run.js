@@ -46,6 +46,7 @@ const OFFLINE = [
   'reader-overflow.test.js',  // tables/diagrams must not clip in the reader
   'agent-runtime.test.js',    // host-runtime detect + agent logos
   'pins-layout.test.js',      // v0.8.0 pins clustering/spread/overflow-fold core
+  'worker-shell.test.js',     // step7 worker shell parity: /frame route, CSP, bundled builders
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'notifications.test.js',    // inbox aggregation + Reddit recipients

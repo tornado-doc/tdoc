@@ -303,8 +303,13 @@ t('doc view and homepage share one render path', () => {
   // Regression guard: the /d/ route used to inline the whole render. If it
   // grows a second copy, the homepage and doc pages drift on access/CSP.
   assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?\)/.test(worker), 'missing serveDocVersion');
-  const occurrences = (worker.match(/injectOverlay\(raw,/g) || []).length;
-  assert(occurrences === 1, `injectOverlay(raw, ...) called ${occurrences} times; expected exactly 1 shared call site`);
+  // One shared render call site. Docs render as the shell, the homepage as the
+  // overlay, but both flow through the SINGLE `render(raw, ...)` call selected by
+  // isLanding — so access/CSP/version wiring can't drift between them.
+  const occurrences = (worker.match(/\brender\(raw,/g) || []).length;
+  assert(occurrences === 1, `render(raw, ...) called ${occurrences} times; expected exactly 1 shared call site`);
+  assert(/const render = isLanding \? injectOverlay : shellDocumentWorker;/.test(worker),
+    'render must select overlay (homepage) vs shell (docs) at one site');
 });
 
 t('homepage bar is site chrome, not a document toolbar', () => {
