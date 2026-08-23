@@ -130,7 +130,7 @@
   // Floating comment card inner HTML (subset of overlay.js buildCard 2061+):
   // author + text + meta. Replies/reactions/actions/re-anchor are deferred.
   // Consumer creates a .tdoc-margin-comment element and sets innerHTML to this.
-  function buildCard(comment) {
+  function buildCard(comment, me) {
     comment = comment || {};
     var id = escapeHtml(comment.id || '');
     var when = '';
@@ -140,17 +140,44 @@
       ? '<div class="tdoc-replies-toggle" data-id="' + id + '"><svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>' + replies.length + ' ' + (replies.length === 1 ? 'reply' : 'replies') + '</div>' +
         '<div class="tdoc-replies">' + replies.map(function (r) { return '<div class="tdoc-reply">' + renderAuthor(r.author) + '<div class="text">' + escapeHtml(r.text || '') + '</div></div>'; }).join('') + '</div>'
       : '';
+    var hr = hasReactions(comment);
     return renderAuthor(comment.author) +
       '<div class="text">' + escapeHtml(comment.text || '') + '</div>' +
+      (hr ? renderReactionsRow(comment, me) : '') +
       '<div class="meta"><span>v' + (comment.version || 1) + (when ? ' · ' + escapeHtml(when) : '') + '</span>' +
-      '<span class="actions"><span class="tdoc-reply-toggle" data-id="' + id + '">Reply</span>' +
+      '<span class="actions">' + (hr ? '' : reactAddInline(comment)) +
+      '<span class="tdoc-reply-toggle" data-id="' + id + '">Reply</span>' +
       '<span class="del" data-id="' + id + '">delete</span></span></div>' +
       repliesBlock +
       '<div class="tdoc-reply-form" data-parent-id="' + id + '"><textarea placeholder="Reply…"></textarea>' +
       '<div class="tdoc-reply-form-foot"><span class="hint"></span><button class="tdoc-reply-submit">Reply</button></div></div>';
   }
 
-  var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer, renderAuthor: renderAuthor, buildCard: buildCard };
+  // --- reactions (ports overlay.js QUICK_EMOJIS/renderReactionsRow/glyph/picker) ---
+  var QUICK_EMOJIS = ['👍', '❤️', '🔥', '🎉', '😂', '🤔', '👀', '🚀', '✅', '❌', '❓', '❗'];
+  var QUICK_TEXT_REACTIONS = ['LGTM'];
+  var REACT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><line x1="19" y1="6" x2="19" y2="10"/><line x1="19" y1="6" x2="19" y2="10"/><line x1="21" y1="8" x2="17" y2="8"/></svg>';
+  function reactionGlyph(s) { var safe = escapeHtml(s); return QUICK_TEXT_REACTIONS.indexOf(s) >= 0 ? safe : '<span class="tdoc-emoji">' + safe + '</span>'; }
+  function hasReactions(comment) { var r = comment && comment.reactions; return !!(r && Object.keys(r).some(function (k) { return r[k] && r[k].length; })); }
+  function renderReactionsRow(comment, me) {
+    var reactions = (comment && comment.reactions) || {}; me = me || 'anon';
+    var emojis = Object.keys(reactions).filter(function (k) { return reactions[k] && reactions[k].length; });
+    if (!emojis.length) return '';
+    var chips = emojis.map(function (emoji) {
+      var users = reactions[emoji], mine = users.indexOf(me) >= 0;
+      var isAgent = users.some(function (u) { return u === 'tdoc-agent' || /agent|codex|claude/i.test(u); });
+      var cls = ['tdoc-react-chip', mine ? 'mine' : '', isAgent ? 'agent' : ''].filter(Boolean).join(' ');
+      return '<span class="' + cls + '" data-emoji="' + escapeHtml(emoji) + '" data-target-id="' + escapeHtml(comment.id) + '">' + reactionGlyph(emoji) + ' ' + users.length + '</span>';
+    }).join('');
+    return '<div class="tdoc-reactions" data-target-id="' + escapeHtml(comment.id) + '">' + chips + '<button class="tdoc-react-add" data-target-id="' + escapeHtml(comment.id) + '" title="Add reaction" aria-label="Add reaction">' + REACT_ICON_SVG + '</button></div>';
+  }
+  function reactAddInline(comment) { return '<button class="tdoc-react-add inline" data-target-id="' + escapeHtml(comment.id) + '" title="Add reaction" aria-label="Add reaction">' + REACT_ICON_SVG + '</button>'; }
+  function buildEmojiPicker() {
+    return QUICK_EMOJIS.map(function (e) { return '<button data-emoji="' + e + '">' + reactionGlyph(e) + '</button>'; }).join('') +
+      QUICK_TEXT_REACTIONS.map(function (t) { return '<button class="tdoc-emoji-text" data-emoji="' + t + '">' + t + '</button>'; }).join('');
+  }
+
+  var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer, renderAuthor: renderAuthor, buildCard: buildCard, hasReactions: hasReactions, renderReactionsRow: renderReactionsRow, buildEmojiPicker: buildEmojiPicker };
   if (typeof window !== 'undefined') window.TDOC_CHROME = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

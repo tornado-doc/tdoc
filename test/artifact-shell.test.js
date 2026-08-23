@@ -215,6 +215,16 @@ const SLUG = 'hostile-body-css';
       if (!/Publish/.test(h)) throw new Error('publish modal missing: ' + h);
     });
 
+    await t('reaction add button opens the emoji picker', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.waitForSelector('.tdoc-pin', { timeout: 3000 });
+      await page.click('.tdoc-pin');
+      await page.waitForSelector('.tdoc-margin-comment .tdoc-react-add', { timeout: 2000 });
+      await page.click('.tdoc-margin-comment .tdoc-react-add');
+      await page.waitForSelector('.tdoc-emoji-picker button[data-emoji]', { timeout: 2000 });
+    });
+
     await t('comment card has a working Reply box', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });

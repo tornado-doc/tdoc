@@ -420,6 +420,27 @@ function shellScript() {
       .then(function(){ openCard(parentId); })   // reopen with the new reply shown
       .catch(function(){ if (btn){ btn.disabled = false; btn.textContent = 'Retry'; } });
   }
+  function postReaction(targetId, emoji){
+    fetch('/api/reactions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ slug: cfg.slug, comment_id: targetId, emoji: emoji, version: cfg.version }) })
+      .then(function(r){ if (r.ok) return loadComments().then(function(){ openCard(targetId); }); })
+      .catch(function(){});
+  }
+  var emojiPicker = null;
+  function closeEmojiPicker(){ if (emojiPicker){ emojiPicker.remove(); emojiPicker = null; } }
+  function openEmojiPicker(anchorBtn, targetId){
+    closeEmojiPicker();
+    emojiPicker = document.createElement('div'); emojiPicker.className = 'tdoc-emoji-picker'; emojiPicker.style.position = 'fixed';
+    emojiPicker.innerHTML = window.TDOC_CHROME.buildEmojiPicker();
+    document.body.appendChild(emojiPicker);
+    var r = anchorBtn.getBoundingClientRect();
+    emojiPicker.style.visibility = 'hidden'; emojiPicker.style.top = '0'; emojiPicker.style.left = '0';
+    var pw = emojiPicker.offsetWidth, ph = emojiPicker.offsetHeight;
+    var left = r.left, top = r.bottom + 6;
+    if (left + pw > window.innerWidth - 8) left = Math.max(8, r.right - pw);
+    if (top + ph > window.innerHeight - 8) top = r.top - ph - 6;
+    emojiPicker.style.top = top + 'px'; emojiPicker.style.left = left + 'px'; emojiPicker.style.visibility = '';
+    emojiPicker.querySelectorAll('button').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); var emoji = b.getAttribute('data-emoji'); closeEmojiPicker(); postReaction(targetId, emoji); }); });
+  }
   // Footer reveals only when the doc is scrolled to its end (or the doc is short
   // enough to fit). d = {scrollY, innerH, height} from the frame probe.
   function updateFooter(d){
@@ -446,10 +467,13 @@ function shellScript() {
     var card = document.createElement('div');
     card.className = 'tdoc-margin-comment tdoc-floating-open';
     card.setAttribute('data-comment-id', id);
-    card.innerHTML = window.TDOC_CHROME.buildCard(c);
+    card.innerHTML = window.TDOC_CHROME.buildCard(c, (cfg.identity && cfg.identity.login) || 'anon');
     card.addEventListener('click', function(e){ e.stopPropagation(); });
     document.body.appendChild(card);
     openCardId = id;
+    // reactions: click a chip to toggle, click + to pick
+    card.querySelectorAll('.tdoc-react-chip').forEach(function(chip){ chip.addEventListener('click', function(e){ e.stopPropagation(); postReaction(chip.getAttribute('data-target-id') || id, chip.getAttribute('data-emoji')); }); });
+    card.querySelectorAll('.tdoc-react-add').forEach(function(add){ add.addEventListener('click', function(e){ e.stopPropagation(); openEmojiPicker(add, add.getAttribute('data-target-id') || id); }); });
     // replies expand/collapse
     var rtog = card.querySelector('.tdoc-replies-toggle'), rlist = card.querySelector('.tdoc-replies');
     if (rtog && rlist) rtog.addEventListener('click', function(e){ e.stopPropagation(); var o = rlist.classList.toggle('open'); rtog.classList.toggle('open', o); positionCard(); });
@@ -570,7 +594,7 @@ function shellScript() {
     if (!frameWin() || e.source !== frameWin()) return;      // validate by window identity (opaque origin)
     var d = e.data; if (!d || d.source !== 'tdoc-frame') return;
     if (d.type === 'tdoc:selection') open(d);
-    else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); }
+    else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); closeEmojiPicker(); }
     else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
     else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; positionPins(); }
     else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); }
@@ -604,7 +628,7 @@ function shellScript() {
   wire('#tdoc-copy-md-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-copy-md-menu'); });
   document.querySelectorAll('#tdoc-copy-md-menu [data-mode]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); copyReq={ includeComments: b.getAttribute('data-mode')==='doc-comments' }; sendFrame({ type:'tdoc:copyDoc', requestId: Date.now() }); }); });
   wire('#tdoc-more-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-secondary-menu'); });
-  document.addEventListener('click', function(){ closeMenus(); closeCard(); });
+  document.addEventListener('click', function(){ closeMenus(); closeEmojiPicker(); closeCard(); });
   layout();
 })();`;
 }
