@@ -871,9 +871,10 @@
      they look like negatives, but a chart or a simulation drawn in ink on a
      white field should go dark with everything else — otherwise it sits in a
      dark page as a glowing white slab. */
-  /* The site mark is ink on an opaque field. Let it invert with the page
-     instead of restoring, or it becomes a white tile on the dark bar. */
-  html[data-tdoc-theme="dark"] .tdoc-bar-mark img { filter: none; }
+  /* The site mark keeps its white field in dark mode. It is ink on an opaque
+     white field, so it is restored like a photograph by the rule above rather
+     than inverted with the page: inverting turned the field black, which is the
+     bar's own dark colour, and the drawing read as a see-through outline. */
   /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
      them in .tdoc-emoji so they get the same restore as photos. */
   .tdoc-emoji { display: inline-block; line-height: 1; }
@@ -2016,14 +2017,6 @@
   function tdocLogoUrl() {
     return '/tdoc_logo.svg';
   }
-  // The project mark is ink on an opaque field, like the raster it replaced.
-  // Photos must be restored in dark mode or they read as negatives, but this
-  // is a drawing: let it invert with the page, or its white body sits on the
-  // dark bar as a glowing tile. Only the tdoc mark opts in -- a coloured
-  // brand mark from simpleicons, or a GitHub photo, must not.
-  function darkInvertAttr(url) {
-    return url === tdocLogoUrl() ? ' data-tdoc-dark="invert"' : '';
-  }
   function agentLogoUrl(author) {
     const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))
       ? author.avatar_url : null;
@@ -2046,7 +2039,7 @@
       const label = author.name || author.login || 'tdoc-agent';
       const title = author.login && author.name && author.login !== author.name ? author.login : label;
       const logo = agentLogoUrl(author);
-      const mark = `<img src="${escapeHtml(logo)}" alt=""${darkInvertAttr(logo)} data-tdoc-fallback-anon="tdoc-agent-badge">`;
+      const mark = `<img src="${escapeHtml(logo)}" alt="" data-tdoc-fallback-anon="tdoc-agent-badge">`;
       return `<div class="author tdoc-agent-author" title="${escapeHtml(title)}">${mark}<span class="login">${escapeHtml(label)}</span></div>`;
     }
     const avatar = author.avatar_url ? `<img src="${escapeHtml(author.avatar_url)}" alt="">` : '';
@@ -2559,7 +2552,7 @@
     // placeholder (data-tdoc-fallback-anon carries which class to use) — no
     // inline onerror= attribute, which a nonce-based CSP would block anyway.
     return url
-      ? `<img src="${escapeHtml(url)}" alt=""${darkInvertAttr(url)} data-tdoc-fallback-anon="${anonClass}">`
+      ? `<img src="${escapeHtml(url)}" alt="" data-tdoc-fallback-anon="${anonClass}">`
       : `<span class="${anonClass}"></span>`;
   }
 

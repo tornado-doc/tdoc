@@ -168,6 +168,11 @@ t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
   assert(markRule, 'bar mark rule missing');
   assert(/justify-content:\s*center/.test(markRule[0]),
     'bar mark must centre its logo, or the hover highlight sits off to one side');
+  // The mark carries its own opaque white field, so dark mode must RESTORE it
+  // like a photograph. Letting it invert with the page turns the field black --
+  // the bar's own colour -- and the drawing reads as a see-through outline.
+  assert(!/\.tdoc-bar-mark img\s*\{[^}]*filter:\s*none/.test(overlay),
+    'bar mark must not opt out of the dark-mode image restore, or its white field inverts to black');
   const localServer = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf8');
   assert(/p === '\/me'[\s\S]{0,180}Location: '\/'/.test(localServer),
     'local studio must 302 /me to / so the logo click does not 404');
