@@ -14,6 +14,10 @@ const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
 const CHROME_PATH = path.join(__dirname, 'chrome.js');
+// Shared chrome module, also loaded server-side so the shell can render the real
+// bar/footer markup statically (same source the browser gets as window.TDOC_CHROME).
+let CHROME = {};
+try { CHROME = require(CHROME_PATH); } catch {}
 const FRAME_PROBE_PATH = path.join(__dirname, 'frame-probe.js');
 const ONBOARD_PATH = path.join(__dirname, 'onboard.js');
 const SIGNIN_PATH = path.join(__dirname, 'signin.js');
@@ -313,54 +317,39 @@ function chromeCss() {
 // P1: the shell renders a top bar + embeds the author frame. P2 adds the
 // postMessage anchoring bridge + comment chrome (composer/pins/cards) here.
 function shellDocument(slug, version, nonce) {
-  let title = slug;
+  let title = slug, versions = [{ n: version }];
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8'));
     if (meta && meta.title) title = meta.title;
+    if (Array.isArray(meta.versions) && meta.versions.length) versions = meta.versions.map((v) => ({ n: v.n }));
   } catch {}
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
-  const cfgJson = safeJsonForScript({ slug, version, mode: 'shell' });
-  // Shared chrome module (Contract 1) — inlined nonced before the shell script
-  // so window.TDOC_CHROME is available. Extracted from overlay.js; reused here
-  // so shell chrome stays 1:1 with the overlay. (Step 1 of IMPLEMENTATION.md.)
+  const cfgJson = safeJsonForScript({ slug, version, mode: 'local', versions });
+  // Shared chrome module (Contract 1): rendered server-side for the static bar +
+  // footer (1:1 with overlay), AND inlined as a nonced <script> so the shell's
+  // client logic can build the composer/pins from window.TDOC_CHROME.
   let chromeJs = '';
   try { chromeJs = fs.readFileSync(CHROME_PATH, 'utf8'); } catch {}
+  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'local', slug, version, versions }) : '';
+  const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
+<style>${chromeCss()}</style>
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#fff;color:#1a1a1a;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
-  body{display:flex;flex-direction:column;min-height:100vh;}
-  .tdoc-bar{position:relative;width:100%;height:48px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 12px;background:#fff;border-bottom:1px solid #e5e5e7;font:13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;z-index:2;flex:0 0 auto;}
-  .tdoc-bar .tdoc-ver{color:#6b6a66;}
-  .tdoc-bar .tdoc-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .tdoc-footer{flex:0 0 auto;padding:20px 16px 28px;font:12px system-ui,sans-serif;color:#888;text-align:center;border-top:1px solid #eee;box-sizing:border-box;}
-  .tdoc-footer .tdoc-footer-row{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;row-gap:4px;}
-  .tdoc-footer a{color:#666;text-decoration:none;}
-  .tdoc-footer a:hover{color:#1652f0;text-decoration:underline;}
-  .tdoc-footer .sep{color:#ccc;}
+  /* shell layout only — the real chrome CSS above owns bar/footer/composer/pins */
+  html,body{margin:0;padding:0;min-height:100vh;background:#fff;}
+  body{display:flex;flex-direction:column;}
   .tdoc-doc-frame{flex:1 1 auto;width:100%;border:0;display:block;}
-  .tdoc-popup{position:absolute;z-index:10;width:320px;max-width:calc(100vw - 16px);background:#fff;border:1px solid #e5e5e7;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.14);padding:12px;font:14px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
-  .tdoc-popup .head{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;}
-  .tdoc-popup .quote{flex:1 1 auto;color:#6b6a66;font-size:13px;max-height:48px;overflow:hidden;border-left:3px solid #e5e5e7;padding-left:8px;}
-  .tdoc-popup .x{flex:0 0 auto;border:0;background:none;font-size:18px;line-height:1;color:#888;cursor:pointer;}
-  .tdoc-popup textarea{width:100%;box-sizing:border-box;min-height:64px;resize:vertical;border:1px solid #e5e5e7;border-radius:8px;padding:8px;font:inherit;}
-  .tdoc-popup .foot{display:flex;justify-content:flex-end;margin-top:8px;}
-  .tdoc-popup .submit{border:0;background:#1652f0;color:#fff;border-radius:8px;padding:6px 14px;font:inherit;font-weight:600;cursor:pointer;}
-  .tdoc-popup .submit[disabled]{opacity:.5;cursor:default;}
-  .tdoc-pin{position:fixed;right:14px;width:26px;height:26px;border-radius:50%;background:#1652f0;color:#fff;font:600 12px system-ui,sans-serif;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.18);cursor:pointer;z-index:5;}
-  .tdoc-pin[hidden]{display:none;}
-  body.tdoc-narrow .tdoc-pin{display:none;}
-  .tdoc-fab{position:fixed;right:16px;bottom:16px;height:44px;padding:0 16px;border:0;border-radius:22px;background:#1652f0;color:#fff;font:600 14px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.2);cursor:pointer;z-index:6;display:none;}
-  body.tdoc-narrow .tdoc-fab{display:inline-flex;align-items:center;}
+  .tdoc-pin{position:fixed;right:14px;}  /* shell body never scrolls; pins live in the right gutter */
+  .tdoc-popup{position:fixed;}
 </style>
 </head><body>
-  <div class="tdoc-bar"><span class="tdoc-ver">v${version}</span><span class="tdoc-title">${esc(title)}</span></div>
+  <div class="tdoc-bar">${barInner}</div>
   <iframe class="tdoc-doc-frame" title="Document content" sandbox="allow-scripts" src="${esc(frameSrc)}"></iframe>
-  <button class="tdoc-fab" type="button">Comments</button>
-  <footer class="tdoc-footer"></footer>
+  <footer class="tdoc-footer">${footerInner}</footer>
   <script${nonceAttr}>${chromeJs}</script>
   <script${nonceAttr}>window.__TDOC_SHELL__ = ${cfgJson};</script>
   <script${nonceAttr}>${shellScript()}</script>
@@ -400,7 +389,10 @@ function shellScript() {
       var el = existing[p.id];
       if (!el){
         el = document.createElement('div'); el.className='tdoc-pin'; el.setAttribute('data-id', p.id);
-        el.textContent = (p.login || '?').slice(0,1).toUpperCase();
+        el.setAttribute('role','button'); el.setAttribute('tabindex','0');
+        // Real pin markup (avatar) from the shared chrome module, styled by the
+        // real .tdoc-pin CSS. Avatar url arrives with the pin when available.
+        el.innerHTML = window.TDOC_CHROME.avatarHtml({ login: p.login, avatar_url: p.avatar_url }, 'tdoc-pin-anon');
         el.addEventListener('click', function(){ sendFrame({ type:'tdoc:scrollTo', docY: p.docY }); });
         document.body.appendChild(el);
       }
@@ -419,24 +411,20 @@ function shellScript() {
     pending = { text: d.text, context_before: d.context_before, context_after: d.context_after };
     var pop = document.createElement('div');
     pop.className = 'tdoc-popup';
-    var head = document.createElement('div'); head.className='head';
-    var q = document.createElement('span'); q.className='quote'; q.textContent = (d.text||'').slice(0,120);
-    var x = document.createElement('button'); x.className='x'; x.setAttribute('aria-label','Close'); x.textContent='\\u00d7';
-    head.appendChild(q); head.appendChild(x);
-    var ta = document.createElement('textarea'); ta.placeholder = 'Comment\\u2026';
-    var foot = document.createElement('div'); foot.className='foot';
-    var submit = document.createElement('button'); submit.className='submit'; submit.textContent='Comment';
-    foot.appendChild(submit);
-    pop.appendChild(head); pop.appendChild(ta); pop.appendChild(foot);
+    // Real composer markup from the shared chrome module (1:1 with the overlay).
+    pop.innerHTML = window.TDOC_CHROME.buildComposer({ anchor: { kind: d.kind || 'text', text: d.text, label: d.label }, needsSignIn: false });
     document.body.appendChild(pop);
+    // Pin the composer to the caret line (frame coords + bar height). Shell body
+    // is fixed (never scrolls), so .tdoc-popup is position:fixed.
     var r = d.rect || { bottom: 0, left: 8 };
-    var top = BAR + (r.bottom || 0) + 8 + window.scrollY;
-    var left = Math.max(8, Math.min((r.left || 8), window.innerWidth - pop.offsetWidth - 8));
+    var top = BAR + (r.bottom || 0) + 8;
+    var left = Math.max(8, Math.min((r.left || 8), window.innerWidth - (pop.offsetWidth || 320) - 8));
     pop.style.top = top + 'px'; pop.style.left = left + 'px';
-    x.addEventListener('click', close);
-    ta.focus();
-    submit.addEventListener('click', function(){ postComment(ta.value, submit); });
-    ta.addEventListener('keydown', function(e){ if ((e.metaKey||e.ctrlKey) && e.key==='Enter') postComment(ta.value, submit); });
+    var ta = pop.querySelector('textarea'), submit = pop.querySelector('.submit'), x = pop.querySelector('.x');
+    if (x) x.addEventListener('click', close);
+    if (ta) ta.focus();
+    if (submit) submit.addEventListener('click', function(){ postComment(ta ? ta.value : '', submit); });
+    if (ta) ta.addEventListener('keydown', function(e){ if ((e.metaKey||e.ctrlKey) && e.key==='Enter') postComment(ta.value, submit); });
   }
   function postComment(text, btn){
     text = (text||'').trim();
@@ -459,11 +447,25 @@ function shellScript() {
     else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; positionPins(); }
     else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); }
   });
-  var fab = document.querySelector('.tdoc-fab');
-  if (fab) fab.addEventListener('click', function(){ /* P3.1: open drawer list */ });
-  // Real footer, reused from the shared chrome module (1:1 with the overlay).
-  var footer = document.querySelector('.tdoc-footer');
-  if (footer && window.TDOC_CHROME) footer.innerHTML = window.TDOC_CHROME.buildFooter();
+  // --- bar handlers (shell-safe subset; Copy-markdown/Publish/Share deferred
+  //     until the probe supplies doc text / the publish flow is ported) ---
+  function wire(sel, ev, fn){ var el = document.querySelector(sel); if (el) el.addEventListener(ev, fn); }
+  // Theme toggle: paint the shell; frame theme comes with the probe theme msg.
+  (function(){
+    var KEY='tdoc-theme';
+    function apply(t){ document.documentElement.setAttribute('data-tdoc-theme', t); var b=document.getElementById('tdoc-theme-btn'); if(b) b.setAttribute('aria-pressed', t==='dark'?'true':'false'); }
+    try { if (localStorage.getItem(KEY)==='dark') apply('dark'); } catch(e){}
+    wire('#tdoc-theme-btn','click',function(){ var dark=document.documentElement.getAttribute('data-tdoc-theme')!=='dark'; apply(dark?'dark':'light'); try{localStorage.setItem(KEY,dark?'dark':'light');}catch(e){} sendFrame({type:'tdoc:theme',theme:dark?'dark':'light'}); });
+  })();
+  // My docs
+  wire('#tdoc-bar-mark','click',function(){ location.href='/me'; });
+  // Version picker: toggle menu + navigate on option click.
+  wire('#tdoc-version-toggle','click',function(e){ e.stopPropagation(); var w=e.currentTarget.closest('.tdoc-version-wrap'); if(w) w.classList.toggle('open'); });
+  document.querySelectorAll('.tdoc-version-menu [data-version]').forEach(function(b){ b.addEventListener('click', function(){ location.href='/d/'+encodeURIComponent(cfg.slug)+'/v/'+b.getAttribute('data-version'); }); });
+  // Copy / secondary menus: toggle open (actions deferred).
+  wire('#tdoc-copy-md-btn','click',function(e){ e.stopPropagation(); var w=e.currentTarget.closest('.tdoc-menu-wrap'); if(w) w.classList.toggle('open'); });
+  wire('#tdoc-more-btn','click',function(e){ e.stopPropagation(); var w=e.currentTarget.closest('.tdoc-menu-wrap'); if(w) w.classList.toggle('open'); });
+  document.addEventListener('click', function(){ document.querySelectorAll('.tdoc-menu-wrap.open, .tdoc-version-wrap.open').forEach(function(w){ w.classList.remove('open'); }); });
   layout();
 })();`;
 }

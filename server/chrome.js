@@ -94,7 +94,32 @@
     return '<div class="tdoc-bar-left">' + leftHtml + '</div><div class="tdoc-bar-right">' + rightHtml + '</div>';
   }
 
-  var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar };
+  // Avatar markup (was overlay.js:2498-2507). Simplified: real avatar_url or an
+  // anon placeholder span. Agent-logo mapping (agentLogoUrl) is a follow-up.
+  function avatarHtml(author, anonClass) {
+    var url = author && author.avatar_url;
+    return url
+      ? '<img src="' + escapeHtml(url) + '" alt="" data-tdoc-fallback-anon="' + anonClass + '">'
+      : '<span class="' + anonClass + '"></span>';
+  }
+
+  // Composer inner HTML (was overlay.js:3382-3389 popup.innerHTML). Consumer
+  // creates a .tdoc-popup element and sets innerHTML to this.
+  function buildComposer(o) {
+    o = o || {};
+    var anchor = o.anchor || {}, needsSignIn = !!o.needsSignIn;
+    var t = anchor.text || '';
+    var preview = anchor.kind === 'text'
+      ? '"' + escapeHtml(t.slice(0, 80)) + (t.length > 80 ? '…' : '') + '"'
+      : '📎 ' + escapeHtml(anchor.label || '');
+    return '<div class="head"><span class="h">' + preview + '</span><span class="x">×</span></div>' +
+      (needsSignIn ? '<div class="signin-needed">Sign in with GitHub to comment.</div>' : '') +
+      '<textarea placeholder="What should change?" ' + (needsSignIn ? 'disabled' : '') + '></textarea>' +
+      '<div class="foot"><span class="hint">' + (needsSignIn ? '' : '⌘+Enter to submit') + '</span>' +
+      '<button class="submit">' + (needsSignIn ? 'Sign in' : 'Comment') + '</button></div>';
+  }
+
+  var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer };
   if (typeof window !== 'undefined') window.TDOC_CHROME = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

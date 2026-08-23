@@ -81,6 +81,30 @@ const SLUG = 'hostile-body-css';
       if (leaked.accent === '#ff00ff') throw new Error('author --td-accent token leaked into the shell');
     });
 
+    await t('the shell renders the REAL top bar + footer (1:1 chrome)', async () => {
+      const chrome = await page.evaluate(() => ({
+        mark: !!document.querySelector('.tdoc-bar .tdoc-bar-mark img'),
+        version: !!document.querySelector('.tdoc-bar #tdoc-version-toggle'),
+        copy: !!document.querySelector('.tdoc-bar #tdoc-copy-md-btn'),
+        theme: !!document.querySelector('.tdoc-bar #tdoc-theme-btn'),
+        footer: !!document.querySelector('.tdoc-footer .tdoc-footer-row'),
+      }));
+      const missing = Object.keys(chrome).filter(k => !chrome[k]);
+      if (missing.length) throw new Error('shell missing real chrome: ' + missing.join(', '));
+    });
+
+    await t('the author document actually renders inside the frame', async () => {
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      if (!frame) throw new Error('author-content frame not found');
+      const info = await frame.evaluate(() => ({
+        bg: getComputedStyle(document.body).backgroundColor,
+        hasPara: !!document.getElementById('para-1'),
+        laidOut: (document.getElementById('para-1') || {}).getClientRects ? document.getElementById('para-1').getClientRects().length > 0 : false,
+      }));
+      if (!info.hasPara || !info.laidOut) throw new Error('frame content not laid out: ' + JSON.stringify(info));
+      if (info.bg !== 'rgb(0, 0, 0)') throw new Error('frame did not apply author CSS (bg=' + info.bg + ')');
+    });
+
     // --- #2 COMMENTS ACROSS THE BOUNDARY -------------------------------------
     await t('selecting text inside the iframe opens the composer in the shell', async () => {
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
