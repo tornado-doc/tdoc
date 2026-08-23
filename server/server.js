@@ -343,6 +343,7 @@ function shellDocument(slug, version, nonce) {
   html,body{margin:0;padding:0;min-height:100vh;background:#fff;}
   body{display:flex;flex-direction:column;}
   .tdoc-doc-frame{flex:1 1 auto;width:100%;border:0;display:block;}
+  .tdoc-footer{margin-top:0;}            /* the frame fills the column; no gap above the footer */
   .tdoc-pin{position:fixed;right:14px;}  /* shell body never scrolls; pins live in the right gutter */
   .tdoc-popup{position:fixed;}
   .tdoc-margin-comment{position:fixed;right:46px;}  /* floating card in the right gutter, left of the pins */
