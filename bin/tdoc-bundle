@@ -24,6 +24,13 @@ const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
 const overlay = fs.readFileSync(path.join(skill, 'server/overlay.js'), 'utf8');
 const onboard = fs.readFileSync(path.join(skill, 'server/onboard.js'), 'utf8');
 const signin = fs.readFileSync(path.join(skill, 'server/signin.js'), 'utf8');
+// Cross-origin shell modules: the shared chrome + shell builder run server-side
+// in the worker (inlined as CODE — Workers ban eval — so they self-register on
+// globalThis), and the chrome + probe are ALSO shipped as client strings the
+// worker inlines into the shell document / the /frame document.
+const chromeMod = fs.readFileSync(path.join(skill, 'server/chrome.js'), 'utf8');
+const shellMod = fs.readFileSync(path.join(skill, 'server/shell.js'), 'utf8');
+const frameProbe = fs.readFileSync(path.join(skill, 'server/frame-probe.js'), 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -37,7 +44,9 @@ const git = (...args) => {
 
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
-const bundleSha = sha(worker + '\0' + overlay);
+// bundleSha covers every source the bundle inlines — so a change to the chrome,
+// shell, or probe modules produces a new bundle_sha (drift can't slip through).
+const bundleSha = sha([worker, overlay, chromeMod, shellMod, frameProbe].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -64,6 +73,19 @@ replaced = replaced.replace(
   /const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;/,
   'const SIGNIN_JS = ' + JSON.stringify(signin) + ';'
 );
+// Shell modules. The chrome + shell builder are inlined as CODE (they self-
+// register on globalThis); the chrome + probe are also inlined as client
+// STRINGS. Each replace is checked so a renamed/absent placeholder fails the
+// build instead of silently shipping the shell architecture disabled.
+function mustReplace(hay, needle, sub, label) {
+  const out = hay.replace(needle, sub);
+  if (out === hay) { console.error('bundle: failed to find ' + label + ' placeholder'); process.exit(1); }
+  return out;
+}
+replaced = mustReplace(replaced, '/* __TDOC_CHROME_MODULE__ */', chromeMod, 'CHROME_MODULE');
+replaced = mustReplace(replaced, '/* __TDOC_SHELL_MODULE__ */', shellMod, 'SHELL_MODULE');
+replaced = mustReplace(replaced, /const CHROME_JS = `__TDOC_CHROME_JS__`;/, 'const CHROME_JS = ' + JSON.stringify(chromeMod) + ';', 'CHROME_JS');
+replaced = mustReplace(replaced, /const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(frameProbe) + ';', 'PROBE_JS');
 
 let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,

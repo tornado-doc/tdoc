@@ -15,6 +15,17 @@
 
 const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;
 
+// Cross-origin shell modules, inlined by bin/tdoc-bundle. The chrome + shell
+// builder are inlined as CODE right here (Workers ban eval, so each self-
+// registers on globalThis when it runs at module load); the chrome + probe are
+// also kept as client strings for inlining into the shell / frame documents.
+/* __TDOC_CHROME_MODULE__ */
+/* __TDOC_SHELL_MODULE__ */
+const CHROME_JS = `__TDOC_CHROME_JS__`;
+const PROBE_JS = `__TDOC_PROBE_JS__`;
+const CHROME = (typeof globalThis !== 'undefined' && globalThis.TDOC_CHROME) || {};
+const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
+
 
 const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";
 

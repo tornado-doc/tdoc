@@ -242,4 +242,7 @@
   var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer, renderAuthor: renderAuthor, buildCard: buildCard, hasReactions: hasReactions, renderReactionsRow: renderReactionsRow, buildEmojiPicker: buildEmojiPicker, layoutPins: layoutPins };
   if (typeof window !== 'undefined') window.TDOC_CHROME = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  // The Cloudflare worker inlines this file as code (Workers ban eval) and reads
+  // the API off globalThis — window/module don't exist there.
+  if (typeof globalThis !== 'undefined') globalThis.TDOC_CHROME = api;
 })();
