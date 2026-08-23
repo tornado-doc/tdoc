@@ -565,5 +565,67 @@ t('tdoc-agent-reply still exits 0 when the reply is accepted', () => {
   }
 });
 
+
+// ---- tdoc-agent-reply must resolve the hosted base from .base (#226) ----
+// Before the fix, `platform: "hosted"` fell into the cloudflare branch and read
+// absent .subdomain/.worker, producing https://null.null.workers.dev -> 404.
+
+t('tdoc-agent-reply posts to .base on a hosted config', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-hosted-'));
+  const port = 8700 + Math.floor(Math.random() * 300);
+  fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+  // A real hosted config: .base and .upload_token, and deliberately NO
+  // .subdomain / .worker — that absence is what the bug tripped over.
+  fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+    platform: 'hosted',
+    base: `http://127.0.0.1:${port}`,
+    public_host: '127.0.0.1',
+    upload_token: 'tok_test',
+  }));
+  // Record the path the reply actually arrives on, so a request that never
+  // leaves for the right host cannot pass.
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({id:'c_hosted',path:q.url,replies:[],reactions:{}}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
+      env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `hosted reply exited ${r.status}; stderr=${r.stderr}`);
+    assert(/"id":"c_hosted"/.test(r.stdout),
+      `reply did not reach the hosted base: stdout=${r.stdout} stderr=${r.stderr}`);
+    assert(/"path":"\/api\/agent\/reply"/.test(r.stdout),
+      `reply hit the wrong path: ${r.stdout}`);
+    assert(!/workers\.dev/.test(r.stdout + r.stderr),
+      `hosted config still derived a workers.dev host: ${r.stderr}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-agent-reply base resolution matches tdoc-pull across platforms', () => {
+  const src = readBin('tdoc-agent-reply');
+  // hosted and vercel both read .base; cloudflare/legacy still derive workers.dev.
+  assert(/\[ "\$PLATFORM" = "hosted" \] \|\| \[ "\$PLATFORM" = "vercel" \]/.test(src),
+    'hosted is not on the .base side of the platform branch');
+  assert(/BASE="https:\/\/\$\{WORKER\}\.\$\{SUBDOMAIN\}\.workers\.dev"/.test(src),
+    'cloudflare no longer derives the workers.dev base');
+  assert(/\.platform \/\/ "cloudflare"/.test(src),
+    'legacy configs without .platform no longer default to cloudflare');
+  // A missing field must not become the literal string "null" in a hostname.
+  assert(/'\.subdomain \/\/ empty'/.test(src) && /'\.worker \/\/ empty'/.test(src),
+    'subdomain/worker are read without an // empty guard, so jq can yield "null"');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
