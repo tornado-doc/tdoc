@@ -94,10 +94,25 @@
     return '<div class="tdoc-bar-left">' + leftHtml + '</div><div class="tdoc-bar-right">' + rightHtml + '</div>';
   }
 
-  // Avatar markup (was overlay.js:2498-2507). Simplified: real avatar_url or an
-  // anon placeholder span. Agent-logo mapping (agentLogoUrl) is a follow-up.
+  // Agent logo mapping (port of overlay.js agentLogoUrl): map grok/claude/codex/
+  // gemini/cursor logins to their product marks; never the Anthropic company PNG.
+  function tdocLogoUrl() { return '/tdoc_logo.svg'; }
+  function isAnthropicCompanyMark(url) { return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url); }
+  function agentLogoUrl(author) {
+    var stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url)) ? author.avatar_url : null;
+    var key = String((author && (author.login || author.name)) || '').toLowerCase();
+    if (key.indexOf('claude') >= 0 || key.indexOf('anthropic') >= 0 || isAnthropicCompanyMark(stored)) return 'https://cdn.simpleicons.org/claude/d97757';
+    if (stored) return stored;
+    if (key.indexOf('grok') >= 0 || key.indexOf('xai') >= 0) return 'https://github.com/xai-org.png';
+    if (key.indexOf('codex') >= 0 || key.indexOf('openai') >= 0 || key.indexOf('chatgpt') >= 0 || key === 'gpt' || key.indexOf('gpt-') === 0) return 'https://github.com/openai.png';
+    if (key.indexOf('gemini') >= 0 || key.indexOf('bard') >= 0) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
+    if (key.indexOf('cursor') >= 0 || key.indexOf('composer') >= 0) return 'https://cdn.simpleicons.org/cursor/000000';
+    return tdocLogoUrl();
+  }
+  // Avatar markup (was overlay.js:2498-2507): agent → product logo, else avatar_url,
+  // else anon placeholder.
   function avatarHtml(author, anonClass) {
-    var url = author && author.avatar_url;
+    var url = (author && author.kind === 'agent') ? agentLogoUrl(author) : (author && author.avatar_url);
     return url
       ? '<img src="' + escapeHtml(url) + '" alt="" data-tdoc-fallback-anon="' + anonClass + '">'
       : '<span class="' + anonClass + '"></span>';
@@ -123,6 +138,10 @@
   // fall back to avatar_url/anon.
   function renderAuthor(author) {
     if (!author) return '<div class="author"><span class="anon">anonymous</span></div>';
+    if (author.kind === 'agent') {
+      var label = author.name || author.login || 'tdoc-agent';
+      return '<div class="author tdoc-agent-author"><img src="' + escapeHtml(agentLogoUrl(author)) + '" alt="" data-tdoc-fallback-anon="tdoc-agent-badge"><span class="login">' + escapeHtml(label) + '</span></div>';
+    }
     var avatar = author.avatar_url ? '<img src="' + escapeHtml(author.avatar_url) + '" alt="">' : '';
     return '<div class="author">' + avatar + '<span class="login">' + escapeHtml(author.login || 'anonymous') + '</span></div>';
   }
@@ -141,7 +160,13 @@
         '<div class="tdoc-replies">' + replies.map(function (r) { return '<div class="tdoc-reply">' + renderAuthor(r.author) + '<div class="text">' + escapeHtml(r.text || '') + '</div></div>'; }).join('') + '</div>'
       : '';
     var hr = hasReactions(comment);
-    return renderAuthor(comment.author) +
+    var isResolved = comment.status === 'applied';
+    var verdict = comment._agentVerdict || 'applied';
+    var resolvedBy = comment._agentActor || comment.agent_actor || 'tdoc-agent';
+    var resolvedChip = isResolved
+      ? '<span class="tdoc-resolved-chip" title="Resolved by ' + escapeHtml(resolvedBy) + (comment.applied_in ? ' in v' + escapeHtml(String(comment.applied_in)) : '') + '">✓ ' + (verdict === 'partial' ? 'partially fixed' : verdict === 'question' ? 'needs input' : 'fixed') + (comment.applied_in ? ' · v' + escapeHtml(String(comment.applied_in)) : '') + '</span>'
+      : '';
+    return resolvedChip + renderAuthor(comment.author) +
       '<div class="text">' + escapeHtml(comment.text || '') + '</div>' +
       (hr ? renderReactionsRow(comment, me) : '') +
       '<div class="meta"><span>v' + (comment.version || 1) + (when ? ' · ' + escapeHtml(when) : '') + '</span>' +

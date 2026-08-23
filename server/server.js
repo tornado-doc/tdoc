@@ -465,7 +465,7 @@ function shellScript() {
     closeCard();
     var c = commentsById[id]; if (!c || !window.TDOC_CHROME) return;
     var card = document.createElement('div');
-    card.className = 'tdoc-margin-comment tdoc-floating-open';
+    card.className = 'tdoc-margin-comment tdoc-floating-open' + (c.status === 'applied' ? ' tdoc-resolved' : '');
     card.setAttribute('data-comment-id', id);
     card.innerHTML = window.TDOC_CHROME.buildCard(c, (cfg.identity && cfg.identity.login) || 'anon');
     card.addEventListener('click', function(e){ e.stopPropagation(); });
@@ -501,11 +501,12 @@ function shellScript() {
       if (!el){
         el = document.createElement('div'); el.className='tdoc-pin'; el.setAttribute('data-id', p.id);
         el.setAttribute('role','button'); el.setAttribute('tabindex','0');
-        el.innerHTML = window.TDOC_CHROME.avatarHtml({ login: p.login, avatar_url: p.avatar_url }, 'tdoc-pin-anon');
+        el.innerHTML = window.TDOC_CHROME.avatarHtml({ login: p.login, avatar_url: p.avatar_url, kind: p.kind }, 'tdoc-pin-anon');
         el.addEventListener('click', (function(id){ return function(ev){ ev.stopPropagation(); openCard(id); }; })(p.id));
         document.body.appendChild(el);
         pinEls[p.id] = el;
       }
+      el.classList.toggle('tdoc-pin-resolved', !!p.resolved);
     });
     Object.keys(pinEls).forEach(function(id){ if (!seen[id]){ pinEls[id].remove(); delete pinEls[id]; } });
     repositionPins();

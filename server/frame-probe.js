@@ -155,7 +155,7 @@
       if (!r) return;
       if (hl) hl.add(r);
       var rect = r.getBoundingClientRect();
-      pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), login: (c.author && c.author.login) || null });
+      pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()) });

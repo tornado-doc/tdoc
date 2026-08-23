@@ -237,6 +237,25 @@ const SLUG = 'hostile-body-css';
       if (!hasDelete) throw new Error('card missing delete control');
     });
 
+    await t('agent comment: pin shows the agent mark, card shows a resolved chip', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.waitForSelector('.tdoc-pin[data-id="c_fixture_3"]', { timeout: 3000 });
+      // the agent's pin carries the resolved state + an agent logo (not an anon dot)
+      const pinInfo = await page.evaluate(() => {
+        const pin = document.querySelector('.tdoc-pin[data-id="c_fixture_3"]');
+        return { resolved: pin.classList.contains('tdoc-pin-resolved'), hasImg: !!pin.querySelector('img') };
+      });
+      if (!pinInfo.resolved) throw new Error('agent pin missing tdoc-pin-resolved state');
+      if (!pinInfo.hasImg) throw new Error('agent pin did not render a logo mark');
+      await page.click('.tdoc-pin[data-id="c_fixture_3"]');
+      await page.waitForSelector('.tdoc-margin-comment.tdoc-resolved', { timeout: 2000 });
+      const chip = await page.$eval('.tdoc-margin-comment .tdoc-resolved-chip', el => el.textContent).catch(() => null);
+      if (!chip || !/fixed/.test(chip)) throw new Error('card missing resolved chip: ' + chip);
+      const agentAuthor = await page.evaluate(() => !!document.querySelector('.tdoc-margin-comment .author.tdoc-agent-author img'));
+      if (!agentAuthor) throw new Error('card did not render the agent author with a logo');
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });
