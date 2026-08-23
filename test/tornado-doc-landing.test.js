@@ -336,8 +336,11 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'title must sit in the left cluster, not a fake-centered slot');
   assert(overlay.includes("${cfg.isLanding ? githubBtnHtml : ''}"),
     'homepage bar must expose a GitHub icon');
-  assert(overlay.includes("${isSiteBar ? '' : copyMenuHtml}"),
-    'homepage bar must drop Copy');
+  // Copy now sits in the ⋯ overflow, which is only rendered when !isSiteBar,
+  // so the homepage (site bar) drops it along with Duplicate/Download.
+  assert(overlay.includes('<button data-action="copy">Copy as Markdown</button>') &&
+         overlay.includes('${!isSiteBar ? `<div class="tdoc-menu-wrap">'),
+    'homepage bar must drop Copy (it lives in the !isSiteBar ⋯ overflow)');
   assert(overlay.includes("${isSiteBar ? '' : primaryCtaHtml}"),
     'homepage bar must drop Share');
 
