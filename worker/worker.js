@@ -3966,6 +3966,15 @@ export default {
         if (!incoming.access && prev && prev.access) {
           incoming.access = prev.access;
         }
+        // A brand-new doc with no access block falls through to
+        // accessFromMeta's legacy branch, which answers `public` — so every
+        // doc published without explicit flags was world-readable, while the
+        // product told the user it was unlisted. Stamp the modern defaults on
+        // FIRST publish only. A doc that already exists without an access
+        // block is genuinely legacy and keeps its back-compat treatment.
+        if (!incoming.access && !prev) {
+          incoming.access = normalizeAccess(null, { legacy: false });
+        }
         if (incoming.access) {
           const validatedAccess = validateAccessWrite(incoming.access);
           if (validatedAccess.error) {

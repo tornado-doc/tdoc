@@ -721,6 +721,79 @@ async function issue(worker, env, login = 'alice', label = login) {
     assert(!body.includes('id="tdoc-duplicate-btn"'), 'export must not include published chrome');
   });
 
+  // ---- a first publish gets the modern access defaults, not the legacy ones ----
+  // PR #101 set out: new policy defaults to unlisted + history owner, while
+  // "docs without access stay public + full history" is back-compat for docs
+  // that predate the policy. But tdoc-publish sends no access block on a plain
+  // publish, so a brand-new doc was indistinguishable from a legacy one and
+  // got the legacy treatment — world-visible version history on every doc
+  // published without flags.
+
+  await t('a brand-new doc is stamped unlisted + owner history', async () => {
+    const mod = await loadWorker();
+    const worker = mod.default;
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env, 'alice');
+    const r = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'fresh-doc', version: 1, html: '<h1>A</h1>',
+              meta: { title: 'A', slug: 'fresh-doc', versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }] } },
+    }), env, {});
+    assert(r.status === 200, `upload ${r.status}`);
+    const meta = JSON.parse(await env.META.get('meta:fresh-doc'));
+    assert(meta.access, 'a first publish must persist an access block');
+    assert(meta.access.visibility === 'unlisted',
+      `expected unlisted, got ${meta.access.visibility}`);
+    assert(meta.access.history_visibility === 'owner',
+      `expected owner history, got ${meta.access.history_visibility}`);
+  });
+
+  await t('a genuinely legacy doc keeps its back-compat treatment', async () => {
+    const mod = await loadWorker();
+    const worker = mod.default;
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env, 'alice');
+    // Build a genuine legacy doc: publish it for real so ownership is claimed
+    // in the Durable Object, then strip the access block the way a doc from
+    // before the policy would look. Writing meta straight into KV is not
+    // enough — the write gate checks the owner claim, not just meta, and the
+    // republish below is denied 403 without it.
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'legacy-doc', version: 1, html: '<h1>L</h1>',
+              meta: { title: 'L', slug: 'legacy-doc', versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }] } },
+    }), env, {});
+    const seeded = JSON.parse(await env.META.get('meta:legacy-doc'));
+    delete seeded.access;
+    await env.META.put('meta:legacy-doc', JSON.stringify(seeded));
+    const r = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'legacy-doc', version: 2, html: '<h1>L2</h1>',
+              meta: { title: 'L', slug: 'legacy-doc', versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }, { n: 2, created: '2026-01-02T00:00:00Z' }] } },
+    }), env, {});
+    assert(r.status === 200, `upload ${r.status}`);
+    const meta = JSON.parse(await env.META.get('meta:legacy-doc'));
+    assert(!meta.access,
+      `republishing a legacy doc must not silently change its policy, got ${JSON.stringify(meta.access)}`);
+  });
+
+  await t('an explicit --visibility still wins over the default', async () => {
+    const mod = await loadWorker();
+    const worker = mod.default;
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env, 'alice');
+    const r = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'explicit-doc', version: 1, html: '<h1>E</h1>',
+              meta: { title: 'E', slug: 'explicit-doc', versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }],
+                      access: { visibility: 'private' } } },
+    }), env, {});
+    assert(r.status === 200, `upload ${r.status}`);
+    const meta = JSON.parse(await env.META.get('meta:explicit-doc'));
+    assert(meta.access.visibility === 'private',
+      `explicit visibility must win, got ${meta.access.visibility}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
