@@ -19,6 +19,25 @@ postMessage-only. This is "cross-origin" for our purposes **without** needing a
 we already ship. (A real subdomain is only needed if we later let authors run
 persistent JS with storage, like Artifacts' `allow-same-origin` frames.)
 
+## Styling model: B — self-contained docs (Claude Artifacts model)
+
+DECIDED: the reader-template CSS is **not injected at render time**. The author
+document is fully self-contained (its own styling), rendered as-is in the frame —
+exactly what Claude Artifacts does. Rationale: injecting our template into the
+isolated frame would re-introduce a cascade collision (our CSS vs the author's)
+*inside* the frame, defeating the point of isolation. So:
+
+- `/frame` serves author HTML + the probe only. No template injection.
+- The current reader template becomes a **reference template in the skill**
+  (`SKILL.md`), so agents generate self-contained, well-styled HTML.
+- Existing docs (which rely on runtime injection) get a **one-time migration**
+  that bakes the template into their HTML, so they stay good-looking and become
+  self-contained. Reuse the template source by slicing overlay.js between the
+  `TDOC_READER_CSS_START/END` markers.
+
+Trade-off accepted: no central restyle of existing docs after migration; each
+doc is independent. This is the Claude model and the price of true isolation.
+
 ## Rollout: behind a flag
 
 Everything ships behind an opt-in (`?shell=1` initially, later a doc/config
@@ -60,11 +79,22 @@ The test fails on `main` (no shell) and passes when the architecture lands.
   layout) that consumes geometry via messages. Define the message protocol
   (`tdoc:selection`, `tdoc:anchors`, `tdoc:geometry`, `tdoc:scroll`,
   `tdoc:highlight`, `tdoc:scrollTo`). Boundary test #2 (comments) passes.
-- **P3 — mobile/drawer + coordinate translation + resize/scroll sync.** Test #3.
-- **P4 — bundle split + CSP directives + update existing tests.** `bin/tdoc-bundle`
-  emits shell + probe; `cspHeader` gains `frame-src`/doc gains `frame-ancestors`.
-  `csp-headers`, `widget-island`, `browser-bundles-parse`, `ui`, `csp-xss` updated.
-- **P5 — flip default (later PR, out of scope here).**
+- **P3 — chrome parity + comments render:** port the REAL top bar (title,
+  version picker, Copy/Share/Duplicate, sign-in, theme, avatar) and the footer
+  into the shell; render submitted/existing comments as pins + highlights by
+  round-tripping anchors to the probe (probe resolves anchor→range, applies
+  CSS.highlights, reports pin Y; shell draws pins/cards in the outer gutter);
+  narrow/drawer mode (toggle `tdoc-narrow` <700px — flips boundary test #3);
+  scroll/resize coordinate sync. What the user flagged as "missing" (top bar
+  login, footer, pins) lands here.
+- **P4 — styling model B + bundle + CSP + tests:** add the reference template to
+  `SKILL.md`; write the one-time existing-doc bake migration; `bin/tdoc-bundle`
+  emits shell + probe; `cspHeader` gains `frame-src`, frame gains `frame-ancestors`;
+  worker.js parity; update `csp-headers`, `widget-island`, `browser-bundles-parse`,
+  `ui`, `csp-xss`.
+- **P5 — unify:** flip shell to the default, DELETE the `?shell=1` flag and the
+  old single-origin inline-overlay path. (Only after P3+P4 parity + doc migration
+  so main stays shippable throughout.)
 
 ## Key files (from recon)
 
