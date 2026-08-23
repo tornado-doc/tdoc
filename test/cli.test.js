@@ -632,5 +632,78 @@ t('tdoc-agent-reply base resolution matches tdoc-pull across platforms', () => {
     'subdomain/worker are read without an // empty guard, so jq can yield "null"');
 });
 
+
+// ---- publish-first flow (S4): sign-in ahead of generation, no stray localhost ----
+
+t('tdoc-publish --signin-only needs no slug and no-ops when already signed in', () => {
+  const bin = path.join(BIN, 'tdoc-publish');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-signin-'));
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: 'https://tdoc.dev', upload_token: 'tok',
+    }));
+    const r = spawnSync(bin, ['--signin-only'], {
+      env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `expected exit 0, got ${r.status}: ${r.stderr}`);
+    assert(/already signed in/.test(r.stderr), `expected a no-op message, got: ${r.stderr}`);
+    // It must not have printed usage — --signin-only takes no slug.
+    assert(!/usage:/i.test(r.stdout + r.stderr), 'usage printed for --signin-only');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('a normal publish still requires a slug', () => {
+  const r = spawnSync(path.join(BIN, 'tdoc-publish'), [], { encoding: 'utf8', timeout: 20000 });
+  assert(r.status !== 0, 'publish with no slug must not succeed');
+});
+
+t('the GitHub sign-in opens the browser and is NOT gated on a tty', () => {
+  const src = readBin('tdoc-publish');
+  assert(/should_open_browser\(\)/.test(src), 'no browser-open helper');
+  // An agent runs this with stderr piped. A tty check would mean the auto-open
+  // never fires in the exact situation it exists for.
+  const helper = src.slice(src.indexOf('should_open_browser()'), src.indexOf('Waiting for GitHub approval'));
+  assert(!/-t\s+2|-t\s+1/.test(helper), 'browser-open must not be gated on a tty');
+  for (const guard of ['TDOC_NO_BROWSER', 'CI', 'SSH_CONNECTION']) {
+    assert(helper.includes(guard), `browser-open should respect ${guard}`);
+  }
+  // Only ever hand a github.com URL to the opener.
+  assert(/case "\$uri" in\s*\n\s*https:\/\/github\.com\/\*\)/.test(src),
+    'the opener must be restricted to github.com URLs');
+});
+
+t('bin/tdoc-new still defaults to NOT publishing', () => {
+  // /document-release, /retro, /investigate, /cso and /qa-only all call this.
+  // If the publish-by-default flip leaked here, every security audit and retro
+  // would auto-upload to tdoc.dev.
+  const src = readBin('tdoc-new');
+  assert(/^PUBLISH=0$/m.test(src), 'tdoc-new must default PUBLISH=0');
+  assert(/--publish\)\s*PUBLISH=1/.test(src), '--publish must remain the opt-in');
+});
+
+t('SKILL.md states the localhost rule and no longer promises localhost by default', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  assert(/never hand over a `localhost` URL unless the user asked/i.test(skill),
+    'the localhost rule is not stated');
+  // The delivery step must not open localhost unconditionally any more.
+  assert(!/^7\. Open `http:\/\/localhost/m.test(skill),
+    '/tdoc new still opens localhost as its delivery step');
+  // Front matter must not advertise the abandoned default.
+  const front = skill.slice(0, skill.indexOf('---', 4));
+  assert(!/serve it at localhost/.test(front), 'description still says "serve it at localhost"');
+  assert(!/own Cloudflare\s*\n?\s*Worker/.test(front), 'description still sells BYOK Cloudflare as the default');
+  assert(/tdoc\.dev/.test(front), 'description should name the hosted destination');
+});
+
+t('SKILL.md and skills/tdoc/SKILL.md stay identical', () => {
+  const root = path.join(__dirname, '..');
+  const a = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
+  const b = fs.readFileSync(path.join(root, 'skills', 'tdoc', 'SKILL.md'), 'utf8');
+  assert(a === b, 'SKILL.md and its plugin-mode copy have drifted');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
