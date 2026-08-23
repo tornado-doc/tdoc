@@ -71,10 +71,14 @@
   const THEME_KEY = 'tdoc-theme';
   function readStoredTheme() {
     try {
-      return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light';
-    } catch (e) {
-      return 'light';
-    }
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored === 'dark' || stored === 'light') return stored;
+    } catch (e) { /* private mode */ }
+    // No saved choice yet — honor a doc that declares its default look
+    // (data-tdoc-default-theme="dark", e.g. a dark-first engineering style),
+    // otherwise light. The bar button still overrides and persists.
+    const declared = document.documentElement.getAttribute('data-tdoc-default-theme');
+    return declared === 'dark' ? 'dark' : 'light';
   }
   function currentTheme() {
     return document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light';
@@ -93,6 +97,69 @@
     btn.title = dark ? 'Light mode' : 'Dark mode';
   }
   paintTheme(readStoredTheme());
+
+  // ========== Copy-to-clipboard primitive (author opt-in) ==========
+  // A doc runs under a nonce CSP, so the doc's OWN <script> can never wire a
+  // copy button. The overlay (nonced, trusted) provides one instead: any
+  // element carrying data-tdoc-copy becomes a working "click to copy" trigger.
+  //   <button data-tdoc-copy="literal text …">Copy</button>   copies the literal
+  //   <button data-tdoc-copy="#promptId">Copy the prompt</button>
+  //                                     copies #promptId's text (trimmed)
+  // On success the trigger briefly shows data-tdoc-copy-done (default "Copied ✓")
+  // and gets a .tdoc-copied class the doc can style. Delegated + capture-phase
+  // so it fires before (and suppresses) the doc's artifact/comment handlers,
+  // and is a no-op for every click that is not on a copy trigger.
+  function fallbackCopy(text) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      return true;
+    } catch (e) { return false; }
+  }
+  function flashCopyTrigger(trigger) {
+    const done = trigger.getAttribute('data-tdoc-copy-done') || 'Copied ✓';
+    if (trigger.getAttribute('data-tdoc-copy-label') == null) {
+      trigger.setAttribute('data-tdoc-copy-label', trigger.textContent);
+    }
+    trigger.textContent = done;
+    trigger.classList.add('tdoc-copied');
+    clearTimeout(trigger._tdocCopyTimer);
+    trigger._tdocCopyTimer = setTimeout(() => {
+      const orig = trigger.getAttribute('data-tdoc-copy-label');
+      if (orig != null) trigger.textContent = orig;
+      trigger.classList.remove('tdoc-copied');
+    }, 1600);
+  }
+  function wireCopyTriggers() {
+    document.addEventListener('click', (e) => {
+      const trigger = e.target.closest && e.target.closest('[data-tdoc-copy]');
+      if (!trigger) return;                       // not a copy click — leave alone
+      e.preventDefault();
+      e.stopPropagation();
+      const raw = trigger.getAttribute('data-tdoc-copy') || '';
+      let text = raw;
+      if (raw.charAt(0) === '#') {
+        const src = document.getElementById(raw.slice(1));
+        if (src) text = (src.innerText || src.textContent || '').replace(/\u00a0/g, ' ').trim();
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          () => flashCopyTrigger(trigger),
+          () => { if (fallbackCopy(text)) flashCopyTrigger(trigger); }
+        );
+      } else if (fallbackCopy(text)) {
+        flashCopyTrigger(trigger);
+      }
+    }, true);
+  }
 
   // ========== UI selector registry ==========
   // One source of truth for "is this part of the tdoc overlay UI?".
@@ -857,7 +924,7 @@
   // those pages already name themselves in the document.
   const isSiteBar = !!(cfg.isLanding || isCatalog);
   const leftHtml = `
-    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="My docs" aria-label="My docs"><img src="/tdoc_logo.png" alt="" width="24" height="24"></button>
+    <button class="tdoc-bar-mark" id="tdoc-bar-mark" title="My docs" aria-label="My docs"><img src="/tdoc_logo.svg" alt="" width="24" height="24"></button>
     ${isSiteBar ? '' : `
     <span class="crumb crumb-slug" title="${escapeHtml(slugCrumbLabel)}">${escapeHtml(slugCrumbLabel)}</span>
     <span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>
@@ -984,6 +1051,8 @@
     persistTheme(next);
     paintTheme(next);
   };
+
+  wireCopyTriggers();
 
   // Duplicate = hosted account copy. Download HTML = /export file.
   // Download PDF = print the export (browser Save as PDF), not a JPEG wrap.
@@ -1894,7 +1963,7 @@
     return typeof url === 'string' && /(?:^|\/\/)(?:www\.)?github\.com\/anthropics(?:\.png)?(?:[/?#]|$)/i.test(url);
   }
   function tdocLogoUrl() {
-    return '/tdoc_logo.png';
+    return '/tdoc_logo.svg';
   }
   function agentLogoUrl(author) {
     const stored = (author && typeof author.avatar_url === 'string' && /^https:\/\//i.test(author.avatar_url))

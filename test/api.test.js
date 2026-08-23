@@ -172,6 +172,40 @@ function waitReady(port, ms = 5000) {
     if (after.body.length !== 0) throw new Error('top comment not removed');
   });
 
+  function rawGet(p) {
+    return new Promise((resolve, reject) => {
+      const r = http.get({ host: HOST, port: PORT, path: p }, (res) => {
+        const chunks = [];
+        res.on('data', (d) => chunks.push(d));
+        res.on('end', () => resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks),
+        }));
+      });
+      r.on('error', reject);
+    });
+  }
+
+  await t('GET /tdoc_logo.svg is the vector mark', async () => {
+    const r = await rawGet('/tdoc_logo.svg');
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    const ct = String(r.headers['content-type'] || '');
+    if (!ct.includes('image/svg+xml')) throw new Error(`content-type ${ct}`);
+    const text = r.body.toString('utf8');
+    if (!/<svg[\s>]/.test(text)) throw new Error('body is not SVG');
+    if (!/currentColor/.test(text)) throw new Error('SVG does not follow currentColor');
+    if (/<image[\s>]|data:image\//i.test(text)) throw new Error('SVG embeds a bitmap');
+  });
+
+  await t('GET /tdoc_logo.png stays as the Open Graph raster', async () => {
+    const r = await rawGet('/tdoc_logo.png');
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    const ct = String(r.headers['content-type'] || '');
+    if (!ct.includes('image/png')) throw new Error(`content-type ${ct}`);
+    if (r.body[0] !== 0x89 || r.body[1] !== 0x50) throw new Error('body is not PNG');
+  });
+
   // Cleanup: kill the spawned server + remove the temp dir.
   shutdown();
 

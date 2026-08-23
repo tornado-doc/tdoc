@@ -281,23 +281,39 @@ colors them; this file decides there should be many.
    Voice constrains the prose as you generate it, not as a later cleanup
    pass. The style tells you which components to reach for and its palette —
    apply it unless the user named another entry in `$SKILL_DIR/authoring/style/`.
-   The default style does not override reading typography, so do not set your
-   own body or heading sizes.
+   The named style file is the complete visual contract: use its CSS, but do
+   not invent a second page-wide aesthetic on top of it.
 3. Create `~/tdocs/<slug>/v1/index.html` — the host document:
-   - All host CSS inline in `<style>`. **No JavaScript in the host** — those tags do not execute (CSP; see HTML generation rules). If the idea needs computation, also write `v1/widgets/<name>.html` and iframe it.
+   - All host CSS inline in `<style>`. **Never put JavaScript in the host.**
+     Host `<script>`, `on*=` handlers, and `javascript:` URLs are inert under
+     CSP and therefore create controls or empty panels that cannot work. If
+     the idea needs computation, write `v1/widgets/<name>.html` and iframe it.
    - No external CDNs in the host unless requested. No build step.
-   - Clean reading-typography (system font stack, generous line-height, max-width ~720px for prose) UNLESS the doc is primarily a diagram, in which case go full-bleed.
+   - The default style is mandatory when the user names no style. A full-page
+     custom design is allowed only when the user explicitly requests one;
+     programmatic callers must make that exception visible with
+     `--custom-template`.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
-4. Write `meta.json`:
+4. **Validate the host before recording or opening the doc. This is mandatory
+   for every generated version, including chat-driven `/tdoc new`:**
+   ```bash
+   "$SKILL_DIR/bin/tdoc-validate-template" \
+     "$TDOC_DIR/<slug>/v1/index.html" --style <selected-style>
+   ```
+   Use `--custom-template` only when the user explicitly requested a custom
+   whole-page design. It never permits host JavaScript. If validation fails,
+   fix the host or move computation into `v1/widgets/<name>.html`; do not open,
+   publish, or report the document as complete.
+5. Write `meta.json`:
    ```json
    { "title": "...", "slug": "...", "created": "<iso>", "versions": [{ "n": 1, "created": "<iso>", "prompt": "..." }] }
    ```
-5. Init `comments.json` as `[]`.
-6. Open `http://localhost:7878/d/<slug>/v/1` in the browser:
+6. Init `comments.json` as `[]`.
+7. Open `http://localhost:7878/d/<slug>/v/1` in the browser:
    ```bash
    open "http://localhost:7878/d/<slug>/v/1"
    ```
-7. Report the URL to the user.
+8. Report the URL to the user.
 
 ### `bin/tdoc-new` — programmatic entry for agents in other skills
 
@@ -342,12 +358,20 @@ TDOC_NEW_CALLER=document-release \
 - `--slug <kebab-case>` (required) — slug for `~/tdocs/<slug>/`.
 - `--title "<title>"` (required) — recorded in `meta.json`.
 - `--html-file <path>` OR `--html-stdin` (required) — full HTML for v1.
+- `--widgets-dir <path>` — optional directory of sandboxed widget HTML files.
+  Each `<name>.html` is stored as `v1/widgets/<name>.html`; JavaScript belongs
+  there, never in the host HTML.
 - `--prompt "<one-line>"` — prompt-of-record in `meta.json` (defaults
   to `Imported via tdoc-new by <caller>`).
 - `--publish` — also run `tdoc-publish` so a shareable URL is returned.
 - `--open` — open the resulting URL in the default browser.
 - `--quiet` — suppress informational output (the URL is still printed
   on the last line so callers can capture it).
+- `--style default|technical|editorial|paper` — selected house-style
+  contract. Omit it to use `default`.
+- `--custom-template` — explicit opt-out from the default template for a
+  user-requested presentation, landing page, or full-bleed simulation. Normal
+  docs must not pass it.
 - `--force` — overwrite an existing slug. Without this, an existing
   slug is a hard error (no silent clobber).
 
@@ -356,9 +380,13 @@ If `--publish` succeeded, the published URL appears on a second line.
 This is what callers should `tail -n 1` (or `tail -n 2`) to capture.
 
 **Guards built in:** refuses to clobber existing slugs without `--force`;
-validates that input contains a `<body>` tag (catches markdown handed
-in by mistake); restarts the local server if it's down so the URL is
-immediately reachable.
+validates the host before replacing an existing doc; copies explicitly
+supplied widget files; restarts the local server if needed. Host validation
+rejects `<script>`, `on*=` handlers, `javascript:` URLs, and `<canvas>` even in
+custom-template mode, because all of them are inert under the host CSP and can
+silently create empty UI. It also enforces the selected house-style boundary.
+Whole-page custom styling requires the deliberate `--custom-template` flag;
+that flag never permits host JavaScript.
 
 **Set `TDOC_NEW_CALLER`** (or rely on `CLAUDE_SKILL_NAME`) so `meta.json`
 records which skill scaffolded the doc — useful for later auditing or
@@ -393,8 +421,12 @@ silently is the #1 source of regression complaints.
    - `anchor.context_before` / `anchor.context_after` — surrounding text
      (~60 chars each side) for disambiguation when the same text appears
      multiple times
-5. Append to `meta.json` versions array.
-6. **For each comment, post an agent reply** so the user sees the outcome
+5. **Validate `v<n+1>/index.html` before updating metadata or replying to
+   comments.** Run `bin/tdoc-validate-template` with the style already used by
+   the document. If validation fails, repair the host or move the computation
+   into `v<n+1>/widgets/<name>.html`; never publish or report a broken version.
+6. Append to `meta.json` versions array.
+7. **For each comment, post an agent reply** so the user sees the outcome
    in the doc UI. This is mandatory.
 
    Use `bin/tdoc-agent-reply`. It auto-detects the host runtime (Claude Code,
@@ -427,7 +459,7 @@ silently is the #1 source of regression complaints.
    - question: "Two of your comments asked for different tones — formal in
      the intro and casual in section II. Which should I prioritize?"
 
-7. Update `comments.json`: set `status: "applied"` (or leave `"open"` for
+8. Update `comments.json`: set `status: "applied"` (or leave `"open"` for
    partial/question) and `applied_in: n+1`. The agent-reply endpoint
    already flips the status server-side AND drops a status emoji on the
    parent comment (✅ applied, 🟡 partial, ❓ question), clearing any
@@ -438,7 +470,7 @@ silently is the #1 source of regression complaints.
    If a comment is later re-anchored by the user (anchor moved to new
    text), the server automatically clears the agent's emoji and resets
    `status: "open"`. Re-running `/tdoc edit` will pick it up again.
-6. Open `http://localhost:7878/d/<slug>/v/<n+1>`.
+9. Open `http://localhost:7878/d/<slug>/v/<n+1>`.
 
 If there are zero open comments AND no extra prompt, ask the user what to change before doing anything.
 
@@ -776,11 +808,16 @@ The overlay's template is modeled after the `conway-life` doc ("What if a doc co
 - pre: mono 15px, light gray background, left-rule, scrolling overflow
 - Code (inline): 0.92em mono, light-gray rounded chip
 
-**Write CSS for the house style's components and for what the doc itself
-needs** — a chart, a diagram, a custom widget — and scope it tightly
-(`.risk { … }`, `.my-slider { … }`), never as a global element rule. A
-presentation or landing page may warrant overriding the reading typography
-itself; a reading doc, essay, or report should not.
+**The default style is mandatory when the user names no other style.** Use the
+CSS from `$SKILL_DIR/authoring/style/default.md` as written. Add only the
+house style's components and tightly scoped CSS for content-specific charts,
+diagrams, and controls. Do not invent additional bare-element rules or change
+the content root's width, margins, or padding.
+
+A different file in `$SKILL_DIR/authoring/style/` applies only when the user
+names it. A presentation or landing page may replace the reading aesthetic
+only when the user explicitly asks; programmatic creation must mark that
+exception with `--custom-template`.
 
 What to write:
 

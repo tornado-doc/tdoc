@@ -111,6 +111,35 @@ async function tPub(name, fn) {
     if (stored !== 'light') throw new Error(`storage should be light, got "${stored}"`);
   });
 
+  // data-tdoc-default-theme + [data-tdoc-copy] primitive. Fresh context so
+  // there is no stored tdoc-theme from the tests above (default only applies
+  // when the reader has made no choice).
+  const copyDocUrl = URL.slice(0, URL.indexOf('/d/')) + '/d/copy-doc/v/1';
+
+  await t('A doc declaring data-tdoc-default-theme="dark" opens dark', async () => {
+    const c = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1200, height: 800 } });
+    const p = await c.newPage();
+    await p.goto(copyDocUrl, { waitUntil: 'networkidle' });
+    const theme = await p.getAttribute('html', 'data-tdoc-theme');
+    const stored = await p.evaluate(() => localStorage.getItem('tdoc-theme'));
+    await c.close();
+    if (theme !== 'dark') throw new Error(`expected dark from the default hint, got "${theme}"`);
+    if (stored !== null) throw new Error(`the hint must not persist a preference, got "${stored}"`);
+  });
+
+  await t('A [data-tdoc-copy] button copies the target text and flashes', async () => {
+    const c = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1200, height: 800 } });
+    const p = await c.newPage();
+    await p.goto(copyDocUrl, { waitUntil: 'networkidle' });
+    await p.click('[data-tdoc-copy]');
+    await p.waitForFunction(() => document.querySelector('[data-tdoc-copy]').classList.contains('tdoc-copied'), { timeout: 3000 });
+    const flashed = await p.textContent('[data-tdoc-copy]');
+    const clip = await p.evaluate(() => navigator.clipboard.readText());
+    await c.close();
+    if (!/✓/.test(flashed)) throw new Error(`button should flash a check mark, got "${flashed}"`);
+    if (!clip.includes('技术设计文档')) throw new Error(`clipboard should hold the prompt, got "${clip}"`);
+  });
+
   await t('Table in overflow-x:auto wrapper is not clipped on the left', async () => {
     const m = await page.evaluate(() => {
       const table = document.querySelector('.wrap table');

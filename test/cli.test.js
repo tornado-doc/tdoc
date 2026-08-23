@@ -13,7 +13,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync, spawnSync } = require('child_process');
+const { execFileSync, spawn, spawnSync } = require('child_process');
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -100,6 +100,144 @@ t('tdoc-new fails loudly if the local server never comes up', () => {
   const src = readBin('tdoc-new');
   assert(/SERVER_UP/.test(src) && /failed to start/.test(src),
     'ping-loop success is not checked');
+});
+
+t('chat-driven new and edit flows require host validation', () => {
+  const rootSkill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const packagedSkill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'tdoc', 'SKILL.md'), 'utf8');
+  assert(rootSkill === packagedSkill, 'root and packaged SKILL.md copies must stay identical');
+  assert(/mandatory[\s\S]*tdoc-validate-template[\s\S]*do not open,\s*publish, or report/.test(rootSkill),
+    '/tdoc new must validate before completion');
+  assert(/Validate `v<n\+1>\/index\.html`[\s\S]*tdoc-validate-template[\s\S]*never publish or report a broken version/.test(rootSkill),
+    '/tdoc edit must validate every generated version');
+});
+
+t('tdoc default-template validator accepts scoped widget CSS', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-template-'));
+  try {
+    const html = path.join(dir, 'valid.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } .cost-widget { display:grid } .cost-widget p { color:#333 }</style>
+      </head><body><div class="wrap"><h1>Title</h1><div class="cost-widget"><p>x</p></div></div></body></html>`);
+    const r = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(r.status === 0, `valid default-template HTML rejected: ${r.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc default-template validator rejects global restyling by default', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-template-'));
+  try {
+    const html = path.join(dir, 'custom.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } h1 { font-size:72px } .wrap { max-width:1200px }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`);
+    const rejected = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(rejected.status !== 0, 'global h1/.wrap restyling should be rejected');
+    assert(/default template/i.test(rejected.stderr), rejected.stderr);
+    const explicit = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html, '--custom-template'], { encoding: 'utf8' });
+    assert(explicit.status === 0, `explicit custom template should pass: ${explicit.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc host validator rejects inert JavaScript even for a custom template', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-host-js-'));
+  try {
+    const html = path.join(dir, 'broken.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff }</style></head>
+      <body><div class="wrap"><button onclick="go()">Run</button>
+      <a href="javascript:go()">again</a><canvas></canvas><script>go()</script></div></body></html>`);
+    const r = spawnSync(path.join(BIN, 'tdoc-validate-template'),
+      [html, '--custom-template'], { encoding: 'utf8' });
+    assert(r.status !== 0, 'custom-template must not make host JavaScript executable');
+    assert(/host <script> is inert/.test(r.stderr), r.stderr);
+    assert(/event handlers are inert/.test(r.stderr), r.stderr);
+    assert(/javascript: URLs are inert/.test(r.stderr), r.stderr);
+    assert(/host <canvas> cannot render/.test(r.stderr), r.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc host validator accepts the named editorial house-style background', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-style-'));
+  try {
+    const html = path.join(dir, 'editorial.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#f7f6f5 } .wrap { font-family:Georgia,serif; color:#000 }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`);
+    const wrong = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(wrong.status !== 0, 'editorial background should not pass as default');
+    const right = spawnSync(path.join(BIN, 'tdoc-validate-template'),
+      [html, '--style', 'editorial'], { encoding: 'utf8' });
+    assert(right.status === 0, right.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-new copies sandboxed widget files while keeping host HTML script-free', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-widget-new-'));
+  try {
+    const fakeBin = path.join(dir, 'fake-bin');
+    const widgets = path.join(dir, 'widgets');
+    fs.mkdirSync(fakeBin);
+    fs.mkdirSync(widgets);
+    const fakeCurl = path.join(fakeBin, 'curl');
+    fs.writeFileSync(fakeCurl, '#!/bin/sh\nprintf \'{"service":"tdoc"}\'\n');
+    fs.chmodSync(fakeCurl, 0o755);
+    fs.writeFileSync(path.join(widgets, 'calculator.html'),
+      '<!doctype html><html><body><output id="x"></output><script>document.querySelector("#x").textContent="ok"</script></body></html>');
+    const host = `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff }</style></head><body><div class="wrap">
+      <h1>Calculator</h1><iframe sandbox="allow-scripts" src="/d/widget-doc/v/1/widget/calculator"></iframe>
+      </div></body></html>`;
+    const env = { ...process.env, HOME: dir, TDOC_DIR: path.join(dir, 'tdocs'),
+      PATH: `${fakeBin}:${process.env.PATH}` };
+    const r = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', 'widget-doc', '--title', 'Widget', '--html-stdin', '--widgets-dir', widgets, '--quiet'],
+      { input: host, env, encoding: 'utf8', timeout: 20000 });
+    assert(r.status === 0, `tdoc-new widget handoff failed (exit ${r.status})\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    const copied = fs.readFileSync(path.join(dir, 'tdocs', 'widget-doc', 'v1', 'widgets', 'calculator.html'), 'utf8');
+    assert(copied.includes('<script>'), 'widget JavaScript was not preserved in the island file');
+    const savedHost = fs.readFileSync(path.join(dir, 'tdocs', 'widget-doc', 'v1', 'index.html'), 'utf8');
+    assert(!savedHost.includes('<script>'), 'host unexpectedly gained JavaScript');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-new validates the default template before replacing an existing doc', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cli-'));
+  try {
+    const env = { ...process.env, TDOC_DIR: dir, TDOC_PORT: '0' };
+    const docDir = path.join(dir, 'mydoc');
+    fs.mkdirSync(path.join(docDir, 'v1'), { recursive: true });
+    fs.writeFileSync(path.join(docDir, 'v1', 'index.html'), '<!doctype html><body>ORIGINAL</body>');
+    fs.writeFileSync(path.join(docDir, 'meta.json'), JSON.stringify({ slug: 'mydoc', versions: [{ n: 1 }] }));
+    fs.writeFileSync(path.join(docDir, 'comments.json'), JSON.stringify([{ id: 'c1', text: 'precious' }]));
+    const custom = `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff } h1 { font-size:72px }</style>
+      </head><body><div class="wrap"><h1>Custom</h1></div></body></html>`;
+    const r = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', 'mydoc', '--title', 'x', '--html-stdin', '--force'],
+      { input: custom, env, encoding: 'utf8', timeout: 20000 });
+    assert(r.status !== 0 && /default-template validation failed/i.test(r.stderr), r.stderr);
+    assert(/ORIGINAL/.test(fs.readFileSync(path.join(docDir, 'v1', 'index.html'), 'utf8')),
+      'existing doc was replaced before template validation');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---- live behavior: --force must not destroy an existing doc on bad input ----
@@ -343,6 +481,87 @@ t('tdoc-update-nag real git: ahead-only is silent, behind nags, both diverge', (
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+// ---- tdoc-agent-reply must not report success on a rejected reply (#141) ----
+
+t('tdoc-agent-reply gates on HTTP status and on 200-with-error bodies', () => {
+  const src = readBin('tdoc-agent-reply');
+  assert(/post_reply\(\)/.test(src), 'post_reply helper missing');
+  assert(/http_code/.test(src) && /grep -qE '\^2/.test(src),
+    'post_reply does not gate on 2xx HTTP status');
+  assert(/has\("error"\)/.test(src),
+    'post_reply does not reject a 200 body carrying an "error" key');
+  // Both transports must go through the helper and propagate its failure.
+  const calls = src.split('\n').filter(l => /^\s*post_reply /.test(l));
+  assert(calls.length === 2, `expected 2 post_reply call sites, got ${calls.length}`);
+  for (const c of calls) assert(/\|\| exit 1/.test(c), `call site swallows failure: ${c.trim()}`);
+  // No raw curl POST to the reply endpoint left outside the helper.
+  const raw = src.split('\n').filter(l =>
+    /\bcurl\b/.test(l) && /api\/agent\/reply/.test(l) && !l.trim().startsWith('#'));
+  assert(raw.length === 0, `raw curl to /api/agent/reply outside post_reply:\n      ${raw.join('\n      ')}`);
+});
+
+t('tdoc-agent-reply exits non-zero when the server rejects the reply', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
+  const port = 7900 + Math.floor(Math.random() * 300);
+  // Stub the reply endpoint: 200 with an error body, exactly what the server
+  // returns for an unknown parent. That is the case the bug reported.
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({error:'parent_not_found'}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_missing',
+      '--text', 'applied', '--status', 'applied'], {
+      env: { ...process.env, HOME: home, TDOC_PORT: String(port) },
+      encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status !== 0,
+      `rejected reply still exited ${r.status}; stdout=${r.stdout} stderr=${r.stderr}`);
+    assert(/parent_not_found/.test(r.stdout + r.stderr),
+      `server error not surfaced: ${r.stdout} ${r.stderr}`);
+    assert(/NOT posted/.test(r.stderr), `no failure line on stderr: ${r.stderr}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-agent-reply still exits 0 when the reply is accepted', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
+  const port = 8300 + Math.floor(Math.random() * 300);
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({id:'c_1',replies:[],reactions:{}}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
+      env: { ...process.env, HOME: home, TDOC_PORT: String(port) },
+      encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `accepted reply exited ${r.status}; stderr=${r.stderr}`);
+    assert(/"id":"c_1"/.test(r.stdout), `server body not passed through: ${r.stdout}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

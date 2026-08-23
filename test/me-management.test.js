@@ -157,7 +157,7 @@ t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
     'doc pages still show the title in the left cluster');
   assert(!overlay.includes('tdoc-bar-center'),
     'title must not sit in a fake-centered middle slot');
-  assert(overlay.includes('src="/tdoc_logo.png"'),
+  assert(overlay.includes('src="/tdoc_logo.svg"'),
     'bar mark must be the tdoc logo, not a text pill');
   assert(overlay.includes("tdoc-bar-mark').onclick = () => { location.href = '/me'; }"),
     'tdoc logo must go to /me (the hub), not /');

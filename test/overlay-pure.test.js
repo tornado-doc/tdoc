@@ -124,8 +124,8 @@ t('agentLogoUrl maps grok/claude/codex/cursor/gemini logins to product marks', (
   assert(agentLogoUrl({ login: 'codex' }).includes('openai'), 'codex');
   assert(agentLogoUrl({ login: 'cursor' }).includes('cursor'), 'cursor');
   assert(agentLogoUrl({ login: 'gemini' }).includes('gemini'), 'gemini');
-  assert(agentLogoUrl({ login: 'tdoc-agent' }).includes('tdoc_logo.png'), 'tdoc logo');
-  assert(agentLogoUrl({ login: 'mystery-bot' }).includes('tdoc_logo.png'), 'unmatched uses tdoc logo');
+  assert(agentLogoUrl({ login: 'tdoc-agent' }).includes('tdoc_logo.svg'), 'tdoc logo');
+  assert(agentLogoUrl({ login: 'mystery-bot' }).includes('tdoc_logo.svg'), 'unmatched uses tdoc logo');
   assert(!String(agentLogoUrl({ login: 'tdoc-agent' })).includes('⚡'), 'no lightning');
 });
 t('agentLogoUrl prefers an explicit https avatar_url', () => {
@@ -212,6 +212,30 @@ t('findCommentRoot maps a reply id to its top-level card', () => {
   assert(findCommentRoot(list, 'missing') === 'missing');
   assert(findCommentRoot(list, '') === null);
   assert(findCommentRoot(null, 'c1') === 'c1');
+});
+
+// --- dark-default hint + copy primitive (source guards; live behavior in ui.test.js) ---
+// These features are DOM/clipboard-bound so they can't run pure here; guard the
+// wiring at the source so an accidental removal or the flashCopied() name
+// collision (two same-named fns → last wins) can't slip back in unnoticed.
+t('readStoredTheme honors data-tdoc-default-theme, stored pref still wins', () => {
+  const fn = sliceFn('readStoredTheme');
+  assert(/getItem\(THEME_KEY\)/.test(fn), 'a stored tdoc-theme must be read first');
+  assert(/data-tdoc-default-theme/.test(fn), 'must fall back to the doc-declared default theme');
+});
+t('overlay exposes a data-tdoc-copy click-to-copy primitive', () => {
+  assert(/function wireCopyTriggers\(/.test(src), 'wireCopyTriggers must be defined');
+  assert(/\n\s*wireCopyTriggers\(\);/.test(src), 'wireCopyTriggers must be called on bar mount');
+  const body = sliceFn('wireCopyTriggers');
+  assert(/\[data-tdoc-copy\]/.test(body), 'delegated handler targets [data-tdoc-copy]');
+  assert(/writeText/.test(body), 'copy uses navigator.clipboard.writeText');
+  assert(/,\s*true\s*\)/.test(body), 'listener is capture-phase (beats artifact/comment handlers)');
+});
+t('copy primitive uses a UNIQUELY named flash helper (no flashCopied collision)', () => {
+  assert(/function flashCopyTrigger\(/.test(src), 'flashCopyTrigger must exist');
+  // there must still be exactly one flashCopied (the copy-as-markdown one)
+  const n = (src.match(/function flashCopied\(/g) || []).length;
+  assert(n === 1, `expected exactly one function flashCopied(, found ${n}`);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
