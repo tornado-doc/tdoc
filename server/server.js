@@ -274,6 +274,17 @@ function forceWidgetSandbox(html) {
   });
 }
 
+// Local preview of the landing header's live star count. Production fetches
+// this in the Cloudflare Worker (edge-cached); here we just refresh hourly.
+let cachedStars = null;
+async function refreshStars() {
+  try {
+    const r = await fetch('https://api.github.com/repos/tornado-doc/tdoc', { headers: { 'User-Agent': 'tdoc-local', 'Accept': 'application/vnd.github+json' } });
+    if (r.ok) { const d = await r.json(); const n = Number(d && d.stargazers_count); if (Number.isFinite(n)) cachedStars = n; }
+  } catch {}
+}
+refreshStars(); const _starTimer = setInterval(refreshStars, 3600e3); if (_starTimer.unref) _starTimer.unref();
+
 function injectOverlay(html, slug, version, nonce) {
   html = forceWidgetSandbox(html);
   if (ONBOARD_SLUGS.has(slug)) {
@@ -310,6 +321,8 @@ function injectOverlay(html, slug, version, nonce) {
     identity: ident,
     isOwner: !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase()),
     authConfigured: !!ident, mode: 'local', versions,
+    isLanding: slug === 'tornado-doc',
+    stars: cachedStars,
   })};</script>`;
   const inject = `${cfg}\n<script${nonceAttr}>${overlay}</script>`;
   if (html.includes('</body>')) return html.replace('</body>', `${inject}\n</body>`);
