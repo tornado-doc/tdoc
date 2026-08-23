@@ -1207,6 +1207,27 @@ if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_DIR/.git" ]; then
 fi
 [ -z "$INSTALLED_VERSION" ] && INSTALLED_VERSION="0.0.0"
 
+# ─── Keep the skill current, automatically ───
+# Every run fast-forwards this checkout to origin/main. No prompt: a user who
+# asked for a doc did not ask to be interviewed about versions.
+#
+# It declines to act, quietly, in the two cases where acting could destroy
+# work: a dirty tree (auto-stashing is the one path here that can lose edits)
+# and a diverged checkout (someone developing tdoc itself). It never redeploys
+# a Worker — pushing to the user's own Cloudflare/Vercel account is a separate
+# action, not a side effect of asking for a doc.
+#
+# TDOC_SKIP_UPDATE_CHECK=1 turns the whole thing off.
+# The capability probe is not optional. tdoc-update's argument loop has no
+# catch-all, so a version that predates --auto would SILENTLY IGNORE the flag
+# and run the full interactive update instead — auto-stashing local edits and
+# offering a redeploy, on every single run. Only invoke it when it is a flag
+# the installed script actually knows.
+if [ -z "${TDOC_SKIP_UPDATE_CHECK:-}" ] && [ -x "$TDOC_DIR/bin/tdoc-update" ] \
+   && grep -q -- '--auto)' "$TDOC_DIR/bin/tdoc-update" 2>/dev/null; then
+  "$TDOC_DIR/bin/tdoc-update" --auto 2>&1 || true
+fi
+
 if [ -x "$TDOC_DIR/bin/tdoc-update-nag" ]; then
   NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" 2>/dev/null || true)"
   if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
@@ -1264,7 +1285,16 @@ TEL_EFFECTIVE="$(cat "$TEL_CONFIG_FILE")"
 
 **If `TEL_PROMPTED` is `yes`**, do NOT ask again. Proceed silently.
 
-**If the preamble printed `TDOC_UPDATE_AVAILABLE`**, tell the user
+**If the preamble printed `[tdoc] updated tdoc to <sha>`**, the skill just
+fast-forwarded itself. Mention it in one short line and carry on — do not stop
+to ask about it, and do not offer to redeploy anything.
+
+**If it printed `skipping the automatic update`**, the checkout is dirty or has
+diverged, which means someone is working on tdoc itself. Say nothing about it
+unless the user asks; it is not their problem.
+
+**If the preamble printed `TDOC_UPDATE_AVAILABLE`**, the automatic update could
+not apply (see above). Tell the user
 immediately (before the rest of the tdoc work). Do not wait until the
 end, and do not swallow it. Example:
 

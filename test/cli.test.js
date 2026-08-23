@@ -719,5 +719,50 @@ t('SKILL.md and skills/tdoc/SKILL.md stay identical', () => {
   assert(a === b, 'SKILL.md and its plugin-mode copy have drifted');
 });
 
+
+// ---- tdoc-update --auto: keep current without ever destroying work ----
+
+t('tdoc-update --auto never stashes and never redeploys', () => {
+  const src = readBin('tdoc-update');
+  assert(/--auto\)\s*AUTO=1/.test(src), '--auto flag missing');
+  // The stash path is the one that can lose someone's edits.
+  const stashIdx = src.indexOf('git stash push');
+  const guardIdx = src.lastIndexOf('AUTO" = "1"', stashIdx);
+  assert(guardIdx !== -1 && guardIdx < stashIdx,
+    '--auto must bail out before the stash push');
+  // Redeploy pushes to the user's own infrastructure.
+  const redeployIdx = src.indexOf('bin/tdoc-publish');
+  const exitIdx = src.lastIndexOf('AUTO" = "1"', redeployIdx);
+  assert(exitIdx !== -1 && exitIdx < redeployIdx,
+    '--auto must exit before the redeploy offer');
+});
+
+t('tdoc-update --auto declines on a diverged checkout', () => {
+  const src = readBin('tdoc-update');
+  assert(/LOCAL" != "\$BASE" \] && \[ "\$AUTO" = "1"/.test(src),
+    '--auto must skip rather than fail on a diverged checkout');
+});
+
+t('SKILL.md probes for --auto before calling it', () => {
+  // tdoc-update's arg loop has no catch-all: a version predating --auto would
+  // ignore the flag and run the FULL interactive update, stashing local edits
+  // on every skill run. The probe is what stops that.
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const call = skill.indexOf('bin/tdoc-update" --auto');
+  assert(call !== -1, 'Step 0 should keep the skill current');
+  const probe = skill.lastIndexOf("grep -q -- '--auto)'", call);
+  assert(probe !== -1 && probe < call, 'the --auto call must be capability-probed');
+  assert(skill.lastIndexOf('TDOC_SKIP_UPDATE_CHECK', call) !== -1,
+    'there must be an off switch');
+});
+
+t('tdoc-update arg loop still has no catch-all (why the probe exists)', () => {
+  // If this ever gains a `*)` that errors on unknown flags, the probe in
+  // SKILL.md can be simplified — but until then it is load-bearing.
+  const src = readBin('tdoc-update');
+  const loop = src.slice(src.indexOf('for arg in "$@"'), src.indexOf('done', src.indexOf('for arg in "$@"')));
+  assert(!/\*\)/.test(loop), 'arg loop gained a catch-all — revisit the SKILL.md probe');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
