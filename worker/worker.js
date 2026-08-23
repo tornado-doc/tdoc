@@ -1550,9 +1550,8 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
         <li>Open the AI you already use.
           <span class="mk-say">Use tdoc to make me a one page summary of this quarter, with a chart of weekly signups.</span>
         </li>
-        <li>It writes the page and opens it for you.</li>
-        <li>Hit <b>Publish</b>, top right, to put it online.</li>
-        <li>Send the link to anyone. They comment on the page, and your AI answers them.</li>
+        <li>It writes the page, publishes it, and hands you the link.</li>
+        <li>Send that link to anyone. They comment on the page, and your AI answers them.</li>
       </ol>
     </div>
     <div class="mk-ft">Want a specific look first? <a href="/templates">Browse templates</a>. &nbsp;·&nbsp; Not set up yet? <a href="/start">Start here</a>.</div>

@@ -309,5 +309,32 @@ t('/start serves the doc and fails safe', () => {
     '/start must route through landingResponse so it inherits the neutral-page fallback');
 });
 
+// ---- the site must not teach the pre-publish-first flow (#236 S6) ----
+
+t('/start names tdoc.dev, not a Cloudflare account, as the destination', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'landing', 'tdoc-start', 'v1', 'index.html'), 'utf8');
+  const from = html.indexOf('Where does it get published');
+  const fold = html.slice(from, html.indexOf('</details>', from));
+  assert(!/free Cloudflare account you own/.test(fold),
+    '/start still names a Cloudflare account as the default destination');
+  assert(!/enable R2|About five minutes/.test(fold),
+    '/start still walks people through Cloudflare setup for the default path');
+  assert(/tdoc\.dev/.test(fold), '/start should name tdoc.dev');
+  // Self-hosting and local-only are demoted, not deleted.
+  assert(/my own Cloudflare/.test(fold), 'self-hosting should still be reachable');
+  assert(/keep it local/.test(fold), 'local-only should still be reachable');
+});
+
+t('the /me create-doc modal does not teach a manual Publish step', () => {
+  // /tdoc new publishes on its own since #239; telling people to hit Publish
+  // sends them looking for a button that is not part of the flow any more.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+  const from = src.indexOf('class="mk-bd"');
+  const modal = src.slice(from, src.indexOf('</ol>', from));
+  assert(!/Hit <b>Publish<\/b>/.test(modal), '/me modal still says to hit Publish');
+  assert(/publishes it, and hands you the link/.test(modal),
+    '/me modal should say the link comes back on its own');
+});
+
 console.log(`\n${pass} passed, ${fail} failed.`);
 process.exit(fail ? 1 : 0);
