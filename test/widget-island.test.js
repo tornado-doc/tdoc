@@ -144,8 +144,10 @@ function get(port, p, headers = {}) {
     if (csp.includes('unsafe-inline')) throw new Error(`host CSP gained unsafe-inline: ${csp}`);
   });
 
-  await t('host doc rewrites widget iframe sandbox to allow-scripts only', async () => {
-    const res = await get(PORT, `/d/${SLUG}/v/1`);
+  await t('the /frame document rewrites widget iframe sandbox to allow-scripts only', async () => {
+    // Author content (incl. its widget iframes) now lives in the isolated
+    // /frame document, where forceWidgetSandbox runs — not in the shell chrome.
+    const res = await get(PORT, `/d/${SLUG}/v/1/frame`, { 'Sec-Fetch-Dest': 'iframe' });
     const iframes = [...res.body.matchAll(/<iframe\b([^>]*)>/gi)].map(m => m[0]);
     const widgetIframe = iframes.find(t => t.includes('/d/island-fixture/v/1/widget/'));
     if (!widgetIframe) throw new Error(`widget iframe missing from host doc: ${iframes.join(' | ')}`);

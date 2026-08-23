@@ -244,7 +244,10 @@ function safeJsonForScript(obj) {
 // author sees locally matches what ships (no "worked in dev, XSS in prod"
 // surprise), and costs nothing since 0 published docs use <script>.
 function cspHeader(nonce) {
-  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+  // frame-src 'self': the shell document embeds the author content only via the
+  // same-origin /frame route (which is itself sandboxed to an opaque origin).
+  // Locking it to 'self' means the shell can never be made to frame anything else.
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; frame-src 'self'; object-src 'none'; base-uri 'none';`;
 }
 
 // Interactive islands (#138). Host documents keep cspHeader(); computation
@@ -326,7 +329,19 @@ function shellDocument(slug, version, nonce) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
-  const cfgJson = safeJsonForScript({ slug, version, mode: 'local', versions });
+  const ident = e2eIdentity();
+  const isOwner = !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase());
+  // window.__TDOC__ powers the chrome-level modals (sign-in device flow +
+  // onboarding), which read it exactly as they did in the single-origin path.
+  // window.__TDOC_SHELL__ carries the shell client's own config (incl. identity
+  // so reaction "mine" detection works). Both are nonced.
+  const authCfgJson = safeJsonForScript({ slug, version, identity: ident, isOwner, authConfigured: !!ident, mode: 'local', versions });
+  const cfgJson = safeJsonForScript({ slug, version, mode: 'local', versions, identity: ident });
+  // Sign-in (always) + onboarding (start docs only) are chrome, so they live in
+  // the shell, not the isolated author frame — same modules as the overlay path.
+  let signinJs = '', onboardJs = '';
+  try { signinJs = fs.readFileSync(SIGNIN_PATH, 'utf8'); } catch {}
+  if (ONBOARD_SLUGS.has(slug)) { try { onboardJs = fs.readFileSync(ONBOARD_PATH, 'utf8'); } catch {} }
   // Shared chrome module (Contract 1): rendered server-side for the static bar +
   // footer (1:1 with overlay), AND inlined as a nonced <script> so the shell's
   // client logic can build the composer/pins from window.TDOC_CHROME.
@@ -363,7 +378,10 @@ function shellDocument(slug, version, nonce) {
   <iframe class="tdoc-doc-frame" title="Document content" sandbox="allow-scripts" src="${esc(frameSrc)}"></iframe>
   <footer class="tdoc-footer">${footerInner}</footer>
   <script${nonceAttr}>${chromeJs}</script>
+  <script${nonceAttr}>window.__TDOC__ = ${authCfgJson};</script>
   <script${nonceAttr}>window.__TDOC_SHELL__ = ${cfgJson};</script>
+  <script${nonceAttr}>${signinJs}</script>
+  ${onboardJs ? `<script${nonceAttr}>${onboardJs}</script>` : ''}
   <script${nonceAttr}>${shellScript()}</script>
 </body></html>`;
 }
@@ -416,17 +434,21 @@ function shellScript() {
       .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); return list; })
       .catch(function(){ return []; });
   }
+  // On a 401 (auth required — production/worker), run the shared sign-in modal
+  // (device flow / web redirect) then retry the write. Local mode carries an
+  // E2E identity so this never fires there; it's here for worker parity.
+  function ensureAuthThen(status, retry){ if (status === 401 && window.__tdocSignIn){ window.__tdocSignIn().then(function(){ retry(); }, function(){}); return true; } return false; }
   function postReply(parentId, text, btn){
     text = (text || '').trim(); if (!text) return; if (btn) btn.disabled = true;
     fetch('/api/comments', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ slug: cfg.slug, version: cfg.version, text: text, parent_id: parentId }) })
       .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function(){ return loadComments(); })
       .then(function(){ openCard(parentId); })   // reopen with the new reply shown
-      .catch(function(){ if (btn){ btn.disabled = false; btn.textContent = 'Retry'; } });
+      .catch(function(status){ if (ensureAuthThen(status, function(){ postReply(parentId, text, btn); })) return; if (btn){ btn.disabled = false; btn.textContent = 'Retry'; } });
   }
   function postReaction(targetId, emoji){
     fetch('/api/reactions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ slug: cfg.slug, comment_id: targetId, emoji: emoji, version: cfg.version }) })
-      .then(function(r){ if (r.ok) return loadComments().then(function(){ openCard(targetId); }); })
+      .then(function(r){ if (r.ok) return loadComments().then(function(){ openCard(targetId); }); ensureAuthThen(r.status, function(){ postReaction(targetId, emoji); }); })
       .catch(function(){});
   }
   var emojiPicker = null;
@@ -667,7 +689,7 @@ function shellScript() {
         anchor: { kind:'text', text: pending.text, context_before: pending.context_before, context_after: pending.context_after } })
     }).then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function(){ close(); loadComments(); })   // re-resolve so the new pin appears
-      .catch(function(){ btn.disabled = false; btn.textContent = 'Retry'; });
+      .catch(function(status){ if (ensureAuthThen(status, function(){ postComment(text, btn); })) return; btn.disabled = false; btn.textContent = 'Retry'; });
   }
   window.addEventListener('message', function(e){
     if (!frameWin() || e.source !== frameWin()) return;      // validate by window identity (opaque origin)
@@ -710,48 +732,6 @@ function shellScript() {
   document.addEventListener('click', function(){ closeMenus(); closeEmojiPicker(); closeCard(); closeClusterPopover(); });
   layout();
 })();`;
-}
-
-function injectOverlay(html, slug, version, nonce) {
-  html = forceWidgetSandbox(html);
-  if (ONBOARD_SLUGS.has(slug)) {
-    try {
-      const onboard = fs.readFileSync(ONBOARD_PATH, 'utf8');
-      const tag = `<script${nonce ? ` nonce="${nonce}"` : ''}>${onboard}</script>`;
-      html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
-    } catch {}
-  }
-  // The shared device flow goes in before the overlay, which calls into it.
-  try {
-    const signin = fs.readFileSync(SIGNIN_PATH, 'utf8');
-    const tag = `<script${nonce ? ` nonce="${nonce}"` : ''}>${signin}</script>`;
-    html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
-  } catch {}
-  const overlay = fs.readFileSync(OVERLAY_PATH, 'utf8');
-  // Hand the overlay the full version list so the bar can offer a version
-  // picker. Read straight from meta.json; ignore failures and fall back to
-  // the current version only.
-  let versions = [{ n: version }];
-  try {
-    const meta = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8'));
-    if (Array.isArray(meta.versions) && meta.versions.length) {
-      versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
-    }
-  } catch {}
-  // nonce is stamped onto BOTH injected <script> tags so only they run under
-  // the CSP set by cspHeader() above — author content in `html` has no nonce
-  // and is inert.
-  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
-  const ident = e2eIdentity();
-  const cfg = `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript({
-    slug, version,
-    identity: ident,
-    isOwner: !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase()),
-    authConfigured: !!ident, mode: 'local', versions,
-  })};</script>`;
-  const inject = `${cfg}\n<script${nonceAttr}>${overlay}</script>`;
-  if (html.includes('</body>')) return html.replace('</body>', `${inject}\n</body>`);
-  return html + inject;
 }
 
 // Always returns an array for a comments file. A comments.json that parses to a
@@ -1056,16 +1036,10 @@ const server = http.createServer(async (req, res) => {
     const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
     if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
     const nonce = crypto.randomBytes(16).toString('hex');
-    // Shell mode (opt-in): render chrome + embed the author frame instead of
-    // inlining the overlay into the author document. Default path unchanged.
-    if (url.searchParams.get('shell') === '1') {
-      return send(res, 200, shellDocument(slug, Number(vStr), nonce), {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': cspHeader(nonce),
-      });
-    }
-    const html = fs.readFileSync(file, 'utf8');
-    return send(res, 200, injectOverlay(html, slug, Number(vStr), nonce), {
+    // Single path: every doc renders the cross-origin shell (chrome in the outer
+    // document, author content isolated in the /frame iframe). The legacy
+    // single-origin overlay-injection path is gone — see the git history / PLAN.md.
+    return send(res, 200, shellDocument(slug, Number(vStr), nonce), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': cspHeader(nonce),
     });
