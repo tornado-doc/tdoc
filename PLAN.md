@@ -19,13 +19,21 @@ postMessage-only. This is "cross-origin" for our purposes **without** needing a
 we already ship. (A real subdomain is only needed if we later let authors run
 persistent JS with storage, like Artifacts' `allow-same-origin` frames.)
 
-## CORRECTION (must reuse overlay.js 1:1 — do NOT reinvent chrome)
+## CORRECTION (reuse the core UI/UX 1:1 — NOT the exact implementation)
 
-P1–P3a wrongly hand-rolled a minimal shell chrome (bare top bar, custom
-composer, custom pins, custom FAB). That produces a DIFFERENT UI/UX — wrong.
-The chrome (real top bar with sign-in/Copy/Share/version/theme/avatar, footer,
-comment cards, mobile drawer, all CSS) MUST be the existing `server/overlay.js`,
-reused verbatim, so the look is 1:1 identical on laptop and mobile.
+What must be 1:1 is the **UI/UX**: the same top bar (sign-in/Copy/Share/version/
+theme/avatar), footer, comment composer, comment cards, pins, and mobile drawer —
+same look and same behavior on laptop and mobile. It does NOT have to be the same
+*implementation*: the shell may reimplement the wiring async-side. So the goal is
+NOT "run overlay.js across the boundary via a doc-port" (that was over-engineered);
+it's "make the shell chrome look and behave identically by REUSING overlay.js's
+CSS + markup structure, fed by the probe over postMessage."
+
+P1–P3a's chrome was wrong not because it was a reimplementation but because it was
+minimal/ugly and didn't match. Fix: pull the REAL chrome CSS + bar/footer/card/pin/
+drawer markup from overlay.js into the shell so it's pixel-identical; wire it shell-
+side with probe data (selection→composer, comments→pins, drawer). The overlay's
+synchronous anchoring internals stay in the frame (probe); nothing "hard" about it.
 
 FULL MIGRATION — single path, no dual-mode, no flag. This is a draft PR on a
 feature branch, so main is untouched until merge; we do NOT need the flag or a
@@ -35,23 +43,23 @@ reach 1:1 parity + migrate existing docs, then merge. No dual-mode tech debt.
 Correct architecture:
 - The doc route ALWAYS returns the shell; author content ALWAYS renders in the
   iframe; there is no `?shell=1` flag and no single-origin fallback.
-- Run the SAME `overlay.js` in the SHELL document. It builds the identical
-  chrome. Nothing about the bar/footer/cards/drawer/CSS changes.
-- overlay.js's content-DOM access (selection capture, getContext,
-  collectTextNodes, findTextRange/findElement, getArticleMetrics,
-  CSS.highlights, per-range hit-testing, scrollAnchorIntoView — recon area 4)
-  ALWAYS goes to the frame probe over postMessage. A thin doc-port seam is fine
-  for structure, but it has ONE backend (postMessage) — no local-read branch.
-  Highlighting runs inside the probe (ranges can't cross origins).
+- The shell renders the chrome by REUSING overlay.js's CSS + markup (bar,
+  footer, comment cards, pins, drawer, composer) so it is pixel- and
+  behavior-identical — but the shell wires it async-side from probe data. We do
+  NOT run overlay.js verbatim in the shell.
+- The frame probe owns the content-DOM work (selection capture, anchor resolve,
+  geometry, CSS.highlights, hit-testing, scrollIntoView) and pushes results
+  (selection events, per-comment pin coordinates, article geometry) to the
+  shell over postMessage; the shell reads that local mirror synchronously and
+  re-renders reactively (as overlay already does on refresh/resize).
 - DELETE the old inline-overlay path (`injectOverlay`/`injectOverlayCfg` into
   the author HTML) in BOTH server.js and worker.js.
-- DISCARD the hand-rolled shell bar/composer/pins from P1–P3a.
 - Existing docs migrate to self-contained (model B bake) since there is no old
   path to fall back on.
 
-Definition of 1:1 done: the (only) shell path shows the exact same top bar
-(incl. sign-in where applicable), footer, comment composer, pins/cards, and
-mobile drawer as before — because it IS the same overlay code.
+Definition of 1:1 done: the (only) shell path shows the same top bar (incl.
+sign-in), footer, composer, pins/cards, and mobile drawer — same look and
+behavior on laptop and mobile — by reusing overlay.js's CSS + markup.
 
 ## Styling model: B — self-contained docs (Claude Artifacts model)
 
