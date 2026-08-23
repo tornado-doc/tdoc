@@ -772,6 +772,27 @@
   .tdoc-modal .manage-action.danger-btn:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
   .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
+  /* Allowed-users token field: chips (avatar + login + remove) plus a live
+     GitHub handle autocomplete. Candidate search and avatar validation hit
+     GitHub straight from the owner's browser (their IP, their ~10 req/min
+     budget) — no server proxy, no API key. The doc CSP (worker cspHeader)
+     restricts only script/object/base-uri, so these fetches + <img>s pass. */
+  .tdoc-token-field { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid #ccc; border-radius: 6px; padding: 6px; box-sizing: border-box; cursor: text; }
+  .tdoc-token-field.focus { border-color: var(--td-accent); }
+  .tdoc-token-field input[type="text"] { flex: 1 1 120px; min-width: 90px; width: auto; border: none; padding: 3px 4px; }
+  .tdoc-token-field input[type="text"]:focus { border: none; outline: none; }
+  .tdoc-token { display: inline-flex; align-items: center; gap: 6px; background: #f2f4f7; border: 1px solid #e2e6ea; border-radius: 999px; padding: 2px 4px 2px 2px; font-size: 13px; line-height: 1.4; }
+  .tdoc-token.invalid { background: #fdeceb; border-color: #f1b8b2; color: var(--td-danger); }
+  .tdoc-token img, .tdoc-token .mark { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
+  .tdoc-token .mark { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; background: #f1b8b2; color: #fff; }
+  .tdoc-token .rm { cursor: pointer; color: #999; font-size: 15px; padding: 0 3px; }
+  .tdoc-token .rm:hover { color: var(--td-danger); }
+  .tdoc-ac { position: relative; }
+  .tdoc-ac-list { position: absolute; left: 0; right: 0; top: 2px; z-index: 10; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
+  .tdoc-ac-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; }
+  .tdoc-ac-item:hover, .tdoc-ac-item.active { background: #f2f4f7; }
+  .tdoc-ac-item img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
+  .tdoc-ac-item .login { font-size: 13px; font-weight: 600; color: #222; }
 
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
@@ -3231,7 +3252,10 @@
         </div>
         <div class="manage-section">
           <label class="field" for="tdoc-mgmt-allowed">Allowed users (private / invited)</label>
-          <input type="text" id="tdoc-mgmt-allowed" autocomplete="off" placeholder="github-login, another-login" value="${escapeHtml((access.allowed_users || []).join(', '))}">
+          <div class="tdoc-token-field" id="tdoc-allowed-field">
+            <input type="text" id="tdoc-mgmt-allowed" autocomplete="off" spellcheck="false" placeholder="Add a GitHub username…">
+          </div>
+          <div class="tdoc-ac" id="tdoc-allowed-ac"></div>
           <p class="manage-hint" id="tdoc-allowed-status">&nbsp;</p>
         </div>
         <div class="manage-section">
@@ -3315,11 +3339,131 @@
       };
     });
 
-    const allowedInput = document.getElementById('tdoc-mgmt-allowed');
-    allowedInput.addEventListener('change', async () => {
-      const list = allowedInput.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
-      await patchAccess({ allowed_users: list }, document.getElementById('tdoc-allowed-status'), 'Saved.');
-    });
+    // ----- Allowed users: chip field + live GitHub handle autocomplete -----
+    // All client-side. Candidate lookup and avatar existence checks go straight
+    // to GitHub from the owner's browser (their IP → their own ~10 req/min
+    // anonymous budget), so there is no worker proxy and no API key. See the
+    // CSS block for why the doc CSP permits these requests.
+    (function setupAllowedUsers() {
+      const field = document.getElementById('tdoc-allowed-field');
+      const input = document.getElementById('tdoc-mgmt-allowed');
+      const acWrap = document.getElementById('tdoc-allowed-ac');
+      const status = document.getElementById('tdoc-allowed-status');
+      const list = Array.isArray(access.allowed_users) ? access.allowed_users.slice() : [];
+      // Accept a bare login, an @handle, or a pasted github.com/<login> URL.
+      const norm = (s) => s.trim().replace(/^@/, '').replace(/^https?:\/\/github\.com\//i, '').replace(/\/.*$/, '');
+      const avatarUrl = (login) => `https://github.com/${encodeURIComponent(login)}.png?size=48`;
+
+      function renderChips() {
+        field.querySelectorAll('.tdoc-token').forEach(c => c.remove());
+        list.forEach((login) => {
+          const chip = document.createElement('span');
+          chip.className = 'tdoc-token';
+          const img = document.createElement('img');
+          img.src = avatarUrl(login); img.alt = '';
+          // A 404 from the avatar endpoint means no such GitHub user — flag it
+          // so the owner sees a bad handle instead of silently locking someone
+          // out. (github.com/<login>.png needs no API call and no rate budget.)
+          img.onerror = () => {
+            chip.classList.add('invalid');
+            const mark = document.createElement('span');
+            mark.className = 'mark'; mark.textContent = '!';
+            mark.title = 'No GitHub user with this username';
+            img.replaceWith(mark);
+          };
+          const name = document.createElement('span'); name.textContent = login;
+          const rm = document.createElement('span');
+          rm.className = 'rm'; rm.textContent = '×'; rm.title = 'Remove';
+          rm.onclick = () => remove(login);
+          chip.append(img, name, rm);
+          field.insertBefore(chip, input);
+        });
+      }
+      const commit = () => patchAccess({ allowed_users: list.slice() }, status, 'Saved.');
+      function add(raw) {
+        const l = norm(raw);
+        if (l && !list.some(x => x.toLowerCase() === l.toLowerCase())) {
+          list.push(l); renderChips(); commit();
+        }
+        input.value = ''; closeAc();
+      }
+      function remove(login) {
+        const i = list.findIndex(x => x.toLowerCase() === login.toLowerCase());
+        if (i >= 0) { list.splice(i, 1); renderChips(); commit(); }
+      }
+
+      // ---- autocomplete dropdown ----
+      let acItems = [], acActive = -1, acSeq = 0, debounceTimer = 0;
+      function closeAc() { acWrap.innerHTML = ''; acItems = []; acActive = -1; }
+      function renderAc(users) {
+        acItems = users; acActive = -1;
+        if (!users.length) return closeAc();
+        const box = document.createElement('div');
+        box.className = 'tdoc-ac-list';
+        users.forEach((u) => {
+          const it = document.createElement('div');
+          it.className = 'tdoc-ac-item';
+          const img = document.createElement('img');
+          img.src = u.avatar_url || avatarUrl(u.login); img.alt = '';
+          const login = document.createElement('span');
+          login.className = 'login'; login.textContent = u.login;
+          it.append(img, login);
+          // mousedown (not click) so it fires before the input's blur handler.
+          it.addEventListener('mousedown', (e) => { e.preventDefault(); add(u.login); });
+          box.appendChild(it);
+        });
+        acWrap.innerHTML = ''; acWrap.appendChild(box);
+      }
+      async function search(q) {
+        const seq = ++acSeq;
+        try {
+          const r = await fetch(
+            `https://api.github.com/search/users?q=${encodeURIComponent(q)}+in:login&per_page=6`,
+            { headers: { 'Accept': 'application/vnd.github+json' } });
+          if (seq !== acSeq) return; // superseded by a newer keystroke
+          if (!r.ok) return closeAc(); // rate-limited / error → no suggestions; typing still works
+          const data = await r.json();
+          if (seq !== acSeq) return;
+          renderAc((data.items || []).filter(u => u.type === 'User').slice(0, 6));
+        } catch { if (seq === acSeq) closeAc(); }
+      }
+      function moveAc(dir) {
+        const items = acWrap.querySelectorAll('.tdoc-ac-item');
+        if (!items.length) return;
+        acActive = (acActive + dir + items.length) % items.length;
+        items.forEach((el, i) => el.classList.toggle('active', i === acActive));
+      }
+
+      input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        const q = norm(input.value);
+        if (q.length < 2) return closeAc();
+        // Generous debounce: GitHub's anonymous search budget is ~10/min per IP.
+        debounceTimer = setTimeout(() => search(q), 450);
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' && acItems.length) { e.preventDefault(); return moveAc(1); }
+        if (e.key === 'ArrowUp' && acItems.length) { e.preventDefault(); return moveAc(-1); }
+        if (e.key === 'Escape') return closeAc();
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          if (acActive >= 0 && acItems[acActive]) add(acItems[acActive].login);
+          else if (input.value.trim()) add(input.value);
+          return;
+        }
+        if (e.key === 'Backspace' && !input.value && list.length) remove(list[list.length - 1]);
+      });
+      input.addEventListener('focus', () => field.classList.add('focus'));
+      input.addEventListener('blur', () => {
+        field.classList.remove('focus');
+        // Defer so a candidate click (mousedown) resolves first; then commit any
+        // half-typed handle left in the box.
+        setTimeout(() => { if (input.value.trim()) add(input.value); closeAc(); }, 150);
+      });
+      field.addEventListener('click', () => input.focus());
+
+      renderChips();
+    })();
 
     document.getElementById('tdoc-mgmt-unpublish').onclick = () => {
       showManageConfirm({
