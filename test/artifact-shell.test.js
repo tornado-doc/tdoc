@@ -17,8 +17,12 @@
 // It FAILS on main (no shell path) and PASSES when the architecture lands.
 // Each phase flips one block from red to green.
 
+const fs = require('fs');
+const path = require('path');
 const { requirePlaywrightOrSkip, resolveTarget } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('artifact-shell.test.js');
+
+const COMMENTS_FIXTURE = path.join(__dirname, 'fixtures/tdocs/hostile-body-css/comments.json');
 
 let pass = 0, fail = 0;
 function ok(name) { console.log(`  ✓ ${name}`); pass++; }
@@ -254,6 +258,51 @@ const SLUG = 'hostile-body-css';
       if (!chip || !/fixed/.test(chip)) throw new Error('card missing resolved chip: ' + chip);
       const agentAuthor = await page.evaluate(() => !!document.querySelector('.tdoc-margin-comment .author.tdoc-agent-author img'));
       if (!agentAuthor) throw new Error('card did not render the agent author with a logo');
+    });
+
+    await t('re-anchor: "move anchor" rebinds a comment to a new frame selection', async () => {
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 3000 });
+        await page.click('.tdoc-pin[data-id="c_fixture_1"]');
+        await page.waitForSelector('.tdoc-margin-comment.active .tdoc-reanchor-btn', { timeout: 2000 });
+        // the "move anchor" affordance is visible on the active card
+        const btnVisible = await page.evaluate(() => {
+          const b = document.querySelector('.tdoc-margin-comment.active .tdoc-reanchor-btn');
+          return b && getComputedStyle(b).display !== 'none';
+        });
+        if (!btnVisible) throw new Error('move-anchor button not visible on active card');
+        await page.click('.tdoc-margin-comment.active .tdoc-reanchor-btn');
+        // banner appears; body enters re-anchoring mode
+        const remode = await page.evaluate(() => document.body.classList.contains('tdoc-reanchoring') &&
+          getComputedStyle(document.querySelector('.tdoc-reanchor-banner')).display !== 'none');
+        if (!remode) throw new Error('re-anchor banner/mode did not engage');
+        // select para-2 in the frame → shell PATCHes the anchor instead of opening a composer
+        const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+        await frame.evaluate(() => {
+          const p = document.getElementById('para-2');
+          const r = document.createRange(); r.selectNodeContents(p);
+          const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+          const rect = p.getBoundingClientRect();
+          document.dispatchEvent(new MouseEvent('mouseup', { clientX: rect.left + 20, clientY: rect.top + 8, bubbles: true, cancelable: true, view: window, button: 0 }));
+        });
+        // wait for the PATCH to land in the fixture
+        let anchored = null;
+        for (let i = 0; i < 40; i++) {
+          const parsed = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'));
+          const c = parsed.find(x => x.id === 'c_fixture_1');
+          if (c && c.anchor && /second paragraph/.test(c.anchor.text || '')) { anchored = c; break; }
+          await page.waitForTimeout(50);
+        }
+        if (!anchored) throw new Error('comment was not re-anchored to the new selection');
+        // re-anchoring exits the mode and does NOT open a composer
+        const composerOpen = await page.evaluate(() => !!document.querySelector('.tdoc-popup'));
+        if (composerOpen) throw new Error('re-anchor selection wrongly opened the composer');
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
     });
 
     // --- #3 MOBILE ------------------------------------------------------------

@@ -359,6 +359,7 @@ function shellDocument(slug, version, nonce) {
 </style>
 </head><body>
   <div class="tdoc-bar">${barInner}</div>
+  <div class="tdoc-reanchor-banner"><span class="label">Select text to move anchor</span><button type="button" id="tdoc-reanchor-remove">Remove anchor</button><button type="button" id="tdoc-reanchor-cancel" class="danger">Cancel</button></div>
   <iframe class="tdoc-doc-frame" title="Document content" sandbox="allow-scripts" src="${esc(frameSrc)}"></iframe>
   <footer class="tdoc-footer">${footerInner}</footer>
   <script${nonceAttr}>${chromeJs}</script>
@@ -386,6 +387,7 @@ function shellScript() {
   function pinX(){ return Math.min((gutterRight || (window.innerWidth - 44)) + 14, window.innerWidth - 34); }
   var copyReq = null; // { includeComments } awaiting tdoc:docMarkdown
   var frameScrollY = 0;
+  var reanchoringId = null; // comment id awaiting a new frame selection to rebind its anchor
   function copyText(t){
     if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function(){return true;}).catch(function(){return false;});
     try { var ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); var ok=document.execCommand('copy'); ta.remove(); return Promise.resolve(ok); } catch(e){ return Promise.resolve(false); }
@@ -465,7 +467,7 @@ function shellScript() {
     closeCard();
     var c = commentsById[id]; if (!c || !window.TDOC_CHROME) return;
     var card = document.createElement('div');
-    card.className = 'tdoc-margin-comment tdoc-floating-open' + (c.status === 'applied' ? ' tdoc-resolved' : '');
+    card.className = 'tdoc-margin-comment tdoc-floating-open active' + (c.status === 'applied' ? ' tdoc-resolved' : '') + (isUnanchored(id) ? ' tdoc-unanchored' : '');
     card.setAttribute('data-comment-id', id);
     card.innerHTML = window.TDOC_CHROME.buildCard(c, (cfg.identity && cfg.identity.login) || 'anon');
     card.addEventListener('click', function(e){ e.stopPropagation(); });
@@ -489,8 +491,36 @@ function shellScript() {
       fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&id=' + encodeURIComponent(id) + '&version=' + encodeURIComponent(cfg.version), { method:'DELETE' })
         .then(function(r){ if (r.ok){ closeCard(); loadComments(); } else { r.json().catch(function(){return {};}).then(function(x){ alert('Could not delete: ' + (x.error || x.message || ('HTTP ' + r.status))); }); } });
     });
+    // re-anchor: enter re-anchor mode; the next frame selection rebinds this comment
+    var reBtn = card.querySelector('.tdoc-reanchor-btn');
+    if (reBtn) reBtn.addEventListener('click', function(e){ e.stopPropagation(); startReanchor(id); });
     positionCard();
   }
+  // A comment is unanchored when its anchor didn't resolve in this doc version —
+  // i.e. no pin was reported for it. (pinData holds only resolved anchors.)
+  function isUnanchored(id){ for (var i=0;i<pinData.length;i++){ if (pinData[i].id===id) return false; } return true; }
+  // Re-anchor flow (1:1 with overlay startReanchor/exitReanchor): the shell holds
+  // reanchoringId; the next tdoc:selection from the frame PATCHes the anchor
+  // instead of opening the composer. A banner near the bar exposes cancel/remove.
+  function startReanchor(id){ if (reanchoringId === id){ exitReanchor(); return; } reanchoringId = id; document.body.classList.add('tdoc-reanchoring'); }
+  function exitReanchor(){ reanchoringId = null; document.body.classList.remove('tdoc-reanchoring'); }
+  function reanchorTo(d){
+    var id = reanchoringId; exitReanchor(); closeCard(); if (!id) return;
+    fetch('/api/comments', { method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ slug: cfg.slug, id: id, version: cfg.version,
+        anchor: { kind:'text', text: d.text, context_before: d.context_before, context_after: d.context_after } })
+    }).then(function(r){ return r.ok ? loadComments() : null; });
+  }
+  function removeAnchor(){
+    var id = reanchoringId; exitReanchor(); closeCard(); if (!id) return;
+    fetch('/api/comments', { method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ slug: cfg.slug, id: id, version: cfg.version, anchor: { kind:'none' } })
+    }).then(function(r){ return r.ok ? loadComments() : null; });
+  }
+  (function(){
+    var c = document.getElementById('tdoc-reanchor-cancel'); if (c) c.addEventListener('click', function(e){ e.stopPropagation(); exitReanchor(); });
+    var r = document.getElementById('tdoc-reanchor-remove'); if (r) r.addEventListener('click', function(e){ e.stopPropagation(); removeAnchor(); });
+  })();
   // Full reconcile — only on tdoc:pins (comment set changed). Creates/removes
   // pin elements against the cached pinEls map, then positions them. O(P) once.
   function positionPins(){
@@ -594,7 +624,7 @@ function shellScript() {
   window.addEventListener('message', function(e){
     if (!frameWin() || e.source !== frameWin()) return;      // validate by window identity (opaque origin)
     var d = e.data; if (!d || d.source !== 'tdoc-frame') return;
-    if (d.type === 'tdoc:selection') open(d);
+    if (d.type === 'tdoc:selection') { if (reanchoringId) reanchorTo(d); else open(d); }
     else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); closeEmojiPicker(); }
     else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
     else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; positionPins(); }

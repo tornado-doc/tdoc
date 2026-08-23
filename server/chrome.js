@@ -166,7 +166,8 @@
     var resolvedChip = isResolved
       ? '<span class="tdoc-resolved-chip" title="Resolved by ' + escapeHtml(resolvedBy) + (comment.applied_in ? ' in v' + escapeHtml(String(comment.applied_in)) : '') + '">✓ ' + (verdict === 'partial' ? 'partially fixed' : verdict === 'question' ? 'needs input' : 'fixed') + (comment.applied_in ? ' · v' + escapeHtml(String(comment.applied_in)) : '') + '</span>'
       : '';
-    return resolvedChip + renderAuthor(comment.author) +
+    var anchorActions = '<div class="tdoc-anchor-actions"><button class="tdoc-reanchor-btn" type="button" data-id="' + id + '"><span class="tdoc-reanchor-unanchored">unanchored — click to re-anchor</span><span class="tdoc-reanchor-anchored">↻ move anchor</span></button></div>';
+    return anchorActions + resolvedChip + renderAuthor(comment.author) +
       '<div class="text">' + escapeHtml(comment.text || '') + '</div>' +
       (hr ? renderReactionsRow(comment, me) : '') +
       '<div class="meta"><span>v' + (comment.version || 1) + (when ? ' · ' + escapeHtml(when) : '') + '</span>' +
