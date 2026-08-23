@@ -70,9 +70,9 @@ t('tdoc-publish defaults to hosted and treats Cloudflare/Vercel as self-host fla
   assert(/sign_in_required/.test(src), 'hosted setup must handle a missing GitHub session');
   assert(!/TDOC_HOSTED_UPLOAD_TOKEN/.test(src), 'hosted setup must not require an out-of-band upload token');
   assert(/TDOC_HOSTED_BASE:-https:\/\/tdoc\.dev/.test(src), 'hosted setup does not default to tdoc.dev');
-  assert(/platform:"hosted"/.test(src), 'hosted setup does not persist hosted platform');
-  assert(/github_login:\$gh/.test(src), 'hosted setup does not persist github_login');
-  assert(/account_id:\$acct/.test(src), 'hosted setup does not persist account_id');
+  assert(/platform: "hosted"/.test(src), 'hosted setup does not persist hosted platform');
+  assert(/github_login: gh/.test(src), 'hosted setup does not persist github_login');
+  assert(/account_id: acct/.test(src), 'hosted setup does not persist account_id');
   assert(/if \[ "\$PLATFORM" = "hosted" \]/.test(src), 'hosted platform branch missing');
   assert(/UPLOAD_BASE="\$BASE"/.test(src), 'hosted branch should upload to configured base');
   assert(/PUBLIC_BASE="\$BASE"/.test(src), 'hosted branch should emit configured hosted base links');
@@ -762,6 +762,50 @@ t('tdoc-update arg loop still has no catch-all (why the probe exists)', () => {
   const src = readBin('tdoc-update');
   const loop = src.slice(src.indexOf('for arg in "$@"'), src.indexOf('done', src.indexOf('for arg in "$@"')));
   assert(!/\*\)/.test(loop), 'arg loop gained a catch-all — revisit the SKILL.md probe');
+});
+
+
+// ---- hosted publish must not need jq (#256) ----
+
+t('the hosted path uses no jq at all', () => {
+  const src = readBin('tdoc-publish');
+  // Everything hosted-reachable: the device flow, the token mint, the config
+  // write and read, the upload payload, and the response parse.
+  const hostedFns = [
+    src.slice(src.indexOf('hosted_github_signin()'), src.indexOf('first_time_setup_hosted()')),
+    src.slice(src.indexOf('first_time_setup_hosted()'), src.indexOf('require_jq_for_selfhost')),
+    src.slice(src.indexOf('build_payload()'), src.indexOf('PLATFORM_FLAG=')),
+  ].join('\n');
+  const calls = hostedFns.split('\n').filter((l) => /\bjq\s+(-|["'$])/.test(l) && !l.trim().startsWith('#'));
+  assert(calls.length === 0, `hosted path still shells out to jq:\n      ${calls.join('\n      ')}`);
+});
+
+t('jq is required for self-hosting, and only there', () => {
+  const src = readBin('tdoc-publish');
+  // No top-level hard fail any more — that turned a zero-setup path into an
+  // install step on a machine that ships no jq.
+  assert(!/^if ! command -v jq >\/dev\/null 2>&1; then$/m.test(src),
+    'the global jq gate is back');
+  assert(/require_jq_for_selfhost\(\)/.test(src), 'the self-host jq gate is missing');
+  for (const fn of ['first_time_setup()', 'first_time_setup_vercel()']) {
+    const i = src.indexOf(fn);
+    assert(i !== -1, `${fn} not found`);
+    const head = src.slice(i, i + 200);
+    assert(/require_jq_for_selfhost/.test(head), `${fn} does not check for jq`);
+  }
+  // And the message must not send a hosted user to install anything.
+  const msg = src.slice(src.indexOf('Self-hosting needs jq'), src.indexOf('Self-hosting needs jq') + 320);
+  assert(/does not need it/.test(msg), 'the jq message should say hosted publishing is unaffected');
+});
+
+t('build_payload embeds the document without a shell round trip', () => {
+  const src = readBin('tdoc-publish');
+  const fn = src.slice(src.indexOf('build_payload()'), src.indexOf('PLATFORM_FLAG='));
+  assert(/readFileSync\(htmlPath/.test(fn), 'the HTML must be read by node, not passed as an argument');
+  assert(/JSON\.stringify\(out\)/.test(fn), 'the payload must be JSON-encoded by node');
+  // Widgets and comments stay optional, the way the jq version had them.
+  assert(/if \(commentsPath\)/.test(fn), 'comments must stay optional');
+  assert(/Object\.keys\(widgets\)\.length/.test(fn), 'widgets must stay optional');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
