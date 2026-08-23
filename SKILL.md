@@ -1146,6 +1146,16 @@ if [ -n "${SKILL_TELEMETRY:-}" ]; then
   TEL_EFFECTIVE="$SKILL_TELEMETRY"
 elif [ -n "$TEL_MODE_PERSISTED" ]; then
   TEL_EFFECTIVE="$TEL_MODE_PERSISTED"
+elif [ "$TEL_PROMPTED" = "no" ]; then
+  # First ever run. The consent question used to be asked here, before any
+  # work — so the very first thing someone got after asking for a document
+  # was a question about analytics. It moves to the Final Step, after the
+  # link is in their hands.
+  #
+  # Nothing is recorded for this run. Defaulting to "on" and asking
+  # afterwards would be recording before consent; losing one event is the
+  # cheaper mistake.
+  TEL_EFFECTIVE="deferred"
 else
   TEL_EFFECTIVE="on"
 fi
@@ -1156,7 +1166,10 @@ fi
 TEL_SESSION_ID="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
 
 # Write per-session sentinel (not one global file)
-if [ "$TEL_EFFECTIVE" != "off" ]; then
+# Only "on" writes. "deferred" (a first run, consent not yet asked) records
+# nothing at all — no sentinel, no pending marker — so there is nothing to
+# reap and nothing logged before the user agreed to it.
+if [ "$TEL_EFFECTIVE" = "on" ]; then
   mkdir -p "$TEL_HOME/sentinels"
   date +%s > "$TEL_HOME/sentinels/$TEL_SESSION_ID"
   find "$TEL_HOME/sentinels" -type f -mtime +1 -delete 2>/dev/null || true
@@ -1232,7 +1245,7 @@ if [ -x "$TDOC_DIR/bin/tdoc-update-nag" ]; then
   NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" 2>/dev/null || true)"
   if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
     echo "$NAG_LINE"
-    if [ "$TEL_EFFECTIVE" != "off" ]; then
+    if [ "$TEL_EFFECTIVE" = "on" ]; then
       "$TDOC_DIR/telemetry/bin/telemetry-log" \
         --skill tdoc \
         --event-type upgrade_prompted \
@@ -1254,8 +1267,14 @@ echo "TDOC_VERSION: $INSTALLED_VERSION"
 
 ### Instructions for the agent
 
-**If `TEL_PROMPTED` is `no`** (first time the user runs tdoc with
-telemetry), ask the user ONCE with this text and two options:
+**If `TEL_PROMPTED` is `no`, ask nothing now.** The preamble set
+`TEL_EFFECTIVE=deferred`, which records nothing for this run. Do the work
+the user actually asked for, hand over the link, and only then ask — the
+question lives in the Final Step. A person who asked for a document should
+not have their first interaction with tdoc be an analytics prompt.
+
+The question itself, when the Final Step reaches it, is this text with two
+options:
 
 > tdoc can record when it runs, how it went (success/error/abandoned),
 > how long it took, and a random ID for your machine, and send it to
@@ -1275,13 +1294,8 @@ or any other host without that tool), present the same text as plain
 prose and wait for the user's typed reply (A/B). Either way, record
 their choice the same.
 
-After they pick, record the choice:
-
-```bash
-echo "MODE_FROM_USER" > "$TEL_CONFIG_FILE"  # "on" or "off"
-touch "$TEL_PROMPTED_FLAG"
-TEL_EFFECTIVE="$(cat "$TEL_CONFIG_FILE")"
-```
+Recording their answer is the Final Step's job — see there. Do not ask
+here, and do not ask twice.
 
 **If `TEL_PROMPTED` is `yes`**, do NOT ask again. Proceed silently.
 
@@ -1334,8 +1348,33 @@ rm -f "$TEL_HOME/sentinels/$TEL_SESSION_ID"
 # event, so the self-healing reaper must not later treat it as orphaned.
 rm -f "$TEL_HOME/telemetry/pending/.pending-$TEL_SESSION_ID" 2>/dev/null
 
-TEL_EFFECTIVE="${SKILL_TELEMETRY:-$(cat "$TEL_HOME/.telemetry-mode" 2>/dev/null || echo on)}"
+TEL_PROMPTED="no"; [ -f "$TEL_HOME/.telemetry-prompted" ] && TEL_PROMPTED="yes"
+TEL_MODE_PERSISTED="$(cat "$TEL_HOME/.telemetry-mode" 2>/dev/null | tr -d ' \n\r')"
+if [ -n "${SKILL_TELEMETRY:-}" ]; then
+  TEL_EFFECTIVE="$SKILL_TELEMETRY"
+elif [ -n "$TEL_MODE_PERSISTED" ]; then
+  TEL_EFFECTIVE="$TEL_MODE_PERSISTED"
+elif [ "$TEL_PROMPTED" = "no" ]; then
+  TEL_EFFECTIVE="deferred"
+else
+  TEL_EFFECTIVE="on"
+fi
+echo "TEL_EFFECTIVE: $TEL_EFFECTIVE"
 ```
+
+**If `TEL_EFFECTIVE` is `deferred`** — this was the user's first ever run.
+Hand over the finished work FIRST. Then, once the link is in their hands,
+ask the consent question above, exactly once, and record their answer:
+
+```bash
+echo "MODE_FROM_USER" > "$TEL_HOME/.telemetry-mode"   # "on" or "off"
+touch "$TEL_HOME/.telemetry-prompted"
+```
+
+Then **stop** — log nothing for this run. There is no sentinel and no
+pending marker to clean up, because the preamble wrote neither. The next
+run honours whatever they chose. One lost event is the correct price for
+not recording before someone agreed to it.
 
 If `TEL_EFFECTIVE` is `off`, **stop here** — do not call telemetry-log.
 
