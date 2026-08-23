@@ -282,7 +282,7 @@ about. Two things change it, and only if the user says so in their own words:
 
 | The user said | Destination | What they get back |
 |---|---|---|
-| nothing about hosting | **hosted tdoc.dev** | `https://tdoc.dev/d/<slug>/v/1` |
+| nothing about hosting | **hosted tdoc.dev** | `https://tdoc.dev/d/<slug>/v/1` — link-readable, not listed anywhere |
 | "publish to my own Cloudflare / Vercel", "self-host it" | their own worker | `<worker>.workers.dev` / `tdoc-<scope>.vercel.app` — still a public link, **not localhost** |
 | "keep it local", "don't upload it anywhere", "just show me locally" | local only | `http://localhost:7878/...` |
 
@@ -355,13 +355,23 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
 
    ```bash
    "$SKILL_DIR/bin/tdoc-publish" <slug>
+   # keep earlier drafts to yourself:
+   #   "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
    ```
 
    Report the `https://tdoc.dev/d/<slug>/v/1` URL on its own line, and say what
-   it is — the user may never have seen a tdoc page before:
+   it is — the user may never have seen a tdoc page before. Describe the
+   access it actually has, which for a plain publish is the legacy policy:
 
-   > Your doc is live and **unlisted**: anyone with this link can read it, and
-   > it is never listed anywhere. Send it to whoever should comment.
+   > Your doc is live. Anyone with this link can read it — and can page back
+   > through earlier versions — but it is not listed anywhere, so only people
+   > you send it to will find it.
+
+   Do **not** call it "unlisted". A publish with no explicit flags stores no
+   access block and takes the legacy policy (`visibility: public`,
+   `history_visibility: public`); saying unlisted would understate what a
+   recipient can see. If the user wants earlier versions kept private, that is
+   `--history owner`.
 
    *If the sign-in has not completed yet*, do not fall back to localhost and do
    not go quiet. Say the doc is written and waiting, and that approving the
@@ -369,7 +379,7 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
    get them a fresh code. The doc stays in `$TDOC_DIR/<slug>/`.
 
    *Self-host.* `"$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
-   (or `vercel`). Report the worker URL.
+   (or `vercel`). Report the worker URL, with the same note about access.
 
    **Local preview stays available to self-hosting users** — `/tdoc serve` and
    `http://localhost:7878` are unchanged, and iterating locally before pushing
