@@ -345,6 +345,7 @@ function shellDocument(slug, version, nonce) {
   .tdoc-doc-frame{flex:1 1 auto;width:100%;border:0;display:block;}
   .tdoc-pin{position:fixed;right:14px;}  /* shell body never scrolls; pins live in the right gutter */
   .tdoc-popup{position:fixed;}
+  .tdoc-margin-comment{position:fixed;right:46px;}  /* floating card in the right gutter, left of the pins */
 </style>
 </head><body>
   <div class="tdoc-bar">${barInner}</div>
@@ -367,6 +368,7 @@ function shellScript() {
   var BAR = 48; // top bar height; frame viewport coords + BAR = shell coords
   var pending = null; // last selection anchor awaiting a comment
   var pinData = []; // [{id, docY, login}]
+  var commentsById = {}; // id -> comment (for the floating card)
   var frameScrollY = 0;
   function frameWin(){ return frame && frame.contentWindow; }
   function sendFrame(msg){ var w = frameWin(); if (w) w.postMessage(Object.assign({source:'tdoc-shell'}, msg), '*'); }
@@ -379,8 +381,21 @@ function shellScript() {
   function loadComments(){
     fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&version=' + encodeURIComponent(cfg.version))
       .then(function(r){ return r.ok ? r.json() : []; })
-      .then(function(list){ sendFrame({ type:'tdoc:anchors', comments: Array.isArray(list) ? list : [] }); })
+      .then(function(list){ list = Array.isArray(list) ? list : []; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); })
       .catch(function(){});
+  }
+  // Floating comment card (real .tdoc-margin-comment markup + CSS).
+  function closeCard(){ var el = document.querySelector('.tdoc-margin-comment'); if (el) el.remove(); }
+  function openCard(id, topPx){
+    closeCard();
+    var c = commentsById[id]; if (!c || !window.TDOC_CHROME) return;
+    var card = document.createElement('div');
+    card.className = 'tdoc-margin-comment tdoc-floating-open';
+    card.setAttribute('data-comment-id', id);
+    card.innerHTML = window.TDOC_CHROME.buildCard(c);
+    document.body.appendChild(card);
+    card.style.top = Math.max(BAR + 4, Math.min(topPx, window.innerHeight - card.offsetHeight - 8)) + 'px';
+    card.addEventListener('click', function(e){ e.stopPropagation(); });
   }
   function positionPins(){
     var existing = {};
@@ -393,7 +408,7 @@ function shellScript() {
         // Real pin markup (avatar) from the shared chrome module, styled by the
         // real .tdoc-pin CSS. Avatar url arrives with the pin when available.
         el.innerHTML = window.TDOC_CHROME.avatarHtml({ login: p.login, avatar_url: p.avatar_url }, 'tdoc-pin-anon');
-        el.addEventListener('click', function(){ sendFrame({ type:'tdoc:scrollTo', docY: p.docY }); });
+        el.addEventListener('click', function(ev){ ev.stopPropagation(); openCard(p.id, BAR + (p.docY - frameScrollY)); sendFrame({ type:'tdoc:scrollTo', docY: p.docY }); });
         document.body.appendChild(el);
       }
       delete existing[p.id];
@@ -465,7 +480,7 @@ function shellScript() {
   // Copy / secondary menus: toggle open (actions deferred).
   wire('#tdoc-copy-md-btn','click',function(e){ e.stopPropagation(); var w=e.currentTarget.closest('.tdoc-menu-wrap'); if(w) w.classList.toggle('open'); });
   wire('#tdoc-more-btn','click',function(e){ e.stopPropagation(); var w=e.currentTarget.closest('.tdoc-menu-wrap'); if(w) w.classList.toggle('open'); });
-  document.addEventListener('click', function(){ document.querySelectorAll('.tdoc-menu-wrap.open, .tdoc-version-wrap.open').forEach(function(w){ w.classList.remove('open'); }); });
+  document.addEventListener('click', function(){ document.querySelectorAll('.tdoc-menu-wrap.open, .tdoc-version-wrap.open').forEach(function(w){ w.classList.remove('open'); }); closeCard(); });
   layout();
 })();`;
 }

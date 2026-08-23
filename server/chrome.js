@@ -119,7 +119,27 @@
       '<button class="submit">' + (needsSignIn ? 'Sign in' : 'Comment') + '</button></div>';
   }
 
-  var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer };
+  // Author row (was overlay.js:1986-1997). Agent-logo mapping deferred; agents
+  // fall back to avatar_url/anon.
+  function renderAuthor(author) {
+    if (!author) return '<div class="author"><span class="anon">anonymous</span></div>';
+    var avatar = author.avatar_url ? '<img src="' + escapeHtml(author.avatar_url) + '" alt="">' : '';
+    return '<div class="author">' + avatar + '<span class="login">' + escapeHtml(author.login || 'anonymous') + '</span></div>';
+  }
+
+  // Floating comment card inner HTML (subset of overlay.js buildCard 2061+):
+  // author + text + meta. Replies/reactions/actions/re-anchor are deferred.
+  // Consumer creates a .tdoc-margin-comment element and sets innerHTML to this.
+  function buildCard(comment) {
+    comment = comment || {};
+    var when = '';
+    try { when = new Date(comment.created).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) {}
+    return renderAuthor(comment.author) +
+      '<div class="text">' + escapeHtml(comment.text || '') + '</div>' +
+      '<div class="meta"><span>v' + (comment.version || 1) + (when ? ' · ' + escapeHtml(when) : '') + '</span></div>';
+  }
+
+  var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer, renderAuthor: renderAuthor, buildCard: buildCard };
   if (typeof window !== 'undefined') window.TDOC_CHROME = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

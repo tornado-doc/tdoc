@@ -132,6 +132,13 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-pin', { timeout: 3000 });
     });
 
+    await t('clicking a pin opens the real comment card', async () => {
+      await page.click('.tdoc-pin');
+      await page.waitForSelector('.tdoc-margin-comment .text', { timeout: 2000 });
+      const txt = await page.$eval('.tdoc-margin-comment .text', el => el.textContent);
+      if (!/pin should appear/.test(txt)) throw new Error('card text mismatch: ' + txt);
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });
