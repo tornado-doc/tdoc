@@ -1100,7 +1100,7 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
   // The onboarding modal is product UI, so it ships from here under the page
   // nonce. The doc's own <script> would never run (#138), which is why the
   // landing CTA still carries a plain href: with scripting off the visitor
@@ -1123,6 +1123,8 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     // version number are storage detail; printing them in the bar tells a
     // first-time visitor they are looking at somebody's document.
     isLanding: !!isLanding,
+    // Live GitHub star count for the landing header (null when unknown).
+    stars: (typeof stars === 'number' ? stars : null),
     // /me catalog: same overlay bar, no Share / Duplicate / Copy.
     isCatalog: !!isCatalog,
     // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
@@ -1165,6 +1167,27 @@ const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;
 // Returns { ok, response }. `ok:false` carries the real 401/403/404 response
 // for the /d/ route to pass through; the homepage ignores it and falls back to
 // the neutral page, because `/` must never dead-end on an access screen.
+// Live GitHub star count for the landing header. Fetched server-side because
+// the doc CSP (default-src 'none') blocks a browser fetch to api.github.com.
+// Cached at the edge for an hour via cf.cacheTtl, so it is one refresh per hour
+// per POP, not per pageview — GitHub's rate limit is never in play. Best-effort:
+// any failure returns null and the header simply shows the mark with no count.
+async function fetchStars(env) {
+  const repo = (env && env.GITHUB_REPO) || 'tornado-doc/tdoc';
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo}`, {
+      headers: { 'User-Agent': 'tdoc-landing', 'Accept': 'application/vnd.github+json' },
+      cf: { cacheTtl: 3600, cacheEverything: true },
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const n = Number(d && d.stargazers_count);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 async function serveDocVersion(env, req, slug, version, isLanding) {
   const gate = await enforceDocAccess(env, req, slug, version);
   if (!gate.ok) return { ok: false, response: gate.response };
@@ -1204,9 +1227,10 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
   }
   const nonce = rand(16);
+  const stars = isLanding ? await fetchStars(env) : null;
   return {
     ok: true,
-    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET), {
+    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
