@@ -5,10 +5,10 @@ description: |
   document from a prompt (SVG diagrams, CSS-toggled models, explainers,
   strategy docs, research write-ups, product specs, explainer pages,
   design docs, RFCs, case studies, post-mortems, technical proposals,
-  vision docs, one-pagers, decision frameworks), serve it at localhost
-  with text- and artifact-anchored inline commenting, and regenerate
-  new versions from comments. Publishes to each user's own Cloudflare
-  Worker for free always-on sharing.
+  vision docs, one-pagers, decision frameworks), publish it to a free
+  shareable link on tdoc.dev, and collect text- and artifact-anchored
+  comments that regenerate the next version. Readers need nothing
+  installed. Self-hosting on your own Cloudflare or Vercel is optional.
 
   Use when asked to "write a doc", "draft this", "publish this",
   "design doc", "PRD", "one-pager", "research write-up", "case study",
@@ -276,6 +276,45 @@ colors them; this file decides there should be many.
 
 ### `/tdoc new <prompt>` — create a new doc
 
+**Where it goes.** A doc is published to hosted `tdoc.dev` and the user is
+handed a shareable link. That is the default and it is not something to ask
+about. Two things change it, and only if the user says so in their own words:
+
+| The user said | Destination | What they get back |
+|---|---|---|
+| nothing about hosting | **hosted tdoc.dev** | `https://tdoc.dev/d/<slug>/v/1` — link-readable, not listed anywhere |
+| "publish to my own Cloudflare / Vercel", "self-host it" | their own worker | `<worker>.workers.dev` / `tdoc-<scope>.vercel.app` — still a public link, **not localhost** |
+| "keep it local", "don't upload it anywhere", "just show me locally" | local only | `http://localhost:7878/...` |
+
+**The localhost rule: never hand over a `localhost` URL unless the user asked
+to keep the doc local.** Not as a fallback, not when a sign-in did not finish,
+not as "here it is locally in the meantime". Asking to self-host on Cloudflare
+or Vercel is NOT asking for localhost — that path still ends at a public URL.
+If publishing cannot complete, say so and leave the doc in `$TDOC_DIR/<slug>/`;
+do not substitute a local URL for the link the user was promised.
+
+This rule is about **what you hand over**, not about the local server, which is
+untouched. `/tdoc serve` still works for everyone, and previewing locally while
+iterating is fine whenever the user asks for it — it is simply not what a
+finished doc is delivered as.
+
+**Step 0 — start the sign-in before you start writing.** Hosted publishing
+needs a one-time GitHub sign-in. Generating a doc takes 30–60 s and the device
+flow is a poll loop, so run them at the same time rather than interrupting the
+user at the end:
+
+```bash
+# no-op and instant when already signed in
+"$SKILL_DIR/bin/tdoc-publish" --signin-only
+```
+
+Launch this in the **background** (Bash `run_in_background: true`) and go
+straight on to writing the doc. It opens GitHub in the user's browser and
+prints a short code that they type there — GitHub does not accept the code
+through the URL, so it has to be entered by hand. Tell the user in one line
+that a GitHub page has opened and that the code is in the terminal; then keep
+working. Skip Step 0 entirely for the local-only and self-host destinations.
+
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
 2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, and `$SKILL_DIR/authoring/style/default.md`.**
    Voice constrains the prose as you generate it, not as a later cleanup
@@ -309,11 +348,54 @@ colors them; this file decides there should be many.
    { "title": "...", "slug": "...", "created": "<iso>", "versions": [{ "n": 1, "created": "<iso>", "prompt": "..." }] }
    ```
 6. Init `comments.json` as `[]`.
-7. Open `http://localhost:7878/d/<slug>/v/1` in the browser:
+7. **Publish and hand over the link.**
+
+   *Hosted (the default).* Confirm the background sign-in from Step 0 finished,
+   then publish:
+
+   ```bash
+   "$SKILL_DIR/bin/tdoc-publish" <slug>
+   # keep earlier drafts to yourself:
+   #   "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
+   ```
+
+   Report the `https://tdoc.dev/d/<slug>/v/1` URL on its own line, and say what
+   it is — the user may never have seen a tdoc page before. Describe the
+   access it actually has, which for a plain publish is the legacy policy:
+
+   > Your doc is live. Anyone with this link can read it — and can page back
+   > through earlier versions — but it is not listed anywhere, so only people
+   > you send it to will find it.
+
+   Do **not** call it "unlisted". A publish with no explicit flags stores no
+   access block and takes the legacy policy (`visibility: public`,
+   `history_visibility: public`); saying unlisted would understate what a
+   recipient can see. If the user wants earlier versions kept private, that is
+   `--history owner`.
+
+   *If the sign-in has not completed yet*, do not fall back to localhost and do
+   not go quiet. Say the doc is written and waiting, and that approving the
+   GitHub page finishes it — or that they can say "publish it" later and you'll
+   get them a fresh code. The doc stays in `$TDOC_DIR/<slug>/`.
+
+   *Self-host.* `"$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
+   (or `vercel`). Report the worker URL, with the same note about access.
+
+   **Local preview stays available to self-hosting users** — `/tdoc serve` and
+   `http://localhost:7878` are unchanged, and iterating locally before pushing
+   to your own worker is a perfectly good loop. That is an *authoring* step the
+   user can ask for at any time; it does not change what gets handed over at
+   the end, which is still the worker URL. Nothing about the local server was
+   removed.
+
+   *Local only — because the user asked.* Start the server if needed and open
+   the local URL:
+
    ```bash
    open "http://localhost:7878/d/<slug>/v/1"
    ```
-8. Report the URL to the user.
+
+   This is the only branch that reports a `localhost` URL.
 
 ### `bin/tdoc-new` — programmatic entry for agents in other skills
 
@@ -470,7 +552,18 @@ silently is the #1 source of regression complaints.
    If a comment is later re-anchored by the user (anchor moved to new
    text), the server automatically clears the agent's emoji and resets
    `status: "open"`. Re-running `/tdoc edit` will pick it up again.
-9. Open `http://localhost:7878/d/<slug>/v/<n+1>`.
+9. **Publish the new version and hand back its link**, the same way `/tdoc new`
+   does. A doc that was published stays published; report
+   `https://tdoc.dev/d/<slug>/v/<n+1>` so the reviewer can see the version
+   their comment produced. The link a user already shared keeps working — a new
+   version never breaks it.
+
+   ```bash
+   "$SKILL_DIR/bin/tdoc-publish" <slug>
+   ```
+
+   Only report a `localhost` URL if this doc is local-only because the user
+   asked for that (see the localhost rule in `/tdoc new`).
 
 If there are zero open comments AND no extra prompt, ask the user what to change before doing anything.
 

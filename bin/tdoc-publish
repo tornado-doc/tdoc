@@ -53,6 +53,7 @@ EOF
 
 SLUG=""
 PLATFORM_FLAG="${TDOC_PLATFORM:-}"
+SIGNIN_ONLY=0
 VISIBILITY_FLAG=""
 HISTORY_FLAG=""
 COMMENTING_FLAG=""
@@ -69,15 +70,25 @@ while [ $# -gt 0 ]; do
     --commenting=*) COMMENTING_FLAG="${1#--commenting=}"; [ -n "$COMMENTING_FLAG" ] || usage; shift ;;
     --allow-user) [ -n "${2:-}" ] || usage; ALLOW_USERS+=("$2"); shift 2 ;;
     --allow-user=*) ALLOW_USERS+=("${1#--allow-user=}"); shift ;;
+    # Sign in and mint the upload token, then stop — no doc required. Lets the
+    # skill start the device flow BEFORE it spends 30-60s generating HTML, so
+    # the human approves in the browser while the doc is being written instead
+    # of being interrupted at the moment the link was about to appear.
+    # A no-op (exit 0, no prompt) when a config already exists.
+    --signin-only) SIGNIN_ONLY=1; shift ;;
     # Anything else is treated as the slug — including dash-leading junk,
     # which the kebab-case validator below rejects with a precise message.
     *)  [ -z "$SLUG" ] || usage; SLUG="$1"; shift ;;
   esac
 done
-if [ -z "$SLUG" ]; then
+# --signin-only takes no slug: there is no doc yet when it runs.
+if [ "$SIGNIN_ONLY" = "1" ]; then
+  SLUG="${SLUG:-signin}"
+elif [ -z "$SLUG" ]; then
   usage
 fi
 # Validate the slug BEFORE it becomes a filesystem path or a URL query value.
+
 # Same kebab-case rule tdoc-new enforces. Without this a `..` slug escapes
 # TDOC_DIR (read/publish an arbitrary dir) and an unsafe slug injects into the
 # Cloudflare API query string.
@@ -242,9 +253,62 @@ hosted_github_signin() {
   case "$interval" in ''|*[!0-9]*) interval=5 ;; esac
   [ "$interval" -lt 5 ] && interval=5
   case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
+
+  # No attempt to pre-fill the code in the URL. GitHub returns no
+  # verification_uri_complete, and appending ?user_code= does NOT work in
+  # practice: a signed-out visitor is sent to the account chooser first and the
+  # parameter is gone by the time the code page renders. Verified by hand.
+  # `return_to` carrying the param through the first hop is not evidence it
+  # survives the second — that inference was wrong. #186 reached the same
+  # conclusion; the code has to be typed, so say so plainly.
+
   echo "[tdoc] Sign in with GitHub to publish on $base" >&2
-  echo "[tdoc] Open: $uri" >&2
-  echo "[tdoc] Code: $user_code" >&2
+  # Open it for them. $uri is verification_uri_complete when GitHub returns it,
+  # which pre-fills the code — the human then only clicks Authorize. Printing
+  # stays above as the fallback; this is best-effort and silent on failure.
+  #
+  # Deliberately NOT gated on [ -t 2 ]. An agent runs this with stderr piped,
+  # which is exactly the case the auto-open exists for; a tty check would mean
+  # it never fires where it matters. Gate on "is there a human desktop here"
+  # instead: not CI, not an SSH session, and on Linux an actual display.
+  # TDOC_NO_BROWSER=1 forces it off.
+  should_open_browser() {
+    [ -n "${TDOC_NO_BROWSER:-}" ] && return 1
+    [ -n "${CI:-}" ] && return 1
+    [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ] && return 1
+    case "$(uname -s)" in
+      Darwin) command -v open >/dev/null 2>&1 ;;
+      *) [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1 ;;
+    esac
+  }
+  # Only ever hand a github.com URL to the opener.
+  case "$uri" in
+    https://github.com/*)
+      if should_open_browser; then
+        if command -v open >/dev/null 2>&1; then open "$uri" >/dev/null 2>&1 || true
+        elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$uri" >/dev/null 2>&1 || true
+        fi
+        opened=1
+      fi
+      ;;
+  esac
+  # Never promise the field is pre-filled. GitHub returns no
+  # verification_uri_complete, and #186 removed exactly that claim so nobody
+  # arrives expecting a filled box that is not there. We pass ?user_code= as a
+  # best effort; the instruction stays "enter this code" either way.
+  if [ "${opened:-0}" = "1" ]; then
+    echo "[tdoc] A GitHub page just opened in your browser." >&2
+    echo "[tdoc] Enter this code there (it is only shown here):" >&2
+  else
+    echo "[tdoc] Open this page in your browser to finish signing in:" >&2
+    echo "[tdoc]   $uri" >&2
+    echo "[tdoc] and enter this code:" >&2
+  fi
+  echo "" >&2
+  echo "        $user_code" >&2
+  echo "" >&2
+  [ "${opened:-0}" = "1" ] && echo "[tdoc] (If nothing opened: $uri )" >&2
+  echo "[tdoc] Then click Authorize. I'll carry on by myself — nothing to do here." >&2
   echo "[tdoc] Waiting for GitHub approval…" >&2
   local waited=0 err
   while [ "$waited" -lt "$expires" ]; do
@@ -342,6 +406,30 @@ fi
 if ! command -v node >/dev/null 2>&1; then
   fail_with_agent_prompt "node 18+ is not installed" \
     "Install Node.js 18 or newer (https://nodejs.org). On macOS: 'brew install node'. Verify with 'node --version'. Then run '/tdoc publish $SLUG' again."
+fi
+
+# --signin-only: make sure a publish credential exists, then stop. Runs before
+# the doc-exists check on purpose — there is no doc yet when this is used.
+#
+# Only first_time_setup_hosted is defined this early, and that is the only one
+# that makes sense here: self-host setup is an interactive wrangler/vercel
+# session, not a credential that can be obtained ahead of time. A non-hosted
+# target is reported and skipped rather than failed, so a caller that pre-signs
+# in unconditionally is never blocked by it.
+if [ "$SIGNIN_ONLY" = "1" ]; then
+  if [ -f "$CONFIG_FILE" ]; then
+    echo "[tdoc] already signed in — nothing to do." >&2
+    exit 0
+  fi
+  case "${PLATFORM_FLAG:-hosted}" in
+    hosted)
+      first_time_setup_hosted
+      ;;
+    *)
+      echo "[tdoc] --signin-only applies to hosted publishing; '${PLATFORM_FLAG}' sets up at publish time." >&2
+      ;;
+  esac
+  exit 0
 fi
 
 if [ ! -d "$DOC_DIR" ]; then
