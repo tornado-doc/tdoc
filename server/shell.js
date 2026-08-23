@@ -340,7 +340,7 @@
     function close(){ var el = document.querySelector('.tdoc-popup'); if (el) el.remove(); pending = null; }
     function open(d){
       close();
-      pending = { text: d.text, context_before: d.context_before, context_after: d.context_after };
+      pending = { kind: d.kind || 'text', selector: d.selector, label: d.label, text: d.text, context_before: d.context_before, context_after: d.context_after };
       var pop = document.createElement('div');
       pop.className = 'tdoc-popup';
       // Real composer markup from the shared chrome module (1:1 with the overlay).
@@ -362,10 +362,12 @@
       text = (text||'').trim();
       if (!text || !pending) { close(); return; }
       btn.disabled = true;
+      var anchor = pending.kind === 'element'
+        ? { kind:'element', selector: pending.selector, label: pending.label }
+        : { kind:'text', text: pending.text, context_before: pending.context_before, context_after: pending.context_after };
       fetch('/api/comments', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ slug: cfg.slug, version: cfg.version, text: text,
-          anchor: { kind:'text', text: pending.text, context_before: pending.context_before, context_after: pending.context_after } })
+        body: JSON.stringify({ slug: cfg.slug, version: cfg.version, text: text, anchor: anchor })
       }).then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function(){ close(); loadComments(); })   // re-resolve so the new pin appears
         .catch(function(status){ if (ensureAuthThen(status, function(){ postComment(text, btn); })) return; btn.disabled = false; btn.textContent = 'Retry'; });

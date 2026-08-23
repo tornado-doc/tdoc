@@ -356,6 +356,37 @@ const SLUG = 'hostile-body-css';
       if (stored) throw new Error(`the default-theme hint must not persist a preference, got ${stored}`);
     });
 
+    await t('element commenting: hover a canvas → pill → comment on the whole element → pin', async () => {
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+        if (!frame) throw new Error('author frame not found');
+        // hovering the canvas surfaces the comment pill INSIDE the frame
+        await frame.evaluate(() => document.getElementById('art-canvas').scrollIntoView({ block: 'center' }));
+        await frame.hover('#art-canvas');
+        await frame.waitForSelector('.tdoc-comment-pill', { state: 'visible', timeout: 3000 });
+        // clicking it opens the composer in the shell (element anchor)
+        await frame.click('.tdoc-comment-pill');
+        await page.waitForSelector('.tdoc-popup textarea', { timeout: 3000 });
+        await page.fill('.tdoc-popup textarea', 'comment on the whole canvas');
+        await page.click('.tdoc-popup .submit');
+        // the element comment persists with an element anchor + gets a pin
+        let anchored = null;
+        for (let i = 0; i < 40; i++) {
+          const parsed = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'));
+          anchored = parsed.find(c => c.anchor && c.anchor.kind === 'element' && /canvas/i.test(c.anchor.selector || ''));
+          if (anchored) break;
+          await page.waitForTimeout(50);
+        }
+        if (!anchored) throw new Error('element comment was not persisted with an element anchor');
+        await page.waitForSelector(`.tdoc-pin[data-id="${anchored.id}"], .tdoc-pin`, { timeout: 3000 });
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

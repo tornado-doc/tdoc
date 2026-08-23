@@ -27,6 +27,18 @@
     st.textContent = '::highlight(tdoc-anchor){background:rgba(255,214,0,.38);}';
     (document.head || document.documentElement).appendChild(st);
   }
+  // Element-comment affordances live IN the frame (they hug author artifacts).
+  // Colors are inlined (the frame has no :root chrome tokens); look matches the
+  // overlay's .tdoc-hover-outline / .tdoc-comment-pill.
+  (function () {
+    var s = document.createElement('style');
+    s.textContent =
+      '.tdoc-hover-outline{position:absolute;pointer-events:none;z-index:2147483644;border:2px dashed #4f46e5;border-radius:4px;background:rgba(79,70,229,.08);box-sizing:border-box;}' +
+      '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:#4f46e5;border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
+      '.tdoc-comment-pill:hover{background:#4f46e5;color:#fff;border-color:#4f46e5;}' +
+      '.tdoc-comment-pill svg{width:14px;height:14px;stroke:currentColor;}';
+    (document.head || document.documentElement).appendChild(s);
+  })();
 
   // --- selection capture ---------------------------------------------------
   function selectionRect(range) {
@@ -58,7 +70,78 @@
   }
   document.addEventListener('mouseup', function () { setTimeout(reportSelection, 0); }, true);
   document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
-  document.addEventListener('mousedown', function () { post({ type: 'tdoc:cleared' }); }, true);
+  document.addEventListener('mousedown', function (e) {
+    // Clicking our own comment pill must not fire the clear (it opens the
+    // composer) — everything else in the doc clears the shell's open UI.
+    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
+    post({ type: 'tdoc:cleared' });
+  }, true);
+
+  // --- element/region commenting (slice 1: hover a commentable artifact →
+  //     outline + pill → click to comment on the whole element). Mirrors the
+  //     overlay COMMENTABLE set + hover affordance; the marquee sub-region
+  //     gesture is a follow-on slice. ---
+  var COMMENTABLE = 'img, svg, canvas, video, pre, figure, iframe[src], section, aside, blockquote, table, details, [data-tdoc-artifact], [class*="tdoc-artifact"]';
+  var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill';
+  function isProbeUI(el) { return !!(el && el.closest && el.closest(UI_SEL)); }
+  function artifactFor(node) {
+    if (!node || isProbeUI(node)) return null;
+    var el = node.matches && node.matches(COMMENTABLE) ? node : (node.closest && node.closest(COMMENTABLE));
+    return (el && !isProbeUI(el)) ? el : null;
+  }
+  // A simple, same-version-stable selector (id, else an nth-of-type path). Good
+  // enough to re-find the element for a pin; the worker's aid stamping is the
+  // durable cross-version identity (a later slice).
+  function cssPath(el) {
+    if (el.id) { try { if (document.querySelectorAll('#' + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id)).length === 1) return '#' + el.id; } catch (x) {} }
+    var parts = [];
+    while (el && el.nodeType === 1 && el !== document.body && parts.length < 8) {
+      var tag = el.tagName.toLowerCase(), parent = el.parentElement;
+      if (!parent) { parts.unshift(tag); break; }
+      var same = Array.prototype.filter.call(parent.children, function (c) { return c.tagName === el.tagName; });
+      parts.unshift(same.length > 1 ? tag + ':nth-of-type(' + (same.indexOf(el) + 1) + ')' : tag);
+      el = parent;
+    }
+    return parts.join(' > ');
+  }
+  var hoverEl = null, hoverOutline = null, hoverPill = null;
+  function ensureHoverUI() {
+    if (hoverOutline) return;
+    hoverOutline = document.createElement('div'); hoverOutline.className = 'tdoc-hover-outline'; hoverOutline.style.display = 'none';
+    hoverPill = document.createElement('button'); hoverPill.className = 'tdoc-comment-pill'; hoverPill.type = 'button'; hoverPill.style.display = 'none';
+    hoverPill.setAttribute('aria-label', 'Comment on this');
+    hoverPill.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    document.body.appendChild(hoverOutline); document.body.appendChild(hoverPill);
+    hoverPill.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); if (hoverEl) commentOnElement(hoverEl); });
+  }
+  function positionHover(el) {
+    ensureHoverUI();
+    var r = el.getBoundingClientRect(), sx = window.scrollX || 0, sy = window.scrollY || 0;
+    hoverOutline.style.display = 'block';
+    hoverOutline.style.left = (r.left + sx) + 'px'; hoverOutline.style.top = (r.top + sy) + 'px';
+    hoverOutline.style.width = r.width + 'px'; hoverOutline.style.height = r.height + 'px';
+    hoverPill.style.display = 'inline-flex';
+    hoverPill.style.left = (r.right + sx - 34) + 'px'; hoverPill.style.top = (r.top + sy + 6) + 'px';
+  }
+  function hideHover() { hoverEl = null; if (hoverOutline) hoverOutline.style.display = 'none'; if (hoverPill) hoverPill.style.display = 'none'; }
+  function commentOnElement(el) {
+    var r = el.getBoundingClientRect();
+    var label = el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('data-tdoc-artifact') || el.tagName.toLowerCase();
+    post({
+      type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: cssPath(el),
+      text: '', context_before: '', context_after: '',
+      rect: { top: r.top, left: r.left, bottom: r.bottom, right: r.right, width: r.width, height: r.height },
+    });
+    hideHover();
+  }
+  document.addEventListener('mousemove', function (e) {
+    var t = e.target;
+    if (isProbeUI(t)) return; // keep the pill/outline up while the cursor is on them
+    var art = artifactFor(t);
+    if (art) positionHover((hoverEl = art));
+    else if (hoverEl) hideHover();
+  });
+  window.addEventListener('scroll', function () { if (hoverEl) positionHover(hoverEl); }, { passive: true });
 
   // --- anchor resolution (faithful port of overlay.js collectTextNodes/
   //     findTextRange). Normalizes whitespace so multi-block/wrapped selections
@@ -149,7 +232,13 @@
   function reportPins(comments) {
     var pins = [], hl = HL ? new Highlight() : null;
     (comments || []).forEach(function (c) {
-      if (!c || !c.anchor || c.anchor.kind !== 'text') return;
+      if (!c || !c.anchor) return;
+      if (c.anchor.kind === 'element' && c.anchor.selector) {
+        var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
+        if (eel) pins.push({ id: c.id, docY: eel.getBoundingClientRect().top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
+        return;
+      }
+      if (c.anchor.kind !== 'text') return;
       var key = (c.anchor.text || '') + ' ' + (c.anchor.context_before || '') + ' ' + (c.anchor.context_after || '');
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
       if (!r) return;
