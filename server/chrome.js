@@ -203,7 +203,43 @@
       QUICK_TEXT_REACTIONS.map(function (t) { return '<button class="tdoc-emoji-text" data-emoji="' + t + '">' + t + '</button>'; }).join('');
   }
 
-  var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer, renderAuthor: renderAuthor, buildCard: buildCard, hasReactions: hasReactions, renderReactionsRow: renderReactionsRow, buildEmojiPicker: buildEmojiPicker };
+  // Pure pin-layout core — verbatim port of overlay.js layoutPins (2409-2469),
+  // shared so the single-origin overlay and the cross-origin shell cluster pins
+  // identically. Takes Y-positioned rows [{y, c, el?, elTop?, elHeight?}], the
+  // gutter geometry {articleTop, articleHeight}, and spacing consts; returns the
+  // placed clusters [{y, items:[row,...]}]. MUTATES row.y. In the shell rows have
+  // no `el` (text anchors), so the element-spread step is a no-op there.
+  function layoutPins(rows, geo, consts) {
+    var PIN_SIZE = consts.PIN_SIZE, PIN_MIN_GAP = consts.PIN_MIN_GAP, SAME_LINE_GAP = consts.SAME_LINE_GAP;
+    // 0) Spread comments sharing the SAME element anchor down that element.
+    var byEl = new Map();
+    for (var a = 0; a < rows.length; a++) { var r0 = rows[a]; if (!r0.el) continue; if (!byEl.has(r0.el)) byEl.set(r0.el, []); byEl.get(r0.el).push(r0); }
+    byEl.forEach(function (group) {
+      if (group.length < 2) return;
+      var top = group[0].elTop, h = group[0].elHeight || 0, usable = Math.max(0, h - PIN_SIZE);
+      if (usable < PIN_MIN_GAP) return;
+      var step = Math.max(PIN_MIN_GAP, usable / (group.length - 1));
+      group.forEach(function (r, i) { r.y = top + i * step; });
+    });
+    rows.sort(function (x, y) { return x.y - y.y; });
+    // 1) Merge only genuinely same-line comments into clusters (tight gap).
+    var clusters = [];
+    for (var b = 0; b < rows.length; b++) {
+      var row = rows[b], last = clusters[clusters.length - 1];
+      if (last && row.y - last.maxY <= SAME_LINE_GAP) { last.items.push(row); last.maxY = row.y; last.y = (last.items[0].y + row.y) / 2; }
+      else clusters.push({ y: row.y, maxY: row.y, items: [row] });
+    }
+    // 2) Spread to prevent overlap; fold the overflow tail past the article bottom.
+    var bottomLimit = geo.articleTop + geo.articleHeight, placed = [], prevY = -Infinity;
+    for (var d = 0; d < clusters.length; d++) {
+      var cl = clusters[d], y = Math.max(cl.y, prevY + PIN_MIN_GAP);
+      if (y > bottomLimit && placed.length) { var tail = placed[placed.length - 1]; tail.items.push.apply(tail.items, cl.items); continue; }
+      cl.y = y; placed.push(cl); prevY = y;
+    }
+    return placed;
+  }
+
+  var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer, renderAuthor: renderAuthor, buildCard: buildCard, hasReactions: hasReactions, renderReactionsRow: renderReactionsRow, buildEmojiPicker: buildEmojiPicker, layoutPins: layoutPins };
   if (typeof window !== 'undefined') window.TDOC_CHROME = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

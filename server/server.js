@@ -383,7 +383,9 @@ function shellScript() {
   var commentList = []; // ordered comments (for Copy: doc + comments)
   var gutterRight = 0;  // article right edge (from the probe) — where pins live
   var openCardId = null; // comment id of the currently open floating card
-  var pinEls = {};       // id -> pin element (cached so scroll doesn't re-query the DOM)
+  var pinEls = {};       // cluster-key -> pin element (cached so scroll doesn't re-query the DOM)
+  var pinClusters = [];  // placed clusters [{y, items:[{y,c}], key}] from layoutPins
+  var docHeight = 0;     // author doc scrollHeight (from the probe) — for cluster overflow-fold
   function pinX(){ return Math.min((gutterRight || (window.innerWidth - 44)) + 14, window.innerWidth - 34); }
   var copyReq = null; // { includeComments } awaiting tdoc:docMarkdown
   var frameScrollY = 0;
@@ -455,7 +457,7 @@ function shellScript() {
   // resize), and the card closes if its pin scrolls out of view. Clicking a pin
   // opens the card WITHOUT scrolling the doc.
   function closeCard(){ var el = document.querySelector('.tdoc-margin-comment'); if (el) el.remove(); openCardId = null; }
-  function pinTopFor(id){ for (var i=0;i<pinData.length;i++){ if (pinData[i].id===id) return BAR + (pinData[i].docY - frameScrollY); } return null; }
+  function pinTopFor(id){ for (var i=0;i<pinClusters.length;i++){ var it=pinClusters[i].items; for (var j=0;j<it.length;j++){ if (it[j].c.id===id) return BAR + (pinClusters[i].y - frameScrollY); } } return null; }
   function positionCard(){
     var card = document.querySelector('.tdoc-margin-comment'); if (!card || openCardId == null) return;
     var top = pinTopFor(openCardId);
@@ -521,37 +523,83 @@ function shellScript() {
     var c = document.getElementById('tdoc-reanchor-cancel'); if (c) c.addEventListener('click', function(e){ e.stopPropagation(); exitReanchor(); });
     var r = document.getElementById('tdoc-reanchor-remove'); if (r) r.addEventListener('click', function(e){ e.stopPropagation(); removeAnchor(); });
   })();
-  // Full reconcile — only on tdoc:pins (comment set changed). Creates/removes
-  // pin elements against the cached pinEls map, then positions them. O(P) once.
+  // Full reconcile — only on tdoc:pins (comment set changed). Clusters same-line
+  // pins (1:1 with overlay layoutPins), reconciles pin elements against the
+  // cached pinEls map (keyed by cluster membership), then positions them. O(P).
+  function buildPin(cl, key){
+    var el = document.createElement('div'); el.className='tdoc-pin'; el.setAttribute('data-key', key);
+    el.setAttribute('role','button'); el.setAttribute('tabindex','0');
+    if (cl.items.length === 1){
+      var p = cl.items[0].c; el.setAttribute('data-id', p.id);
+      el.innerHTML = window.TDOC_CHROME.avatarHtml({ login: p.login, avatar_url: p.avatar_url, kind: p.kind }, 'tdoc-pin-anon');
+      el.addEventListener('click', (function(id){ return function(ev){ ev.stopPropagation(); openCard(id); }; })(p.id));
+    } else {
+      el.classList.add('tdoc-pin-cluster'); el.textContent = String(cl.items.length);
+      el.setAttribute('aria-label', cl.items.length + ' comments here');
+      el.addEventListener('click', function(ev){ ev.stopPropagation(); openClusterPopover(el._cluster, el); });
+    }
+    applyPinState(el, cl);
+    return el;
+  }
+  function applyPinState(el, cl){
+    el._cluster = cl;
+    if (cl.items.length === 1) el.classList.toggle('tdoc-pin-resolved', !!cl.items[0].c.resolved);
+    else el.classList.toggle('tdoc-cluster-allresolved', cl.items.every(function(r){ return r.c.resolved; }));
+  }
   function positionPins(){
+    var rows = pinData.map(function(p){ return { y: p.docY, c: p }; });
+    pinClusters = window.TDOC_CHROME.layoutPins(rows, { articleTop: 0, articleHeight: docHeight || 1e7 },
+      { PIN_SIZE: 28, PIN_MIN_GAP: 32, SAME_LINE_GAP: 12 });
     var seen = {};
-    pinData.forEach(function(p){
-      seen[p.id] = 1;
-      var el = pinEls[p.id];
-      if (!el){
-        el = document.createElement('div'); el.className='tdoc-pin'; el.setAttribute('data-id', p.id);
-        el.setAttribute('role','button'); el.setAttribute('tabindex','0');
-        el.innerHTML = window.TDOC_CHROME.avatarHtml({ login: p.login, avatar_url: p.avatar_url, kind: p.kind }, 'tdoc-pin-anon');
-        el.addEventListener('click', (function(id){ return function(ev){ ev.stopPropagation(); openCard(id); }; })(p.id));
-        document.body.appendChild(el);
-        pinEls[p.id] = el;
-      }
-      el.classList.toggle('tdoc-pin-resolved', !!p.resolved);
+    pinClusters.forEach(function(cl){
+      var key = cl.items.map(function(r){ return r.c.id; }).sort().join('|');
+      cl.key = key; seen[key] = 1;
+      var el = pinEls[key];
+      if (!el){ el = buildPin(cl, key); document.body.appendChild(el); pinEls[key] = el; }
+      else applyPinState(el, cl);   // membership same → reuse; refresh state + cluster ref
     });
-    Object.keys(pinEls).forEach(function(id){ if (!seen[id]){ pinEls[id].remove(); delete pinEls[id]; } });
+    Object.keys(pinEls).forEach(function(k){ if (!seen[k]){ pinEls[k].remove(); delete pinEls[k]; } });
     repositionPins();
   }
   // Cheap — on every scroll frame. No DOM query/rebuild: just move cached pins.
   function repositionPins(){
     var left = pinX() + 'px';
-    for (var i = 0; i < pinData.length; i++){
-      var p = pinData[i], el = pinEls[p.id]; if (!el) continue;
-      var top = BAR + (p.docY - frameScrollY);
+    for (var i = 0; i < pinClusters.length; i++){
+      var cl = pinClusters[i], el = pinEls[cl.key]; if (!el) continue;
+      var top = BAR + (cl.y - frameScrollY);
       el.hidden = !(top >= BAR - 20 && top <= window.innerHeight - 8);
       el.style.top = Math.max(BAR + 4, top) + 'px';
       el.style.left = left;
     }
     positionCard();
+  }
+  // Cluster popover — a compact list of the comments under a count badge. Click
+  // a row to open that comment's card. (1:1 with overlay openClusterPopover.)
+  var clusterPop = null;
+  function ensureClusterPop(){ if (!clusterPop){ clusterPop = document.createElement('div'); clusterPop.className = 'tdoc-cluster-pop'; clusterPop.addEventListener('click', function(e){ e.stopPropagation(); }); document.body.appendChild(clusterPop); } return clusterPop; }
+  function closeClusterPopover(){ if (clusterPop){ clusterPop.classList.remove('open'); clusterPop._key = null; } }
+  function openClusterPopover(cluster, pinEl){
+    if (!cluster) return;
+    var pop = ensureClusterPop(), esc = window.TDOC_CHROME.escapeHtml, key = pinEl.getAttribute('data-key');
+    if (pop.classList.contains('open') && pop._key === key){ closeClusterPopover(); return; }
+    pop._key = key;
+    pop.innerHTML = cluster.items.map(function(r){ var c = r.c;
+      var done = c.resolved ? '<span class="tdoc-cluster-done">✓</span>' : '';
+      var cur = c.id === openCardId ? ' tdoc-cluster-current' : '';
+      var text = (commentsById[c.id] && commentsById[c.id].text) || '';
+      return '<div class="tdoc-cluster-row' + cur + '" role="button" tabindex="0" data-id="' + esc(c.id) + '">' +
+        window.TDOC_CHROME.avatarHtml({ login: c.login, avatar_url: c.avatar_url, kind: c.kind }, 'tdoc-cluster-anon') +
+        '<span class="tdoc-cluster-snip">' + esc(text.slice(0, 60)) + '</span>' + done + '</div>';
+    }).join('');
+    pop.querySelectorAll('.tdoc-cluster-row').forEach(function(rowEl){
+      rowEl.addEventListener('click', function(e){ e.stopPropagation(); closeClusterPopover(); openCard(rowEl.getAttribute('data-id')); });
+    });
+    pop.classList.add('open'); // measurable
+    var pw = pop.offsetWidth || 260, ph = pop.offsetHeight || 200, pr = pinEl.getBoundingClientRect();
+    var left = pr.left - pw - 8; if (left < 8) left = pr.right + 8;
+    left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
+    var top = Math.max(BAR + 4, Math.min(pr.top, window.innerHeight - ph - 8));
+    pop.style.left = left + 'px'; pop.style.top = top + 'px';
   }
 
   // Publish flow — self-contained chrome modal (real .tdoc-modal CSS), 1:1 with
@@ -625,9 +673,9 @@ function shellScript() {
     if (!frameWin() || e.source !== frameWin()) return;      // validate by window identity (opaque origin)
     var d = e.data; if (!d || d.source !== 'tdoc-frame') return;
     if (d.type === 'tdoc:selection') { if (reanchoringId) reanchorTo(d); else open(d); }
-    else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); closeEmojiPicker(); }
+    else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); closeEmojiPicker(); closeClusterPopover(); }
     else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
-    else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; positionPins(); }
+    else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; if (d.docHeight) docHeight = d.docHeight; positionPins(); }
     else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); }
     else if (d.type === 'tdoc:docMarkdown' && copyReq) {
       var md = d.markdown || '';
@@ -659,7 +707,7 @@ function shellScript() {
   wire('#tdoc-copy-md-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-copy-md-menu'); });
   document.querySelectorAll('#tdoc-copy-md-menu [data-mode]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); copyReq={ includeComments: b.getAttribute('data-mode')==='doc-comments' }; sendFrame({ type:'tdoc:copyDoc', requestId: Date.now() }); }); });
   wire('#tdoc-more-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-secondary-menu'); });
-  document.addEventListener('click', function(){ closeMenus(); closeEmojiPicker(); closeCard(); });
+  document.addEventListener('click', function(){ closeMenus(); closeEmojiPicker(); closeCard(); closeClusterPopover(); });
   layout();
 })();`;
 }

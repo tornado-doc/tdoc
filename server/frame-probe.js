@@ -12,7 +12,7 @@
 //     { type:'tdoc:selection', text, context_before, context_after, rect }
 //     { type:'tdoc:cleared' }
 //     { type:'tdoc:scroll',    scrollY, height }
-//     { type:'tdoc:pins',      pins:[{id,docY,login}], scrollY }
+//     { type:'tdoc:pins',      pins:[{id,docY,login,avatar_url,kind,resolved}], scrollY, articleRight, docHeight }
 //   shell → frame:
 //     { type:'tdoc:anchors',   comments:[...] }   // resolve → highlight → report pins
 //     { type:'tdoc:scrollTo',  docY }
@@ -158,7 +158,7 @@
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
-    post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()) });
+    post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
 
   // Doc → Markdown (verbatim port of overlay.js htmlToMarkdown 4176-4253). Runs
