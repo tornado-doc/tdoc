@@ -576,8 +576,7 @@ function tShellGap(name, reason, _fn) {
     }
   });
 
-  await tShellGap('?comment= on a phone opens the comment drawer',
-    'the shell has no mobile comment drawer yet (narrow mode shows the fab only). Tracked; wide-mode deep-link is covered by artifact-shell.test.js.', async () => {
+  await t('?comment= on a phone opens the comment drawer', async () => {
     const deep = await ctx.newPage();
     try {
       await deep.setViewportSize({ width: 375, height: 812 });

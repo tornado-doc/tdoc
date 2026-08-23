@@ -388,11 +388,34 @@ const SLUG = 'hostile-body-css';
     });
 
     // --- #3 MOBILE ------------------------------------------------------------
-    await t('narrow viewport: comments go to the drawer (fab present)', async () => {
+    await t('narrow viewport: fab opens a comment drawer listing the comments', async () => {
       await page.setViewportSize({ width: 480, height: 900 });
-      await page.waitForTimeout(200);
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(300);
       const narrow = await page.evaluate(() => document.body.classList.contains('tdoc-narrow'));
       if (!narrow) throw new Error('shell did not enter narrow/drawer mode at 480px');
+      // the fab is visible (comments exist) and shows the count
+      await page.waitForSelector('.tdoc-fab', { state: 'visible', timeout: 2000 });
+      const count = await page.$eval('#tdoc-fab-count', el => el.textContent.trim());
+      if (!(Number(count) > 0)) throw new Error(`fab count should be > 0, got ${count}`);
+      // gutter pins are hidden in narrow (comments are in the drawer)
+      const pinVisible = await page.evaluate(() => { const p = document.querySelector('.tdoc-pin'); return p && getComputedStyle(p).display !== 'none'; });
+      if (pinVisible) throw new Error('gutter pins should be hidden in narrow mode');
+      // tapping the fab opens the bottom-sheet drawer with a card per comment
+      await page.click('.tdoc-fab');
+      await page.waitForSelector('#tdoc-comment-layer.open', { timeout: 2000 });
+      const cards = await page.evaluate(() => document.querySelectorAll('#tdoc-comment-layer .tdoc-margin-comment').length);
+      if (cards < 1) throw new Error('drawer opened but has no comment cards');
+      // a drawer card is fully wired (Reply control present)
+      const hasReply = await page.evaluate(() => !!document.querySelector('#tdoc-comment-layer .tdoc-reply-toggle'));
+      if (!hasReply) throw new Error('drawer card missing Reply control (not wired)');
+    });
+
+    await t('narrow ?comment= deep-link opens the drawer', async () => {
+      await page.setViewportSize({ width: 480, height: 900 });
+      await page.goto(shellUrl + '&comment=c_fixture_1', { waitUntil: 'networkidle' });
+      await page.waitForSelector('#tdoc-comment-layer.open', { timeout: 3000 });
+      await page.waitForSelector('#tdoc-comment-layer .tdoc-margin-comment[data-comment-id="c_fixture_1"]', { timeout: 2000 });
     });
 
   } finally {

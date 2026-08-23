@@ -65,14 +65,55 @@
     function sendFrame(msg){ var w = frameWin(); if (w) w.postMessage(Object.assign({source:'tdoc-shell'}, msg), '*'); }
 
     // --- narrow / drawer mode ---
-    function layout(){ document.body.classList.toggle('tdoc-narrow', window.innerWidth < 700); positionPins(); }
+    // Below 700px there's no gutter for margin cards, so comments move into a
+    // bottom-sheet drawer toggled by a fab (1:1 with the overlay). The drawer +
+    // fab CSS ships in the chrome slice; here we build the DOM + wiring.
+    var drawerEl = null, fabEl = null;
+    function ensureDrawer(){
+      if (drawerEl) return;
+      drawerEl = document.createElement('div'); drawerEl.id = 'tdoc-comment-layer';
+      drawerEl.innerHTML = '<div class="tdoc-drawer-handle" aria-label="Drag down to close comments"></div><div class="tdoc-drawer-list"></div>';
+      drawerEl.addEventListener('click', function(e){ e.stopPropagation(); });
+      document.body.appendChild(drawerEl);
+      fabEl = document.createElement('button'); fabEl.className = 'tdoc-fab'; fabEl.type = 'button';
+      fabEl.innerHTML = '💬 <span id="tdoc-fab-count">0</span>';
+      fabEl.addEventListener('click', function(e){ e.stopPropagation(); toggleDrawer(); });
+      document.body.appendChild(fabEl);
+      var h = drawerEl.querySelector('.tdoc-drawer-handle');
+      if (h) h.addEventListener('click', function(e){ e.stopPropagation(); closeDrawer(); });
+    }
+    function renderDrawer(){
+      if (!document.body.classList.contains('tdoc-narrow') || !window.TDOC_CHROME) return;
+      ensureDrawer();
+      var list = drawerEl.querySelector('.tdoc-drawer-list'); if (!list) return;
+      list.innerHTML = '';
+      commentList.forEach(function(c){
+        var card = document.createElement('div');
+        card.className = 'tdoc-margin-comment active' + (c.status === 'applied' ? ' tdoc-resolved' : '') + (isUnanchored(c.id) ? ' tdoc-unanchored' : '');
+        card.setAttribute('data-comment-id', c.id);
+        card.innerHTML = window.TDOC_CHROME.buildCard(c, (cfg.identity && cfg.identity.login) || 'anon');
+        list.appendChild(card);
+        wireCard(card, c.id, function(){});   // no reflow in the flowing drawer
+      });
+      var count = document.getElementById('tdoc-fab-count'); if (count) count.textContent = commentList.length;
+      if (fabEl) fabEl.style.display = commentList.length ? 'inline-flex' : 'none';   // fab iff comments exist
+    }
+    function openDrawer(){ ensureDrawer(); renderDrawer(); drawerEl.classList.add('open'); }
+    function closeDrawer(){ if (drawerEl) drawerEl.classList.remove('open'); }
+    function toggleDrawer(){ if (drawerEl && drawerEl.classList.contains('open')) closeDrawer(); else openDrawer(); }
+    function layout(){
+      var narrow = window.innerWidth < 700;
+      document.body.classList.toggle('tdoc-narrow', narrow);
+      if (narrow) { closeCard(); renderDrawer(); } else { closeDrawer(); if (fabEl) fabEl.style.display = 'none'; }
+      positionPins();
+    }
     window.addEventListener('resize', layout);
 
     // --- comments: fetch → resolve in frame → draw pins ---
     function loadComments(){
       return fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&version=' + encodeURIComponent(cfg.version))
         .then(function(r){ return r.ok ? r.json() : []; })
-        .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); document.body.dataset.tdocReady = '1'; captureDeepLink(); return list; })
+        .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); document.body.dataset.tdocReady = '1'; renderDrawer(); captureDeepLink(); return list; })
         .catch(function(){ return []; });
     }
     // On a 401 (auth required — production/worker), run the shared sign-in modal
@@ -119,10 +160,13 @@
     // stays glued to its pin: positionCard() re-runs whenever pins move (scroll/
     // resize), and the card closes if its pin scrolls out of view. Clicking a pin
     // opens the card WITHOUT scrolling the doc.
-    function closeCard(){ var el = document.querySelector('.tdoc-margin-comment'); if (el) el.remove(); openCardId = null; }
+    // Scoped to .tdoc-floating-open so the narrow-mode drawer's cards (also
+    // .tdoc-margin-comment, but never .tdoc-floating-open) are never treated as
+    // the single floating margin card.
+    function closeCard(){ var el = document.querySelector('.tdoc-margin-comment.tdoc-floating-open'); if (el) el.remove(); openCardId = null; }
     function pinTopFor(id){ for (var i=0;i<pinClusters.length;i++){ var it=pinClusters[i].items; for (var j=0;j<it.length;j++){ if (it[j].c.id===id) return BAR + (pinClusters[i].y - frameScrollY); } } return null; }
     function positionCard(){
-      var card = document.querySelector('.tdoc-margin-comment'); if (!card || openCardId == null) return;
+      var card = document.querySelector('.tdoc-margin-comment.tdoc-floating-open'); if (!card || openCardId == null) return;
       var top = pinTopFor(openCardId);
       if (top == null || top < BAR - 40 || top > window.innerHeight - 8){ card.remove(); openCardId = null; return; } // pin off-screen → close
       card.style.top = Math.max(BAR + 4, Math.min(top, window.innerHeight - card.offsetHeight - 8)) + 'px';
@@ -138,28 +182,31 @@
       card.addEventListener('click', function(e){ e.stopPropagation(); });
       document.body.appendChild(card);
       openCardId = id;
-      // reactions: click a chip to toggle, click + to pick
+      wireCard(card, id);
+      positionCard();
+    }
+    // Wire a comment card's interactive controls (reactions/replies/reply-form/
+    // delete/re-anchor). Shared by the floating margin card (openCard) and the
+    // narrow-mode drawer, so both behave the same. reflow runs after size-
+    // changing toggles: positionCard for the floating card, a no-op in the drawer.
+    function wireCard(card, id, reflow){
+      reflow = reflow || positionCard;
       card.querySelectorAll('.tdoc-react-chip').forEach(function(chip){ chip.addEventListener('click', function(e){ e.stopPropagation(); postReaction(chip.getAttribute('data-target-id') || id, chip.getAttribute('data-emoji')); }); });
       card.querySelectorAll('.tdoc-react-add').forEach(function(add){ add.addEventListener('click', function(e){ e.stopPropagation(); openEmojiPicker(add, add.getAttribute('data-target-id') || id); }); });
-      // replies expand/collapse
       var rtog = card.querySelector('.tdoc-replies-toggle'), rlist = card.querySelector('.tdoc-replies');
-      if (rtog && rlist) rtog.addEventListener('click', function(e){ e.stopPropagation(); var o = rlist.classList.toggle('open'); rtog.classList.toggle('open', o); positionCard(); });
-      // reply: show form + submit (POST with parent_id)
+      if (rtog && rlist) rtog.addEventListener('click', function(e){ e.stopPropagation(); var o = rlist.classList.toggle('open'); rtog.classList.toggle('open', o); reflow(); });
       var rbtn = card.querySelector('.tdoc-reply-toggle'), rform = card.querySelector('.tdoc-reply-form');
-      if (rbtn && rform) rbtn.addEventListener('click', function(e){ e.stopPropagation(); var o = rform.classList.toggle('open'); if (o){ var t = rform.querySelector('textarea'); if (t) t.focus(); } positionCard(); });
+      if (rbtn && rform) rbtn.addEventListener('click', function(e){ e.stopPropagation(); var o = rform.classList.toggle('open'); if (o){ var t = rform.querySelector('textarea'); if (t) t.focus(); } reflow(); });
       if (rform){ var sub = rform.querySelector('.tdoc-reply-submit'), rta = rform.querySelector('textarea');
         if (sub && rta){ sub.addEventListener('click', function(e){ e.stopPropagation(); postReply(id, rta.value, sub); });
           rta.addEventListener('keydown', function(e){ if ((e.metaKey||e.ctrlKey) && e.key==='Enter') postReply(id, rta.value, sub); }); } }
-      // delete (1:1 with overlay: deletes on click, no native confirm)
       var del = card.querySelector('.del');
       if (del) del.addEventListener('click', function(e){ e.stopPropagation();
         fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&id=' + encodeURIComponent(id) + '&version=' + encodeURIComponent(cfg.version), { method:'DELETE' })
           .then(function(r){ if (r.ok){ closeCard(); loadComments(); } else { r.json().catch(function(){return {};}).then(function(x){ alert('Could not delete: ' + (x.error || x.message || ('HTTP ' + r.status))); }); } });
       });
-      // re-anchor: enter re-anchor mode; the next frame selection rebinds this comment
       var reBtn = card.querySelector('.tdoc-reanchor-btn');
       if (reBtn) reBtn.addEventListener('click', function(e){ e.stopPropagation(); startReanchor(id); });
-      positionCard();
     }
     // A comment is unanchored when its anchor didn't resolve in this doc version —
     // i.e. no pin was reported for it. (pinData holds only resolved anchors.)
@@ -185,6 +232,19 @@
       if (!pendingDeepLink) return;
       var root = findCommentRoot(pendingDeepLink);
       if (!root) { pendingDeepLink = null; return; }
+      // Narrow: open the bottom drawer, expand a reply thread, and scroll the
+      // target card into view — no pin/gutter in narrow mode.
+      if (document.body.classList.contains('tdoc-narrow')) {
+        var target0 = pendingDeepLink; pendingDeepLink = null;
+        openDrawer();
+        var dcard = drawerEl && drawerEl.querySelector('.tdoc-margin-comment[data-comment-id="' + root + '"]');
+        if (dcard) {
+          if (target0 !== root) { var drl = dcard.querySelector('.tdoc-replies'), drt = dcard.querySelector('.tdoc-replies-toggle'); if (drl){ drl.classList.add('open'); if (drt) drt.classList.add('open'); } }
+          dcard.classList.add('active');
+          try { dcard.scrollIntoView({ block: 'center' }); } catch (e) {}
+        }
+        return;
+      }
       var cl = clusterForId(root);
       if (!cl) { if (++deepLinkTries > 40) pendingDeepLink = null; return; } // pin not resolved yet
       var top = BAR + (cl.y - frameScrollY);
@@ -445,6 +505,8 @@
 '  .tdoc-pin{position:fixed;}\n' +
 '  .tdoc-popup{position:fixed;}\n' +
 '  .tdoc-margin-comment{position:fixed;}\n' +
+'  body.tdoc-narrow .tdoc-pin{display:none;}\n' +   /* narrow: comments live in the drawer, not gutter pins */
+'  .tdoc-fab{display:none;}\n' +                    /* fab shown only in narrow + when comments exist (JS) */
 '</style>\n' +
 '</head><body>\n' +
 '  <div class="tdoc-bar">' + (d.barInner || '') + '</div>\n' +
