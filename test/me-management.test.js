@@ -150,7 +150,10 @@ t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
   assert(!index.includes('class="who"'), 'identity belongs in the overlay chip');
   assert(index.includes('nonce="${nonce}"'), '/me catalog script must carry the CSP nonce');
   assert(overlay.includes('const isCatalog = !!cfg.isCatalog'), 'overlay must read isCatalog');
-  assert(overlay.includes("${isSiteBar ? '' : copyMenuHtml}"), 'catalog must hide Copy');
+  // Copy now lives in the ⋯ overflow, and the whole overflow is !isSiteBar-gated,
+  // so the catalog bar drops Copy/Duplicate/Download together.
+  assert(overlay.includes('<button data-action="copy">Copy as Markdown</button>'), 'Copy lives in the ⋯ overflow menu');
+  assert(overlay.includes('${!isSiteBar ? `<div class="tdoc-menu-wrap">'), 'catalog must hide Copy (⋯ overflow is !isSiteBar-gated)');
   assert(overlay.includes("${isSiteBar ? '' : primaryCtaHtml}"), 'catalog must hide Share');
   assert(overlay.includes("${isSiteBar ? '' : forkBtnHtml}"), 'catalog must hide Duplicate/Download');
   assert(overlay.includes('id="tdoc-title"'),

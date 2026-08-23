@@ -471,8 +471,11 @@
   .tdoc-secondary-menu .tdoc-sec-sep { border-top: 1px solid #eee; margin: 4px 6px; }
 
   .tdoc-menu-wrap { position: relative; display: inline-block; }
-  /* Overflow ⋯ button shows on narrow viewports. */
-  .tdoc-bar .tdoc-secondary-toggle { display: none; padding: 6px 10px; }
+  /* ⋯ overflow is the single home for secondary actions (Copy / Duplicate /
+     Download) at every width. Their inline bar buttons stay in the DOM for the
+     #146 chrome contract but never render — the ⋯ menu drives them. */
+  .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; padding: 6px 10px; }
+  .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
   /* Identity chip — avatar + name (name hides on narrow). */
   .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; position: relative; }
   .tdoc-chip:hover { background: #e5e6ea; }
@@ -783,21 +786,16 @@
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
-    .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
-    .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   }
   @media (max-width: 700px) {
     .tdoc-bar { padding: 0 8px; gap: 4px; }
     .tdoc-version-wrap { display: none; }
     .tdoc-bar .doc-title { font-size: 13px; }
-    .tdoc-bar #tdoc-copy-md-btn span { display: none; }
     .tdoc-bar #tdoc-publish-btn span, .tdoc-bar #tdoc-share-btn span { display: inline; }
   }
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow .tdoc-bar #tdoc-duplicate-btn, body.tdoc-narrow .tdoc-bar #tdoc-download-wrap, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
-  body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
   /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
@@ -961,19 +959,8 @@
     </div>
     <span class="doc-title" id="tdoc-title">tdoc</span>`}`;
 
-  // Right: copy menu + primary CTA (Share or Publish) + ⋯ overflow + identity.
-  const copyMenuHtml = `
-    <div class="tdoc-menu-wrap">
-      <button id="tdoc-copy-md-btn" title="Copy as Markdown" aria-label="Copy as Markdown">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        <span>Copy</span>
-      </button>
-      <div class="tdoc-menu" id="tdoc-copy-md-menu">
-        <button data-mode="doc">Doc only</button>
-        <button data-mode="doc-comments">Doc + comments</button>
-      </div>
-    </div>`;
-
+  // Right: primary CTA (Share or Publish) + ⋯ overflow + identity. Copy /
+  // Duplicate / Download all live inside the ⋯ menu now — see rightHtml.
   const primaryCtaHtml = isFork ? '' : (isPublished
     ? `<button id="tdoc-share-btn" class="primary" title="Share" aria-label="Share">
          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -1013,10 +1000,9 @@
   const rightHtml = `
     ${cfg.isLanding ? githubBtnHtml : ''}
     ${themeBtnHtml}
-    ${isSiteBar ? '' : copyMenuHtml}
     ${isSiteBar ? '' : forkBtnHtml}
     ${isSiteBar ? '' : primaryCtaHtml}
-    ${!isSiteBar && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
+    ${!isSiteBar ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
         ${versions.length > 1 ? `<div class="tdoc-sec-versions" role="group" aria-label="Version">
@@ -1024,6 +1010,7 @@
           ${versions.map(v => `<button role="option" data-version="${v.n}" class="tdoc-sec-version${v.n === version ? ' current' : ''}">v${v.n}${v.n === version ? ' · current' : ''}</button>`).join('')}
           <div class="tdoc-sec-sep"></div>
         </div>` : ''}
+        <button data-action="copy">Copy as Markdown</button>
         ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
         ${isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
       </div>
@@ -1229,7 +1216,6 @@
       e.stopPropagation();
       const open = dlMenu.classList.toggle('open');
       dlBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      if (copyMenu) copyMenu.classList.remove('open');
     };
     dlMenu.querySelectorAll('button').forEach((b) => {
       b.onclick = (e) => {
@@ -1263,24 +1249,6 @@
     });
   }
 
-  const copyBtn = document.getElementById('tdoc-copy-md-btn');
-  const copyMenu = document.getElementById('tdoc-copy-md-menu');
-  if (copyBtn && copyMenu) {
-    copyBtn.onclick = (e) => {
-      e.stopPropagation();
-      copyMenu.classList.toggle('open');
-      if (dlMenu) dlMenu.classList.remove('open');
-      if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
-    };
-    copyMenu.querySelectorAll('button').forEach(b => {
-      b.onclick = async (e) => {
-        e.stopPropagation();
-        copyMenu.classList.remove('open');
-        await window.__tdocCopyDocMd(b.dataset.mode === 'doc-comments');
-      };
-    });
-  }
-
   const moreBtn = document.getElementById('tdoc-more-btn');
   const secMenu = document.getElementById('tdoc-secondary-menu');
   if (moreBtn && secMenu) {
@@ -1295,6 +1263,7 @@
           if (Number.isFinite(vn) && vn !== version) location.href = `/d/${encodeURIComponent(slug)}/v/${vn}`;
           return;
         }
+        if (b.dataset.action === 'copy') window.__tdocCopyDocMd(false);
         if (b.dataset.action === 'duplicate') duplicateDoc();
         if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
         if (b.dataset.action === 'download-pdf') startDownload('pdf');
@@ -4175,7 +4144,6 @@
     // Close menus that aren't under the cursor
     if (secMenu && !t.closest('#tdoc-more-btn') && !t.closest('#tdoc-secondary-menu')) secMenu.classList.remove('open');
     if (!t.closest('.tdoc-menu-wrap')) {
-      copyMenu.classList.remove('open');
       if (dlMenu) dlMenu.classList.remove('open');
       if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
     }
@@ -4308,18 +4276,6 @@
       return ok;
     }
   }
-  function flashCopied(btn) {
-    if (!btn || btn.dataset.flashing === '1') return;
-    btn.dataset.flashing = '1';
-    const orig = btn.innerHTML;
-    const oc = btn.style.color, ob = btn.style.borderColor;
-    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Copied</span>`;
-    btn.style.color = '#3ecf8e'; btn.style.borderColor = '#3ecf8e';
-    setTimeout(() => {
-      btn.innerHTML = orig; btn.style.color = oc; btn.style.borderColor = ob;
-      btn.dataset.flashing = '0';
-    }, 1200);
-  }
   function flashToast(msg) {
     const t = document.createElement('div');
     t.textContent = msg;
@@ -4360,8 +4316,9 @@
       md += '\n\n---\n\n## Comments\n\n' + state.activeComments.map(commentToMd).join('\n---\n\n');
     }
     const ok = await copyText(md);
-    if (ok) flashCopied(document.getElementById('tdoc-copy-md-btn'));
-    else flashToast('Copy failed');
+    // Copy now lives in the ⋯ menu, which closes on click, so there's no bar
+    // button to flash — confirm with a toast instead.
+    flashToast(ok ? 'Copied as Markdown' : 'Copy failed');
   };
   window.__tdocCopyCommentMd = async function (commentId, srcBtn) {
     const c = state.activeComments.find(x => x.id === commentId);

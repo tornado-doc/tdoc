@@ -197,74 +197,52 @@ async function tPub(name, fn) {
     }
   });
 
-  await t('Copy button exists with icon + label', async () => {
-    const btn = await page.$('#tdoc-copy-md-btn');
-    if (!btn) throw new Error('no #tdoc-copy-md-btn');
-    const label = await btn.textContent();
-    if (!label.includes('Copy')) throw new Error(`label was "${label}"`);
-    const svg = await btn.$('svg');
-    if (!svg) throw new Error('no svg icon inside Copy button');
+  // Copy moved into the ⋯ overflow menu as a single action (the old two-option
+  // doc-only/doc+comments submenu is gone — Copy is always doc-only markdown).
+  await t('⋯ menu carries a single "Copy as Markdown" action', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('#tdoc-secondary-menu.open', { timeout: 1000 });
+    const items = await page.$$eval('#tdoc-secondary-menu.open [data-action="copy"]', els => els.map(e => e.textContent.trim()));
+    if (items.length !== 1) throw new Error(`expected one Copy action, got ${items.length}`);
+    if (items[0] !== 'Copy as Markdown') throw new Error(`label was "${items[0]}"`);
+    await page.click('h1', { position: { x: 5, y: 5 } });
+    await page.waitForTimeout(120);
   });
 
-  await t('Copy menu hidden by default', async () => {
-    const open = await page.$('.tdoc-menu.open');
-    if (open) throw new Error('menu is open before click');
+  await t('⋯ menu hidden by default', async () => {
+    const open = await page.$('#tdoc-secondary-menu.open');
+    if (open) throw new Error('secondary menu open before click');
   });
 
-  await t('Click Copy opens menu with two options', async () => {
-    await page.click('#tdoc-copy-md-btn');
-    await page.waitForSelector('.tdoc-menu.open', { timeout: 1000 });
-    const items = await page.$$eval('.tdoc-menu.open button', els => els.map(e => e.textContent.trim()));
-    if (items.length !== 2) throw new Error(`expected 2 menu items, got ${items.length}: ${items.join(', ')}`);
-    if (!items.includes('Doc only')) throw new Error(`no "Doc only": ${items.join(', ')}`);
-    if (!items.includes('Doc + comments')) throw new Error(`no "Doc + comments": ${items.join(', ')}`);
-  });
-
-  await t('Click outside closes menu', async () => {
+  await t('Click outside closes the ⋯ menu', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('#tdoc-secondary-menu.open');
     await page.click('h1', { position: { x: 5, y: 5 } });
     await page.waitForTimeout(150);
-    const open = await page.$('.tdoc-menu.open');
+    const open = await page.$('#tdoc-secondary-menu.open');
     if (open) throw new Error('menu stayed open after outside click');
   });
 
-  await t('Doc only copy → clipboard has markdown', async () => {
-    await page.click('#tdoc-copy-md-btn');
-    await page.waitForSelector('.tdoc-menu.open');
-    await page.click('.tdoc-menu.open button[data-mode="doc"]');
+  await t('Copy as Markdown → clipboard has markdown, no Comments section', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('#tdoc-secondary-menu.open');
+    await page.click('#tdoc-secondary-menu.open [data-action="copy"]');
     await page.waitForTimeout(300);
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     if (!clip || clip.length < 20) throw new Error(`clipboard too short: "${clip}"`);
     if (!clip.includes('#')) throw new Error('no markdown headings in clipboard');
-    if (clip.includes('## Comments')) throw new Error('doc-only should not include Comments section');
+    if (clip.includes('## Comments')) throw new Error('Copy as Markdown must not include a Comments section');
   });
 
-  await t('Copy button briefly shows "Copied" after copy', async () => {
-    await page.click('#tdoc-copy-md-btn');
-    await page.waitForSelector('.tdoc-menu.open');
-    await page.click('.tdoc-menu.open button[data-mode="doc"]');
-    // Within the 1200ms flash window, the button should read "Copied"
+  await t('Copy confirms with a "Copied as Markdown" toast', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('#tdoc-secondary-menu.open');
+    await page.click('#tdoc-secondary-menu.open [data-action="copy"]');
     await page.waitForFunction(
-      () => document.querySelector('#tdoc-copy-md-btn')?.textContent?.includes('Copied'),
+      () => [...document.querySelectorAll('div')].some(d => d.textContent === 'Copied as Markdown'),
       null,
-      { timeout: 800 }
+      { timeout: 1200 }
     );
-    // And revert afterward
-    await page.waitForFunction(
-      () => document.querySelector('#tdoc-copy-md-btn')?.textContent?.trim() === 'Copy',
-      null,
-      { timeout: 2000 }
-    );
-  });
-
-  await t('Doc + comments copy → markdown includes Comments section if comments exist', async () => {
-    await page.click('#tdoc-copy-md-btn');
-    await page.waitForSelector('.tdoc-menu.open');
-    await page.click('.tdoc-menu.open button[data-mode="doc-comments"]');
-    await page.waitForTimeout(300);
-    const clip = await page.evaluate(() => navigator.clipboard.readText());
-    const hasComments = await page.evaluate(() => document.querySelectorAll('.tdoc-margin-comment').length > 0);
-    if (hasComments && !clip.includes('## Comments')) throw new Error('expected ## Comments section');
-    if (!hasComments && clip.includes('## Comments')) throw new Error('no comments but section appeared');
   });
 
   await t('Anchor highlight is clickable (pointer cursor)', async () => {
@@ -736,7 +714,7 @@ async function tPub(name, fn) {
   });
 
   // ----- Feature: Share button on published view -----
-  await tPub('Share button visible on published view (left of Copy)', async () => {
+  await tPub('Share button visible on published view', async () => {
     const share = await page.$('#tdoc-share-btn');
     if (!share) throw new Error('no #tdoc-share-btn on published doc');
     const text = await share.textContent();
