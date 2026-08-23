@@ -125,6 +125,26 @@ async function tPub(name, fn) {
           await page.evaluate(() => document.querySelector('#tdoc-comment-layer').classList.remove('open'));
           await page.waitForTimeout(120);
         });
+        await t('narrow mode: tapping the backdrop scrim dismisses the drawer', async () => {
+          // Open the drawer, then confirm the scrim is a visible full-screen
+          // dismiss target and a tap on it closes the drawer (no drag needed).
+          await page.evaluate(() => document.querySelector('.tdoc-fab').click());
+          await page.waitForTimeout(250);
+          const scrimShown = await page.evaluate(() => {
+            const s = document.querySelector('#tdoc-drawer-scrim');
+            return s && getComputedStyle(s).display !== 'none';
+          });
+          if (!scrimShown) throw new Error('scrim not visible while drawer is open');
+          await page.evaluate(() => document.querySelector('#tdoc-drawer-scrim').click());
+          await page.waitForTimeout(250);
+          const stillOpen = await page.evaluate(() => document.querySelector('#tdoc-comment-layer.open') !== null);
+          if (stillOpen) throw new Error('drawer stayed open after tapping the scrim');
+          const scrimHidden = await page.evaluate(() => {
+            const s = document.querySelector('#tdoc-drawer-scrim');
+            return !s || getComputedStyle(s).display === 'none';
+          });
+          if (!scrimHidden) throw new Error('scrim stayed visible after the drawer closed');
+        });
       }
       if (st.more) {
         await t('narrow mode: More opens the secondary menu', async () => {

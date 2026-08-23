@@ -789,6 +789,16 @@
   body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
+  /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
+     tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
+     plain body text, so the document-level "close on outside click" never fires
+     there — but a real element with its own listener does. It also dims the doc
+     so the "tap anywhere out here to close" affordance is visible without a drag.
+     Sibling combinator keeps visibility purely CSS-driven off the drawer's
+     .open class, so every open/close path (fab, handle, drag, resize) stays in
+     sync with no extra JS. */
+  #tdoc-drawer-scrim { display: none; }
+  body.tdoc-narrow #tdoc-comment-layer.open ~ #tdoc-drawer-scrim { display: block; position: fixed; inset: 0; z-index: 999997; background: rgba(0,0,0,0.28); -webkit-tap-highlight-color: transparent; }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle { display: block; width: 36px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 12px; cursor: grab; touch-action: none; user-select: none; }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
@@ -1611,6 +1621,17 @@
   fab.innerHTML = '💬 <span id="tdoc-fab-count">0</span>';
   fab.onclick = (e) => { e.stopPropagation(); commentLayer.classList.toggle('open'); };
   document.body.appendChild(fab);
+
+  // Backdrop scrim for the mobile drawer: tap it to dismiss. Appended after the
+  // comment layer so the CSS sibling combinator above can show/hide it purely
+  // off the drawer's .open class. touchstart closes immediately (and blocks the
+  // synthesized click/scroll); a click handler covers desktop-narrow pointers.
+  const drawerScrim = document.createElement('div');
+  drawerScrim.id = 'tdoc-drawer-scrim';
+  const closeDrawer = () => commentLayer.classList.remove('open');
+  drawerScrim.addEventListener('click', closeDrawer);
+  drawerScrim.addEventListener('touchstart', (e) => { e.preventDefault(); closeDrawer(); }, { passive: false });
+  document.body.appendChild(drawerScrim);
 
   // Drawer drag-to-close
   drawerHandle.onclick = (e) => { e.stopPropagation(); commentLayer.classList.remove('open'); };
