@@ -392,7 +392,10 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
 
   // tdoc-publish only attaches comments.json when it is a non-empty array.
   const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
-  assert(/type == "array" and length > 0/.test(publish),
+  // The check moved from jq to node when the hosted path dropped its jq
+  // dependency (#256); the invariant is the same — attach comments.json only
+  // when it is a non-empty array.
+  assert(/Array\.isArray\(a\) *&& *a\.length/.test(publish),
     'tdoc-publish must skip empty comments.json so the release payload does not send a dummy list');
 });
 
@@ -420,7 +423,8 @@ t('release payload carries the homepage access policy', () => {
 
   const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
   // The access block only matters if it is in the upload body.
-  assert(/meta: \$meta\[0\]/.test(publish),
+  // Built by build_payload in node now (#256) rather than jq --slurpfile.
+  assert(/meta: JSON\.parse\(fs\.readFileSync\(metaPath/.test(publish),
     'tdoc-publish no longer sends local meta.json, so payload access never reaches /api/upload');
   // --visibility public must merge, not replace. Otherwise the documented
   // publish line would wipe history_visibility / commenting back to defaults.
