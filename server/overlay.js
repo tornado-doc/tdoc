@@ -461,6 +461,8 @@
   .tdoc-menu button, .tdoc-secondary-menu button, .tdoc-version-menu button { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 4px; color: #1a1a1a; font: 13px system-ui, sans-serif; }
   .tdoc-version-menu button { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
   .tdoc-menu button:hover, .tdoc-secondary-menu button:hover, .tdoc-version-menu button:hover { background: #f0f1f4; }
+  .tdoc-secondary-menu button.tdoc-sec-danger { color: var(--td-danger); }
+  .tdoc-secondary-menu button.tdoc-sec-danger:hover { background: var(--td-danger); color: #fff; }
   .tdoc-version-menu button.current { color: var(--td-accent); font-weight: 600; }
 
   /* Version switcher folded into the ⋯ overflow menu. The inline version chip
@@ -797,6 +799,13 @@
   .tdoc-ac-item:hover, .tdoc-ac-item.active { background: #f2f4f7; }
   .tdoc-ac-item img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
   .tdoc-ac-item .login { font-size: 13px; font-weight: 600; color: #222; }
+  /* Simplified Share panel: one plain-language access dropdown, an Advanced
+     disclosure for the secondary axes, and a de-emphasised danger row. */
+  .tdoc-modal .tdoc-select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 10px; font: inherit; color: inherit; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
+  .tdoc-modal .tdoc-select:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-modal .tdoc-adv { margin: 16px 0 0; border-top: 1px solid #eee; padding-top: 6px; }
+  .tdoc-modal .tdoc-adv > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #555; padding: 6px 0; }
+  .tdoc-modal .tdoc-adv > summary:hover { color: #222; }
 
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
@@ -1042,6 +1051,7 @@
         <button data-action="copy">Copy as Markdown</button>
         ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
         ${isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
+        ${cfg.ownerManage ? '<div class="tdoc-sec-sep"></div><button data-action="delete" class="tdoc-sec-danger">Delete doc…</button>' : ''}
       </div>
     </div>` : ''}
     <span id="tdoc-identity-slot"></span>`;
@@ -1296,6 +1306,7 @@
         if (b.dataset.action === 'duplicate') duplicateDoc();
         if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
         if (b.dataset.action === 'download-pdf') startDownload('pdf');
+        if (b.dataset.action === 'delete') confirmDeleteDoc();
       };
     });
   }
@@ -3207,7 +3218,25 @@
     }
     return r.json().catch(() => ({}));
   }
-  const VIS_OPTIONS = [['public', 'Public'], ['unlisted', 'Unlisted'], ['private', 'Private']];
+  // Delete is a lifecycle action, not a sharing setting, so it lives in the ⋯
+  // overflow menu (owner-only), not the Share panel. Same session-authorized
+  // DELETE + confirm the Share panel used to run.
+  function confirmDeleteDoc() {
+    const om = cfg.ownerManage;
+    if (!om) return; // owner-only; the ⋯ item is gated on cfg.ownerManage too
+    const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+    showManageConfirm({
+      title: 'Delete this doc?',
+      body: `This permanently removes <b>${escapeHtml(slug)}</b> — all <b>${plural(om.versionCount, 'version')}</b> and <b>${plural(om.commentCount, 'comment')}</b> are deleted. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+      onConfirm: async (status) => {
+        await ownerFetch(`/api/doc?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
+        status.textContent = 'Deleted. Redirecting…';
+        setTimeout(() => { window.location.href = '/'; }, 900);
+      },
+    });
+  }
   const HISTORY_OPTIONS = [['owner', 'Owner only'], ['invited', 'Invited'], ['public', 'Everyone']];
   const COMMENTING_OPTIONS = [['signed_in', 'Signed in'], ['invited', 'Invited'], ['owner', 'Owner only'], ['off', 'Off']];
   function renderSeg(id, current) {
@@ -3237,46 +3266,75 @@
         </div>
         <p class="muted">${escapeHtml(slug)} · ${plural(om.versionCount, 'version')} · ${plural(om.commentCount, 'comment')}</p>
         <div class="manage-section">
-          <label class="field">Visibility</label>
-          <div class="tdoc-seg" id="tdoc-vis-seg">
-            ${VIS_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          <label class="field" for="tdoc-access-sel">Who has access</label>
+          <select id="tdoc-access-sel" class="tdoc-select">
+            <option value="private">Only people I invite</option>
+            <option value="unlisted">Anyone with the link</option>
+          </select>
+          <p class="manage-hint" id="tdoc-access-explain">&nbsp;</p>
+          <div id="tdoc-invited-wrap" style="display:none;margin-top:10px;">
+            <label class="field" for="tdoc-mgmt-allowed">Invite by GitHub username</label>
+            <div class="tdoc-token-field" id="tdoc-allowed-field">
+              <input type="text" id="tdoc-mgmt-allowed" autocomplete="off" spellcheck="false" placeholder="Add a GitHub username…">
+            </div>
+            <div class="tdoc-ac" id="tdoc-allowed-ac"></div>
+            <p class="manage-hint" id="tdoc-allowed-status">&nbsp;</p>
+          </div>
+        </div>
+        <details class="tdoc-adv"${(access.commenting !== 'signed_in' || access.history_visibility !== 'owner') ? ' open' : ''}>
+          <summary>Advanced</summary>
+          <div class="manage-section">
+            <label class="field">Who can comment</label>
+            <div class="tdoc-seg" id="tdoc-comment-seg">
+              ${COMMENTING_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+            </div>
+          </div>
+          <div class="manage-section">
+            <label class="field">Who can see version history</label>
+            <div class="tdoc-seg" id="tdoc-hist-seg">
+              ${HISTORY_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+            </div>
           </div>
           <p class="manage-hint" id="tdoc-vis-status">&nbsp;</p>
-        </div>
-        <div class="manage-section">
-          <label class="field">Who can see version history</label>
-          <div class="tdoc-seg" id="tdoc-hist-seg">
-            ${HISTORY_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
-          </div>
-        </div>
-        <div class="manage-section">
-          <label class="field">Who can comment</label>
-          <div class="tdoc-seg" id="tdoc-comment-seg">
-            ${COMMENTING_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
-          </div>
-        </div>
-        <div class="manage-section">
-          <label class="field" for="tdoc-mgmt-allowed">Allowed users (private / invited)</label>
-          <div class="tdoc-token-field" id="tdoc-allowed-field">
-            <input type="text" id="tdoc-mgmt-allowed" autocomplete="off" spellcheck="false" placeholder="Add a GitHub username…">
-          </div>
-          <div class="tdoc-ac" id="tdoc-allowed-ac"></div>
-          <p class="manage-hint" id="tdoc-allowed-status">&nbsp;</p>
-        </div>
-        <div class="manage-section">
-          <button type="button" id="tdoc-mgmt-unpublish" class="manage-action">Unpublish</button>
-          <p class="manage-hint">Sets this doc to Private. Versions and comments are kept — republish anytime.</p>
-        </div>
-        <div class="manage-section">
-          <button type="button" id="tdoc-mgmt-delete" class="manage-action danger-btn">Delete doc…</button>
-          <p class="manage-hint">Permanently removes this doc, every version, and every comment. No undo.</p>
-        </div>
+        </details>
         <div class="actions"><button type="button" id="tdoc-share-close">Close</button></div>
       </div>`;
     document.body.appendChild(bg);
-    renderSeg('tdoc-vis-seg', access.visibility);
     renderSeg('tdoc-hist-seg', access.history_visibility);
     renderSeg('tdoc-comment-seg', access.commenting);
+    // --- General access: one plain-language dropdown replaces the old
+    // Visibility segmented control AND the separate Unpublish button (Unpublish
+    // was identical to switching visibility to Private, so it's gone). The
+    // invite field only appears when "invited" semantics are actually in play. ---
+    const accessSel = document.getElementById('tdoc-access-sel');
+    const accessExplainEl = document.getElementById('tdoc-access-explain');
+    const invitedWrap = document.getElementById('tdoc-invited-wrap');
+    // `public` and `unlisted` are functionally identical today — `public` only
+    // reserves a not-yet-built discovery listing (see worker canReadDoc), so
+    // the dropdown offers two options and a legacy public doc maps onto
+    // "Anyone with the link".
+    accessSel.value = access.visibility === 'private' ? 'private' : 'unlisted';
+    const invitedRelevant = () => access.visibility === 'private'
+      || access.commenting === 'invited' || access.history_visibility === 'invited';
+    function updateInvited() { invitedWrap.style.display = invitedRelevant() ? 'block' : 'none'; }
+    function updateAccessExplain() {
+      const n = (access.allowed_users || []).length;
+      accessExplainEl.textContent =
+        access.visibility !== 'private' ? 'Anyone with the link can read it.'
+        : n ? `Only you and ${n === 1 ? '1 invited person' : n + ' invited people'} can open it.`
+        : 'Only you can open it — add people below to invite them.';
+    }
+    accessSel.onchange = async () => {
+      const value = accessSel.value;
+      if (value === access.visibility) return;
+      // patchAccess only mutates `access` on success; on failure it leaves the
+      // error text in accessExplainEl, so only refresh on a confirmed change.
+      await patchAccess({ visibility: value }, accessExplainEl, '');
+      if (access.visibility === value) { updateAccessExplain(); updateInvited(); }
+      else { accessSel.value = access.visibility; }
+    };
+    updateAccessExplain();
+    updateInvited();
     document.getElementById('tdoc-share-close').onclick = closeManageModal;
     document.getElementById('tdoc-share-copy').onclick = () => navigator.clipboard?.writeText(url);
     document.getElementById('tdoc-share-url').onclick = () => navigator.clipboard?.writeText(url);
@@ -3298,40 +3356,13 @@
       }
     }
 
-    document.getElementById('tdoc-vis-seg').querySelectorAll('button').forEach(b => {
-      b.onclick = async () => {
-        const value = b.dataset.value;
-        if (value === access.visibility) return;
-        const status = document.getElementById('tdoc-vis-status');
-        const commit = async () => {
-          await patchAccess({ visibility: value }, status, 'Saved: ' + VIS_OPTIONS.find(([v]) => v === value)[1]);
-          renderSeg('tdoc-vis-seg', access.visibility);
-        };
-        // Switching TO private is the same effect as Unpublish (takes the
-        // doc offline) — worth a confirm even though it's reversible.
-        if (value === 'private') {
-          showManageConfirm({
-            title: 'Switch to Private?',
-            body: 'Only you (and anyone on the allowlist) will be able to open this doc.',
-            confirmLabel: 'Switch to Private',
-            onConfirm: async (confirmStatus) => {
-              await commit();
-              confirmStatus.textContent = 'Done.';
-              closeManageConfirm();
-            },
-          });
-        } else {
-          await commit();
-        }
-      };
-    });
-
     document.getElementById('tdoc-hist-seg').querySelectorAll('button').forEach(b => {
       b.onclick = async () => {
         const value = b.dataset.value;
         if (value === access.history_visibility) return;
         await patchAccess({ history_visibility: value }, document.getElementById('tdoc-vis-status'), 'Saved.');
         renderSeg('tdoc-hist-seg', access.history_visibility);
+        updateInvited(); // "Invited" history reveals the invite field
       };
     });
 
@@ -3341,6 +3372,7 @@
         if (value === access.commenting) return;
         await patchAccess({ commenting: value }, document.getElementById('tdoc-vis-status'), 'Saved.');
         renderSeg('tdoc-comment-seg', access.commenting);
+        updateInvited(); // "Invited" commenting reveals the invite field
       };
     });
 
@@ -3384,7 +3416,10 @@
           field.insertBefore(chip, input);
         });
       }
-      const commit = () => patchAccess({ allowed_users: list.slice() }, status, 'Saved.');
+      const commit = async () => {
+        await patchAccess({ allowed_users: list.slice() }, status, 'Saved.');
+        updateAccessExplain(); // keep the "Only you and N invited people" line in sync
+      };
       function add(raw) {
         const l = norm(raw);
         if (l && !list.some(x => x.toLowerCase() === l.toLowerCase())) {
@@ -3470,32 +3505,6 @@
       renderChips();
     })();
 
-    document.getElementById('tdoc-mgmt-unpublish').onclick = () => {
-      showManageConfirm({
-        title: 'Take this doc offline?',
-        body: 'This sets visibility to <b>Private</b> — only you can open it until you publish again. Comments and version history are kept.',
-        confirmLabel: 'Unpublish',
-        onConfirm: async (status) => {
-          await patchAccess({ visibility: 'private' }, status, 'Unpublished.');
-          renderSeg('tdoc-vis-seg', 'private');
-          setTimeout(closeManageConfirm, 700);
-        },
-      });
-    };
-
-    document.getElementById('tdoc-mgmt-delete').onclick = () => {
-      showManageConfirm({
-        title: 'Delete this doc?',
-        body: `This permanently removes <b>${escapeHtml(slug)}</b> — all <b>${plural(om.versionCount, 'version')}</b> and <b>${plural(om.commentCount, 'comment')}</b> are deleted. This cannot be undone.`,
-        confirmLabel: 'Delete',
-        danger: true,
-        onConfirm: async (status) => {
-          await ownerFetch(`/api/doc?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
-          status.textContent = 'Deleted. Redirecting…';
-          setTimeout(() => { window.location.href = '/'; }, 900);
-        },
-      });
-    };
   }
 
 
