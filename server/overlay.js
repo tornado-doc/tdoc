@@ -459,6 +459,17 @@
   .tdoc-menu button:hover, .tdoc-secondary-menu button:hover, .tdoc-version-menu button:hover { background: #f0f1f4; }
   .tdoc-version-menu button.current { color: var(--td-accent); font-weight: 600; }
 
+  /* Version switcher folded into the ⋯ overflow menu. The inline version chip
+     is hidden at <700px (phones), so surface the same list here — otherwise
+     there is no way to switch versions on a phone. Shown only at that width;
+     wider layouts keep the inline chip. */
+  .tdoc-secondary-menu .tdoc-sec-versions { display: none; }
+  @media (max-width: 700px) { .tdoc-secondary-menu .tdoc-sec-versions { display: block; } }
+  .tdoc-secondary-menu .tdoc-sec-label { padding: 6px 10px 2px; font: 600 11px system-ui, sans-serif; color: #8a8a8a; text-transform: uppercase; letter-spacing: .04em; }
+  .tdoc-secondary-menu .tdoc-sec-version { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .tdoc-secondary-menu .tdoc-sec-version.current { color: var(--td-accent); font-weight: 600; }
+  .tdoc-secondary-menu .tdoc-sec-sep { border-top: 1px solid #eee; margin: 4px 6px; }
+
   .tdoc-menu-wrap { position: relative; display: inline-block; }
   /* Overflow ⋯ button shows on narrow viewports. */
   .tdoc-bar .tdoc-secondary-toggle { display: none; padding: 6px 10px; }
@@ -1008,6 +1019,11 @@
     ${!isSiteBar && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
+        ${versions.length > 1 ? `<div class="tdoc-sec-versions" role="group" aria-label="Version">
+          <div class="tdoc-sec-label">Version</div>
+          ${versions.map(v => `<button role="option" data-version="${v.n}" class="tdoc-sec-version${v.n === version ? ' current' : ''}">v${v.n}${v.n === version ? ' · current' : ''}</button>`).join('')}
+          <div class="tdoc-sec-sep"></div>
+        </div>` : ''}
         ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
         ${isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
       </div>
@@ -1273,6 +1289,12 @@
       b.onclick = (e) => {
         e.stopPropagation();
         secMenu.classList.remove('open');
+        // Version rows (folded in from the inline chip on phones) navigate.
+        if (b.dataset.version != null) {
+          const vn = Number(b.dataset.version);
+          if (Number.isFinite(vn) && vn !== version) location.href = `/d/${encodeURIComponent(slug)}/v/${vn}`;
+          return;
+        }
         if (b.dataset.action === 'duplicate') duplicateDoc();
         if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
         if (b.dataset.action === 'download-pdf') startDownload('pdf');
