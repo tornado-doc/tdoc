@@ -143,6 +143,41 @@
   });
   window.addEventListener('scroll', function () { if (hoverEl) positionHover(hoverEl); }, { passive: true });
 
+  // --- data-tdoc-copy author buttons (port of overlay.js wireCopyTriggers) ---
+  // A doc element with data-tdoc-copy becomes a click-to-copy trigger. The
+  // author's own <script> is inert here, so we wire it. Clipboard from a
+  // sandboxed frame is unreliable, so we execCommand on the user gesture AND ask
+  // the shell to copy (belt and suspenders); either way the button flashes.
+  function tdocFallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand('copy'); ta.remove(); return ok;
+    } catch (e) { return false; }
+  }
+  function flashCopy(trigger) {
+    var done = trigger.getAttribute('data-tdoc-copy-done') || 'Copied ✓';
+    if (trigger.getAttribute('data-tdoc-copy-label') == null) trigger.setAttribute('data-tdoc-copy-label', trigger.textContent);
+    trigger.textContent = done; trigger.classList.add('tdoc-copied');
+    clearTimeout(trigger._tdocCopyTimer);
+    trigger._tdocCopyTimer = setTimeout(function () {
+      var orig = trigger.getAttribute('data-tdoc-copy-label');
+      if (orig != null) trigger.textContent = orig;
+      trigger.classList.remove('tdoc-copied');
+    }, 1600);
+  }
+  document.addEventListener('click', function (e) {
+    var trigger = e.target.closest && e.target.closest('[data-tdoc-copy]');
+    if (!trigger) return;
+    e.preventDefault(); e.stopPropagation();
+    var raw = trigger.getAttribute('data-tdoc-copy') || '', text = raw;
+    if (raw.charAt(0) === '#') { var src = document.getElementById(raw.slice(1)); if (src) text = (src.innerText || src.textContent || '').replace(/ /g, ' ').trim(); }
+    post({ type: 'tdoc:copyText', text: text });
+    tdocFallbackCopy(text);
+    flashCopy(trigger);
+  }, true);
+
   // --- anchor resolution (faithful port of overlay.js collectTextNodes/
   //     findTextRange). Normalizes whitespace so multi-block/wrapped selections
   //     (Selection.toString gives "para1\n\npara2" but the raw DOM has "\n   ")

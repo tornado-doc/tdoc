@@ -451,6 +451,7 @@
       }
       else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; if (d.docHeight) docHeight = d.docHeight; positionPins(); }
       else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); tryDeepLink(); }
+      else if (d.type === 'tdoc:copyText') { copyText(d.text || ''); }   // author data-tdoc-copy button (frame clipboard is unreliable)
       else if (d.type === 'tdoc:docMarkdown' && copyReq) {
         var md = d.markdown || '';
         if (copyReq.includeComments && commentList.length) md += '\\n\\n---\\n\\n## Comments\\n\\n' + commentList.map(commentToMd).join('\\n---\\n\\n');
