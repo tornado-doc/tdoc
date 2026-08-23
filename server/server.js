@@ -13,6 +13,7 @@ const { spawn } = require('child_process');
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
+const CHROME_PATH = path.join(__dirname, 'chrome.js');
 const FRAME_PROBE_PATH = path.join(__dirname, 'frame-probe.js');
 const ONBOARD_PATH = path.join(__dirname, 'onboard.js');
 const SIGNIN_PATH = path.join(__dirname, 'signin.js');
@@ -298,6 +299,11 @@ function shellDocument(slug, version, nonce) {
   const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const cfgJson = safeJsonForScript({ slug, version, mode: 'shell' });
+  // Shared chrome module (Contract 1) — inlined nonced before the shell script
+  // so window.TDOC_CHROME is available. Extracted from overlay.js; reused here
+  // so shell chrome stays 1:1 with the overlay. (Step 1 of IMPLEMENTATION.md.)
+  let chromeJs = '';
+  try { chromeJs = fs.readFileSync(CHROME_PATH, 'utf8'); } catch {}
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
@@ -307,6 +313,11 @@ function shellDocument(slug, version, nonce) {
   .tdoc-bar{position:relative;width:100%;height:48px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 12px;background:#fff;border-bottom:1px solid #e5e5e7;font:13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;z-index:2;flex:0 0 auto;}
   .tdoc-bar .tdoc-ver{color:#6b6a66;}
   .tdoc-bar .tdoc-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .tdoc-footer{flex:0 0 auto;padding:20px 16px 28px;font:12px system-ui,sans-serif;color:#888;text-align:center;border-top:1px solid #eee;box-sizing:border-box;}
+  .tdoc-footer .tdoc-footer-row{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;row-gap:4px;}
+  .tdoc-footer a{color:#666;text-decoration:none;}
+  .tdoc-footer a:hover{color:#1652f0;text-decoration:underline;}
+  .tdoc-footer .sep{color:#ccc;}
   .tdoc-doc-frame{flex:1 1 auto;width:100%;border:0;display:block;}
   .tdoc-popup{position:absolute;z-index:10;width:320px;max-width:calc(100vw - 16px);background:#fff;border:1px solid #e5e5e7;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.14);padding:12px;font:14px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
   .tdoc-popup .head{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;}
@@ -326,6 +337,8 @@ function shellDocument(slug, version, nonce) {
   <div class="tdoc-bar"><span class="tdoc-ver">v${version}</span><span class="tdoc-title">${esc(title)}</span></div>
   <iframe class="tdoc-doc-frame" title="Document content" sandbox="allow-scripts" src="${esc(frameSrc)}"></iframe>
   <button class="tdoc-fab" type="button">Comments</button>
+  <footer class="tdoc-footer"></footer>
+  <script${nonceAttr}>${chromeJs}</script>
   <script${nonceAttr}>window.__TDOC_SHELL__ = ${cfgJson};</script>
   <script${nonceAttr}>${shellScript()}</script>
 </body></html>`;
@@ -425,6 +438,9 @@ function shellScript() {
   });
   var fab = document.querySelector('.tdoc-fab');
   if (fab) fab.addEventListener('click', function(){ /* P3.1: open drawer list */ });
+  // Real footer, reused from the shared chrome module (1:1 with the overlay).
+  var footer = document.querySelector('.tdoc-footer');
+  if (footer && window.TDOC_CHROME) footer.innerHTML = window.TDOC_CHROME.buildFooter();
   layout();
 })();`;
 }

@@ -21,7 +21,7 @@ const root = path.join(__dirname, '..');
 console.log('browser bundles parse');
 
 // Everything the worker injects into a page.
-for (const rel of ['server/overlay.js', 'server/onboard.js', 'server/signin.js']) {
+for (const rel of ['server/overlay.js', 'server/chrome.js', 'server/frame-probe.js', 'server/onboard.js', 'server/signin.js']) {
   t(`${rel} is valid JavaScript`, () => {
     const src = fs.readFileSync(path.join(root, rel), 'utf8');
     // Compile without running: catches syntax errors, touches no globals.
