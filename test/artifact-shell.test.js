@@ -163,6 +163,17 @@ const SLUG = 'hostile-body-css';
       if (frameDark !== 'dark') throw new Error('frame did not receive the theme signal');
     });
 
+    await t('persisted dark mode applies to the frame on first load (no toggle)', async () => {
+      // the previous test toggled dark → localStorage tdoc-theme=dark persists.
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(300);
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      const frameDark = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
+      if (frameDark !== 'dark') throw new Error('frame did not receive persisted dark on first load (had to toggle): ' + frameDark);
+      // reset for later tests
+      await page.evaluate(() => { try { localStorage.removeItem('tdoc-theme'); } catch (e) {} });
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

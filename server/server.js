@@ -473,7 +473,7 @@ function shellScript() {
     var d = e.data; if (!d || d.source !== 'tdoc-frame') return;
     if (d.type === 'tdoc:selection') open(d);
     else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); }
-    else if (d.type === 'tdoc:ready') { layout(); loadComments(); }
+    else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
     else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; positionPins(); }
     else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); }
     else if (d.type === 'tdoc:docMarkdown' && copyReq) {
