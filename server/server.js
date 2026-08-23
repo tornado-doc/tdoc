@@ -353,9 +353,9 @@ function shellDocument(slug, version, nonce) {
     .tdoc-footer .tdoc-footer-row{flex-direction:row;}
     .tdoc-footer .tdoc-footer-row>a:first-child{display:none;}
   }
-  .tdoc-pin{position:fixed;right:14px;}  /* shell body never scrolls; pins live in the right gutter */
+  .tdoc-pin{position:fixed;}             /* shell body never scrolls; JS sets left from the article edge */
   .tdoc-popup{position:fixed;}
-  .tdoc-margin-comment{position:fixed;right:46px;}  /* floating card in the right gutter, left of the pins */
+  .tdoc-margin-comment{position:fixed;}  /* JS positions it in the gutter by the pin */
 </style>
 </head><body>
   <div class="tdoc-bar">${barInner}</div>
@@ -380,6 +380,8 @@ function shellScript() {
   var pinData = []; // [{id, docY, login}]
   var commentsById = {}; // id -> comment (for the floating card)
   var commentList = []; // ordered comments (for Copy: doc + comments)
+  var gutterRight = 0;  // article right edge (from the probe) — where pins live
+  function pinX(){ return Math.min((gutterRight || (window.innerWidth - 44)) + 14, window.innerWidth - 34); }
   var copyReq = null; // { includeComments } awaiting tdoc:docMarkdown
   var frameScrollY = 0;
   function copyText(t){
@@ -426,6 +428,7 @@ function shellScript() {
     card.innerHTML = window.TDOC_CHROME.buildCard(c);
     document.body.appendChild(card);
     card.style.top = Math.max(BAR + 4, Math.min(topPx, window.innerHeight - card.offsetHeight - 8)) + 'px';
+    card.style.left = Math.max(8, Math.min(pinX() + 34, window.innerWidth - (card.offsetWidth || 280) - 8)) + 'px';
     card.addEventListener('click', function(e){ e.stopPropagation(); });
   }
   function positionPins(){
@@ -447,6 +450,7 @@ function shellScript() {
       var vis = top >= BAR - 20 && top <= window.innerHeight - 8;
       el.hidden = !vis;
       el.style.top = Math.max(BAR + 4, top) + 'px';
+      el.style.left = pinX() + 'px';
     });
     Object.keys(existing).forEach(function(k){ existing[k].remove(); });
   }
@@ -490,7 +494,7 @@ function shellScript() {
     if (d.type === 'tdoc:selection') open(d);
     else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); }
     else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
-    else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; positionPins(); }
+    else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; positionPins(); }
     else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); updateFooter(d); }
     else if (d.type === 'tdoc:docMarkdown' && copyReq) {
       var md = d.markdown || '';

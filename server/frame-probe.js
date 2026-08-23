@@ -129,6 +129,17 @@
     }
     return (bestIdx === -1 || bestScore === 0) ? null : rangeFromNorm(view, bestIdx, needleN.length);
   }
+  // Article right edge (page coords) so the shell can park pins/cards in the
+  // gutter just right of the reading column — not pinned to the viewport edge.
+  // Mirrors overlay.js getArticleMetrics: widest wrapper, else widest prose.
+  function articleRight() {
+    var best = 0, bw = 0, els = document.querySelectorAll('main, article, .wrap, .content, .container');
+    for (var i = 0; i < els.length; i++) { var r = els[i].getBoundingClientRect(); if (r.width > bw && r.width > 200 && r.width < window.innerWidth) { bw = r.width; best = r.right; } }
+    if (bw) return best;
+    var ps = document.querySelectorAll('p, h1, h2, h3, li');
+    for (var j = 0; j < ps.length; j++) { var rr = ps[j].getBoundingClientRect(); if (rr.width > bw && rr.width > 300 && rr.width < window.innerWidth) { bw = rr.width; best = rr.right; } }
+    return bw ? best : window.innerWidth;
+  }
   function reportPins(comments) {
     var view = collectTextNodes(), pins = [], hl = HL ? new Highlight() : null;
     (comments || []).forEach(function (c) {
@@ -140,7 +151,7 @@
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), login: (c.author && c.author.login) || null });
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
-    post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0 });
+    post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()) });
   }
 
   // Doc → Markdown (verbatim port of overlay.js htmlToMarkdown 4176-4253). Runs

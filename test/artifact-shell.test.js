@@ -136,6 +136,10 @@ const SLUG = 'hostile-body-css';
       await page.waitForTimeout(300);
       const pins = await page.evaluate(() => document.querySelectorAll('.tdoc-pin').length);
       if (pins < 2) throw new Error(`expected 2 pins (single-node + cross-block), got ${pins} — normalized anchor matching regressed`);
+      // Pins sit at the article's right edge, not pinned to the far viewport edge
+      // (the fixture body is max-width:900 centered in 1400 → edge ~1100).
+      const pinLeft = await page.evaluate(() => Math.round(document.querySelector('.tdoc-pin').getBoundingClientRect().left));
+      if (pinLeft > 1300) throw new Error(`pin is pinned to the viewport edge (${pinLeft}), not the article gutter`);
     });
 
     await t('clicking a pin opens the real comment card', async () => {
