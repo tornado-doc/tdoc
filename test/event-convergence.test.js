@@ -106,5 +106,75 @@ t('ORDERING: fold result is identical regardless of physical event order', () =>
   assert(inOrder.text === 'edited' && inOrder.status === 'applied');
 });
 
+
+// --- agent status is a toggle, and must converge back to applied (#229) ---
+// question/partial -> applied is the NORMAL progression: the agent asks, the
+// human answers, the agent applies. Under the old `<kind>:<at_version>` eid
+// that path could never converge, because marked_applied and marked_open sat
+// in two slots and dedupEvents re-seats each slot at its FIRST occurrence.
+
+t('marked_applied and marked_open share one eid slot (status is a toggle)', () => {
+  const applied = eventEid({ kind: 'marked_applied', at_version: 1 });
+  const open = eventEid({ kind: 'marked_open', at_version: 1 });
+  assert(applied === open,
+    `status kinds must share an eid, got ${applied} vs ${open}`);
+  // ...but not across versions, so snapshots stay immutable.
+  assert(eventEid({ kind: 'marked_open', at_version: 2 }) !== open,
+    'status eid must still include at_version');
+  // deleted is terminal, not a toggle — it keeps its own slot.
+  assert(eventEid({ kind: 'deleted', at_version: 1 }) !== open,
+    'deleted must not share the status slot');
+});
+
+t('CONVERGENCE: applied -> partial -> applied ends applied, not stuck open', () => {
+  const c = { id: 'c_1', created_in: 1, author: { login: 'u' }, text: 'q',
+    events: [{ kind: 'created', at_version: 1, at: 't0', eid: 'created:1' }] };
+  appendEvent(c, { kind: 'marked_applied', at_version: 1, at: 't1', applied_in: 1, by: 'claude', agent_status: 'applied' });
+  appendEvent(c, { kind: 'marked_open', at_version: 1, at: 't2', by: 'claude', agent_status: 'partial' });
+  appendEvent(c, { kind: 'marked_applied', at_version: 1, at: 't3', applied_in: 1, by: 'claude', agent_status: 'applied' });
+  const snap = snapshotAt(c, 1);
+  assert(snap.status === 'applied', `status stuck at "${snap.status}" after re-applying`);
+  assert(Object.keys(snap.reactions || {}).join('') === '✅',
+    `emoji is ${JSON.stringify(Object.keys(snap.reactions || {}))}, expected ✅`);
+});
+
+t('CONVERGENCE: question -> applied flips the verdict within one version', () => {
+  const c = { id: 'c_2', created_in: 2, author: { login: 'u' }, text: 'q',
+    events: [{ kind: 'created', at_version: 2, at: 't0', eid: 'created:2' }] };
+  appendEvent(c, { kind: 'marked_open', at_version: 2, at: 't1', by: 'claude', agent_status: 'question' });
+  appendEvent(c, { kind: 'marked_applied', at_version: 2, at: 't2', applied_in: 2, by: 'claude', agent_status: 'applied' });
+  const snap = snapshotAt(c, 2);
+  assert(snap.status === 'applied', `question->applied left status "${snap.status}"`);
+});
+
+t('a later marked_open still reopens an applied comment', () => {
+  // The toggle must work in both directions — converging must not mean
+  // "applied always wins".
+  const c = { id: 'c_3', created_in: 1, author: { login: 'u' }, text: 'q',
+    events: [{ kind: 'created', at_version: 1, at: 't0', eid: 'created:1' }] };
+  appendEvent(c, { kind: 'marked_applied', at_version: 1, at: 't1', applied_in: 1, by: 'claude', agent_status: 'applied' });
+  appendEvent(c, { kind: 'marked_open', at_version: 1, at: 't2', by: 'claude', agent_status: 'question' });
+  const snap = snapshotAt(c, 1);
+  assert(snap.status !== 'applied', 'a later marked_open must reopen the comment');
+});
+
+t('MIGRATION: events stored under the old <kind>:<version> eid are recomputed', () => {
+  // Real stored data: two status events written before this fix, each carrying
+  // the old eid. backfillEids must migrate both into the shared slot so the
+  // comment self-heals on the next fold rather than staying stuck.
+  const events = [
+    { kind: 'created', at_version: 1, at: 't0', eid: 'created:1' },
+    { kind: 'marked_applied', at_version: 1, at: 't1', applied_in: 1, by: 'claude', agent_status: 'applied', eid: 'marked_applied:1' },
+    { kind: 'marked_open', at_version: 1, at: 't2', by: 'claude', agent_status: 'partial', eid: 'marked_open:1' },
+    { kind: 'marked_applied', at_version: 1, at: 't3', applied_in: 1, by: 'claude', agent_status: 'applied', eid: 'marked_applied:1' },
+  ];
+  const changed = backfillEids(events);
+  assert(changed === true, 'backfillEids must report the eid format migration');
+  const statusEids = new Set(events.filter(e => e.kind.startsWith('marked_')).map(e => e.eid));
+  assert(statusEids.size === 1, `status events still in ${statusEids.size} slots: ${[...statusEids]}`);
+  const c = { id: 'c_4', created_in: 1, author: { login: 'u' }, text: 'q', events };
+  assert(snapshotAt(c, 1).status === 'applied', 'migrated legacy events did not converge');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

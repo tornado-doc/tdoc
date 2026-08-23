@@ -231,11 +231,12 @@ t('overlay exposes a data-tdoc-copy click-to-copy primitive', () => {
   assert(/writeText/.test(body), 'copy uses navigator.clipboard.writeText');
   assert(/,\s*true\s*\)/.test(body), 'listener is capture-phase (beats artifact/comment handlers)');
 });
-t('copy primitive uses a UNIQUELY named flash helper (no flashCopied collision)', () => {
+t('copy primitives use distinctly named flash helpers (no flashCopied collision)', () => {
   assert(/function flashCopyTrigger\(/.test(src), 'flashCopyTrigger must exist');
-  // there must still be exactly one flashCopied (the copy-as-markdown one)
+  // Copy-as-Markdown moved into the ⋯ menu and now confirms with a toast, so the
+  // old bar-button flashCopied helper is gone — there must be none left to collide.
   const n = (src.match(/function flashCopied\(/g) || []).length;
-  assert(n === 1, `expected exactly one function flashCopied(, found ${n}`);
+  assert(n === 0, `flashCopied should be gone (toast now), found ${n}`);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
