@@ -27,22 +27,31 @@ The chrome (real top bar with sign-in/Copy/Share/version/theme/avatar, footer,
 comment cards, mobile drawer, all CSS) MUST be the existing `server/overlay.js`,
 reused verbatim, so the look is 1:1 identical on laptop and mobile.
 
-Correct architecture:
-- Run the SAME `overlay.js` in the SHELL document (mode:'shell'). It builds the
-  identical chrome there. Nothing about the bar/footer/cards/drawer/CSS changes.
-- Introduce a **doc-port** abstraction for every place overlay.js reaches into
-  the document CONTENT (selection capture, getContext, collectTextNodes,
-  findTextRange/findElement, getArticleMetrics, CSS.highlights, per-range
-  hit-testing, scrollAnchorIntoView — recon area 4). Single-origin mode: the
-  port reads the local document (current behavior, zero change). Shell mode:
-  the port proxies to the frame probe over postMessage; highlighting runs inside
-  the probe (ranges can't cross origins).
-- DISCARD the hand-rolled shell bar/composer/pins from P1–P3a; the shell only
-  provides the frame + loads the real overlay with the shell doc-port.
+FULL MIGRATION — single path, no dual-mode, no flag. This is a draft PR on a
+feature branch, so main is untouched until merge; we do NOT need the flag or a
+dual doc-port to keep main shippable mid-build. The branch is all-or-nothing:
+reach 1:1 parity + migrate existing docs, then merge. No dual-mode tech debt.
 
-Definition of 1:1 done: shell mode shows the exact same top bar (incl. sign-in
-where applicable), footer, comment composer, pins/cards, and mobile drawer as
-the single-origin path — because it IS the same overlay code.
+Correct architecture:
+- The doc route ALWAYS returns the shell; author content ALWAYS renders in the
+  iframe; there is no `?shell=1` flag and no single-origin fallback.
+- Run the SAME `overlay.js` in the SHELL document. It builds the identical
+  chrome. Nothing about the bar/footer/cards/drawer/CSS changes.
+- overlay.js's content-DOM access (selection capture, getContext,
+  collectTextNodes, findTextRange/findElement, getArticleMetrics,
+  CSS.highlights, per-range hit-testing, scrollAnchorIntoView — recon area 4)
+  ALWAYS goes to the frame probe over postMessage. A thin doc-port seam is fine
+  for structure, but it has ONE backend (postMessage) — no local-read branch.
+  Highlighting runs inside the probe (ranges can't cross origins).
+- DELETE the old inline-overlay path (`injectOverlay`/`injectOverlayCfg` into
+  the author HTML) in BOTH server.js and worker.js.
+- DISCARD the hand-rolled shell bar/composer/pins from P1–P3a.
+- Existing docs migrate to self-contained (model B bake) since there is no old
+  path to fall back on.
+
+Definition of 1:1 done: the (only) shell path shows the exact same top bar
+(incl. sign-in where applicable), footer, comment composer, pins/cards, and
+mobile drawer as before — because it IS the same overlay code.
 
 ## Styling model: B — self-contained docs (Claude Artifacts model)
 
@@ -63,12 +72,13 @@ isolated frame would re-introduce a cascade collision (our CSS vs the author's)
 Trade-off accepted: no central restyle of existing docs after migration; each
 doc is independent. This is the Claude model and the price of true isolation.
 
-## Rollout: behind a flag
+## Rollout: full migration on the branch (no flag)
 
-Everything ships behind an opt-in (`?shell=1` initially, later a doc/config
-default). The current single-origin inline-overlay path stays the default and
-untouched until the shell reaches parity. This makes each PR independently
-mergeable and non-disruptive.
+No flag, no dual-mode. On this feature branch the doc route serves ONLY the
+shell; the old inline-overlay path is deleted. main is unaffected until the PR
+merges, and the PR merges only once the shell is at 1:1 parity and existing docs
+are migrated. (The `?shell=1` flag from P1–P3a is being removed as part of this
+correction.)
 
 ## Test boundary (definition of done for the architecture)
 
