@@ -151,6 +151,18 @@ const SLUG = 'hostile-body-css';
       }
     });
 
+    await t('theme toggle darkens the shell chrome AND signals the frame', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.click('#tdoc-theme-btn');
+      await page.waitForTimeout(200);
+      const shellDark = await page.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme'));
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      const frameDark = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
+      if (shellDark !== 'dark') throw new Error('shell chrome did not go dark');
+      if (frameDark !== 'dark') throw new Error('frame did not receive the theme signal');
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

@@ -161,10 +161,26 @@
     return walk(root, { inPre: false }).replace(/\n{3,}/g, '\n\n').trim();
   }
 
+  // Dark mode = filter-invert applied INSIDE the frame (verbatim from overlay.js
+  // 821-842). Works on any author doc without knowing its colors; photos/video/
+  // canvas are inverted back. An author can opt an element out with
+  // data-tdoc-dark="invert", or ship their own theme (then avoid our toggle).
+  var themeStyle = null;
+  function applyTheme(theme) {
+    var html = document.documentElement;
+    if (theme === 'dark') html.setAttribute('data-tdoc-theme', 'dark'); else html.removeAttribute('data-tdoc-theme');
+    if (!themeStyle) {
+      themeStyle = document.createElement('style');
+      themeStyle.textContent = 'html[data-tdoc-theme="dark"]{color-scheme:dark;background:#fff;filter:invert(1) hue-rotate(180deg);}html[data-tdoc-theme="dark"] button,html[data-tdoc-theme="dark"] input,html[data-tdoc-theme="dark"] select,html[data-tdoc-theme="dark"] textarea{color-scheme:light;}html[data-tdoc-theme="dark"] img:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] video:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] canvas:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] iframe:not([data-tdoc-dark="invert"]){filter:invert(1) hue-rotate(180deg);}';
+      (document.head || document.documentElement).appendChild(themeStyle);
+    }
+  }
+
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || d.source !== 'tdoc-shell') return;
     if (d.type === 'tdoc:anchors') reportPins(d.comments);
+    else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {
       var clone = document.body.cloneNode(true);
