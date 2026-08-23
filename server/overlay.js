@@ -791,7 +791,10 @@
     .tdoc-bar { padding: 0 8px; gap: 4px; }
     .tdoc-version-wrap { display: none; }
     .tdoc-bar .doc-title { font-size: 13px; }
-    .tdoc-bar #tdoc-publish-btn span, .tdoc-bar #tdoc-share-btn span { display: inline; }
+    /* Small screens: the primary CTA collapses to just its icon (label is kept
+       in title/aria-label). Keeps the phone bar to a compact icon + ⋯. */
+    .tdoc-bar #tdoc-publish-btn span, .tdoc-bar #tdoc-share-btn span { display: none; }
+    .tdoc-bar #tdoc-publish-btn, .tdoc-bar #tdoc-share-btn { padding: 7px 9px; }
   }
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
