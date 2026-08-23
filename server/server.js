@@ -381,6 +381,7 @@ function shellScript() {
   var commentsById = {}; // id -> comment (for the floating card)
   var commentList = []; // ordered comments (for Copy: doc + comments)
   var gutterRight = 0;  // article right edge (from the probe) — where pins live
+  var openCardId = null; // comment id of the currently open floating card
   function pinX(){ return Math.min((gutterRight || (window.innerWidth - 44)) + 14, window.innerWidth - 34); }
   var copyReq = null; // { includeComments } awaiting tdoc:docMarkdown
   var frameScrollY = 0;
@@ -417,19 +418,30 @@ function shellScript() {
     var atBottom = !d || !d.innerH || (d.scrollY + d.innerH) >= (d.height - 4);
     f.classList.toggle('tdoc-footer-show', !!atBottom);
   }
-  // Floating comment card (real .tdoc-margin-comment markup + CSS).
-  function closeCard(){ var el = document.querySelector('.tdoc-margin-comment'); if (el) el.remove(); }
-  function openCard(id, topPx){
+  // Floating comment card (real .tdoc-margin-comment markup + CSS). The card
+  // stays glued to its pin: positionCard() re-runs whenever pins move (scroll/
+  // resize), and the card closes if its pin scrolls out of view. Clicking a pin
+  // opens the card WITHOUT scrolling the doc.
+  function closeCard(){ var el = document.querySelector('.tdoc-margin-comment'); if (el) el.remove(); openCardId = null; }
+  function pinTopFor(id){ for (var i=0;i<pinData.length;i++){ if (pinData[i].id===id) return BAR + (pinData[i].docY - frameScrollY); } return null; }
+  function positionCard(){
+    var card = document.querySelector('.tdoc-margin-comment'); if (!card || openCardId == null) return;
+    var top = pinTopFor(openCardId);
+    if (top == null || top < BAR - 40 || top > window.innerHeight - 8){ card.remove(); openCardId = null; return; } // pin off-screen → close
+    card.style.top = Math.max(BAR + 4, Math.min(top, window.innerHeight - card.offsetHeight - 8)) + 'px';
+    card.style.left = Math.max(8, Math.min(pinX() + 34, window.innerWidth - (card.offsetWidth || 280) - 8)) + 'px';
+  }
+  function openCard(id){
     closeCard();
     var c = commentsById[id]; if (!c || !window.TDOC_CHROME) return;
     var card = document.createElement('div');
     card.className = 'tdoc-margin-comment tdoc-floating-open';
     card.setAttribute('data-comment-id', id);
     card.innerHTML = window.TDOC_CHROME.buildCard(c);
-    document.body.appendChild(card);
-    card.style.top = Math.max(BAR + 4, Math.min(topPx, window.innerHeight - card.offsetHeight - 8)) + 'px';
-    card.style.left = Math.max(8, Math.min(pinX() + 34, window.innerWidth - (card.offsetWidth || 280) - 8)) + 'px';
     card.addEventListener('click', function(e){ e.stopPropagation(); });
+    document.body.appendChild(card);
+    openCardId = id;
+    positionCard();
   }
   function positionPins(){
     var existing = {};
@@ -442,7 +454,7 @@ function shellScript() {
         // Real pin markup (avatar) from the shared chrome module, styled by the
         // real .tdoc-pin CSS. Avatar url arrives with the pin when available.
         el.innerHTML = window.TDOC_CHROME.avatarHtml({ login: p.login, avatar_url: p.avatar_url }, 'tdoc-pin-anon');
-        el.addEventListener('click', function(ev){ ev.stopPropagation(); openCard(p.id, BAR + (p.docY - frameScrollY)); sendFrame({ type:'tdoc:scrollTo', docY: p.docY }); });
+        el.addEventListener('click', function(ev){ ev.stopPropagation(); openCard(p.id); });
         document.body.appendChild(el);
       }
       delete existing[p.id];
@@ -453,6 +465,7 @@ function shellScript() {
       el.style.left = pinX() + 'px';
     });
     Object.keys(existing).forEach(function(k){ existing[k].remove(); });
+    positionCard(); // keep the open card glued to its pin as things move
   }
 
   function close(){ var el = document.querySelector('.tdoc-popup'); if (el) el.remove(); pending = null; }

@@ -142,11 +142,20 @@ const SLUG = 'hostile-body-css';
       if (pinLeft > 1300) throw new Error(`pin is pinned to the viewport edge (${pinLeft}), not the article gutter`);
     });
 
-    await t('clicking a pin opens the real comment card', async () => {
+    await t('clicking a pin opens the card by its pin, without scrolling the doc', async () => {
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      const before = await frame.evaluate(() => window.scrollY);
       await page.click('.tdoc-pin');
       await page.waitForSelector('.tdoc-margin-comment .text', { timeout: 2000 });
-      const txt = await page.$eval('.tdoc-margin-comment .text', el => el.textContent);
-      if (!/pin should appear/.test(txt)) throw new Error('card text mismatch: ' + txt);
+      await page.waitForTimeout(150);
+      const after = await frame.evaluate(() => window.scrollY);
+      if (Math.abs(after - before) > 2) throw new Error(`clicking a pin scrolled the doc (${before}→${after}) — should not`);
+      // card sits next to its pin (tops within a card-height of each other)
+      const d = await page.evaluate(() => {
+        const pin = document.querySelector('.tdoc-pin'), card = document.querySelector('.tdoc-margin-comment');
+        return { pinTop: pin.getBoundingClientRect().top, cardTop: card.getBoundingClientRect().top, cardLeft: Math.round(card.getBoundingClientRect().left) };
+      });
+      if (Math.abs(d.cardTop - d.pinTop) > 200) throw new Error(`card drifted from its pin (pin ${d.pinTop}, card ${d.cardTop})`);
     });
 
     await t('Copy → Doc only puts the doc markdown on the clipboard', async () => {
