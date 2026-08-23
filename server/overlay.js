@@ -422,9 +422,11 @@
   /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
   .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; }
   .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
-  .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; color: #555; }
+  .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; }
   .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
   .tdoc-bar .tdoc-github-btn svg { display: block; }
+  .tdoc-bar .tdoc-gh-stars { display: inline-flex; align-items: center; gap: 3px; color: #444; }
+  .tdoc-bar .tdoc-gh-stars svg { display: block; }
 
   /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
   .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -456,6 +458,17 @@
   .tdoc-version-menu button { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
   .tdoc-menu button:hover, .tdoc-secondary-menu button:hover, .tdoc-version-menu button:hover { background: #f0f1f4; }
   .tdoc-version-menu button.current { color: var(--td-accent); font-weight: 600; }
+
+  /* Version switcher folded into the ⋯ overflow menu. The inline version chip
+     is hidden at <700px (phones), so surface the same list here — otherwise
+     there is no way to switch versions on a phone. Shown only at that width;
+     wider layouts keep the inline chip. */
+  .tdoc-secondary-menu .tdoc-sec-versions { display: none; }
+  @media (max-width: 700px) { .tdoc-secondary-menu .tdoc-sec-versions { display: block; } }
+  .tdoc-secondary-menu .tdoc-sec-label { padding: 6px 10px 2px; font: 600 11px system-ui, sans-serif; color: #8a8a8a; text-transform: uppercase; letter-spacing: .04em; }
+  .tdoc-secondary-menu .tdoc-sec-version { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .tdoc-secondary-menu .tdoc-sec-version.current { color: var(--td-accent); font-weight: 600; }
+  .tdoc-secondary-menu .tdoc-sec-sep { border-top: 1px solid #eee; margin: 4px 6px; }
 
   .tdoc-menu-wrap { position: relative; display: inline-block; }
   /* Overflow ⋯ button shows on narrow viewports. */
@@ -787,6 +800,16 @@
   body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
+  /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
+     tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
+     plain body text, so the document-level "close on outside click" never fires
+     there — but a real element with its own listener does. It also dims the doc
+     so the "tap anywhere out here to close" affordance is visible without a drag.
+     Sibling combinator keeps visibility purely CSS-driven off the drawer's
+     .open class, so every open/close path (fab, handle, drag, resize) stays in
+     sync with no extra JS. */
+  #tdoc-drawer-scrim { display: none; }
+  body.tdoc-narrow #tdoc-comment-layer.open ~ #tdoc-drawer-scrim { display: block; position: fixed; inset: 0; z-index: 999997; background: rgba(0,0,0,0.28); -webkit-tap-highlight-color: transparent; }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle { display: block; width: 36px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 12px; cursor: grab; touch-action: none; user-select: none; }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
@@ -980,9 +1003,11 @@
       <svg class="tdoc-theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
     </button>`;
 
+  const ghStars = (typeof cfg.stars === 'number' && cfg.stars >= 0) ? cfg.stars : null;
+  const ghStarText = ghStars === null ? '' : (ghStars >= 1000 ? (ghStars / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(ghStars));
   const githubBtnHtml = `
-    <a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="tdoc on GitHub" aria-label="tdoc on GitHub">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    <a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="${ghStars === null ? 'tdoc on GitHub' : ghStars + ' stars on GitHub'}" aria-label="tdoc on GitHub">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>${ghStarText ? `<span class="tdoc-gh-stars"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>${ghStarText}</span>` : ''}
     </a>`;
 
   const rightHtml = `
@@ -994,6 +1019,11 @@
     ${!isSiteBar && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
+        ${versions.length > 1 ? `<div class="tdoc-sec-versions" role="group" aria-label="Version">
+          <div class="tdoc-sec-label">Version</div>
+          ${versions.map(v => `<button role="option" data-version="${v.n}" class="tdoc-sec-version${v.n === version ? ' current' : ''}">v${v.n}${v.n === version ? ' · current' : ''}</button>`).join('')}
+          <div class="tdoc-sec-sep"></div>
+        </div>` : ''}
         ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
         ${isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
       </div>
@@ -1259,6 +1289,12 @@
       b.onclick = (e) => {
         e.stopPropagation();
         secMenu.classList.remove('open');
+        // Version rows (folded in from the inline chip on phones) navigate.
+        if (b.dataset.version != null) {
+          const vn = Number(b.dataset.version);
+          if (Number.isFinite(vn) && vn !== version) location.href = `/d/${encodeURIComponent(slug)}/v/${vn}`;
+          return;
+        }
         if (b.dataset.action === 'duplicate') duplicateDoc();
         if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
         if (b.dataset.action === 'download-pdf') startDownload('pdf');
@@ -1607,6 +1643,17 @@
   fab.innerHTML = '💬 <span id="tdoc-fab-count">0</span>';
   fab.onclick = (e) => { e.stopPropagation(); commentLayer.classList.toggle('open'); };
   document.body.appendChild(fab);
+
+  // Backdrop scrim for the mobile drawer: tap it to dismiss. Appended after the
+  // comment layer so the CSS sibling combinator above can show/hide it purely
+  // off the drawer's .open class. touchstart closes immediately (and blocks the
+  // synthesized click/scroll); a click handler covers desktop-narrow pointers.
+  const drawerScrim = document.createElement('div');
+  drawerScrim.id = 'tdoc-drawer-scrim';
+  const closeDrawer = () => commentLayer.classList.remove('open');
+  drawerScrim.addEventListener('click', closeDrawer);
+  drawerScrim.addEventListener('touchstart', (e) => { e.preventDefault(); closeDrawer(); }, { passive: false });
+  document.body.appendChild(drawerScrim);
 
   // Drawer drag-to-close
   drawerHandle.onclick = (e) => { e.stopPropagation(); commentLayer.classList.remove('open'); };

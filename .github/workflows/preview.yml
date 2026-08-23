@@ -124,7 +124,15 @@ jobs:
           TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
         working-directory: worker
         run: |
-          printf '%s' "$TDOC_PREVIEW_UPLOAD_TOKEN" | wrangler secret put TDOC_UPLOAD_TOKEN --name tdoc-preview
+          # Must be the *versions* variant. Previews ship via `wrangler versions
+          # upload` (next step), which uploads a new version WITHOUT deploying
+          # it — so after the first PR the worker's latest version is never the
+          # deployed one. Plain `wrangler secret put` refuses in that state
+          # ("the latest version of your Worker isn't currently deployed",
+          # guarding against an accidental deploy), which failed this job on
+          # every PR. `versions secret put` updates the secret at the version
+          # level and is inherited by the version uploaded next.
+          printf '%s' "$TDOC_PREVIEW_UPLOAD_TOKEN" | wrangler versions secret put TDOC_UPLOAD_TOKEN --name tdoc-preview
 
       - name: Upload version with pr-N alias
         id: upload
