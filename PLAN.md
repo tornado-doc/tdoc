@@ -19,6 +19,31 @@ postMessage-only. This is "cross-origin" for our purposes **without** needing a
 we already ship. (A real subdomain is only needed if we later let authors run
 persistent JS with storage, like Artifacts' `allow-same-origin` frames.)
 
+## CORRECTION (must reuse overlay.js 1:1 — do NOT reinvent chrome)
+
+P1–P3a wrongly hand-rolled a minimal shell chrome (bare top bar, custom
+composer, custom pins, custom FAB). That produces a DIFFERENT UI/UX — wrong.
+The chrome (real top bar with sign-in/Copy/Share/version/theme/avatar, footer,
+comment cards, mobile drawer, all CSS) MUST be the existing `server/overlay.js`,
+reused verbatim, so the look is 1:1 identical on laptop and mobile.
+
+Correct architecture:
+- Run the SAME `overlay.js` in the SHELL document (mode:'shell'). It builds the
+  identical chrome there. Nothing about the bar/footer/cards/drawer/CSS changes.
+- Introduce a **doc-port** abstraction for every place overlay.js reaches into
+  the document CONTENT (selection capture, getContext, collectTextNodes,
+  findTextRange/findElement, getArticleMetrics, CSS.highlights, per-range
+  hit-testing, scrollAnchorIntoView — recon area 4). Single-origin mode: the
+  port reads the local document (current behavior, zero change). Shell mode:
+  the port proxies to the frame probe over postMessage; highlighting runs inside
+  the probe (ranges can't cross origins).
+- DISCARD the hand-rolled shell bar/composer/pins from P1–P3a; the shell only
+  provides the frame + loads the real overlay with the shell doc-port.
+
+Definition of 1:1 done: shell mode shows the exact same top bar (incl. sign-in
+where applicable), footer, comment composer, pins/cards, and mobile drawer as
+the single-origin path — because it IS the same overlay code.
+
 ## Styling model: B — self-contained docs (Claude Artifacts model)
 
 DECIDED: the reader-template CSS is **not injected at render time**. The author
