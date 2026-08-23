@@ -2098,7 +2098,8 @@ function ensureMigrated(list) {
 // DETERMINISTIC eid so a concurrent duplicate collapses to one:
 //   reaction add/remove → reaction:<emoji>:<by>:<at_version>      (toggle converges)
 //   reply reaction      → rreaction:<reply_id>:<emoji>:<by>:<at_version>
-//   marked_applied/open/deleted → <kind>:<at_version>       (state, not history)
+//   marked_applied/marked_open  → status:<at_version>       (state, not history)
+//   deleted                     → deleted:<at_version>      (terminal, not a toggle)
 // One-shot events (created, reply_added, text_edited, anchor_changed) get a
 // unique eid so each is preserved.
 //
@@ -2110,6 +2111,16 @@ function ensureMigrated(list) {
 //   - including at_version keeps each version's reaction independent, so a
 //     reaction on v1 and a different toggle on v3 don't clobber each other
 //     (snapshots stay immutable).
+//
+// Agent status eids drop the kind for the SAME reason (#229). marked_applied
+// and marked_open are a toggle, not two facts: an agent that answers a comment
+// with `question`, gets a reply, and then applies it emits [applied, open,
+// applied]. Under `<kind>:<at_version>` those landed in two slots, and because
+// dedupEvents re-seats each slot at its FIRST occurrence, the newest verdict
+// was carried but placed ahead of the older one — so `open` folded last and
+// won. The verdict could never converge back to applied within one version,
+// and question→applied is the normal progression, so ✅/🟡/❓ lied permanently.
+// `deleted` keeps its own slot: it is terminal, not a toggle.
 function eventEid(e) {
   switch (e.kind) {
     case 'reaction_added':
@@ -2120,6 +2131,7 @@ function eventEid(e) {
       return `rreaction:${e.reply_id}:${e.emoji}:${e.by}:${e.at_version}`;
     case 'marked_applied':
     case 'marked_open':
+      return `status:${e.at_version}`;
     case 'deleted':
       return `${e.kind}:${e.at_version}`;
     default:
