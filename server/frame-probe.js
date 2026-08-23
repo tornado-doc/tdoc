@@ -60,46 +60,80 @@
   document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
   document.addEventListener('mousedown', function () { post({ type: 'tdoc:cleared' }); }, true);
 
-  // --- anchor resolution (minimal port of overlay.js collectTextNodes/findTextRange) ---
-  function collectText() {
-    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-    var nodes = [], text = '', node;
-    while ((node = walker.nextNode())) {
-      var t = node.nodeValue || '';
-      if (!t) continue;
-      nodes.push({ node: node, start: text.length, len: t.length });
-      text += t;
+  // --- anchor resolution (faithful port of overlay.js collectTextNodes/
+  //     findTextRange). Normalizes whitespace so multi-block/wrapped selections
+  //     (Selection.toString gives "para1\n\npara2" but the raw DOM has "\n   ")
+  //     resolve, with context to disambiguate repeated text. The crude raw
+  //     indexOf this replaces silently failed on any cross-block selection —
+  //     which is why comments showed no pin/highlight. ---
+  function collectTextNodes() {
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.parentElement) return NodeFilter.FILTER_REJECT;
+        var tag = n.parentElement.tagName;
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEMPLATE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [], total = '', norm = '', normToRaw = [], prevWasSpace = false;
+    while (walker.nextNode()) {
+      var n = walker.currentNode, start = total.length, v = n.nodeValue;
+      nodes.push({ node: n, start: start, end: start + v.length });
+      total += v;
+      for (var i = 0; i < v.length; i++) {
+        var ch = v.charCodeAt(i);
+        var isWs = ch === 0x20 || ch === 0x09 || ch === 0x0a || ch === 0x0d || ch === 0xa0;
+        if (isWs) { if (!prevWasSpace && norm.length) { norm += ' '; normToRaw.push(start + i); prevWasSpace = true; } }
+        else { norm += v[i]; normToRaw.push(start + i); prevWasSpace = false; }
+      }
     }
-    return { nodes: nodes, text: text };
+    normToRaw.push(total.length);
+    return { nodes: nodes, total: total, norm: norm, normToRaw: normToRaw };
   }
-  function locate(model, off) {
-    for (var i = 0; i < model.nodes.length; i++) {
-      var n = model.nodes[i];
-      if (off <= n.start + n.len) return { node: n.node, offset: Math.max(0, off - n.start) };
-    }
-    var last = model.nodes[model.nodes.length - 1];
-    return last ? { node: last.node, offset: last.len } : null;
+  function normalizeNeedle(s) { return s ? s.replace(/\s+/g, ' ').trim() : ''; }
+  function normalizeContext(s) { return s ? s.replace(/\s+/g, ' ') : ''; }
+  function locateAt(nodes, off) {
+    var lo = 0, hi = nodes.length - 1;
+    while (lo <= hi) { var mid = (lo + hi) >> 1, n = nodes[mid];
+      if (off < n.start) hi = mid - 1; else if (off > n.end) lo = mid + 1; else return { node: n.node, offset: off - n.start }; }
+    return null;
   }
-  function rangeFor(model, anchor) {
-    var needle = anchor && anchor.text;
-    if (!needle) return null;
-    var hay = model.text, before = anchor.context_before || '', best = -1, idx = -1, from = 0;
-    while ((idx = hay.indexOf(needle, from)) !== -1) {
-      if (best === -1) best = idx;
-      if (before && hay.slice(Math.max(0, idx - before.length), idx) === before) { best = idx; break; }
-      from = idx + 1;
+  function commonSuffixLen(a, b) { var i = 0, m = Math.min(a.length, b.length); while (i < m && a[a.length - 1 - i] === b[b.length - 1 - i]) i++; return i; }
+  function commonPrefixLen(a, b) { var i = 0, m = Math.min(a.length, b.length); while (i < m && a[i] === b[i]) i++; return i; }
+  function rangeFromNorm(view, normIdx, normLen) {
+    var rawStart = view.normToRaw[normIdx], rawEnd = view.normToRaw[normIdx + normLen];
+    if (rawEnd == null) rawEnd = view.total.length;
+    var s = locateAt(view.nodes, rawStart), e = locateAt(view.nodes, rawEnd);
+    if (!s || !e) return null;
+    try { var r = document.createRange(); r.setStart(s.node, s.offset); r.setEnd(e.node, e.offset); return r; } catch (x) { return null; }
+  }
+  function findTextRange(anchor, view) {
+    if (!anchor || !anchor.text || anchor.text.length < 2 || !view.norm) return null;
+    var needleN = normalizeNeedle(anchor.text); if (needleN.length < 2) return null;
+    var hits = [];
+    for (var i = 0; (i = view.norm.indexOf(needleN, i)) !== -1; i += Math.max(1, needleN.length)) { hits.push(i); if (hits.length > 64) break; }
+    if (!hits.length) return null;
+    if (hits.length === 1) return rangeFromNorm(view, hits[0], needleN.length); // unique → accept
+    // Multiple occurrences: disambiguate by saved context; refuse if none clears.
+    var beforeN = normalizeContext(anchor.context_before), afterN = normalizeContext(anchor.context_after);
+    if (!beforeN && !afterN) return null;
+    var MIN = 4, L = 60;
+    var bTail = beforeN.slice(-Math.min(L, beforeN.length)), aHead = afterN.slice(0, Math.min(L, afterN.length));
+    var bestIdx = -1, bestScore = 0;
+    for (var k = 0; k < hits.length; k++) {
+      var h = hits[k];
+      var bScore = commonSuffixLen(view.norm.slice(Math.max(0, h - L), h), bTail);
+      var aScore = commonPrefixLen(view.norm.slice(h + needleN.length, h + needleN.length + L), aHead);
+      var score = (bScore >= MIN ? bScore : 0) + (aScore >= MIN ? aScore : 0);
+      if (score > bestScore) { bestScore = score; bestIdx = h; }
     }
-    if (best === -1) return null;
-    var a = locate(model, best), b = locate(model, best + needle.length);
-    if (!a || !b) return null;
-    try { var r = document.createRange(); r.setStart(a.node, a.offset); r.setEnd(b.node, b.offset); return r; }
-    catch (e) { return null; }
+    return (bestIdx === -1 || bestScore === 0) ? null : rangeFromNorm(view, bestIdx, needleN.length);
   }
   function reportPins(comments) {
-    var model = collectText(), pins = [], hl = HL ? new Highlight() : null;
+    var view = collectTextNodes(), pins = [], hl = HL ? new Highlight() : null;
     (comments || []).forEach(function (c) {
       if (!c || !c.anchor || c.anchor.kind !== 'text') return;
-      var r = rangeFor(model, c.anchor);
+      var r = findTextRange(c.anchor, view);
       if (!r) return;
       if (hl) hl.add(r);
       var rect = r.getBoundingClientRect();

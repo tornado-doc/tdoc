@@ -124,12 +124,18 @@ const SLUG = 'hostile-body-css';
     });
 
     // --- #2b EXISTING COMMENTS RENDER AS PINS --------------------------------
-    await t('an existing text-anchored comment renders a pin in the shell', async () => {
+    await t('existing comments render pins — incl. a cross-block anchor', async () => {
       // Fresh load so the shell fetches comments, hands anchors to the probe,
       // and the probe resolves + reports pin positions back across the boundary.
+      // Two fixture comments: a single-node anchor AND a cross-block anchor
+      // ("h1\n\np") — the latter only resolves with normalized whitespace
+      // matching (a raw indexOf misses it → no pin, the reported bug).
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       await page.waitForSelector('.tdoc-pin', { timeout: 3000 });
+      await page.waitForTimeout(300);
+      const pins = await page.evaluate(() => document.querySelectorAll('.tdoc-pin').length);
+      if (pins < 2) throw new Error(`expected 2 pins (single-node + cross-block), got ${pins} — normalized anchor matching regressed`);
     });
 
     await t('clicking a pin opens the real comment card', async () => {

@@ -1,3 +1,4 @@
 [
-  { "id": "c_fixture_1", "version": 1, "text": "a pin should appear for this", "author": { "login": "tester" }, "status": "open", "created": "2026-08-22T00:00:00Z", "anchor": { "kind": "text", "text": "The quick brown fox jumps over the lazy dog", "context_before": "", "context_after": "" } }
+  { "id": "c_fixture_1", "version": 1, "text": "a pin should appear for this", "author": { "login": "tester" }, "status": "open", "created": "2026-08-22T00:00:00Z", "anchor": { "kind": "text", "text": "The quick brown fox jumps over the lazy dog", "context_before": "", "context_after": "" } },
+  { "id": "c_fixture_2", "version": 1, "text": "cross-block anchor (h1 into p)", "author": { "login": "tester" }, "status": "open", "created": "2026-08-22T00:00:01Z", "anchor": { "kind": "text", "text": "Hostile body CSS fixture\n\nThis paragraph exists", "context_before": "", "context_after": "" } }
 ]
