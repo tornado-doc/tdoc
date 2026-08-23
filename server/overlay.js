@@ -471,8 +471,12 @@
   .tdoc-secondary-menu .tdoc-sec-sep { border-top: 1px solid #eee; margin: 4px 6px; }
 
   .tdoc-menu-wrap { position: relative; display: inline-block; }
-  /* Overflow ⋯ button shows on narrow viewports. */
-  .tdoc-bar .tdoc-secondary-toggle { display: none; padding: 6px 10px; }
+  /* Overflow ⋯ button is the single home for the secondary doc actions at
+     every width. Duplicate / Download / Save-as exist in the bar markup for
+     the export and fork chrome checks, but never show inline — the ⋯ menu
+     already carries the same actions. */
+  .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; padding: 6px 10px; }
+  .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
   /* Identity chip — avatar + name (name hides on narrow). */
   .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; position: relative; }
   .tdoc-chip:hover { background: #e5e6ea; }
@@ -773,6 +777,8 @@
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
      stays elegant at every size.
+     ⋯ is present at every width and holds Duplicate / Download, so the bar
+     only ever sheds identity and breadcrumb detail as it tightens.
        ≥1100px: logo · slug · v · title ……………… identity · share · ⋯
        <1100px: logo ·      · v · title ……………… identity · share · ⋯  (slug hides)
        < 900px: logo ·      · v · title ……………… avatar   · share · ⋯  (name hides)
@@ -783,8 +789,6 @@
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
-    .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
-    .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   }
   @media (max-width: 700px) {
     .tdoc-bar { padding: 0 8px; gap: 4px; }
@@ -796,8 +800,6 @@
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow .tdoc-bar #tdoc-duplicate-btn, body.tdoc-narrow .tdoc-bar #tdoc-download-wrap, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
-  body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
   /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
