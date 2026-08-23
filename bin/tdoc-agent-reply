@@ -140,14 +140,24 @@ post_reply() {
 
 CONFIG_FILE="$HOME/.tdoc/published.json"
 if [ -f "$CONFIG_FILE" ]; then
+  # Resolve the API base for the configured platform: hosted/vercel configs store
+  # the URL directly in `.base`; cloudflare configs derive workers.dev. Matches
+  # tdoc-pull / tdoc-unpublish. Hosted used to fall into the cloudflare branch
+  # and read absent .subdomain/.worker, producing https://null.null.workers.dev
+  # and a 404 on every reply — silently, for every hosted user.
   PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
   TOKEN="$(jq -r '.upload_token // empty' "$CONFIG_FILE")"
-  if [ "$PLATFORM" = "vercel" ]; then
+  if [ "$PLATFORM" = "hosted" ] || [ "$PLATFORM" = "vercel" ]; then
     BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
+    if [ "$BASE" = "null" ]; then BASE=""; fi
   else
-    SUBDOMAIN="$(jq -r .subdomain "$CONFIG_FILE")"
-    WORKER="$(jq -r .worker "$CONFIG_FILE")"
-    BASE="https://${WORKER}.${SUBDOMAIN}.workers.dev"
+    SUBDOMAIN="$(jq -r '.subdomain // empty' "$CONFIG_FILE")"
+    WORKER="$(jq -r '.worker // empty' "$CONFIG_FILE")"
+    if [ -n "$SUBDOMAIN" ] && [ -n "$WORKER" ]; then
+      BASE="https://${WORKER}.${SUBDOMAIN}.workers.dev"
+    else
+      BASE=""
+    fi
   fi
   if [ -n "$TOKEN" ] && [ -n "$BASE" ] && [ "$BASE" != "https://." ]; then
     post_reply "${BASE}/api/agent/reply" "$TOKEN" || exit 1
