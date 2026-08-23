@@ -104,6 +104,12 @@ t('tdoc_logo.svg is the vector SoT; PNG stays for Open Graph', () => {
   assert(/<svg[\s>]/.test(svg), 'not an SVG');
   assert(/<path[\s>]/.test(svg), 'SVG has no path');
   assert(/currentColor/.test(svg), 'SVG must follow currentColor');
+  // The mark is ink on an opaque field, like the raster it replaced. A fully
+  // transparent mark reads as a see-through outline on any non-white surface,
+  // and in dark mode the page-level invert has no body to flip.
+  assert(/fill="#ffffff"/i.test(svg), 'the mark needs an opaque body layer');
+  assert(svg.indexOf('fill="#ffffff"') < svg.indexOf('fill="currentColor"'),
+    'the opaque body must be painted before the ink, or it covers the drawing');
   assert(/fill-rule\s*=\s*["']evenodd["']/.test(svg), 'outline holes need evenodd');
   assert(!/<image[\s>]/i.test(svg), 'embedded <image> not allowed');
   assert(!/data:image\//i.test(svg), 'embedded bitmap not allowed');
