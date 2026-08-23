@@ -161,6 +161,13 @@ t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
     'bar mark must be the tdoc logo, not a text pill');
   assert(overlay.includes("tdoc-bar-mark').onclick = () => { location.href = '/me'; }"),
     'tdoc logo must go to /me (the hub), not /');
+  // The generic .tdoc-bar button rule gives inline-flex + align-items:center and
+  // no horizontal centring, so without this the 24px mark sits flush left in its
+  // 32px box and the hover highlight is 8px off-centre.
+  const markRule = overlay.match(/\.tdoc-bar button\.tdoc-bar-mark \{[^}]*\}/);
+  assert(markRule, 'bar mark rule missing');
+  assert(/justify-content:\s*center/.test(markRule[0]),
+    'bar mark must centre its logo, or the hover highlight sits off to one side');
   const localServer = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf8');
   assert(/p === '\/me'[\s\S]{0,180}Location: '\/'/.test(localServer),
     'local studio must 302 /me to / so the logo click does not 404');

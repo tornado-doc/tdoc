@@ -420,7 +420,11 @@
   .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
 
   /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
-  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; }
+  /* justify-content is required: the generic .tdoc-bar button rule supplies
+     display:inline-flex + align-items:center but no horizontal centring, so a
+     24px mark in a 32px padding-0 box sits flush left and the hover highlight
+     lands 8px off to the right of the drawing. */
+  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; justify-content: center; }
   .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
   .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; }
   .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
