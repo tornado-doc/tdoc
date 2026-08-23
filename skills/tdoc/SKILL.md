@@ -309,9 +309,10 @@ user at the end:
 ```
 
 Launch this in the **background** (Bash `run_in_background: true`) and go
-straight on to writing the doc. It opens the pre-filled GitHub page in the
-user's browser and prints the URL and code as a fallback. Tell the user in one
-line that a GitHub page has opened and they should approve it; then keep
+straight on to writing the doc. It opens GitHub in the user's browser and
+prints a short code that they type there — GitHub does not accept the code
+through the URL, so it has to be entered by hand. Tell the user in one line
+that a GitHub page has opened and that the code is in the terminal; then keep
 working. Skip Step 0 entirely for the local-only and self-host destinations.
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
