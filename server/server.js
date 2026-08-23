@@ -485,6 +485,40 @@ function shellScript() {
     positionCard(); // keep the open card glued to its pin as things move
   }
 
+  // Publish flow — self-contained chrome modal (real .tdoc-modal CSS), 1:1 with
+  // overlay.js showPublishModal. POSTs /api/publish; no doc-DOM access.
+  function closeAuxModal(){ var m = document.getElementById('tdoc-aux-modal'); if (m) m.remove(); }
+  function showPublishModal(){
+    closeAuxModal();
+    var esc = window.TDOC_CHROME.escapeHtml, bg = document.createElement('div');
+    bg.className = 'tdoc-modal-bg'; bg.id = 'tdoc-aux-modal';
+    bg.innerHTML = '<div class="tdoc-modal" data-state="idle"><h3>Publish this doc</h3>' +
+      '<p>We\\'ll deploy this so anyone with the link can read it. GitHub sign-in is required for commenting.</p>' +
+      '<div class="step"><span class="n">·</span><span>Slug: <code id="tdoc-pub-slug">' + esc(cfg.slug) + '</code></span></div>' +
+      '<div class="status" id="tdoc-pub-status" style="margin-top:10px;display:none;"></div>' +
+      '<div id="tdoc-pub-result" style="margin-top:10px;display:none;"><div class="code" style="font-size:14px;letter-spacing:0;text-align:left;" id="tdoc-pub-url"></div>' +
+      '<div class="actions" style="justify-content:flex-start;gap:8px;"><button class="primary" id="tdoc-pub-copy">Copy link</button><button id="tdoc-pub-open">View live →</button></div></div>' +
+      '<div class="actions"><button id="tdoc-pub-cancel">Cancel</button><button class="primary" id="tdoc-pub-go">Publish</button></div></div>';
+    document.body.appendChild(bg);
+    bg.addEventListener('click', function(e){ if (e.target === bg) closeAuxModal(); });
+    document.getElementById('tdoc-pub-cancel').onclick = closeAuxModal;
+    document.getElementById('tdoc-pub-go').onclick = function(){
+      var status = document.getElementById('tdoc-pub-status'), go = document.getElementById('tdoc-pub-go');
+      status.style.display = 'block'; status.textContent = 'Publishing — this can take 20–60s on first run…'; go.disabled = true;
+      fetch('/api/publish', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ slug: cfg.slug }) })
+        .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+        .then(function(x){
+          if (!x.ok || x.d.error){ status.textContent = 'Failed: ' + (x.d.error || x.d.message || 'unknown'); go.disabled = false; return; }
+          var url = x.d.url; status.style.display = 'none';
+          var res = document.getElementById('tdoc-pub-result'); res.style.display = 'block';
+          document.getElementById('tdoc-pub-url').textContent = url;
+          document.getElementById('tdoc-pub-copy').onclick = function(){ copyText(url); };
+          document.getElementById('tdoc-pub-open').onclick = function(){ window.open(url, '_blank'); };
+          go.style.display = 'none'; document.getElementById('tdoc-pub-cancel').textContent = 'Done';
+        })
+        .catch(function(e){ status.textContent = 'Failed: ' + e.message; go.disabled = false; });
+    };
+  }
   function close(){ var el = document.querySelector('.tdoc-popup'); if (el) el.remove(); pending = null; }
   function open(d){
     close();
@@ -545,6 +579,8 @@ function shellScript() {
   })();
   // My docs
   wire('#tdoc-bar-mark','click',function(){ location.href='/me'; });
+  // Publish (local mode)
+  wire('#tdoc-publish-btn','click',function(e){ e.stopPropagation(); showPublishModal(); });
   // Menus open by toggling .open on the MENU element (matches the real CSS
   // .tdoc-menu.open / .tdoc-version-menu.open).
   function toggleMenu(id){ var m=document.getElementById(id); if(!m) return; var was=m.classList.contains('open'); closeMenus(); if(!was) m.classList.add('open'); }

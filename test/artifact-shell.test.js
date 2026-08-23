@@ -206,6 +206,15 @@ const SLUG = 'hostile-body-css';
       if (!shownAtBottom) throw new Error('footer should reveal at the doc bottom');
     });
 
+    await t('Publish button opens the publish modal', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.click('#tdoc-publish-btn');
+      await page.waitForSelector('.tdoc-modal-bg .tdoc-modal', { timeout: 2000 });
+      const h = await page.$eval('.tdoc-modal h3', el => el.textContent);
+      if (!/Publish/.test(h)) throw new Error('publish modal missing: ' + h);
+    });
+
     await t('comment card has a working Reply box', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
