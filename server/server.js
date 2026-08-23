@@ -344,6 +344,11 @@ function shellDocument(slug, version, nonce) {
   body{display:flex;flex-direction:column;}
   .tdoc-doc-frame{flex:1 1 auto;width:100%;border:0;display:block;}
   .tdoc-footer{margin-top:0;}            /* the frame fills the column; no gap above the footer */
+  /* Narrow: one line — just "built with tdoc" (don't stack to two rows). */
+  @media (max-width:700px){
+    .tdoc-footer .tdoc-footer-row{flex-direction:row;}
+    .tdoc-footer .tdoc-footer-row>a:first-child{display:none;}
+  }
   .tdoc-pin{position:fixed;right:14px;}  /* shell body never scrolls; pins live in the right gutter */
   .tdoc-popup{position:fixed;}
   .tdoc-margin-comment{position:fixed;right:46px;}  /* floating card in the right gutter, left of the pins */
