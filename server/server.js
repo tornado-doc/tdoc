@@ -406,10 +406,18 @@ function shellScript() {
 
   // --- comments: fetch → resolve in frame → draw pins ---
   function loadComments(){
-    fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&version=' + encodeURIComponent(cfg.version))
+    return fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&version=' + encodeURIComponent(cfg.version))
       .then(function(r){ return r.ok ? r.json() : []; })
-      .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); })
-      .catch(function(){});
+      .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); return list; })
+      .catch(function(){ return []; });
+  }
+  function postReply(parentId, text, btn){
+    text = (text || '').trim(); if (!text) return; if (btn) btn.disabled = true;
+    fetch('/api/comments', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ slug: cfg.slug, version: cfg.version, text: text, parent_id: parentId }) })
+      .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function(){ return loadComments(); })
+      .then(function(){ openCard(parentId); })   // reopen with the new reply shown
+      .catch(function(){ if (btn){ btn.disabled = false; btn.textContent = 'Retry'; } });
   }
   // Footer reveals only when the doc is scrolled to its end (or the doc is short
   // enough to fit). d = {scrollY, innerH, height} from the frame probe.
@@ -441,6 +449,15 @@ function shellScript() {
     card.addEventListener('click', function(e){ e.stopPropagation(); });
     document.body.appendChild(card);
     openCardId = id;
+    // replies expand/collapse
+    var rtog = card.querySelector('.tdoc-replies-toggle'), rlist = card.querySelector('.tdoc-replies');
+    if (rtog && rlist) rtog.addEventListener('click', function(e){ e.stopPropagation(); var o = rlist.classList.toggle('open'); rtog.classList.toggle('open', o); positionCard(); });
+    // reply: show form + submit (POST with parent_id)
+    var rbtn = card.querySelector('.tdoc-reply-toggle'), rform = card.querySelector('.tdoc-reply-form');
+    if (rbtn && rform) rbtn.addEventListener('click', function(e){ e.stopPropagation(); var o = rform.classList.toggle('open'); if (o){ var t = rform.querySelector('textarea'); if (t) t.focus(); } positionCard(); });
+    if (rform){ var sub = rform.querySelector('.tdoc-reply-submit'), rta = rform.querySelector('textarea');
+      if (sub && rta){ sub.addEventListener('click', function(e){ e.stopPropagation(); postReply(id, rta.value, sub); });
+        rta.addEventListener('keydown', function(e){ if ((e.metaKey||e.ctrlKey) && e.key==='Enter') postReply(id, rta.value, sub); }); } }
     positionCard();
   }
   function positionPins(){
@@ -505,7 +522,7 @@ function shellScript() {
     if (!frameWin() || e.source !== frameWin()) return;      // validate by window identity (opaque origin)
     var d = e.data; if (!d || d.source !== 'tdoc-frame') return;
     if (d.type === 'tdoc:selection') open(d);
-    else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); }
+    else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); }
     else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
     else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; positionPins(); }
     else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); updateFooter(d); }

@@ -206,6 +206,16 @@ const SLUG = 'hostile-body-css';
       if (!shownAtBottom) throw new Error('footer should reveal at the doc bottom');
     });
 
+    await t('comment card has a working Reply box', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.waitForSelector('.tdoc-pin', { timeout: 3000 });
+      await page.click('.tdoc-pin');
+      await page.waitForSelector('.tdoc-margin-comment .tdoc-reply-toggle', { timeout: 2000 });
+      await page.click('.tdoc-margin-comment .tdoc-reply-toggle');
+      await page.waitForSelector('.tdoc-margin-comment .tdoc-reply-form.open textarea', { timeout: 2000 });
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

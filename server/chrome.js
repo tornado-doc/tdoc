@@ -132,11 +132,21 @@
   // Consumer creates a .tdoc-margin-comment element and sets innerHTML to this.
   function buildCard(comment) {
     comment = comment || {};
+    var id = escapeHtml(comment.id || '');
     var when = '';
     try { when = new Date(comment.created).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) {}
+    var replies = Array.isArray(comment.replies) ? comment.replies : [];
+    var repliesBlock = replies.length
+      ? '<div class="tdoc-replies-toggle" data-id="' + id + '"><svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>' + replies.length + ' ' + (replies.length === 1 ? 'reply' : 'replies') + '</div>' +
+        '<div class="tdoc-replies">' + replies.map(function (r) { return '<div class="tdoc-reply">' + renderAuthor(r.author) + '<div class="text">' + escapeHtml(r.text || '') + '</div></div>'; }).join('') + '</div>'
+      : '';
     return renderAuthor(comment.author) +
       '<div class="text">' + escapeHtml(comment.text || '') + '</div>' +
-      '<div class="meta"><span>v' + (comment.version || 1) + (when ? ' · ' + escapeHtml(when) : '') + '</span></div>';
+      '<div class="meta"><span>v' + (comment.version || 1) + (when ? ' · ' + escapeHtml(when) : '') + '</span>' +
+      '<span class="actions"><span class="tdoc-reply-toggle" data-id="' + id + '">Reply</span></span></div>' +
+      repliesBlock +
+      '<div class="tdoc-reply-form" data-parent-id="' + id + '"><textarea placeholder="Reply…"></textarea>' +
+      '<div class="tdoc-reply-form-foot"><span class="hint"></span><button class="tdoc-reply-submit">Reply</button></div></div>';
   }
 
   var api = { escapeHtml: escapeHtml, buildFooter: buildFooter, buildBar: buildBar, avatarHtml: avatarHtml, buildComposer: buildComposer, renderAuthor: renderAuthor, buildCard: buildCard };
