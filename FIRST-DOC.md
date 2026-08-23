@@ -10,17 +10,27 @@ Follow [ONBOARDING.md](ONBOARDING.md) end-to-end first. Do not skip it and do
 not ask the human which runtime they use; that file tells you how to install
 yourself and how to authenticate.
 
-Publishing is hosted by default. If the CLI asks the human to sign in with
+Publishing is hosted by default and needs no Cloudflare account, no card, and
+nothing to click in a dashboard. If the CLI asks the human to sign in with
 GitHub, print the code and the URL and wait for them. Do not ask them for a
 token; there is nothing for them to paste.
 
-**If the human said to publish to their own Cloudflare** — the line they pasted
-will say so — do that instead, and do not sign them into the hosted service.
-ONBOARDING.md step 4 covers it: install wrangler, `wrangler login`, then two
-things only they can click in a browser (claim a workers.dev subdomain, enable
-R2). Print each URL, say what to click, and wait for them to confirm before
-re-probing with `bin/tdoc-doctor`. It is about five minutes the first time and
-free. Their account, their bill, no card.
+Do not install wrangler, and do not send them to the Cloudflare dashboard. If
+`bin/tdoc-doctor` is asking for either, read its `.target` field first — on the
+hosted default it never should.
+
+<details>
+<summary><b>Only if the human said to publish to their own Cloudflare</b> — the
+line they pasted will say so</summary>
+
+Do that instead, and do not sign them into the hosted service. The self-hosting
+appendix at the end of ONBOARDING.md covers it: install wrangler,
+`wrangler login`, then two things only they can click in a browser (claim a
+workers.dev subdomain, enable R2). Print each URL, say what to click, and wait
+for them to confirm before re-probing with `bin/tdoc-doctor --platform
+cloudflare`. It is about five minutes the first time and free. Their account,
+their bill, no card.
+</details>
 
 ## Step 2 — make the doc
 

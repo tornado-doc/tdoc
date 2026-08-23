@@ -586,20 +586,29 @@ installed, or might be partway through. You **must** drive the flow from
 **Algorithm:**
 
 1. Run `"$SKILL_DIR/bin/tdoc-doctor"` and parse the JSON. This is non-destructive.
+   The doctor is target-aware and reports what it assessed under `.target`.
+   The default is `hosted` (tdoc.dev), which needs Node 18+, curl and jq —
+   **no Cloudflare account, no wrangler, nothing to click in a dashboard.**
+   Only pass `--platform cloudflare` / `--platform vercel` when the user has
+   asked to self-host.
 2. If `.ready_to_publish == true` AND `.published.ok == true` → tell the user
    they are fully set up, and offer to run `/tdoc new <prompt>` or to test
    publishing with a sample doc.
 3. If `.ready_to_publish == true` AND `.published.ok == false` → they have all
    deps but haven't published yet. Offer to create a quick sample doc with
    `/tdoc new` and then `/tdoc publish` it.
-4. Otherwise, walk through `.missing_steps` in order. For each step:
-   - **kind == "install"**: run the `cmd` for them via Bash (e.g. `npm i -g wrangler`,
-     `brew install jq`). After install, re-run `tdoc-doctor` to confirm.
+4. Otherwise, walk through `.missing_steps` in order. On the hosted default
+   this list is usually empty. For each step:
+   - **kind == "install"**: run the `cmd` for them via Bash (e.g. `brew install jq`).
+     After install, re-run `tdoc-doctor` to confirm.
    - **kind == "login"**: explain that this opens a browser, then run the `cmd`.
      `wrangler login` is interactive — print clear instructions and wait.
    - **kind == "click"**: you cannot click for the user. Print the URL clearly
      and tell them what to do ("Open this and click 'Enable R2'"). Then wait
      for the user to say "done", then re-run `tdoc-doctor` to verify.
+     `login` and `click` steps are **self-host only**. If one appears for a
+     user who never asked to self-host, re-read `.target` before sending them
+     to a dashboard.
 5. After every step, re-run `tdoc-doctor` and continue from the new state.
 6. When `.ready_to_publish == true`, congratulate and offer to create + publish
    a sample doc.
@@ -608,6 +617,8 @@ installed, or might be partway through. You **must** drive the flow from
 
 - NEVER skip the doctor check before suggesting a step. State changes between
   steps (e.g. R2 takes a few seconds after enabling).
+- NEVER walk a hosted user through Cloudflare setup. Publishing to tdoc.dev
+  does not use wrangler, a workers.dev subdomain, or R2.
 - ALWAYS show the user what you're running. Print the JSON status if helpful.
 - If a "click" step doesn't take effect after the user says "done", offer to
   re-check after waiting 10s (Cloudflare API can be slow to reflect changes).
