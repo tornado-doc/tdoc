@@ -140,11 +140,18 @@
     for (var j = 0; j < ps.length; j++) { var rr = ps[j].getBoundingClientRect(); if (rr.width > bw && rr.width > 300 && rr.width < window.innerWidth) { bw = rr.width; best = rr.right; } }
     return bw ? best : window.innerWidth;
   }
+  // The author document is static in shell mode, so cache the text-model view
+  // and each anchor's resolved Range. Re-resolving after a comment/reply then
+  // only pays findTextRange for NEW anchors (O(D) each) instead of re-walking
+  // the whole doc + re-scanning every anchor (O(N + C·D)) every time.
+  var _view = null, _rangeCache = {};
+  function docView() { return _view || (_view = collectTextNodes()); }
   function reportPins(comments) {
-    var view = collectTextNodes(), pins = [], hl = HL ? new Highlight() : null;
+    var pins = [], hl = HL ? new Highlight() : null;
     (comments || []).forEach(function (c) {
       if (!c || !c.anchor || c.anchor.kind !== 'text') return;
-      var r = findTextRange(c.anchor, view);
+      var key = (c.anchor.text || '') + ' ' + (c.anchor.context_before || '') + ' ' + (c.anchor.context_after || '');
+      var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
       if (!r) return;
       if (hl) hl.add(r);
       var rect = r.getBoundingClientRect();

@@ -382,6 +382,7 @@ function shellScript() {
   var commentList = []; // ordered comments (for Copy: doc + comments)
   var gutterRight = 0;  // article right edge (from the probe) — where pins live
   var openCardId = null; // comment id of the currently open floating card
+  var pinEls = {};       // id -> pin element (cached so scroll doesn't re-query the DOM)
   function pinX(){ return Math.min((gutterRight || (window.innerWidth - 44)) + 14, window.innerWidth - 34); }
   var copyReq = null; // { includeComments } awaiting tdoc:docMarkdown
   var frameScrollY = 0;
@@ -460,29 +461,36 @@ function shellScript() {
         rta.addEventListener('keydown', function(e){ if ((e.metaKey||e.ctrlKey) && e.key==='Enter') postReply(id, rta.value, sub); }); } }
     positionCard();
   }
+  // Full reconcile — only on tdoc:pins (comment set changed). Creates/removes
+  // pin elements against the cached pinEls map, then positions them. O(P) once.
   function positionPins(){
-    var existing = {};
-    Array.prototype.forEach.call(document.querySelectorAll('.tdoc-pin'), function(el){ existing[el.getAttribute('data-id')] = el; });
+    var seen = {};
     pinData.forEach(function(p){
-      var el = existing[p.id];
+      seen[p.id] = 1;
+      var el = pinEls[p.id];
       if (!el){
         el = document.createElement('div'); el.className='tdoc-pin'; el.setAttribute('data-id', p.id);
         el.setAttribute('role','button'); el.setAttribute('tabindex','0');
-        // Real pin markup (avatar) from the shared chrome module, styled by the
-        // real .tdoc-pin CSS. Avatar url arrives with the pin when available.
         el.innerHTML = window.TDOC_CHROME.avatarHtml({ login: p.login, avatar_url: p.avatar_url }, 'tdoc-pin-anon');
-        el.addEventListener('click', function(ev){ ev.stopPropagation(); openCard(p.id); });
+        el.addEventListener('click', (function(id){ return function(ev){ ev.stopPropagation(); openCard(id); }; })(p.id));
         document.body.appendChild(el);
+        pinEls[p.id] = el;
       }
-      delete existing[p.id];
-      var top = BAR + (p.docY - frameScrollY);
-      var vis = top >= BAR - 20 && top <= window.innerHeight - 8;
-      el.hidden = !vis;
-      el.style.top = Math.max(BAR + 4, top) + 'px';
-      el.style.left = pinX() + 'px';
     });
-    Object.keys(existing).forEach(function(k){ existing[k].remove(); });
-    positionCard(); // keep the open card glued to its pin as things move
+    Object.keys(pinEls).forEach(function(id){ if (!seen[id]){ pinEls[id].remove(); delete pinEls[id]; } });
+    repositionPins();
+  }
+  // Cheap — on every scroll frame. No DOM query/rebuild: just move cached pins.
+  function repositionPins(){
+    var left = pinX() + 'px';
+    for (var i = 0; i < pinData.length; i++){
+      var p = pinData[i], el = pinEls[p.id]; if (!el) continue;
+      var top = BAR + (p.docY - frameScrollY);
+      el.hidden = !(top >= BAR - 20 && top <= window.innerHeight - 8);
+      el.style.top = Math.max(BAR + 4, top) + 'px';
+      el.style.left = left;
+    }
+    positionCard();
   }
 
   // Publish flow — self-contained chrome modal (real .tdoc-modal CSS), 1:1 with
@@ -559,7 +567,7 @@ function shellScript() {
     else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); closeCard(); closeMenus(); }
     else if (d.type === 'tdoc:ready') { layout(); loadComments(); sendFrame({ type:'tdoc:theme', theme: document.documentElement.getAttribute('data-tdoc-theme') === 'dark' ? 'dark' : 'light' }); }
     else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; positionPins(); }
-    else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); updateFooter(d); }
+    else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); }
     else if (d.type === 'tdoc:docMarkdown' && copyReq) {
       var md = d.markdown || '';
       if (copyReq.includeComments && commentList.length) md += '\\n\\n---\\n\\n## Comments\\n\\n' + commentList.map(commentToMd).join('\\n---\\n\\n');
