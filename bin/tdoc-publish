@@ -243,6 +243,7 @@ hosted_github_signin() {
   user_code="$(printf '%s' "$payload" | jq -r '.user_code // empty')"
   device_code="$(printf '%s' "$payload" | jq -r '.device_code // empty')"
   uri="$(printf '%s' "$payload" | jq -r '.verification_uri_complete // .verification_uri // empty')"
+  plain_uri="$(printf '%s' "$payload" | jq -r '.verification_uri // empty')"
   interval="$(printf '%s' "$payload" | jq -r '.interval // 5')"
   expires="$(printf '%s' "$payload" | jq -r '.expires_in // 900')"
   if [ -z "$user_code" ] || [ -z "$device_code" ] || [ -z "$uri" ]; then
@@ -253,9 +254,23 @@ hosted_github_signin() {
   case "$interval" in ''|*[!0-9]*) interval=5 ;; esac
   [ "$interval" -lt 5 ] && interval=5
   case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
+
+  # GitHub does NOT return verification_uri_complete — it is null on every
+  # device/start, so the // fallback above lands on the bare
+  # https://github.com/login/device and the human has to type the code by hand.
+  # Build the pre-filled URL ourselves. GitHub carries ?user_code= through its
+  # own login redirect (return_to=...device%3Fuser_code%3D...), so it survives
+  # a signed-out browser too.
+  case "$uri" in
+    *user_code=*) ;;
+    *)
+      if [ -n "$plain_uri" ] && [ -n "$user_code" ]; then
+        uri="${plain_uri}?user_code=${user_code}"
+      fi
+      ;;
+  esac
+
   echo "[tdoc] Sign in with GitHub to publish on $base" >&2
-  echo "[tdoc] Open: $uri" >&2
-  echo "[tdoc] Code: $user_code" >&2
   # Open it for them. $uri is verification_uri_complete when GitHub returns it,
   # which pre-fills the code — the human then only clicks Authorize. Printing
   # stays above as the fallback; this is best-effort and silent on failure.
@@ -281,10 +296,27 @@ hosted_github_signin() {
         if command -v open >/dev/null 2>&1; then open "$uri" >/dev/null 2>&1 || true
         elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$uri" >/dev/null 2>&1 || true
         fi
-        echo "[tdoc] Opened that page in your browser — approve there and I'll continue." >&2
+        opened=1
       fi
       ;;
   esac
+  # Never promise the field is pre-filled. GitHub returns no
+  # verification_uri_complete, and #186 removed exactly that claim so nobody
+  # arrives expecting a filled box that is not there. We pass ?user_code= as a
+  # best effort; the instruction stays "enter this code" either way.
+  if [ "${opened:-0}" = "1" ]; then
+    echo "[tdoc] A GitHub page just opened in your browser." >&2
+    echo "[tdoc] Enter this code there (it is only shown here):" >&2
+  else
+    echo "[tdoc] Open this page in your browser to finish signing in:" >&2
+    echo "[tdoc]   $uri" >&2
+    echo "[tdoc] and enter this code:" >&2
+  fi
+  echo "" >&2
+  echo "        $user_code" >&2
+  echo "" >&2
+  [ "${opened:-0}" = "1" ] && echo "[tdoc] (If nothing opened: $uri )" >&2
+  echo "[tdoc] Then click Authorize. I'll carry on by myself — nothing to do here." >&2
   echo "[tdoc] Waiting for GitHub approval…" >&2
   local waited=0 err
   while [ "$waited" -lt "$expires" ]; do
