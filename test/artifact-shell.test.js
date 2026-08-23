@@ -99,6 +99,15 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
     });
 
+    // --- #2b EXISTING COMMENTS RENDER AS PINS --------------------------------
+    await t('an existing text-anchored comment renders a pin in the shell', async () => {
+      // Fresh load so the shell fetches comments, hands anchors to the probe,
+      // and the probe resolves + reports pin positions back across the boundary.
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.waitForSelector('.tdoc-pin', { timeout: 3000 });
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: comments go to the drawer (fab present)', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

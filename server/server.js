@@ -316,10 +316,16 @@ function shellDocument(slug, version, nonce) {
   .tdoc-popup .foot{display:flex;justify-content:flex-end;margin-top:8px;}
   .tdoc-popup .submit{border:0;background:#1652f0;color:#fff;border-radius:8px;padding:6px 14px;font:inherit;font-weight:600;cursor:pointer;}
   .tdoc-popup .submit[disabled]{opacity:.5;cursor:default;}
+  .tdoc-pin{position:fixed;right:14px;width:26px;height:26px;border-radius:50%;background:#1652f0;color:#fff;font:600 12px system-ui,sans-serif;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.18);cursor:pointer;z-index:5;}
+  .tdoc-pin[hidden]{display:none;}
+  body.tdoc-narrow .tdoc-pin{display:none;}
+  .tdoc-fab{position:fixed;right:16px;bottom:16px;height:44px;padding:0 16px;border:0;border-radius:22px;background:#1652f0;color:#fff;font:600 14px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.2);cursor:pointer;z-index:6;display:none;}
+  body.tdoc-narrow .tdoc-fab{display:inline-flex;align-items:center;}
 </style>
 </head><body>
   <div class="tdoc-bar"><span class="tdoc-ver">v${version}</span><span class="tdoc-title">${esc(title)}</span></div>
   <iframe class="tdoc-doc-frame" title="Document content" sandbox="allow-scripts" src="${esc(frameSrc)}"></iframe>
+  <button class="tdoc-fab" type="button">Comments</button>
   <script${nonceAttr}>window.__TDOC_SHELL__ = ${cfgJson};</script>
   <script${nonceAttr}>${shellScript()}</script>
 </body></html>`;
@@ -335,7 +341,42 @@ function shellScript() {
   var frame = document.querySelector('.tdoc-doc-frame');
   var BAR = 48; // top bar height; frame viewport coords + BAR = shell coords
   var pending = null; // last selection anchor awaiting a comment
+  var pinData = []; // [{id, docY, login}]
+  var frameScrollY = 0;
   function frameWin(){ return frame && frame.contentWindow; }
+  function sendFrame(msg){ var w = frameWin(); if (w) w.postMessage(Object.assign({source:'tdoc-shell'}, msg), '*'); }
+
+  // --- narrow / drawer mode ---
+  function layout(){ document.body.classList.toggle('tdoc-narrow', window.innerWidth < 700); positionPins(); }
+  window.addEventListener('resize', layout);
+
+  // --- comments: fetch → resolve in frame → draw pins ---
+  function loadComments(){
+    fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&version=' + encodeURIComponent(cfg.version))
+      .then(function(r){ return r.ok ? r.json() : []; })
+      .then(function(list){ sendFrame({ type:'tdoc:anchors', comments: Array.isArray(list) ? list : [] }); })
+      .catch(function(){});
+  }
+  function positionPins(){
+    var existing = {};
+    Array.prototype.forEach.call(document.querySelectorAll('.tdoc-pin'), function(el){ existing[el.getAttribute('data-id')] = el; });
+    pinData.forEach(function(p){
+      var el = existing[p.id];
+      if (!el){
+        el = document.createElement('div'); el.className='tdoc-pin'; el.setAttribute('data-id', p.id);
+        el.textContent = (p.login || '?').slice(0,1).toUpperCase();
+        el.addEventListener('click', function(){ sendFrame({ type:'tdoc:scrollTo', docY: p.docY }); });
+        document.body.appendChild(el);
+      }
+      delete existing[p.id];
+      var top = BAR + (p.docY - frameScrollY);
+      var vis = top >= BAR - 20 && top <= window.innerHeight - 8;
+      el.hidden = !vis;
+      el.style.top = Math.max(BAR + 4, top) + 'px';
+    });
+    Object.keys(existing).forEach(function(k){ existing[k].remove(); });
+  }
+
   function close(){ var el = document.querySelector('.tdoc-popup'); if (el) el.remove(); pending = null; }
   function open(d){
     close();
@@ -370,7 +411,7 @@ function shellScript() {
       body: JSON.stringify({ slug: cfg.slug, version: cfg.version, text: text,
         anchor: { kind:'text', text: pending.text, context_before: pending.context_before, context_after: pending.context_after } })
     }).then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
-      .then(function(){ close(); /* P3: render the new pin via the frame */ })
+      .then(function(){ close(); loadComments(); })   // re-resolve so the new pin appears
       .catch(function(){ btn.disabled = false; btn.textContent = 'Retry'; });
   }
   window.addEventListener('message', function(e){
@@ -378,7 +419,13 @@ function shellScript() {
     var d = e.data; if (!d || d.source !== 'tdoc-frame') return;
     if (d.type === 'tdoc:selection') open(d);
     else if (d.type === 'tdoc:cleared') { if (!document.querySelector('.tdoc-popup textarea:focus')) close(); }
+    else if (d.type === 'tdoc:ready') { layout(); loadComments(); }
+    else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; positionPins(); }
+    else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; positionPins(); }
   });
+  var fab = document.querySelector('.tdoc-fab');
+  if (fab) fab.addEventListener('click', function(){ /* P3.1: open drawer list */ });
+  layout();
 })();`;
 }
 
