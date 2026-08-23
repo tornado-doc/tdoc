@@ -96,6 +96,16 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **The project mark keeps a white field in both themes, and its hover
+  highlight is centred.** The SVG that replaced the raster was fully
+  transparent, so the dinosaur read as a see-through outline. The mark is now
+  ink on an opaque white field, the same look as the landing hero. Because it
+  carries its own field it is restored like a photograph in dark mode instead
+  of inverting with the page — inverting turned the field black, which is the
+  bar's own colour, so the drawing still read as see-through. Separately, the
+  bar mark's 24px logo sat flush left in its 32px button, so the hover
+  highlight landed 8px off to the right of the drawing; the button now centres
+  its content. The worker's inlined copy of the asset was re-synced. `#161`.
 - **`tdoc-agent-reply` fails loudly.** A rejected reply used to exit 0, so a
   comment that was never answered looked answered. `curl -sS` exits 0 on HTTP
   4xx/5xx, and the server also reports rejections as a 200 body with an
