@@ -772,8 +772,15 @@ t('a first run defers the telemetry question and records nothing', () => {
   const step0 = skill.slice(skill.indexOf('## Step 0'), skill.indexOf('## Final Step'));
 
   // First run resolves to "deferred", not "on".
-  assert(/TEL_PROMPTED" = "no" \]; then\s*\n(?:#[^\n]*\n|\s*#[^\n]*\n)*\s*TEL_EFFECTIVE="deferred"/.test(step0),
-    'a first run should resolve TEL_EFFECTIVE to deferred');
+  // Checked as a line sequence rather than one regex. The regex version had
+  // two alternatives matching the same input inside a star — exponential
+  // backtracking, which CodeQL flagged as js/redos.
+  const lines = step0.split('\n').map((l) => l.trim());
+  const branch = lines.findIndex((l) => l.includes('TEL_PROMPTED" = "no" ]; then'));
+  assert(branch !== -1, 'no first-run branch in the mode resolution');
+  const body = lines.slice(branch + 1).filter((l) => l && !l.startsWith('#'));
+  assert(body[0] === 'TEL_EFFECTIVE="deferred"',
+    `a first run should resolve TEL_EFFECTIVE to deferred, got: ${body[0]}`);
 
   // And "deferred" must not slip through a `!= off` gate and write a sentinel.
   assert(!/TEL_EFFECTIVE" != "off" \]; then\s*\n\s*mkdir -p "\$TEL_HOME\/sentinels"/.test(step0),
