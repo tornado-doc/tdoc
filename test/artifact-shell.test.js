@@ -223,6 +223,8 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-margin-comment .tdoc-reply-toggle', { timeout: 2000 });
       await page.click('.tdoc-margin-comment .tdoc-reply-toggle');
       await page.waitForSelector('.tdoc-margin-comment .tdoc-reply-form.open textarea', { timeout: 2000 });
+      const hasDelete = await page.evaluate(() => !!document.querySelector('.tdoc-margin-comment .del'));
+      if (!hasDelete) throw new Error('card missing delete control');
     });
 
     // --- #3 MOBILE ------------------------------------------------------------

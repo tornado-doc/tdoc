@@ -143,7 +143,8 @@
     return renderAuthor(comment.author) +
       '<div class="text">' + escapeHtml(comment.text || '') + '</div>' +
       '<div class="meta"><span>v' + (comment.version || 1) + (when ? ' · ' + escapeHtml(when) : '') + '</span>' +
-      '<span class="actions"><span class="tdoc-reply-toggle" data-id="' + id + '">Reply</span></span></div>' +
+      '<span class="actions"><span class="tdoc-reply-toggle" data-id="' + id + '">Reply</span>' +
+      '<span class="del" data-id="' + id + '">delete</span></span></div>' +
       repliesBlock +
       '<div class="tdoc-reply-form" data-parent-id="' + id + '"><textarea placeholder="Reply…"></textarea>' +
       '<div class="tdoc-reply-form-foot"><span class="hint"></span><button class="tdoc-reply-submit">Reply</button></div></div>';

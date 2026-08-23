@@ -459,6 +459,12 @@ function shellScript() {
     if (rform){ var sub = rform.querySelector('.tdoc-reply-submit'), rta = rform.querySelector('textarea');
       if (sub && rta){ sub.addEventListener('click', function(e){ e.stopPropagation(); postReply(id, rta.value, sub); });
         rta.addEventListener('keydown', function(e){ if ((e.metaKey||e.ctrlKey) && e.key==='Enter') postReply(id, rta.value, sub); }); } }
+    // delete (1:1 with overlay: deletes on click, no native confirm)
+    var del = card.querySelector('.del');
+    if (del) del.addEventListener('click', function(e){ e.stopPropagation();
+      fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&id=' + encodeURIComponent(id) + '&version=' + encodeURIComponent(cfg.version), { method:'DELETE' })
+        .then(function(r){ if (r.ok){ closeCard(); loadComments(); } else { r.json().catch(function(){return {};}).then(function(x){ alert('Could not delete: ' + (x.error || x.message || ('HTTP ' + r.status))); }); } });
+    });
     positionCard();
   }
   // Full reconcile — only on tdoc:pins (comment set changed). Creates/removes
