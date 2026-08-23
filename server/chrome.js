@@ -157,7 +157,7 @@
     var replies = Array.isArray(comment.replies) ? comment.replies : [];
     var repliesBlock = replies.length
       ? '<div class="tdoc-replies-toggle" data-id="' + id + '"><svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>' + replies.length + ' ' + (replies.length === 1 ? 'reply' : 'replies') + '</div>' +
-        '<div class="tdoc-replies">' + replies.map(function (r) { return '<div class="tdoc-reply">' + renderAuthor(r.author) + '<div class="text">' + escapeHtml(r.text || '') + '</div></div>'; }).join('') + '</div>'
+        '<div class="tdoc-replies">' + replies.map(function (r) { return '<div class="tdoc-reply" data-comment-id="' + escapeHtml(r.id || '') + '">' + renderAuthor(r.author) + '<div class="text">' + escapeHtml(r.text || '') + '</div></div>'; }).join('') + '</div>'
       : '';
     var hr = hasReactions(comment);
     var isResolved = comment.status === 'applied';

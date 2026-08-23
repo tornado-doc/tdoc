@@ -72,7 +72,7 @@
     function loadComments(){
       return fetch('/api/comments?slug=' + encodeURIComponent(cfg.slug) + '&version=' + encodeURIComponent(cfg.version))
         .then(function(r){ return r.ok ? r.json() : []; })
-        .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); captureDeepLink(); return list; })
+        .then(function(list){ list = Array.isArray(list) ? list : []; commentList = list; commentsById = {}; list.forEach(function(c){ commentsById[c.id] = c; }); sendFrame({ type:'tdoc:anchors', comments: list }); document.body.dataset.tdocReady = '1'; captureDeepLink(); return list; })
         .catch(function(){ return []; });
     }
     // On a 401 (auth required — production/worker), run the shared sign-in modal

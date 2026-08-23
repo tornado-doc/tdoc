@@ -96,10 +96,15 @@ function waitReady(port, ms = 5000) {
   });
 
   await t('author inline onclick= never fires — clicking the button leaves window.__XSS__ undefined', async () => {
-    await page.click('#xss-btn');
+    // Author content lives in the isolated /frame now; click the button there
+    // and check the FRAME's window — its sandbox+nonce CSP blocks the inline
+    // handler, so __XSS__ never flips.
+    const frame = page.frames().find((f) => f !== page.mainFrame());
+    if (!frame) throw new Error('author frame not found');
+    await frame.click('#xss-btn');
     await page.waitForTimeout(150);
-    const v = await page.evaluate(() => window.__XSS__);
-    if (v !== undefined) throw new Error(`window.__XSS__ = ${v} — inline onclick ran, CSP failed to block it`);
+    const v = await frame.evaluate(() => window.__XSS__);
+    if (v !== undefined) throw new Error(`window.__XSS__ = ${v} — inline onclick ran in the frame, CSP failed to block it`);
   });
 
   await t('the nonced overlay script DID execute — the tdoc bar renders', async () => {
@@ -108,21 +113,24 @@ function waitReady(port, ms = 5000) {
     if (markSrc !== '/tdoc_logo.svg') throw new Error('tdoc bar mark is missing the logo — overlay may not have booted');
   });
 
-  await t('commenting still works end-to-end under the CSP (drag INTO the element opens the popup, submit persists)', async () => {
-    // Mirrors ui.test.js's canvas drag-to-comment gesture: drag from outside
-    // the artifact into it so the mouseup handler resolves an element anchor.
-    const pre = await page.$('#target');
-    const box = await pre.boundingBox();
-    const startX = Math.max(20, box.x - 30);
-    const startY = box.y + box.height / 2;
-    await page.mouse.move(startX, startY);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 10 });
-    await page.mouse.up();
+  await t('commenting still works end-to-end under the CSP (select text in the frame → composer → submit persists)', async () => {
+    // Select prose inside the isolated frame; the probe reports the selection
+    // across the boundary and the shell opens the composer. Proves the whole
+    // comment path runs under the sandbox+nonce CSP. (Element/region drag-to-
+    // comment is a separate shell gap, tracked in ui.test.js.)
+    const frame = page.frames().find((f) => f !== page.mainFrame());
+    if (!frame) throw new Error('author frame not found');
+    await frame.evaluate(() => {
+      const p = document.querySelector('p');
+      const r = document.createRange(); r.selectNodeContents(p);
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      const rect = p.getBoundingClientRect();
+      document.dispatchEvent(new MouseEvent('mouseup', { clientX: rect.left + 20, clientY: rect.top + 8, bubbles: true, cancelable: true, view: window, button: 0 }));
+    });
     await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
     await page.fill('.tdoc-popup textarea', 'csp smoke comment');
     await page.click('.tdoc-popup .submit');
-    await page.waitForSelector('.tdoc-margin-comment', { timeout: 2000 });
+    await page.waitForSelector('.tdoc-pin', { timeout: 2000 });
   });
 
   // --- nonce hardening (小cc PR review): a CSP nonce only protects if it is
