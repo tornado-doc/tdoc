@@ -243,7 +243,6 @@ hosted_github_signin() {
   user_code="$(printf '%s' "$payload" | jq -r '.user_code // empty')"
   device_code="$(printf '%s' "$payload" | jq -r '.device_code // empty')"
   uri="$(printf '%s' "$payload" | jq -r '.verification_uri_complete // .verification_uri // empty')"
-  plain_uri="$(printf '%s' "$payload" | jq -r '.verification_uri // empty')"
   interval="$(printf '%s' "$payload" | jq -r '.interval // 5')"
   expires="$(printf '%s' "$payload" | jq -r '.expires_in // 900')"
   if [ -z "$user_code" ] || [ -z "$device_code" ] || [ -z "$uri" ]; then
@@ -255,20 +254,13 @@ hosted_github_signin() {
   [ "$interval" -lt 5 ] && interval=5
   case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
 
-  # GitHub does NOT return verification_uri_complete — it is null on every
-  # device/start, so the // fallback above lands on the bare
-  # https://github.com/login/device and the human has to type the code by hand.
-  # Build the pre-filled URL ourselves. GitHub carries ?user_code= through its
-  # own login redirect (return_to=...device%3Fuser_code%3D...), so it survives
-  # a signed-out browser too.
-  case "$uri" in
-    *user_code=*) ;;
-    *)
-      if [ -n "$plain_uri" ] && [ -n "$user_code" ]; then
-        uri="${plain_uri}?user_code=${user_code}"
-      fi
-      ;;
-  esac
+  # No attempt to pre-fill the code in the URL. GitHub returns no
+  # verification_uri_complete, and appending ?user_code= does NOT work in
+  # practice: a signed-out visitor is sent to the account chooser first and the
+  # parameter is gone by the time the code page renders. Verified by hand.
+  # `return_to` carrying the param through the first hop is not evidence it
+  # survives the second — that inference was wrong. #186 reached the same
+  # conclusion; the code has to be typed, so say so plainly.
 
   echo "[tdoc] Sign in with GitHub to publish on $base" >&2
   # Open it for them. $uri is verification_uri_complete when GitHub returns it,
