@@ -848,5 +848,41 @@ t('the Final Step owns the consent question and logs nothing for that run', () =
     'the deferred run must not be logged — that would be recording before consent');
 });
 
+// ---- the local server must hand its own node down to spawned CLIs (#259) ----
+
+t('server spawns CLIs with the running interpreter on PATH', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf8');
+  assert(/function childEnv\(\)/.test(src), 'childEnv helper missing');
+  assert(/path\.dirname\(process\.execPath\)/.test(src),
+    'childEnv does not derive the node directory from process.execPath');
+  const spawns = src.split('\n').filter(l => /\bspawn\(bin\b/.test(l));
+  assert(spawns.length >= 2, `expected at least 2 spawn sites, found ${spawns.length}`);
+  for (const s of spawns) {
+    assert(/env:\s*childEnv\(\)/.test(s),
+      `spawn site does not pass childEnv(): ${s.trim()}`);
+  }
+});
+
+t('a stripped PATH hides node from a child, and childEnv restores it', () => {
+  // The failure this guards: the server is started by absolute path (launchd,
+  // an editor, nohup from a non-interactive shell) so nvm/fnm/asdf shims are
+  // not on PATH. The child then reports "node is not installed" on a machine
+  // that has node. Prove both halves rather than trusting the code read.
+  const bare = '/usr/bin:/bin:/usr/sbin:/sbin';
+  const nodeDir = path.dirname(process.execPath);
+  const look = (p) => spawnSync('sh', ['-c', 'command -v node || true'],
+    { env: { PATH: p }, encoding: 'utf8', timeout: 10000 }).stdout.trim();
+
+  if (look(bare)) {
+    // node lives in /usr/bin on this machine; the bug cannot occur here.
+    return;
+  }
+  assert(look(bare) === '', 'expected node to be invisible on a bare PATH');
+  const restored = look(`${nodeDir}${path.delimiter}${bare}`);
+  assert(restored !== '', 'prepending the interpreter directory did not expose node');
+  assert(restored.startsWith(nodeDir),
+    `child resolved a different node: ${restored} (wanted one under ${nodeDir})`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

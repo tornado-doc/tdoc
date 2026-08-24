@@ -454,7 +454,10 @@ require_jq_for_selfhost() {
     "Self-hosting needs jq to build its Cloudflare/Vercel payloads. On macOS: 'brew install jq'. On Debian/Ubuntu: 'sudo apt-get install -y jq'. Publishing to hosted tdoc.dev does not need it — '/tdoc publish $SLUG' without --platform works as-is."
 }
 if ! command -v node >/dev/null 2>&1; then
-  fail_with_agent_prompt "node 18+ is not installed" \
+  # Name the PATH that was searched. When this fires from the local server the
+  # user does have node — it is simply not on the PATH the child inherited —
+  # and "install node" sends them to fix the wrong thing. See #259.
+  fail_with_agent_prompt "node 18+ not found on PATH ($PATH)" \
     "Install Node.js 18 or newer (https://nodejs.org). On macOS: 'brew install node'. Verify with 'node --version'. Then run '/tdoc publish $SLUG' again."
 fi
 

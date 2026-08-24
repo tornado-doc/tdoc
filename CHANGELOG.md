@@ -96,6 +96,15 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **Publishing from the modal works when node is version-managed.** The local
+  server passed its own `PATH` straight to the CLIs it spawns. A server started
+  by absolute path — launchd, an editor, `nohup` from a shell that only loads
+  nvm interactively — has the bare system `PATH`, so `tdoc-publish` could not
+  find a node installed by nvm, fnm, asdf or volta and reported `node 18+ is
+  not installed` on a machine running Node 22. The server now puts its own
+  interpreter's directory in front of the child's `PATH`, and the CLI names the
+  `PATH` it searched when the check does fail, so the message stops pointing at
+  the wrong problem. `#259`.
 - **The project mark keeps a white field in both themes, and its hover
   highlight is centred.** The SVG that replaced the raster was fully
   transparent, so the dinosaur read as a see-through outline. The mark is now
