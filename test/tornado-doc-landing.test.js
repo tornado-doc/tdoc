@@ -428,8 +428,13 @@ t('release payload carries the homepage access policy', () => {
     'tdoc-publish no longer sends local meta.json, so payload access never reaches /api/upload');
   // --visibility public must merge, not replace. Otherwise the documented
   // publish line would wipe history_visibility / commenting back to defaults.
-  assert(/\.access\.visibility = \(if \$vis != "" then \$vis else \(\.access\.visibility \/\/ "unlisted"\) end\)/.test(publish),
+  // Written in node since #272; the merge semantics are unchanged — an
+  // unspecified flag falls back to what the payload already had, and only
+  // then to the default. cli.test.js exercises this behaviourally.
+  assert(/a\.visibility = vis \|\| a\.visibility \|\| "unlisted"/.test(publish),
     'tdoc-publish access merge no longer keeps unspecified fields from the payload');
+  assert(/a\.history_visibility = hist \|\| a\.history_visibility \|\| "owner"/.test(publish),
+    'history_visibility no longer merges');
 
   const workerSrc = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   assert(/if \(incoming\.access\)/.test(workerSrc) && /incoming\.access = normalizeAccess\(validatedAccess\.access/.test(workerSrc),

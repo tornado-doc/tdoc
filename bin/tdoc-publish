@@ -1012,23 +1012,38 @@ if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG
     ''|owner|invited|signed_in|off) ;;
     *) echo "[tdoc] invalid --commenting '$COMMENTING_FLAG' (owner|invited|signed_in|off)" >&2; exit 1 ;;
   esac
-  ALLOW_JSON='[]'
-  if [ ${#ALLOW_USERS[@]} -gt 0 ]; then
-    ALLOW_JSON="$(printf '%s
-' "${ALLOW_USERS[@]}" | jq -R . | jq -s .)"
-  fi
+  # Written with node, not jq. FIRST-DOC.md step 7 makes the very first doc a
+  # `--visibility private --history owner` publish, so this block is on the
+  # hosted path for every new user — and #256 removed jq from that path
+  # precisely because macOS does not ship it. It was missed then because the
+  # test only checked inside the functions that changed.
+  ALLOW_JSON="$(printf '%s\n' "${ALLOW_USERS[@]:-}" | node -e '
+    let s = "";
+    process.stdin.on("data", (d) => { s += d; });
+    process.stdin.on("end", () => {
+      const list = s.split("\n").map((x) => x.trim()).filter(Boolean);
+      process.stdout.write(JSON.stringify(list));
+    });
+  ')"
   tmp_meta="$(mktemp -t tdoc-meta.XXXXXX)"
-  jq     --arg vis "${VISIBILITY_FLAG}"     --arg hist "${HISTORY_FLAG}"     --arg comm "${COMMENTING_FLAG}"     --argjson allow "$ALLOW_JSON"     '
-      .access = (.access // {})
-      | .access.visibility = (if $vis != "" then $vis else (.access.visibility // "unlisted") end)
-      | .access.history_visibility = (if $hist != "" then $hist else (.access.history_visibility // "owner") end)
-      | .access.commenting = (if $comm != "" then $comm else (.access.commenting // "signed_in") end)
-      | .access.allowed_users = (
-          if ($allow|length) > 0 then
-            (((.access.allowed_users // []) + $allow) | map(ascii_downcase|sub("^github:";"")|sub("^@";"")) | unique)
-          else (.access.allowed_users // []) end
-        )
-    ' "$META_FILE" > "$tmp_meta"
+  node -e '
+    const fs = require("fs");
+    const [metaPath, vis, hist, comm, allowJson] = process.argv.slice(1);
+    const m = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    const a = (m.access && typeof m.access === "object") ? m.access : {};
+    a.visibility = vis || a.visibility || "unlisted";
+    a.history_visibility = hist || a.history_visibility || "owner";
+    a.commenting = comm || a.commenting || "signed_in";
+    const incoming = JSON.parse(allowJson || "[]");
+    if (incoming.length) {
+      const norm = (u) => String(u).toLowerCase().replace(/^github:/, "").replace(/^@/, "");
+      a.allowed_users = [...new Set([...(a.allowed_users || []), ...incoming].map(norm))];
+    } else {
+      a.allowed_users = a.allowed_users || [];
+    }
+    m.access = a;
+    fs.writeFileSync(process.argv[6], JSON.stringify(m, null, 2));
+  ' "$META_FILE" "${VISIBILITY_FLAG}" "${HISTORY_FLAG}" "${COMMENTING_FLAG}" "$ALLOW_JSON" "$tmp_meta"
   mv "$tmp_meta" "$META_FILE"
   echo "[tdoc] access → $(node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(JSON.stringify(m.access===undefined?null:m.access))' "$META_FILE")"
 fi
