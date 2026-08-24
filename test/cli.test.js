@@ -1509,10 +1509,19 @@ t('a denied pull explains it is an access problem, not a network one', () => {
       encoding: 'utf8', timeout: 60000,
     });
     assert(r.status !== 0, 'a denial must fail');
-    assert(/private/.test(r.stderr) && /does not own it/.test(r.stderr),
+    assert(/access_denied/.test(r.stderr) && /private/.test(r.stderr),
       `the denial was not explained:\n      ${r.stderr.trim()}`);
     assert(/tdoc publish priv-doc/.test(r.stderr),
       `no way out was offered:\n      ${r.stderr.trim()}`);
+    // Both causes, neither asserted. The first live run of this message named
+    // the wrong one — the token owned the doc, the worker was just older than
+    // the fix — and sent the owner off to re-publish for nothing.
+    assert(/different account/.test(r.stderr),
+      `the wrong-account cause is missing:\n      ${r.stderr.trim()}`);
+    assert(/predates token-authenticated reads|redeploy/.test(r.stderr),
+      `the stale-worker cause is missing:\n      ${r.stderr.trim()}`);
+    assert(!/does not own it/.test(r.stderr),
+      `the message still asserts one cause as fact:\n      ${r.stderr.trim()}`);
     assert(!/network error/.test(r.stderr),
       `a denial was still blamed on the network:\n      ${r.stderr.trim()}`);
     assert(fs.readFileSync(path.join(doc, 'comments.json'), 'utf8') === original,

@@ -69,9 +69,16 @@ fi
 # worker error must never clobber comments.json.
 if ! printf '%s' "$REMOTE" | json_is_array; then
   if printf '%s' "$REMOTE" | grep -q '"access_denied"'; then
-    echo "tdoc-pull: the worker refused to show '$SLUG' to this machine." >&2
-    echo "  This doc is private and the account token in $CONFIG_FILE does not own it." >&2
-    echo "  If it is yours, the token is stale — re-run: /tdoc publish $SLUG" >&2
+    # State the possibilities; do not pick one. The first live run of this
+    # message picked "your token does not own it" and was wrong: the token did
+    # own the doc, the worker was simply older than the fix that taught it to
+    # read tokens. Self-hosted workers can lag by any amount, so that case is
+    # permanent, not a launch-week detail.
+    echo "tdoc-pull: '$SLUG' is not readable by this machine ($BASE said access_denied)." >&2
+    echo "  The doc is private, so one of these is true:" >&2
+    echo "    - the account token in $CONFIG_FILE belongs to a different account" >&2
+    echo "    - this worker predates token-authenticated reads; redeploy it" >&2
+    echo "  If the doc is yours and the host is tdoc.dev, re-run: /tdoc publish $SLUG" >&2
   else
     echo "tdoc-pull: worker did not return a comment array (network error or bad slug?). Local comments.json left untouched." >&2
   fi
