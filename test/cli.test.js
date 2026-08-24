@@ -935,5 +935,153 @@ t('SKILL.md resolves its own directory at runtime, not at install time', () => {
     'the resolved directory does not satisfy the update guard');
 });
 
+
+// ---- access flags must not drag jq back onto the hosted path (#272) ----
+// FIRST-DOC.md step 7 publishes the very first doc with
+// `--visibility private --history owner`, so this is the path EVERY new user
+// takes. #256 removed jq from hosted publishing but its test only looked
+// inside the functions that had changed, and the access-block writer sits
+// outside all of them — so the first doc still died with "jq: command not
+// found" on a machine without jq. This test runs the real thing instead of
+// grepping, so scope cannot drift again.
+
+t('a hosted publish with access flags works with no jq on PATH', () => {
+  const bin = path.join(BIN, 'tdoc-publish');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nojq-'));
+  const port = 8600 + Math.floor(Math.random() * 300);
+  const binDir = path.join(home, 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+
+  // A PATH with everything the script needs EXCEPT jq. Masking jq with a
+  // failing stub would not work: `command -v jq` succeeds on a file that
+  // exists whether or not it runs.
+  for (const dir of (process.env.PATH || '').split(':')) {
+    let entries = [];
+    try { entries = fs.readdirSync(dir); } catch { continue; }
+    for (const name of entries) {
+      if (name === 'jq') continue;
+      const target = path.join(binDir, name);
+      if (fs.existsSync(target)) continue;
+      try { fs.symlinkSync(path.join(dir, name), target); } catch {}
+    }
+  }
+  assert(!fs.existsSync(path.join(binDir, 'jq')), 'the jq-free PATH still has jq');
+
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
+    `s.setHeader('content-type','application/json');` +
+    `const u=q.url.split('?')[0];` +
+    `if(u==='/api/upload'){const j=JSON.parse(b||'{}');` +
+    `return s.end(JSON.stringify({ok:true,slug:j.slug,version:j.version,size:42,` +
+    `access:(j.meta&&j.meta.access)||null}));}` +
+    `s.statusCode=404;s.end('{}');});}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 -X POST ` +
+      `http://127.0.0.1:${port}/api/upload && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: `http://127.0.0.1:${port}`,
+      public_host: '127.0.0.1', upload_token: 'tok', github_login: 'tester',
+    }));
+    const docs = path.join(home, 'tdocs', 'first-doc', 'v1');
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, 'index.html'),
+      '<!doctype html><body><div class="wrap"><h1>D</h1></div></body>');
+    fs.writeFileSync(path.join(home, 'tdocs', 'first-doc', 'meta.json'), JSON.stringify({
+      title: 'D', slug: 'first-doc', versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }],
+    }));
+    fs.writeFileSync(path.join(home, 'tdocs', 'first-doc', 'comments.json'), '[]');
+
+    // Exactly what FIRST-DOC.md step 7 tells the agent to run.
+    const r = spawnSync(bin, ['--visibility', 'private', '--history', 'owner', 'first-doc'], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_DIR: path.join(home, 'tdocs') },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(!/jq: command not found/.test(r.stdout + r.stderr),
+      `the access path still needs jq:\n      ${(r.stdout + r.stderr).split('\n').filter((l) => /jq/.test(l)).join('\n      ')}`);
+    assert(r.status === 0, `publish exited ${r.status}: ${r.stderr}`);
+    assert(/Published:/.test(r.stdout), `no published URL: ${r.stdout}`);
+
+    // And the policy it wrote must be the one that was asked for.
+    const meta = JSON.parse(fs.readFileSync(path.join(home, 'tdocs', 'first-doc', 'meta.json'), 'utf8'));
+    assert(meta.access.visibility === 'private',
+      `expected private, got ${meta.access.visibility}`);
+    assert(meta.access.history_visibility === 'owner',
+      `expected owner history, got ${meta.access.history_visibility}`);
+    assert(Array.isArray(meta.access.allowed_users), 'allowed_users must stay an array');
+
+    // A later flag must MERGE, not replace: publishing again with only
+    // --visibility has to leave history_visibility alone. Getting this wrong
+    // would quietly re-expose the version history of a doc someone had
+    // deliberately locked down.
+    const r2 = spawnSync(bin, ['--visibility', 'unlisted', 'first-doc'], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_DIR: path.join(home, 'tdocs') },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(r2.status === 0, `second publish exited ${r2.status}: ${r2.stderr}`);
+    const meta2 = JSON.parse(fs.readFileSync(path.join(home, 'tdocs', 'first-doc', 'meta.json'), 'utf8'));
+    assert(meta2.access.visibility === 'unlisted', 'the new visibility did not apply');
+    assert(meta2.access.history_visibility === 'owner',
+      `history_visibility was reset to ${meta2.access.history_visibility} instead of merging`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+
+t('no jq call sits outside a self-host-only region (#272)', () => {
+  // The behavioural test above proves ONE hosted path works without jq. This
+  // one covers the whole file, because the bug it replaces was not a missing
+  // line — it was a test scoped to the code that changed instead of to the
+  // surface the claim covered. Anything added at top level, or in a new
+  // helper, is caught here even if nobody thinks to exercise it.
+  const src = readBin('tdoc-publish');
+  const lines = src.split('\n');
+
+  const fnRange = (name) => {
+    const start = lines.indexOf(`${name}() {`);
+    if (start === -1) return null;
+    for (let j = start + 1; j < lines.length; j++) if (lines[j] === '}') return [start, j];
+    return null;
+  };
+
+  // The platform dispatch is at column 0, so its closing `fi` is too;
+  // everything nested inside is indented.
+  const dispatch = lines.indexOf('if [ "$PLATFORM" = "hosted" ]; then');
+  assert(dispatch !== -1, 'the platform dispatch moved — this guard needs updating');
+  let dispatchEnd = -1;
+  for (let j = dispatch + 1; j < lines.length; j++) if (lines[j] === 'fi') { dispatchEnd = j; break; }
+  assert(dispatchEnd !== -1, 'could not find the end of the platform dispatch');
+  let firstElif = -1;
+  for (let j = dispatch + 1; j < dispatchEnd; j++) {
+    if (lines[j].startsWith('elif [ "$PLATFORM"')) { firstElif = j; break; }
+  }
+  assert(firstElif !== -1, 'the dispatch has no self-host branch');
+
+  const allowed = [['self-host dispatch', firstElif, dispatchEnd]];
+  for (const fn of ['first_time_setup', 'first_time_setup_vercel', 'cf_api',
+                    'resolve_wrangler_oauth_token', 'bundle_worker']) {
+    const r = fnRange(fn);
+    if (r) allowed.push([fn, r[0], r[1]]);
+  }
+  assert(allowed.length >= 4, 'the self-host functions moved — this guard needs updating');
+
+  const stray = [];
+  lines.forEach((l, i) => {
+    if (!/\bjq\s+(-|["'$])/.test(l)) return;
+    if (l.trim().startsWith('#')) return;
+    if (allowed.some(([, a, b]) => i >= a && i <= b)) return;
+    stray.push(`line ${i + 1}: ${l.trim().slice(0, 80)}`);
+  });
+  assert(stray.length === 0,
+    `jq is reachable from the hosted path:\n      ${stray.join('\n      ')}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
