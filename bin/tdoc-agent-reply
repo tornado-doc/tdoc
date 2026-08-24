@@ -14,6 +14,8 @@
 # otherwise to http://localhost:${TDOC_PORT:-7878}.
 
 set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
 
 SLUG=""
 PARENT=""
@@ -82,28 +84,17 @@ if ! printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
   exit 1
 fi
 
-if ! command -v jq >/dev/null 2>&1; then echo "needs jq" >&2; exit 1; fi
-
-PAYLOAD="$(jq -n \
-  --arg slug "$SLUG" \
-  --arg parent "$PARENT" \
-  --arg text "$TEXT" \
-  --arg status "$STATUS" \
-  --arg applied "$APPLIED_IN" \
-  --arg login "$LOGIN" \
-  --arg name "$NAME" \
-  --arg avatar "$AVATAR" \
-  '{
-    slug: $slug,
-    parent_id: $parent,
-    text: $text,
-    agent_login: $login,
-    agent_name: $name
-  }
-  + (if $status != "" then {status: $status} else {} end)
-  + (if $applied != "" then {applied_in: ($applied|tonumber)} else {} end)
-  + (if $avatar != "" then {agent_avatar_url: $avatar} else {} end)
-')"
+# The reply body is built by node, not jq: agent replies are a mandatory step
+# of /tdoc edit, and macOS ships no jq, so a jq dependency here takes the whole
+# comment loop down on a stock machine. See #276.
+PAYLOAD="$(node -e '
+  const [slug, parent, text, status, applied, login, name, avatar] = process.argv.slice(1);
+  const o = { slug, parent_id: parent, text, agent_login: login, agent_name: name };
+  if (status !== "") o.status = status;
+  if (applied !== "") o.applied_in = Number(applied);
+  if (avatar !== "") o.agent_avatar_url = avatar;
+  process.stdout.write(JSON.stringify(o));
+' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR")"
 
 # Post the reply and gate on the outcome.
 #
@@ -131,8 +122,9 @@ post_reply() {
     echo "[tdoc] agent reply NOT posted: $url returned HTTP $http" >&2
     return 1
   fi
-  if printf '%s' "$body" | jq -e 'type == "object" and has("error")' >/dev/null 2>&1; then
-    echo "[tdoc] agent reply NOT posted: $(printf '%s' "$body" | jq -r '.error')" >&2
+  local err
+  if err="$(printf '%s' "$body" | json_error)"; then
+    echo "[tdoc] agent reply NOT posted: $err" >&2
     return 1
   fi
   return 0
@@ -145,14 +137,13 @@ if [ -f "$CONFIG_FILE" ]; then
   # tdoc-pull / tdoc-unpublish. Hosted used to fall into the cloudflare branch
   # and read absent .subdomain/.worker, producing https://null.null.workers.dev
   # and a 404 on every reply — silently, for every hosted user.
-  PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
-  TOKEN="$(jq -r '.upload_token // empty' "$CONFIG_FILE")"
+  PLATFORM="$(json_file_get "$CONFIG_FILE" platform)"; PLATFORM="${PLATFORM:-cloudflare}"
+  TOKEN="$(json_file_get "$CONFIG_FILE" upload_token)"
   if [ "$PLATFORM" = "hosted" ] || [ "$PLATFORM" = "vercel" ]; then
-    BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
-    if [ "$BASE" = "null" ]; then BASE=""; fi
+    BASE="$(json_file_get "$CONFIG_FILE" base)"
   else
-    SUBDOMAIN="$(jq -r '.subdomain // empty' "$CONFIG_FILE")"
-    WORKER="$(jq -r '.worker // empty' "$CONFIG_FILE")"
+    SUBDOMAIN="$(json_file_get "$CONFIG_FILE" subdomain)"
+    WORKER="$(json_file_get "$CONFIG_FILE" worker)"
     if [ -n "$SUBDOMAIN" ] && [ -n "$WORKER" ]; then
       BASE="https://${WORKER}.${SUBDOMAIN}.workers.dev"
     else

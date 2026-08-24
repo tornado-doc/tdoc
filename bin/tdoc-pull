@@ -9,7 +9,9 @@
 # absent on the worker, e.g. created before publish) are merged in rather than
 # clobbered.
 set -euo pipefail
-"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+"$TDOC_BIN_DIR/tdoc-update-nag" >/dev/null || true
 
 SLUG="${1:-}"
 if [ -z "$SLUG" ]; then echo "usage: tdoc-pull <slug>" >&2; exit 1; fi
@@ -29,20 +31,19 @@ if [ ! -f "$CONFIG_FILE" ]; then
   echo "no ~/.tdoc/published.json — run /tdoc publish <slug> first." >&2
   exit 1
 fi
-if ! command -v jq >/dev/null 2>&1; then echo "needs jq" >&2; exit 1; fi
 
 # Resolve the API base for the configured platform: hosted/vercel configs store
 # the URL directly in `.base`; cloudflare configs derive workers.dev.
-PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
+PLATFORM="$(json_file_get "$CONFIG_FILE" platform)"; PLATFORM="${PLATFORM:-cloudflare}"
 if [ "$PLATFORM" = "hosted" ] || [ "$PLATFORM" = "vercel" ]; then
-  BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
+  BASE="$(json_file_get "$CONFIG_FILE" base)"
   if [ -z "$BASE" ] || [ "$BASE" = "null" ]; then
     echo "[tdoc] $CONFIG_FILE has no '.base' — delete it and re-run /tdoc publish to re-setup." >&2
     exit 1
   fi
 else
-  SUBDOMAIN="$(jq -r .subdomain "$CONFIG_FILE")"
-  WORKER_NAME="$(jq -r .worker "$CONFIG_FILE")"
+  SUBDOMAIN="$(json_file_get "$CONFIG_FILE" subdomain)"
+  WORKER_NAME="$(json_file_get "$CONFIG_FILE" worker)"
   BASE="https://${WORKER_NAME}.${SUBDOMAIN}.workers.dev"
 fi
 
@@ -56,7 +57,7 @@ REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/comments?slug=$
 
 # Validate the response is a JSON array before touching local state. A transient
 # worker error must never clobber comments.json.
-if ! printf '%s' "$REMOTE" | jq -e 'type == "array"' >/dev/null 2>&1; then
+if ! printf '%s' "$REMOTE" | json_is_array; then
   echo "tdoc-pull: worker did not return a comment array (network error or bad slug?). Local comments.json left untouched." >&2
   printf '%s\n' "$REMOTE" | head -c 400 >&2; echo >&2
   exit 1
@@ -66,21 +67,31 @@ fi
 # any local-only comments (by id) that the worker doesn't know about. This
 # preserves comments authored locally before the doc was published, which would
 # otherwise be lost on the first pull.
-if [ -f "$OUT" ] && jq -e 'type == "array"' "$OUT" >/dev/null 2>&1; then
+if json_file_is_array "$OUT"; then
   cp "$OUT" "$OUT.bak"
-  MERGED="$(jq -n --argjson remote "$REMOTE" --slurpfile local "$OUT" '
-    ($local[0] // []) as $loc
-    | ($remote | map(.id)) as $remoteIds
-    | ($loc | map(select(.id as $i | ($remoteIds | index($i)) | not))) as $localOnly
-    | $remote + $localOnly
-  ')"
-  printf '%s\n' "$MERGED" | jq . > "$OUT"
-  LOCAL_ONLY="$(jq -n --argjson m "$MERGED" --argjson r "$REMOTE" '($m | length) - ($r | length)')"
+  # Merge in node: remote wins on id, local-only comments are appended. Reports
+  # the local-only count on stdout so the shell does not have to re-read the
+  # file to count. See #276 — jq is a self-host-only dependency now.
+  LOCAL_ONLY="$(printf '%s' "$REMOTE" | node -e '
+    const fs = require("fs");
+    const outPath = process.argv[1];
+    let s = "";
+    process.stdin.on("data", (d) => { s += d; });
+    process.stdin.on("end", () => {
+      const remote = JSON.parse(s);
+      let local = [];
+      try { const v = JSON.parse(fs.readFileSync(outPath, "utf8")); if (Array.isArray(v)) local = v; } catch {}
+      const remoteIds = new Set(remote.map((c) => c && c.id));
+      const localOnly = local.filter((c) => !remoteIds.has(c && c.id));
+      fs.writeFileSync(outPath, JSON.stringify(remote.concat(localOnly), null, 2) + "\n");
+      process.stdout.write(String(localOnly.length));
+    });
+  ' "$OUT")"
   if [ "$LOCAL_ONLY" -gt 0 ] 2>/dev/null; then
     echo "Merged $LOCAL_ONLY local-only comment(s) the worker didn't have (backup at $OUT.bak)."
   fi
 else
-  printf '%s\n' "$REMOTE" | jq . > "$OUT"
+  printf '%s' "$REMOTE" | json_pretty > "$OUT"
 fi
 
-echo "Pulled $(jq 'length' "$OUT") comments for $SLUG -> $OUT"
+echo "Pulled $(json_file_len "$OUT") comments for $SLUG -> $OUT"

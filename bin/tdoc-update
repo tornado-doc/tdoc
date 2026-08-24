@@ -152,13 +152,14 @@ if [ "$AUTO" = "1" ]; then
 fi
 CONFIG_FILE="$HOME/.tdoc/published.json"
 if [ -f "$CONFIG_FILE" ]; then
+  # Find any locally-existing doc to re-publish — use the one with most-recent
+  # meta.json. This used to sit behind a `command -v jq` guard left over from an
+  # earlier version that parsed meta.json; nothing here calls jq, and the guard
+  # made a no-jq machine report "no local doc found" with docs sitting on disk.
   PUBLISHED_SLUG=""
-  if command -v jq >/dev/null 2>&1; then
-    # Find any locally-existing doc to re-publish — use the one with most-recent meta.json
-    NEWEST_DOC="$(find "$HOME/tdocs" -mindepth 2 -maxdepth 2 -name meta.json -print0 2>/dev/null \
-      | xargs -0 ls -t 2>/dev/null | head -1 || true)"
-    [ -n "$NEWEST_DOC" ] && PUBLISHED_SLUG="$(basename "$(dirname "$NEWEST_DOC")")"
-  fi
+  NEWEST_DOC="$(find "$HOME/tdocs" -mindepth 2 -maxdepth 2 -name meta.json -print0 2>/dev/null \
+    | xargs -0 ls -t 2>/dev/null | head -1 || true)"
+  [ -n "$NEWEST_DOC" ] && PUBLISHED_SLUG="$(basename "$(dirname "$NEWEST_DOC")")"
   echo
   if [ "$YES" = "1" ]; then
     if [ -n "$PUBLISHED_SLUG" ]; then
