@@ -199,6 +199,8 @@ t('the first doc is the reader\'s own portrait, and the recipe carries it', () =
     'the recipe must not hand back a localhost URL — see the localhost rule in SKILL.md');
   assert(/--visibility private/.test(recipe),
     'the recipe must publish the first doc privately rather than withholding it');
+  assert(!/Do not publish without asking/.test(recipe),
+    'a stale do-not-publish line contradicts the localhost rule the recipe now follows');
   // It has to work for someone who does not write code, and for an empty machine.
   assert(/the reader may not write code/i.test(recipe),
     'the recipe must handle readers with no coding projects');
