@@ -7,10 +7,12 @@
 `tdoc` is a Claude Code skill that gives the user prompt-native HTML documents with text- and artifact-anchored comments. After install + onboarding, the user can:
 
 - `/tdoc new <prompt>` → generate a commentable HTML doc
-- `/tdoc publish <slug>` → publish (default target is hosted tdoc.dev; first publish signs in with GitHub)
+- `/tdoc publish <slug>` → publish to **hosted tdoc.dev**; the first publish signs in with GitHub once
 - Share the live URL; commenters sign in with GitHub
 
-Install + onboarding takes ~3 minutes on a clean machine. Most steps are automatic. The user only has to click ~2 things in a browser.
+**Publishing is hosted by default and needs no Cloudflare account, no card, and nothing to click in a dashboard.** On a machine that already has Node, there is usually nothing to install at all. Self-hosting on your own Cloudflare or Vercel is still fully supported — it is at the end of this file, and you only go there if the user asks for it.
+
+The first doc a new user gets is specified in [FIRST-DOC.md](FIRST-DOC.md); this file installs tdoc, that file builds the doc.
 
 ## Step 1 — Install the skill (if not already installed)
 
@@ -62,14 +64,21 @@ Both files must exist. If either is missing, the clone failed — re-run Step 1.
 ~/.claude/skills/tdoc/bin/tdoc-doctor
 ```
 
+The doctor is **target-aware**: it assesses readiness for the platform the user will actually publish to, and reports which one that was under `.target`. Unless the user said otherwise, that is `hosted`, and the Cloudflare block will be empty because it is never probed.
+
+Pass `--platform cloudflare` (or `vercel`) only when the user has asked to self-host.
+
 The JSON has these fields you care about:
 
 ```jsonc
 {
+  "target": "hosted",          // what readiness below was assessed against
   "deps": {
     "node":     { "ok": true/false, "version": "v22.x" },
-    "wrangler": { "ok": true/false, "version": "4.x" },
+    "curl":     { "ok": true/false },
     "jq":       { "ok": true/false },
+    "wrangler": { "ok": true/false, "version": "4.x" },  // self-host only
+    "vercel":   { "ok": true/false },                    // self-host only
     "gh":       { "ok": true/false }
   },
   "cloudflare": {
@@ -99,7 +108,7 @@ The JSON has these fields you care about:
 
 ## Step 4 — Walk the user through `missing_steps`
 
-If `ready_to_publish` is `true` and `published.ok` is `true`, skip to Step 5 — they're already set up.
+**On the hosted default this list is usually empty** — hosted publishing needs only Node 18+, curl and jq. If `ready_to_publish` is `true`, go straight to Step 5. Do not install wrangler, do not run `wrangler login`, and do not send the user to the Cloudflare dashboard; none of that is part of publishing to tdoc.dev.
 
 Otherwise, iterate over `missing_steps` **in order**. Each step has a `kind`:
 
@@ -111,43 +120,90 @@ Otherwise, iterate over `missing_steps` **in order**. Each step has a `kind`:
 
 Always re-run `bin/tdoc-doctor` between steps. State changes — what was missing in iteration N may be resolved in N+1.
 
-**The two `click` steps you'll encounter most:**
+`click` steps only ever appear on the self-host path. If you are seeing one on the hosted default, something is wrong — re-read `.target` before sending anyone to a dashboard.
 
-1. **Claim a workers.dev subdomain** — one-time pick. URL: `https://dash.cloudflare.com/?to=/:account/workers-and-pages`. On the Workers & Pages page Cloudflare prompts for a subdomain; user chooses any name (typically their handle). Free.
-2. **Enable R2** — one-time click. URL: `https://dash.cloudflare.com/<account_id>/r2`. Free tier is 10 GB. Requires acknowledging Cloudflare's pricing page.
+## Step 5 — Build their first doc
 
-Don't surprise the user — explain briefly *why* before you ask them to click.
+**Skip this step entirely if `published.ok` is already `true` in the doctor
+output** — the user already has a published doc and onboarding is done. Tell
+them so and proceed to Step 6.
 
-## Step 5 — Offer a sample doc
+Otherwise, when `ready_to_publish` is `true`, **read
+[FIRST-DOC.md](FIRST-DOC.md) end to end and follow it.** It is the whole
+specification for what the first doc is, how much of the machine to read,
+what the page says, and what happens before it is published. Do not improvise
+a placeholder here.
 
-**Skip this step entirely if `published.ok` is already `true` in the doctor output** — the user already has a published doc and onboarding is done. Tell them so and proceed to Step 6.
+Two things from that file are easy to skip and must not be:
 
-Otherwise, when `ready_to_publish` is `true` and the user has no published doc yet, offer to publish a sample. A reasonable default (note: respect `TDOC_DIR` env var if set; defaults to `~/tdocs/`):
+- **Say the scan line before scanning.** Enumerating someone's assistant
+  folders unannounced, on first run, is the fastest way to lose them.
+- **Publish it privately, and hand over the real URL.** This one is about them,
+  so it goes up as `--visibility private` — a real `tdoc.dev` link, on their
+  account, that nobody else can open. Do not end on a `localhost` URL; that is
+  the failure the localhost rule in SKILL.md exists to prevent.
+
+If the machine has no history to read, FIRST-DOC.md says what to do instead —
+follow that rather than falling back to a placeholder document.
+
+## Step 6 — Offer the routing line (ask once, never write silently)
+
+`SKILL.md`'s description is what routes doc requests to tdoc, and it reaches
+every session. A line in the user's `CLAUDE.md` is a stronger signal, because
+project instructions read as rules rather than as a catalogue entry. Offer it;
+do not take it.
+
+**Skip this step entirely if either is true:**
 
 ```bash
-# Pick a slug
-SLUG="welcome"
-# Generate a simple HTML doc (you can be more creative)
-mkdir -p ~/tdocs/$SLUG/v1
-cat > ~/tdocs/$SLUG/v1/index.html <<'HTML'
-<!doctype html><meta charset="utf-8"><title>Hello tdoc</title>
-<style>body{font:18px/1.6 system-ui;max-width:680px;margin:80px auto;padding:0 20px}h1{color:#1652f0}</style>
-<h1>Hello, tdoc.</h1>
-<p>This is your first document. Highlight any text to leave a comment.</p>
-HTML
-cat > ~/tdocs/$SLUG/meta.json <<EOF
-{"title":"Hello tdoc","slug":"$SLUG","versions":[{"n":1,"created":"$(date -Iseconds)"}]}
-EOF
-echo '[]' > ~/tdocs/$SLUG/comments.json
-# Publish to hosted tdoc.dev. First run signs in with GitHub Device Flow
-# (open the printed URL and enter the code), then uploads.
-# To self-host instead: --platform cloudflare or --platform vercel.
-~/.claude/skills/tdoc/bin/tdoc-publish $SLUG
+# already asked, at any point in the past — never ask twice
+[ -f "$HOME/.tdoc/.routing-prompted" ] && echo SKIP_ASKED
+# already present — a reinstall must not append a second copy
+grep -rq "<!-- tdoc:routing -->" CLAUDE.md "$HOME/.claude/CLAUDE.md" 2>/dev/null && echo SKIP_PRESENT
 ```
 
-The script prints the live URL. Show it to the user.
+**Pick the target file** and name it in the question, because the user is
+agreeing to an edit of a specific path:
 
-## Step 6 — Wrap up
+- a `CLAUDE.md` in the current project that already has a `## Skill routing`
+  section → add the line to that section
+- otherwise `~/.claude/CLAUDE.md` — tdoc is not project-scoped, so global is
+  the honest default. Create it if it does not exist.
+
+**Ask, with the path in the question.** Use `AskUserQuestion` where the host
+offers it; on a host without that tool, ask in prose and wait for a typed
+answer:
+
+> Add a routing line for tdoc to `<path>`? It tells your agent to use tdoc for
+> document requests instead of writing a file by hand. The skill already
+> describes itself this way — this makes it a rule rather than a suggestion.
+>
+> A) Add it
+> B) No thanks
+
+**On A**, append (or add to the existing `## Skill routing` list):
+
+```markdown
+<!-- tdoc:routing -->
+- Write, draft, publish, or share any doc, write-up, explainer, or page → invoke tdoc
+```
+
+**On B**, record it and never raise it again:
+
+```bash
+touch "$HOME/.tdoc/.routing-declined"
+```
+
+**Either way**, mark it asked:
+
+```bash
+mkdir -p "$HOME/.tdoc" && touch "$HOME/.tdoc/.routing-prompted"
+```
+
+Do not commit the change, do not edit any other part of the file, and do not
+re-ask on a later run. A declined offer is a decision, not a pending task.
+
+## Step 7 — Wrap up
 
 Tell the user:
 
@@ -158,7 +214,31 @@ Tell the user:
 
 ## Idempotency
 
+- `~/.tdoc/.routing-prompted` — the CLAUDE.md routing offer was already
+  made. Never ask a second time, whichever way it was answered.
+- `~/.tdoc/.routing-declined` — the user said no. Treat it as settled.
+- `<!-- tdoc:routing -->` in a `CLAUDE.md` — the line is already there; a
+  reinstall must not append another.
 Every step is safe to re-run. The doctor reads state; the publish script checks for existing resources before creating. The user can interrupt and resume at any point.
+
+## Appendix — self-hosting on your own Cloudflare or Vercel
+
+Only do this when the user has explicitly said they want to host it themselves. It is not the default and not the recommended path for someone new.
+
+Re-probe with the target named, so the checklist is the right one:
+
+```bash
+~/.claude/skills/tdoc/bin/tdoc-doctor --platform cloudflare
+```
+
+Then walk `missing_steps` as in Step 4. On Cloudflare the two `click` steps you'll hit are:
+
+1. **Claim a workers.dev subdomain** — one-time pick. URL: `https://dash.cloudflare.com/?to=/:account/workers-and-pages`. On the Workers & Pages page Cloudflare prompts for a subdomain; the user chooses any name (typically their handle). Free.
+2. **Enable R2** — one-time click. URL: `https://dash.cloudflare.com/<account_id>/r2`. Free tier is 10 GB. Requires acknowledging Cloudflare's pricing page.
+
+Don't surprise the user — explain briefly *why* before you ask them to click. Budget about five minutes the first time. Their account, their bill, no card.
+
+Publish with the platform named: `bin/tdoc-publish --platform cloudflare <slug>` (or `--platform vercel`). The choice is saved in `~/.tdoc/published.json` and becomes their default from then on.
 
 ## What to skip if the user just wants local
 
@@ -176,6 +256,7 @@ node --version  # should be v18 or higher
 |--------------------------------------------------|----------------------------------------------------------------|
 | `R2 not enabled` even after the user clicked      | Wait 10s, re-run doctor. Cloudflare's API is briefly stale.    |
 | `wrangler` works in terminal but doctor says no   | Path issue. Tell user to restart their terminal.               |
+| Doctor asks for Cloudflare things on a hosted user | Check `.target`. Something set `TDOC_PLATFORM` or `published.json` to cloudflare. |
 | Worker deploys but `/api/upload` returns 401      | The new TDOC_UPLOAD_TOKEN secret hasn't propagated. Wait 15s, retry. |
 | `gh` is missing                                   | Optional — `tdoc` doesn't need it. Skip.                       |
 

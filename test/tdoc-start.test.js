@@ -51,25 +51,37 @@ t('never asks which runtime you use', () => {
   assert(/ONBOARDING\.md/.test(onboard), 'the paste line must point the agent at the setup guide');
 });
 
-t('sign-in is page one, and only when there is a session to get', () => {
-  // It leads again, on the owner's call: signing in here is what produces the
-  // hosted token, which is what makes publishing zero-setup. It must not
-  // become a wall — skippable, and skipped outright for anyone already signed
-  // in or on a host with no auth configured.
-  assert(/function stepSignIn/.test(onboard), 'the sign-in page is gone');
-  assert(/tdo-skip/.test(onboard), 'the sign-in page must be skippable');
-  assert(/authConfigured === false \|\| signedIn/.test(onboard),
-    'a signed-in visitor, or a host with no auth, must skip straight to the line');
-  assert(/__tdocSignIn/.test(onboard), 'must reuse the shared device flow');
-  assert(!/device\/start|device\/poll/.test(onboard), 'a second device flow is back in the modal');
+t('the dialog does not sign anyone in (#254)', () => {
+  // The sign-in page was kept on the theory that it produced the hosted token
+  // and so bought zero-setup publishing. It did not: the token it minted was
+  // assigned to st.token and never read anywhere, and `sign_in_required` set
+  // the same st.hosted flag without signing in at all — so the page bought a
+  // wording variant at the cost of a full OAuth round trip, and left the
+  // visitor to authenticate a second time in the CLI anyway.
+  assert(!/function stepSignIn/.test(onboard), 'the sign-in page is back');
+  assert(!/__tdocSignIn/.test(onboard), 'the dialog signs the visitor in again');
+  // The endpoint is still called — unauthenticated, to read whether hosted is
+  // open from the error. What must not come back is a credential the dialog
+  // then does nothing with.
+  assert(!/st\.token/.test(onboard), 'the dialog stores a token it cannot use');
+  assert(!/r\.token \? /.test(onboard) || /r\.token \|\| r\.error === 'sign_in_required'/.test(onboard),
+    'the probe should read openness, not harvest a token');
+  assert(!/device\/start|device\/poll/.test(onboard), 'a device flow is back in the modal');
+  // Onboarding is now exactly one sign-in, in the CLI, where the credential
+  // is actually needed.
 });
 
-t('shows one page at a time', () => {
-  // Everything at once was the complaint: copying expanded a panel underneath
-  // the button and the whole dialog jumped.
-  assert(/var PAGES = \[/.test(onboard), 'the dialog is back to a single screen');
-  assert(/st\.page = 2/.test(onboard), 'copying no longer advances to its own page');
+t('is one screen, with nothing to page through (#254)', () => {
+  // Three pages existed because the first one asked a question. With the
+  // sign-in gone, page two was the only page carrying anything, and page
+  // three just restated the line already on screen.
+  assert(!/var PAGES = \[/.test(onboard), 'the dialog is paged again');
+  assert(!/st\.page/.test(onboard), 'page state is back');
   assert(!/showNext/.test(onboard), 'the in-place expansion is back');
+  // Self-hosting stays reachable — a sentence to add, not a button to weigh
+  // against the primary path on the way in.
+  assert(/tdo-alt/.test(onboard), 'the self-host route is gone entirely');
+  assert(!/tdo-skip/.test(onboard), 'the self-host fork is back as a competing button');
 });
 
 t('Copy sits inside the prompt box', () => {
@@ -94,7 +106,11 @@ t('the detail is collapsed on the page that has a job to do', () => {
 t('the self-host path changes the line and the recipe knows what to do', () => {
   // Someone who explicitly skipped hosting must not get the hosted default
   // anyway. The line says which host; the recipe carries the steps.
-  assert(/st\.selfHost/.test(onboard), 'skipping sign-in no longer records the choice');
+  // The mechanism moved (#254): it used to be a button on screen one that
+  // mutated the copied line. It is now a sentence the visitor adds themselves,
+  // so choosing it is still explicit but it is no longer a fork anyone has to
+  // resolve before they know what tdoc is.
+  assert(/tdo-alt/.test(onboard), 'the self-host route is gone entirely');
   assert(/Publish it to my own Cloudflare/.test(onboard),
     'the self-host line does not tell the agent where to publish');
   const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
@@ -107,9 +123,12 @@ t('the self-host path changes the line and the recipe knows what to do', () => {
 t('the prompt survives the page it was copied from', () => {
   // Taking the line away right after telling someone to go paste it is the one
   // moment they still need it.
-  const next = onboard.slice(onboard.indexOf('function stepNext'), onboard.indexOf('function render'));
-  assert(/tdo-line/.test(next), 'the last page no longer shows the prompt');
-  assert(/copyOnly/.test(next), 'the last page has no way to copy it again');
+  // With one screen (#254) the line cannot be paged away from, and Copy is
+  // always on it — which is what this was protecting.
+  const screen = onboard.slice(onboard.indexOf('function stepPaste'), onboard.indexOf('function render'));
+  assert(/tdo-line/.test(screen), 'the screen no longer shows the prompt');
+  assert(/copyOnly/.test(screen), 'the screen has no way to copy it again');
+  assert(!/var PAGES/.test(onboard), 'the line can be paged away from again');
 });
 
 t('the dialogs are not commentable surfaces', () => {
@@ -160,15 +179,41 @@ t('no credential is ever pasted into a prompt', () => {
   assert(!/hosted token is/.test(onboard), 'the token phrase is back in the prompt');
 });
 
-t('the first doc is a Game of Life lesson, and the recipe carries it', () => {
+t('the first doc is the reader\'s own portrait, and the recipe carries it', () => {
   // The doc is written fresh from FIRST-DOC.md each time, so there is no
-  // fixture to drift. That file has to keep teaching the loop.
+  // fixture to drift. That file has to keep specifying the whole thing.
   const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
-  assert(/Game of Life/.test(recipe), 'the recipe no longer builds the Game of Life doc');
+  assert(/What does AI know about me/i.test(recipe),
+    'the recipe no longer builds the what-AI-knows doc');
   assert(/widget island/i.test(recipe),
-    'the recipe must say the artifact goes in a widget island, or CSP will kill it');
-  for (const beat of ['comments', 'fix', 'new version', 'reply', 'friend']) {
-    assert(new RegExp(beat, 'i').test(recipe), `the tutorial no longer covers: ${beat}`);
+    'the recipe must say computation goes in a widget island, or CSP will kill it');
+  // The scan is announced, never silent, and never quotes what it read.
+  assert(/I'm going to look at the traces/.test(recipe),
+    'the recipe must say the scan line before scanning');
+  assert(/Never copy conversation text into the page/.test(recipe),
+    'the recipe must forbid quoting transcripts — they carry pasted keys');
+  // It is a portrait, not an activity log, and it is not published unasked.
+  assert(/Name a trait, then prove it/.test(recipe),
+    'the recipe must ask for traits rather than activity readings');
+  assert(/Do not end at localhost/.test(recipe),
+    'the recipe must not hand back a localhost URL — see the localhost rule in SKILL.md');
+  assert(/--visibility private/.test(recipe),
+    'the recipe must publish the first doc privately rather than withholding it');
+  // Hosted slugs are one global namespace, so a slug derived from the title
+  // hands everyone the same one and rejects every user after the first (#244).
+  assert(/what-ai-knows-<name>/.test(recipe),
+    'the recipe must build the slug from the person, not from the document title');
+  assert(/409|slug_taken/.test(recipe),
+    'the recipe must handle a slug collision instead of surfacing it to the user');
+  assert(!/Do not publish without asking/.test(recipe),
+    'a stale do-not-publish line contradicts the localhost rule the recipe now follows');
+  // It has to work for someone who does not write code, and for an empty machine.
+  assert(/the reader may not write code/i.test(recipe),
+    'the recipe must handle readers with no coding projects');
+  assert(/If there is no history/.test(recipe),
+    'the recipe must handle a machine with nothing to scan');
+  for (const beat of ['comment', 'next version', 'answers']) {
+    assert(new RegExp(beat, 'i').test(recipe), `the loop is no longer taught: ${beat}`);
   }
   assert(/ONBOARDING\.md/.test(recipe), 'the recipe must hand install back to ONBOARDING.md');
   assert(/[Dd]o not ask for a token/.test(recipe),
@@ -182,6 +227,10 @@ t('points at the hub only when there is a hosted account behind it', () => {
   const code = onboard.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
   assert(/st\.hosted \? '[^']*tdoc\.dev\/me/.test(code),
     'the lesson names the hub without checking that hosted publishing is open');
+  // The check survives without the sign-in page (#254): the probe is
+  // unauthenticated, because the answer is in the error rather than the token.
+  assert(/function probeHosted/.test(code), 'nothing establishes whether hosted is open');
+  assert(!/__tdocSignIn/.test(code), 'the probe should not require signing anyone in');
   const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
   assert(/only if/i.test(recipe) && /tdoc\.dev\/me/.test(recipe),
     'the recipe must make the hub conditional on having published to hosted tdoc');
@@ -284,6 +333,33 @@ t('/start serves the doc and fails safe', () => {
   assert(route, '/start has no GET/HEAD route');
   assert(/landingResponse\(env, req, START_SLUG\)/.test(route[0]),
     '/start must route through landingResponse so it inherits the neutral-page fallback');
+});
+
+// ---- the site must not teach the pre-publish-first flow (#236 S6) ----
+
+t('/start names tdoc.dev, not a Cloudflare account, as the destination', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'landing', 'tdoc-start', 'v1', 'index.html'), 'utf8');
+  const from = html.indexOf('Where does it get published');
+  const fold = html.slice(from, html.indexOf('</details>', from));
+  assert(!/free Cloudflare account you own/.test(fold),
+    '/start still names a Cloudflare account as the default destination');
+  assert(!/enable R2|About five minutes/.test(fold),
+    '/start still walks people through Cloudflare setup for the default path');
+  assert(/tdoc\.dev/.test(fold), '/start should name tdoc.dev');
+  // Self-hosting and local-only are demoted, not deleted.
+  assert(/my own Cloudflare/.test(fold), 'self-hosting should still be reachable');
+  assert(/keep it local/.test(fold), 'local-only should still be reachable');
+});
+
+t('the /me create-doc modal does not teach a manual Publish step', () => {
+  // /tdoc new publishes on its own since #239; telling people to hit Publish
+  // sends them looking for a button that is not part of the flow any more.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+  const from = src.indexOf('class="mk-bd"');
+  const modal = src.slice(from, src.indexOf('</ol>', from));
+  assert(!/Hit <b>Publish<\/b>/.test(modal), '/me modal still says to hit Publish');
+  assert(/publishes it, and hands you the link/.test(modal),
+    '/me modal should say the link comes back on its own');
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);

@@ -5,10 +5,10 @@ description: |
   document from a prompt (SVG diagrams, CSS-toggled models, explainers,
   strategy docs, research write-ups, product specs, explainer pages,
   design docs, RFCs, case studies, post-mortems, technical proposals,
-  vision docs, one-pagers, decision frameworks), serve it at localhost
-  with text- and artifact-anchored inline commenting, and regenerate
-  new versions from comments. Publishes to each user's own Cloudflare
-  Worker for free always-on sharing.
+  vision docs, one-pagers, decision frameworks), publish it to a free
+  shareable link on tdoc.dev, and collect text- and artifact-anchored
+  comments that regenerate the next version. Readers need nothing
+  installed. Self-hosting on your own Cloudflare or Vercel is optional.
 
   Use when asked to "write a doc", "draft this", "publish this",
   "design doc", "PRD", "one-pager", "research write-up", "case study",
@@ -276,6 +276,45 @@ colors them; this file decides there should be many.
 
 ### `/tdoc new <prompt>` — create a new doc
 
+**Where it goes.** A doc is published to hosted `tdoc.dev` and the user is
+handed a shareable link. That is the default and it is not something to ask
+about. Two things change it, and only if the user says so in their own words:
+
+| The user said | Destination | What they get back |
+|---|---|---|
+| nothing about hosting | **hosted tdoc.dev** | `https://tdoc.dev/d/<slug>/v/1` — link-readable, not listed anywhere |
+| "publish to my own Cloudflare / Vercel", "self-host it" | their own worker | `<worker>.workers.dev` / `tdoc-<scope>.vercel.app` — still a public link, **not localhost** |
+| "keep it local", "don't upload it anywhere", "just show me locally" | local only | `http://localhost:7878/...` |
+
+**The localhost rule: never hand over a `localhost` URL unless the user asked
+to keep the doc local.** Not as a fallback, not when a sign-in did not finish,
+not as "here it is locally in the meantime". Asking to self-host on Cloudflare
+or Vercel is NOT asking for localhost — that path still ends at a public URL.
+If publishing cannot complete, say so and leave the doc in `$TDOC_DIR/<slug>/`;
+do not substitute a local URL for the link the user was promised.
+
+This rule is about **what you hand over**, not about the local server, which is
+untouched. `/tdoc serve` still works for everyone, and previewing locally while
+iterating is fine whenever the user asks for it — it is simply not what a
+finished doc is delivered as.
+
+**Step 0 — start the sign-in before you start writing.** Hosted publishing
+needs a one-time GitHub sign-in. Generating a doc takes 30–60 s and the device
+flow is a poll loop, so run them at the same time rather than interrupting the
+user at the end:
+
+```bash
+# no-op and instant when already signed in
+"$SKILL_DIR/bin/tdoc-publish" --signin-only
+```
+
+Launch this in the **background** (Bash `run_in_background: true`) and go
+straight on to writing the doc. It opens GitHub in the user's browser and
+prints a short code that they type there — GitHub does not accept the code
+through the URL, so it has to be entered by hand. Tell the user in one line
+that a GitHub page has opened and that the code is in the terminal; then keep
+working. Skip Step 0 entirely for the local-only and self-host destinations.
+
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
 2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, and `$SKILL_DIR/authoring/style/default.md`.**
    Voice constrains the prose as you generate it, not as a later cleanup
@@ -309,11 +348,54 @@ colors them; this file decides there should be many.
    { "title": "...", "slug": "...", "created": "<iso>", "versions": [{ "n": 1, "created": "<iso>", "prompt": "..." }] }
    ```
 6. Init `comments.json` as `[]`.
-7. Open `http://localhost:7878/d/<slug>/v/1` in the browser:
+7. **Publish and hand over the link.**
+
+   *Hosted (the default).* Confirm the background sign-in from Step 0 finished,
+   then publish:
+
+   ```bash
+   "$SKILL_DIR/bin/tdoc-publish" <slug>
+   # keep earlier drafts to yourself:
+   #   "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
+   ```
+
+   Report the `https://tdoc.dev/d/<slug>/v/1` URL on its own line, and say what
+   it is — the user may never have seen a tdoc page before. Describe the
+   access it actually has, which for a plain publish is the legacy policy:
+
+   > Your doc is live. Anyone with this link can read it — and can page back
+   > through earlier versions — but it is not listed anywhere, so only people
+   > you send it to will find it.
+
+   Do **not** call it "unlisted". A publish with no explicit flags stores no
+   access block and takes the legacy policy (`visibility: public`,
+   `history_visibility: public`); saying unlisted would understate what a
+   recipient can see. If the user wants earlier versions kept private, that is
+   `--history owner`.
+
+   *If the sign-in has not completed yet*, do not fall back to localhost and do
+   not go quiet. Say the doc is written and waiting, and that approving the
+   GitHub page finishes it — or that they can say "publish it" later and you'll
+   get them a fresh code. The doc stays in `$TDOC_DIR/<slug>/`.
+
+   *Self-host.* `"$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
+   (or `vercel`). Report the worker URL, with the same note about access.
+
+   **Local preview stays available to self-hosting users** — `/tdoc serve` and
+   `http://localhost:7878` are unchanged, and iterating locally before pushing
+   to your own worker is a perfectly good loop. That is an *authoring* step the
+   user can ask for at any time; it does not change what gets handed over at
+   the end, which is still the worker URL. Nothing about the local server was
+   removed.
+
+   *Local only — because the user asked.* Start the server if needed and open
+   the local URL:
+
    ```bash
    open "http://localhost:7878/d/<slug>/v/1"
    ```
-8. Report the URL to the user.
+
+   This is the only branch that reports a `localhost` URL.
 
 ### `bin/tdoc-new` — programmatic entry for agents in other skills
 
@@ -470,7 +552,18 @@ silently is the #1 source of regression complaints.
    If a comment is later re-anchored by the user (anchor moved to new
    text), the server automatically clears the agent's emoji and resets
    `status: "open"`. Re-running `/tdoc edit` will pick it up again.
-9. Open `http://localhost:7878/d/<slug>/v/<n+1>`.
+9. **Publish the new version and hand back its link**, the same way `/tdoc new`
+   does. A doc that was published stays published; report
+   `https://tdoc.dev/d/<slug>/v/<n+1>` so the reviewer can see the version
+   their comment produced. The link a user already shared keeps working — a new
+   version never breaks it.
+
+   ```bash
+   "$SKILL_DIR/bin/tdoc-publish" <slug>
+   ```
+
+   Only report a `localhost` URL if this doc is local-only because the user
+   asked for that (see the localhost rule in `/tdoc new`).
 
 If there are zero open comments AND no extra prompt, ask the user what to change before doing anything.
 
@@ -586,20 +679,29 @@ installed, or might be partway through. You **must** drive the flow from
 **Algorithm:**
 
 1. Run `"$SKILL_DIR/bin/tdoc-doctor"` and parse the JSON. This is non-destructive.
+   The doctor is target-aware and reports what it assessed under `.target`.
+   The default is `hosted` (tdoc.dev), which needs Node 18+, curl and jq —
+   **no Cloudflare account, no wrangler, nothing to click in a dashboard.**
+   Only pass `--platform cloudflare` / `--platform vercel` when the user has
+   asked to self-host.
 2. If `.ready_to_publish == true` AND `.published.ok == true` → tell the user
    they are fully set up, and offer to run `/tdoc new <prompt>` or to test
    publishing with a sample doc.
 3. If `.ready_to_publish == true` AND `.published.ok == false` → they have all
    deps but haven't published yet. Offer to create a quick sample doc with
    `/tdoc new` and then `/tdoc publish` it.
-4. Otherwise, walk through `.missing_steps` in order. For each step:
-   - **kind == "install"**: run the `cmd` for them via Bash (e.g. `npm i -g wrangler`,
-     `brew install jq`). After install, re-run `tdoc-doctor` to confirm.
+4. Otherwise, walk through `.missing_steps` in order. On the hosted default
+   this list is usually empty. For each step:
+   - **kind == "install"**: run the `cmd` for them via Bash (e.g. `brew install jq`).
+     After install, re-run `tdoc-doctor` to confirm.
    - **kind == "login"**: explain that this opens a browser, then run the `cmd`.
      `wrangler login` is interactive — print clear instructions and wait.
    - **kind == "click"**: you cannot click for the user. Print the URL clearly
      and tell them what to do ("Open this and click 'Enable R2'"). Then wait
      for the user to say "done", then re-run `tdoc-doctor` to verify.
+     `login` and `click` steps are **self-host only**. If one appears for a
+     user who never asked to self-host, re-read `.target` before sending them
+     to a dashboard.
 5. After every step, re-run `tdoc-doctor` and continue from the new state.
 6. When `.ready_to_publish == true`, congratulate and offer to create + publish
    a sample doc.
@@ -608,6 +710,8 @@ installed, or might be partway through. You **must** drive the flow from
 
 - NEVER skip the doctor check before suggesting a step. State changes between
   steps (e.g. R2 takes a few seconds after enabling).
+- NEVER walk a hosted user through Cloudflare setup. Publishing to tdoc.dev
+  does not use wrangler, a workers.dev subdomain, or R2.
 - ALWAYS show the user what you're running. Print the JSON status if helpful.
 - If a "click" step doesn't take effect after the user says "done", offer to
   re-check after waiting 10s (Cloudflare API can be slow to reflect changes).
@@ -1042,6 +1146,16 @@ if [ -n "${SKILL_TELEMETRY:-}" ]; then
   TEL_EFFECTIVE="$SKILL_TELEMETRY"
 elif [ -n "$TEL_MODE_PERSISTED" ]; then
   TEL_EFFECTIVE="$TEL_MODE_PERSISTED"
+elif [ "$TEL_PROMPTED" = "no" ]; then
+  # First ever run. The consent question used to be asked here, before any
+  # work — so the very first thing someone got after asking for a document
+  # was a question about analytics. It moves to the Final Step, after the
+  # link is in their hands.
+  #
+  # Nothing is recorded for this run. Defaulting to "on" and asking
+  # afterwards would be recording before consent; losing one event is the
+  # cheaper mistake.
+  TEL_EFFECTIVE="deferred"
 else
   TEL_EFFECTIVE="on"
 fi
@@ -1052,7 +1166,10 @@ fi
 TEL_SESSION_ID="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
 
 # Write per-session sentinel (not one global file)
-if [ "$TEL_EFFECTIVE" != "off" ]; then
+# Only "on" writes. "deferred" (a first run, consent not yet asked) records
+# nothing at all — no sentinel, no pending marker — so there is nothing to
+# reap and nothing logged before the user agreed to it.
+if [ "$TEL_EFFECTIVE" = "on" ]; then
   mkdir -p "$TEL_HOME/sentinels"
   date +%s > "$TEL_HOME/sentinels/$TEL_SESSION_ID"
   find "$TEL_HOME/sentinels" -type f -mtime +1 -delete 2>/dev/null || true
@@ -1079,8 +1196,8 @@ if [ "$TEL_EFFECTIVE" != "off" ]; then
     _P_SKILL="$(echo "$_PDATA" | grep -o '"skill":"[^"]*"' | head -1 | cut -d'"' -f4)"
     _P_SID="$(echo "$_PDATA" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
     [ -z "$_P_SKILL" ] && continue
-    if [ -x "__TDOC_DIR__/telemetry/bin/telemetry-log" ]; then
-      "__TDOC_DIR__/telemetry/bin/telemetry-log" \
+    if [ -x "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" ]; then
+      "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
         --skill "$_P_SKILL" --outcome unknown \
         --step "reaped-incomplete-run" --session-id "$_P_SID" 2>/dev/null || true
     fi
@@ -1090,25 +1207,58 @@ fi
 # ─── Upgrade check (BYOK: origin/main, every run) ───────────
 # GitHub releases lag (v0.9.0 sat while overlay kept shipping on main).
 # Compare this skill checkout to origin/main the same way tdoc-update does.
-# TDOC_DIR is substituted at install time by postinstall-telemetry.sh.
-TDOC_DIR="__TDOC_DIR__"
+#
+# Resolve the skill directory at RUNTIME. This used to be a placeholder token
+# substituted at install time, and the substitution never happened:
+# every install carried the literal string, so `[ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ]`
+# was false and the automatic update silently never ran, on any machine, ever.
+# A self-update that depends on an install step is a self-update that does not
+# exist. Note this is a different directory from the TDOC_DIR above, which is
+# the docs root (~/tdocs) — hence the distinct name.
+TDOC_SKILL_ROOT="${TDOC_SKILL_DIR:-}"
+if [ -z "$TDOC_SKILL_ROOT" ]; then
+  for _d in "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc"; do
+    [ -f "$_d/SKILL.md" ] && TDOC_SKILL_ROOT="$_d" && break
+  done
+fi
 
 # Resolve installed version, trying multiple sources in order:
 #   1. VERSION file (if maintained, like gstack)
 #   2. git describe --tags (most recent reachable tag)
 #   3. fallback "0.0.0" (skip the check)
-INSTALLED_VERSION="$(cat "$TDOC_DIR/VERSION" 2>/dev/null)"
-if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_DIR/.git" ]; then
+INSTALLED_VERSION="$(cat "$TDOC_SKILL_ROOT/VERSION" 2>/dev/null)"
+if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_SKILL_ROOT/.git" ]; then
   INSTALLED_VERSION="$(cd "$TDOC_DIR" && git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
 fi
 [ -z "$INSTALLED_VERSION" ] && INSTALLED_VERSION="0.0.0"
 
-if [ -x "$TDOC_DIR/bin/tdoc-update-nag" ]; then
-  NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" 2>/dev/null || true)"
+# ─── Keep the skill current, automatically ───
+# Every run fast-forwards this checkout to origin/main. No prompt: a user who
+# asked for a doc did not ask to be interviewed about versions.
+#
+# It declines to act, quietly, in the two cases where acting could destroy
+# work: a dirty tree (auto-stashing is the one path here that can lose edits)
+# and a diverged checkout (someone developing tdoc itself). It never redeploys
+# a Worker — pushing to the user's own Cloudflare/Vercel account is a separate
+# action, not a side effect of asking for a doc.
+#
+# TDOC_SKIP_UPDATE_CHECK=1 turns the whole thing off.
+# The capability probe is not optional. tdoc-update's argument loop has no
+# catch-all, so a version that predates --auto would SILENTLY IGNORE the flag
+# and run the full interactive update instead — auto-stashing local edits and
+# offering a redeploy, on every single run. Only invoke it when it is a flag
+# the installed script actually knows.
+if [ -z "${TDOC_SKIP_UPDATE_CHECK:-}" ] && [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ] \
+   && grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" 2>/dev/null; then
+  "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
+fi
+
+if [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" ]; then
+  NAG_LINE="$("$TDOC_SKILL_ROOT/bin/tdoc-update-nag" 2>/dev/null || true)"
   if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
     echo "$NAG_LINE"
-    if [ "$TEL_EFFECTIVE" != "off" ]; then
-      "$TDOC_DIR/telemetry/bin/telemetry-log" \
+    if [ "$TEL_EFFECTIVE" = "on" ]; then
+      "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
         --skill tdoc \
         --event-type upgrade_prompted \
         --outcome unknown \
@@ -1129,8 +1279,14 @@ echo "TDOC_VERSION: $INSTALLED_VERSION"
 
 ### Instructions for the agent
 
-**If `TEL_PROMPTED` is `no`** (first time the user runs tdoc with
-telemetry), ask the user ONCE with this text and two options:
+**If `TEL_PROMPTED` is `no`, ask nothing now.** The preamble set
+`TEL_EFFECTIVE=deferred`, which records nothing for this run. Do the work
+the user actually asked for, hand over the link, and only then ask — the
+question lives in the Final Step. A person who asked for a document should
+not have their first interaction with tdoc be an analytics prompt.
+
+The question itself, when the Final Step reaches it, is this text with two
+options:
 
 > tdoc can record when it runs, how it went (success/error/abandoned),
 > how long it took, and a random ID for your machine, and send it to
@@ -1150,17 +1306,21 @@ or any other host without that tool), present the same text as plain
 prose and wait for the user's typed reply (A/B). Either way, record
 their choice the same.
 
-After they pick, record the choice:
-
-```bash
-echo "MODE_FROM_USER" > "$TEL_CONFIG_FILE"  # "on" or "off"
-touch "$TEL_PROMPTED_FLAG"
-TEL_EFFECTIVE="$(cat "$TEL_CONFIG_FILE")"
-```
+Recording their answer is the Final Step's job — see there. Do not ask
+here, and do not ask twice.
 
 **If `TEL_PROMPTED` is `yes`**, do NOT ask again. Proceed silently.
 
-**If the preamble printed `TDOC_UPDATE_AVAILABLE`**, tell the user
+**If the preamble printed `[tdoc] updated tdoc to <sha>`**, the skill just
+fast-forwarded itself. Mention it in one short line and carry on — do not stop
+to ask about it, and do not offer to redeploy anything.
+
+**If it printed `skipping the automatic update`**, the checkout is dirty or has
+diverged, which means someone is working on tdoc itself. Say nothing about it
+unless the user asks; it is not their problem.
+
+**If the preamble printed `TDOC_UPDATE_AVAILABLE`**, the automatic update could
+not apply (see above). Tell the user
 immediately (before the rest of the tdoc work). Do not wait until the
 end, and do not swallow it. Example:
 
@@ -1200,8 +1360,33 @@ rm -f "$TEL_HOME/sentinels/$TEL_SESSION_ID"
 # event, so the self-healing reaper must not later treat it as orphaned.
 rm -f "$TEL_HOME/telemetry/pending/.pending-$TEL_SESSION_ID" 2>/dev/null
 
-TEL_EFFECTIVE="${SKILL_TELEMETRY:-$(cat "$TEL_HOME/.telemetry-mode" 2>/dev/null || echo on)}"
+TEL_PROMPTED="no"; [ -f "$TEL_HOME/.telemetry-prompted" ] && TEL_PROMPTED="yes"
+TEL_MODE_PERSISTED="$(cat "$TEL_HOME/.telemetry-mode" 2>/dev/null | tr -d ' \n\r')"
+if [ -n "${SKILL_TELEMETRY:-}" ]; then
+  TEL_EFFECTIVE="$SKILL_TELEMETRY"
+elif [ -n "$TEL_MODE_PERSISTED" ]; then
+  TEL_EFFECTIVE="$TEL_MODE_PERSISTED"
+elif [ "$TEL_PROMPTED" = "no" ]; then
+  TEL_EFFECTIVE="deferred"
+else
+  TEL_EFFECTIVE="on"
+fi
+echo "TEL_EFFECTIVE: $TEL_EFFECTIVE"
 ```
+
+**If `TEL_EFFECTIVE` is `deferred`** — this was the user's first ever run.
+Hand over the finished work FIRST. Then, once the link is in their hands,
+ask the consent question above, exactly once, and record their answer:
+
+```bash
+echo "MODE_FROM_USER" > "$TEL_HOME/.telemetry-mode"   # "on" or "off"
+touch "$TEL_HOME/.telemetry-prompted"
+```
+
+Then **stop** — log nothing for this run. There is no sentinel and no
+pending marker to clean up, because the preamble wrote neither. The next
+run honours whatever they chose. One lost event is the correct price for
+not recording before someone agreed to it.
 
 If `TEL_EFFECTIVE` is `off`, **stop here** — do not call telemetry-log.
 
@@ -1215,7 +1400,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On success**:
 
 ```bash
-"__TDOC_DIR__/telemetry/bin/telemetry-log" \
+"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome success \
   --duration "$DURATION" \
@@ -1227,7 +1412,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On error**:
 
 ```bash
-"__TDOC_DIR__/telemetry/bin/telemetry-log" \
+"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome error \
   --duration "$DURATION" \
@@ -1241,7 +1426,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On abandoned** (user asked to stop):
 
 ```bash
-"__TDOC_DIR__/telemetry/bin/telemetry-log" \
+"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome abandoned \
   --duration "$DURATION" \

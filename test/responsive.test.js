@@ -179,12 +179,12 @@ async function tPub(name, fn) {
       if (m.right > m.ww + 1) throw new Error(`footer right=${m.right} > viewport ${m.ww}`);
     });
 
-    await t('Copy button opens its dropdown', async () => {
-      await page.evaluate(() => document.querySelector('#tdoc-copy-md-btn').click());
+    await t('⋯ menu carries a Copy as Markdown action', async () => {
+      await page.evaluate(() => document.querySelector('#tdoc-more-btn').click());
       await page.waitForTimeout(120);
-      const open = await page.evaluate(() => document.querySelector('#tdoc-copy-md-menu.open') !== null);
-      await page.evaluate(() => { const m = document.querySelector('#tdoc-copy-md-menu'); if (m) m.classList.remove('open'); });
-      if (!open) throw new Error('copy dropdown did not open');
+      const hasCopy = await page.evaluate(() => !!document.querySelector('#tdoc-secondary-menu.open [data-action="copy"]'));
+      await page.evaluate(() => { const m = document.querySelector('#tdoc-secondary-menu'); if (m) m.classList.remove('open'); });
+      if (!hasCopy) throw new Error('no Copy action in the ⋯ menu');
     });
 
     // Published-only: identity chip present.

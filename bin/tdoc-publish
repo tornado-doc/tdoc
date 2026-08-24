@@ -52,7 +52,51 @@ EOF
 }
 
 SLUG=""
+# ── JSON helpers, Node-backed ────────────────────────────────────────────
+# Publishing to hosted tdoc.dev used to hard-fail without jq. Node 18+ is
+# already a requirement on every path, so the hosted path has no reason to
+# need a second JSON tool that macOS does not ship. Self-hosting still uses
+# jq: those paths are wrangler/vercel territory and their own dependency
+# checks already assume a developer machine.
+#
+# json_get  <dotted.path>   JSON on stdin  → the value, or empty
+# json_str  <string>                       → a JSON-encoded string
+json_get() {
+  node -e '
+    let s = "";
+    process.stdin.on("data", (d) => { s += d; });
+    process.stdin.on("end", () => {
+      let o;
+      try { o = JSON.parse(s); } catch { process.exit(0); }
+      const v = process.argv[1].split(".").reduce((a, k) => (a == null ? a : a[k]), o);
+      if (v !== undefined && v !== null) process.stdout.write(String(v));
+    });
+  ' "$1"
+}
+json_str() { node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$1"; }
+
+# build_payload <slug> <version> <html-file> <meta-file> <widgets-json> [comments-file]
+# Node reads the files itself: an entire HTML document, images and all, never
+# has to survive a shell round trip.
+build_payload() {
+  node -e '
+    const fs = require("fs");
+    const [slug, version, htmlPath, metaPath, widgetsJson, commentsPath] = process.argv.slice(1);
+    const out = {
+      slug,
+      version: Number(version),
+      html: fs.readFileSync(htmlPath, "utf8"),
+      meta: JSON.parse(fs.readFileSync(metaPath, "utf8")),
+    };
+    if (commentsPath) out.comments = JSON.parse(fs.readFileSync(commentsPath, "utf8"));
+    const widgets = JSON.parse(widgetsJson || "{}");
+    if (Object.keys(widgets).length) out.widgets = widgets;
+    process.stdout.write(JSON.stringify(out));
+  ' "$1" "$2" "$3" "$4" "$5" "${6:-}"
+}
+
 PLATFORM_FLAG="${TDOC_PLATFORM:-}"
+SIGNIN_ONLY=0
 VISIBILITY_FLAG=""
 HISTORY_FLAG=""
 COMMENTING_FLAG=""
@@ -69,15 +113,25 @@ while [ $# -gt 0 ]; do
     --commenting=*) COMMENTING_FLAG="${1#--commenting=}"; [ -n "$COMMENTING_FLAG" ] || usage; shift ;;
     --allow-user) [ -n "${2:-}" ] || usage; ALLOW_USERS+=("$2"); shift 2 ;;
     --allow-user=*) ALLOW_USERS+=("${1#--allow-user=}"); shift ;;
+    # Sign in and mint the upload token, then stop — no doc required. Lets the
+    # skill start the device flow BEFORE it spends 30-60s generating HTML, so
+    # the human approves in the browser while the doc is being written instead
+    # of being interrupted at the moment the link was about to appear.
+    # A no-op (exit 0, no prompt) when a config already exists.
+    --signin-only) SIGNIN_ONLY=1; shift ;;
     # Anything else is treated as the slug — including dash-leading junk,
     # which the kebab-case validator below rejects with a precise message.
     *)  [ -z "$SLUG" ] || usage; SLUG="$1"; shift ;;
   esac
 done
-if [ -z "$SLUG" ]; then
+# --signin-only takes no slug: there is no doc yet when it runs.
+if [ "$SIGNIN_ONLY" = "1" ]; then
+  SLUG="${SLUG:-signin}"
+elif [ -z "$SLUG" ]; then
   usage
 fi
 # Validate the slug BEFORE it becomes a filesystem path or a URL query value.
+
 # Same kebab-case rule tdoc-new enforces. Without this a `..` slug escapes
 # TDOC_DIR (read/publish an arbitrary dir) and an unsafe slug injects into the
 # Cloudflare API query string.
@@ -229,11 +283,12 @@ hosted_github_signin() {
     exit 1
   fi
   local user_code device_code uri interval expires
-  user_code="$(printf '%s' "$payload" | jq -r '.user_code // empty')"
-  device_code="$(printf '%s' "$payload" | jq -r '.device_code // empty')"
-  uri="$(printf '%s' "$payload" | jq -r '.verification_uri_complete // .verification_uri // empty')"
-  interval="$(printf '%s' "$payload" | jq -r '.interval // 5')"
-  expires="$(printf '%s' "$payload" | jq -r '.expires_in // 900')"
+  user_code="$(printf '%s' "$payload" | json_get user_code)"
+  device_code="$(printf '%s' "$payload" | json_get device_code)"
+  uri="$(printf '%s' "$payload" | json_get verification_uri_complete)"
+  [ -z "$uri" ] && uri="$(printf '%s' "$payload" | json_get verification_uri)"
+  interval="$(printf '%s' "$payload" | json_get interval)"; interval="${interval:-5}"
+  expires="$(printf '%s' "$payload" | json_get expires_in)"; expires="${expires:-900}"
   if [ -z "$user_code" ] || [ -z "$device_code" ] || [ -z "$uri" ]; then
     echo "[tdoc] GitHub device-flow start was missing user_code/device_code." >&2
     printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
@@ -242,9 +297,62 @@ hosted_github_signin() {
   case "$interval" in ''|*[!0-9]*) interval=5 ;; esac
   [ "$interval" -lt 5 ] && interval=5
   case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
+
+  # No attempt to pre-fill the code in the URL. GitHub returns no
+  # verification_uri_complete, and appending ?user_code= does NOT work in
+  # practice: a signed-out visitor is sent to the account chooser first and the
+  # parameter is gone by the time the code page renders. Verified by hand.
+  # `return_to` carrying the param through the first hop is not evidence it
+  # survives the second — that inference was wrong. #186 reached the same
+  # conclusion; the code has to be typed, so say so plainly.
+
   echo "[tdoc] Sign in with GitHub to publish on $base" >&2
-  echo "[tdoc] Open: $uri" >&2
-  echo "[tdoc] Code: $user_code" >&2
+  # Open it for them. $uri is verification_uri_complete when GitHub returns it,
+  # which pre-fills the code — the human then only clicks Authorize. Printing
+  # stays above as the fallback; this is best-effort and silent on failure.
+  #
+  # Deliberately NOT gated on [ -t 2 ]. An agent runs this with stderr piped,
+  # which is exactly the case the auto-open exists for; a tty check would mean
+  # it never fires where it matters. Gate on "is there a human desktop here"
+  # instead: not CI, not an SSH session, and on Linux an actual display.
+  # TDOC_NO_BROWSER=1 forces it off.
+  should_open_browser() {
+    [ -n "${TDOC_NO_BROWSER:-}" ] && return 1
+    [ -n "${CI:-}" ] && return 1
+    [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ] && return 1
+    case "$(uname -s)" in
+      Darwin) command -v open >/dev/null 2>&1 ;;
+      *) [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1 ;;
+    esac
+  }
+  # Only ever hand a github.com URL to the opener.
+  case "$uri" in
+    https://github.com/*)
+      if should_open_browser; then
+        if command -v open >/dev/null 2>&1; then open "$uri" >/dev/null 2>&1 || true
+        elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$uri" >/dev/null 2>&1 || true
+        fi
+        opened=1
+      fi
+      ;;
+  esac
+  # Never promise the field is pre-filled. GitHub returns no
+  # verification_uri_complete, and #186 removed exactly that claim so nobody
+  # arrives expecting a filled box that is not there. We pass ?user_code= as a
+  # best effort; the instruction stays "enter this code" either way.
+  if [ "${opened:-0}" = "1" ]; then
+    echo "[tdoc] A GitHub page just opened in your browser." >&2
+    echo "[tdoc] Enter this code there (it is only shown here):" >&2
+  else
+    echo "[tdoc] Open this page in your browser to finish signing in:" >&2
+    echo "[tdoc]   $uri" >&2
+    echo "[tdoc] and enter this code:" >&2
+  fi
+  echo "" >&2
+  echo "        $user_code" >&2
+  echo "" >&2
+  [ "${opened:-0}" = "1" ] && echo "[tdoc] (If nothing opened: $uri )" >&2
+  echo "[tdoc] Then click Authorize. I'll carry on by myself — nothing to do here." >&2
   echo "[tdoc] Waiting for GitHub approval…" >&2
   local waited=0 err
   while [ "$waited" -lt "$expires" ]; do
@@ -255,11 +363,12 @@ hosted_github_signin() {
       -d "{\"device_code\":\"$(printf '%s' "$device_code" | sed 's/"/\\"/g')\"}")" || continue
     http="${resp##*$'\n'}"
     payload="${resp%$'\n'*}"
-    if printf '%s' "$payload" | jq -e '.ok == true' >/dev/null 2>&1; then
-      echo "[tdoc] Signed in as $(printf '%s' "$payload" | jq -r '.identity.login // "github user"')" >&2
+    if [ "$(printf '%s' "$payload" | json_get ok)" = "true" ]; then
+      _who="$(printf '%s' "$payload" | json_get identity.login)"
+      echo "[tdoc] Signed in as ${_who:-github user}" >&2
       return 0
     fi
-    err="$(printf '%s' "$payload" | jq -r '.error // empty')"
+    err="$(printf '%s' "$payload" | json_get error)"
     case "$err" in
       authorization_pending|'') ;;
       slow_down) interval=$((interval + 5)) ;;
@@ -311,9 +420,9 @@ first_time_setup_hosted() {
     printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
     exit 1
   fi
-  token="$(printf '%s' "$payload" | jq -r '.token // empty')"
-  account_id="$(printf '%s' "$payload" | jq -r '.account_id // empty')"
-  github_login="$(printf '%s' "$payload" | jq -r '.github_login // empty')"
+  token="$(printf '%s' "$payload" | json_get token)"
+  account_id="$(printf '%s' "$payload" | json_get account_id)"
+  github_login="$(printf '%s' "$payload" | json_get github_login)"
   if [ -z "$token" ] || [ -z "$account_id" ]; then
     echo "[tdoc] hosted token response was missing token/account_id." >&2
     printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
@@ -323,25 +432,57 @@ first_time_setup_hosted() {
   public_host="${public_host#https://}"
   (
     umask 077
-    jq -n \
-      --arg tok "$token" \
-      --arg base "$base" \
-      --arg host "$public_host" \
-      --arg acct "$account_id" \
-      --arg gh "$github_login" \
-      '{platform:"hosted", upload_token:$tok, base:$base, public_host:$host, account_id:$acct, github_login:$gh, created: now | todate}' \
-      > "$CONFIG_FILE"
+    node -e '
+      const [tok, base, host, acct, gh] = process.argv.slice(1);
+      process.stdout.write(JSON.stringify({
+        platform: "hosted", upload_token: tok, base, public_host: host,
+        account_id: acct, github_login: gh,
+        created: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      }));
+    ' "$token" "$base" "$public_host" "$account_id" "$github_login" > "$CONFIG_FILE"
   )
   chmod 600 "$CONFIG_FILE"
   echo "[tdoc] hosted publish configured: $base"
 }
-if ! command -v jq >/dev/null 2>&1; then
+# jq is NOT required to publish to hosted tdoc.dev. Node 18+ is already a
+# requirement everywhere and macOS ships no jq, so demanding it turned a
+# zero-setup path into an install step. The self-host branches still use it
+# and check for it where they need it.
+require_jq_for_selfhost() {
+  command -v jq >/dev/null 2>&1 && return 0
   fail_with_agent_prompt "jq is not installed" \
-    "Install jq so tdoc can build its publish payload. On macOS: 'brew install jq'. On Debian/Ubuntu: 'sudo apt-get install -y jq'. Then run '/tdoc publish $SLUG' again."
-fi
+    "Self-hosting needs jq to build its Cloudflare/Vercel payloads. On macOS: 'brew install jq'. On Debian/Ubuntu: 'sudo apt-get install -y jq'. Publishing to hosted tdoc.dev does not need it — '/tdoc publish $SLUG' without --platform works as-is."
+}
 if ! command -v node >/dev/null 2>&1; then
-  fail_with_agent_prompt "node 18+ is not installed" \
+  # Name the PATH that was searched. When this fires from the local server the
+  # user does have node — it is simply not on the PATH the child inherited —
+  # and "install node" sends them to fix the wrong thing. See #259.
+  fail_with_agent_prompt "node 18+ not found on PATH ($PATH)" \
     "Install Node.js 18 or newer (https://nodejs.org). On macOS: 'brew install node'. Verify with 'node --version'. Then run '/tdoc publish $SLUG' again."
+fi
+
+# --signin-only: make sure a publish credential exists, then stop. Runs before
+# the doc-exists check on purpose — there is no doc yet when this is used.
+#
+# Only first_time_setup_hosted is defined this early, and that is the only one
+# that makes sense here: self-host setup is an interactive wrangler/vercel
+# session, not a credential that can be obtained ahead of time. A non-hosted
+# target is reported and skipped rather than failed, so a caller that pre-signs
+# in unconditionally is never blocked by it.
+if [ "$SIGNIN_ONLY" = "1" ]; then
+  if [ -f "$CONFIG_FILE" ]; then
+    echo "[tdoc] already signed in — nothing to do." >&2
+    exit 0
+  fi
+  case "${PLATFORM_FLAG:-hosted}" in
+    hosted)
+      first_time_setup_hosted
+      ;;
+    *)
+      echo "[tdoc] --signin-only applies to hosted publishing; '${PLATFORM_FLAG}' sets up at publish time." >&2
+      ;;
+  esac
+  exit 0
 fi
 
 if [ ! -d "$DOC_DIR" ]; then
@@ -398,6 +539,7 @@ vercel_bundle_sha() {
 }
 
 first_time_setup() {
+  require_jq_for_selfhost
   echo "[tdoc] first-time publish setup (cloudflare)"
   require_wrangler
 
@@ -585,6 +727,7 @@ vercel_deploy_prod() {
 }
 
 first_time_setup_vercel() {
+  require_jq_for_selfhost
   echo "[tdoc] first-time publish setup (vercel)"
   require_vercel
 
@@ -693,7 +836,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 else
   # Existing config is the default. An explicit --platform that differs
   # rewrites published.json via full re-setup (not a half-migrate).
-  PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
+  PLATFORM="$(json_get platform < "$CONFIG_FILE")"; PLATFORM="${PLATFORM:-cloudflare}"
   if [ -n "$PLATFORM_FLAG" ] && [ "$PLATFORM_FLAG" != "$PLATFORM" ]; then
     echo "[tdoc] switching publish platform from '$PLATFORM' to '$PLATFORM_FLAG' (rewriting $CONFIG_FILE)."
     CONFIG_BACKUP="${CONFIG_FILE}.bak.switch"
@@ -714,13 +857,13 @@ else
   fi
 fi
 
-PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
+PLATFORM="$(json_get platform < "$CONFIG_FILE")"; PLATFORM="${PLATFORM:-cloudflare}"
 
-TOKEN="$(jq -r .upload_token "$CONFIG_FILE")"
+TOKEN="$(json_get upload_token < "$CONFIG_FILE")"
 
 if [ "$PLATFORM" = "hosted" ]; then
-  BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
-  PUBLIC_HOST="$(jq -r '.public_host // empty' "$CONFIG_FILE")"
+  BASE="$(json_get base < "$CONFIG_FILE")"
+  PUBLIC_HOST="$(json_get public_host < "$CONFIG_FILE")"
   for _f in TOKEN:upload_token BASE:base PUBLIC_HOST:public_host; do
     _var="${_f%%:*}"; _key="${_f##*:}"; _val="$(eval "printf '%s' \"\$$_var\"")"
     if [ -z "$_val" ] || [ "$_val" = "null" ]; then
@@ -887,10 +1030,14 @@ if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG
         )
     ' "$META_FILE" > "$tmp_meta"
   mv "$tmp_meta" "$META_FILE"
-  echo "[tdoc] access → $(jq -c .access "$META_FILE")"
+  echo "[tdoc] access → $(node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(JSON.stringify(m.access===undefined?null:m.access))' "$META_FILE")"
 fi
 
-VERSION="$(jq -r '.versions | sort_by(.n) | last | .n' "$META_FILE")"
+VERSION="$(node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const vs = (m.versions || []).map((x) => Number(x.n)).filter(Number.isFinite);
+  process.stdout.write(vs.length ? String(Math.max(...vs)) : "");
+' "$META_FILE")"
 HTML_FILE="$DOC_DIR/v${VERSION}/index.html"
 if [ ! -f "$HTML_FILE" ]; then
   echo "no html at $HTML_FILE" >&2
@@ -915,26 +1062,18 @@ upload_version() {
     for wf in "$wdir"/*.html; do
       [ -f "$wf" ] || continue
       wname="$(basename "$wf" .html)"
-      widgets_json="$(jq -n --argjson acc "$widgets_json" --arg name "$wname" --rawfile html "$wf" '$acc + {($name): $html}')" || return 1
+      widgets_json="$(node -e '
+        const fs = require("fs");
+        const acc = JSON.parse(process.argv[1]);
+        acc[process.argv[2]] = fs.readFileSync(process.argv[3], "utf8");
+        process.stdout.write(JSON.stringify(acc));
+      ' "$widgets_json" "$wname" "$wf")" || return 1
     done
   fi
-  if [ -f "$comments_file" ] && jq -e 'type == "array" and length > 0' "$comments_file" >/dev/null 2>&1; then
-    payload="$(jq -n \
-      --arg slug "$SLUG" \
-      --argjson version "$v" \
-      --rawfile html "$html_path" \
-      --slurpfile meta "$META_FILE" \
-      --slurpfile comments "$comments_file" \
-      --argjson widgets "$widgets_json" \
-      '{slug:$slug, version:$version, html:$html, meta: $meta[0], comments: $comments[0]} + (if $widgets == {} then {} else {widgets:$widgets} end)')"
+  if [ -f "$comments_file" ] && node -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(Array.isArray(a)&&a.length?0:1)' "$comments_file" >/dev/null 2>&1; then
+    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json" "$comments_file")" || return 1
   else
-    payload="$(jq -n \
-      --arg slug "$SLUG" \
-      --argjson version "$v" \
-      --rawfile html "$html_path" \
-      --slurpfile meta "$META_FILE" \
-      --argjson widgets "$widgets_json" \
-      '{slug:$slug, version:$version, html:$html, meta: $meta[0]} + (if $widgets == {} then {} else {widgets:$widgets} end)')"
+    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json")" || return 1
   fi
   # Pass the payload via a temp file, not an argument — docs with embedded
   # images exceed ARG_MAX as a curl argument (curl: Argument list too long).
@@ -948,14 +1087,15 @@ upload_version() {
     --data-binary @"$payload_file")" || { rm -f "$payload_file"; echo "[tdoc] v$v upload: network error/timeout" >&2; return 1; }
   rm -f "$payload_file"
   local ok
-  ok="$(echo "$resp" | jq -r '.ok // false')"
+  ok="$(printf '%s' "$resp" | json_get ok)"; ok="${ok:-false}"
+  _sz="$(printf '%s' "$resp" | json_get size)"
   if [ "$ok" = "true" ]; then
     local merged
-    merged="$(echo "$resp" | jq -r '.mergedComments // 0')"
+    merged="$(printf '%s' "$resp" | json_get mergedComments)"; merged="${merged:-0}"
     if [ "$merged" != "0" ] && [ "$merged" != "null" ]; then
-      echo "[tdoc] v$v uploaded ($(echo "$resp" | jq -r '.size // "?"') bytes, +$merged local comment(s) merged)"
+      echo "[tdoc] v$v uploaded (${_sz:-?} bytes, +$merged local comment(s) merged)"
     else
-      echo "[tdoc] v$v uploaded ($(echo "$resp" | jq -r '.size // "?"') bytes)"
+      echo "[tdoc] v$v uploaded (${_sz:-?} bytes)"
     fi
   else
     echo "[tdoc] v$v upload FAILED: $resp" >&2
@@ -967,7 +1107,12 @@ upload_version() {
 # picker in the doc UI needs older versions to be reachable too — we don't
 # rely on past publishes having uploaded them. Latest goes last so the
 # meta KV ends up pointing at the actual newest version.
-LOCAL_VERSIONS="$(jq -r '.versions | sort_by(.n) | .[].n' "$META_FILE")"
+LOCAL_VERSIONS="$(node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const vs = (m.versions || []).map((x) => Number(x.n)).filter(Number.isFinite);
+  vs.sort((a, b) => a - b);
+  process.stdout.write(vs.join("\n"));
+' "$META_FILE")"
 echo "[tdoc] uploading $SLUG versions: $(echo "$LOCAL_VERSIONS" | tr '\n' ' ')"
 # Older versions are best-effort: a transient failure on an OLD version must NOT
 # abort the publish before the LATEST version + meta land (otherwise meta

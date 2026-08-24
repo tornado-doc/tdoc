@@ -10,6 +10,20 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
+
+// The server knows which Node is running it; a spawned child may not. When the
+// server was started by absolute path — a launchd job, an editor, a desktop
+// launcher, nohup from a shell that only loads nvm interactively — PATH can be
+// the bare system default, and a version-managed node is not on it. The child
+// then reports "node 18+ is not installed" on a machine that has Node 22. Put
+// the running interpreter's directory in front of the child's PATH. See #259.
+function childEnv() {
+  const nodeDir = path.dirname(process.execPath);
+  const current = process.env.PATH || '';
+  const already = current.split(path.delimiter).includes(nodeDir);
+  return already ? process.env : { ...process.env, PATH: `${nodeDir}${path.delimiter}${current}` };
+}
+
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
@@ -831,7 +845,7 @@ const server = http.createServer(async (req, res) => {
     // Same spawn hardening as /api/publish: error listener, hard timeout,
     // bounded output. Deleting is quick; 60s covers a slow unpublish curl.
     const args = body.published === false ? [slug, '--local-only'] : [slug];
-    const proc = spawn(bin, args, { env: process.env });
+    const proc = spawn(bin, args, { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 64 * 1024;
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
@@ -869,7 +883,7 @@ const server = http.createServer(async (req, res) => {
     // a bounded output buffer so runaway child output can't OOM us. wrangler
     // legitimately needs the inherited env (CLOUDFLARE_* creds), so we keep it
     // but this endpoint is now origin/CSRF-gated above.
-    const proc = spawn(bin, [slug], { env: process.env });
+    const proc = spawn(bin, [slug], { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 256 * 1024; // 256 KiB of captured output is plenty
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);

@@ -30,7 +30,12 @@ console.log('cli (Batch D resilience)');
 t('every curl call carries --max-time (no unbounded hang)', () => {
   for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply']) {
     const src = readBin(f);
-    const curls = src.split('\n').filter(l => /\bcurl\b/.test(l) && !l.trim().startsWith('#'));
+    // Actual invocations only: `curl` followed by a flag, a quote or a $var.
+    // A bare substring match also hit `curl_ok`, `command -v curl`, and the
+    // literal "brew install curl" inside a missing_steps entry — none of which
+    // issue a request, so none of which can hang.
+    const curls = src.split('\n').filter(l => /\bcurl\s+(-|["'$])/.test(l)
+      && !l.trim().startsWith('#'));
     for (const line of curls) {
       assert(/--max-time/.test(line), `${f}: curl without --max-time:\n      ${line.trim()}`);
     }
@@ -65,9 +70,9 @@ t('tdoc-publish defaults to hosted and treats Cloudflare/Vercel as self-host fla
   assert(/sign_in_required/.test(src), 'hosted setup must handle a missing GitHub session');
   assert(!/TDOC_HOSTED_UPLOAD_TOKEN/.test(src), 'hosted setup must not require an out-of-band upload token');
   assert(/TDOC_HOSTED_BASE:-https:\/\/tdoc\.dev/.test(src), 'hosted setup does not default to tdoc.dev');
-  assert(/platform:"hosted"/.test(src), 'hosted setup does not persist hosted platform');
-  assert(/github_login:\$gh/.test(src), 'hosted setup does not persist github_login');
-  assert(/account_id:\$acct/.test(src), 'hosted setup does not persist account_id');
+  assert(/platform: "hosted"/.test(src), 'hosted setup does not persist hosted platform');
+  assert(/github_login: gh/.test(src), 'hosted setup does not persist github_login');
+  assert(/account_id: acct/.test(src), 'hosted setup does not persist account_id');
   assert(/if \[ "\$PLATFORM" = "hosted" \]/.test(src), 'hosted platform branch missing');
   assert(/UPLOAD_BASE="\$BASE"/.test(src), 'hosted branch should upload to configured base');
   assert(/PUBLIC_BASE="\$BASE"/.test(src), 'hosted branch should emit configured hosted base links');
@@ -563,6 +568,371 @@ t('tdoc-agent-reply still exits 0 when the reply is accepted', () => {
     stub.kill();
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+
+// ---- tdoc-agent-reply must resolve the hosted base from .base (#226) ----
+// Before the fix, `platform: "hosted"` fell into the cloudflare branch and read
+// absent .subdomain/.worker, producing https://null.null.workers.dev -> 404.
+
+t('tdoc-agent-reply posts to .base on a hosted config', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-hosted-'));
+  const port = 8700 + Math.floor(Math.random() * 300);
+  fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+  // A real hosted config: .base and .upload_token, and deliberately NO
+  // .subdomain / .worker — that absence is what the bug tripped over.
+  fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+    platform: 'hosted',
+    base: `http://127.0.0.1:${port}`,
+    public_host: '127.0.0.1',
+    upload_token: 'tok_test',
+  }));
+  // Record the path the reply actually arrives on, so a request that never
+  // leaves for the right host cannot pass.
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({id:'c_hosted',path:q.url,replies:[],reactions:{}}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
+      env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `hosted reply exited ${r.status}; stderr=${r.stderr}`);
+    assert(/"id":"c_hosted"/.test(r.stdout),
+      `reply did not reach the hosted base: stdout=${r.stdout} stderr=${r.stderr}`);
+    assert(/"path":"\/api\/agent\/reply"/.test(r.stdout),
+      `reply hit the wrong path: ${r.stdout}`);
+    assert(!/workers\.dev/.test(r.stdout + r.stderr),
+      `hosted config still derived a workers.dev host: ${r.stderr}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-agent-reply base resolution matches tdoc-pull across platforms', () => {
+  const src = readBin('tdoc-agent-reply');
+  // hosted and vercel both read .base; cloudflare/legacy still derive workers.dev.
+  assert(/\[ "\$PLATFORM" = "hosted" \] \|\| \[ "\$PLATFORM" = "vercel" \]/.test(src),
+    'hosted is not on the .base side of the platform branch');
+  assert(/BASE="https:\/\/\$\{WORKER\}\.\$\{SUBDOMAIN\}\.workers\.dev"/.test(src),
+    'cloudflare no longer derives the workers.dev base');
+  assert(/\.platform \/\/ "cloudflare"/.test(src),
+    'legacy configs without .platform no longer default to cloudflare');
+  // A missing field must not become the literal string "null" in a hostname.
+  assert(/'\.subdomain \/\/ empty'/.test(src) && /'\.worker \/\/ empty'/.test(src),
+    'subdomain/worker are read without an // empty guard, so jq can yield "null"');
+});
+
+
+// ---- publish-first flow (S4): sign-in ahead of generation, no stray localhost ----
+
+t('tdoc-publish --signin-only needs no slug and no-ops when already signed in', () => {
+  const bin = path.join(BIN, 'tdoc-publish');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-signin-'));
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: 'https://tdoc.dev', upload_token: 'tok',
+    }));
+    const r = spawnSync(bin, ['--signin-only'], {
+      env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `expected exit 0, got ${r.status}: ${r.stderr}`);
+    assert(/already signed in/.test(r.stderr), `expected a no-op message, got: ${r.stderr}`);
+    // It must not have printed usage — --signin-only takes no slug.
+    assert(!/usage:/i.test(r.stdout + r.stderr), 'usage printed for --signin-only');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('a normal publish still requires a slug', () => {
+  const r = spawnSync(path.join(BIN, 'tdoc-publish'), [], { encoding: 'utf8', timeout: 20000 });
+  assert(r.status !== 0, 'publish with no slug must not succeed');
+});
+
+t('the GitHub sign-in opens the browser and is NOT gated on a tty', () => {
+  const src = readBin('tdoc-publish');
+  assert(/should_open_browser\(\)/.test(src), 'no browser-open helper');
+  // An agent runs this with stderr piped. A tty check would mean the auto-open
+  // never fires in the exact situation it exists for.
+  const helper = src.slice(src.indexOf('should_open_browser()'), src.indexOf('Waiting for GitHub approval'));
+  assert(!/-t\s+2|-t\s+1/.test(helper), 'browser-open must not be gated on a tty');
+  for (const guard of ['TDOC_NO_BROWSER', 'CI', 'SSH_CONNECTION']) {
+    assert(helper.includes(guard), `browser-open should respect ${guard}`);
+  }
+  // Only ever hand a github.com URL to the opener.
+  assert(/case "\$uri" in\s*\n\s*https:\/\/github\.com\/\*\)/.test(src),
+    'the opener must be restricted to github.com URLs');
+});
+
+t('bin/tdoc-new still defaults to NOT publishing', () => {
+  // /document-release, /retro, /investigate, /cso and /qa-only all call this.
+  // If the publish-by-default flip leaked here, every security audit and retro
+  // would auto-upload to tdoc.dev.
+  const src = readBin('tdoc-new');
+  assert(/^PUBLISH=0$/m.test(src), 'tdoc-new must default PUBLISH=0');
+  assert(/--publish\)\s*PUBLISH=1/.test(src), '--publish must remain the opt-in');
+});
+
+t('the handoff line does not claim a plain publish is unlisted', () => {
+  // A publish with no flags stores no access block and takes the legacy
+  // policy (public + full history). Telling the user "unlisted" would
+  // understate what a recipient can see. Keeping the default as-is is a
+  // product decision (#245/#246 closed); the copy has to match it.
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const step = skill.slice(skill.indexOf('*Hosted (the default).*'), skill.indexOf('*Self-host.*'));
+  assert(!/live and \*\*unlisted\*\*/.test(step), 'handoff still calls a plain publish unlisted');
+  // The blockquote wraps, so match across the "> " continuation.
+  assert(/page back[\s>]+through earlier versions/.test(step),
+    'handoff should say earlier versions are reachable');
+  assert(/--history owner/.test(step), 'handoff should point at the way to change it');
+});
+
+t('SKILL.md states the localhost rule and no longer promises localhost by default', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  assert(/never hand over a `localhost` URL unless the user asked/i.test(skill),
+    'the localhost rule is not stated');
+  // The delivery step must not open localhost unconditionally any more.
+  assert(!/^7\. Open `http:\/\/localhost/m.test(skill),
+    '/tdoc new still opens localhost as its delivery step');
+  // Front matter must not advertise the abandoned default.
+  const front = skill.slice(0, skill.indexOf('---', 4));
+  assert(!/serve it at localhost/.test(front), 'description still says "serve it at localhost"');
+  assert(!/own Cloudflare\s*\n?\s*Worker/.test(front), 'description still sells BYOK Cloudflare as the default');
+  assert(/tdoc\.dev/.test(front), 'description should name the hosted destination');
+});
+
+t('SKILL.md and skills/tdoc/SKILL.md stay identical', () => {
+  const root = path.join(__dirname, '..');
+  const a = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
+  const b = fs.readFileSync(path.join(root, 'skills', 'tdoc', 'SKILL.md'), 'utf8');
+  assert(a === b, 'SKILL.md and its plugin-mode copy have drifted');
+});
+
+
+// ---- tdoc-update --auto: keep current without ever destroying work ----
+
+t('tdoc-update --auto never stashes and never redeploys', () => {
+  const src = readBin('tdoc-update');
+  assert(/--auto\)\s*AUTO=1/.test(src), '--auto flag missing');
+  // The stash path is the one that can lose someone's edits.
+  const stashIdx = src.indexOf('git stash push');
+  const guardIdx = src.lastIndexOf('AUTO" = "1"', stashIdx);
+  assert(guardIdx !== -1 && guardIdx < stashIdx,
+    '--auto must bail out before the stash push');
+  // Redeploy pushes to the user's own infrastructure.
+  const redeployIdx = src.indexOf('bin/tdoc-publish');
+  const exitIdx = src.lastIndexOf('AUTO" = "1"', redeployIdx);
+  assert(exitIdx !== -1 && exitIdx < redeployIdx,
+    '--auto must exit before the redeploy offer');
+});
+
+t('tdoc-update --auto declines on a diverged checkout', () => {
+  const src = readBin('tdoc-update');
+  assert(/LOCAL" != "\$BASE" \] && \[ "\$AUTO" = "1"/.test(src),
+    '--auto must skip rather than fail on a diverged checkout');
+});
+
+t('SKILL.md probes for --auto before calling it', () => {
+  // tdoc-update's arg loop has no catch-all: a version predating --auto would
+  // ignore the flag and run the FULL interactive update, stashing local edits
+  // on every skill run. The probe is what stops that.
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const call = skill.indexOf('bin/tdoc-update" --auto');
+  assert(call !== -1, 'Step 0 should keep the skill current');
+  const probe = skill.lastIndexOf("grep -q -- '--auto)'", call);
+  assert(probe !== -1 && probe < call, 'the --auto call must be capability-probed');
+  assert(skill.lastIndexOf('TDOC_SKIP_UPDATE_CHECK', call) !== -1,
+    'there must be an off switch');
+});
+
+t('tdoc-update arg loop still has no catch-all (why the probe exists)', () => {
+  // If this ever gains a `*)` that errors on unknown flags, the probe in
+  // SKILL.md can be simplified — but until then it is load-bearing.
+  const src = readBin('tdoc-update');
+  const loop = src.slice(src.indexOf('for arg in "$@"'), src.indexOf('done', src.indexOf('for arg in "$@"')));
+  assert(!/\*\)/.test(loop), 'arg loop gained a catch-all — revisit the SKILL.md probe');
+});
+
+
+// ---- hosted publish must not need jq (#256) ----
+
+t('the hosted path uses no jq at all', () => {
+  const src = readBin('tdoc-publish');
+  // Everything hosted-reachable: the device flow, the token mint, the config
+  // write and read, the upload payload, and the response parse.
+  const hostedFns = [
+    src.slice(src.indexOf('hosted_github_signin()'), src.indexOf('first_time_setup_hosted()')),
+    src.slice(src.indexOf('first_time_setup_hosted()'), src.indexOf('require_jq_for_selfhost')),
+    src.slice(src.indexOf('build_payload()'), src.indexOf('PLATFORM_FLAG=')),
+  ].join('\n');
+  const calls = hostedFns.split('\n').filter((l) => /\bjq\s+(-|["'$])/.test(l) && !l.trim().startsWith('#'));
+  assert(calls.length === 0, `hosted path still shells out to jq:\n      ${calls.join('\n      ')}`);
+});
+
+t('jq is required for self-hosting, and only there', () => {
+  const src = readBin('tdoc-publish');
+  // No top-level hard fail any more — that turned a zero-setup path into an
+  // install step on a machine that ships no jq.
+  assert(!/^if ! command -v jq >\/dev\/null 2>&1; then$/m.test(src),
+    'the global jq gate is back');
+  assert(/require_jq_for_selfhost\(\)/.test(src), 'the self-host jq gate is missing');
+  for (const fn of ['first_time_setup()', 'first_time_setup_vercel()']) {
+    const i = src.indexOf(fn);
+    assert(i !== -1, `${fn} not found`);
+    const head = src.slice(i, i + 200);
+    assert(/require_jq_for_selfhost/.test(head), `${fn} does not check for jq`);
+  }
+  // And the message must not send a hosted user to install anything.
+  const msg = src.slice(src.indexOf('Self-hosting needs jq'), src.indexOf('Self-hosting needs jq') + 320);
+  assert(/does not need it/.test(msg), 'the jq message should say hosted publishing is unaffected');
+});
+
+t('build_payload embeds the document without a shell round trip', () => {
+  const src = readBin('tdoc-publish');
+  const fn = src.slice(src.indexOf('build_payload()'), src.indexOf('PLATFORM_FLAG='));
+  assert(/readFileSync\(htmlPath/.test(fn), 'the HTML must be read by node, not passed as an argument');
+  assert(/JSON\.stringify\(out\)/.test(fn), 'the payload must be JSON-encoded by node');
+  // Widgets and comments stay optional, the way the jq version had them.
+  assert(/if \(commentsPath\)/.test(fn), 'comments must stay optional');
+  assert(/Object\.keys\(widgets\)\.length/.test(fn), 'widgets must stay optional');
+});
+
+// ---- consent is asked after the work, not before it (#236 S9) ----
+
+t('a first run defers the telemetry question and records nothing', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const step0 = skill.slice(skill.indexOf('## Step 0'), skill.indexOf('## Final Step'));
+
+  // First run resolves to "deferred", not "on".
+  // Checked as a line sequence rather than one regex. The regex version had
+  // two alternatives matching the same input inside a star — exponential
+  // backtracking, which CodeQL flagged as js/redos.
+  const lines = step0.split('\n').map((l) => l.trim());
+  const branch = lines.findIndex((l) => l.includes('TEL_PROMPTED" = "no" ]; then'));
+  assert(branch !== -1, 'no first-run branch in the mode resolution');
+  const body = lines.slice(branch + 1).filter((l) => l && !l.startsWith('#'));
+  assert(body[0] === 'TEL_EFFECTIVE="deferred"',
+    `a first run should resolve TEL_EFFECTIVE to deferred, got: ${body[0]}`);
+
+  // And "deferred" must not slip through a `!= off` gate and write a sentinel.
+  assert(!/TEL_EFFECTIVE" != "off" \]; then\s*\n\s*mkdir -p "\$TEL_HOME\/sentinels"/.test(step0),
+    'the sentinel gate must require "on", not merely "not off" — deferred would pass');
+  assert(/TEL_EFFECTIVE" = "on" \]; then\s*\n\s*mkdir -p "\$TEL_HOME\/sentinels"/.test(step0),
+    'the sentinel should only be written when telemetry is on');
+
+  // Step 0 must not contain the question any more.
+  assert(!/ask the user ONCE with this text/.test(step0),
+    'Step 0 still asks the consent question before doing the work');
+});
+
+t('the Final Step owns the consent question and logs nothing for that run', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const final = skill.slice(skill.indexOf('## Final Step'));
+  assert(/is `deferred`/.test(final), 'the Final Step should handle the deferred first run');
+  assert(/Hand over the finished work FIRST/.test(final),
+    'the Final Step should deliver before asking');
+  assert(/\.telemetry-prompted/.test(final) && /\.telemetry-mode/.test(final),
+    'the Final Step should persist the answer');
+  assert(/log nothing for this run/.test(final),
+    'the deferred run must not be logged — that would be recording before consent');
+});
+
+// ---- the local server must hand its own node down to spawned CLIs (#259) ----
+
+t('server spawns CLIs with the running interpreter on PATH', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf8');
+  assert(/function childEnv\(\)/.test(src), 'childEnv helper missing');
+  assert(/path\.dirname\(process\.execPath\)/.test(src),
+    'childEnv does not derive the node directory from process.execPath');
+  const spawns = src.split('\n').filter(l => /\bspawn\(bin\b/.test(l));
+  assert(spawns.length >= 2, `expected at least 2 spawn sites, found ${spawns.length}`);
+  for (const s of spawns) {
+    assert(/env:\s*childEnv\(\)/.test(s),
+      `spawn site does not pass childEnv(): ${s.trim()}`);
+  }
+});
+
+t('a stripped PATH hides node from a child, and childEnv restores it', () => {
+  // The failure this guards: the server is started by absolute path (launchd,
+  // an editor, nohup from a non-interactive shell) so nvm/fnm/asdf shims are
+  // not on PATH. The child then reports "node is not installed" on a machine
+  // that has node. Prove both halves rather than trusting the code read.
+  const bare = '/usr/bin:/bin:/usr/sbin:/sbin';
+  const nodeDir = path.dirname(process.execPath);
+  const look = (p) => spawnSync('sh', ['-c', 'command -v node || true'],
+    { env: { PATH: p }, encoding: 'utf8', timeout: 10000 }).stdout.trim();
+
+  if (look(bare)) {
+    // node lives in /usr/bin on this machine; the bug cannot occur here.
+    return;
+  }
+  assert(look(bare) === '', 'expected node to be invisible on a bare PATH');
+  const restored = look(`${nodeDir}${path.delimiter}${bare}`);
+  assert(restored !== '', 'prepending the interpreter directory did not expose node');
+  assert(restored.startsWith(nodeDir),
+    `child resolved a different node: ${restored} (wanted one under ${nodeDir})`);
+});
+
+// ---- the onboarding routing offer must stay an offer (#263) ----
+
+t('onboarding offers the CLAUDE.md routing line and never writes it silently', () => {
+  const ob = fs.readFileSync(path.join(__dirname, '..', 'ONBOARDING.md'), 'utf8');
+  const step = ob.slice(ob.indexOf('## Step 6 — Offer the routing line'),
+                        ob.indexOf('## Step 7'));
+  assert(step.length > 200, 'routing step missing or truncated');
+
+  // Asked at most once, ever.
+  assert(/\.routing-prompted/.test(step), 'no .routing-prompted guard — would re-ask every install');
+  // A no is remembered.
+  assert(/\.routing-declined/.test(step), 'no .routing-declined marker — a decline would not stick');
+  // A reinstall cannot append a second copy.
+  assert(/<!-- tdoc:routing -->/.test(step), 'no idempotency marker for the appended line');
+  // It is an offer: the user is asked, and the path is named in the question.
+  assert(/AskUserQuestion/.test(step), 'step does not ask — writing CLAUDE.md unasked is the failure this guards');
+  assert(/`<path>`/.test(step), 'the question does not name the file being edited');
+  // And it must not quietly commit on the user's behalf.
+  assert(/Do not commit/i.test(step), 'step does not forbid committing the edit');
+
+  // The markers are registered where a future reader looks for them.
+  const idem = ob.slice(ob.indexOf('## Idempotency'));
+  for (const m of ['.routing-prompted', '.routing-declined', 'tdoc:routing']) {
+    assert(idem.includes(m), `${m} not listed under Idempotency`);
+  }
+});
+
+// ---- the skill's self-update must be able to run at all ----
+
+t('SKILL.md resolves its own directory at runtime, not at install time', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  // The failure this guards: TDOC_DIR was a __TDOC_DIR__ placeholder meant to be
+  // substituted by an install script that does not exist, so every install
+  // carried the literal string, `[ -x "$TDOC_DIR/bin/tdoc-update" ]` was false,
+  // and the automatic update silently never ran on any machine.
+  assert(!/__TDOC_DIR__/.test(skill),
+    'SKILL.md still contains an install-time placeholder — it will never be substituted');
+  assert(/TDOC_SKILL_ROOT=/.test(skill), 'no runtime resolution of the skill directory');
+  assert(/tdoc-update" --auto/.test(skill) || /tdoc-update" --auto/.test(skill.replace(/\n\s*/g, ' ')),
+    'the automatic update call is gone');
+
+  // And the guard must actually pass against a real checkout.
+  const root = path.join(__dirname, '..');
+  const probe = spawnSync('sh', ['-c',
+    `TDOC_SKILL_ROOT="${root}"; [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ] && ` +
+    `grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" && echo ok`],
+    { encoding: 'utf8', timeout: 10000 });
+  assert(probe.stdout.trim() === 'ok',
+    'the resolved directory does not satisfy the update guard');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

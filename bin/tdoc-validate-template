@@ -140,6 +140,118 @@ def compact_css_value(value: str) -> str:
     return re.sub(r"\s+", "", value.strip().lower())
 
 
+STYLE_ACCENTS = {
+    "default": ("#f7d7d1", "#e0a99e", "#b3503c", "#dde7f9", "#a9c0ee", "#26407a"),
+}
+
+
+def _css_rules(blocks):
+    """[css text] -> {selector: {prop: value}}, comments stripped."""
+    out = {}
+    for css in blocks:
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        for m in re.finditer(r"([^{}]+)\{([^}]*)\}", css):
+            sel = " ".join(m.group(1).split())
+            if not sel:
+                continue
+            props = out.setdefault(sel, {})
+            for decl in m.group(2).split(";"):
+                if ":" in decl:
+                    k, v = decl.split(":", 1)
+                    props[k.strip()] = " ".join(v.split())
+    return out
+
+
+def _norm(v):
+    return (v or "").replace(" ", "").replace('"', "'").lower()
+
+
+def check_style_contract(styles, style):
+    """Every declaration the style file makes must survive into the document."""
+    md = Path(__file__).resolve().parent.parent / "authoring" / "style" / (style + ".md")
+    if not md.exists():
+        return []
+    declared = _css_rules(re.findall(r"```css\n(.*?)```", md.read_text(), re.S))
+    if not declared:
+        return []
+    have = _css_rules(styles)
+    # Contradiction-only. A style file's css block carries both the scaffold and
+    # example components, so a document that omits a selector is not wrong — it
+    # simply has no links, or no comparison rows. A document that *redefines* one
+    # with a different value is contradicting the contract it selected, which is
+    # the drift worth catching (a 56px h2 margin where the style says 40px).
+    errors = []
+    for sel, props in declared.items():
+        if sel not in have:
+            continue
+        for k, v in props.items():
+            got = have[sel].get(k)
+            if got is None:
+                continue
+            if k == "font-family":
+                # An abbreviated fallback stack is a simplification, not a
+                # contradiction. What matters is that the document did not swap
+                # the register — a serif style rendered in a sans. Sharing one
+                # family is enough to show it kept the intent.
+                fams = lambda s: {f.strip().strip("'\"").lower() for f in s.split(",")}
+                if fams(got) & fams(v):
+                    continue
+            if _norm(got) != _norm(v):
+                errors.append("'%s' sets %s: %s - the '%s' style says %s" % (sel, k, got, style, v))
+    return errors
+
+
+def _attr(tag, name, default=0.0):
+    m = re.search(r'\b%s="([-\d.]+)"' % name, tag)
+    return float(m.group(1)) if m else default
+
+
+def check_svg_bounds(html):
+    """Nothing may be clipped by its own viewBox."""
+    errors = []
+    for m in re.finditer(r'<svg[^>]*viewBox="0 0 ([\d.]+) ([\d.]+)"(.*?)</svg>', html, re.S):
+        vw, vh, body = float(m.group(1)), float(m.group(2)), m.group(3)
+        label = re.search(r'aria-label="([^"]*)"', m.group(0))
+        name = label.group(1)[:44] if label else "unlabelled figure"
+        tr = re.search(r'<g transform="translate\(([-\d.]+),\s*([-\d.]+)\)"', body)
+        ox, oy = (float(tr.group(1)), float(tr.group(2))) if tr else (0.0, 0.0)
+        mx = my = 0.0
+        for r in re.finditer(r"<rect[^>]*>", body):
+            tag = r.group(0)
+            mx = max(mx, _attr(tag, "x") + _attr(tag, "width"))
+            my = max(my, _attr(tag, "y") + _attr(tag, "height"))
+        for c in re.finditer(r"<circle[^>]*>", body):
+            tag = c.group(0)
+            mx = max(mx, _attr(tag, "cx") + _attr(tag, "r"))
+            my = max(my, _attr(tag, "cy") + _attr(tag, "r"))
+        for L in re.finditer(r"<line[^>]*>", body):
+            tag = L.group(0)
+            mx = max(mx, _attr(tag, "x1"), _attr(tag, "x2"))
+            my = max(my, _attr(tag, "y1"), _attr(tag, "y2"))
+        mx += ox
+        my += oy
+        if mx > vw + 0.5:
+            errors.append("figure '%s' overflows its viewBox by %dpx across" % (name, round(mx - vw)))
+        if my > vh + 0.5:
+            errors.append("figure '%s' overflows its viewBox by %dpx down" % (name, round(my - vh)))
+    return errors
+
+
+def check_style_accent(html, style):
+    """A page of figures using none of the style's accent is the style unapplied."""
+    accents = STYLE_ACCENTS.get(style, ())
+    if not accents:
+        return []
+    svgs = re.findall(r"<svg[^>]*>.*?</svg>", html, re.S)
+    if len(svgs) < 2:
+        return []
+    low = html.lower()
+    if any(a in low for a in accents):
+        return []
+    return ["%d figures and not one uses the '%s' style accent - the diagram "
+            "vocabulary is not being applied" % (len(svgs), style)]
+
+
 def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
     html = path.read_text(encoding="utf-8")
     parser = ContractParser()
@@ -200,6 +312,12 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
 
     if not body_background:
         errors.append(f"missing required body background for the '{style}' house style")
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    if not custom_template:
+        errors.extend(check_style_contract(parser.styles, style))
+    errors.extend(check_svg_bounds(raw))
+    errors.extend(check_style_accent(raw, style))
+
     return errors
 
 

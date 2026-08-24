@@ -16,6 +16,16 @@
 #   TDOC_MOCK_NO_R2=1               # R2 not enabled
 #   TDOC_MOCK_NO_PUBLISH_TOKEN=1    # logged in but stored OAuth token unreadable
 #   TDOC_MOCK_NOT_PUBLISHED=1       # no ~/.tdoc/published.json
+#   TDOC_MOCK_NO_CURL=1
+#
+# The probe is TARGET-AWARE. tdoc publishes to hosted tdoc.dev by default
+# (see tdoc-publish), so readiness is assessed against the platform the user
+# will actually publish to, not against Cloudflare for everyone. Resolution
+# order matches the rest of the CLI:
+#   --platform <hosted|cloudflare|vercel>  >  $TDOC_PLATFORM  >
+#   .platform in ~/.tdoc/published.json    >  hosted
+# Cloudflare is only probed when the target is cloudflare, so the common path
+# also stops making two Cloudflare API round-trips it never needed.
 #
 # Exit code is always 0; consumers read the JSON.
 
@@ -23,6 +33,27 @@ set -uo pipefail
 
 SKILL_DIR="${SKILL_DIR:-$HOME/.claude/skills/tdoc}"
 CONFIG_FILE="${TDOC_CONFIG_FILE:-$HOME/.tdoc/published.json}"
+
+# --- target platform ---
+PLATFORM_FLAG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --platform)   PLATFORM_FLAG="${2:-}"; shift 2 ;;
+    --platform=*) PLATFORM_FLAG="${1#--platform=}"; shift ;;
+    *) shift ;;
+  esac
+done
+
+target="${PLATFORM_FLAG:-${TDOC_PLATFORM:-}}"
+if [ -z "$target" ] && [ -z "${TDOC_MOCK_NOT_PUBLISHED:-}" ] && [ -f "$CONFIG_FILE" ]; then
+  # Read .platform without depending on jq — jq itself is a dep we report on,
+  # so the target must resolve even when jq is missing.
+  target="$(sed -n 's/.*"platform"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' "$CONFIG_FILE" | head -1)"
+fi
+case "$target" in
+  hosted|cloudflare|vercel) ;;
+  *) target="hosted" ;;
+esac
 
 # --- helpers ---
 # (Removed unused have() helper — dead code from an abandoned rewrite.)
@@ -79,6 +110,14 @@ jq_ok=false
 gh_ok=false
 [ -z "${TDOC_MOCK_NO_GH:-}" ] && command -v gh >/dev/null 2>&1 && gh_ok=true
 
+# curl carries every hosted upload and every Cloudflare probe, and was never
+# reported even though a machine without it cannot publish at all.
+curl_ok=false
+[ -z "${TDOC_MOCK_NO_CURL:-}" ] && command -v curl >/dev/null 2>&1 && curl_ok=true
+
+vercel_ok=false
+[ -z "${TDOC_MOCK_NO_VERCEL:-}" ] && command -v vercel >/dev/null 2>&1 && vercel_ok=true
+
 # --- Cloudflare state ---
 # Only probe if wrangler is present and not mocked away.
 cf_logged_in=false
@@ -88,7 +127,7 @@ cf_subdomain_ok=false
 cf_r2_enabled=false
 cf_publish_token_ok=false
 
-if $wrangler_ok && [ -z "${TDOC_MOCK_NO_CF_LOGIN:-}" ]; then
+if [ "$target" = "cloudflare" ] && $wrangler_ok && [ -z "${TDOC_MOCK_NO_CF_LOGIN:-}" ]; then
   if wrangler whoami >/dev/null 2>&1; then
     cf_logged_in=true
     cf_account_id="$(wrangler whoami 2>/dev/null | grep -Eo '[a-f0-9]{32}' | head -1 || true)"
@@ -142,11 +181,22 @@ if [ -z "${TDOC_MOCK_NOT_PUBLISHED:-}" ] && [ -f "$CONFIG_FILE" ]; then
   fi
 fi
 
-# --- ready_to_publish derived flag ---
+# --- ready_to_publish derived flag (per target) ---
+# Publishing to hosted tdoc.dev needs Node, curl and jq. It does NOT need
+# wrangler, a Cloudflare login, a workers.dev subdomain, or R2 — demanding
+# those of a hosted user was #236.
 ready_to_publish=false
-if $node_ok && $wrangler_ok && $jq_ok && $cf_logged_in && $cf_publish_token_ok && $cf_subdomain_ok && $cf_r2_enabled; then
-  ready_to_publish=true
-fi
+case "$target" in
+  hosted)
+    if $node_ok && $curl_ok && $jq_ok; then ready_to_publish=true; fi ;;
+  vercel)
+    if $node_ok && $curl_ok && $jq_ok && $vercel_ok; then ready_to_publish=true; fi ;;
+  cloudflare)
+    if $node_ok && $curl_ok && $jq_ok && $wrangler_ok && $cf_logged_in \
+       && $cf_publish_token_ok && $cf_subdomain_ok && $cf_r2_enabled; then
+      ready_to_publish=true
+    fi ;;
+esac
 
 # --- missing_steps: ordered checklist of what the user still needs to do ---
 # Each entry has: id, label, action_kind ("install"|"login"|"click"|"automatic"), command_or_url
@@ -156,9 +206,18 @@ if $jq_ok; then
   # mechanism + a duplicate `cmds="."` init were dead code — removed.)
   cmds="."
   $node_ok || cmds="$cmds | . + [{id:\"node\",label:\"Install Node 18+\",kind:\"install\",cmd:\"brew install node\"}]"
-  $wrangler_ok || cmds="$cmds | . + [{id:\"wrangler\",label:\"Install wrangler CLI\",kind:\"install\",cmd:\"npm i -g wrangler\"}]"
+  $curl_ok || cmds="$cmds | . + [{id:\"curl\",label:\"Install curl\",kind:\"install\",cmd:\"brew install curl\"}]"
   $jq_ok || cmds="$cmds | . + [{id:\"jq\",label:\"Install jq\",kind:\"install\",cmd:\"brew install jq\"}]"
-  if ! $cf_logged_in; then
+  # Everything below is self-host setup. A hosted user needs none of it, so it
+  # is never offered to them.
+  if [ "$target" = "vercel" ] && ! $vercel_ok; then
+    cmds="$cmds | . + [{id:\"vercel\",label:\"Install the vercel CLI\",kind:\"install\",cmd:\"npm i -g vercel\"}]"
+  fi
+  if [ "$target" = "cloudflare" ]; then
+  $wrangler_ok || cmds="$cmds | . + [{id:\"wrangler\",label:\"Install wrangler CLI\",kind:\"install\",cmd:\"npm i -g wrangler\"}]"
+  if ! $wrangler_ok; then
+    :
+  elif ! $cf_logged_in; then
     cmds="$cmds | . + [{id:\"cf_login\",label:\"Log into Cloudflare\",kind:\"login\",cmd:\"wrangler login\"}]"
   elif ! $cf_publish_token_ok; then
     # Logged in (wrangler whoami works) but we couldn't read the stored OAuth
@@ -173,6 +232,7 @@ if $jq_ok; then
     if ! $cf_r2_enabled; then
       cmds="$cmds | . + [{id:\"cf_r2\",label:\"Enable R2 on your Cloudflare account (one click, free up to 10GB)\",kind:\"click\",cmd:\"https://dash.cloudflare.com/$cf_account_id/r2\"}]"
     fi
+  fi
   fi
   missing_json="$(echo '[]' | jq "$cmds")"
 fi
@@ -189,6 +249,9 @@ if $jq_ok; then
     --arg wrangler_ver "$wrangler_ver" \
     --argjson jq_ok "$jq_ok" \
     --argjson gh_ok "$gh_ok" \
+    --argjson curl_ok "$curl_ok" \
+    --argjson vercel_ok "$vercel_ok" \
+    --arg target "$target" \
     --argjson cf_logged_in "$cf_logged_in" \
     --argjson cf_publish_token_ok "$cf_publish_token_ok" \
     --arg cf_account_id "$cf_account_id" \
@@ -202,8 +265,11 @@ if $jq_ok; then
     --argjson missing_steps "$missing_json" \
     --argjson update "$update_json" \
     '{
+      target: $target,
       deps: { node: { ok: $node_ok, version: $node_ver },
+              curl: { ok: $curl_ok },
               wrangler: { ok: $wrangler_ok, version: $wrangler_ver },
+              vercel: { ok: $vercel_ok },
               jq: { ok: $jq_ok },
               gh: { ok: $gh_ok } },
       cloudflare: { logged_in: $cf_logged_in, publish_token_ok: $cf_publish_token_ok,
@@ -218,6 +284,6 @@ if $jq_ok; then
 else
   # Minimal JSON fallback if jq isn't installed (we still report the lack of jq).
   cat <<EOF
-{"deps":{"node":{"ok":$node_ok,"version":"$node_ver"},"wrangler":{"ok":$wrangler_ok,"version":"$wrangler_ver"},"jq":{"ok":false},"gh":{"ok":$gh_ok}},"cloudflare":{"logged_in":false,"account_id":""},"published":{"ok":false},"ready_to_publish":false,"missing_steps":[{"id":"jq","label":"Install jq","kind":"install","cmd":"brew install jq"}]}
+{"target":"$target","deps":{"node":{"ok":$node_ok,"version":"$node_ver"},"curl":{"ok":$curl_ok},"wrangler":{"ok":$wrangler_ok,"version":"$wrangler_ver"},"vercel":{"ok":$vercel_ok},"jq":{"ok":false},"gh":{"ok":$gh_ok}},"cloudflare":{"logged_in":false,"account_id":""},"published":{"ok":false},"ready_to_publish":false,"missing_steps":[{"id":"jq","label":"Install jq","kind":"install","cmd":"brew install jq"}]}
 EOF
 fi
