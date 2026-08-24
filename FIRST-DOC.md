@@ -557,6 +557,7 @@ first doc something a static tutorial never has — a reason to come back.
 - Do not open, quote, or summarise the contents of any conversation.
 - Do not comment on the person's life, mood, or circumstances. The subject is
   the work, not them.
-- Do not publish without asking.
+- Do not end on a `localhost` URL, and do not ask for permission before the
+  page exists. Publish it privately and let them open it up from there.
 - Do not build a fixture, a template, or a starter repo. This page is written
   fresh each time, by you, from this file.
