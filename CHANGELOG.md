@@ -74,6 +74,24 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **The first doc is the reader's own portrait.** `FIRST-DOC.md` no longer
+  builds a Conway's Game of Life lesson. It builds *What does AI know about
+  you?* — a page assembled from the traces every AI assistant on the machine
+  has already left, with the reader's name in the title. Every section opens
+  with a trait and proves it with a chart, the page is visuals rather than
+  prose, and it ends by handing over tdoc itself. The scan is announced before
+  it runs, reads timestamps and paths only, never quotes a transcript, and the
+  finished page is shown before it is published rather than after. It degrades
+  for a reader who writes no code, and for a machine with no history at all.
+  Onboarding Step 5 now reads that file instead of scaffolding a placeholder.
+  `#161`.
+- **The template validator checks the whole style contract.** It compared the
+  body background and stopped, so a document could pass `--style default` while
+  contradicting the style's own CSS, clipping a legend outside its `viewBox`,
+  or using none of the diagram vocabulary. It now diffs every declaration the
+  style file makes against the document (contradictions only, so an abbreviated
+  font stack is still fine), measures every figure's contents against its
+  `viewBox`, and fails a page of charts that uses no accent at all.
 - **tdoc logo in the top bar goes to My docs (`/me`).** On tdoc.dev that is
   https://tdoc.dev/me. It used to go to `/` (the marketing homepage).
   Local studio 302s `/me` to `/` because there is no hosted catalog.
