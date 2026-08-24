@@ -30,11 +30,13 @@ console.log('cli (Batch D resilience)');
 t('every curl call carries --max-time (no unbounded hang)', () => {
   for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply']) {
     const src = readBin(f);
-    // Actual invocations only: `curl` followed by a flag, a quote or a $var.
-    // A bare substring match also hit `curl_ok`, `command -v curl`, and the
-    // literal "brew install curl" inside a missing_steps entry — none of which
-    // issue a request, so none of which can hang.
-    const curls = src.split('\n').filter(l => /\bcurl\s+(-|["'$])/.test(l)
+    // Actual invocations only: `curl` in COMMAND position — at the start of a
+    // line or right after |, ;, &, ( or $( — and followed by a flag, quote or
+    // $var. Looser patterns kept catching things that issue no request and so
+    // cannot hang: `curl_ok`, `command -v curl`, "brew install curl" as a
+    // missing_steps label, and `add_step curl "Install curl"` where curl is
+    // the argument rather than the program.
+    const curls = src.split('\n').filter(l => /(^|[|;&(]|\$\()\s*curl\s+(-|["'$])/.test(l)
       && !l.trim().startsWith('#'));
     for (const line of curls) {
       assert(/--max-time/.test(line), `${f}: curl without --max-time:\n      ${line.trim()}`);

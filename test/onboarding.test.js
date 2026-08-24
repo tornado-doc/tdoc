@@ -53,11 +53,30 @@ function getStep(report, id) {
     if (r.missing_steps[0].id !== 'wrangler') throw new Error(`expected wrangler first, got ${r.missing_steps[0].id}`);
   });
 
-  await t('Scenario B: no jq → reports jq missing', () => {
-    const r = runDoctor({ TDOC_MOCK_NO_JQ: '1' });
-    // jq missing → JSON falls through to the minimal-emission path
+  await t('Scenario B [cloudflare]: no jq → reports jq missing', () => {
+    const r = runDoctor({ TDOC_PLATFORM: 'cloudflare', TDOC_MOCK_NO_JQ: '1' });
     if (r.deps.jq.ok) throw new Error('jq should be mocked-missing');
     if (!r.missing_steps.find(s => s.id === 'jq')) throw new Error('jq step missing');
+  });
+
+  await t('Scenario B2 [hosted]: no jq → still ready, and jq is not demanded', () => {
+    // The hosted publish path dropped jq in #256/#272. The doctor kept asking
+    // for it, and — worse — could not emit its report without it, so it fell
+    // back to a hardcoded "not ready, install jq". That is the one machine
+    // whose checklist has to be right, and it was wrong.
+    const r = runDoctor({ TDOC_MOCK_NO_JQ: '1', TDOC_MOCK_NOT_PUBLISHED: '1' });
+    if (r.target !== 'hosted') throw new Error(`expected hosted, got ${r.target}`);
+    if (r.deps.jq.ok) throw new Error('jq should be mocked-missing');
+    if (r.missing_steps.find(s => s.id === 'jq')) {
+      throw new Error('hosted must not ask a user to install jq');
+    }
+    if (!r.ready_to_publish) {
+      throw new Error(`hosted must be ready without jq; steps=[${r.missing_steps.map(s => s.id).join(',')}]`);
+    }
+    // And the report must still be a real report, not a fallback stub.
+    if (!r.deps.curl || !r.cloudflare || !r.update) {
+      throw new Error('the report degraded to a minimal fallback without jq');
+    }
   });
 
   await t('Scenario C [cloudflare]: wrangler OK but no R2 → R2 step appears with click URL', () => {
