@@ -884,5 +884,32 @@ t('a stripped PATH hides node from a child, and childEnv restores it', () => {
     `child resolved a different node: ${restored} (wanted one under ${nodeDir})`);
 });
 
+// ---- the onboarding routing offer must stay an offer (#263) ----
+
+t('onboarding offers the CLAUDE.md routing line and never writes it silently', () => {
+  const ob = fs.readFileSync(path.join(__dirname, '..', 'ONBOARDING.md'), 'utf8');
+  const step = ob.slice(ob.indexOf('## Step 6 — Offer the routing line'),
+                        ob.indexOf('## Step 7'));
+  assert(step.length > 200, 'routing step missing or truncated');
+
+  // Asked at most once, ever.
+  assert(/\.routing-prompted/.test(step), 'no .routing-prompted guard — would re-ask every install');
+  // A no is remembered.
+  assert(/\.routing-declined/.test(step), 'no .routing-declined marker — a decline would not stick');
+  // A reinstall cannot append a second copy.
+  assert(/<!-- tdoc:routing -->/.test(step), 'no idempotency marker for the appended line');
+  // It is an offer: the user is asked, and the path is named in the question.
+  assert(/AskUserQuestion/.test(step), 'step does not ask — writing CLAUDE.md unasked is the failure this guards');
+  assert(/`<path>`/.test(step), 'the question does not name the file being edited');
+  // And it must not quietly commit on the user's behalf.
+  assert(/Do not commit/i.test(step), 'step does not forbid committing the edit');
+
+  // The markers are registered where a future reader looks for them.
+  const idem = ob.slice(ob.indexOf('## Idempotency'));
+  for (const m of ['.routing-prompted', '.routing-declined', 'tdoc:routing']) {
+    assert(idem.includes(m), `${m} not listed under Idempotency`);
+  }
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -8,6 +8,15 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Onboarding offers the `CLAUDE.md` routing line, once.** The skill
+  description already routes doc requests to tdoc and reaches every session,
+  but a line in the user's own instructions reads as a rule rather than a
+  catalogue entry. Onboarding now offers to add one, names the file it would
+  edit, and takes no for an answer permanently
+  (`~/.tdoc/.routing-declined`). It asks at most once ever
+  (`~/.tdoc/.routing-prompted`) and a marker comment keeps a reinstall from
+  appending a second copy. Installing a tool never edits the config of the
+  thing that installed it without being asked. `#263`.
 - **Five house styles, a visual-first floor, and a new default.** The default
   is now the stark-sans / OpenAI-index aesthetic (white, black, Inter, an
   oversized tight-tracked headline) with a full technical-diagram vocabulary —

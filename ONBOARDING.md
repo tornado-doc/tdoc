@@ -149,7 +149,64 @@ echo '[]' > ~/tdocs/$SLUG/comments.json
 
 The script prints the live URL. Show it to the user, and say what it is: the doc is **unlisted** — anyone with the link can read it, and it is never listed anywhere. Don't assume they already know that; they may never have seen a tdoc page before.
 
-## Step 6 — Wrap up
+## Step 6 — Offer the routing line (ask once, never write silently)
+
+`SKILL.md`'s description is what routes doc requests to tdoc, and it reaches
+every session. A line in the user's `CLAUDE.md` is a stronger signal, because
+project instructions read as rules rather than as a catalogue entry. Offer it;
+do not take it.
+
+**Skip this step entirely if either is true:**
+
+```bash
+# already asked, at any point in the past — never ask twice
+[ -f "$HOME/.tdoc/.routing-prompted" ] && echo SKIP_ASKED
+# already present — a reinstall must not append a second copy
+grep -rq "<!-- tdoc:routing -->" CLAUDE.md "$HOME/.claude/CLAUDE.md" 2>/dev/null && echo SKIP_PRESENT
+```
+
+**Pick the target file** and name it in the question, because the user is
+agreeing to an edit of a specific path:
+
+- a `CLAUDE.md` in the current project that already has a `## Skill routing`
+  section → add the line to that section
+- otherwise `~/.claude/CLAUDE.md` — tdoc is not project-scoped, so global is
+  the honest default. Create it if it does not exist.
+
+**Ask, with the path in the question.** Use `AskUserQuestion` where the host
+offers it; on a host without that tool, ask in prose and wait for a typed
+answer:
+
+> Add a routing line for tdoc to `<path>`? It tells your agent to use tdoc for
+> document requests instead of writing a file by hand. The skill already
+> describes itself this way — this makes it a rule rather than a suggestion.
+>
+> A) Add it
+> B) No thanks
+
+**On A**, append (or add to the existing `## Skill routing` list):
+
+```markdown
+<!-- tdoc:routing -->
+- Write, draft, publish, or share any doc, write-up, explainer, or page → invoke tdoc
+```
+
+**On B**, record it and never raise it again:
+
+```bash
+touch "$HOME/.tdoc/.routing-declined"
+```
+
+**Either way**, mark it asked:
+
+```bash
+mkdir -p "$HOME/.tdoc" && touch "$HOME/.tdoc/.routing-prompted"
+```
+
+Do not commit the change, do not edit any other part of the file, and do not
+re-ask on a later run. A declined offer is a decision, not a pending task.
+
+## Step 7 — Wrap up
 
 Tell the user:
 
@@ -160,6 +217,11 @@ Tell the user:
 
 ## Idempotency
 
+- `~/.tdoc/.routing-prompted` — the CLAUDE.md routing offer was already
+  made. Never ask a second time, whichever way it was answered.
+- `~/.tdoc/.routing-declined` — the user said no. Treat it as settled.
+- `<!-- tdoc:routing -->` in a `CLAUDE.md` — the line is already there; a
+  reinstall must not append another.
 Every step is safe to re-run. The doctor reads state; the publish script checks for existing resources before creating. The user can interrupt and resume at any point.
 
 ## Appendix — self-hosting on your own Cloudflare or Vercel
