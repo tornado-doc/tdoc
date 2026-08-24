@@ -53,12 +53,28 @@ mkdir -p "$(dirname "$OUT")"
 # Fetch the FULL history (all versions). Without version=all the worker returns
 # only the latest snapshot, which silently drops comments created on earlier
 # versions (root cause of "comments disappear on pull").
-REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/comments?slug=$SLUG&version=all")"
+# Send the account token. This was the only CLI request that authenticated
+# with nothing at all, so on a private doc the worker saw an anonymous visitor
+# and denied the owner their own comments — and private is what FIRST-DOC.md
+# publishes every new user's first doc as. See #278.
+TOKEN="$(json_file_get "$CONFIG_FILE" upload_token)"
+if [ -n "$TOKEN" ]; then
+  REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 \
+    -H "Authorization: Bearer $TOKEN" "$BASE/api/comments?slug=$SLUG&version=all")"
+else
+  REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/comments?slug=$SLUG&version=all")"
+fi
 
 # Validate the response is a JSON array before touching local state. A transient
 # worker error must never clobber comments.json.
 if ! printf '%s' "$REMOTE" | json_is_array; then
-  echo "tdoc-pull: worker did not return a comment array (network error or bad slug?). Local comments.json left untouched." >&2
+  if printf '%s' "$REMOTE" | grep -q '"access_denied"'; then
+    echo "tdoc-pull: the worker refused to show '$SLUG' to this machine." >&2
+    echo "  This doc is private and the account token in $CONFIG_FILE does not own it." >&2
+    echo "  If it is yours, the token is stale — re-run: /tdoc publish $SLUG" >&2
+  else
+    echo "tdoc-pull: worker did not return a comment array (network error or bad slug?). Local comments.json left untouched." >&2
+  fi
   printf '%s\n' "$REMOTE" | head -c 400 >&2; echo >&2
   exit 1
 fi
