@@ -199,6 +199,12 @@ t('the first doc is the reader\'s own portrait, and the recipe carries it', () =
     'the recipe must not hand back a localhost URL — see the localhost rule in SKILL.md');
   assert(/--visibility private/.test(recipe),
     'the recipe must publish the first doc privately rather than withholding it');
+  // Hosted slugs are one global namespace, so a slug derived from the title
+  // hands everyone the same one and rejects every user after the first (#244).
+  assert(/what-ai-knows-<name>/.test(recipe),
+    'the recipe must build the slug from the person, not from the document title');
+  assert(/409|slug_taken/.test(recipe),
+    'the recipe must handle a slug collision instead of surfacing it to the user');
   assert(!/Do not publish without asking/.test(recipe),
     'a stale do-not-publish line contradicts the localhost rule the recipe now follows');
   // It has to work for someone who does not write code, and for an empty machine.

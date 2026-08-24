@@ -123,6 +123,13 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **The first doc's slug is per-person, so onboarding stops colliding.** Hosted
+  slugs are one flat global namespace and the recipe derived the slug from the
+  document title, which handed every user the same one. The second person to
+  run onboarding was rejected — `slug_taken` (409) or `not_doc_owner` (403) —
+  on the first publish they ever attempted. The slug now carries the reader's
+  name, falls back to their GitHub login, and a collision is retried with a
+  suffix rather than surfaced as a failure. `#244`.
 - **The skill actually keeps itself current now.** `#248` added an automatic
   fast-forward to `origin/main` on every tdoc invocation, guarded on a
   `TDOC_DIR` that a placeholder token was supposed to fill in at install time.
