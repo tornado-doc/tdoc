@@ -1034,5 +1034,54 @@ t('a hosted publish with access flags works with no jq on PATH', () => {
   }
 });
 
+
+t('no jq call sits outside a self-host-only region (#272)', () => {
+  // The behavioural test above proves ONE hosted path works without jq. This
+  // one covers the whole file, because the bug it replaces was not a missing
+  // line — it was a test scoped to the code that changed instead of to the
+  // surface the claim covered. Anything added at top level, or in a new
+  // helper, is caught here even if nobody thinks to exercise it.
+  const src = readBin('tdoc-publish');
+  const lines = src.split('\n');
+
+  const fnRange = (name) => {
+    const start = lines.indexOf(`${name}() {`);
+    if (start === -1) return null;
+    for (let j = start + 1; j < lines.length; j++) if (lines[j] === '}') return [start, j];
+    return null;
+  };
+
+  // The platform dispatch is at column 0, so its closing `fi` is too;
+  // everything nested inside is indented.
+  const dispatch = lines.indexOf('if [ "$PLATFORM" = "hosted" ]; then');
+  assert(dispatch !== -1, 'the platform dispatch moved — this guard needs updating');
+  let dispatchEnd = -1;
+  for (let j = dispatch + 1; j < lines.length; j++) if (lines[j] === 'fi') { dispatchEnd = j; break; }
+  assert(dispatchEnd !== -1, 'could not find the end of the platform dispatch');
+  let firstElif = -1;
+  for (let j = dispatch + 1; j < dispatchEnd; j++) {
+    if (lines[j].startsWith('elif [ "$PLATFORM"')) { firstElif = j; break; }
+  }
+  assert(firstElif !== -1, 'the dispatch has no self-host branch');
+
+  const allowed = [['self-host dispatch', firstElif, dispatchEnd]];
+  for (const fn of ['first_time_setup', 'first_time_setup_vercel', 'cf_api',
+                    'resolve_wrangler_oauth_token', 'bundle_worker']) {
+    const r = fnRange(fn);
+    if (r) allowed.push([fn, r[0], r[1]]);
+  }
+  assert(allowed.length >= 4, 'the self-host functions moved — this guard needs updating');
+
+  const stray = [];
+  lines.forEach((l, i) => {
+    if (!/\bjq\s+(-|["'$])/.test(l)) return;
+    if (l.trim().startsWith('#')) return;
+    if (allowed.some(([, a, b]) => i >= a && i <= b)) return;
+    stray.push(`line ${i + 1}: ${l.trim().slice(0, 80)}`);
+  });
+  assert(stray.length === 0,
+    `jq is reachable from the hosted path:\n      ${stray.join('\n      ')}`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
