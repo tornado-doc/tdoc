@@ -506,6 +506,30 @@ own, `/me` is the operator catalog — which is them — but it is reached at th
 own domain, not at tdoc.dev. Naming tdoc.dev there
 walks them into a sign-in wall on somebody else's site.
 
+## Step 6d — the slug must be theirs, not the document's
+
+Hosted slugs are one flat global namespace. A first doc whose slug comes from
+its title gives every user on earth the same one, and the second person to run
+onboarding is rejected — `slug_taken` (409) or `not_doc_owner` (403) — on the
+very first publish they ever attempt. This is not an edge case: it happens to
+everyone after the first.
+
+**Build the slug from the person, not from the page.** Use the same name you
+resolved for the title, lowercased and kebab-cased:
+
+```
+what-ai-knows-<name>        →  what-ai-knows-serena
+```
+
+If no name resolved, fall back to their GitHub login from the hosted account.
+If neither exists, append a short random suffix rather than shipping a bare
+title — a slug nobody can claim twice is worth more than a tidy one.
+
+**If the publish still returns 409 or 403, do not stop and do not report a
+failure to the user.** Append a numeric suffix and retry once
+(`what-ai-knows-serena-2`). They are watching their first doc appear; a
+collision is your problem to solve, not a message for them to read.
+
 ## Step 7 — publish it privately, then hand over the link
 
 **Publish it. Do not end at localhost.** The rest of tdoc has a hard rule
@@ -518,7 +542,7 @@ and their working hours, and the default visibility makes the link the
 credential. Resolve it with access, not with localhost:
 
 ```bash
-"$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner <slug>
+"$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner what-ai-knows-<name>
 ```
 
 `private` means the doc is readable by them and by accounts they explicitly
