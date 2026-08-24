@@ -188,9 +188,9 @@ fi
 ready_to_publish=false
 case "$target" in
   hosted)
-    if $node_ok && $curl_ok && $jq_ok; then ready_to_publish=true; fi ;;
+    if $node_ok && $curl_ok; then ready_to_publish=true; fi ;;
   vercel)
-    if $node_ok && $curl_ok && $jq_ok && $vercel_ok; then ready_to_publish=true; fi ;;
+    if $node_ok && $curl_ok && $vercel_ok; then ready_to_publish=true; fi ;;
   cloudflare)
     if $node_ok && $curl_ok && $jq_ok && $wrangler_ok && $cf_logged_in \
        && $cf_publish_token_ok && $cf_subdomain_ok && $cf_r2_enabled; then
@@ -200,90 +200,88 @@ esac
 
 # --- missing_steps: ordered checklist of what the user still needs to do ---
 # Each entry has: id, label, action_kind ("install"|"login"|"click"|"automatic"), command_or_url
-missing_json="[]"
-if $jq_ok; then
-  # Single jq-filter builder. (An earlier abandoned `add()/add_step()/jq_args`
-  # mechanism + a duplicate `cmds="."` init were dead code — removed.)
-  cmds="."
-  $node_ok || cmds="$cmds | . + [{id:\"node\",label:\"Install Node 18+\",kind:\"install\",cmd:\"brew install node\"}]"
-  $curl_ok || cmds="$cmds | . + [{id:\"curl\",label:\"Install curl\",kind:\"install\",cmd:\"brew install curl\"}]"
-  $jq_ok || cmds="$cmds | . + [{id:\"jq\",label:\"Install jq\",kind:\"install\",cmd:\"brew install jq\"}]"
-  # Everything below is self-host setup. A hosted user needs none of it, so it
-  # is never offered to them.
-  if [ "$target" = "vercel" ] && ! $vercel_ok; then
-    cmds="$cmds | . + [{id:\"vercel\",label:\"Install the vercel CLI\",kind:\"install\",cmd:\"npm i -g vercel\"}]"
-  fi
-  if [ "$target" = "cloudflare" ]; then
-  $wrangler_ok || cmds="$cmds | . + [{id:\"wrangler\",label:\"Install wrangler CLI\",kind:\"install\",cmd:\"npm i -g wrangler\"}]"
+# Collected as tab-separated lines, then turned into JSON by node. It used to
+# be a jq filter built up in a string, which meant the list was empty on a
+# machine with no jq — the one machine whose checklist matters most.
+steps=""
+add_step() { steps="${steps}${1}	${2}	${3}	${4}
+"; }
+
+$node_ok || add_step node "Install Node 18+" install "brew install node"
+$curl_ok || add_step curl "Install curl" install "brew install curl"
+
+# Everything below is self-host setup. A hosted user needs none of it, so it is
+# never offered to them — including jq, which the hosted publish path dropped
+# in #256 and #272.
+if [ "$target" = "vercel" ]; then
+  $jq_ok || add_step jq "Install jq (needed to self-host)" install "brew install jq"
+  $vercel_ok || add_step vercel "Install the vercel CLI" install "npm i -g vercel"
+fi
+if [ "$target" = "cloudflare" ]; then
+  $jq_ok || add_step jq "Install jq (needed to self-host)" install "brew install jq"
   if ! $wrangler_ok; then
-    :
+    add_step wrangler "Install wrangler CLI" install "npm i -g wrangler"
   elif ! $cf_logged_in; then
-    cmds="$cmds | . + [{id:\"cf_login\",label:\"Log into Cloudflare\",kind:\"login\",cmd:\"wrangler login\"}]"
+    add_step cf_login "Log into Cloudflare" login "wrangler login"
   elif ! $cf_publish_token_ok; then
-    # Logged in (wrangler whoami works) but we couldn't read the stored OAuth
+    # Logged in (wrangler whoami works) but we could not read the stored OAuth
     # token from any known wrangler config location. Re-login rewrites it, or
     # the user can supply CLOUDFLARE_API_TOKEN. Without this, doctor used to
     # silently fall through to "claim subdomain" — misattributing the cause.
-    cmds="$cmds | . + [{id:\"cf_token\",label:\"Re-run wrangler login (could not read stored Cloudflare token)\",kind:\"login\",cmd:\"wrangler login\"}]"
+    add_step cf_token "Re-run wrangler login (could not read stored Cloudflare token)" login "wrangler login"
   else
-    if ! $cf_subdomain_ok; then
-      cmds="$cmds | . + [{id:\"cf_subdomain\",label:\"Claim your free workers.dev subdomain\",kind:\"click\",cmd:\"https://dash.cloudflare.com/?to=/:account/workers-and-pages\"}]"
-    fi
-    if ! $cf_r2_enabled; then
-      cmds="$cmds | . + [{id:\"cf_r2\",label:\"Enable R2 on your Cloudflare account (one click, free up to 10GB)\",kind:\"click\",cmd:\"https://dash.cloudflare.com/$cf_account_id/r2\"}]"
-    fi
+    $cf_subdomain_ok || add_step cf_subdomain "Claim your free workers.dev subdomain" click "https://dash.cloudflare.com/?to=/:account/workers-and-pages"
+    $cf_r2_enabled   || add_step cf_r2 "Enable R2 on your Cloudflare account (one click, free up to 10GB)" click "https://dash.cloudflare.com/$cf_account_id/r2"
   fi
-  fi
-  missing_json="$(echo '[]' | jq "$cmds")"
 fi
 
+missing_json="$(printf '%b' "$steps" | node -e '
+  let s = "";
+  process.stdin.on("data", (d) => { s += d; });
+  process.stdin.on("end", () => {
+    const out = s.split("\n").filter(Boolean).map((line) => {
+      const [id, label, kind, cmd] = line.split("\t");
+      return { id, label, kind, cmd };
+    });
+    process.stdout.write(JSON.stringify(out));
+  });
+')"
+
 # --- emit JSON ---
-if $jq_ok; then
-  if ! printf '%s' "$update_json" | jq -e . >/dev/null 2>&1; then
-    update_json='{"ok":true,"checked":false,"behind":0}'
-  fi
-  jq -n \
-    --argjson node_ok "$node_ok" \
-    --arg node_ver "$node_ver" \
-    --argjson wrangler_ok "$wrangler_ok" \
-    --arg wrangler_ver "$wrangler_ver" \
-    --argjson jq_ok "$jq_ok" \
-    --argjson gh_ok "$gh_ok" \
-    --argjson curl_ok "$curl_ok" \
-    --argjson vercel_ok "$vercel_ok" \
-    --arg target "$target" \
-    --argjson cf_logged_in "$cf_logged_in" \
-    --argjson cf_publish_token_ok "$cf_publish_token_ok" \
-    --arg cf_account_id "$cf_account_id" \
-    --argjson cf_subdomain_ok "$cf_subdomain_ok" \
-    --arg cf_subdomain "$cf_subdomain" \
-    --argjson cf_r2_enabled "$cf_r2_enabled" \
-    --argjson published "$published" \
-    --arg publish_subdomain "$publish_subdomain" \
-    --arg publish_worker "$publish_worker" \
-    --argjson ready_to_publish "$ready_to_publish" \
-    --argjson missing_steps "$missing_json" \
-    --argjson update "$update_json" \
-    '{
-      target: $target,
-      deps: { node: { ok: $node_ok, version: $node_ver },
-              curl: { ok: $curl_ok },
-              wrangler: { ok: $wrangler_ok, version: $wrangler_ver },
-              vercel: { ok: $vercel_ok },
-              jq: { ok: $jq_ok },
-              gh: { ok: $gh_ok } },
-      cloudflare: { logged_in: $cf_logged_in, publish_token_ok: $cf_publish_token_ok,
-                    account_id: $cf_account_id,
-                    subdomain: { ok: $cf_subdomain_ok, name: $cf_subdomain },
-                    r2_enabled: $cf_r2_enabled },
-      published: { ok: $published, subdomain: $publish_subdomain, worker: $publish_worker },
-      ready_to_publish: $ready_to_publish,
-      missing_steps: $missing_steps,
-      update: $update
-    }'
-else
-  # Minimal JSON fallback if jq isn't installed (we still report the lack of jq).
-  cat <<EOF
-{"target":"$target","deps":{"node":{"ok":$node_ok,"version":"$node_ver"},"curl":{"ok":$curl_ok},"wrangler":{"ok":$wrangler_ok,"version":"$wrangler_ver"},"vercel":{"ok":$vercel_ok},"jq":{"ok":false},"gh":{"ok":$gh_ok}},"cloudflare":{"logged_in":false,"account_id":""},"published":{"ok":false},"ready_to_publish":false,"missing_steps":[{"id":"jq","label":"Install jq","kind":"install","cmd":"brew install jq"}]}
-EOF
-fi
+# Built with node, not jq. The doctor used to fall back to a hardcoded
+# "not ready, install jq" blob when jq was absent — which is exactly the
+# machine it most needs to answer correctly, and it answered wrong.
+node -e '
+  const [target, nodeVer, wranglerVer, cfAccount, cfSubdomain, pubSub, pubWorker,
+         flags, missingRaw, updateRaw] = process.argv.slice(1);
+  const f = JSON.parse(flags);
+  let missing = [];
+  try { missing = JSON.parse(missingRaw); } catch {}
+  let update = { ok: true, checked: false, behind: 0 };
+  try { const u = JSON.parse(updateRaw); if (u && typeof u === "object") update = u; } catch {}
+  process.stdout.write(JSON.stringify({
+    target,
+    deps: {
+      node: { ok: f.node, version: nodeVer },
+      curl: { ok: f.curl },
+      wrangler: { ok: f.wrangler, version: wranglerVer },
+      vercel: { ok: f.vercel },
+      jq: { ok: f.jq },
+      gh: { ok: f.gh },
+    },
+    cloudflare: {
+      logged_in: f.cf_logged_in, publish_token_ok: f.cf_token,
+      account_id: cfAccount,
+      subdomain: { ok: f.cf_subdomain, name: cfSubdomain },
+      r2_enabled: f.cf_r2,
+    },
+    published: { ok: f.published, subdomain: pubSub, worker: pubWorker },
+    ready_to_publish: f.ready,
+    missing_steps: missing,
+    update,
+  }, null, 2));
+' "$target" "$node_ver" "$wrangler_ver" "$cf_account_id" "$cf_subdomain" \
+  "$publish_subdomain" "$publish_worker" \
+  "{\"node\":$node_ok,\"curl\":$curl_ok,\"wrangler\":$wrangler_ok,\"vercel\":$vercel_ok,\"jq\":$jq_ok,\"gh\":$gh_ok,\"cf_logged_in\":$cf_logged_in,\"cf_token\":$cf_publish_token_ok,\"cf_subdomain\":$cf_subdomain_ok,\"cf_r2\":$cf_r2_enabled,\"published\":$published,\"ready\":$ready_to_publish}" \
+  "$missing_json" "$update_json"
+echo
