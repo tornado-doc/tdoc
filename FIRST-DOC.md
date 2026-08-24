@@ -506,15 +506,40 @@ own, `/me` is the operator catalog — which is them — but it is reached at th
 own domain, not at tdoc.dev. Naming tdoc.dev there
 walks them into a sign-in wall on somebody else's site.
 
-## Step 7 — show it before you publish
+## Step 7 — publish it privately, then hand over the link
 
-**Do not publish this one automatically.** Every other tdoc is published as a
-matter of course; this one is about them, and the default visibility means the
-link is the credential.
+**Publish it. Do not end at localhost.** The rest of tdoc has a hard rule
+against handing back a `http://localhost` URL when the human did not ask for
+one, and it applies here: a first doc that lives only on their machine has not
+shown them what tdoc is. The shareable link *is* the product working.
 
-Build it, open it locally, and ask. If they say yes, publish and give them the
-URL on its own line. If they say no, leave it on their machine and tell them
-the command to publish it later.
+The tension is real — this page is about them, it carries their project names
+and their working hours, and the default visibility makes the link the
+credential. Resolve it with access, not with localhost:
+
+```bash
+"$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner <slug>
+```
+
+`private` means the doc is readable by them and by accounts they explicitly
+allow, and by nobody holding the link. They get a real `https://tdoc.dev/d/...`
+URL, on their account, listed at their hub — and none of it is exposed.
+
+Then say, in one line each:
+
+- the URL, on its own line
+- that it is private to them right now, and nobody with the link can open it
+- how to open it up when they want to:
+  `tdoc-publish --visibility unlisted <slug>` for link-readable, or
+  `--allow-user <github-login>` to add one person
+
+**Do not ask first and publish second.** Asking "shall I publish this?" before
+they have seen anything asks them to consent to a page that does not exist yet.
+Publish privately — which exposes nothing — show them the page at its real URL,
+and let opening it up be their decision, made while looking at it.
+
+The only case that ends locally is the one the human asked for: they said keep
+it local, or they are self-hosting and their own worker is not ready.
 
 ## If there is no history
 
