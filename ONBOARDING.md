@@ -12,6 +12,8 @@
 
 **Publishing is hosted by default and needs no Cloudflare account, no card, and nothing to click in a dashboard.** On a machine that already has Node, there is usually nothing to install at all. Self-hosting on your own Cloudflare or Vercel is still fully supported — it is at the end of this file, and you only go there if the user asks for it.
 
+The first doc a new user gets is specified in [FIRST-DOC.md](FIRST-DOC.md); this file installs tdoc, that file builds the doc.
+
 ## Step 1 — Install the skill (if not already installed)
 
 First check whether the user has already installed via the plugin marketplace. The marketplace install is a separate path the user runs themselves (`/plugin marketplace add tornado-doc/tdoc`) and does NOT need you to clone anything.
@@ -120,34 +122,27 @@ Always re-run `bin/tdoc-doctor` between steps. State changes — what was missin
 
 `click` steps only ever appear on the self-host path. If you are seeing one on the hosted default, something is wrong — re-read `.target` before sending anyone to a dashboard.
 
-## Step 5 — Offer a sample doc
+## Step 5 — Build their first doc
 
-**Skip this step entirely if `published.ok` is already `true` in the doctor output** — the user already has a published doc and onboarding is done. Tell them so and proceed to Step 6.
+**Skip this step entirely if `published.ok` is already `true` in the doctor
+output** — the user already has a published doc and onboarding is done. Tell
+them so and proceed to Step 6.
 
-Otherwise, when `ready_to_publish` is `true` and the user has no published doc yet, offer to publish a sample. A reasonable default (note: respect `TDOC_DIR` env var if set; defaults to `~/tdocs/`):
+Otherwise, when `ready_to_publish` is `true`, **read
+[FIRST-DOC.md](FIRST-DOC.md) end to end and follow it.** It is the whole
+specification for what the first doc is, how much of the machine to read,
+what the page says, and what happens before it is published. Do not improvise
+a placeholder here.
 
-```bash
-# Pick a slug
-SLUG="welcome"
-# Generate a simple HTML doc (you can be more creative)
-mkdir -p ~/tdocs/$SLUG/v1
-cat > ~/tdocs/$SLUG/v1/index.html <<'HTML'
-<!doctype html><meta charset="utf-8"><title>Hello tdoc</title>
-<style>body{font:18px/1.6 system-ui;max-width:680px;margin:80px auto;padding:0 20px}h1{color:#1652f0}</style>
-<h1>Hello, tdoc.</h1>
-<p>This is your first document. Highlight any text to leave a comment.</p>
-HTML
-cat > ~/tdocs/$SLUG/meta.json <<EOF
-{"title":"Hello tdoc","slug":"$SLUG","versions":[{"n":1,"created":"$(date -Iseconds)"}]}
-EOF
-echo '[]' > ~/tdocs/$SLUG/comments.json
-# Publish to hosted tdoc.dev. First run signs in with GitHub Device Flow
-# (open the printed URL and enter the code), then uploads.
-# To self-host instead: --platform cloudflare or --platform vercel.
-~/.claude/skills/tdoc/bin/tdoc-publish $SLUG
-```
+Two things from that file are easy to skip and must not be:
 
-The script prints the live URL. Show it to the user, and say what it is: the doc is **unlisted** — anyone with the link can read it, and it is never listed anywhere. Don't assume they already know that; they may never have seen a tdoc page before.
+- **Say the scan line before scanning.** Enumerating someone's assistant
+  folders unannounced, on first run, is the fastest way to lose them.
+- **Do not publish it automatically.** Every other tdoc is published as a
+  matter of course; this one is about them. Build it, open it locally, and ask.
+
+If the machine has no history to read, FIRST-DOC.md says what to do instead —
+follow that rather than falling back to a placeholder document.
 
 ## Step 6 — Offer the routing line (ask once, never write silently)
 

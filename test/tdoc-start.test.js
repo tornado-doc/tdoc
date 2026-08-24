@@ -179,15 +179,31 @@ t('no credential is ever pasted into a prompt', () => {
   assert(!/hosted token is/.test(onboard), 'the token phrase is back in the prompt');
 });
 
-t('the first doc is a Game of Life lesson, and the recipe carries it', () => {
+t('the first doc is the reader\'s own portrait, and the recipe carries it', () => {
   // The doc is written fresh from FIRST-DOC.md each time, so there is no
-  // fixture to drift. That file has to keep teaching the loop.
+  // fixture to drift. That file has to keep specifying the whole thing.
   const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
-  assert(/Game of Life/.test(recipe), 'the recipe no longer builds the Game of Life doc');
+  assert(/What does AI know about me/i.test(recipe),
+    'the recipe no longer builds the what-AI-knows doc');
   assert(/widget island/i.test(recipe),
-    'the recipe must say the artifact goes in a widget island, or CSP will kill it');
-  for (const beat of ['comments', 'fix', 'new version', 'reply', 'friend']) {
-    assert(new RegExp(beat, 'i').test(recipe), `the tutorial no longer covers: ${beat}`);
+    'the recipe must say computation goes in a widget island, or CSP will kill it');
+  // The scan is announced, never silent, and never quotes what it read.
+  assert(/I'm going to look at the traces/.test(recipe),
+    'the recipe must say the scan line before scanning');
+  assert(/Never copy conversation text into the page/.test(recipe),
+    'the recipe must forbid quoting transcripts — they carry pasted keys');
+  // It is a portrait, not an activity log, and it is not published unasked.
+  assert(/Name a trait, then prove it/.test(recipe),
+    'the recipe must ask for traits rather than activity readings');
+  assert(/Do not publish this one automatically/.test(recipe),
+    'the recipe must withhold publication until the human says yes');
+  // It has to work for someone who does not write code, and for an empty machine.
+  assert(/the reader may not write code/i.test(recipe),
+    'the recipe must handle readers with no coding projects');
+  assert(/If there is no history/.test(recipe),
+    'the recipe must handle a machine with nothing to scan');
+  for (const beat of ['comment', 'next version', 'answers']) {
+    assert(new RegExp(beat, 'i').test(recipe), `the loop is no longer taught: ${beat}`);
   }
   assert(/ONBOARDING\.md/.test(recipe), 'the recipe must hand install back to ONBOARDING.md');
   assert(/[Dd]o not ask for a token/.test(recipe),
