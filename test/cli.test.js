@@ -911,5 +911,29 @@ t('onboarding offers the CLAUDE.md routing line and never writes it silently', (
   }
 });
 
+// ---- the skill's self-update must be able to run at all ----
+
+t('SKILL.md resolves its own directory at runtime, not at install time', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  // The failure this guards: TDOC_DIR was a __TDOC_DIR__ placeholder meant to be
+  // substituted by an install script that does not exist, so every install
+  // carried the literal string, `[ -x "$TDOC_DIR/bin/tdoc-update" ]` was false,
+  // and the automatic update silently never ran on any machine.
+  assert(!/__TDOC_DIR__/.test(skill),
+    'SKILL.md still contains an install-time placeholder — it will never be substituted');
+  assert(/TDOC_SKILL_ROOT=/.test(skill), 'no runtime resolution of the skill directory');
+  assert(/tdoc-update" --auto/.test(skill) || /tdoc-update" --auto/.test(skill.replace(/\n\s*/g, ' ')),
+    'the automatic update call is gone');
+
+  // And the guard must actually pass against a real checkout.
+  const root = path.join(__dirname, '..');
+  const probe = spawnSync('sh', ['-c',
+    `TDOC_SKILL_ROOT="${root}"; [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ] && ` +
+    `grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" && echo ok`],
+    { encoding: 'utf8', timeout: 10000 });
+  assert(probe.stdout.trim() === 'ok',
+    'the resolved directory does not satisfy the update guard');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

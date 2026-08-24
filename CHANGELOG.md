@@ -123,6 +123,15 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **The skill actually keeps itself current now.** `#248` added an automatic
+  fast-forward to `origin/main` on every tdoc invocation, guarded on a
+  `TDOC_DIR` that a placeholder token was supposed to fill in at install time.
+  Nothing ever filled it in — the install script it named does not exist — so
+  every install carried the literal token, the guard `[ -x "$TDOC_DIR/bin/tdoc-update" ]`
+  was false, and the update silently never ran on any machine. The skill
+  directory is now resolved at runtime the same way the setup check resolves
+  it, `~/.agents/skills/tdoc` is included in the candidates, and the two
+  meanings of `TDOC_DIR` in one file are no longer the same variable.
 - **The first doc goes to tdoc.dev, privately, instead of ending at
   localhost.** The recipe told the agent to build the page, open it locally and
   ask before publishing — which recreated exactly the failure the localhost

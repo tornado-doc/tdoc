@@ -1196,8 +1196,8 @@ if [ "$TEL_EFFECTIVE" = "on" ]; then
     _P_SKILL="$(echo "$_PDATA" | grep -o '"skill":"[^"]*"' | head -1 | cut -d'"' -f4)"
     _P_SID="$(echo "$_PDATA" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
     [ -z "$_P_SKILL" ] && continue
-    if [ -x "__TDOC_DIR__/telemetry/bin/telemetry-log" ]; then
-      "__TDOC_DIR__/telemetry/bin/telemetry-log" \
+    if [ -x "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" ]; then
+      "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
         --skill "$_P_SKILL" --outcome unknown \
         --step "reaped-incomplete-run" --session-id "$_P_SID" 2>/dev/null || true
     fi
@@ -1207,15 +1207,27 @@ fi
 # ─── Upgrade check (BYOK: origin/main, every run) ───────────
 # GitHub releases lag (v0.9.0 sat while overlay kept shipping on main).
 # Compare this skill checkout to origin/main the same way tdoc-update does.
-# TDOC_DIR is substituted at install time by postinstall-telemetry.sh.
-TDOC_DIR="__TDOC_DIR__"
+#
+# Resolve the skill directory at RUNTIME. This used to be a placeholder token
+# substituted at install time, and the substitution never happened:
+# every install carried the literal string, so `[ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ]`
+# was false and the automatic update silently never ran, on any machine, ever.
+# A self-update that depends on an install step is a self-update that does not
+# exist. Note this is a different directory from the TDOC_DIR above, which is
+# the docs root (~/tdocs) — hence the distinct name.
+TDOC_SKILL_ROOT="${TDOC_SKILL_DIR:-}"
+if [ -z "$TDOC_SKILL_ROOT" ]; then
+  for _d in "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc"; do
+    [ -f "$_d/SKILL.md" ] && TDOC_SKILL_ROOT="$_d" && break
+  done
+fi
 
 # Resolve installed version, trying multiple sources in order:
 #   1. VERSION file (if maintained, like gstack)
 #   2. git describe --tags (most recent reachable tag)
 #   3. fallback "0.0.0" (skip the check)
-INSTALLED_VERSION="$(cat "$TDOC_DIR/VERSION" 2>/dev/null)"
-if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_DIR/.git" ]; then
+INSTALLED_VERSION="$(cat "$TDOC_SKILL_ROOT/VERSION" 2>/dev/null)"
+if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_SKILL_ROOT/.git" ]; then
   INSTALLED_VERSION="$(cd "$TDOC_DIR" && git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
 fi
 [ -z "$INSTALLED_VERSION" ] && INSTALLED_VERSION="0.0.0"
@@ -1236,17 +1248,17 @@ fi
 # and run the full interactive update instead — auto-stashing local edits and
 # offering a redeploy, on every single run. Only invoke it when it is a flag
 # the installed script actually knows.
-if [ -z "${TDOC_SKIP_UPDATE_CHECK:-}" ] && [ -x "$TDOC_DIR/bin/tdoc-update" ] \
-   && grep -q -- '--auto)' "$TDOC_DIR/bin/tdoc-update" 2>/dev/null; then
-  "$TDOC_DIR/bin/tdoc-update" --auto 2>&1 || true
+if [ -z "${TDOC_SKIP_UPDATE_CHECK:-}" ] && [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ] \
+   && grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" 2>/dev/null; then
+  "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
 fi
 
-if [ -x "$TDOC_DIR/bin/tdoc-update-nag" ]; then
-  NAG_LINE="$("$TDOC_DIR/bin/tdoc-update-nag" 2>/dev/null || true)"
+if [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" ]; then
+  NAG_LINE="$("$TDOC_SKILL_ROOT/bin/tdoc-update-nag" 2>/dev/null || true)"
   if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
     echo "$NAG_LINE"
     if [ "$TEL_EFFECTIVE" = "on" ]; then
-      "$TDOC_DIR/telemetry/bin/telemetry-log" \
+      "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
         --skill tdoc \
         --event-type upgrade_prompted \
         --outcome unknown \
@@ -1388,7 +1400,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On success**:
 
 ```bash
-"__TDOC_DIR__/telemetry/bin/telemetry-log" \
+"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome success \
   --duration "$DURATION" \
@@ -1400,7 +1412,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On error**:
 
 ```bash
-"__TDOC_DIR__/telemetry/bin/telemetry-log" \
+"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome error \
   --duration "$DURATION" \
@@ -1414,7 +1426,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On abandoned** (user asked to stop):
 
 ```bash
-"__TDOC_DIR__/telemetry/bin/telemetry-log" \
+"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome abandoned \
   --duration "$DURATION" \
