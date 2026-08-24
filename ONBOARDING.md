@@ -108,7 +108,7 @@ The JSON has these fields you care about:
 
 ## Step 4 — Walk the user through `missing_steps`
 
-**On the hosted default this list is usually empty** — hosted publishing needs only Node 18+, curl and jq. If `ready_to_publish` is `true`, go straight to Step 5. Do not install wrangler, do not run `wrangler login`, and do not send the user to the Cloudflare dashboard; none of that is part of publishing to tdoc.dev.
+**On the hosted default this list is usually empty** — hosted publishing needs only Node 18+ and curl. If `ready_to_publish` is `true`, go straight to Step 5. Do not install wrangler, do not run `wrangler login`, and do not send the user to the Cloudflare dashboard; none of that is part of publishing to tdoc.dev.
 
 Otherwise, iterate over `missing_steps` **in order**. Each step has a `kind`:
 

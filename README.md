@@ -171,10 +171,12 @@ This is the "edit history" half of the Google-Docs feeling: nothing you write â€
 
 ## Requirements
 
-- Node 18+
-- `jq` (for publishing)
-- For publishing, ONE of:
-  - `wrangler` + a free Cloudflare account with R2 enabled (default), or
+- Node 18+ and `curl`. That is the whole list for publishing to tdoc.dev, which
+  is the default â€” the first publish signs you in with GitHub and needs no
+  other CLI, no account to create, and no cloud dashboard.
+- Self-hosting instead? Then also `jq`, plus ONE of:
+  - `wrangler` + a free Cloudflare account with R2 enabled
+    (`/tdoc publish --platform cloudflare <slug>`), or
   - `vercel` CLI + a free Vercel account (`/tdoc publish --platform vercel <slug>`)
 
 `/tdoc onboard` checks and installs these for you.

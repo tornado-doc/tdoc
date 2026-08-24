@@ -641,7 +641,7 @@ GitHub Device Flow for commenter sign-in via the org-owned OAuth App in
 app; they do not register their own. Set the OAuth App callback URL to
 `https://<host>/auth/done` so GitHub's post-approve redirect is not a 404.
 
-Requires `jq`. Hosted needs no extra CLI. Cloudflare needs `wrangler`
+Hosted needs no extra CLI beyond Node 18+ and curl. Self-hosting needs `jq`. Cloudflare needs `wrangler`
 (`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
 
 ```bash
@@ -680,7 +680,7 @@ installed, or might be partway through. You **must** drive the flow from
 
 1. Run `"$SKILL_DIR/bin/tdoc-doctor"` and parse the JSON. This is non-destructive.
    The doctor is target-aware and reports what it assessed under `.target`.
-   The default is `hosted` (tdoc.dev), which needs Node 18+, curl and jq —
+   The default is `hosted` (tdoc.dev), which needs only Node 18+ and curl —
    **no Cloudflare account, no wrangler, nothing to click in a dashboard.**
    Only pass `--platform cloudflare` / `--platform vercel` when the user has
    asked to self-host.
@@ -747,7 +747,8 @@ Prints the doctor JSON. Use this when the user reports a problem to localize
 which dep / Cloudflare resource is missing.
 
 ```bash
-"$SKILL_DIR/bin/tdoc-doctor" | jq .
+# jq is a self-host-only dependency, so read the report with node.
+"$SKILL_DIR/bin/tdoc-doctor" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.stringify(JSON.parse(s),null,2)))'
 ```
 
 ## Troubleshooting
