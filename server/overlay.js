@@ -3569,11 +3569,22 @@
     document.body.appendChild(popup);   // append first so offsetHeight is known
     const popupH = popup.offsetHeight || 140;
     const popupW = popup.offsetWidth || 320;
-    if (anchor._placeAbove && rect.top - 8 - popupH >= 8) {
-      popup.style.top = (window.scrollY + rect.top - popupH - 8) + 'px';
-    } else {
-      popup.style.top = (window.scrollY + rect.bottom + 8) + 'px';
-    }
+    const above = window.scrollY + rect.top - popupH - 8;
+    const below = window.scrollY + rect.bottom + 8;
+    // Prefer above when the element pill asked for it and there is room; else
+    // open below the selection so the sheet follows the cursor.
+    let top = (anchor._placeAbove && rect.top - 8 - popupH >= 8) ? above : below;
+    // Clamp vertically to the viewport — the horizontal clamp below always
+    // kept the sheet on screen sideways, but `top` used to be set blind, so a
+    // comment on a selection (or artifact) low in the viewport opened below
+    // the fold and the textarea + Comment button were cut off. Mirror the
+    // emoji-picker / margin-card behavior: if the sheet would spill past the
+    // bottom, flip it above the anchor; if it still doesn't fit (tall sheet /
+    // short viewport), pin it to the bottom edge so its controls stay reachable.
+    const vpTop = window.scrollY + 8;
+    const vpBottom = window.scrollY + window.innerHeight - 8;
+    if (top + popupH > vpBottom) top = (above >= vpTop) ? above : Math.max(vpTop, vpBottom - popupH);
+    popup.style.top = top + 'px';
     // `rect.left` is the caret / mouse-up X for text selections (not the
     // line-box origin). Clamp in document coords so a caret near the right
     // edge still keeps the 320px sheet on screen.

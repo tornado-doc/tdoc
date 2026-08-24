@@ -414,6 +414,44 @@ async function tPub(name, fn) {
     await page.click('.tdoc-popup .head .x').catch(() => {});
   });
 
+  await t('Comment popup on a LOW selection is not cut off below the fold', async () => {
+    // The popup clamps horizontally but used to set `top` blind — a comment on
+    // a selection low in the viewport opened below the fold and the textarea +
+    // Comment button were cut off. It must flip above when there's no room.
+    const info = await page.evaluate(() => {
+      const vh = window.innerHeight;
+      const ps = [...document.querySelectorAll('.wrap p, .wrap li, .wrap td')]
+        .filter(p => p.firstChild && p.firstChild.nodeType === 3 && p.textContent.trim().length > 20);
+      if (!ps.length) return null;
+      const target = ps[Math.min(3, ps.length - 1)];
+      // scroll the paragraph to ~90px above the viewport bottom (popup needs ~140)
+      const y = target.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo(0, y - (vh - 90));
+      const tn = target.firstChild;
+      const r = document.createRange();
+      r.setStart(tn, 0); r.setEnd(tn, Math.min(28, tn.textContent.length));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      const sr = r.getBoundingClientRect();
+      return { vh, x: sr.left + 5, y: sr.bottom, roomBelow: vh - sr.bottom };
+    });
+    if (!info) { console.log('  (no low selectable paragraph, skipping)'); return; }
+    if (info.roomBelow > 150) { console.log('  (viewport too tall to force the clamp, skipping)'); return; }
+    await page.evaluate(({ x, y }) => {
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        clientX: x, clientY: y, bubbles: true, cancelable: true, view: window, button: 0,
+      }));
+    }, { x: info.x, y: info.y });
+    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
+    const box = await page.$eval('.tdoc-popup', el => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom };
+    });
+    if (box.bottom > info.vh + 1 || box.top < -1) {
+      throw new Error(`popup spills the viewport: top ${box.top.toFixed(1)}, bottom ${box.bottom.toFixed(1)}, viewport ${info.vh}`);
+    }
+    await page.click('.tdoc-popup .head .x').catch(() => {});
+  });
+
   await t('Drag STARTED INSIDE canvas does NOT open popup (passes through)', async () => {
     const canvas = await page.$('canvas');
     if (!canvas) { console.log('  (no canvas, skipping)'); return; }
