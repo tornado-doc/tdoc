@@ -138,8 +138,10 @@ Two things from that file are easy to skip and must not be:
 
 - **Say the scan line before scanning.** Enumerating someone's assistant
   folders unannounced, on first run, is the fastest way to lose them.
-- **Do not publish it automatically.** Every other tdoc is published as a
-  matter of course; this one is about them. Build it, open it locally, and ask.
+- **Publish it privately, and hand over the real URL.** This one is about them,
+  so it goes up as `--visibility private` — a real `tdoc.dev` link, on their
+  account, that nobody else can open. Do not end on a `localhost` URL; that is
+  the failure the localhost rule in SKILL.md exists to prevent.
 
 If the machine has no history to read, FIRST-DOC.md says what to do instead —
 follow that rather than falling back to a placeholder document.

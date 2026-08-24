@@ -195,8 +195,10 @@ t('the first doc is the reader\'s own portrait, and the recipe carries it', () =
   // It is a portrait, not an activity log, and it is not published unasked.
   assert(/Name a trait, then prove it/.test(recipe),
     'the recipe must ask for traits rather than activity readings');
-  assert(/Do not publish this one automatically/.test(recipe),
-    'the recipe must withhold publication until the human says yes');
+  assert(/Do not end at localhost/.test(recipe),
+    'the recipe must not hand back a localhost URL — see the localhost rule in SKILL.md');
+  assert(/--visibility private/.test(recipe),
+    'the recipe must publish the first doc privately rather than withholding it');
   // It has to work for someone who does not write code, and for an empty machine.
   assert(/the reader may not write code/i.test(recipe),
     'the recipe must handle readers with no coding projects');

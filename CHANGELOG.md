@@ -123,6 +123,14 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **The first doc goes to tdoc.dev, privately, instead of ending at
+  localhost.** The recipe told the agent to build the page, open it locally and
+  ask before publishing — which recreated exactly the failure the localhost
+  rule exists to prevent, one commit after that rule landed. A first doc that
+  lives only on the machine has not shown anyone what tdoc is. It now publishes
+  with `--visibility private`, so the reader gets a real link on their own
+  account that nobody else can open, and opening it up is a decision they make
+  while looking at the page rather than before it exists. `#161`.
 - **Publishing from the modal works when node is version-managed.** The local
   server passed its own `PATH` straight to the CLIs it spawns. A server started
   by absolute path — launchd, an editor, `nohup` from a shell that only loads
