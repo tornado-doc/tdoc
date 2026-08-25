@@ -163,30 +163,29 @@ function tShellGap(name, reason, _fn) {
   // longer exists by design. Author-content isolation is covered by
   // csp-headers.test.js (/frame) and artifact-shell.test.js.
 
-  await t('Copy button exists with icon + label', async () => {
-    const btn = await page.$('#tdoc-copy-md-btn');
-    if (!btn) throw new Error('no #tdoc-copy-md-btn');
-    const label = await btn.textContent();
-    if (!label.includes('Copy')) throw new Error(`label was "${label}"`);
-    const svg = await btn.$('svg');
-    if (!svg) throw new Error('no svg icon inside Copy button');
+  // Copy moved into the ⋯ overflow menu as a single action (the old two-option
+  // doc-only/doc+comments submenu is gone — Copy is always doc-only markdown).
+  await t('⋯ menu carries a single "Copy as Markdown" action', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('#tdoc-secondary-menu.open', { timeout: 1000 });
+    const items = await page.$$eval('#tdoc-secondary-menu.open [data-action="copy"]', els => els.map(e => e.textContent.trim()));
+    if (items.length !== 1) throw new Error(`expected one Copy action, got ${items.length}`);
+    if (items[0] !== 'Copy as Markdown') throw new Error(`label was "${items[0]}"`);
+    // cleanup: the author h1 lives in the /frame — click there to close the menu
+    const cleanupFrame = page.frames().find(f => f !== page.mainFrame());
+    if (cleanupFrame) await cleanupFrame.click('h1', { position: { x: 5, y: 5 } });
+    else await page.mouse.click(5, 300);
+    await page.waitForTimeout(200);
   });
 
-  await t('Copy menu hidden by default', async () => {
-    const open = await page.$('.tdoc-menu.open');
-    if (open) throw new Error('menu is open before click');
+  await t('⋯ menu hidden by default', async () => {
+    const open = await page.$('#tdoc-secondary-menu.open');
+    if (open) throw new Error('secondary menu open before click');
   });
 
-  await t('Click Copy opens menu with two options', async () => {
-    await page.click('#tdoc-copy-md-btn');
-    await page.waitForSelector('.tdoc-menu.open', { timeout: 1000 });
-    const items = await page.$$eval('.tdoc-menu.open button', els => els.map(e => e.textContent.trim()));
-    if (items.length !== 2) throw new Error(`expected 2 menu items, got ${items.length}: ${items.join(', ')}`);
-    if (!items.includes('Doc only')) throw new Error(`no "Doc only": ${items.join(', ')}`);
-    if (!items.includes('Doc + comments')) throw new Error(`no "Doc + comments": ${items.join(', ')}`);
-  });
-
-  await t('Click outside closes menu', async () => {
+  await t('Click outside closes the ⋯ menu', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('#tdoc-secondary-menu.open');
     // The author <h1> lives in the isolated /frame now — clicking into the frame
     // fires tdoc:cleared across the boundary, which the shell uses to close the
     // menu (there is no author DOM in the outer chrome document to click).
@@ -194,51 +193,30 @@ function tShellGap(name, reason, _fn) {
     if (authorFrame) await authorFrame.click('h1', { position: { x: 5, y: 5 } });
     else await page.mouse.click(5, 300);
     await page.waitForTimeout(200);
-    const open = await page.$('.tdoc-menu.open');
+    const open = await page.$('#tdoc-secondary-menu.open');
     if (open) throw new Error('menu stayed open after outside click');
   });
 
-  await t('Doc only copy → clipboard has markdown', async () => {
-    await page.click('#tdoc-copy-md-btn');
-    await page.waitForSelector('.tdoc-menu.open');
-    await page.click('.tdoc-menu.open button[data-mode="doc"]');
+  await t('Copy as Markdown → clipboard has markdown, no Comments section', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('#tdoc-secondary-menu.open');
+    await page.click('#tdoc-secondary-menu.open [data-action="copy"]');
     await page.waitForTimeout(300);
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     if (!clip || clip.length < 20) throw new Error(`clipboard too short: "${clip}"`);
     if (!clip.includes('#')) throw new Error('no markdown headings in clipboard');
-    if (clip.includes('## Comments')) throw new Error('doc-only should not include Comments section');
+    if (clip.includes('## Comments')) throw new Error('Copy as Markdown must not include a Comments section');
   });
 
-  await t('Copy button briefly shows "Copied" after copy', async () => {
-    await page.click('#tdoc-copy-md-btn');
-    await page.waitForSelector('.tdoc-menu.open');
-    await page.click('.tdoc-menu.open button[data-mode="doc"]');
-    // Within the 1200ms flash window, the button should read "Copied"
+  await t('Copy confirms with a "Copied as Markdown" toast', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('#tdoc-secondary-menu.open');
+    await page.click('#tdoc-secondary-menu.open [data-action="copy"]');
     await page.waitForFunction(
-      () => document.querySelector('#tdoc-copy-md-btn')?.textContent?.includes('Copied'),
+      () => [...document.querySelectorAll('div')].some(d => d.textContent === 'Copied as Markdown'),
       null,
-      { timeout: 800 }
+      { timeout: 1200 }
     );
-    // And revert afterward
-    await page.waitForFunction(
-      () => document.querySelector('#tdoc-copy-md-btn')?.textContent?.trim() === 'Copy',
-      null,
-      { timeout: 2000 }
-    );
-  });
-
-  await t('Doc + comments copy → markdown includes Comments section if comments exist', async () => {
-    await page.click('#tdoc-copy-md-btn');
-    await page.waitForSelector('.tdoc-menu.open');
-    await page.click('.tdoc-menu.open button[data-mode="doc-comments"]');
-    await page.waitForTimeout(300);
-    const clip = await page.evaluate(() => navigator.clipboard.readText());
-    // The shell renders comment cards on demand (none open here), so a pin is
-    // the has-comments signal — the copy still appends every comment from the
-    // loaded list, not just open cards.
-    const hasComments = await page.evaluate(() => document.querySelectorAll('.tdoc-pin').length > 0);
-    if (hasComments && !clip.includes('## Comments')) throw new Error('expected ## Comments section');
-    if (!hasComments && clip.includes('## Comments')) throw new Error('no comments but section appeared');
   });
 
   await t('Anchor highlight is clickable (pointer cursor)', async () => {
@@ -406,6 +384,44 @@ function tShellGap(name, reason, _fn) {
     const distLeft = Math.abs(popup.left - pos.lineLeft);
     if (distEnd > distLeft && distEnd > 48) {
       throw new Error(`popup left ${popup.left.toFixed(1)} is nearer the line origin (${pos.lineLeft.toFixed(1)}) than the caret (${pos.x.toFixed(1)})`);
+    }
+    await page.click('.tdoc-popup .head .x').catch(() => {});
+  });
+
+  await t('Comment popup on a LOW selection is not cut off below the fold', async () => {
+    // The popup clamps horizontally but used to set `top` blind — a comment on
+    // a selection low in the viewport opened below the fold and the textarea +
+    // Comment button were cut off. It must flip above when there's no room.
+    const info = await page.evaluate(() => {
+      const vh = window.innerHeight;
+      const ps = [...document.querySelectorAll('.wrap p, .wrap li, .wrap td')]
+        .filter(p => p.firstChild && p.firstChild.nodeType === 3 && p.textContent.trim().length > 20);
+      if (!ps.length) return null;
+      const target = ps[Math.min(3, ps.length - 1)];
+      // scroll the paragraph to ~90px above the viewport bottom (popup needs ~140)
+      const y = target.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo(0, y - (vh - 90));
+      const tn = target.firstChild;
+      const r = document.createRange();
+      r.setStart(tn, 0); r.setEnd(tn, Math.min(28, tn.textContent.length));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      const sr = r.getBoundingClientRect();
+      return { vh, x: sr.left + 5, y: sr.bottom, roomBelow: vh - sr.bottom };
+    });
+    if (!info) { console.log('  (no low selectable paragraph, skipping)'); return; }
+    if (info.roomBelow > 150) { console.log('  (viewport too tall to force the clamp, skipping)'); return; }
+    await page.evaluate(({ x, y }) => {
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        clientX: x, clientY: y, bubbles: true, cancelable: true, view: window, button: 0,
+      }));
+    }, { x: info.x, y: info.y });
+    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
+    const box = await page.$eval('.tdoc-popup', el => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom };
+    });
+    if (box.bottom > info.vh + 1 || box.top < -1) {
+      throw new Error(`popup spills the viewport: top ${box.top.toFixed(1)}, bottom ${box.bottom.toFixed(1)}, viewport ${info.vh}`);
     }
     await page.click('.tdoc-popup .head .x').catch(() => {});
   });
@@ -712,7 +728,7 @@ function tShellGap(name, reason, _fn) {
   });
 
   // ----- Feature: Share button on published view -----
-  await tPub('Share button visible on published view (left of Copy)', async () => {
+  await tPub('Share button visible on published view', async () => {
     const share = await page.$('#tdoc-share-btn');
     if (!share) throw new Error('no #tdoc-share-btn on published doc');
     const text = await share.textContent();

@@ -75,6 +75,12 @@
       drawerEl.innerHTML = '<div class="tdoc-drawer-handle" aria-label="Drag down to close comments"></div><div class="tdoc-drawer-list"></div>';
       drawerEl.addEventListener('click', function(e){ e.stopPropagation(); });
       document.body.appendChild(drawerEl);
+      // Backdrop scrim — a full-screen tap target that dismisses the drawer
+      // (from main's overlay). CSS shows it via #tdoc-comment-layer.open ~
+      // #tdoc-drawer-scrim, so it must be the drawer's NEXT sibling.
+      var scrim = document.createElement('div'); scrim.id = 'tdoc-drawer-scrim';
+      scrim.addEventListener('click', function(e){ e.stopPropagation(); closeDrawer(); });
+      document.body.appendChild(scrim);
       fabEl = document.createElement('button'); fabEl.className = 'tdoc-fab'; fabEl.type = 'button';
       fabEl.innerHTML = '💬 <span id="tdoc-fab-count">0</span>';
       fabEl.addEventListener('click', function(e){ e.stopPropagation(); toggleDrawer(); });
@@ -453,10 +459,10 @@
       else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); tryDeepLink(); }
       else if (d.type === 'tdoc:copyText') { copyText(d.text || ''); }   // author data-tdoc-copy button (frame clipboard is unreliable)
       else if (d.type === 'tdoc:docMarkdown' && copyReq) {
-        var md = d.markdown || '';
-        if (copyReq.includeComments && commentList.length) md += '\\n\\n---\\n\\n## Comments\\n\\n' + commentList.map(commentToMd).join('\\n---\\n\\n');
-        var btn = document.getElementById('tdoc-copy-md-btn'); copyReq = null;
-        copyText(md).then(function(ok){ if (btn){ var s=btn.querySelector('span'); if(s){ var o=s.textContent; s.textContent=ok?'Copied':'Copy failed'; setTimeout(function(){ s.textContent=o; },1200);} } });
+        // Copy lives in the ⋯ menu now — no button to flash, confirm with a
+        // toast instead (1:1 with the overlay's "Copied as Markdown").
+        copyReq = null;
+        copyText(d.markdown || '').then(function(ok){ flashToast(ok ? 'Copied as Markdown' : 'Copy failed'); });
       }
     });
     // --- bar handlers (shell-safe subset; Copy-markdown/Publish/Share deferred
@@ -479,9 +485,19 @@
     function closeMenus(){ document.querySelectorAll('.tdoc-menu.open, .tdoc-version-menu.open, .tdoc-secondary-menu.open').forEach(function(m){ m.classList.remove('open'); }); }
     wire('#tdoc-version-toggle','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-version-menu'); });
     document.querySelectorAll('.tdoc-version-menu [data-version]').forEach(function(b){ b.addEventListener('click', function(){ location.href='/d/'+encodeURIComponent(cfg.slug)+'/v/'+b.getAttribute('data-version'); }); });
-    wire('#tdoc-copy-md-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-copy-md-menu'); });
-    document.querySelectorAll('#tdoc-copy-md-menu [data-mode]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); copyReq={ includeComments: b.getAttribute('data-mode')==='doc-comments' }; sendFrame({ type:'tdoc:copyDoc', requestId: Date.now() }); }); });
     wire('#tdoc-more-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-secondary-menu'); });
+    // ⋯ menu actions: Copy as Markdown (all modes) + narrow-mode version rows.
+    document.querySelectorAll('#tdoc-secondary-menu [data-action="copy"]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); copyReq={}; sendFrame({ type:'tdoc:copyDoc', requestId: Date.now() }); }); });
+    document.querySelectorAll('#tdoc-secondary-menu [data-version]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); location.href='/d/'+encodeURIComponent(cfg.slug)+'/v/'+b.getAttribute('data-version'); }); });
+    // Toast confirmation (port of overlay flashToast).
+    function flashToast(msg){
+      var t = document.createElement('div');
+      t.textContent = msg;
+      t.style.cssText = 'position:fixed;bottom:18px;right:18px;background:#0a0a0a;color:#fff;padding:8px 14px;border-radius:6px;font:12px system-ui;z-index:1000001;opacity:0;transition:opacity 0.15s;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,0.2);';
+      document.body.appendChild(t);
+      requestAnimationFrame(function(){ t.style.opacity = '0.95'; });
+      setTimeout(function(){ t.style.opacity = '0'; setTimeout(function(){ t.remove(); }, 200); }, 1400);
+    }
     document.addEventListener('click', function(){ closeMenus(); closeEmojiPicker(); closeCard(); closeClusterPopover(); });
     layout();
   })();`;

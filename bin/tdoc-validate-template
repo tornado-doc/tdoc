@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+"""Validate tdoc host HTML before it can create a broken document.
+
+The host CSP deliberately blocks author JavaScript. Computation belongs in a
+sandboxed widget island, never in index.html. The validator also protects the
+reader layout while allowing the selected house style under `.wrap`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from html.parser import HTMLParser
+from pathlib import Path
+
+
+VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+    "meta", "param", "source", "track", "wbr",
+}
+PROSE_TAGS = {
+    "h1", "h2", "h3", "h4", "h5", "h6", "p", "ul", "ol", "li", "a",
+    "blockquote", "pre", "code", "table", "thead", "tbody", "tfoot", "tr",
+    "th", "td", "dl", "dt", "dd",
+}
+GLOBAL_SELECTOR_TAGS = PROSE_TAGS | {
+    "button", "input", "label", "img", "svg", "canvas", "video", "iframe",
+    "main", "article", "footer",
+}
+ROOT_CLASSES = {"wrap", "content", "container"}
+HOUSE_STYLES = {"default", "technical", "editorial", "paper"}
+HOUSE_BACKGROUNDS = {
+    "default": {"#fff", "#ffffff", "white", "rgb(255,255,255)"},
+    "technical": {"#fff", "#ffffff", "white", "rgb(255,255,255)"},
+    "editorial": {"#f7f6f5"},
+    "paper": {"#faf9f5"},
+}
+ROOT_LAYOUT_PROPERTIES = {
+    "width", "min-width", "max-width", "margin", "margin-left", "margin-right",
+    "padding", "padding-left", "padding-right", "position", "left", "right",
+    "inset", "transform",
+}
+
+
+class ContractParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.in_body = False
+        self.body_depth = 0
+        self.in_style = False
+        self.style_chunks: list[str] = []
+        self.styles: list[str] = []
+        self.has_viewport = False
+        self.primary_roots = 0
+        self.has_footer = False
+        self.inline_prose_styles: list[str] = []
+        self.author_scripts = 0
+        self.event_handlers: list[str] = []
+        self.javascript_urls: list[str] = []
+        self.host_canvas = 0
+
+    def handle_starttag(self, tag: str, attrs_list: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        attrs = {key.lower(): (value or "") for key, value in attrs_list}
+
+        if tag == "meta" and attrs.get("name", "").lower() == "viewport":
+            self.has_viewport = True
+        if tag == "style":
+            self.in_style = True
+            self.style_chunks = []
+        if tag == "footer":
+            self.has_footer = True
+        if tag == "script":
+            self.author_scripts += 1
+        if tag == "canvas":
+            self.host_canvas += 1
+        if tag in PROSE_TAGS and "style" in attrs:
+            self.inline_prose_styles.append(tag)
+        for name, value in attrs.items():
+            if name.startswith("on"):
+                self.event_handlers.append(f"{tag}[{name}]")
+            if name in {"href", "src", "action", "formaction"} and value.lstrip().lower().startswith("javascript:"):
+                self.javascript_urls.append(f"{tag}[{name}]")
+
+        if tag == "body":
+            self.in_body = True
+            self.body_depth = 0
+            return
+
+        if self.in_body:
+            if self.body_depth == 0:
+                classes = set(attrs.get("class", "").split())
+                if tag in {"main", "article"} or classes.intersection(ROOT_CLASSES):
+                    self.primary_roots += 1
+            if tag not in VOID_TAGS:
+                self.body_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == "style" and self.in_style:
+            self.styles.append("".join(self.style_chunks))
+            self.style_chunks = []
+            self.in_style = False
+        if tag == "body":
+            self.in_body = False
+            self.body_depth = 0
+        elif self.in_body and tag not in VOID_TAGS:
+            self.body_depth = max(0, self.body_depth - 1)
+
+    def handle_data(self, data: str) -> None:
+        if self.in_style:
+            self.style_chunks.append(data)
+
+
+def split_declarations(body: str) -> list[tuple[str, str]]:
+    declarations: list[tuple[str, str]] = []
+    for part in body.split(";"):
+        if not part.strip():
+            continue
+        if ":" not in part:
+            declarations.append((part.strip().lower(), ""))
+            continue
+        prop, value = part.split(":", 1)
+        declarations.append((prop.strip().lower(), value.strip().lower()))
+    return declarations
+
+
+def selector_is_global(selector: str) -> bool:
+    selector = re.sub(r"\s+", " ", selector.strip().lower())
+    if selector in {"*", ":root"}:
+        return True
+    if re.match(r"^(?:html|body)(?:$|[\s:>+~.#\[])", selector):
+        return True
+    tag_pattern = "|".join(sorted(GLOBAL_SELECTOR_TAGS, key=len, reverse=True))
+    return re.match(rf"^(?:{tag_pattern})(?:$|[\s:>+~.#\[])", selector) is not None
+
+
+def compact_css_value(value: str) -> str:
+    return re.sub(r"\s+", "", value.strip().lower())
+
+
+STYLE_ACCENTS = {
+    "default": ("#f7d7d1", "#e0a99e", "#b3503c", "#dde7f9", "#a9c0ee", "#26407a"),
+}
+
+
+def _css_rules(blocks):
+    """[css text] -> {selector: {prop: value}}, comments stripped."""
+    out = {}
+    for css in blocks:
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        for m in re.finditer(r"([^{}]+)\{([^}]*)\}", css):
+            sel = " ".join(m.group(1).split())
+            if not sel:
+                continue
+            props = out.setdefault(sel, {})
+            for decl in m.group(2).split(";"):
+                if ":" in decl:
+                    k, v = decl.split(":", 1)
+                    props[k.strip()] = " ".join(v.split())
+    return out
+
+
+def _norm(v):
+    return (v or "").replace(" ", "").replace('"', "'").lower()
+
+
+def check_style_contract(styles, style):
+    """Every declaration the style file makes must survive into the document."""
+    md = Path(__file__).resolve().parent.parent / "authoring" / "style" / (style + ".md")
+    if not md.exists():
+        return []
+    declared = _css_rules(re.findall(r"```css\n(.*?)```", md.read_text(), re.S))
+    if not declared:
+        return []
+    have = _css_rules(styles)
+    # Contradiction-only. A style file's css block carries both the scaffold and
+    # example components, so a document that omits a selector is not wrong — it
+    # simply has no links, or no comparison rows. A document that *redefines* one
+    # with a different value is contradicting the contract it selected, which is
+    # the drift worth catching (a 56px h2 margin where the style says 40px).
+    errors = []
+    for sel, props in declared.items():
+        if sel not in have:
+            continue
+        for k, v in props.items():
+            got = have[sel].get(k)
+            if got is None:
+                continue
+            if k == "font-family":
+                # An abbreviated fallback stack is a simplification, not a
+                # contradiction. What matters is that the document did not swap
+                # the register — a serif style rendered in a sans. Sharing one
+                # family is enough to show it kept the intent.
+                fams = lambda s: {f.strip().strip("'\"").lower() for f in s.split(",")}
+                if fams(got) & fams(v):
+                    continue
+            if _norm(got) != _norm(v):
+                errors.append("'%s' sets %s: %s - the '%s' style says %s" % (sel, k, got, style, v))
+    return errors
+
+
+def _attr(tag, name, default=0.0):
+    m = re.search(r'\b%s="([-\d.]+)"' % name, tag)
+    return float(m.group(1)) if m else default
+
+
+def check_svg_bounds(html):
+    """Nothing may be clipped by its own viewBox."""
+    errors = []
+    for m in re.finditer(r'<svg[^>]*viewBox="0 0 ([\d.]+) ([\d.]+)"(.*?)</svg>', html, re.S):
+        vw, vh, body = float(m.group(1)), float(m.group(2)), m.group(3)
+        label = re.search(r'aria-label="([^"]*)"', m.group(0))
+        name = label.group(1)[:44] if label else "unlabelled figure"
+        tr = re.search(r'<g transform="translate\(([-\d.]+),\s*([-\d.]+)\)"', body)
+        ox, oy = (float(tr.group(1)), float(tr.group(2))) if tr else (0.0, 0.0)
+        mx = my = 0.0
+        for r in re.finditer(r"<rect[^>]*>", body):
+            tag = r.group(0)
+            mx = max(mx, _attr(tag, "x") + _attr(tag, "width"))
+            my = max(my, _attr(tag, "y") + _attr(tag, "height"))
+        for c in re.finditer(r"<circle[^>]*>", body):
+            tag = c.group(0)
+            mx = max(mx, _attr(tag, "cx") + _attr(tag, "r"))
+            my = max(my, _attr(tag, "cy") + _attr(tag, "r"))
+        for L in re.finditer(r"<line[^>]*>", body):
+            tag = L.group(0)
+            mx = max(mx, _attr(tag, "x1"), _attr(tag, "x2"))
+            my = max(my, _attr(tag, "y1"), _attr(tag, "y2"))
+        mx += ox
+        my += oy
+        if mx > vw + 0.5:
+            errors.append("figure '%s' overflows its viewBox by %dpx across" % (name, round(mx - vw)))
+        if my > vh + 0.5:
+            errors.append("figure '%s' overflows its viewBox by %dpx down" % (name, round(my - vh)))
+    return errors
+
+
+def check_style_accent(html, style):
+    """A page of figures using none of the style's accent is the style unapplied."""
+    accents = STYLE_ACCENTS.get(style, ())
+    if not accents:
+        return []
+    svgs = re.findall(r"<svg[^>]*>.*?</svg>", html, re.S)
+    if len(svgs) < 2:
+        return []
+    low = html.lower()
+    if any(a in low for a in accents):
+        return []
+    return ["%d figures and not one uses the '%s' style accent - the diagram "
+            "vocabulary is not being applied" % (len(svgs), style)]
+
+
+def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
+    html = path.read_text(encoding="utf-8")
+    parser = ContractParser()
+    parser.feed(html)
+    errors: list[str] = []
+
+    if not parser.has_viewport:
+        errors.append('missing <meta name="viewport">')
+    if parser.primary_roots != 1:
+        errors.append("expected exactly one direct body content root (.wrap, main, article, .content, or .container)")
+    if parser.has_footer:
+        errors.append("author <footer> is reserved; the tdoc shell supplies the footer")
+    if parser.author_scripts:
+        errors.append("host <script> is inert under CSP; move JavaScript to v<n>/widgets/<name>.html")
+    if parser.event_handlers:
+        errors.append("host on*= event handlers are inert under CSP: " + ", ".join(parser.event_handlers))
+    if parser.javascript_urls:
+        errors.append("host javascript: URLs are inert under CSP: " + ", ".join(parser.javascript_urls))
+    if parser.host_canvas:
+        errors.append("host <canvas> cannot render without JavaScript; use SVG or a sandboxed widget island")
+    if parser.inline_prose_styles and not custom_template:
+        tags = ", ".join(sorted(set(parser.inline_prose_styles)))
+        errors.append(f"inline styles override default prose elements: {tags}")
+
+    if custom_template:
+        return errors
+
+    body_background = False
+    for raw_css in parser.styles:
+        css = re.sub(r"/\*.*?\*/", "", raw_css, flags=re.S)
+        for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css, flags=re.S):
+            selector_group, declarations_raw = match.groups()
+            if selector_group.strip().startswith("@"):
+                continue
+            declarations = split_declarations(declarations_raw)
+            for selector in selector_group.split(","):
+                normalized = re.sub(r"\s+", " ", selector.strip().lower())
+                if normalized == "body":
+                    allowed = all(prop in {"background", "background-color"} for prop, _ in declarations)
+                    white = any(
+                        prop in {"background", "background-color"}
+                        and compact_css_value(value) in HOUSE_BACKGROUNDS[style]
+                        for prop, value in declarations
+                    )
+                    if allowed and white:
+                        body_background = True
+                    else:
+                        errors.append(f"body background does not match the '{style}' house style")
+                elif normalized in {".wrap", ".content", ".container", "main", "article"}:
+                    forbidden = sorted({prop for prop, _ in declarations}.intersection(ROOT_LAYOUT_PROPERTIES))
+                    if forbidden:
+                        errors.append(
+                            f"content root selector '{selector.strip()}' overrides reader layout: "
+                            + ", ".join(forbidden)
+                        )
+                elif selector_is_global(normalized):
+                    errors.append(f"global selector '{selector.strip()}' overrides the default template")
+
+    if not body_background:
+        errors.append(f"missing required body background for the '{style}' house style")
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    if not custom_template:
+        errors.extend(check_style_contract(parser.styles, style))
+    errors.extend(check_svg_bounds(raw))
+    errors.extend(check_style_accent(raw, style))
+
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate tdoc default-template author HTML")
+    parser.add_argument("html_file")
+    parser.add_argument("--style", choices=sorted(HOUSE_STYLES), default="default")
+    parser.add_argument("--custom-template", action="store_true", help="explicitly allow a custom whole-page design")
+    args = parser.parse_args()
+    path = Path(args.html_file)
+    if not path.is_file():
+        print(f"tdoc-template: file not found: {path}", file=sys.stderr)
+        return 2
+    errors = validate(path, style=args.style, custom_template=args.custom_template)
+    if errors:
+        print("tdoc-template: HTML does not use the default template:", file=sys.stderr)
+        for error in errors:
+            print(f"  - {error}", file=sys.stderr)
+        print("Keep host HTML static/CSS-only. Put computation in a sandboxed widget island.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

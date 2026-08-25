@@ -8,6 +8,15 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **Onboarding offers the `CLAUDE.md` routing line, once.** The skill
+  description already routes doc requests to tdoc and reaches every session,
+  but a line in the user's own instructions reads as a rule rather than a
+  catalogue entry. Onboarding now offers to add one, names the file it would
+  edit, and takes no for an answer permanently
+  (`~/.tdoc/.routing-declined`). It asks at most once ever
+  (`~/.tdoc/.routing-prompted`) and a marker comment keeps a reinstall from
+  appending a second copy. Installing a tool never edits the config of the
+  thing that installed it without being asked. `#263`.
 - **Five house styles, a visual-first floor, and a new default.** The default
   is now the stark-sans / OpenAI-index aesthetic (white, black, Inter, an
   oversized tight-tracked headline) with a full technical-diagram vocabulary —
@@ -65,6 +74,24 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **The first doc is the reader's own portrait.** `FIRST-DOC.md` no longer
+  builds a Conway's Game of Life lesson. It builds *What does AI know about
+  you?* — a page assembled from the traces every AI assistant on the machine
+  has already left, with the reader's name in the title. Every section opens
+  with a trait and proves it with a chart, the page is visuals rather than
+  prose, and it ends by handing over tdoc itself. The scan is announced before
+  it runs, reads timestamps and paths only, never quotes a transcript, and the
+  finished page is shown before it is published rather than after. It degrades
+  for a reader who writes no code, and for a machine with no history at all.
+  Onboarding Step 5 now reads that file instead of scaffolding a placeholder.
+  `#161`.
+- **The template validator checks the whole style contract.** It compared the
+  body background and stopped, so a document could pass `--style default` while
+  contradicting the style's own CSS, clipping a legend outside its `viewBox`,
+  or using none of the diagram vocabulary. It now diffs every declaration the
+  style file makes against the document (contradictions only, so an abbreviated
+  font stack is still fine), measures every figure's contents against its
+  `viewBox`, and fails a page of charts that uses no accent at all.
 - **tdoc logo in the top bar goes to My docs (`/me`).** On tdoc.dev that is
   https://tdoc.dev/me. It used to go to `/` (the marketing homepage).
   Local studio 302s `/me` to `/` because there is no hosted catalog.
@@ -96,6 +123,55 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **The first doc's slug is per-person, so onboarding stops colliding.** Hosted
+  slugs are one flat global namespace and the recipe derived the slug from the
+  document title, which handed every user the same one. The second person to
+  run onboarding was rejected — `slug_taken` (409) or `not_doc_owner` (403) —
+  on the first publish they ever attempted. The slug now carries the reader's
+  name, falls back to their GitHub login, and a collision is retried with a
+  suffix rather than surfaced as a failure. `#244`.
+- **The skill actually keeps itself current now.** `#248` added an automatic
+  fast-forward to `origin/main` on every tdoc invocation, guarded on a
+  `TDOC_DIR` that a placeholder token was supposed to fill in at install time.
+  Nothing ever filled it in — the install script it named does not exist — so
+  every install carried the literal token, the guard `[ -x "$TDOC_DIR/bin/tdoc-update" ]`
+  was false, and the update silently never ran on any machine. The skill
+  directory is now resolved at runtime the same way the setup check resolves
+  it, `~/.agents/skills/tdoc` is included in the candidates, and the two
+  meanings of `TDOC_DIR` in one file are no longer the same variable.
+- **The first doc goes to tdoc.dev, privately, instead of ending at
+  localhost.** The recipe told the agent to build the page, open it locally and
+  ask before publishing — which recreated exactly the failure the localhost
+  rule exists to prevent, one commit after that rule landed. A first doc that
+  lives only on the machine has not shown anyone what tdoc is. It now publishes
+  with `--visibility private`, so the reader gets a real link on their own
+  account that nobody else can open, and opening it up is a decision they make
+  while looking at the page rather than before it exists. `#161`.
+- **Publishing from the modal works when node is version-managed.** The local
+  server passed its own `PATH` straight to the CLIs it spawns. A server started
+  by absolute path — launchd, an editor, `nohup` from a shell that only loads
+  nvm interactively — has the bare system `PATH`, so `tdoc-publish` could not
+  find a node installed by nvm, fnm, asdf or volta and reported `node 18+ is
+  not installed` on a machine running Node 22. The server now puts its own
+  interpreter's directory in front of the child's `PATH`, and the CLI names the
+  `PATH` it searched when the check does fail, so the message stops pointing at
+  the wrong problem. `#259`.
+- **The project mark keeps a white field in both themes, and its hover
+  highlight is centred.** The SVG that replaced the raster was fully
+  transparent, so the dinosaur read as a see-through outline. The mark is now
+  ink on an opaque white field, the same look as the landing hero. Because it
+  carries its own field it is restored like a photograph in dark mode instead
+  of inverting with the page — inverting turned the field black, which is the
+  bar's own colour, so the drawing still read as see-through. Separately, the
+  bar mark's 24px logo sat flush left in its 32px button, so the hover
+  highlight landed 8px off to the right of the drawing; the button now centres
+  its content. The worker's inlined copy of the asset was re-synced. `#161`.
+- **`tdoc-agent-reply` fails loudly.** A rejected reply used to exit 0, so a
+  comment that was never answered looked answered. `curl -sS` exits 0 on HTTP
+  4xx/5xx, and the server also reports rejections as a 200 body with an
+  `error` key, so a `post_reply` helper now gates on both and both transports
+  propagate its failure. Accepted replies still exit 0 and still print the
+  server body. `#141`.
 - **Notification clicks open the target doc and comment.** Inbox rows
   go to `/d/<slug>/v/<n>?comment=<id>` (including from `/me` and `/`).
   Same-doc clicks no longer pin the card and then immediately unpin it

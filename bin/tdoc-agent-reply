@@ -14,6 +14,8 @@
 # otherwise to http://localhost:${TDOC_PORT:-7878}.
 
 set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
 
 SLUG=""
 PARENT=""
@@ -82,52 +84,77 @@ if ! printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
   exit 1
 fi
 
-if ! command -v jq >/dev/null 2>&1; then echo "needs jq" >&2; exit 1; fi
+# The reply body is built by node, not jq: agent replies are a mandatory step
+# of /tdoc edit, and macOS ships no jq, so a jq dependency here takes the whole
+# comment loop down on a stock machine. See #276.
+PAYLOAD="$(node -e '
+  const [slug, parent, text, status, applied, login, name, avatar] = process.argv.slice(1);
+  const o = { slug, parent_id: parent, text, agent_login: login, agent_name: name };
+  if (status !== "") o.status = status;
+  if (applied !== "") o.applied_in = Number(applied);
+  if (avatar !== "") o.agent_avatar_url = avatar;
+  process.stdout.write(JSON.stringify(o));
+' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR")"
 
-PAYLOAD="$(jq -n \
-  --arg slug "$SLUG" \
-  --arg parent "$PARENT" \
-  --arg text "$TEXT" \
-  --arg status "$STATUS" \
-  --arg applied "$APPLIED_IN" \
-  --arg login "$LOGIN" \
-  --arg name "$NAME" \
-  --arg avatar "$AVATAR" \
-  '{
-    slug: $slug,
-    parent_id: $parent,
-    text: $text,
-    agent_login: $login,
-    agent_name: $name
-  }
-  + (if $status != "" then {status: $status} else {} end)
-  + (if $applied != "" then {applied_in: ($applied|tonumber)} else {} end)
-  + (if $avatar != "" then {agent_avatar_url: $avatar} else {} end)
-')"
+# Post the reply and gate on the outcome.
+#
+# Two things have to be checked or a rejected reply is indistinguishable from a
+# posted one: `curl -sS` exits 0 on HTTP 4xx/5xx (no --fail), and the server
+# also reports rejections as a 200 body carrying an "error" key
+# (e.g. {"error":"parent_not_found"}). Same shape as cf_api() in tdoc-publish.
+post_reply() {
+  local url="$1" tok="${2:-}"
+  local resp http body
+  if [ -n "$tok" ]; then
+    resp="$(curl -sS --max-time 20 -w $'\n%{http_code}' \
+      -X POST "$url" -H "Authorization: Bearer $tok" \
+      -H "Content-Type: application/json" -d "$PAYLOAD" 2>&1)" || {
+        echo "[tdoc] agent reply NOT posted: network error calling $url" >&2; return 1; }
+  else
+    resp="$(curl -sS --max-time 20 -w $'\n%{http_code}' \
+      -X POST "$url" -H "Content-Type: application/json" -d "$PAYLOAD" 2>&1)" || {
+        echo "[tdoc] agent reply NOT posted: network error calling $url" >&2; return 1; }
+  fi
+  http="${resp##*$'\n'}"        # last line = status code
+  body="${resp%$'\n'*}"         # everything before it = body
+  printf '%s\n' "$body"
+  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
+    echo "[tdoc] agent reply NOT posted: $url returned HTTP $http" >&2
+    return 1
+  fi
+  local err
+  if err="$(printf '%s' "$body" | json_error)"; then
+    echo "[tdoc] agent reply NOT posted: $err" >&2
+    return 1
+  fi
+  return 0
+}
 
 CONFIG_FILE="$HOME/.tdoc/published.json"
 if [ -f "$CONFIG_FILE" ]; then
-  PLATFORM="$(jq -r '.platform // "cloudflare"' "$CONFIG_FILE")"
-  TOKEN="$(jq -r '.upload_token // empty' "$CONFIG_FILE")"
-  if [ "$PLATFORM" = "vercel" ]; then
-    BASE="$(jq -r '.base // empty' "$CONFIG_FILE")"
+  # Resolve the API base for the configured platform: hosted/vercel configs store
+  # the URL directly in `.base`; cloudflare configs derive workers.dev. Matches
+  # tdoc-pull / tdoc-unpublish. Hosted used to fall into the cloudflare branch
+  # and read absent .subdomain/.worker, producing https://null.null.workers.dev
+  # and a 404 on every reply — silently, for every hosted user.
+  PLATFORM="$(json_file_get "$CONFIG_FILE" platform)"; PLATFORM="${PLATFORM:-cloudflare}"
+  TOKEN="$(json_file_get "$CONFIG_FILE" upload_token)"
+  if [ "$PLATFORM" = "hosted" ] || [ "$PLATFORM" = "vercel" ]; then
+    BASE="$(json_file_get "$CONFIG_FILE" base)"
   else
-    SUBDOMAIN="$(jq -r .subdomain "$CONFIG_FILE")"
-    WORKER="$(jq -r .worker "$CONFIG_FILE")"
-    BASE="https://${WORKER}.${SUBDOMAIN}.workers.dev"
+    SUBDOMAIN="$(json_file_get "$CONFIG_FILE" subdomain)"
+    WORKER="$(json_file_get "$CONFIG_FILE" worker)"
+    if [ -n "$SUBDOMAIN" ] && [ -n "$WORKER" ]; then
+      BASE="https://${WORKER}.${SUBDOMAIN}.workers.dev"
+    else
+      BASE=""
+    fi
   fi
   if [ -n "$TOKEN" ] && [ -n "$BASE" ] && [ "$BASE" != "https://." ]; then
-    curl -sS --max-time 20 -X POST "${BASE}/api/agent/reply" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$PAYLOAD"
-    echo
+    post_reply "${BASE}/api/agent/reply" "$TOKEN" || exit 1
     exit 0
   fi
 fi
 
 TDOC_PORT="${TDOC_PORT:-7878}"
-curl -sS --max-time 20 -X POST "http://localhost:${TDOC_PORT}/api/agent/reply" \
-  -H "Content-Type: application/json" \
-  -d "$PAYLOAD"
-echo
+post_reply "http://localhost:${TDOC_PORT}/api/agent/reply" || exit 1

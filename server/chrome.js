@@ -57,14 +57,22 @@
         '</div>' +
         '<span class="doc-title" id="tdoc-title">tdoc</span>');
 
-    var copyMenuHtml = '' +
-      '<div class="tdoc-menu-wrap">' +
-        '<button id="tdoc-copy-md-btn" title="Copy as Markdown" aria-label="Copy as Markdown">' +
-          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
-          '<span>Copy</span>' +
-        '</button>' +
-        '<div class="tdoc-menu" id="tdoc-copy-md-menu"><button data-mode="doc">Doc only</button><button data-mode="doc-comments">Doc + comments</button></div>' +
-      '</div>';
+    // Copy / Duplicate / Download all live inside the ⋯ menu now (matches the
+    // overlay's redesigned right cluster) — no standalone Copy button.
+    var secVersionsHtml = versions.length > 1
+      ? '<div class="tdoc-sec-versions" role="group" aria-label="Version"><div class="tdoc-sec-label">Version</div>' +
+        versions.map(function (v) { return '<button role="option" data-version="' + v.n + '" class="tdoc-sec-version' + (v.n === version ? ' current' : '') + '">v' + v.n + (v.n === version ? ' · current' : '') + '</button>'; }).join('') +
+        '<div class="tdoc-sec-sep"></div></div>'
+      : '';
+    var secondaryMenuHtml = '<div class="tdoc-menu-wrap">' +
+      '<button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>' +
+      '<div class="tdoc-secondary-menu" id="tdoc-secondary-menu">' +
+        secVersionsHtml +
+        '<button data-action="copy">Copy as Markdown</button>' +
+        (isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : '') +
+        (isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : '') +
+        (o.ownerManage ? '<div class="tdoc-sec-sep"></div><button data-action="delete" class="tdoc-sec-danger">Delete doc…</button>' : '') +
+      '</div></div>';
 
     var primaryCtaHtml = isFork ? '' : (isPublished ?
       '<button id="tdoc-share-btn" class="primary" title="Share" aria-label="Share"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>Share</span></button>' :
@@ -76,19 +84,17 @@
 
     var themeBtnHtml = '<button type="button" id="tdoc-theme-btn" class="tdoc-theme-btn" aria-pressed="false" title="Dark mode" aria-label="Switch to dark mode"><svg class="tdoc-theme-icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 7 7 0 0 0 21 14.5z"/></svg><svg class="tdoc-theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></button>';
 
-    var githubBtnHtml = '<a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="tdoc on GitHub" aria-label="tdoc on GitHub"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>';
+    // GitHub button carries the live star count when provided (landing bar).
+    var ghStars = (typeof o.stars === 'number' && o.stars >= 0) ? o.stars : null;
+    var ghStarText = ghStars === null ? '' : (ghStars >= 1000 ? (ghStars / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(ghStars));
+    var githubBtnHtml = '<a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="' + (ghStars === null ? 'tdoc on GitHub' : ghStars + ' stars on GitHub') + '" aria-label="tdoc on GitHub"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>' + (ghStarText ? '<span class="tdoc-gh-stars"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>' + ghStarText + '</span>' : '') + '</a>';
 
     var rightHtml = '' +
       (o.isLanding ? githubBtnHtml : '') +
       themeBtnHtml +
-      (isSiteBar ? '' : copyMenuHtml) +
       (isSiteBar ? '' : forkBtnHtml) +
       (isSiteBar ? '' : primaryCtaHtml) +
-      ((!isSiteBar && (isPublished || isFork)) ?
-        '<div class="tdoc-menu-wrap"><button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button><div class="tdoc-secondary-menu" id="tdoc-secondary-menu">' +
-          (isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : '') +
-          (isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : '') +
-        '</div></div>' : '') +
+      (isSiteBar ? '' : secondaryMenuHtml) +
       '<span id="tdoc-identity-slot"></span>';
 
     return '<div class="tdoc-bar-left">' + leftHtml + '</div><div class="tdoc-bar-right">' + rightHtml + '</div>';

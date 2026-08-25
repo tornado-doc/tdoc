@@ -35,8 +35,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
@@ -124,7 +124,15 @@ jobs:
           TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
         working-directory: worker
         run: |
-          printf '%s' "$TDOC_PREVIEW_UPLOAD_TOKEN" | wrangler secret put TDOC_UPLOAD_TOKEN --name tdoc-preview
+          # Must be the *versions* variant. Previews ship via `wrangler versions
+          # upload` (next step), which uploads a new version WITHOUT deploying
+          # it — so after the first PR the worker's latest version is never the
+          # deployed one. Plain `wrangler secret put` refuses in that state
+          # ("the latest version of your Worker isn't currently deployed",
+          # guarding against an accidental deploy), which failed this job on
+          # every PR. `versions secret put` updates the secret at the version
+          # level and is inherited by the version uploaded next.
+          printf '%s' "$TDOC_PREVIEW_UPLOAD_TOKEN" | wrangler versions secret put TDOC_UPLOAD_TOKEN --name tdoc-preview
 
       - name: Upload version with pr-N alias
         id: upload

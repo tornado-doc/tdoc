@@ -341,8 +341,11 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'title must sit in the left cluster, not a fake-centered slot');
   assert(overlay.includes("${cfg.isLanding ? githubBtnHtml : ''}"),
     'homepage bar must expose a GitHub icon');
-  assert(overlay.includes("${isSiteBar ? '' : copyMenuHtml}"),
-    'homepage bar must drop Copy');
+  // Copy now sits in the ⋯ overflow, which is only rendered when !isSiteBar,
+  // so the homepage (site bar) drops it along with Duplicate/Download.
+  assert(overlay.includes('<button data-action="copy">Copy as Markdown</button>') &&
+         overlay.includes('${!isSiteBar ? `<div class="tdoc-menu-wrap">'),
+    'homepage bar must drop Copy (it lives in the !isSiteBar ⋯ overflow)');
   assert(overlay.includes("${isSiteBar ? '' : primaryCtaHtml}"),
     'homepage bar must drop Share');
 
@@ -394,7 +397,10 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
 
   // tdoc-publish only attaches comments.json when it is a non-empty array.
   const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
-  assert(/type == "array" and length > 0/.test(publish),
+  // The check moved from jq to node when the hosted path dropped its jq
+  // dependency (#256); the invariant is the same — attach comments.json only
+  // when it is a non-empty array.
+  assert(/Array\.isArray\(a\) *&& *a\.length/.test(publish),
     'tdoc-publish must skip empty comments.json so the release payload does not send a dummy list');
 });
 
@@ -422,12 +428,18 @@ t('release payload carries the homepage access policy', () => {
 
   const publish = fs.readFileSync(path.join(root, 'bin', 'tdoc-publish'), 'utf8');
   // The access block only matters if it is in the upload body.
-  assert(/meta: \$meta\[0\]/.test(publish),
+  // Built by build_payload in node now (#256) rather than jq --slurpfile.
+  assert(/meta: JSON\.parse\(fs\.readFileSync\(metaPath/.test(publish),
     'tdoc-publish no longer sends local meta.json, so payload access never reaches /api/upload');
   // --visibility public must merge, not replace. Otherwise the documented
   // publish line would wipe history_visibility / commenting back to defaults.
-  assert(/\.access\.visibility = \(if \$vis != "" then \$vis else \(\.access\.visibility \/\/ "unlisted"\) end\)/.test(publish),
+  // Written in node since #272; the merge semantics are unchanged — an
+  // unspecified flag falls back to what the payload already had, and only
+  // then to the default. cli.test.js exercises this behaviourally.
+  assert(/a\.visibility = vis \|\| a\.visibility \|\| "unlisted"/.test(publish),
     'tdoc-publish access merge no longer keeps unspecified fields from the payload');
+  assert(/a\.history_visibility = hist \|\| a\.history_visibility \|\| "owner"/.test(publish),
+    'history_visibility no longer merges');
 
   const workerSrc = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   assert(/if \(incoming\.access\)/.test(workerSrc) && /incoming\.access = normalizeAccess\(validatedAccess\.access/.test(workerSrc),

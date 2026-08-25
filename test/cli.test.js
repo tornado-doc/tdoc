@@ -13,7 +13,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync, spawnSync } = require('child_process');
+const { execFileSync, spawn, spawnSync } = require('child_process');
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -30,7 +30,14 @@ console.log('cli (Batch D resilience)');
 t('every curl call carries --max-time (no unbounded hang)', () => {
   for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply']) {
     const src = readBin(f);
-    const curls = src.split('\n').filter(l => /\bcurl\b/.test(l) && !l.trim().startsWith('#'));
+    // Actual invocations only: `curl` in COMMAND position — at the start of a
+    // line or right after |, ;, &, ( or $( — and followed by a flag, quote or
+    // $var. Looser patterns kept catching things that issue no request and so
+    // cannot hang: `curl_ok`, `command -v curl`, "brew install curl" as a
+    // missing_steps label, and `add_step curl "Install curl"` where curl is
+    // the argument rather than the program.
+    const curls = src.split('\n').filter(l => /(^|[|;&(]|\$\()\s*curl\s+(-|["'$])/.test(l)
+      && !l.trim().startsWith('#'));
     for (const line of curls) {
       assert(/--max-time/.test(line), `${f}: curl without --max-time:\n      ${line.trim()}`);
     }
@@ -65,9 +72,9 @@ t('tdoc-publish defaults to hosted and treats Cloudflare/Vercel as self-host fla
   assert(/sign_in_required/.test(src), 'hosted setup must handle a missing GitHub session');
   assert(!/TDOC_HOSTED_UPLOAD_TOKEN/.test(src), 'hosted setup must not require an out-of-band upload token');
   assert(/TDOC_HOSTED_BASE:-https:\/\/tdoc\.dev/.test(src), 'hosted setup does not default to tdoc.dev');
-  assert(/platform:"hosted"/.test(src), 'hosted setup does not persist hosted platform');
-  assert(/github_login:\$gh/.test(src), 'hosted setup does not persist github_login');
-  assert(/account_id:\$acct/.test(src), 'hosted setup does not persist account_id');
+  assert(/platform: "hosted"/.test(src), 'hosted setup does not persist hosted platform');
+  assert(/github_login: gh/.test(src), 'hosted setup does not persist github_login');
+  assert(/account_id: acct/.test(src), 'hosted setup does not persist account_id');
   assert(/if \[ "\$PLATFORM" = "hosted" \]/.test(src), 'hosted platform branch missing');
   assert(/UPLOAD_BASE="\$BASE"/.test(src), 'hosted branch should upload to configured base');
   assert(/PUBLIC_BASE="\$BASE"/.test(src), 'hosted branch should emit configured hosted base links');
@@ -90,9 +97,13 @@ t('tdoc-publish defaults to hosted and treats Cloudflare/Vercel as self-host fla
 t('pull/unpublish read hosted base from published.json', () => {
   for (const f of ['tdoc-pull', 'tdoc-unpublish']) {
     const src = readBin(f);
-    assert(/PLATFORM="\$\(jq -r '\.platform \/\/ "cloudflare"'/.test(src), `${f}: platform detection missing`);
+    assert(/PLATFORM="\$\(json_file_get "\$CONFIG_FILE" platform\)"/.test(src),
+      `${f}: platform detection missing`);
+    assert(/PLATFORM="\$\{PLATFORM:-cloudflare\}"/.test(src),
+      `${f}: platform must still default to cloudflare for old configs`);
     assert(/"\$PLATFORM" = "hosted"/.test(src), `${f}: hosted platform branch missing`);
-    assert(/BASE="\$\(jq -r '\.base \/\/ empty'/.test(src), `${f}: hosted/vercel branch should read .base`);
+    assert(/BASE="\$\(json_file_get "\$CONFIG_FILE" base\)"/.test(src),
+      `${f}: hosted/vercel branch should read .base`);
   }
 });
 
@@ -100,6 +111,144 @@ t('tdoc-new fails loudly if the local server never comes up', () => {
   const src = readBin('tdoc-new');
   assert(/SERVER_UP/.test(src) && /failed to start/.test(src),
     'ping-loop success is not checked');
+});
+
+t('chat-driven new and edit flows require host validation', () => {
+  const rootSkill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const packagedSkill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'tdoc', 'SKILL.md'), 'utf8');
+  assert(rootSkill === packagedSkill, 'root and packaged SKILL.md copies must stay identical');
+  assert(/mandatory[\s\S]*tdoc-validate-template[\s\S]*do not open,\s*publish, or report/.test(rootSkill),
+    '/tdoc new must validate before completion');
+  assert(/Validate `v<n\+1>\/index\.html`[\s\S]*tdoc-validate-template[\s\S]*never publish or report a broken version/.test(rootSkill),
+    '/tdoc edit must validate every generated version');
+});
+
+t('tdoc default-template validator accepts scoped widget CSS', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-template-'));
+  try {
+    const html = path.join(dir, 'valid.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } .cost-widget { display:grid } .cost-widget p { color:#333 }</style>
+      </head><body><div class="wrap"><h1>Title</h1><div class="cost-widget"><p>x</p></div></div></body></html>`);
+    const r = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(r.status === 0, `valid default-template HTML rejected: ${r.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc default-template validator rejects global restyling by default', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-template-'));
+  try {
+    const html = path.join(dir, 'custom.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } h1 { font-size:72px } .wrap { max-width:1200px }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`);
+    const rejected = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(rejected.status !== 0, 'global h1/.wrap restyling should be rejected');
+    assert(/default template/i.test(rejected.stderr), rejected.stderr);
+    const explicit = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html, '--custom-template'], { encoding: 'utf8' });
+    assert(explicit.status === 0, `explicit custom template should pass: ${explicit.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc host validator rejects inert JavaScript even for a custom template', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-host-js-'));
+  try {
+    const html = path.join(dir, 'broken.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff }</style></head>
+      <body><div class="wrap"><button onclick="go()">Run</button>
+      <a href="javascript:go()">again</a><canvas></canvas><script>go()</script></div></body></html>`);
+    const r = spawnSync(path.join(BIN, 'tdoc-validate-template'),
+      [html, '--custom-template'], { encoding: 'utf8' });
+    assert(r.status !== 0, 'custom-template must not make host JavaScript executable');
+    assert(/host <script> is inert/.test(r.stderr), r.stderr);
+    assert(/event handlers are inert/.test(r.stderr), r.stderr);
+    assert(/javascript: URLs are inert/.test(r.stderr), r.stderr);
+    assert(/host <canvas> cannot render/.test(r.stderr), r.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc host validator accepts the named editorial house-style background', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-style-'));
+  try {
+    const html = path.join(dir, 'editorial.html');
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#f7f6f5 } .wrap { font-family:Georgia,serif; color:#000 }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`);
+    const wrong = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(wrong.status !== 0, 'editorial background should not pass as default');
+    const right = spawnSync(path.join(BIN, 'tdoc-validate-template'),
+      [html, '--style', 'editorial'], { encoding: 'utf8' });
+    assert(right.status === 0, right.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-new copies sandboxed widget files while keeping host HTML script-free', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-widget-new-'));
+  try {
+    const fakeBin = path.join(dir, 'fake-bin');
+    const widgets = path.join(dir, 'widgets');
+    fs.mkdirSync(fakeBin);
+    fs.mkdirSync(widgets);
+    const fakeCurl = path.join(fakeBin, 'curl');
+    fs.writeFileSync(fakeCurl, '#!/bin/sh\nprintf \'{"service":"tdoc"}\'\n');
+    fs.chmodSync(fakeCurl, 0o755);
+    fs.writeFileSync(path.join(widgets, 'calculator.html'),
+      '<!doctype html><html><body><output id="x"></output><script>document.querySelector("#x").textContent="ok"</script></body></html>');
+    const host = `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff }</style></head><body><div class="wrap">
+      <h1>Calculator</h1><iframe sandbox="allow-scripts" src="/d/widget-doc/v/1/widget/calculator"></iframe>
+      </div></body></html>`;
+    const env = { ...process.env, HOME: dir, TDOC_DIR: path.join(dir, 'tdocs'),
+      PATH: `${fakeBin}:${process.env.PATH}` };
+    const r = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', 'widget-doc', '--title', 'Widget', '--html-stdin', '--widgets-dir', widgets, '--quiet'],
+      { input: host, env, encoding: 'utf8', timeout: 20000 });
+    assert(r.status === 0, `tdoc-new widget handoff failed (exit ${r.status})\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    const copied = fs.readFileSync(path.join(dir, 'tdocs', 'widget-doc', 'v1', 'widgets', 'calculator.html'), 'utf8');
+    assert(copied.includes('<script>'), 'widget JavaScript was not preserved in the island file');
+    const savedHost = fs.readFileSync(path.join(dir, 'tdocs', 'widget-doc', 'v1', 'index.html'), 'utf8');
+    assert(!savedHost.includes('<script>'), 'host unexpectedly gained JavaScript');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-new validates the default template before replacing an existing doc', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cli-'));
+  try {
+    const env = { ...process.env, TDOC_DIR: dir, TDOC_PORT: '0' };
+    const docDir = path.join(dir, 'mydoc');
+    fs.mkdirSync(path.join(docDir, 'v1'), { recursive: true });
+    fs.writeFileSync(path.join(docDir, 'v1', 'index.html'), '<!doctype html><body>ORIGINAL</body>');
+    fs.writeFileSync(path.join(docDir, 'meta.json'), JSON.stringify({ slug: 'mydoc', versions: [{ n: 1 }] }));
+    fs.writeFileSync(path.join(docDir, 'comments.json'), JSON.stringify([{ id: 'c1', text: 'precious' }]));
+    const custom = `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#fff } h1 { font-size:72px }</style>
+      </head><body><div class="wrap"><h1>Custom</h1></div></body></html>`;
+    const r = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', 'mydoc', '--title', 'x', '--html-stdin', '--force'],
+      { input: custom, env, encoding: 'utf8', timeout: 20000 });
+    assert(r.status !== 0 && /default-template validation failed/i.test(r.stderr), r.stderr);
+    assert(/ORIGINAL/.test(fs.readFileSync(path.join(docDir, 'v1', 'index.html'), 'utf8')),
+      'existing doc was replaced before template validation');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---- live behavior: --force must not destroy an existing doc on bad input ----
@@ -345,6 +494,949 @@ t('tdoc-update-nag real git: ahead-only is silent, behind nags, both diverge', (
     }
   }
 });
+
+// ---- tdoc-agent-reply must not report success on a rejected reply (#141) ----
+
+t('tdoc-agent-reply gates on HTTP status and on 200-with-error bodies', () => {
+  const src = readBin('tdoc-agent-reply');
+  assert(/post_reply\(\)/.test(src), 'post_reply helper missing');
+  assert(/http_code/.test(src) && /grep -qE '\^2/.test(src),
+    'post_reply does not gate on 2xx HTTP status');
+  assert(/json_error/.test(src),
+    'post_reply does not reject a 200 body carrying an "error" key');
+  // Both transports must go through the helper and propagate its failure.
+  const calls = src.split('\n').filter(l => /^\s*post_reply /.test(l));
+  assert(calls.length === 2, `expected 2 post_reply call sites, got ${calls.length}`);
+  for (const c of calls) assert(/\|\| exit 1/.test(c), `call site swallows failure: ${c.trim()}`);
+  // No raw curl POST to the reply endpoint left outside the helper.
+  const raw = src.split('\n').filter(l =>
+    /\bcurl\b/.test(l) && /api\/agent\/reply/.test(l) && !l.trim().startsWith('#'));
+  assert(raw.length === 0, `raw curl to /api/agent/reply outside post_reply:\n      ${raw.join('\n      ')}`);
+});
+
+t('tdoc-agent-reply exits non-zero when the server rejects the reply', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
+  const port = 7900 + Math.floor(Math.random() * 300);
+  // Stub the reply endpoint: 200 with an error body, exactly what the server
+  // returns for an unknown parent. That is the case the bug reported.
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({error:'parent_not_found'}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_missing',
+      '--text', 'applied', '--status', 'applied'], {
+      env: { ...process.env, HOME: home, TDOC_PORT: String(port) },
+      encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status !== 0,
+      `rejected reply still exited ${r.status}; stdout=${r.stdout} stderr=${r.stderr}`);
+    assert(/parent_not_found/.test(r.stdout + r.stderr),
+      `server error not surfaced: ${r.stdout} ${r.stderr}`);
+    assert(/NOT posted/.test(r.stderr), `no failure line on stderr: ${r.stderr}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-agent-reply still exits 0 when the reply is accepted', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
+  const port = 8300 + Math.floor(Math.random() * 300);
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({id:'c_1',replies:[],reactions:{}}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
+      env: { ...process.env, HOME: home, TDOC_PORT: String(port) },
+      encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `accepted reply exited ${r.status}; stderr=${r.stderr}`);
+    assert(/"id":"c_1"/.test(r.stdout), `server body not passed through: ${r.stdout}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+
+// ---- tdoc-agent-reply must resolve the hosted base from .base (#226) ----
+// Before the fix, `platform: "hosted"` fell into the cloudflare branch and read
+// absent .subdomain/.worker, producing https://null.null.workers.dev -> 404.
+
+t('tdoc-agent-reply posts to .base on a hosted config', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-hosted-'));
+  const port = 8700 + Math.floor(Math.random() * 300);
+  fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+  // A real hosted config: .base and .upload_token, and deliberately NO
+  // .subdomain / .worker — that absence is what the bug tripped over.
+  fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+    platform: 'hosted',
+    base: `http://127.0.0.1:${port}`,
+    public_host: '127.0.0.1',
+    upload_token: 'tok_test',
+  }));
+  // Record the path the reply actually arrives on, so a request that never
+  // leaves for the right host cannot pass.
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({id:'c_hosted',path:q.url,replies:[],reactions:{}}));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
+      env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `hosted reply exited ${r.status}; stderr=${r.stderr}`);
+    assert(/"id":"c_hosted"/.test(r.stdout),
+      `reply did not reach the hosted base: stdout=${r.stdout} stderr=${r.stderr}`);
+    assert(/"path":"\/api\/agent\/reply"/.test(r.stdout),
+      `reply hit the wrong path: ${r.stdout}`);
+    assert(!/workers\.dev/.test(r.stdout + r.stderr),
+      `hosted config still derived a workers.dev host: ${r.stderr}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-agent-reply base resolution matches tdoc-pull across platforms', () => {
+  const src = readBin('tdoc-agent-reply');
+  // hosted and vercel both read .base; cloudflare/legacy still derive workers.dev.
+  assert(/\[ "\$PLATFORM" = "hosted" \] \|\| \[ "\$PLATFORM" = "vercel" \]/.test(src),
+    'hosted is not on the .base side of the platform branch');
+  assert(/BASE="https:\/\/\$\{WORKER\}\.\$\{SUBDOMAIN\}\.workers\.dev"/.test(src),
+    'cloudflare no longer derives the workers.dev base');
+  assert(/PLATFORM="\$\{PLATFORM:-cloudflare\}"/.test(src),
+    'legacy configs without .platform no longer default to cloudflare');
+});
+
+t('a legacy config with no .platform still resolves a workers.dev base', () => {
+  // The grep above says the default is written down; this says it survives a
+  // real run. #272's lesson: a claim tested by reading the source is a claim
+  // about the source, not about what the command does.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-legacy-'));
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    // No `platform` key at all — the shape configs had before hosted existed.
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      subdomain: 'acme', worker: 'tdoc', upload_token: 'tok',
+    }));
+    const r = spawnSync(path.join(BIN, 'tdoc-agent-reply'), [
+      '--slug', 'legacy-doc', '--parent', 'c1', '--text', 'hi',
+    ], {
+      env: { ...process.env, HOME: home, TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    // acme is not a real subdomain, so this cannot succeed. What matters is
+    // WHICH host it tried: the legacy derivation, not localhost and not "null".
+    const out = r.stdout + r.stderr;
+    assert(/tdoc\.acme\.workers\.dev/.test(out),
+      `legacy config did not derive workers.dev:\n      ${out.trim()}`);
+    assert(!/null\.null/.test(out), `a missing field leaked as "null":\n      ${out.trim()}`);
+    assert(!/localhost/.test(out), `fell through to localhost instead:\n      ${out.trim()}`);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('a hosted config missing .base falls through to localhost, not to "null"', () => {
+  // json_file_get returns empty for both a missing key and an explicit null,
+  // which is what the old `// empty` filters guaranteed. If that ever changed,
+  // BASE would be the string "null" and every reply would 404 on
+  // https://null — the #226 bug, wearing a different hat.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nullbase-'));
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: null, upload_token: 'tok',
+    }));
+    const r = spawnSync(path.join(BIN, 'tdoc-agent-reply'), [
+      '--slug', 'nullbase-doc', '--parent', 'c1', '--text', 'hi',
+    ], {
+      env: { ...process.env, HOME: home, TDOC_SKIP_UPDATE_CHECK: '1', TDOC_PORT: '7999' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    const out = r.stdout + r.stderr;
+    assert(/localhost:7999/.test(out),
+      `an unusable base should fall through to local, got:\n      ${out.trim()}`);
+    assert(!/https:\/\/null/.test(out), `"null" was used as a host:\n      ${out.trim()}`);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+
+// ---- publish-first flow (S4): sign-in ahead of generation, no stray localhost ----
+
+t('tdoc-publish --signin-only needs no slug and no-ops when already signed in', () => {
+  const bin = path.join(BIN, 'tdoc-publish');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-signin-'));
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: 'https://tdoc.dev', upload_token: 'tok',
+    }));
+    const r = spawnSync(bin, ['--signin-only'], {
+      env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `expected exit 0, got ${r.status}: ${r.stderr}`);
+    assert(/already signed in/.test(r.stderr), `expected a no-op message, got: ${r.stderr}`);
+    // It must not have printed usage — --signin-only takes no slug.
+    assert(!/usage:/i.test(r.stdout + r.stderr), 'usage printed for --signin-only');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('a normal publish still requires a slug', () => {
+  const r = spawnSync(path.join(BIN, 'tdoc-publish'), [], { encoding: 'utf8', timeout: 20000 });
+  assert(r.status !== 0, 'publish with no slug must not succeed');
+});
+
+t('the GitHub sign-in opens the browser and is NOT gated on a tty', () => {
+  const src = readBin('tdoc-publish');
+  assert(/should_open_browser\(\)/.test(src), 'no browser-open helper');
+  // An agent runs this with stderr piped. A tty check would mean the auto-open
+  // never fires in the exact situation it exists for.
+  const helper = src.slice(src.indexOf('should_open_browser()'), src.indexOf('Waiting for GitHub approval'));
+  assert(!/-t\s+2|-t\s+1/.test(helper), 'browser-open must not be gated on a tty');
+  for (const guard of ['TDOC_NO_BROWSER', 'CI', 'SSH_CONNECTION']) {
+    assert(helper.includes(guard), `browser-open should respect ${guard}`);
+  }
+  // Only ever hand a github.com URL to the opener.
+  assert(/case "\$uri" in\s*\n\s*https:\/\/github\.com\/\*\)/.test(src),
+    'the opener must be restricted to github.com URLs');
+});
+
+t('bin/tdoc-new still defaults to NOT publishing', () => {
+  // /document-release, /retro, /investigate, /cso and /qa-only all call this.
+  // If the publish-by-default flip leaked here, every security audit and retro
+  // would auto-upload to tdoc.dev.
+  const src = readBin('tdoc-new');
+  assert(/^PUBLISH=0$/m.test(src), 'tdoc-new must default PUBLISH=0');
+  assert(/--publish\)\s*PUBLISH=1/.test(src), '--publish must remain the opt-in');
+});
+
+t('the handoff line does not claim a plain publish is unlisted', () => {
+  // A publish with no flags stores no access block and takes the legacy
+  // policy (public + full history). Telling the user "unlisted" would
+  // understate what a recipient can see. Keeping the default as-is is a
+  // product decision (#245/#246 closed); the copy has to match it.
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const step = skill.slice(skill.indexOf('*Hosted (the default).*'), skill.indexOf('*Self-host.*'));
+  assert(!/live and \*\*unlisted\*\*/.test(step), 'handoff still calls a plain publish unlisted');
+  // The blockquote wraps, so match across the "> " continuation.
+  assert(/page back[\s>]+through earlier versions/.test(step),
+    'handoff should say earlier versions are reachable');
+  assert(/--history owner/.test(step), 'handoff should point at the way to change it');
+});
+
+t('SKILL.md states the localhost rule and no longer promises localhost by default', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  assert(/never hand over a `localhost` URL unless the user asked/i.test(skill),
+    'the localhost rule is not stated');
+  // The delivery step must not open localhost unconditionally any more.
+  assert(!/^7\. Open `http:\/\/localhost/m.test(skill),
+    '/tdoc new still opens localhost as its delivery step');
+  // Front matter must not advertise the abandoned default.
+  const front = skill.slice(0, skill.indexOf('---', 4));
+  assert(!/serve it at localhost/.test(front), 'description still says "serve it at localhost"');
+  assert(!/own Cloudflare\s*\n?\s*Worker/.test(front), 'description still sells BYOK Cloudflare as the default');
+  assert(/tdoc\.dev/.test(front), 'description should name the hosted destination');
+});
+
+t('SKILL.md and skills/tdoc/SKILL.md stay identical', () => {
+  const root = path.join(__dirname, '..');
+  const a = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
+  const b = fs.readFileSync(path.join(root, 'skills', 'tdoc', 'SKILL.md'), 'utf8');
+  assert(a === b, 'SKILL.md and its plugin-mode copy have drifted');
+});
+
+
+// ---- tdoc-update --auto: keep current without ever destroying work ----
+
+t('tdoc-update --auto never stashes and never redeploys', () => {
+  const src = readBin('tdoc-update');
+  assert(/--auto\)\s*AUTO=1/.test(src), '--auto flag missing');
+  // The stash path is the one that can lose someone's edits.
+  const stashIdx = src.indexOf('git stash push');
+  const guardIdx = src.lastIndexOf('AUTO" = "1"', stashIdx);
+  assert(guardIdx !== -1 && guardIdx < stashIdx,
+    '--auto must bail out before the stash push');
+  // Redeploy pushes to the user's own infrastructure.
+  const redeployIdx = src.indexOf('bin/tdoc-publish');
+  const exitIdx = src.lastIndexOf('AUTO" = "1"', redeployIdx);
+  assert(exitIdx !== -1 && exitIdx < redeployIdx,
+    '--auto must exit before the redeploy offer');
+});
+
+t('tdoc-update --auto declines on a diverged checkout', () => {
+  const src = readBin('tdoc-update');
+  assert(/LOCAL" != "\$BASE" \] && \[ "\$AUTO" = "1"/.test(src),
+    '--auto must skip rather than fail on a diverged checkout');
+});
+
+t('SKILL.md probes for --auto before calling it', () => {
+  // tdoc-update's arg loop has no catch-all: a version predating --auto would
+  // ignore the flag and run the FULL interactive update, stashing local edits
+  // on every skill run. The probe is what stops that.
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const call = skill.indexOf('bin/tdoc-update" --auto');
+  assert(call !== -1, 'Step 0 should keep the skill current');
+  const probe = skill.lastIndexOf("grep -q -- '--auto)'", call);
+  assert(probe !== -1 && probe < call, 'the --auto call must be capability-probed');
+  assert(skill.lastIndexOf('TDOC_SKIP_UPDATE_CHECK', call) !== -1,
+    'there must be an off switch');
+});
+
+t('tdoc-update arg loop still has no catch-all (why the probe exists)', () => {
+  // If this ever gains a `*)` that errors on unknown flags, the probe in
+  // SKILL.md can be simplified — but until then it is load-bearing.
+  const src = readBin('tdoc-update');
+  const loop = src.slice(src.indexOf('for arg in "$@"'), src.indexOf('done', src.indexOf('for arg in "$@"')));
+  assert(!/\*\)/.test(loop), 'arg loop gained a catch-all — revisit the SKILL.md probe');
+});
+
+
+// ---- hosted publish must not need jq (#256) ----
+
+t('the hosted path uses no jq at all', () => {
+  const src = readBin('tdoc-publish');
+  // Everything hosted-reachable: the device flow, the token mint, the config
+  // write and read, the upload payload, and the response parse.
+  const hostedFns = [
+    src.slice(src.indexOf('hosted_github_signin()'), src.indexOf('first_time_setup_hosted()')),
+    src.slice(src.indexOf('first_time_setup_hosted()'), src.indexOf('require_jq_for_selfhost')),
+    src.slice(src.indexOf('build_payload()'), src.indexOf('PLATFORM_FLAG=')),
+  ].join('\n');
+  const calls = hostedFns.split('\n').filter((l) => /\bjq\s+(-|["'$])/.test(l) && !l.trim().startsWith('#'));
+  assert(calls.length === 0, `hosted path still shells out to jq:\n      ${calls.join('\n      ')}`);
+});
+
+t('jq is required for self-hosting, and only there', () => {
+  const src = readBin('tdoc-publish');
+  // No top-level hard fail any more — that turned a zero-setup path into an
+  // install step on a machine that ships no jq.
+  assert(!/^if ! command -v jq >\/dev\/null 2>&1; then$/m.test(src),
+    'the global jq gate is back');
+  assert(/require_jq_for_selfhost\(\)/.test(src), 'the self-host jq gate is missing');
+  for (const fn of ['first_time_setup()', 'first_time_setup_vercel()']) {
+    const i = src.indexOf(fn);
+    assert(i !== -1, `${fn} not found`);
+    const head = src.slice(i, i + 200);
+    assert(/require_jq_for_selfhost/.test(head), `${fn} does not check for jq`);
+  }
+  // And the message must not send a hosted user to install anything.
+  const msg = src.slice(src.indexOf('Self-hosting needs jq'), src.indexOf('Self-hosting needs jq') + 320);
+  assert(/does not need it/.test(msg), 'the jq message should say hosted publishing is unaffected');
+});
+
+t('build_payload embeds the document without a shell round trip', () => {
+  const src = readBin('tdoc-publish');
+  const fn = src.slice(src.indexOf('build_payload()'), src.indexOf('PLATFORM_FLAG='));
+  assert(/readFileSync\(htmlPath/.test(fn), 'the HTML must be read by node, not passed as an argument');
+  assert(/JSON\.stringify\(out\)/.test(fn), 'the payload must be JSON-encoded by node');
+  // Widgets and comments stay optional, the way the jq version had them.
+  assert(/if \(commentsPath\)/.test(fn), 'comments must stay optional');
+  assert(/Object\.keys\(widgets\)\.length/.test(fn), 'widgets must stay optional');
+});
+
+// ---- consent is asked after the work, not before it (#236 S9) ----
+
+t('a first run defers the telemetry question and records nothing', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const step0 = skill.slice(skill.indexOf('## Step 0'), skill.indexOf('## Final Step'));
+
+  // First run resolves to "deferred", not "on".
+  // Checked as a line sequence rather than one regex. The regex version had
+  // two alternatives matching the same input inside a star — exponential
+  // backtracking, which CodeQL flagged as js/redos.
+  const lines = step0.split('\n').map((l) => l.trim());
+  const branch = lines.findIndex((l) => l.includes('TEL_PROMPTED" = "no" ]; then'));
+  assert(branch !== -1, 'no first-run branch in the mode resolution');
+  const body = lines.slice(branch + 1).filter((l) => l && !l.startsWith('#'));
+  assert(body[0] === 'TEL_EFFECTIVE="deferred"',
+    `a first run should resolve TEL_EFFECTIVE to deferred, got: ${body[0]}`);
+
+  // And "deferred" must not slip through a `!= off` gate and write a sentinel.
+  assert(!/TEL_EFFECTIVE" != "off" \]; then\s*\n\s*mkdir -p "\$TEL_HOME\/sentinels"/.test(step0),
+    'the sentinel gate must require "on", not merely "not off" — deferred would pass');
+  assert(/TEL_EFFECTIVE" = "on" \]; then\s*\n\s*mkdir -p "\$TEL_HOME\/sentinels"/.test(step0),
+    'the sentinel should only be written when telemetry is on');
+
+  // Step 0 must not contain the question any more.
+  assert(!/ask the user ONCE with this text/.test(step0),
+    'Step 0 still asks the consent question before doing the work');
+});
+
+t('the Final Step owns the consent question and logs nothing for that run', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const final = skill.slice(skill.indexOf('## Final Step'));
+  assert(/is `deferred`/.test(final), 'the Final Step should handle the deferred first run');
+  assert(/Hand over the finished work FIRST/.test(final),
+    'the Final Step should deliver before asking');
+  assert(/\.telemetry-prompted/.test(final) && /\.telemetry-mode/.test(final),
+    'the Final Step should persist the answer');
+  assert(/log nothing for this run/.test(final),
+    'the deferred run must not be logged — that would be recording before consent');
+});
+
+// ---- the local server must hand its own node down to spawned CLIs (#259) ----
+
+t('server spawns CLIs with the running interpreter on PATH', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'server.js'), 'utf8');
+  assert(/function childEnv\(\)/.test(src), 'childEnv helper missing');
+  assert(/path\.dirname\(process\.execPath\)/.test(src),
+    'childEnv does not derive the node directory from process.execPath');
+  const spawns = src.split('\n').filter(l => /\bspawn\(bin\b/.test(l));
+  assert(spawns.length >= 2, `expected at least 2 spawn sites, found ${spawns.length}`);
+  for (const s of spawns) {
+    assert(/env:\s*childEnv\(\)/.test(s),
+      `spawn site does not pass childEnv(): ${s.trim()}`);
+  }
+});
+
+t('a stripped PATH hides node from a child, and childEnv restores it', () => {
+  // The failure this guards: the server is started by absolute path (launchd,
+  // an editor, nohup from a non-interactive shell) so nvm/fnm/asdf shims are
+  // not on PATH. The child then reports "node is not installed" on a machine
+  // that has node. Prove both halves rather than trusting the code read.
+  const bare = '/usr/bin:/bin:/usr/sbin:/sbin';
+  const nodeDir = path.dirname(process.execPath);
+  const look = (p) => spawnSync('sh', ['-c', 'command -v node || true'],
+    { env: { PATH: p }, encoding: 'utf8', timeout: 10000 }).stdout.trim();
+
+  if (look(bare)) {
+    // node lives in /usr/bin on this machine; the bug cannot occur here.
+    return;
+  }
+  assert(look(bare) === '', 'expected node to be invisible on a bare PATH');
+  const restored = look(`${nodeDir}${path.delimiter}${bare}`);
+  assert(restored !== '', 'prepending the interpreter directory did not expose node');
+  assert(restored.startsWith(nodeDir),
+    `child resolved a different node: ${restored} (wanted one under ${nodeDir})`);
+});
+
+// ---- the onboarding routing offer must stay an offer (#263) ----
+
+t('onboarding offers the CLAUDE.md routing line and never writes it silently', () => {
+  const ob = fs.readFileSync(path.join(__dirname, '..', 'ONBOARDING.md'), 'utf8');
+  const step = ob.slice(ob.indexOf('## Step 6 — Offer the routing line'),
+                        ob.indexOf('## Step 7'));
+  assert(step.length > 200, 'routing step missing or truncated');
+
+  // Asked at most once, ever.
+  assert(/\.routing-prompted/.test(step), 'no .routing-prompted guard — would re-ask every install');
+  // A no is remembered.
+  assert(/\.routing-declined/.test(step), 'no .routing-declined marker — a decline would not stick');
+  // A reinstall cannot append a second copy.
+  assert(/<!-- tdoc:routing -->/.test(step), 'no idempotency marker for the appended line');
+  // It is an offer: the user is asked, and the path is named in the question.
+  assert(/AskUserQuestion/.test(step), 'step does not ask — writing CLAUDE.md unasked is the failure this guards');
+  assert(/`<path>`/.test(step), 'the question does not name the file being edited');
+  // And it must not quietly commit on the user's behalf.
+  assert(/Do not commit/i.test(step), 'step does not forbid committing the edit');
+
+  // The markers are registered where a future reader looks for them.
+  const idem = ob.slice(ob.indexOf('## Idempotency'));
+  for (const m of ['.routing-prompted', '.routing-declined', 'tdoc:routing']) {
+    assert(idem.includes(m), `${m} not listed under Idempotency`);
+  }
+});
+
+// ---- the skill's self-update must be able to run at all ----
+
+t('SKILL.md resolves its own directory at runtime, not at install time', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  // The failure this guards: TDOC_DIR was a __TDOC_DIR__ placeholder meant to be
+  // substituted by an install script that does not exist, so every install
+  // carried the literal string, `[ -x "$TDOC_DIR/bin/tdoc-update" ]` was false,
+  // and the automatic update silently never ran on any machine.
+  assert(!/__TDOC_DIR__/.test(skill),
+    'SKILL.md still contains an install-time placeholder — it will never be substituted');
+  assert(/TDOC_SKILL_ROOT=/.test(skill), 'no runtime resolution of the skill directory');
+  assert(/tdoc-update" --auto/.test(skill) || /tdoc-update" --auto/.test(skill.replace(/\n\s*/g, ' ')),
+    'the automatic update call is gone');
+
+  // And the guard must actually pass against a real checkout.
+  const root = path.join(__dirname, '..');
+  const probe = spawnSync('sh', ['-c',
+    `TDOC_SKILL_ROOT="${root}"; [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ] && ` +
+    `grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" && echo ok`],
+    { encoding: 'utf8', timeout: 10000 });
+  assert(probe.stdout.trim() === 'ok',
+    'the resolved directory does not satisfy the update guard');
+});
+
+
+// ---- access flags must not drag jq back onto the hosted path (#272) ----
+// FIRST-DOC.md step 7 publishes the very first doc with
+// `--visibility private --history owner`, so this is the path EVERY new user
+// takes. #256 removed jq from hosted publishing but its test only looked
+// inside the functions that had changed, and the access-block writer sits
+// outside all of them — so the first doc still died with "jq: command not
+// found" on a machine without jq. This test runs the real thing instead of
+// grepping, so scope cannot drift again.
+
+t('a hosted publish with access flags works with no jq on PATH', () => {
+  const bin = path.join(BIN, 'tdoc-publish');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nojq-'));
+  const port = 8600 + Math.floor(Math.random() * 300);
+  const binDir = path.join(home, 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+
+  // A PATH with everything the script needs EXCEPT jq. Masking jq with a
+  // failing stub would not work: `command -v jq` succeeds on a file that
+  // exists whether or not it runs.
+  for (const dir of (process.env.PATH || '').split(':')) {
+    let entries = [];
+    try { entries = fs.readdirSync(dir); } catch { continue; }
+    for (const name of entries) {
+      if (name === 'jq') continue;
+      const target = path.join(binDir, name);
+      if (fs.existsSync(target)) continue;
+      try { fs.symlinkSync(path.join(dir, name), target); } catch {}
+    }
+  }
+  assert(!fs.existsSync(path.join(binDir, 'jq')), 'the jq-free PATH still has jq');
+
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
+    `s.setHeader('content-type','application/json');` +
+    `const u=q.url.split('?')[0];` +
+    `if(u==='/api/upload'){const j=JSON.parse(b||'{}');` +
+    `return s.end(JSON.stringify({ok:true,slug:j.slug,version:j.version,size:42,` +
+    `access:(j.meta&&j.meta.access)||null}));}` +
+    `s.statusCode=404;s.end('{}');});}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+
+  try {
+    const up = spawnSync('bash', ['-c',
+      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 -X POST ` +
+      `http://127.0.0.1:${port}/api/upload && exit 0; sleep 0.05; done; exit 1`],
+      { encoding: 'utf8', timeout: 15000 });
+    assert(up.status === 0, 'stub server never came up');
+
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: `http://127.0.0.1:${port}`,
+      public_host: '127.0.0.1', upload_token: 'tok', github_login: 'tester',
+    }));
+    const docs = path.join(home, 'tdocs', 'first-doc', 'v1');
+    fs.mkdirSync(docs, { recursive: true });
+    fs.writeFileSync(path.join(docs, 'index.html'),
+      '<!doctype html><body><div class="wrap"><h1>D</h1></div></body>');
+    fs.writeFileSync(path.join(home, 'tdocs', 'first-doc', 'meta.json'), JSON.stringify({
+      title: 'D', slug: 'first-doc', versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }],
+    }));
+    fs.writeFileSync(path.join(home, 'tdocs', 'first-doc', 'comments.json'), '[]');
+
+    // Exactly what FIRST-DOC.md step 7 tells the agent to run.
+    const r = spawnSync(bin, ['--visibility', 'private', '--history', 'owner', 'first-doc'], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_DIR: path.join(home, 'tdocs') },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(!/jq: command not found/.test(r.stdout + r.stderr),
+      `the access path still needs jq:\n      ${(r.stdout + r.stderr).split('\n').filter((l) => /jq/.test(l)).join('\n      ')}`);
+    assert(r.status === 0, `publish exited ${r.status}: ${r.stderr}`);
+    assert(/Published:/.test(r.stdout), `no published URL: ${r.stdout}`);
+
+    // And the policy it wrote must be the one that was asked for.
+    const meta = JSON.parse(fs.readFileSync(path.join(home, 'tdocs', 'first-doc', 'meta.json'), 'utf8'));
+    assert(meta.access.visibility === 'private',
+      `expected private, got ${meta.access.visibility}`);
+    assert(meta.access.history_visibility === 'owner',
+      `expected owner history, got ${meta.access.history_visibility}`);
+    assert(Array.isArray(meta.access.allowed_users), 'allowed_users must stay an array');
+
+    // A later flag must MERGE, not replace: publishing again with only
+    // --visibility has to leave history_visibility alone. Getting this wrong
+    // would quietly re-expose the version history of a doc someone had
+    // deliberately locked down.
+    const r2 = spawnSync(bin, ['--visibility', 'unlisted', 'first-doc'], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_DIR: path.join(home, 'tdocs') },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(r2.status === 0, `second publish exited ${r2.status}: ${r2.stderr}`);
+    const meta2 = JSON.parse(fs.readFileSync(path.join(home, 'tdocs', 'first-doc', 'meta.json'), 'utf8'));
+    assert(meta2.access.visibility === 'unlisted', 'the new visibility did not apply');
+    assert(meta2.access.history_visibility === 'owner',
+      `history_visibility was reset to ${meta2.access.history_visibility} instead of merging`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+
+t('no jq call sits outside a self-host-only region (#272)', () => {
+  // The behavioural test above proves ONE hosted path works without jq. This
+  // one covers the whole file, because the bug it replaces was not a missing
+  // line — it was a test scoped to the code that changed instead of to the
+  // surface the claim covered. Anything added at top level, or in a new
+  // helper, is caught here even if nobody thinks to exercise it.
+  const src = readBin('tdoc-publish');
+  const lines = src.split('\n');
+
+  const fnRange = (name) => {
+    const start = lines.indexOf(`${name}() {`);
+    if (start === -1) return null;
+    for (let j = start + 1; j < lines.length; j++) if (lines[j] === '}') return [start, j];
+    return null;
+  };
+
+  // The platform dispatch is at column 0, so its closing `fi` is too;
+  // everything nested inside is indented.
+  const dispatch = lines.indexOf('if [ "$PLATFORM" = "hosted" ]; then');
+  assert(dispatch !== -1, 'the platform dispatch moved — this guard needs updating');
+  let dispatchEnd = -1;
+  for (let j = dispatch + 1; j < lines.length; j++) if (lines[j] === 'fi') { dispatchEnd = j; break; }
+  assert(dispatchEnd !== -1, 'could not find the end of the platform dispatch');
+  let firstElif = -1;
+  for (let j = dispatch + 1; j < dispatchEnd; j++) {
+    if (lines[j].startsWith('elif [ "$PLATFORM"')) { firstElif = j; break; }
+  }
+  assert(firstElif !== -1, 'the dispatch has no self-host branch');
+
+  const allowed = [['self-host dispatch', firstElif, dispatchEnd]];
+  for (const fn of ['first_time_setup', 'first_time_setup_vercel', 'cf_api',
+                    'resolve_wrangler_oauth_token', 'bundle_worker']) {
+    const r = fnRange(fn);
+    if (r) allowed.push([fn, r[0], r[1]]);
+  }
+  assert(allowed.length >= 4, 'the self-host functions moved — this guard needs updating');
+
+  const stray = [];
+  lines.forEach((l, i) => {
+    if (!/\bjq\s+(-|["'$])/.test(l)) return;
+    if (l.trim().startsWith('#')) return;
+    if (allowed.some(([, a, b]) => i >= a && i <= b)) return;
+    stray.push(`line ${i + 1}: ${l.trim().slice(0, 80)}`);
+  });
+  assert(stray.length === 0,
+    `jq is reachable from the hosted path:\n      ${stray.join('\n      ')}`);
+});
+
+
+// ---- the rest of the hosted command set must not need jq either (#276) ----
+// Four PRs removed jq from one script each (#228, #257, #273, #275) and each
+// left the next one standing, because every bin script re-implemented its own
+// config reads. tdoc-agent-reply is the worst of them: SKILL.md calls replying
+// on every comment "mandatory", so a jq gate there takes the whole comment
+// loop down on a stock macOS machine. These run the real binaries.
+
+// Build a PATH carrying everything except jq. A failing stub would not do:
+// `command -v jq` succeeds on any file that exists, runnable or not.
+function jqFreePath(home) {
+  const binDir = path.join(home, 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  for (const dir of (process.env.PATH || '').split(':')) {
+    let entries = [];
+    try { entries = fs.readdirSync(dir); } catch { continue; }
+    for (const name of entries) {
+      if (name === 'jq') continue;
+      const target = path.join(binDir, name);
+      if (fs.existsSync(target)) continue;
+      try { fs.symlinkSync(path.join(dir, name), target); } catch {}
+    }
+  }
+  assert(!fs.existsSync(path.join(binDir, 'jq')), 'the jq-free PATH still has jq');
+  return binDir;
+}
+
+// A stand-in worker: serves a comment list, accepts agent replies, accepts
+// deletes. Routes are the ones the three scripts actually call.
+function startStubWorker(port, state) {
+  const child = spawn(process.execPath, ['-e',
+    `const st=${JSON.stringify(state)};` +
+    `require('http').createServer((q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
+    `s.setHeader('content-type','application/json');` +
+    `const u=q.url.split('?')[0];` +
+    `if(u==='/api/comments')return s.end(JSON.stringify(st.comments));` +
+    `if(u==='/api/agent/reply'){st.lastReply=JSON.parse(b||'{}');` +
+    `return s.end(JSON.stringify({ok:true,echo:st.lastReply}));}` +
+    `if(u==='/api/doc')return s.end(JSON.stringify({ok:true,deleted:3}));` +
+    `s.statusCode=404;s.end('{}');});}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  const up = spawnSync('bash', ['-c',
+    `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+    `http://127.0.0.1:${port}/api/comments && exit 0; sleep 0.05; done; exit 1`],
+    { encoding: 'utf8', timeout: 15000 });
+  assert(up.status === 0, 'stub worker never came up');
+  return child;
+}
+
+function hostedHome(port) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nojq2-'));
+  fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+    platform: 'hosted', base: `http://127.0.0.1:${port}`,
+    public_host: '127.0.0.1', upload_token: 'tok', github_login: 'tester',
+  }));
+  return home;
+}
+
+const noJq = (r) => !/jq: command not found|needs jq/.test(r.stdout + r.stderr);
+
+t('tdoc-pull works with no jq on PATH, and still merges local-only comments', () => {
+  const port = 8900 + Math.floor(Math.random() * 200);
+  const remote = [{ id: 'r1', text: 'from worker', version: 1 }];
+  const stub = startStubWorker(port, { comments: remote });
+  const home = hostedHome(port);
+  try {
+    const binDir = jqFreePath(home);
+    const doc = path.join(home, 'tdocs', 'pull-doc');
+    fs.mkdirSync(doc, { recursive: true });
+    // One comment the worker has, one it does not. The local-only one is the
+    // whole point of the merge — losing it was a real data-loss bug once.
+    fs.writeFileSync(path.join(doc, 'comments.json'), JSON.stringify([
+      { id: 'r1', text: 'stale copy', version: 1 },
+      { id: 'local-only', text: 'authored before publish', version: 1 },
+    ]));
+
+    const r = spawnSync(path.join(BIN, 'tdoc-pull'), ['pull-doc'], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_DIR: path.join(home, 'tdocs'),
+             TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(noJq(r), `tdoc-pull still needs jq:\n      ${r.stdout}\n      ${r.stderr}`);
+    assert(r.status === 0, `tdoc-pull exited ${r.status}: ${r.stderr}`);
+
+    const merged = JSON.parse(fs.readFileSync(path.join(doc, 'comments.json'), 'utf8'));
+    assert(merged.length === 2, `expected 2 merged comments, got ${merged.length}`);
+    assert(merged[0].text === 'from worker', 'the worker copy must win on a shared id');
+    assert(merged.some((c) => c.id === 'local-only'), 'the local-only comment was dropped');
+    assert(fs.existsSync(path.join(doc, 'comments.json.bak')), 'no backup was written');
+    assert(/Pulled 2 comments/.test(r.stdout), `wrong count reported: ${r.stdout}`);
+    assert(/Merged 1 local-only/.test(r.stdout), `merge not reported: ${r.stdout}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-pull refuses to clobber comments.json when the worker misbehaves', () => {
+  // The array check is the guard that keeps a 500 or an HTML error page from
+  // wiping local comments. It has to survive the move off jq.
+  const port = 9150 + Math.floor(Math.random() * 200);
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{s.statusCode=500;s.end('<html>bad gateway</html>');})` +
+    `.listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  const home = hostedHome(port);
+  try {
+    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
+    const binDir = jqFreePath(home);
+    const doc = path.join(home, 'tdocs', 'pull-doc');
+    fs.mkdirSync(doc, { recursive: true });
+    const original = JSON.stringify([{ id: 'keep-me', text: 'precious', version: 1 }]);
+    fs.writeFileSync(path.join(doc, 'comments.json'), original);
+
+    const r = spawnSync(path.join(BIN, 'tdoc-pull'), ['pull-doc'], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_DIR: path.join(home, 'tdocs'),
+             TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(noJq(r), `tdoc-pull still needs jq:\n      ${r.stderr}`);
+    assert(r.status !== 0, 'a non-array response must fail, not succeed');
+    assert(fs.readFileSync(path.join(doc, 'comments.json'), 'utf8') === original,
+      'local comments were clobbered by a bad worker response');
+    // The file surviving is not enough. Node's own JSON.parse would also throw
+    // on this input, so the file is safe either way — what the array guard buys
+    // is that the user reads a sentence instead of a stack trace, and sees the
+    // start of the response that confused it. Assert the sentence.
+    assert(/did not return a comment array/.test(r.stderr),
+      `no plain-language explanation:\n      ${r.stderr.trim()}`);
+    assert(/bad gateway/.test(r.stderr),
+      `the worker's actual response was not shown:\n      ${r.stderr.trim()}`);
+    assert(!/at JSON\.parse|node:internal/.test(r.stderr),
+      `a node stack trace reached the user:\n      ${r.stderr.trim()}`);
+    assert(!fs.existsSync(path.join(doc, 'comments.json.bak')),
+      'a bad response should not leave a spurious .bak behind');
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-agent-reply posts with no jq on PATH, and builds the payload right', () => {
+  const port = 9400 + Math.floor(Math.random() * 200);
+  const stub = startStubWorker(port, { comments: [] });
+  const home = hostedHome(port);
+  try {
+    const binDir = jqFreePath(home);
+    // Quotes and non-ASCII in the reply text: hand-rolled JSON is where this
+    // kind of port usually breaks, and replies are written in the user's own
+    // language, so non-ASCII is the normal case rather than the edge one.
+    const text = 'Rewrote the "intro" — 已改成中文.';
+    const r = spawnSync(path.join(BIN, 'tdoc-agent-reply'), [
+      '--slug', 'reply-doc', '--parent', 'c1', '--text', text,
+      '--status', 'applied', '--applied-in', '2',
+    ], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(noJq(r), `tdoc-agent-reply still needs jq:\n      ${r.stdout}\n      ${r.stderr}`);
+    assert(r.status === 0, `agent-reply exited ${r.status}: ${r.stderr}`);
+
+    const echoed = JSON.parse(r.stdout).echo;
+    assert(echoed.slug === 'reply-doc' && echoed.parent_id === 'c1', 'wrong identifiers');
+    assert(echoed.text === text, `text was mangled: ${echoed.text}`);
+    assert(echoed.status === 'applied', 'status was dropped');
+    assert(echoed.applied_in === 2,
+      `applied_in must be a number, got ${JSON.stringify(echoed.applied_in)}`);
+    assert(typeof echoed.agent_login === 'string', 'agent_login must always be present');
+    assert(!('agent_avatar_url' in echoed), 'an empty avatar must be omitted, not sent as ""');
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-agent-reply still reports a 200-with-error as a failure', () => {
+  // The worker rejects some replies with a 200 body carrying {"error": ...}.
+  // Without this check a rejected reply is indistinguishable from a posted one,
+  // which is how comments silently go unanswered.
+  const port = 9650 + Math.floor(Math.random() * 200);
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{s.setHeader('content-type','application/json');` +
+    `s.end(JSON.stringify({error:'parent_not_found'}));}).listen(${port},'127.0.0.1');`],
+    { stdio: 'ignore' });
+  const home = hostedHome(port);
+  try {
+    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
+    const binDir = jqFreePath(home);
+    const r = spawnSync(path.join(BIN, 'tdoc-agent-reply'), [
+      '--slug', 'reply-doc', '--parent', 'missing', '--text', 'hi',
+    ], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(noJq(r), `tdoc-agent-reply still needs jq:\n      ${r.stderr}`);
+    assert(r.status !== 0, 'a 200-with-error must exit non-zero');
+    assert(/parent_not_found/.test(r.stderr),
+      `the worker's reason should reach the user: ${r.stderr}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-unpublish works with no jq on PATH', () => {
+  const port = 9900 + Math.floor(Math.random() * 90);
+  const stub = startStubWorker(port, { comments: [] });
+  const home = hostedHome(port);
+  try {
+    const binDir = jqFreePath(home);
+    const r = spawnSync(path.join(BIN, 'tdoc-unpublish'), ['gone-doc'], {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(noJq(r), `tdoc-unpublish still needs jq:\n      ${r.stdout}\n      ${r.stderr}`);
+    assert(r.status === 0, `unpublish exited ${r.status}: ${r.stderr}`);
+    assert(/Unpublished gone-doc/.test(r.stdout), `no confirmation: ${r.stdout}`);
+    assert(/"deleted": 3/.test(r.stdout), `the worker response was not printed: ${r.stdout}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('the hosted-capable scripts call jq nowhere at all (#276)', () => {
+  // tdoc-publish has genuine self-host regions, so its guard has to reason
+  // about ranges. These three have no self-host-only work in them: every line
+  // runs on hosted, so the correct budget is zero. A range-based guard would
+  // be the same mistake that let #272 through.
+  for (const f of ['tdoc-pull', 'tdoc-agent-reply', 'tdoc-unpublish']) {
+    const lines = readBin(f).split('\n');
+    const stray = [];
+    lines.forEach((l, i) => {
+      if (!/\bjq\b/.test(l)) return;
+      if (l.trim().startsWith('#')) return;   // prose about jq is fine
+      stray.push(`line ${i + 1}: ${l.trim().slice(0, 80)}`);
+    });
+    assert(stray.length === 0, `${f} reaches for jq:\n      ${stray.join('\n      ')}`);
+  }
+});
+
+t('the shared JSON helpers are sourced, not re-implemented per script', () => {
+  // The defect #276 names is not any one jq call, it is that each script grew
+  // its own config reader. Keep them on one implementation so the next fix
+  // lands once.
+  const lib = fs.readFileSync(path.join(BIN, 'lib', 'json.sh'), 'utf8');
+  for (const fn of ['json_get', 'json_file_get', 'json_str', 'json_is_array',
+                    'json_file_is_array', 'json_file_len', 'json_pretty', 'json_error']) {
+    assert(new RegExp(`^${fn}\\(\\) \\{`, 'm').test(lib), `lib/json.sh lost ${fn}`);
+  }
+  assert(!/\bjq\b/.test(lib.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n')),
+    'lib/json.sh must not shell out to jq');
+
+  for (const f of ['tdoc-pull', 'tdoc-agent-reply', 'tdoc-unpublish']) {
+    const src = readBin(f);
+    assert(/^\. "\$TDOC_BIN_DIR\/lib\/json\.sh"$/m.test(src),
+      `${f} does not source the shared helpers`);
+    assert(/^TDOC_BIN_DIR="\$\(cd "\$\(dirname "\$0"\)" && pwd\)"$/m.test(src),
+      `${f} does not resolve its own bin dir before sourcing`);
+  }
+});
+
+t('lib/json.sh survives the inputs that actually show up', () => {
+  const lib = path.join(BIN, 'lib', 'json.sh');
+  const run = (script, input) => spawnSync('bash', ['-c', `. "${lib}"; ${script}`],
+    { input: input ?? '', encoding: 'utf8', timeout: 20000 });
+
+  // A missing key, a null, and unparseable input all have to read as empty —
+  // that is what the `// empty` jq filters they replaced did, and the callers
+  // test the result with [ -z ].
+  assert(run('json_get a.b', '{"a":{"b":"x"}}').stdout === 'x', 'nested read failed');
+  assert(run('json_get a.b', '{"a":{}}').stdout === '', 'missing key must read empty');
+  assert(run('json_get a', '{"a":null}').stdout === '', 'null must read empty');
+  assert(run('json_get a', 'not json').stdout === '', 'garbage must read empty, not crash');
+  assert(run('json_get a', 'not json').status === 0, 'garbage must not fail the caller');
+  assert(run('json_get a.b', '{"a":"scalar"}').stdout === '',
+    'descending into a scalar must read empty');
+
+  // Numbers and booleans come back as their text, since config values land in
+  // shell variables either way.
+  assert(run('json_get n', '{"n":42}').stdout === '42', 'numbers must stringify');
+  assert(run('json_get b', '{"b":false}').stdout === 'false', 'false must not read as empty');
+
+  assert(run('json_str \'a "b" 中\'').stdout === '"a \\"b\\" 中"', 'json_str mis-encodes');
+  assert(run('json_is_array', '[]').status === 0, '[] is an array');
+  assert(run('json_is_array', '{}').status !== 0, '{} is not an array');
+  assert(run('json_is_array', '<html>').status !== 0, 'an error page is not an array');
+  assert(run('json_error', '{"error":"nope"}').stdout === 'nope', 'json_error missed .error');
+  assert(run('json_error', '{"ok":true}').status !== 0, 'json_error fired without an error');
+  assert(run('json_error', '[{"error":"x"}]').status !== 0, 'an array is not an error object');
+  // An error page must reach the user rather than being swallowed as invalid.
+  assert(run('json_pretty', '<html>500</html>').stdout === '<html>500</html>',
+    'json_pretty ate a non-JSON body');
+});
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

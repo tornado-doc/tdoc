@@ -19,7 +19,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const SKILL_DIR = path.join(os.homedir(), '.claude/skills/tdoc');
+// Resolve from the checkout under test, NOT ~/.claude/skills/tdoc — otherwise
+// this suite silently probes whatever build happens to be installed and a
+// broken working tree still goes green.
+const SKILL_DIR = path.join(__dirname, '..');
 const DOCTOR = path.join(SKILL_DIR, 'bin/tdoc-doctor');
 
 let pass = 0, fail = 0;
@@ -28,7 +31,9 @@ function bad(name, err) { console.log(`  ✗ ${name}\n    ${err}`); fail++; }
 async function t(name, fn) { try { await fn(); ok(name); } catch (e) { bad(name, e.message); } }
 
 function runDoctor(envOverrides = {}) {
-  const env = { ...process.env, ...envOverrides };
+  // TDOC_PLATFORM is inherited from the caller's shell otherwise, which would
+  // silently retarget every scenario.
+  const env = { ...process.env, TDOC_PLATFORM: '', ...envOverrides };
   const out = execFileSync(DOCTOR, [], { env, encoding: 'utf8' });
   return JSON.parse(out);
 }
@@ -40,23 +45,42 @@ function getStep(report, id) {
 (async () => {
   console.log('--- Mocked onboarding scenarios ---');
 
-  await t('Scenario A: no wrangler installed → missing_steps starts with wrangler', () => {
-    const r = runDoctor({ TDOC_MOCK_NO_WRANGLER: '1' });
+  await t('Scenario A [cloudflare]: no wrangler installed → missing_steps starts with wrangler', () => {
+    const r = runDoctor({ TDOC_PLATFORM: 'cloudflare', TDOC_MOCK_NO_WRANGLER: '1' });
     if (r.deps.wrangler.ok) throw new Error('wrangler should be mocked-missing');
     if (r.ready_to_publish) throw new Error('cannot be ready without wrangler');
     if (!getStep(r, 'wrangler')) throw new Error('missing_steps should include id:wrangler');
     if (r.missing_steps[0].id !== 'wrangler') throw new Error(`expected wrangler first, got ${r.missing_steps[0].id}`);
   });
 
-  await t('Scenario B: no jq → reports jq missing', () => {
-    const r = runDoctor({ TDOC_MOCK_NO_JQ: '1' });
-    // jq missing → JSON falls through to the minimal-emission path
+  await t('Scenario B [cloudflare]: no jq → reports jq missing', () => {
+    const r = runDoctor({ TDOC_PLATFORM: 'cloudflare', TDOC_MOCK_NO_JQ: '1' });
     if (r.deps.jq.ok) throw new Error('jq should be mocked-missing');
     if (!r.missing_steps.find(s => s.id === 'jq')) throw new Error('jq step missing');
   });
 
-  await t('Scenario C: wrangler OK but no R2 → R2 step appears with click URL', () => {
-    const r = runDoctor({ TDOC_MOCK_NO_R2: '1' });
+  await t('Scenario B2 [hosted]: no jq → still ready, and jq is not demanded', () => {
+    // The hosted publish path dropped jq in #256/#272. The doctor kept asking
+    // for it, and — worse — could not emit its report without it, so it fell
+    // back to a hardcoded "not ready, install jq". That is the one machine
+    // whose checklist has to be right, and it was wrong.
+    const r = runDoctor({ TDOC_MOCK_NO_JQ: '1', TDOC_MOCK_NOT_PUBLISHED: '1' });
+    if (r.target !== 'hosted') throw new Error(`expected hosted, got ${r.target}`);
+    if (r.deps.jq.ok) throw new Error('jq should be mocked-missing');
+    if (r.missing_steps.find(s => s.id === 'jq')) {
+      throw new Error('hosted must not ask a user to install jq');
+    }
+    if (!r.ready_to_publish) {
+      throw new Error(`hosted must be ready without jq; steps=[${r.missing_steps.map(s => s.id).join(',')}]`);
+    }
+    // And the report must still be a real report, not a fallback stub.
+    if (!r.deps.curl || !r.cloudflare || !r.update) {
+      throw new Error('the report degraded to a minimal fallback without jq');
+    }
+  });
+
+  await t('Scenario C [cloudflare]: wrangler OK but no R2 → R2 step appears with click URL', () => {
+    const r = runDoctor({ TDOC_PLATFORM: 'cloudflare', TDOC_MOCK_NO_R2: '1' });
     if (r.cloudflare.r2_enabled) throw new Error('R2 should be mocked-disabled');
     const step = getStep(r, 'cf_r2');
     if (!step) throw new Error('cf_r2 step missing');
@@ -64,8 +88,8 @@ function getStep(report, id) {
     if (!step.cmd.startsWith('https://dash.cloudflare.com/')) throw new Error(`expected dashboard URL, got "${step.cmd}"`);
   });
 
-  await t('Scenario D: subdomain not claimed → step with onboarding URL', () => {
-    const r = runDoctor({ TDOC_MOCK_NO_SUBDOMAIN: '1' });
+  await t('Scenario D [cloudflare]: subdomain not claimed → step with onboarding URL', () => {
+    const r = runDoctor({ TDOC_PLATFORM: 'cloudflare', TDOC_MOCK_NO_SUBDOMAIN: '1' });
     if (r.cloudflare.subdomain.ok) throw new Error('subdomain should be mocked-unclaimed');
     const step = getStep(r, 'cf_subdomain');
     if (!step) throw new Error('cf_subdomain step missing');
@@ -73,8 +97,8 @@ function getStep(report, id) {
     if (!step.cmd.includes('/workers-and-pages')) throw new Error(`expected workers-and-pages URL, got "${step.cmd}"`);
   });
 
-  await t('Scenario E: not logged into Cloudflare → cf_login step (login kind)', () => {
-    const r = runDoctor({ TDOC_MOCK_NO_CF_LOGIN: '1' });
+  await t('Scenario E [cloudflare]: not logged into Cloudflare → cf_login step (login kind)', () => {
+    const r = runDoctor({ TDOC_PLATFORM: 'cloudflare', TDOC_MOCK_NO_CF_LOGIN: '1' });
     if (r.cloudflare.logged_in) throw new Error('cf should be mocked-logged-out');
     const step = getStep(r, 'cf_login');
     if (!step) throw new Error('cf_login step missing');
@@ -82,8 +106,8 @@ function getStep(report, id) {
     if (step.cmd !== 'wrangler login') throw new Error(`expected 'wrangler login', got "${step.cmd}"`);
   });
 
-  await t('Scenario E2: logged in but token unreadable → cf_token step, publish_token_ok false, not ready', () => {
-    const r = runDoctor({ TDOC_MOCK_NO_PUBLISH_TOKEN: '1' });
+  await t('Scenario E2 [cloudflare]: logged in but token unreadable → cf_token step, publish_token_ok false, not ready', () => {
+    const r = runDoctor({ TDOC_PLATFORM: 'cloudflare', TDOC_MOCK_NO_PUBLISH_TOKEN: '1' });
     // The token read happens only inside the "wrangler whoami succeeds" block,
     // so this scenario can only exercise the real elif branch when the host is
     // actually logged into Cloudflare. On a logged-out box (typical CI), the
@@ -117,8 +141,9 @@ function getStep(report, id) {
     }
   });
 
-  await t('Scenario G: everything missing → ordered list, install first, click last', () => {
+  await t('Scenario G [cloudflare]: everything missing → ordered list, install first, click last', () => {
     const r = runDoctor({
+      TDOC_PLATFORM: 'cloudflare',
       TDOC_MOCK_NO_WRANGLER: '1',
       TDOC_MOCK_NO_JQ: '1',
       TDOC_MOCK_NO_CF_LOGIN: '1',
@@ -129,6 +154,69 @@ function getStep(report, id) {
     // jq missing falls through to the simple emission path so structure differs.
     const ids = r.missing_steps.map(s => s.id);
     if (!ids.includes('jq')) throw new Error(`expected jq, got [${ids.join(',')}]`);
+  });
+
+  console.log('\n--- Hosted target (#236) ---');
+
+  await t('H1: hosted is the default target when nothing says otherwise', () => {
+    const r = runDoctor({ TDOC_MOCK_NOT_PUBLISHED: '1' });
+    if (r.target !== 'hosted') throw new Error(`expected target hosted, got ${r.target}`);
+  });
+
+  await t('H2: a machine with no Cloudflare tooling at all is READY for hosted', () => {
+    // The bug: this exact machine was told to install wrangler, log into
+    // Cloudflare, claim a subdomain and enable R2 — none of which hosted needs.
+    const r = runDoctor({
+      TDOC_MOCK_NOT_PUBLISHED: '1',
+      TDOC_MOCK_NO_WRANGLER: '1',
+      TDOC_MOCK_NO_CF_LOGIN: '1',
+      TDOC_MOCK_NO_SUBDOMAIN: '1',
+      TDOC_MOCK_NO_R2: '1',
+    });
+    if (!r.ready_to_publish) {
+      throw new Error(`hosted must be ready without Cloudflare; steps=[${r.missing_steps.map(s => s.id).join(',')}]`);
+    }
+    for (const id of ['wrangler', 'cf_login', 'cf_subdomain', 'cf_r2', 'cf_token']) {
+      if (getStep(r, id)) throw new Error(`hosted must never ask for "${id}"`);
+    }
+  });
+
+  await t('H3: hosted still reports the deps it genuinely needs', () => {
+    for (const [mock, id] of [['TDOC_MOCK_NO_NODE', 'node'], ['TDOC_MOCK_NO_CURL', 'curl']]) {
+      const r = runDoctor({ TDOC_MOCK_NOT_PUBLISHED: '1', [mock]: '1' });
+      if (r.ready_to_publish) throw new Error(`hosted cannot be ready without ${id}`);
+      if (!getStep(r, id)) throw new Error(`expected a "${id}" step`);
+    }
+  });
+
+  await t('H4: target resolves flag > env > published.json, and the read is jq-free', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-doctor-target-'));
+    const cfg = path.join(dir, 'published.json');
+    try {
+      fs.writeFileSync(cfg, JSON.stringify({ platform: 'cloudflare', subdomain: 'a', worker: 'tdoc' }));
+      const fromCfg = runDoctor({ TDOC_CONFIG_FILE: cfg });
+      if (fromCfg.target !== 'cloudflare') throw new Error(`config should select cloudflare, got ${fromCfg.target}`);
+
+      // jq is what the doctor reports on, so resolving the target must not need it.
+      const noJq = runDoctor({ TDOC_CONFIG_FILE: cfg, TDOC_MOCK_NO_JQ: '1' });
+      if (noJq.target !== 'cloudflare') throw new Error(`target must resolve without jq, got ${noJq.target}`);
+
+      const fromEnv = runDoctor({ TDOC_CONFIG_FILE: cfg, TDOC_PLATFORM: 'hosted' });
+      if (fromEnv.target !== 'hosted') throw new Error(`env should beat config, got ${fromEnv.target}`);
+
+      const out = execFileSync(DOCTOR, ['--platform', 'vercel'], {
+        env: { ...process.env, TDOC_CONFIG_FILE: cfg, TDOC_PLATFORM: 'hosted' }, encoding: 'utf8',
+      });
+      const fromFlag = JSON.parse(out);
+      if (fromFlag.target !== 'vercel') throw new Error(`flag should beat env, got ${fromFlag.target}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await t('H5: an unknown platform falls back to hosted rather than guessing', () => {
+    const r = runDoctor({ TDOC_MOCK_NOT_PUBLISHED: '1', TDOC_PLATFORM: 'nonsense' });
+    if (r.target !== 'hosted') throw new Error(`expected fallback to hosted, got ${r.target}`);
   });
 
   console.log('\n--- Help text on tdoc-update ---');

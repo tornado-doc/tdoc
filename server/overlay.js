@@ -421,11 +421,17 @@
   .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
 
   /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
-  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; }
+  /* justify-content is required: the generic .tdoc-bar button rule supplies
+     display:inline-flex + align-items:center but no horizontal centring, so a
+     24px mark in a 32px padding-0 box sits flush left and the hover highlight
+     lands 8px off to the right of the drawing. */
+  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; justify-content: center; }
   .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
-  .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; color: #555; }
+  .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; }
   .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
   .tdoc-bar .tdoc-github-btn svg { display: block; }
+  .tdoc-bar .tdoc-gh-stars { display: inline-flex; align-items: center; gap: 3px; color: #444; }
+  .tdoc-bar .tdoc-gh-stars svg { display: block; }
 
   /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
   .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -456,11 +462,27 @@
   .tdoc-menu button, .tdoc-secondary-menu button, .tdoc-version-menu button { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 4px; color: #1a1a1a; font: 13px system-ui, sans-serif; }
   .tdoc-version-menu button { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
   .tdoc-menu button:hover, .tdoc-secondary-menu button:hover, .tdoc-version-menu button:hover { background: #f0f1f4; }
+  .tdoc-secondary-menu button.tdoc-sec-danger { color: var(--td-danger); }
+  .tdoc-secondary-menu button.tdoc-sec-danger:hover { background: var(--td-danger); color: #fff; }
   .tdoc-version-menu button.current { color: var(--td-accent); font-weight: 600; }
 
+  /* Version switcher folded into the ⋯ overflow menu. The inline version chip
+     is hidden at <700px (phones), so surface the same list here — otherwise
+     there is no way to switch versions on a phone. Shown only at that width;
+     wider layouts keep the inline chip. */
+  .tdoc-secondary-menu .tdoc-sec-versions { display: none; }
+  @media (max-width: 700px) { .tdoc-secondary-menu .tdoc-sec-versions { display: block; } }
+  .tdoc-secondary-menu .tdoc-sec-label { padding: 6px 10px 2px; font: 600 11px system-ui, sans-serif; color: #8a8a8a; text-transform: uppercase; letter-spacing: .04em; }
+  .tdoc-secondary-menu .tdoc-sec-version { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .tdoc-secondary-menu .tdoc-sec-version.current { color: var(--td-accent); font-weight: 600; }
+  .tdoc-secondary-menu .tdoc-sec-sep { border-top: 1px solid #eee; margin: 4px 6px; }
+
   .tdoc-menu-wrap { position: relative; display: inline-block; }
-  /* Overflow ⋯ button shows on narrow viewports. */
-  .tdoc-bar .tdoc-secondary-toggle { display: none; padding: 6px 10px; }
+  /* ⋯ overflow is the single home for secondary actions (Copy / Duplicate /
+     Download) at every width. Their inline bar buttons stay in the DOM for the
+     #146 chrome contract but never render — the ⋯ menu drives them. */
+  .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; padding: 6px 10px; }
+  .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
   /* Identity chip — avatar + name (name hides on narrow). */
   .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; position: relative; }
   .tdoc-chip:hover { background: #e5e6ea; }
@@ -757,6 +779,34 @@
   .tdoc-modal .manage-action.danger-btn:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
   .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
+  /* Allowed-users token field: chips (avatar + login + remove) plus a live
+     GitHub handle autocomplete. Candidate search and avatar validation hit
+     GitHub straight from the owner's browser (their IP, their ~10 req/min
+     budget) — no server proxy, no API key. The doc CSP (worker cspHeader)
+     restricts only script/object/base-uri, so these fetches + <img>s pass. */
+  .tdoc-token-field { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid #ccc; border-radius: 6px; padding: 6px; box-sizing: border-box; cursor: text; }
+  .tdoc-token-field.focus { border-color: var(--td-accent); }
+  .tdoc-token-field input[type="text"] { flex: 1 1 120px; min-width: 90px; width: auto; border: none; padding: 3px 4px; }
+  .tdoc-token-field input[type="text"]:focus { border: none; outline: none; }
+  .tdoc-token { display: inline-flex; align-items: center; gap: 6px; background: #f2f4f7; border: 1px solid #e2e6ea; border-radius: 999px; padding: 2px 4px 2px 2px; font-size: 13px; line-height: 1.4; }
+  .tdoc-token.invalid { background: #fdeceb; border-color: #f1b8b2; color: var(--td-danger); }
+  .tdoc-token img, .tdoc-token .mark { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
+  .tdoc-token .mark { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; background: #f1b8b2; color: #fff; }
+  .tdoc-token .rm { cursor: pointer; color: #999; font-size: 15px; padding: 0 3px; }
+  .tdoc-token .rm:hover { color: var(--td-danger); }
+  .tdoc-ac { position: relative; }
+  .tdoc-ac-list { position: absolute; left: 0; right: 0; top: 2px; z-index: 10; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
+  .tdoc-ac-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; }
+  .tdoc-ac-item:hover, .tdoc-ac-item.active { background: #f2f4f7; }
+  .tdoc-ac-item img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
+  .tdoc-ac-item .login { font-size: 13px; font-weight: 600; color: #222; }
+  /* Simplified Share panel: one plain-language access dropdown, an Advanced
+     disclosure for the secondary axes, and a de-emphasised danger row. */
+  .tdoc-modal .tdoc-select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 10px; font: inherit; color: inherit; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
+  .tdoc-modal .tdoc-select:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-modal .tdoc-adv { margin: 16px 0 0; border-top: 1px solid #eee; padding-top: 6px; }
+  .tdoc-modal .tdoc-adv > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #555; padding: 6px 0; }
+  .tdoc-modal .tdoc-adv > summary:hover { color: #222; }
 
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
@@ -771,23 +821,31 @@
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
-    .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
-    .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   }
   @media (max-width: 700px) {
     .tdoc-bar { padding: 0 8px; gap: 4px; }
     .tdoc-version-wrap { display: none; }
     .tdoc-bar .doc-title { font-size: 13px; }
-    .tdoc-bar #tdoc-copy-md-btn span { display: none; }
-    .tdoc-bar #tdoc-publish-btn span, .tdoc-bar #tdoc-share-btn span { display: inline; }
+    /* Small screens: the primary CTA collapses to just its icon (label is kept
+       in title/aria-label). Keeps the phone bar to a compact icon + ⋯. */
+    .tdoc-bar #tdoc-publish-btn span, .tdoc-bar #tdoc-share-btn span { display: none; }
+    .tdoc-bar #tdoc-publish-btn, .tdoc-bar #tdoc-share-btn { padding: 7px 9px; }
   }
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow .tdoc-bar #tdoc-duplicate-btn, body.tdoc-narrow .tdoc-bar #tdoc-download-wrap, body.tdoc-narrow .tdoc-bar #tdoc-saveas-btn { display: none; }
-  body.tdoc-narrow .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; }
   body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
+  /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
+     tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
+     plain body text, so the document-level "close on outside click" never fires
+     there — but a real element with its own listener does. It also dims the doc
+     so the "tap anywhere out here to close" affordance is visible without a drag.
+     Sibling combinator keeps visibility purely CSS-driven off the drawer's
+     .open class, so every open/close path (fab, handle, drag, resize) stays in
+     sync with no extra JS. */
+  #tdoc-drawer-scrim { display: none; }
+  body.tdoc-narrow #tdoc-comment-layer.open ~ #tdoc-drawer-scrim { display: block; position: fixed; inset: 0; z-index: 999997; background: rgba(0,0,0,0.28); -webkit-tap-highlight-color: transparent; }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle { display: block; width: 36px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 12px; cursor: grab; touch-action: none; user-select: none; }
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
@@ -845,9 +903,10 @@
      they look like negatives, but a chart or a simulation drawn in ink on a
      white field should go dark with everything else — otherwise it sits in a
      dark page as a glowing white slab. */
-  /* The site mark is a black-on-white PNG. Let it invert with the page
-     instead of restoring, or it becomes a white tile on the dark bar. */
-  html[data-tdoc-theme="dark"] .tdoc-bar-mark img { filter: none; }
+  /* The site mark keeps its white field in dark mode. It is ink on an opaque
+     white field, so it is restored like a photograph by the rule above rather
+     than inverted with the page: inverting turned the field black, which is the
+     bar's own dark colour, and the drawing read as a see-through outline. */
   /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
      them in .tdoc-emoji so they get the same restore as photos. */
   .tdoc-emoji { display: inline-block; line-height: 1; }
@@ -940,19 +999,8 @@
     </div>
     <span class="doc-title" id="tdoc-title">tdoc</span>`}`;
 
-  // Right: copy menu + primary CTA (Share or Publish) + ⋯ overflow + identity.
-  const copyMenuHtml = `
-    <div class="tdoc-menu-wrap">
-      <button id="tdoc-copy-md-btn" title="Copy as Markdown" aria-label="Copy as Markdown">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        <span>Copy</span>
-      </button>
-      <div class="tdoc-menu" id="tdoc-copy-md-menu">
-        <button data-mode="doc">Doc only</button>
-        <button data-mode="doc-comments">Doc + comments</button>
-      </div>
-    </div>`;
-
+  // Right: primary CTA (Share or Publish) + ⋯ overflow + identity. Copy /
+  // Duplicate / Download all live inside the ⋯ menu now — see rightHtml.
   const primaryCtaHtml = isFork ? '' : (isPublished
     ? `<button id="tdoc-share-btn" class="primary" title="Share" aria-label="Share">
          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -982,22 +1030,30 @@
       <svg class="tdoc-theme-icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
     </button>`;
 
+  const ghStars = (typeof cfg.stars === 'number' && cfg.stars >= 0) ? cfg.stars : null;
+  const ghStarText = ghStars === null ? '' : (ghStars >= 1000 ? (ghStars / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(ghStars));
   const githubBtnHtml = `
-    <a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="tdoc on GitHub" aria-label="tdoc on GitHub">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    <a class="tdoc-github-btn" id="tdoc-github-btn" href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener" title="${ghStars === null ? 'tdoc on GitHub' : ghStars + ' stars on GitHub'}" aria-label="tdoc on GitHub">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>${ghStarText ? `<span class="tdoc-gh-stars"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>${ghStarText}</span>` : ''}
     </a>`;
 
   const rightHtml = `
     ${cfg.isLanding ? githubBtnHtml : ''}
     ${themeBtnHtml}
-    ${isSiteBar ? '' : copyMenuHtml}
     ${isSiteBar ? '' : forkBtnHtml}
     ${isSiteBar ? '' : primaryCtaHtml}
-    ${!isSiteBar && (isPublished || isFork) ? `<div class="tdoc-menu-wrap">
+    ${!isSiteBar ? `<div class="tdoc-menu-wrap">
       <button class="tdoc-secondary-toggle" id="tdoc-more-btn" aria-label="More" title="More">⋯</button>
       <div class="tdoc-secondary-menu" id="tdoc-secondary-menu">
+        ${versions.length > 1 ? `<div class="tdoc-sec-versions" role="group" aria-label="Version">
+          <div class="tdoc-sec-label">Version</div>
+          ${versions.map(v => `<button role="option" data-version="${v.n}" class="tdoc-sec-version${v.n === version ? ' current' : ''}">v${v.n}${v.n === version ? ' · current' : ''}</button>`).join('')}
+          <div class="tdoc-sec-sep"></div>
+        </div>` : ''}
+        <button data-action="copy">Copy as Markdown</button>
         ${isPublished ? '<button data-action="duplicate">Duplicate</button><button data-action="download">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
         ${isFork ? '<button data-action="saveas">Download HTML</button><button data-action="download-pdf">Download PDF</button>' : ''}
+        ${cfg.ownerManage ? '<div class="tdoc-sec-sep"></div><button data-action="delete" class="tdoc-sec-danger">Delete doc…</button>' : ''}
       </div>
     </div>` : ''}
     <span id="tdoc-identity-slot"></span>`;
@@ -1201,7 +1257,6 @@
       e.stopPropagation();
       const open = dlMenu.classList.toggle('open');
       dlBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      if (copyMenu) copyMenu.classList.remove('open');
     };
     dlMenu.querySelectorAll('button').forEach((b) => {
       b.onclick = (e) => {
@@ -1235,24 +1290,6 @@
     });
   }
 
-  const copyBtn = document.getElementById('tdoc-copy-md-btn');
-  const copyMenu = document.getElementById('tdoc-copy-md-menu');
-  if (copyBtn && copyMenu) {
-    copyBtn.onclick = (e) => {
-      e.stopPropagation();
-      copyMenu.classList.toggle('open');
-      if (dlMenu) dlMenu.classList.remove('open');
-      if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
-    };
-    copyMenu.querySelectorAll('button').forEach(b => {
-      b.onclick = async (e) => {
-        e.stopPropagation();
-        copyMenu.classList.remove('open');
-        await window.__tdocCopyDocMd(b.dataset.mode === 'doc-comments');
-      };
-    });
-  }
-
   const moreBtn = document.getElementById('tdoc-more-btn');
   const secMenu = document.getElementById('tdoc-secondary-menu');
   if (moreBtn && secMenu) {
@@ -1261,9 +1298,17 @@
       b.onclick = (e) => {
         e.stopPropagation();
         secMenu.classList.remove('open');
+        // Version rows (folded in from the inline chip on phones) navigate.
+        if (b.dataset.version != null) {
+          const vn = Number(b.dataset.version);
+          if (Number.isFinite(vn) && vn !== version) location.href = `/d/${encodeURIComponent(slug)}/v/${vn}`;
+          return;
+        }
+        if (b.dataset.action === 'copy') window.__tdocCopyDocMd(false);
         if (b.dataset.action === 'duplicate') duplicateDoc();
         if (b.dataset.action === 'download' || b.dataset.action === 'saveas') downloadExport();
         if (b.dataset.action === 'download-pdf') startDownload('pdf');
+        if (b.dataset.action === 'delete') confirmDeleteDoc();
       };
     });
   }
@@ -1609,6 +1654,17 @@
   fab.innerHTML = '💬 <span id="tdoc-fab-count">0</span>';
   fab.onclick = (e) => { e.stopPropagation(); commentLayer.classList.toggle('open'); };
   document.body.appendChild(fab);
+
+  // Backdrop scrim for the mobile drawer: tap it to dismiss. Appended after the
+  // comment layer so the CSS sibling combinator above can show/hide it purely
+  // off the drawer's .open class. touchstart closes immediately (and blocks the
+  // synthesized click/scroll); a click handler covers desktop-narrow pointers.
+  const drawerScrim = document.createElement('div');
+  drawerScrim.id = 'tdoc-drawer-scrim';
+  const closeDrawer = () => commentLayer.classList.remove('open');
+  drawerScrim.addEventListener('click', closeDrawer);
+  drawerScrim.addEventListener('touchstart', (e) => { e.preventDefault(); closeDrawer(); }, { passive: false });
+  document.body.appendChild(drawerScrim);
 
   // Drawer drag-to-close
   drawerHandle.onclick = (e) => { e.stopPropagation(); commentLayer.classList.remove('open'); };
@@ -3164,7 +3220,25 @@
     }
     return r.json().catch(() => ({}));
   }
-  const VIS_OPTIONS = [['public', 'Public'], ['unlisted', 'Unlisted'], ['private', 'Private']];
+  // Delete is a lifecycle action, not a sharing setting, so it lives in the ⋯
+  // overflow menu (owner-only), not the Share panel. Same session-authorized
+  // DELETE + confirm the Share panel used to run.
+  function confirmDeleteDoc() {
+    const om = cfg.ownerManage;
+    if (!om) return; // owner-only; the ⋯ item is gated on cfg.ownerManage too
+    const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+    showManageConfirm({
+      title: 'Delete this doc?',
+      body: `This permanently removes <b>${escapeHtml(slug)}</b> — all <b>${plural(om.versionCount, 'version')}</b> and <b>${plural(om.commentCount, 'comment')}</b> are deleted. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+      onConfirm: async (status) => {
+        await ownerFetch(`/api/doc?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
+        status.textContent = 'Deleted. Redirecting…';
+        setTimeout(() => { window.location.href = '/'; }, 900);
+      },
+    });
+  }
   const HISTORY_OPTIONS = [['owner', 'Owner only'], ['invited', 'Invited'], ['public', 'Everyone']];
   const COMMENTING_OPTIONS = [['signed_in', 'Signed in'], ['invited', 'Invited'], ['owner', 'Owner only'], ['off', 'Off']];
   function renderSeg(id, current) {
@@ -3194,43 +3268,75 @@
         </div>
         <p class="muted">${escapeHtml(slug)} · ${plural(om.versionCount, 'version')} · ${plural(om.commentCount, 'comment')}</p>
         <div class="manage-section">
-          <label class="field">Visibility</label>
-          <div class="tdoc-seg" id="tdoc-vis-seg">
-            ${VIS_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+          <label class="field" for="tdoc-access-sel">Who has access</label>
+          <select id="tdoc-access-sel" class="tdoc-select">
+            <option value="private">Only people I invite</option>
+            <option value="unlisted">Anyone with the link</option>
+          </select>
+          <p class="manage-hint" id="tdoc-access-explain">&nbsp;</p>
+          <div id="tdoc-invited-wrap" style="display:none;margin-top:10px;">
+            <label class="field" for="tdoc-mgmt-allowed">Invite by GitHub username</label>
+            <div class="tdoc-token-field" id="tdoc-allowed-field">
+              <input type="text" id="tdoc-mgmt-allowed" autocomplete="off" spellcheck="false" placeholder="Add a GitHub username…">
+            </div>
+            <div class="tdoc-ac" id="tdoc-allowed-ac"></div>
+            <p class="manage-hint" id="tdoc-allowed-status">&nbsp;</p>
+          </div>
+        </div>
+        <details class="tdoc-adv"${(access.commenting !== 'signed_in' || access.history_visibility !== 'owner') ? ' open' : ''}>
+          <summary>Advanced</summary>
+          <div class="manage-section">
+            <label class="field">Who can comment</label>
+            <div class="tdoc-seg" id="tdoc-comment-seg">
+              ${COMMENTING_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+            </div>
+          </div>
+          <div class="manage-section">
+            <label class="field">Who can see version history</label>
+            <div class="tdoc-seg" id="tdoc-hist-seg">
+              ${HISTORY_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
+            </div>
           </div>
           <p class="manage-hint" id="tdoc-vis-status">&nbsp;</p>
-        </div>
-        <div class="manage-section">
-          <label class="field">Who can see version history</label>
-          <div class="tdoc-seg" id="tdoc-hist-seg">
-            ${HISTORY_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
-          </div>
-        </div>
-        <div class="manage-section">
-          <label class="field">Who can comment</label>
-          <div class="tdoc-seg" id="tdoc-comment-seg">
-            ${COMMENTING_OPTIONS.map(([v, l]) => `<button type="button" data-value="${v}">${l}</button>`).join('')}
-          </div>
-        </div>
-        <div class="manage-section">
-          <label class="field" for="tdoc-mgmt-allowed">Allowed users (private / invited)</label>
-          <input type="text" id="tdoc-mgmt-allowed" autocomplete="off" placeholder="github-login, another-login" value="${escapeHtml((access.allowed_users || []).join(', '))}">
-          <p class="manage-hint" id="tdoc-allowed-status">&nbsp;</p>
-        </div>
-        <div class="manage-section">
-          <button type="button" id="tdoc-mgmt-unpublish" class="manage-action">Unpublish</button>
-          <p class="manage-hint">Sets this doc to Private. Versions and comments are kept — republish anytime.</p>
-        </div>
-        <div class="manage-section">
-          <button type="button" id="tdoc-mgmt-delete" class="manage-action danger-btn">Delete doc…</button>
-          <p class="manage-hint">Permanently removes this doc, every version, and every comment. No undo.</p>
-        </div>
+        </details>
         <div class="actions"><button type="button" id="tdoc-share-close">Close</button></div>
       </div>`;
     document.body.appendChild(bg);
-    renderSeg('tdoc-vis-seg', access.visibility);
     renderSeg('tdoc-hist-seg', access.history_visibility);
     renderSeg('tdoc-comment-seg', access.commenting);
+    // --- General access: one plain-language dropdown replaces the old
+    // Visibility segmented control AND the separate Unpublish button (Unpublish
+    // was identical to switching visibility to Private, so it's gone). The
+    // invite field only appears when "invited" semantics are actually in play. ---
+    const accessSel = document.getElementById('tdoc-access-sel');
+    const accessExplainEl = document.getElementById('tdoc-access-explain');
+    const invitedWrap = document.getElementById('tdoc-invited-wrap');
+    // `public` and `unlisted` are functionally identical today — `public` only
+    // reserves a not-yet-built discovery listing (see worker canReadDoc), so
+    // the dropdown offers two options and a legacy public doc maps onto
+    // "Anyone with the link".
+    accessSel.value = access.visibility === 'private' ? 'private' : 'unlisted';
+    const invitedRelevant = () => access.visibility === 'private'
+      || access.commenting === 'invited' || access.history_visibility === 'invited';
+    function updateInvited() { invitedWrap.style.display = invitedRelevant() ? 'block' : 'none'; }
+    function updateAccessExplain() {
+      const n = (access.allowed_users || []).length;
+      accessExplainEl.textContent =
+        access.visibility !== 'private' ? 'Anyone with the link can read it.'
+        : n ? `Only you and ${n === 1 ? '1 invited person' : n + ' invited people'} can open it.`
+        : 'Only you can open it — add people below to invite them.';
+    }
+    accessSel.onchange = async () => {
+      const value = accessSel.value;
+      if (value === access.visibility) return;
+      // patchAccess only mutates `access` on success; on failure it leaves the
+      // error text in accessExplainEl, so only refresh on a confirmed change.
+      await patchAccess({ visibility: value }, accessExplainEl, '');
+      if (access.visibility === value) { updateAccessExplain(); updateInvited(); }
+      else { accessSel.value = access.visibility; }
+    };
+    updateAccessExplain();
+    updateInvited();
     document.getElementById('tdoc-share-close').onclick = closeManageModal;
     document.getElementById('tdoc-share-copy').onclick = () => navigator.clipboard?.writeText(url);
     document.getElementById('tdoc-share-url').onclick = () => navigator.clipboard?.writeText(url);
@@ -3252,40 +3358,13 @@
       }
     }
 
-    document.getElementById('tdoc-vis-seg').querySelectorAll('button').forEach(b => {
-      b.onclick = async () => {
-        const value = b.dataset.value;
-        if (value === access.visibility) return;
-        const status = document.getElementById('tdoc-vis-status');
-        const commit = async () => {
-          await patchAccess({ visibility: value }, status, 'Saved: ' + VIS_OPTIONS.find(([v]) => v === value)[1]);
-          renderSeg('tdoc-vis-seg', access.visibility);
-        };
-        // Switching TO private is the same effect as Unpublish (takes the
-        // doc offline) — worth a confirm even though it's reversible.
-        if (value === 'private') {
-          showManageConfirm({
-            title: 'Switch to Private?',
-            body: 'Only you (and anyone on the allowlist) will be able to open this doc.',
-            confirmLabel: 'Switch to Private',
-            onConfirm: async (confirmStatus) => {
-              await commit();
-              confirmStatus.textContent = 'Done.';
-              closeManageConfirm();
-            },
-          });
-        } else {
-          await commit();
-        }
-      };
-    });
-
     document.getElementById('tdoc-hist-seg').querySelectorAll('button').forEach(b => {
       b.onclick = async () => {
         const value = b.dataset.value;
         if (value === access.history_visibility) return;
         await patchAccess({ history_visibility: value }, document.getElementById('tdoc-vis-status'), 'Saved.');
         renderSeg('tdoc-hist-seg', access.history_visibility);
+        updateInvited(); // "Invited" history reveals the invite field
       };
     });
 
@@ -3295,41 +3374,139 @@
         if (value === access.commenting) return;
         await patchAccess({ commenting: value }, document.getElementById('tdoc-vis-status'), 'Saved.');
         renderSeg('tdoc-comment-seg', access.commenting);
+        updateInvited(); // "Invited" commenting reveals the invite field
       };
     });
 
-    const allowedInput = document.getElementById('tdoc-mgmt-allowed');
-    allowedInput.addEventListener('change', async () => {
-      const list = allowedInput.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
-      await patchAccess({ allowed_users: list }, document.getElementById('tdoc-allowed-status'), 'Saved.');
-    });
+    // ----- Allowed users: chip field + live GitHub handle autocomplete -----
+    // All client-side. Candidate lookup and avatar existence checks go straight
+    // to GitHub from the owner's browser (their IP → their own ~10 req/min
+    // anonymous budget), so there is no worker proxy and no API key. See the
+    // CSS block for why the doc CSP permits these requests.
+    (function setupAllowedUsers() {
+      const field = document.getElementById('tdoc-allowed-field');
+      const input = document.getElementById('tdoc-mgmt-allowed');
+      const acWrap = document.getElementById('tdoc-allowed-ac');
+      const status = document.getElementById('tdoc-allowed-status');
+      const list = Array.isArray(access.allowed_users) ? access.allowed_users.slice() : [];
+      // Accept a bare login, an @handle, or a pasted github.com/<login> URL.
+      const norm = (s) => s.trim().replace(/^@/, '').replace(/^https?:\/\/github\.com\//i, '').replace(/\/.*$/, '');
+      const avatarUrl = (login) => `https://github.com/${encodeURIComponent(login)}.png?size=48`;
 
-    document.getElementById('tdoc-mgmt-unpublish').onclick = () => {
-      showManageConfirm({
-        title: 'Take this doc offline?',
-        body: 'This sets visibility to <b>Private</b> — only you can open it until you publish again. Comments and version history are kept.',
-        confirmLabel: 'Unpublish',
-        onConfirm: async (status) => {
-          await patchAccess({ visibility: 'private' }, status, 'Unpublished.');
-          renderSeg('tdoc-vis-seg', 'private');
-          setTimeout(closeManageConfirm, 700);
-        },
-      });
-    };
+      function renderChips() {
+        field.querySelectorAll('.tdoc-token').forEach(c => c.remove());
+        list.forEach((login) => {
+          const chip = document.createElement('span');
+          chip.className = 'tdoc-token';
+          const img = document.createElement('img');
+          img.src = avatarUrl(login); img.alt = '';
+          // A 404 from the avatar endpoint means no such GitHub user — flag it
+          // so the owner sees a bad handle instead of silently locking someone
+          // out. (github.com/<login>.png needs no API call and no rate budget.)
+          img.onerror = () => {
+            chip.classList.add('invalid');
+            const mark = document.createElement('span');
+            mark.className = 'mark'; mark.textContent = '!';
+            mark.title = 'No GitHub user with this username';
+            img.replaceWith(mark);
+          };
+          const name = document.createElement('span'); name.textContent = login;
+          const rm = document.createElement('span');
+          rm.className = 'rm'; rm.textContent = '×'; rm.title = 'Remove';
+          rm.onclick = () => remove(login);
+          chip.append(img, name, rm);
+          field.insertBefore(chip, input);
+        });
+      }
+      const commit = async () => {
+        await patchAccess({ allowed_users: list.slice() }, status, 'Saved.');
+        updateAccessExplain(); // keep the "Only you and N invited people" line in sync
+      };
+      function add(raw) {
+        const l = norm(raw);
+        if (l && !list.some(x => x.toLowerCase() === l.toLowerCase())) {
+          list.push(l); renderChips(); commit();
+        }
+        input.value = ''; closeAc();
+      }
+      function remove(login) {
+        const i = list.findIndex(x => x.toLowerCase() === login.toLowerCase());
+        if (i >= 0) { list.splice(i, 1); renderChips(); commit(); }
+      }
 
-    document.getElementById('tdoc-mgmt-delete').onclick = () => {
-      showManageConfirm({
-        title: 'Delete this doc?',
-        body: `This permanently removes <b>${escapeHtml(slug)}</b> — all <b>${plural(om.versionCount, 'version')}</b> and <b>${plural(om.commentCount, 'comment')}</b> are deleted. This cannot be undone.`,
-        confirmLabel: 'Delete',
-        danger: true,
-        onConfirm: async (status) => {
-          await ownerFetch(`/api/doc?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' });
-          status.textContent = 'Deleted. Redirecting…';
-          setTimeout(() => { window.location.href = '/'; }, 900);
-        },
+      // ---- autocomplete dropdown ----
+      let acItems = [], acActive = -1, acSeq = 0, debounceTimer = 0;
+      function closeAc() { acWrap.innerHTML = ''; acItems = []; acActive = -1; }
+      function renderAc(users) {
+        acItems = users; acActive = -1;
+        if (!users.length) return closeAc();
+        const box = document.createElement('div');
+        box.className = 'tdoc-ac-list';
+        users.forEach((u) => {
+          const it = document.createElement('div');
+          it.className = 'tdoc-ac-item';
+          const img = document.createElement('img');
+          img.src = u.avatar_url || avatarUrl(u.login); img.alt = '';
+          const login = document.createElement('span');
+          login.className = 'login'; login.textContent = u.login;
+          it.append(img, login);
+          // mousedown (not click) so it fires before the input's blur handler.
+          it.addEventListener('mousedown', (e) => { e.preventDefault(); add(u.login); });
+          box.appendChild(it);
+        });
+        acWrap.innerHTML = ''; acWrap.appendChild(box);
+      }
+      async function search(q) {
+        const seq = ++acSeq;
+        try {
+          const r = await fetch(
+            `https://api.github.com/search/users?q=${encodeURIComponent(q)}+in:login&per_page=6`,
+            { headers: { 'Accept': 'application/vnd.github+json' } });
+          if (seq !== acSeq) return; // superseded by a newer keystroke
+          if (!r.ok) return closeAc(); // rate-limited / error → no suggestions; typing still works
+          const data = await r.json();
+          if (seq !== acSeq) return;
+          renderAc((data.items || []).filter(u => u.type === 'User').slice(0, 6));
+        } catch { if (seq === acSeq) closeAc(); }
+      }
+      function moveAc(dir) {
+        const items = acWrap.querySelectorAll('.tdoc-ac-item');
+        if (!items.length) return;
+        acActive = (acActive + dir + items.length) % items.length;
+        items.forEach((el, i) => el.classList.toggle('active', i === acActive));
+      }
+
+      input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        const q = norm(input.value);
+        if (q.length < 2) return closeAc();
+        // Generous debounce: GitHub's anonymous search budget is ~10/min per IP.
+        debounceTimer = setTimeout(() => search(q), 450);
       });
-    };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' && acItems.length) { e.preventDefault(); return moveAc(1); }
+        if (e.key === 'ArrowUp' && acItems.length) { e.preventDefault(); return moveAc(-1); }
+        if (e.key === 'Escape') return closeAc();
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          if (acActive >= 0 && acItems[acActive]) add(acItems[acActive].login);
+          else if (input.value.trim()) add(input.value);
+          return;
+        }
+        if (e.key === 'Backspace' && !input.value && list.length) remove(list[list.length - 1]);
+      });
+      input.addEventListener('focus', () => field.classList.add('focus'));
+      input.addEventListener('blur', () => {
+        field.classList.remove('focus');
+        // Defer so a candidate click (mousedown) resolves first; then commit any
+        // half-typed handle left in the box.
+        setTimeout(() => { if (input.value.trim()) add(input.value); closeAc(); }, 150);
+      });
+      field.addEventListener('click', () => input.focus());
+
+      renderChips();
+    })();
+
   }
 
 
@@ -3394,11 +3571,22 @@
     document.body.appendChild(popup);   // append first so offsetHeight is known
     const popupH = popup.offsetHeight || 140;
     const popupW = popup.offsetWidth || 320;
-    if (anchor._placeAbove && rect.top - 8 - popupH >= 8) {
-      popup.style.top = (window.scrollY + rect.top - popupH - 8) + 'px';
-    } else {
-      popup.style.top = (window.scrollY + rect.bottom + 8) + 'px';
-    }
+    const above = window.scrollY + rect.top - popupH - 8;
+    const below = window.scrollY + rect.bottom + 8;
+    // Prefer above when the element pill asked for it and there is room; else
+    // open below the selection so the sheet follows the cursor.
+    let top = (anchor._placeAbove && rect.top - 8 - popupH >= 8) ? above : below;
+    // Clamp vertically to the viewport — the horizontal clamp below always
+    // kept the sheet on screen sideways, but `top` used to be set blind, so a
+    // comment on a selection (or artifact) low in the viewport opened below
+    // the fold and the textarea + Comment button were cut off. Mirror the
+    // emoji-picker / margin-card behavior: if the sheet would spill past the
+    // bottom, flip it above the anchor; if it still doesn't fit (tall sheet /
+    // short viewport), pin it to the bottom edge so its controls stay reachable.
+    const vpTop = window.scrollY + 8;
+    const vpBottom = window.scrollY + window.innerHeight - 8;
+    if (top + popupH > vpBottom) top = (above >= vpTop) ? above : Math.max(vpTop, vpBottom - popupH);
+    popup.style.top = top + 'px';
     // `rect.left` is the caret / mouse-up X for text selections (not the
     // line-box origin). Clamp in document coords so a caret near the right
     // edge still keeps the 320px sheet on screen.
@@ -4130,7 +4318,6 @@
     // Close menus that aren't under the cursor
     if (secMenu && !t.closest('#tdoc-more-btn') && !t.closest('#tdoc-secondary-menu')) secMenu.classList.remove('open');
     if (!t.closest('.tdoc-menu-wrap')) {
-      copyMenu.classList.remove('open');
       if (dlMenu) dlMenu.classList.remove('open');
       if (dlBtn) dlBtn.setAttribute('aria-expanded', 'false');
     }
@@ -4263,18 +4450,6 @@
       return ok;
     }
   }
-  function flashCopied(btn) {
-    if (!btn || btn.dataset.flashing === '1') return;
-    btn.dataset.flashing = '1';
-    const orig = btn.innerHTML;
-    const oc = btn.style.color, ob = btn.style.borderColor;
-    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Copied</span>`;
-    btn.style.color = '#3ecf8e'; btn.style.borderColor = '#3ecf8e';
-    setTimeout(() => {
-      btn.innerHTML = orig; btn.style.color = oc; btn.style.borderColor = ob;
-      btn.dataset.flashing = '0';
-    }, 1200);
-  }
   function flashToast(msg) {
     const t = document.createElement('div');
     t.textContent = msg;
@@ -4315,8 +4490,9 @@
       md += '\n\n---\n\n## Comments\n\n' + state.activeComments.map(commentToMd).join('\n---\n\n');
     }
     const ok = await copyText(md);
-    if (ok) flashCopied(document.getElementById('tdoc-copy-md-btn'));
-    else flashToast('Copy failed');
+    // Copy now lives in the ⋯ menu, which closes on click, so there's no bar
+    // button to flash — confirm with a toast instead.
+    flashToast(ok ? 'Copied as Markdown' : 'Copy failed');
   };
   window.__tdocCopyCommentMd = async function (commentId, srcBtn) {
     const c = state.activeComments.find(x => x.id === commentId);

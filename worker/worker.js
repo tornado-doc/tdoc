@@ -346,8 +346,14 @@ async function enforceDocAccess(env, req, slug, version) {
   };
 }
 const TDOC_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-111.391 -301.011 1000 1000" role="img" aria-label="tdoc">
-  <g transform="translate(-123.097585,711.963561) scale(0.1,-0.1)" fill="currentColor" fill-rule="evenodd">
-    <path d="M2705 7105 c-33 -9 -110 -40 -171 -70 -102 -51 -116 -55 -180 -55
+  <!-- The field. The mark is ink on an opaque white field, the same look as the
+       landing hero (a raster that is 0% transparent). Full-bleed so the mark
+       never shows the surface through it, and so the page-level dark invert has
+       a solid field to flip. -->
+  <rect x="-111.391" y="-301.011" width="1000" height="1000" fill="#ffffff"/>
+  <!-- The ink. currentColor so an inlined copy follows the surrounding text. -->
+  <g transform="translate(-123.097585,711.963561) scale(0.1,-0.1)" fill-rule="evenodd">
+    <path fill="currentColor" d="M2705 7105 c-33 -9 -110 -40 -171 -70 -102 -51 -116 -55 -180 -55
 -158 0 -289 -73 -356 -197 -14 -27 -24 -32 -65 -38 -243 -31 -434 -94 -511
 -168 -96 -92 -210 -405 -188 -518 15 -83 90 -156 177 -173 18 -4 44 -30 83
 -81 47 -63 61 -75 85 -75 34 0 42 9 66 73 20 53 30 63 48 50 7 -5 36 -19 65
@@ -404,7 +410,7 @@ c-80 45 -104 39 -136 -35 l-13 -30 -21 30 c-37 51 -53 62 -97 69 -64 10 -100
 -216 -3 c-186 -2 -217 0 -217 12 0 25 120 115 216 161 l90 44 18 58 c10 32 38
 120 62 196 24 76 44 151 44 167 0 65 -298 294 -631 483 -55 31 -133 100 -189
 167 -49 58 -48 59 28 21z"/>
-    <path d="M2265 6675 c-37 -36 -34 -86 7 -120 39 -33 81 -29 117 12 68 78 -51
+    <path fill="currentColor" d="M2265 6675 c-37 -36 -34 -86 7 -120 39 -33 81 -29 117 12 68 78 -51
 182 -124 108z"/>
   </g>
 </svg>
@@ -1122,7 +1128,7 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth) {
+function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
   // The onboarding modal is product UI, so it ships from here under the page
   // nonce. The doc's own <script> would never run (#138), which is why the
   // landing CTA still carries a plain href: with scripting off the visitor
@@ -1145,6 +1151,8 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
     // version number are storage detail; printing them in the bar tells a
     // first-time visitor they are looking at somebody's document.
     isLanding: !!isLanding,
+    // Live GitHub star count for the landing header (null when unknown).
+    stars: (typeof stars === 'number' ? stars : null),
     // /me catalog: same overlay bar, no Share / Duplicate / Copy.
     isCatalog: !!isCatalog,
     // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
@@ -1233,6 +1241,27 @@ const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;
 // Returns { ok, response }. `ok:false` carries the real 401/403/404 response
 // for the /d/ route to pass through; the homepage ignores it and falls back to
 // the neutral page, because `/` must never dead-end on an access screen.
+// Live GitHub star count for the landing header. Fetched server-side because
+// the doc CSP (default-src 'none') blocks a browser fetch to api.github.com.
+// Cached at the edge for an hour via cf.cacheTtl, so it is one refresh per hour
+// per POP, not per pageview — GitHub's rate limit is never in play. Best-effort:
+// any failure returns null and the header simply shows the mark with no count.
+async function fetchStars(env) {
+  const repo = (env && env.GITHUB_REPO) || 'tornado-doc/tdoc';
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo}`, {
+      headers: { 'User-Agent': 'tdoc-landing', 'Accept': 'application/vnd.github+json' },
+      cf: { cacheTtl: 3600, cacheEverything: true },
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const n = Number(d && d.stargazers_count);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 async function serveDocVersion(env, req, slug, version, isLanding) {
   const gate = await enforceDocAccess(env, req, slug, version);
   if (!gate.ok) return { ok: false, response: gate.response };
@@ -1275,10 +1304,12 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   // Docs render as the cross-origin shell (chrome outside, author content in the
   // /frame iframe). The homepage (isLanding) stays a normal overlay page: its
   // marketing copy must be crawlable, not buried in an opaque-origin iframe.
+  // Stars are landing-only chrome (the bar's GitHub star count).
+  const stars = isLanding ? await fetchStars(env) : null;
   const render = isLanding ? injectOverlay : shellDocumentWorker;
   return {
     ok: true,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1592,9 +1623,8 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
         <li>Open the AI you already use.
           <span class="mk-say">Use tdoc to make me a one page summary of this quarter, with a chart of weekly signups.</span>
         </li>
-        <li>It writes the page and opens it for you.</li>
-        <li>Hit <b>Publish</b>, top right, to put it online.</li>
-        <li>Send the link to anyone. They comment on the page, and your AI answers them.</li>
+        <li>It writes the page, publishes it, and hands you the link.</li>
+        <li>Send that link to anyone. They comment on the page, and your AI answers them.</li>
       </ol>
     </div>
     <div class="mk-ft">Want a specific look first? <a href="/templates">Browse templates</a>. &nbsp;·&nbsp; Not set up yet? <a href="/start">Start here</a>.</div>
@@ -2146,7 +2176,8 @@ function ensureMigrated(list) {
 // DETERMINISTIC eid so a concurrent duplicate collapses to one:
 //   reaction add/remove → reaction:<emoji>:<by>:<at_version>      (toggle converges)
 //   reply reaction      → rreaction:<reply_id>:<emoji>:<by>:<at_version>
-//   marked_applied/open/deleted → <kind>:<at_version>       (state, not history)
+//   marked_applied/marked_open  → status:<at_version>       (state, not history)
+//   deleted                     → deleted:<at_version>      (terminal, not a toggle)
 // One-shot events (created, reply_added, text_edited, anchor_changed) get a
 // unique eid so each is preserved.
 //
@@ -2158,6 +2189,16 @@ function ensureMigrated(list) {
 //   - including at_version keeps each version's reaction independent, so a
 //     reaction on v1 and a different toggle on v3 don't clobber each other
 //     (snapshots stay immutable).
+//
+// Agent status eids drop the kind for the SAME reason (#229). marked_applied
+// and marked_open are a toggle, not two facts: an agent that answers a comment
+// with `question`, gets a reply, and then applies it emits [applied, open,
+// applied]. Under `<kind>:<at_version>` those landed in two slots, and because
+// dedupEvents re-seats each slot at its FIRST occurrence, the newest verdict
+// was carried but placed ahead of the older one — so `open` folded last and
+// won. The verdict could never converge back to applied within one version,
+// and question→applied is the normal progression, so ✅/🟡/❓ lied permanently.
+// `deleted` keeps its own slot: it is terminal, not a toggle.
 function eventEid(e) {
   switch (e.kind) {
     case 'reaction_added':
@@ -2168,6 +2209,7 @@ function eventEid(e) {
       return `rreaction:${e.reply_id}:${e.emoji}:${e.by}:${e.at_version}`;
     case 'marked_applied':
     case 'marked_open':
+      return `status:${e.at_version}`;
     case 'deleted':
       return `${e.kind}:${e.at_version}`;
     default:

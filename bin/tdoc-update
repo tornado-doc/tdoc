@@ -13,6 +13,10 @@
 #   tdoc-update            # interactive (asks before redeploy)
 #   tdoc-update --yes      # non-interactive (auto-redeploy if published)
 #   tdoc-update --check    # report-only: print what WOULD change, no changes
+#   tdoc-update --auto     # silent keep-current, run on every skill invocation:
+#                          #   fast-forward only, never stashes, never
+#                          #   redeploys, and prints nothing when there is
+#                          #   nothing to do.
 
 set -uo pipefail
 
@@ -21,10 +25,12 @@ cd "$SKILL_DIR" || { echo "tdoc-update: cannot cd into $SKILL_DIR" >&2; exit 1; 
 
 YES=0
 CHECK=0
+AUTO=0
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) YES=1 ;;
     --check) CHECK=1 ;;
+    --auto)  AUTO=1 ;;
     -h|--help) echo "usage: tdoc-update [--yes] [--check]"; exit 0 ;;
   esac
 done
@@ -36,7 +42,7 @@ if [ ! -d .git ]; then
   exit 1
 fi
 
-echo "[tdoc-update] fetching origin/main..."
+[ "$AUTO" = "1" ] || echo "[tdoc-update] fetching origin/main..."
 if ! git fetch origin main --quiet; then
   echo "[tdoc-update] fetch failed (check network / GitHub access)." >&2
   exit 1
@@ -47,7 +53,15 @@ REMOTE="$(git rev-parse origin/main)"
 BASE="$(git merge-base HEAD origin/main)"
 
 if [ "$LOCAL" = "$REMOTE" ]; then
-  echo "[tdoc-update] already up-to-date (no remote changes)."
+  # --auto runs on every skill invocation; "nothing to do" must be silent.
+  [ "$AUTO" = "1" ] || echo "[tdoc-update] already up-to-date (no remote changes)."
+  exit 0
+fi
+
+if [ "$LOCAL" != "$BASE" ] && [ "$AUTO" = "1" ]; then
+  # A diverged checkout belongs to someone working on tdoc itself. Fast-forward
+  # is impossible and anything else would rewrite their branch.
+  echo "[tdoc-update] checkout has diverged — skipping the automatic update." >&2
   exit 0
 fi
 
@@ -57,11 +71,14 @@ if [ "$LOCAL" != "$BASE" ]; then
   exit 1
 fi
 
-# Show the incoming changelog
-echo
-echo "[tdoc-update] incoming changes:"
-git --no-pager log --oneline "$LOCAL..$REMOTE" | sed 's/^/  /'
-echo
+# Show the incoming changelog. --auto keeps this quiet: it runs on every skill
+# invocation, so a changelog every time would be noise, not information.
+if [ "$AUTO" != "1" ]; then
+  echo
+  echo "[tdoc-update] incoming changes:"
+  git --no-pager log --oneline "$LOCAL..$REMOTE" | sed 's/^/  /'
+  echo
+fi
 
 if [ "$CHECK" = "1" ]; then
   # ${#} would be the CLI arg count (1 for `--check`), not the commit count.
@@ -72,19 +89,31 @@ fi
 # Stash local edits, if any
 STASH_REF=""
 if ! git diff --quiet || ! git diff --cached --quiet; then
+  if [ "$AUTO" = "1" ]; then
+    # Keeping the skill current must never touch work in progress. Auto-stashing
+    # is the one path here that can lose someone's edits, so --auto declines.
+    echo "[tdoc-update] local edits present — skipping the automatic update." >&2
+    exit 0
+  fi
   echo "[tdoc-update] local edits detected — stashing..."
   git stash push -u -m "tdoc-update auto-stash $(date -Iseconds)" >/dev/null
   STASH_REF="$(git stash list | head -1 | awk -F: '{print $1}')"
 fi
 
 # Pull (fast-forward)
-echo "[tdoc-update] fast-forwarding..."
+[ "$AUTO" = "1" ] || echo "[tdoc-update] fast-forwarding..."
 if ! git merge --ff-only origin/main --quiet; then
   echo "[tdoc-update] fast-forward failed. Aborting."
   [ -n "$STASH_REF" ] && git stash pop "$STASH_REF" >/dev/null
   exit 1
 fi
-echo "[tdoc-update] updated to: $(git rev-parse --short HEAD)"
+if [ "$AUTO" = "1" ]; then
+  # One line, not silence: the user's tooling just changed under them and they
+  # should be able to see why behaviour differs from a minute ago.
+  echo "[tdoc] updated tdoc to $(git rev-parse --short HEAD)" >&2
+else
+  echo "[tdoc-update] updated to: $(git rev-parse --short HEAD)"
+fi
 
 # Restart the local server if it's running — otherwise the user keeps hitting
 # stale routes (e.g. a 404 on /api/publish after we added the endpoint).
@@ -115,15 +144,22 @@ if [ -n "$STASH_REF" ]; then
 fi
 
 # Offer to redeploy
+# --auto stops here. Updating the local skill is one thing; pushing a new Worker
+# bundle to the user's own Cloudflare/Vercel account is another, and is not a
+# side effect of asking for a doc.
+if [ "$AUTO" = "1" ]; then
+  exit 0
+fi
 CONFIG_FILE="$HOME/.tdoc/published.json"
 if [ -f "$CONFIG_FILE" ]; then
+  # Find any locally-existing doc to re-publish — use the one with most-recent
+  # meta.json. This used to sit behind a `command -v jq` guard left over from an
+  # earlier version that parsed meta.json; nothing here calls jq, and the guard
+  # made a no-jq machine report "no local doc found" with docs sitting on disk.
   PUBLISHED_SLUG=""
-  if command -v jq >/dev/null 2>&1; then
-    # Find any locally-existing doc to re-publish — use the one with most-recent meta.json
-    NEWEST_DOC="$(find "$HOME/tdocs" -mindepth 2 -maxdepth 2 -name meta.json -print0 2>/dev/null \
-      | xargs -0 ls -t 2>/dev/null | head -1 || true)"
-    [ -n "$NEWEST_DOC" ] && PUBLISHED_SLUG="$(basename "$(dirname "$NEWEST_DOC")")"
-  fi
+  NEWEST_DOC="$(find "$HOME/tdocs" -mindepth 2 -maxdepth 2 -name meta.json -print0 2>/dev/null \
+    | xargs -0 ls -t 2>/dev/null | head -1 || true)"
+  [ -n "$NEWEST_DOC" ] && PUBLISHED_SLUG="$(basename "$(dirname "$NEWEST_DOC")")"
   echo
   if [ "$YES" = "1" ]; then
     if [ -n "$PUBLISHED_SLUG" ]; then

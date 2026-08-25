@@ -10,6 +10,20 @@ const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
+
+// The server knows which Node is running it; a spawned child may not. When the
+// server was started by absolute path — a launchd job, an editor, a desktop
+// launcher, nohup from a shell that only loads nvm interactively — PATH can be
+// the bare system default, and a version-managed node is not on it. The child
+// then reports "node 18+ is not installed" on a machine that has Node 22. Put
+// the running interpreter's directory in front of the child's PATH. See #259.
+function childEnv() {
+  const nodeDir = path.dirname(process.execPath);
+  const current = process.env.PATH || '';
+  const already = current.split(path.delimiter).includes(nodeDir);
+  return already ? process.env : { ...process.env, PATH: `${nodeDir}${path.delimiter}${current}` };
+}
+
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
 const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
@@ -286,7 +300,7 @@ function forceWidgetSandbox(html) {
   });
 }
 
-// --- Cross-origin iframe "shell" (flag: ?shell=1). See PLAN.md. ---
+// --- Cross-origin iframe "shell" (single path; see PLAN.md). ---
 // The author document is served from /d/<slug>/v/<n>/frame under a CSP `sandbox`
 // (opaque origin) so its CSS/DOM can never touch the overlay chrome, which lives
 // in the shell document. Same isolation mechanism as widget islands, applied to
@@ -306,6 +320,18 @@ function chromeCss() {
   try { return SHELL.sliceChromeCss(fs.readFileSync(OVERLAY_PATH, 'utf8')); } catch { return ''; }
 }
 
+// Local preview of the landing header's live star count (from main). Production
+// fetches this in the Cloudflare Worker (edge-cached); here we refresh hourly.
+// Threaded into the shell cfg so a landing bar variant can consume it.
+let cachedStars = null;
+async function refreshStars() {
+  try {
+    const r = await fetch('https://api.github.com/repos/tornado-doc/tdoc', { headers: { 'User-Agent': 'tdoc-local', 'Accept': 'application/vnd.github+json' } });
+    if (r.ok) { const d = await r.json(); const n = Number(d && d.stargazers_count); if (Number.isFinite(n)) cachedStars = n; }
+  } catch {}
+}
+refreshStars(); const _starTimer = setInterval(refreshStars, 3600e3); if (_starTimer.unref) _starTimer.unref();
+
 // P1: the shell renders a top bar + embeds the author frame. P2 adds the
 // postMessage anchoring bridge + comment chrome (composer/pins/cards) here.
 function shellDocument(slug, version, nonce) {
@@ -323,8 +349,10 @@ function shellDocument(slug, version, nonce) {
   // window.__TDOC__ powers the chrome-level modals (sign-in device flow +
   // onboarding), which read it exactly as they did in the single-origin path.
   // window.__TDOC_SHELL__ carries the shell client's own config (incl. identity
-  // so reaction "mine" detection works). Both are nonced.
-  const authCfgJson = safeJsonForScript({ slug, version, identity: ident, isOwner, authConfigured: !!ident, mode: 'local', versions });
+  // so reaction "mine" detection works). Both are nonced. isLanding/stars come
+  // from main's landing-bar star count (consumed by a landing bar variant).
+  const isLanding = slug === 'tornado-doc';
+  const authCfgJson = safeJsonForScript({ slug, version, identity: ident, isOwner, authConfigured: !!ident, mode: 'local', versions, isLanding, stars: cachedStars });
   const cfgJson = safeJsonForScript({ slug, version, mode: 'local', versions, identity: ident });
   // Sign-in (always) + onboarding (start docs only) are chrome, so they live in
   // the shell, not the isolated author frame — same modules as the overlay path.
@@ -885,7 +913,7 @@ const server = http.createServer(async (req, res) => {
     // Same spawn hardening as /api/publish: error listener, hard timeout,
     // bounded output. Deleting is quick; 60s covers a slow unpublish curl.
     const args = body.published === false ? [slug, '--local-only'] : [slug];
-    const proc = spawn(bin, args, { env: process.env });
+    const proc = spawn(bin, args, { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 64 * 1024;
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
@@ -923,7 +951,7 @@ const server = http.createServer(async (req, res) => {
     // a bounded output buffer so runaway child output can't OOM us. wrangler
     // legitimately needs the inherited env (CLOUDFLARE_* creds), so we keep it
     // but this endpoint is now origin/CSRF-gated above.
-    const proc = spawn(bin, [slug], { env: process.env });
+    const proc = spawn(bin, [slug], { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 256 * 1024; // 256 KiB of captured output is plenty
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);

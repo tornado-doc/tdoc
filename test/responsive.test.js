@@ -133,6 +133,26 @@ async function tPub(name, fn) {
           await page.evaluate(() => document.querySelector('#tdoc-comment-layer').classList.remove('open'));
           await page.waitForTimeout(120);
         });
+        await t('narrow mode: tapping the backdrop scrim dismisses the drawer', async () => {
+          // Open the drawer, then confirm the scrim is a visible full-screen
+          // dismiss target and a tap on it closes the drawer (no drag needed).
+          await page.evaluate(() => document.querySelector('.tdoc-fab').click());
+          await page.waitForTimeout(250);
+          const scrimShown = await page.evaluate(() => {
+            const s = document.querySelector('#tdoc-drawer-scrim');
+            return s && getComputedStyle(s).display !== 'none';
+          });
+          if (!scrimShown) throw new Error('scrim not visible while drawer is open');
+          await page.evaluate(() => document.querySelector('#tdoc-drawer-scrim').click());
+          await page.waitForTimeout(250);
+          const stillOpen = await page.evaluate(() => document.querySelector('#tdoc-comment-layer.open') !== null);
+          if (stillOpen) throw new Error('drawer stayed open after tapping the scrim');
+          const scrimHidden = await page.evaluate(() => {
+            const s = document.querySelector('#tdoc-drawer-scrim');
+            return !s || getComputedStyle(s).display === 'none';
+          });
+          if (!scrimHidden) throw new Error('scrim stayed visible after the drawer closed');
+        });
       }
       if (st.more) {
         await t('narrow mode: More opens the secondary menu', async () => {
@@ -167,12 +187,12 @@ async function tPub(name, fn) {
       if (m.right > m.ww + 1) throw new Error(`footer right=${m.right} > viewport ${m.ww}`);
     });
 
-    await t('Copy button opens its dropdown', async () => {
-      await page.evaluate(() => document.querySelector('#tdoc-copy-md-btn').click());
+    await t('⋯ menu carries a Copy as Markdown action', async () => {
+      await page.evaluate(() => document.querySelector('#tdoc-more-btn').click());
       await page.waitForTimeout(120);
-      const open = await page.evaluate(() => document.querySelector('#tdoc-copy-md-menu.open') !== null);
-      await page.evaluate(() => { const m = document.querySelector('#tdoc-copy-md-menu'); if (m) m.classList.remove('open'); });
-      if (!open) throw new Error('copy dropdown did not open');
+      const hasCopy = await page.evaluate(() => !!document.querySelector('#tdoc-secondary-menu.open [data-action="copy"]'));
+      await page.evaluate(() => { const m = document.querySelector('#tdoc-secondary-menu'); if (m) m.classList.remove('open'); });
+      if (!hasCopy) throw new Error('no Copy action in the ⋯ menu');
     });
 
     // Published-only: identity chip present.

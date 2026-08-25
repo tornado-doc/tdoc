@@ -54,7 +54,7 @@
   ].join('');
   document.head.appendChild(S);
 
-  var st = { page: 0, selfHost: false, token: null, hosted: false, copied: false, waiting: false, bg: null, box: null, esc: null };
+  var st = { copied: false, hosted: false, bg: null, box: null, esc: null };
 
   function el(t, c, h) { var e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; }
 
@@ -68,9 +68,7 @@
   // secret into a prompt that lands in the agent's history.
   var RECIPE = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
   function line() {
-    var s = 'Set up tdoc and make my first doc: ' + RECIPE;
-    if (st.selfHost) s += ' Publish it to my own Cloudflare, not the hosted service.';
-    return s;
+    return 'Set up tdoc and make my first doc: ' + RECIPE;
   }
 
   function ghMark() {
@@ -101,30 +99,10 @@
   }
 
   // ---- page 1: sign in (skipped when we already have a session) ----------
-  function stepSignIn() {
-    var bd = shell('First, sign in with GitHub',
-      'So tdoc can publish for you and hand back a link. Same login gets you back to your docs later, on any machine.');
-    var ft = el('div', 'tdo-ft');
-    var b = el('button', 'tdo-btn', st.waiting
-      ? '<span>Waiting for GitHub…</span>'
-      : '<svg class="tdo-gh" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span>Sign in with GitHub</span>');
-    b.disabled = !!st.waiting;
-    b.onclick = signIn;
-    ft.appendChild(b);
-    var skip = el('button', 'tdo-skip', 'Skip, I publish to my own host');
-    skip.onclick = function () { st.selfHost = true; st.page = 1; render(); };
-    ft.appendChild(skip);
-    st.box.appendChild(ft);
-    return b;
-  }
-
-  // ---- page 2: the line, with Copy inside the box ------------------------
+  // ---- the only screen: the line, and a Copy button ----------------------
   function stepPaste() {
-    var bd = shell('Paste this into your AI', st.selfHost
-      ? 'Your AI installs tdoc, writes your first doc — a live, commentable web page, not a chat reply — and sets up your own Cloudflare to publish it, then hands back a link to share. Two browser clicks, no card.'
-      : (st.hosted
-        ? 'Your AI installs tdoc, writes your first doc — a live, commentable web page, not a chat reply — publishes it, and hands back a link you can share.'
-        : 'Your AI installs tdoc, writes your first doc — a live, commentable web page, not a chat reply — and publishes it to a free Cloudflare account you own, then hands back a link to share. No sign-up here, no card.'));
+    var bd = shell('Paste this into your AI',
+      'It installs tdoc, writes your first doc \u2014 a live, commentable web page, not a chat reply \u2014 publishes it, and hands back a link you can send to anyone.');
 
     var wrap = el('div', 'tdo-linewrap');
     var pre = el('div', 'tdo-line');
@@ -132,8 +110,8 @@
     wrap.appendChild(pre);
     // Inside the box, because a button under the dialog reads as "copy the
     // dialog" — which is exactly what it looked like.
-    var cp = el('button', 'tdo-copy', 'Copy');
-    cp.onclick = function () { copy(cp, pre); };
+    var cp = el('button', 'tdo-copy' + (st.copied ? ' done' : ''), st.copied ? 'Copied' : 'Copy');
+    cp.onclick = function () { copyOnly(cp, pre); };
     wrap.appendChild(cp);
     bd.appendChild(wrap);
 
@@ -150,85 +128,34 @@
     bd.appendChild(learn);
 
     var ft = el('div', 'tdo-ft');
-    var b = el('button', 'tdo-btn', '<span>' + (st.copied ? 'Next' : 'I pasted it') + '</span>');
-    b.onclick = function () { st.page = 2; render(); };
-    ft.appendChild(b);
-    st.box.appendChild(ft);
-    return cp;
-  }
-
-  // ---- page 3: what happens next -----------------------------------------
-  function stepNext() {
-    var bd = shell('Now go run it', 'The link it hands back is the proof it worked.');
-    // Still here on purpose: this is the page where they alt-tab to their
-    // agent, which is exactly when they may need to grab it again.
-    var wrap = el('div', 'tdo-linewrap');
-    var pre = el('div', 'tdo-line');
-    pre.textContent = line();
-    wrap.appendChild(pre);
-    var cp = el('button', 'tdo-copy' + (st.copied ? ' done' : ''), st.copied ? 'Copied' : 'Copy');
-    cp.onclick = function () { copyOnly(cp, pre); };
-    wrap.appendChild(cp);
-    bd.appendChild(wrap);
-    var learn = document.createElement('details');
-    learn.className = 'tdo-learn';
-    learn.open = true;
-    learn.innerHTML = '<summary>Three steps</summary>'
-      + '<ol><li>Open the AI you already use.</li>'
-      + '<li>Paste the line and send it.</li>'
-      + '<li>It hands you a link. Share it, and comments land on the page.</li></ol>';
-    bd.appendChild(learn);
-
-    var ft = el('div', 'tdo-ft');
     var b = el('button', 'tdo-btn', '<span>Done</span>');
     b.onclick = close;
     ft.appendChild(b);
+    // Self-hosting is still here, just not a decision anyone has to make on
+    // the way in: it is a sentence they can say, not a button competing with
+    // the primary path.
+    var alt = el('p', 'tdo-alt',
+      'Want it on your own Cloudflare or Vercel instead? Add '
+      + '<b>Publish it to my own Cloudflare, not the hosted service.</b> to that line.');
+    ft.appendChild(alt);
     var tut = el('a', 'tdo-tut', 'Or read the full tutorial');
     tut.href = '/start';
     ft.appendChild(tut);
     st.box.appendChild(ft);
-    return b;
+    return cp;
   }
 
-  var PAGES = [stepSignIn, stepPaste, stepNext];
+  // One screen. There is no page state left to advance through: the sign-in
+  // page and the self-host fork both came out (#254), and the "now go run it"
+  // page only restated the line that is already on screen.
   function render() {
     if (!st.box) return null;
-    return PAGES[st.page]();
+    return stepPaste();
   }
 
   // The visitor is about to leave for their agent and may not come back, so
   // the copy is also the handoff: name the landmark that proves it worked.
 
-  function copy(btn, pre) {
-    var text = line();
-    var done = function () {
-      st.copied = true;
-      btn.textContent = 'Copied';
-      btn.className = 'tdo-copy done';
-      // Advance rather than growing the page underneath them: expanding in
-      // place shifted everything and read as a glitch.
-      setTimeout(function () { if (st.bg) { st.page = 2; render(); } }, 550);
-    };
-    // A click that appears to do nothing is worse than no button. The
-    // clipboard API rejects whenever the document is not focused, so the last
-    // resort still has to leave the visitor holding the line.
-    var manual = function () {
-      try {
-        var rng = document.createRange();
-        rng.selectNodeContents(pre);
-        var sel = window.getSelection();
-        sel.removeAllRanges(); sel.addRange(rng);
-      } catch (e) {}
-      btn.textContent = /Mac|iP(hone|ad)/.test(navigator.platform || '') ? 'Press \u2318C' : 'Press Ctrl+C';
-      st.copied = true;
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, function () { fallback(text, done, manual); });
-    } else {
-      fallback(text, done, manual);
-    }
-  }
-  // Same copy, minus the page turn: there is nowhere left to advance to.
   function copyOnly(btn, pre) {
     var text = line();
     var mark = function () { btn.textContent = 'Copied'; btn.className = 'tdo-copy done'; st.copied = true; };
@@ -256,34 +183,21 @@
     if (ok) done(); else manual();
   }
 
-  // Sign-in reuses server/signin.js, the one device flow shared with the
-  // overlay and the neutral page.
-  function signIn() {
-    if (!window.__tdocSignIn) { st.page = 1; render(); return; }
-    st.waiting = true;
-    render();
-    window.__tdocSignIn().then(function () {
-      st.waiting = false;
-      return mint();
-    }, function () {
-      st.waiting = false;
-      render();          // cancelled: stay on the sign-in page
-    }).then(function () {
-      if (st.bg && !st.waiting) { st.page = 1; render(); }
-    });
-  }
-
-  function mint() {
+  // Is hosted publishing open on this host? Unauthenticated on purpose: the
+  // answer is in the error. `sign_in_required` means hosted is available and
+  // the CLI will do the sign-in; only an outright closed registration means a
+  // visitor here would end up self-hosting. Naming tdoc.dev/me to someone who
+  // will self-host walks them into another worker's sign-in wall (#131).
+  //
+  // This is what the removed sign-in page was really for. It never needed the
+  // sign-in to find out.
+  function probeHosted() {
     return fetch('/api/hosted/token', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: '{}', credentials: 'same-origin',
     }).then(function (r) { return r.json(); }).then(function (r) {
       if (!r) return;
-      // Nothing is pasted either way. The token proves hosted is open to this
-      // visitor; sign_in_required proves the same thing and that the CLI will
-      // do the sign-in. Only an outright "closed" sends them to Cloudflare.
-      if (r.token) { st.token = r.token; st.hosted = true; }
-      else if (r.error === 'sign_in_required') st.hosted = true;
+      if (r.token || r.error === 'sign_in_required') st.hosted = true;
       if (st.bg) render();
     }).catch(function () {});
   }
@@ -294,9 +208,9 @@
     if (e && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button && e.button !== 0))) return;
     if (e) e.preventDefault();
 
-    // Display state is recomputed per open, so a stale page or a green
-    // "Copied" never survives into a fresh dialog.
-    st.page = 0; st.selfHost = false; st.token = null; st.hosted = false; st.copied = false; st.waiting = false;
+    // Recomputed per open, so a stale green "Copied" never survives into a
+    // fresh dialog.
+    st.copied = false;
 
     st.bg = el('div', 'tdo-bg');
     st.box = el('div', 'tdo');
@@ -322,14 +236,9 @@
     document.body.appendChild(st.bg);
 
 
-    // Signing in is page one, but only when there is something to sign into
-    // and nobody signed in yet. Everyone else starts at the line.
-    var cfg = window.__TDOC__ || {};
-    var signedIn = !!(cfg.identity && cfg.identity.login);
-    if (cfg.authConfigured === false || signedIn) st.page = 1;
     var btn = render();
     if (btn) btn.focus();
-    if (signedIn) mint();
+    probeHosted();
   }
 
   document.addEventListener('click', function (e) {

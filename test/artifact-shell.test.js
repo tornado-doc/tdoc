@@ -89,7 +89,7 @@ const SLUG = 'hostile-body-css';
       const chrome = await page.evaluate(() => ({
         mark: !!document.querySelector('.tdoc-bar .tdoc-bar-mark img'),
         version: !!document.querySelector('.tdoc-bar #tdoc-version-toggle'),
-        copy: !!document.querySelector('.tdoc-bar #tdoc-copy-md-btn'),
+        more: !!document.querySelector('.tdoc-bar #tdoc-more-btn'),   // ⋯ menu (Copy as Markdown lives here now)
         theme: !!document.querySelector('.tdoc-bar #tdoc-theme-btn'),
         footer: !!document.querySelector('.tdoc-footer .tdoc-footer-row'),
       }));
@@ -162,12 +162,16 @@ const SLUG = 'hostile-body-css';
       if (Math.abs(d.cardTop - d.pinTop) > 200) throw new Error(`card drifted from its pin (pin ${d.pinTop}, card ${d.cardTop})`);
     });
 
-    await t('Copy → Doc only puts the doc markdown on the clipboard', async () => {
+    await t('⋯ → Copy as Markdown puts the doc markdown on the clipboard (with toast)', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
-      await page.click('#tdoc-copy-md-btn');
-      await page.click('#tdoc-copy-md-menu [data-mode="doc"]');
-      await page.waitForTimeout(400);
+      await page.click('#tdoc-more-btn');
+      await page.waitForSelector('#tdoc-secondary-menu.open', { timeout: 2000 });
+      await page.click('#tdoc-secondary-menu.open [data-action="copy"]');
+      await page.waitForFunction(
+        () => [...document.querySelectorAll('div')].some(d => d.textContent === 'Copied as Markdown'),
+        null, { timeout: 2000 }
+      );
       const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
       if (!/Hostile body CSS fixture/.test(clip) || !/quick brown fox/.test(clip)) {
         throw new Error('clipboard missing doc markdown: ' + JSON.stringify(clip.slice(0, 120)));
