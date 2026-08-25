@@ -712,7 +712,13 @@ function tShellGap(name, reason, _fn) {
 
   await tPub('Clicking + React on anon view triggers sign-in (no picker)', async () => {
     // Anon: should NOT open the emoji picker — should redirect to sign-in modal.
-    await page.click('.tdoc-react-add');
+    // The shell renders cards on demand: open a pin's card first (if the doc has
+    // no comments/pins, skip — nothing to react to).
+    const pin = await page.$('.tdoc-pin');
+    if (!pin) { console.log('  (no pins on this doc, skipping react-anon check)'); return; }
+    await pin.click();
+    await page.waitForSelector('.tdoc-margin-comment .tdoc-react-add', { timeout: 3000 });
+    await page.click('.tdoc-margin-comment .tdoc-react-add');
     // Modal appears after the device/start network round-trip (~1-2s). It is
     // the shared server/signin.js dialog (.tds-bg), not the old inline overlay
     // modal those selectors predate.
@@ -778,7 +784,9 @@ function tShellGap(name, reason, _fn) {
     const u = URL.replace(/\/?$/, '') + '/fork';
     await forkPage.goto(u, { waitUntil: 'networkidle' });
     // Title slug should say "fork of …"
-    const slug = await forkPage.$eval('.tdoc-bar .slug', el => el.textContent);
+    // #249 renamed the bar's slug element to .crumb-slug (this tPub assertion
+    // only runs against a live deploy, so the rename slipped past main's CI).
+    const slug = await forkPage.$eval('.tdoc-bar .crumb-slug', el => el.textContent);
     if (!slug.toLowerCase().includes('fork of')) throw new Error(`expected "fork of" in slug, got "${slug}"`);
     // Save button should be present (in narrow mode it may be hidden; we're at 1400px)
     const saveBtn = await forkPage.$('#tdoc-saveas-btn');

@@ -198,7 +198,11 @@
     function wireCard(card, id, reflow){
       reflow = reflow || positionCard;
       card.querySelectorAll('.tdoc-react-chip').forEach(function(chip){ chip.addEventListener('click', function(e){ e.stopPropagation(); postReaction(chip.getAttribute('data-target-id') || id, chip.getAttribute('data-emoji')); }); });
-      card.querySelectorAll('.tdoc-react-add').forEach(function(add){ add.addEventListener('click', function(e){ e.stopPropagation(); openEmojiPicker(add, add.getAttribute('data-target-id') || id); }); });
+      card.querySelectorAll('.tdoc-react-add').forEach(function(add){ add.addEventListener('click', function(e){ e.stopPropagation();
+        // Published + anonymous: sign in FIRST, never open the picker (1:1 with
+        // overlay — reacting requires an identity there).
+        if (cfg.mode === 'published' && !cfg.identity) { if (window.__tdocSignIn) window.__tdocSignIn().then(function(){ location.reload(); }, function(){}); return; }
+        openEmojiPicker(add, add.getAttribute('data-target-id') || id); }); });
       var rtog = card.querySelector('.tdoc-replies-toggle'), rlist = card.querySelector('.tdoc-replies');
       if (rtog && rlist) rtog.addEventListener('click', function(e){ e.stopPropagation(); var o = rlist.classList.toggle('open'); rtog.classList.toggle('open', o); reflow(); });
       var rbtn = card.querySelector('.tdoc-reply-toggle'), rform = card.querySelector('.tdoc-reply-form');
