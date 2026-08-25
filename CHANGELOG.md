@@ -132,6 +132,12 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
+- **The technical style inherits the shared table treatment.** It was the only
+  house style defining its own `table` / `th` / `td` rules — filled cells with a
+  3px gutter — so a technical doc silently opted out of the table style every
+  other style inherits, and kept the look they had all moved off. Removed, and
+  a test now fails if any style file redefines a table or omits the sentence
+  saying it inherits.
 - **The first doc's slug is per-person, so onboarding stops colliding.** Hosted
   slugs are one flat global namespace and the recipe derived the slug from the
   document title, which handed every user the same one. The second person to

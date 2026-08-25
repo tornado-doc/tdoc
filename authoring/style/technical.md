@@ -74,9 +74,6 @@ body  { background:#fff; }
 .wrap a  { color:#737373; text-decoration:underline; }
 .tag     { font:13px ui-monospace,"SF Mono",Menlo,monospace; background:#f5f5f5; color:#171717; border-radius:4px; padding:1px 6px; }
 code     { font:.85em ui-monospace,"SF Mono",Menlo,monospace; background:#f0f0f0; color:#171717; padding:1px 5px; border-radius:3px; }
-table    { border-collapse:separate; border-spacing:3px; width:100%; }
-th       { color:#737373; text-align:left; font:600 11px/1 ui-monospace,Menlo,monospace; letter-spacing:.04em; text-transform:uppercase; padding:8px 10px; }
-td       { background:#f5f5f5; color:#171717; padding:9px 10px; border-radius:4px; }
 .callout { border-left:3px solid #ff4b2e; background:#fff5f3; padding:12px 16px; margin:16px 0; }
 ```
 
@@ -100,6 +97,12 @@ ink-on-white diagrams — never a limit on which visuals a doc has. A pipeline,
 an architecture, a flow, context bars, a bar chart, a timeline, a matrix: draw
 whatever the content needs, in this light palette, and let the invert give the
 dark version.
+
+
+Tables inherit the overlay default: one hairline card, ruled between rows,
+nothing filled. This style used to define its own — filled cells with a 3px
+gutter — which meant a technical doc silently opted out of the shared table
+treatment and kept the look every other style had moved off.
 
 ## Style is visual only
 
