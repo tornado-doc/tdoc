@@ -1564,5 +1564,23 @@ t('tdoc-pull still works against a config that has no token', () => {
 });
 
 
+// ---- one table treatment, inherited by every style (present and future) ----
+
+t('no house style defines its own table CSS', () => {
+  // The overlay's reader CSS carries the table treatment so every style gets
+  // the same one. A style that redefines table/th/td silently opts its docs out
+  // — technical.md did, so technical docs kept filled cells with a 3px gutter
+  // after every other style had moved to the ruled card.
+  const dir = path.join(__dirname, '..', 'authoring', 'style');
+  for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.md') && n !== 'README.md')) {
+    const css = fs.readFileSync(path.join(dir, f), 'utf8');
+    const rules = css.split('\n').filter(l => /^\s*(body\s+)?(table|th|td)\s*[,{]/.test(l));
+    assert(rules.length === 0,
+      `${f} defines its own table CSS — tables must come from the overlay:\n      ${rules.join('\n      ')}`);
+    assert(/Tables inherit/.test(css),
+      `${f} does not say that tables inherit the overlay default`);
+  }
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
