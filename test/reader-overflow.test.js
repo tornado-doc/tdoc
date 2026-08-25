@@ -26,18 +26,8 @@ console.log('reader-overflow (tables + diagrams stay unclipped)');
 t('overlay table style has no negative horizontal margin', () => {
   assert(!/body table[^}]*margin:\s*[^;]*-\d+px/.test(src),
     'table rule still uses a negative margin (clips inside overflow wrappers)');
-  // Pin the property, not the exact spacing — the guard is against a left pull
-  // clipping the first column inside an overflow wrapper, not against ever
-  // changing the vertical rhythm.
-  const rule = src.match(/:where\(body table\) \{[^}]*\}/);
-  assert(rule, 'the default table rule is gone');
-  const margin = rule[0].match(/margin:\s*([^;]+);/);
-  assert(margin, 'the default table rule sets no margin');
-  const sides = margin[1].trim().split(/\s+/);
-  const horizontal = sides.length >= 2 ? [sides[1], sides[3] ?? sides[1]] : [sides[0], sides[0]];
-  for (const v of horizontal) {
-    assert(!v.startsWith('-'), `table margin pulls sideways (${margin[1].trim()})`);
-  }
+  assert(src.includes(':where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }'),
+    'default table margin must be 0 0 18px with no left pull');
 });
 
 t('overlay never display:block a document table', () => {

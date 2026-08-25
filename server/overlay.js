@@ -325,22 +325,12 @@
   :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: var(--td-surface-2); color: var(--td-pre-ink); border: 1px solid var(--td-line); border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
   :where(body pre code) { background: transparent; color: inherit; padding: 0; border-radius: 0; }
   :where(body hr) { border: 0; border-top: 1px solid var(--td-line); margin: 36px 0; }
-  /* Tables: one bordered card, ruled inside, nothing filled. Every cell used to
-     be a rounded tinted chip with a 3px gutter, which read as a pile of grey
-     blocks rather than a grid — the gutters cut the columns apart so the eye
-     had nothing to scan down, and four rounded corners per cell multiplied into
-     noise on any real table. A hairline under each row does that work, and an
-     outer border makes the table one object instead of a loose stack.
-     border-spacing:0 with separate collapse, because border-radius on the table
-     needs separate to round and overflow:hidden to clip.
-     This is also what survives dark mode: that is a whole-page invert, and a
-     filled cell inverts into a slab where a hairline just changes colour.
+  /* Tables: rounded cells with gutters — header tint comes from the theme.
      No negative horizontal margin: that clips the first column inside any
      overflow-x:auto wrapper (author skill tells agents to wrap tables). */
-  :where(body table) { border-collapse: separate; border-spacing: 0; width: 100%; margin: 6px 0 24px; font-size: 15.5px; font-variant-numeric: tabular-nums; border: 1px solid var(--td-line); border-radius: 12px; overflow: hidden; }
-  :where(body th, body td) { padding: 14px 18px; background: none; border: 0; border-bottom: 1px solid var(--td-line); border-radius: 0; text-align: left; vertical-align: middle; line-height: 1.5; }
-  :where(body th) { font-weight: 500; color: var(--td-muted); }
-  :where(body tbody tr:last-child td) { border-bottom: 0; }
+  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
+  :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
+  :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
   :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
   :where(body) ::selection { background: var(--td-selection); }
   /* Task lists: circle checkboxes, Claude Code style. Works for raw
