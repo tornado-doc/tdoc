@@ -127,10 +127,15 @@
   function commentOnElement(el) {
     var r = el.getBoundingClientRect();
     var label = el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('data-tdoc-artifact') || el.tagName.toLowerCase();
+    // Anchor the composer to the PILL the user just clicked (element top-right),
+    // not the element box — a tall section would otherwise park the composer
+    // below the whole box, far from the click.
+    var pr = (hoverPill && hoverPill.style.display !== 'none') ? hoverPill.getBoundingClientRect() : null;
+    var ar = pr && (pr.width || pr.height) ? pr : { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
     post({
       type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: cssPath(el),
       text: '', context_before: '', context_after: '',
-      rect: { top: r.top, left: r.left, bottom: r.bottom, right: r.right, width: r.width, height: r.height },
+      rect: { top: ar.top, left: ar.left, bottom: ar.bottom, right: ar.right, width: ar.width, height: ar.height },
     });
     hideHover();
   }
