@@ -391,6 +391,18 @@ const SLUG = 'hostile-body-css';
       }
     });
 
+    await t('author-doc links navigate the TOP page, not the frame', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      await frame.evaluate(() => document.getElementById('internal-link').scrollIntoView({ block: 'center' }));
+      await frame.click('#internal-link');
+      // the TOP page navigates to the doc path (no nested shell inside the frame)
+      await page.waitForURL(/\/d\/hostile-body-css\/v\/1(?:$|[?#])/, { timeout: 4000 });
+      const nested = await page.evaluate(() => document.querySelectorAll('iframe .tdoc-bar').length);
+      if (nested) throw new Error('shell nested inside the frame — link navigated the iframe');
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: fab opens a comment drawer listing the comments', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

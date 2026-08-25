@@ -68,6 +68,19 @@
     var ctx = context(range, 60);
     post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after, rect: selectionRect(range) });
   }
+  // Links: a click inside the sandboxed frame would navigate the FRAME (nested
+  // shell / 404), not the page. Intercept and hand navigation to the shell,
+  // which navigates the top document (or opens a tab for target=_blank).
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (!href || href.charAt(0) === '#') return;                    // in-page anchors stay in the frame
+    if (!/^(https?:\/\/|\/(?!\/))/i.test(href)) return;             // javascript:/data: etc. — let CSP kill them
+    e.preventDefault(); e.stopPropagation();
+    post({ type: 'tdoc:navigate', href: href, blank: a.getAttribute('target') === '_blank' });
+  }, true);
+
   document.addEventListener('mouseup', function () { setTimeout(reportSelection, 0); }, true);
   document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
   document.addEventListener('mousedown', function (e) {

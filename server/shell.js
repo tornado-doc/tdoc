@@ -561,6 +561,17 @@
       else if (d.type === 'tdoc:pins') { pinData = d.pins || []; frameScrollY = d.scrollY || 0; if (d.articleRight) gutterRight = d.articleRight; if (d.docHeight) docHeight = d.docHeight; positionPins(); }
       else if (d.type === 'tdoc:scroll') { frameScrollY = d.scrollY || 0; repositionPins(); updateFooter(d); tryDeepLink(); }
       else if (d.type === 'tdoc:copyText') { copyText(d.text || ''); }   // author data-tdoc-copy button (frame clipboard is unreliable)
+      else if (d.type === 'tdoc:navigate') {
+        // Author-doc links escape the frame: navigate the TOP page (or a new
+        // tab for target=_blank). Only http(s) URLs / rooted paths get through.
+        // NB: written without slash-bearing regexes — this code lives inside a
+        // template literal, where an escaped slash collapses into a comment.
+        var href = String(d.href || ''), lower = href.toLowerCase();
+        var okHref = lower.indexOf('http:') === 0 || lower.indexOf('https:') === 0
+          ? true
+          : (href.charAt(0) === '/' && href.charAt(1) !== '/');
+        if (okHref) { if (d.blank) window.open(href, '_blank', 'noopener'); else location.href = href; }
+      }
       else if (d.type === 'tdoc:docMarkdown' && copyReq) {
         // Copy lives in the ⋯ menu now — no button to flash, confirm with a
         // toast instead (1:1 with the overlay's "Copied as Markdown").

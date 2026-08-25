@@ -107,6 +107,15 @@ const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8')
     fs.rmSync(outDir, { recursive: true, force: true });
   });
 
+  // ── the GENERATED client script must parse ─────────────────────────────────
+  // shellScript() is code inside a template literal: an escaped slash or a stray
+  // backtick in it silently corrupts the OUTPUT while shell.js itself still
+  // parses (node -c can't see it). Compile the generated string to catch that.
+  await t('generated shellScript compiles (template-literal corruption guard)', async () => {
+    const shell = require(path.join(ROOT, 'server', 'shell.js'));
+    new Function(shell.shellScript());   // throws on any syntax corruption
+  });
+
   // ── published-mode bar wiring lives in the shared shellScript ──────────────
   await t('shellScript wires the published bar (Share/Duplicate/Download/identity)', async () => {
     const shell = require(path.join(ROOT, 'server', 'shell.js'));
