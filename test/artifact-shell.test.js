@@ -315,9 +315,11 @@ const SLUG = 'hostile-body-css';
         // wait for the PATCH to land in the fixture
         let anchored = null;
         for (let i = 0; i < 40; i++) {
-          const parsed = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'));
-          const c = parsed.find(x => x.id === 'c_fixture_1');
-          if (c && c.anchor && /second paragraph/.test(c.anchor.text || '')) { anchored = c; break; }
+          try {
+            const parsed = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'));
+            const c = parsed.find(x => x.id === 'c_fixture_1');
+            if (c && c.anchor && /second paragraph/.test(c.anchor.text || '')) { anchored = c; break; }
+          } catch (e) { /* server mid-write; retry */ }
           await page.waitForTimeout(50);
         }
         if (!anchored) throw new Error('comment was not re-anchored to the new selection');
@@ -367,10 +369,25 @@ const SLUG = 'hostile-body-css';
         await page.goto(shellUrl, { waitUntil: 'networkidle' });
         const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
         if (!frame) throw new Error('author frame not found');
-        // hovering the canvas surfaces the comment pill INSIDE the frame
+        // hovering the canvas surfaces the comment pill INSIDE the frame.
+        // Dispatch mousemove directly (deterministic — Playwright's hover
+        // occasionally raced the probe's listener attach under full-suite load)
+        // and retry until the pill is visible.
         await frame.evaluate(() => document.getElementById('art-canvas').scrollIntoView({ block: 'center' }));
-        await frame.hover('#art-canvas');
-        await frame.waitForSelector('.tdoc-comment-pill', { state: 'visible', timeout: 3000 });
+        let pillVisible = false;
+        for (let i = 0; i < 20 && !pillVisible; i++) {
+          await frame.evaluate(() => {
+            const c = document.getElementById('art-canvas');
+            const r = c.getBoundingClientRect();
+            c.dispatchEvent(new MouseEvent('mousemove', { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, view: window }));
+          });
+          await page.waitForTimeout(150);
+          pillVisible = await frame.evaluate(() => {
+            const p = document.querySelector('.tdoc-comment-pill');
+            return !!(p && p.style.display !== 'none' && p.getBoundingClientRect().width > 0);
+          });
+        }
+        if (!pillVisible) throw new Error('comment pill never appeared over the hovered canvas');
         // clicking it opens the composer in the shell (element anchor)
         await frame.click('.tdoc-comment-pill');
         await page.waitForSelector('.tdoc-popup textarea', { timeout: 3000 });
@@ -379,8 +396,12 @@ const SLUG = 'hostile-body-css';
         // the element comment persists with an element anchor + gets a pin
         let anchored = null;
         for (let i = 0; i < 40; i++) {
-          const parsed = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'));
-          anchored = parsed.find(c => c.anchor && c.anchor.kind === 'element' && /canvas/i.test(c.anchor.selector || ''));
+          // The server's write isn't atomic — a poll can catch the file half-
+          // written. Treat a parse failure as "not yet" and keep polling.
+          try {
+            const parsed = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'));
+            anchored = parsed.find(c => c.anchor && c.anchor.kind === 'element' && /canvas/i.test(c.anchor.selector || ''));
+          } catch (e) { /* mid-write; retry */ }
           if (anchored) break;
           await page.waitForTimeout(50);
         }
