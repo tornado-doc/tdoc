@@ -64,6 +64,8 @@
     var reanchoringId = null; // comment id awaiting a new frame selection to rebind its anchor
     var pendingDeepLink = null; // ?comment=<id> awaiting its pin so we can open+scroll to it
     var deepLinkTries = 0;      // guard against a scroll loop when the pin never comes into view
+    var deepLinkDone = false;   // consume-once: posting a comment re-runs loadComments with the
+                                // URL unchanged — without this the view would jump back to ?comment=
     function copyText(t){
       if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function(){return true;}).catch(function(){return false;});
       try { var ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); var ok=document.execCommand('copy'); ta.remove(); return Promise.resolve(ok); } catch(e){ return Promise.resolve(false); }
@@ -242,7 +244,7 @@
     // per load (the URL is captured after comments arrive).
     function captureDeepLink(){
       var want = null; try { want = new URLSearchParams(location.search).get('comment'); } catch (e) {}
-      if (want && commentsById && findCommentRoot(want)) { pendingDeepLink = want; deepLinkTries = 0; }
+      if (!deepLinkDone && want && commentsById && findCommentRoot(want)) { pendingDeepLink = want; deepLinkTries = 0; }
     }
     function findCommentRoot(want){
       if (!want) return null;
@@ -256,11 +258,11 @@
     function tryDeepLink(){
       if (!pendingDeepLink) return;
       var root = findCommentRoot(pendingDeepLink);
-      if (!root) { pendingDeepLink = null; return; }
+      if (!root) { pendingDeepLink = null; deepLinkDone = true; return; }
       // Narrow: open the bottom drawer, expand a reply thread, and scroll the
       // target card into view — no pin/gutter in narrow mode.
       if (document.body.classList.contains('tdoc-narrow')) {
-        var target0 = pendingDeepLink; pendingDeepLink = null;
+        var target0 = pendingDeepLink; pendingDeepLink = null; deepLinkDone = true;
         openDrawer();
         var dcard = drawerEl && drawerEl.querySelector('.tdoc-margin-comment[data-comment-id="' + root + '"]');
         if (dcard) {
@@ -271,14 +273,14 @@
         return;
       }
       var cl = clusterForId(root);
-      if (!cl) { if (++deepLinkTries > 40) pendingDeepLink = null; return; } // pin not resolved yet
+      if (!cl) { if (++deepLinkTries > 40) { pendingDeepLink = null; deepLinkDone = true; } return; } // pin not resolved yet
       var top = BAR + (cl.y - frameScrollY);
       if ((top < BAR + 20 || top > window.innerHeight - 60) && deepLinkTries < 40) {
         deepLinkTries++;
         sendFrame({ type:'tdoc:scrollTo', docY: Math.max(0, Math.round(cl.y - window.innerHeight / 3)) });
         return; // reopen check after the frame reports the new scroll position
       }
-      var target = pendingDeepLink; pendingDeepLink = null;
+      var target = pendingDeepLink; pendingDeepLink = null; deepLinkDone = true;
       openCard(root);
       if (target !== root) {   // a reply deep-link — expand the thread
         var card = document.querySelector('.tdoc-margin-comment');
@@ -539,6 +541,14 @@
       var r = d.rect || { bottom: 0, left: 8 };
       var top = BAR + (r.bottom || 0) + 8;
       var left = Math.max(8, Math.min((r.left || 8), window.innerWidth - (pop.offsetWidth || 320) - 8));
+      // Vertical clamp (review finding; overlay fixed this same bug): the shell
+      // body never scrolls, so a composer past the viewport bottom would be
+      // unreachable. Flip above the anchor when it fits, else pin to the bottom.
+      var popH = pop.offsetHeight || 200;
+      if (top + popH > window.innerHeight - 8) {
+        var above = BAR + (r.top || 0) - popH - 8;
+        top = above >= BAR + 4 ? above : Math.max(BAR + 4, window.innerHeight - popH - 8);
+      }
       pop.style.top = top + 'px'; pop.style.left = left + 'px';
       var ta = pop.querySelector('textarea'), submit = pop.querySelector('.submit'), x = pop.querySelector('.x');
       if (x) x.addEventListener('click', close);

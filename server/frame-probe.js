@@ -378,7 +378,7 @@
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {
       var clone = document.body.cloneNode(true);
-      Array.prototype.forEach.call(clone.querySelectorAll('script, style, noscript'), function (n) { n.remove(); });
+      Array.prototype.forEach.call(clone.querySelectorAll('script, style, noscript, .tdoc-hover-outline, .tdoc-comment-pill'), function (n) { n.remove(); });
       post({ type: 'tdoc:docMarkdown', markdown: htmlToMarkdown(clone), requestId: d.requestId });
     }
   });
