@@ -107,6 +107,20 @@ const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8')
     fs.rmSync(outDir, { recursive: true, force: true });
   });
 
+  // ── published-mode bar wiring lives in the shared shellScript ──────────────
+  await t('shellScript wires the published bar (Share/Duplicate/Download/identity)', async () => {
+    const shell = require(path.join(ROOT, 'server', 'shell.js'));
+    const js = shell.shellScript();
+    for (const needle of [
+      "wire('#tdoc-share-btn'", 'function showShareModal', 'function duplicateDoc',
+      'function startDownload', 'function downloadExport', 'function renderIdentity',
+      "'/api/doc/duplicate'", "data-action=\"duplicate\"", "data-action=\"download-pdf\"",
+      'Sign in with GitHub', '__tdocSignIn',
+    ]) {
+      if (!js.includes(needle)) throw new Error(`shellScript missing published wiring: ${needle}`);
+    }
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

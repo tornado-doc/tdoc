@@ -331,7 +331,7 @@
         case 'table': {
           var rows = Array.prototype.slice.call(node.querySelectorAll('tr'));
           if (!rows.length) return '';
-          var cells = function (r) { return Array.prototype.map.call(r.children, function (c) { return walk(c, ctx).trim().replace(/\|/g, '\\|'); }); };
+          var cells = function (r) { return Array.prototype.map.call(r.children, function (c) { return walk(c, ctx).trim().replace(/\\/g, '\\\\').replace(/\|/g, '\\|'); }); };
           var head = cells(rows[0]), body = rows.slice(1).map(cells);
           return '\n\n| ' + head.join(' | ') + ' |\n| ' + head.map(function () { return '---'; }).join(' | ') + ' |\n' + body.map(function (r) { return '| ' + r.join(' | ') + ' |'; }).join('\n') + '\n\n';
         }

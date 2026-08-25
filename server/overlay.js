@@ -4426,7 +4426,7 @@
         case 'table': {
           const rows = Array.from(node.querySelectorAll('tr'));
           if (!rows.length) return '';
-          const cells = (r) => Array.from(r.children).map(c => walk(c, ctx).trim().replace(/\|/g, '\\|'));
+          const cells = (r) => Array.from(r.children).map(c => walk(c, ctx).trim().replace(/\\/g, '\\\\').replace(/\|/g, '\\|'));
           const head = cells(rows[0]);
           const body = rows.slice(1).map(cells);
           return '\n\n| ' + head.join(' | ') + ' |\n| ' + head.map(() => '---').join(' | ') + ' |\n' +

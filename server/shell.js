@@ -403,6 +403,109 @@
           .catch(function(e){ status.textContent = 'Failed: ' + e.message; go.disabled = false; });
       };
     }
+    // --- published-mode wiring (ports of overlay.js downloadExport/startDownload/
+    //     duplicateDoc/showShareModal/renderIdentity). Pure chrome + fetch — none
+    //     of it touches the author DOM. Owner manage panel (access/unpublish/
+    //     delete) and the inbox are tracked follow-ups; Share falls back to the
+    //     copy-link modal for owners until the manage panel is ported. ---
+    function publicShareUrl(){ return location.origin + '/d/' + encodeURIComponent(cfg.slug) + '/v/' + cfg.version; }
+    function showShareModal(){
+      closeAuxModal();
+      var esc = window.TDOC_CHROME.escapeHtml, url = publicShareUrl();
+      var bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg'; bg.id = 'tdoc-aux-modal';
+      bg.innerHTML = '<div class="tdoc-modal"><h3>Share</h3>' +
+        '<div class="code" id="tdoc-share-url" style="font-size:14px;letter-spacing:0;text-align:left;cursor:copy;">' + esc(url) + '</div>' +
+        '<div class="actions" style="justify-content:flex-start;gap:8px;margin-top:0;margin-bottom:10px;"><button class="primary" id="tdoc-share-copy">Copy link</button></div>' +
+        '<p class="muted">Anyone with this link can read. To comment, they sign in with GitHub.</p>' +
+        '<div class="actions"><button id="tdoc-share-close">Close</button></div></div>';
+      document.body.appendChild(bg);
+      bg.addEventListener('click', function(e){ if (e.target === bg) closeAuxModal(); });
+      document.getElementById('tdoc-share-close').onclick = closeAuxModal;
+      document.getElementById('tdoc-share-copy').onclick = function(){ copyText(url); };
+      document.getElementById('tdoc-share-url').onclick = function(){ copyText(url); };
+    }
+    function showAccountCopyModal(o){
+      closeAuxModal();
+      var esc = window.TDOC_CHROME.escapeHtml, bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg'; bg.id = 'tdoc-aux-modal';
+      bg.innerHTML = '<div class="tdoc-modal"><h3>' + esc(o.title) + '</h3><p>' + esc(o.body) + '</p>' +
+        '<div class="actions">' + (o.offerDownload ? '<button class="primary" id="tdoc-dup-dl">Download HTML</button>' : '') + '<button id="tdoc-dup-close">Close</button></div></div>';
+      document.body.appendChild(bg);
+      document.getElementById('tdoc-dup-close').onclick = closeAuxModal;
+      var dl = document.getElementById('tdoc-dup-dl');
+      if (dl) dl.onclick = function(){ downloadExport(); closeAuxModal(); };
+    }
+    function downloadExport(){
+      var a = document.createElement('a');
+      a.href = '/d/' + encodeURIComponent(cfg.slug) + '/v/' + cfg.version + '/export?download=1';
+      a.download = cfg.slug + '-v' + cfg.version + '.html';
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    function downloadPdf(){
+      // Print the export in a hidden same-origin iframe (1:1 with overlay).
+      var src = '/d/' + encodeURIComponent(cfg.slug) + '/v/' + cfg.version + '/export?download=0';
+      var fr = document.createElement('iframe');
+      fr.setAttribute('title', 'Print');
+      fr.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:100vh;border:0;opacity:0;pointer-events:none;';
+      document.body.appendChild(fr);
+      function drop(){ if (fr.parentNode) fr.remove(); }
+      return new Promise(function(resolve, reject){
+        fr.onload = resolve; fr.onerror = function(){ reject(new Error('could not load export')); };
+        fr.src = src;
+        setTimeout(function(){ reject(new Error('pdf export timed out')); }, 20000);
+      }).then(function(){
+        var doc = fr.contentDocument, win = fr.contentWindow;
+        if (!doc || !win || !doc.body) throw new Error('empty export');
+        doc.title = cfg.slug + '-v' + cfg.version;
+        win.addEventListener('afterprint', drop, { once: true });
+        setTimeout(drop, 120000);
+        win.focus(); win.print();
+      }).catch(function(e){ drop(); throw e; });
+    }
+    function startDownload(format){
+      if (format === 'pdf') { downloadPdf().catch(function(e){ showAccountCopyModal({ title: 'Could not download PDF', body: e.message || 'PDF export failed. Try Download HTML.', offerDownload: true }); }); return; }
+      downloadExport();
+    }
+    function duplicateDoc(){
+      if (cfg.mode !== 'published') return;
+      if (!cfg.identity && window.__tdocSignIn) { window.__tdocSignIn().then(function(){ location.reload(); }, function(){}); return; }
+      fetch('/api/doc/duplicate', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ slug: cfg.slug, version: cfg.version }) })
+        .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(d){ return { r: r, d: d }; }); })
+        .then(function(x){
+          if (x.r.status === 401 || x.d.error === 'sign_in_required') { if (window.__tdocSignIn) window.__tdocSignIn().then(function(){ duplicateDoc(); }, function(){}); return; }
+          if (x.d.error === 'account_copy_unavailable') { showAccountCopyModal({ title: 'Account copy is not available here', body: x.d.message || 'This host only lets the worker owner make an account copy. Download the HTML to take the doc offline.', offerDownload: true }); return; }
+          if (x.d.error === 'islands_not_supported') { showAccountCopyModal({ title: 'This doc has interactive widgets', body: x.d.message || 'Widget islands cannot be duplicated in v1. Download the host HTML instead.', offerDownload: true }); return; }
+          if (!x.r.ok || !x.d.ok || !x.d.url) { showAccountCopyModal({ title: 'Could not duplicate', body: x.d.message || x.d.error || ('HTTP ' + x.r.status), offerDownload: true }); return; }
+          location.href = x.d.url;
+        })
+        .catch(function(e){ showAccountCopyModal({ title: 'Could not duplicate', body: e.message || 'network error', offerDownload: true }); });
+    }
+    // Identity slot: avatar chip + menu (My docs / Sign out) when signed in, a
+    // sign-in chip otherwise. Inbox is a tracked follow-up.
+    function renderIdentity(){
+      var slot = document.getElementById('tdoc-identity-slot'); if (!slot) return;
+      var esc = window.TDOC_CHROME.escapeHtml;
+      if (cfg.identity) {
+        slot.innerHTML = '<div class="tdoc-menu-wrap"><button class="tdoc-chip" id="tdoc-me" aria-haspopup="menu" aria-expanded="false">' +
+          '<img src="' + esc(cfg.identity.avatar_url || '') + '" alt=""><span class="name">' + esc(cfg.identity.login) + '</span></button>' +
+          '<div class="tdoc-menu" id="tdoc-me-menu" role="menu">' +
+          (cfg.canSeeMyDocs ? '<button id="tdoc-my-docs" role="menuitem">My docs</button>' : '') +
+          '<button id="tdoc-signout" role="menuitem">Sign out</button></div></div>';
+        var meBtn = document.getElementById('tdoc-me'), meMenu = document.getElementById('tdoc-me-menu');
+        meBtn.onclick = function(e){ e.stopPropagation(); var open = meMenu.classList.toggle('open'); meBtn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+        var myDocs = document.getElementById('tdoc-my-docs');
+        if (myDocs) myDocs.onclick = function(){ window.open('/me', '_blank', 'noopener'); };
+        document.getElementById('tdoc-signout').onclick = function(){
+          fetch('/api/auth/logout', { method: 'POST' }).then(function(){ location.reload(); });
+        };
+      } else if (cfg.mode === 'published') {
+        slot.innerHTML = '<button class="tdoc-chip signin" id="tdoc-signin">Sign in with GitHub</button>';
+        document.getElementById('tdoc-signin').onclick = function(){ if (window.__tdocSignIn) window.__tdocSignIn().then(function(){ location.reload(); }, function(){}); };
+      } else {
+        slot.innerHTML = '';
+      }
+    }
     function close(){ var el = document.querySelector('.tdoc-popup'); if (el) el.remove(); pending = null; }
     function open(d){
       close();
@@ -477,8 +580,18 @@
     })();
     // My docs
     wire('#tdoc-bar-mark','click',function(){ location.href='/me'; });
-    // Publish (local mode)
+    // Publish (local mode) / Share (published mode)
     wire('#tdoc-publish-btn','click',function(e){ e.stopPropagation(); showPublishModal(); });
+    wire('#tdoc-share-btn','click',function(e){ e.stopPropagation(); showShareModal(); });
+    wire('#tdoc-duplicate-btn','click',function(e){ e.stopPropagation(); duplicateDoc(); });
+    // Download split-button menu (published/fork wide mode)
+    wire('#tdoc-download-btn','click',function(e){ e.stopPropagation(); toggleMenu('tdoc-download-menu'); });
+    document.querySelectorAll('#tdoc-download-menu [data-format]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); startDownload(b.getAttribute('data-format')); }); });
+    // ⋯ menu published/fork actions
+    document.querySelectorAll('#tdoc-secondary-menu [data-action="duplicate"]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); duplicateDoc(); }); });
+    document.querySelectorAll('#tdoc-secondary-menu [data-action="download"], #tdoc-secondary-menu [data-action="saveas"]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); downloadExport(); }); });
+    document.querySelectorAll('#tdoc-secondary-menu [data-action="download-pdf"]').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); closeMenus(); startDownload('pdf'); }); });
+    renderIdentity();
     // Menus open by toggling .open on the MENU element (matches the real CSS
     // .tdoc-menu.open / .tdoc-version-menu.open).
     function toggleMenu(id){ var m=document.getElementById(id); if(!m) return; var was=m.classList.contains('open'); closeMenus(); if(!was) m.classList.add('open'); }
