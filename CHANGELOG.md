@@ -74,15 +74,6 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
-- **Tables are one bordered card, ruled inside, with nothing filled.** Every
-  cell used to be a rounded tinted chip separated by a 3px gutter, so a table
-  read as a pile of grey blocks rather than a grid: the gutters cut the columns
-  apart, leaving the eye nothing to scan down, and four rounded corners per cell
-  multiplied into noise on any real table. A hairline under each row does that
-  work now, inside a single hairline border, with a normal-case header in the
-  muted ink and roomier cells. It also survives dark mode, which is a whole-page
-  invert — a filled cell inverted into a slab where a hairline just changes
-  colour. Every style inherits it, including styles not written yet.
 - **The first doc is the reader's own portrait.** `FIRST-DOC.md` no longer
   builds a Conway's Game of Life lesson. It builds *What does AI know about
   you?* — a page assembled from the traces every AI assistant on the machine
@@ -132,12 +123,6 @@ file and `.claude-plugin/plugin.json`.
 
 ### Fixed
 
-- **The technical style inherits the shared table treatment.** It was the only
-  house style defining its own `table` / `th` / `td` rules — filled cells with a
-  3px gutter — so a technical doc silently opted out of the table style every
-  other style inherits, and kept the look they had all moved off. Removed, and
-  a test now fails if any style file redefines a table or omits the sentence
-  saying it inherits.
 - **The first doc's slug is per-person, so onboarding stops colliding.** Hosted
   slugs are one flat global namespace and the recipe derived the slug from the
   document title, which handed every user the same one. The second person to
