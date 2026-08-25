@@ -1438,5 +1438,131 @@ t('lib/json.sh survives the inputs that actually show up', () => {
 });
 
 
+
+// ---- tdoc-pull has to prove who it is (#278) ----
+// It was the only CLI request that sent no Authorization header at all, with
+// the token sitting in the same config file it had just read `.base` out of.
+// On a private doc the worker therefore saw an anonymous visitor and denied
+// the owner their own comments.
+
+t('tdoc-pull sends the account token', () => {
+  const port = 8150 + Math.floor(Math.random() * 200);
+  // A worker that behaves like the real one: no token, no private doc.
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{` +
+    `s.setHeader('content-type','application/json');` +
+    `const a=q.headers.authorization||'';` +
+    `if(a!=='Bearer sekret'){s.statusCode=403;return s.end('{"error":"access_denied"}');}` +
+    `s.end(JSON.stringify([{id:'c1',text:'owner can see this',version:1}]));` +
+    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-pullauth-'));
+  try {
+    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: `http://127.0.0.1:${port}`, upload_token: 'sekret',
+      public_host: '127.0.0.1', github_login: 'owner',
+    }));
+    const doc = path.join(home, 'tdocs', 'priv-doc');
+    fs.mkdirSync(doc, { recursive: true });
+
+    const r = spawnSync(path.join(BIN, 'tdoc-pull'), ['priv-doc'], {
+      env: { ...process.env, HOME: home, TDOC_DIR: path.join(home, 'tdocs'),
+             TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(r.status === 0, `pull was denied — the token was not sent: ${r.stderr}`);
+    const got = JSON.parse(fs.readFileSync(path.join(doc, 'comments.json'), 'utf8'));
+    assert(got.length === 1 && got[0].text === 'owner can see this',
+      `wrong comments pulled: ${JSON.stringify(got)}`);
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('a denied pull explains it is an access problem, not a network one', () => {
+  // "network error or bad slug?" sent people looking at their wifi. A denial
+  // has one likely cause and one fix, so say both.
+  const port = 8400 + Math.floor(Math.random() * 200);
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{s.setHeader('content-type','application/json');` +
+    `s.statusCode=403;s.end('{"error":"access_denied"}');}).listen(${port},'127.0.0.1');`],
+    { stdio: 'ignore' });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-pulldenied-'));
+  try {
+    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: `http://127.0.0.1:${port}`, upload_token: 'stale',
+    }));
+    const doc = path.join(home, 'tdocs', 'priv-doc');
+    fs.mkdirSync(doc, { recursive: true });
+    const original = JSON.stringify([{ id: 'keep', text: 'local', version: 1 }]);
+    fs.writeFileSync(path.join(doc, 'comments.json'), original);
+
+    const r = spawnSync(path.join(BIN, 'tdoc-pull'), ['priv-doc'], {
+      env: { ...process.env, HOME: home, TDOC_DIR: path.join(home, 'tdocs'),
+             TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(r.status !== 0, 'a denial must fail');
+    assert(/access_denied/.test(r.stderr) && /private/.test(r.stderr),
+      `the denial was not explained:\n      ${r.stderr.trim()}`);
+    assert(/tdoc publish priv-doc/.test(r.stderr),
+      `no way out was offered:\n      ${r.stderr.trim()}`);
+    // Both causes, neither asserted. The first live run of this message named
+    // the wrong one — the token owned the doc, the worker was just older than
+    // the fix — and sent the owner off to re-publish for nothing.
+    assert(/different account/.test(r.stderr),
+      `the wrong-account cause is missing:\n      ${r.stderr.trim()}`);
+    assert(/predates token-authenticated reads|redeploy/.test(r.stderr),
+      `the stale-worker cause is missing:\n      ${r.stderr.trim()}`);
+    assert(!/does not own it/.test(r.stderr),
+      `the message still asserts one cause as fact:\n      ${r.stderr.trim()}`);
+    assert(!/network error/.test(r.stderr),
+      `a denial was still blamed on the network:\n      ${r.stderr.trim()}`);
+    assert(fs.readFileSync(path.join(doc, 'comments.json'), 'utf8') === original,
+      'a denial must not touch local comments');
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-pull still works against a config that has no token', () => {
+  // Self-host configs written before tokens, and local-only setups. Sending no
+  // header must stay a supported shape rather than becoming "Bearer ".
+  const port = 8480 + Math.floor(Math.random() * 100);
+  const stub = spawn(process.execPath, ['-e',
+    `require('http').createServer((q,s)=>{s.setHeader('content-type','application/json');` +
+    `if('authorization' in q.headers){s.statusCode=400;return s.end('{"error":"sent_empty_bearer"}');}` +
+    `s.end('[]');}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-pullnotoken-'));
+  try {
+    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
+      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: `http://127.0.0.1:${port}`,
+    }));
+    fs.mkdirSync(path.join(home, 'tdocs', 'open-doc'), { recursive: true });
+    const r = spawnSync(path.join(BIN, 'tdoc-pull'), ['open-doc'], {
+      env: { ...process.env, HOME: home, TDOC_DIR: path.join(home, 'tdocs'),
+             TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    assert(r.status === 0, `a token-less config broke: ${r.stderr}`);
+    assert(!/sent_empty_bearer/.test(r.stdout + r.stderr),
+      'an empty token was sent as a header instead of being omitted');
+  } finally {
+    stub.kill();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -721,6 +721,161 @@ async function issue(worker, env, login = 'alice', label = login) {
     assert(!body.includes('id="tdoc-duplicate-btn"'), 'export must not include published chrome');
   });
 
+
+  // ---- the owner's CLI token can read their own private doc (#278) ----
+  // The read gate resolved identity only through a browser cookie, so
+  // `tdoc-pull` — which authenticates with the account token — was treated as
+  // an anonymous visitor and denied. FIRST-DOC.md publishes every new user's
+  // first doc as private, so the first doc they made was the one they could
+  // not iterate on.
+
+  // Publish a doc under `owner` with an access policy, and leave a comment on
+  // it as some signed-in reader so there is something to pull.
+  async function publishWith(env, owner, slug, access) {
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: owner.token,
+      body: { slug, version: 1, html: '<h1>P</h1>', meta: { title: 'P', slug, versions: [{ n: 1 }], access } },
+    }), env, {});
+    assert(up.status === 200, `upload ${up.status}: ${await up.text()}`);
+    return up;
+  }
+
+  await t('the owner token reads comments on their own private doc', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'owner');
+    await publishWith(env, owner, 'priv-doc', {
+      visibility: 'private', history_visibility: 'owner',
+      commenting: 'signed_in', allowed_users: ['reader'],
+    });
+    // A comment from an allowlisted reader — the thing /tdoc pull exists to fetch.
+    const readerCookie = await putSession(env, 'reader');
+    const post = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: readerCookie,
+      body: { slug: 'priv-doc', version: 1, text: 'please fix the chart' },
+    }), env, {});
+    assert(post.status === 200, `reader comment ${post.status}: ${await post.text()}`);
+
+    // Anonymous — the behaviour that must not change.
+    const anon = await worker.fetch(req('/api/comments?slug=priv-doc&version=all'), env, {});
+    assert(anon.status !== 200, `anonymous read of a private doc returned ${anon.status}`);
+
+    // The owner's CLI token — this is the fix.
+    const r = await worker.fetch(req('/api/comments?slug=priv-doc&version=all', {
+      token: owner.token,
+    }), env, {});
+    assert(r.status === 200, `owner token denied: ${r.status} ${await r.clone().text()}`);
+    const list = await r.json();
+    assert(Array.isArray(list), `expected an array, got ${JSON.stringify(list).slice(0, 120)}`);
+    assert(list.length === 1 && list[0].text === 'please fix the chart',
+      `owner did not get the comment: ${JSON.stringify(list)}`);
+  });
+
+  await t('another account token is still denied the same private doc', async () => {
+    // The whole fix rests on this: reading over a token must grant exactly the
+    // docs that token can already overwrite, and nothing else.
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'owner');
+    const stranger = await issue(worker, env, 'stranger');
+    await publishWith(env, owner, 'priv-doc', {
+      visibility: 'private', history_visibility: 'owner', allowed_users: [],
+    });
+
+    const r = await worker.fetch(req('/api/comments?slug=priv-doc&version=all', {
+      token: stranger.token,
+    }), env, {});
+    assert(r.status !== 200, `a stranger's token read a private doc: ${await r.clone().text()}`);
+    const body = await r.json();
+    assert(body.error === 'access_denied', `unexpected body ${JSON.stringify(body)}`);
+
+    // And the stranger cannot write it either — the same account-id comparison.
+    const w = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: stranger.token,
+      body: { slug: 'priv-doc', version: 2, html: '<h1>X</h1>' },
+    }), env, {});
+    assert(w.status === 403, `stranger write should be 403, got ${w.status}`);
+  });
+
+  await t('a bearer token nobody issued is denied, and does not 500', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'owner');
+    await publishWith(env, owner, 'priv-doc', { visibility: 'private', allowed_users: [] });
+    for (const junk of ['not-a-token', '', 'Bearer', '../../etc/passwd']) {
+      const r = await worker.fetch(req('/api/comments?slug=priv-doc&version=all', { token: junk }), env, {});
+      assert(r.status !== 200, `junk token "${junk}" was accepted`);
+      assert(r.status < 500, `junk token "${junk}" caused ${r.status}`);
+    }
+  });
+
+  await t('the owner token opens the private doc HTML and sees every version', async () => {
+    // history_visibility: 'owner' hides the version picker from everyone else.
+    // Reading over the token has to count as the owner there too, or the CLI
+    // sees a doc that claims to have one version.
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'owner');
+    for (const v of [1, 2, 3]) {
+      const up = await worker.fetch(req('/api/upload', {
+        method: 'POST', token: owner.token,
+        body: {
+          slug: 'multi-doc', version: v, html: `<h1>v${v}</h1>`,
+          meta: {
+            title: 'M', slug: 'multi-doc',
+            versions: [1, 2, 3].slice(0, v).map((n) => ({ n })),
+            access: { visibility: 'private', history_visibility: 'owner', allowed_users: [] },
+          },
+        },
+      }), env, {});
+      assert(up.status === 200, `upload v${v} ${up.status}: ${await up.text()}`);
+    }
+
+    const anon = await worker.fetch(req('/d/multi-doc/v/3'), env, {});
+    assert(anon.status !== 200, `anonymous opened a private doc: ${anon.status}`);
+
+    const r = await worker.fetch(req('/d/multi-doc/v/3', { token: owner.token }), env, {});
+    assert(r.status === 200, `owner token denied the HTML: ${r.status}`);
+    const body = await r.text();
+    assert(/v3/.test(body), 'the document body did not come back');
+    // All three versions reachable, not just the one being viewed.
+    const nav = body.match(/"versions":\s*(\[[^\]]*\])/);
+    assert(nav, 'the page did not carry a version list');
+    assert(JSON.parse(nav[1]).length === 3,
+      `owner should see 3 versions, saw ${JSON.parse(nav[1]).length}`);
+  });
+
+  await t('reading over a token does not sign the CLI in', async () => {
+    // The token proves ownership for the read and nothing more. If it were
+    // turned into a session, the page would render a signed-in identity that
+    // no browser ever authenticated, and a comment could be attributed to it.
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'owner');
+    await publishWith(env, owner, 'ident-doc', { visibility: 'private', allowed_users: [] });
+
+    const r = await worker.fetch(req('/d/ident-doc/v/1', { token: owner.token }), env, {});
+    assert(r.status === 200, `owner token denied: ${r.status}`);
+    const body = await r.text();
+    const ident = body.match(/"identity":\s*(null|\{[^}]*\})/);
+    assert(ident, 'the page did not carry an identity field at all');
+    assert(ident[1] === 'null',
+      `a synthetic session was rendered into the page: ${ident[1]}`);
+
+    // And the token must not let it write a comment as anyone.
+    const w = await worker.fetch(req('/api/comments', {
+      method: 'POST', token: owner.token,
+      body: { slug: 'ident-doc', version: 1, text: 'from a token' },
+    }), env, {});
+    assert(w.status === 401, `a token should not post comments, got ${w.status}`);
+  });
+
+  await t('an unlisted doc still needs no token at all', async () => {
+    // The fix must not make anonymous reads harder anywhere.
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'owner');
+    await publishWith(env, owner, 'open-doc', { visibility: 'unlisted' });
+    const r = await worker.fetch(req('/api/comments?slug=open-doc&version=all'), env, {});
+    assert(r.status === 200, `anonymous read of an unlisted doc broke: ${r.status}`);
+    assert(Array.isArray(await r.json()), 'unlisted read did not return an array');
+  });
+
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

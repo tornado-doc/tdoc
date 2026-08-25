@@ -53,12 +53,35 @@ mkdir -p "$(dirname "$OUT")"
 # Fetch the FULL history (all versions). Without version=all the worker returns
 # only the latest snapshot, which silently drops comments created on earlier
 # versions (root cause of "comments disappear on pull").
-REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/comments?slug=$SLUG&version=all")"
+# Send the account token. This was the only CLI request that authenticated
+# with nothing at all, so on a private doc the worker saw an anonymous visitor
+# and denied the owner their own comments — and private is what FIRST-DOC.md
+# publishes every new user's first doc as. See #278.
+TOKEN="$(json_file_get "$CONFIG_FILE" upload_token)"
+if [ -n "$TOKEN" ]; then
+  REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 \
+    -H "Authorization: Bearer $TOKEN" "$BASE/api/comments?slug=$SLUG&version=all")"
+else
+  REMOTE="$(curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/comments?slug=$SLUG&version=all")"
+fi
 
 # Validate the response is a JSON array before touching local state. A transient
 # worker error must never clobber comments.json.
 if ! printf '%s' "$REMOTE" | json_is_array; then
-  echo "tdoc-pull: worker did not return a comment array (network error or bad slug?). Local comments.json left untouched." >&2
+  if printf '%s' "$REMOTE" | grep -q '"access_denied"'; then
+    # State the possibilities; do not pick one. The first live run of this
+    # message picked "your token does not own it" and was wrong: the token did
+    # own the doc, the worker was simply older than the fix that taught it to
+    # read tokens. Self-hosted workers can lag by any amount, so that case is
+    # permanent, not a launch-week detail.
+    echo "tdoc-pull: '$SLUG' is not readable by this machine ($BASE said access_denied)." >&2
+    echo "  The doc is private, so one of these is true:" >&2
+    echo "    - the account token in $CONFIG_FILE belongs to a different account" >&2
+    echo "    - this worker predates token-authenticated reads; redeploy it" >&2
+    echo "  If the doc is yours and the host is tdoc.dev, re-run: /tdoc publish $SLUG" >&2
+  else
+    echo "tdoc-pull: worker did not return a comment array (network error or bad slug?). Local comments.json left untouched." >&2
+  fi
   printf '%s\n' "$REMOTE" | head -c 400 >&2; echo >&2
   exit 1
 fi
