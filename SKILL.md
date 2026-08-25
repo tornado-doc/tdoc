@@ -891,15 +891,19 @@ downloaded file cannot fetch `/widget/` URLs; account copy is host HTML only).
 ### Default styling — trust the reading template, add components on top
 
 **The house style (`$SKILL_DIR/authoring/style/default.md`) deliberately does
-not touch reading typography.** It trusts the overlay's injected template for
-body size, headings, and measure, and adds only semantic components (risk /
-positive / leveled block / pill / diagram box). So "do not re-style" and the
-house style agree: write component CSS and doc-specific CSS, but do not set
-your own `font-size` on `p`, `h1`, `h2` — the overlay already did.
+not touch reading typography.** The reader template owns body size, headings,
+and measure; the house style adds only semantic components (risk / positive /
+leveled block / pill / diagram box). So "do not re-style" and the house style
+agree: write component CSS and doc-specific CSS, but do not set your own
+`font-size` on `p`, `h1`, `h2` — the template already did.
 
-The values below are what the overlay injects, at `:where()` zero
-specificity, and what `/export` and Download PDF inline. The house style
-sits on top of them rather than replacing them.
+**The template is BAKED INTO the document at creation** (`tdoc-new` stamps it
+as `<style id="tdoc-reader">`, the same block `/export` inlines), so every doc
+is self-contained: it renders identically in the reader shell, downloaded, or
+opened as a bare file. Never write your own `<style id="tdoc-reader">` — the
+scaffold owns that block. The values below are that template, at `:where()`
+zero specificity — the house style and your doc CSS sit on top of them and
+always win.
 
 The overlay's template is modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only. **Download** is a menu: **Download HTML** (`/export`, reader CSS inlined as `<style id="tdoc-reader">`) and **Download PDF** (print that same reading column; use the browser's Save as PDF). Neither includes overlay chrome (bar, comments).
 

@@ -187,6 +187,26 @@ if ! "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
   die "default-template validation failed (existing doc, if any, left untouched)"
 fi
 
+# Bake the reader template into the doc so it is SELF-CONTAINED (the cross-
+# origin shell serves author HTML in an isolated frame and injects nothing).
+# The template is all :where() zero-specificity, so author CSS always wins;
+# <style id="tdoc-reader"> is the same block /export stamps. Skipped when the
+# doc already carries one (re-runs, hand-authored docs).
+if ! grep -q 'id="tdoc-reader"' "$STAGE_HTML"; then
+  BAKE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const root = process.argv[1], file = process.argv[2];
+    const shell = require(path.join(root, "server", "shell.js"));
+    const css = shell.sliceReaderCss(fs.readFileSync(path.join(root, "server", "overlay.js"), "utf8"));
+    if (!css) process.exit(0);   // markers missing — serve unbaked rather than die
+    let html = fs.readFileSync(file, "utf8");
+    const tag = "<style id=\"tdoc-reader\">" + css + "</style>\n";
+    html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, tag + "</head>") : tag + html;
+    fs.writeFileSync(file, html);
+  ' "$BAKE_ROOT" "$STAGE_HTML" || die "reader-template bake failed (existing doc left untouched)"
+fi
+
 # Validation passed — NOW it's safe to replace. Swap the existing doc out only
 # at this point. (Same-filesystem mv under TDOC_DIR, so this is atomic-ish.)
 if [ -d "$DOC_DIR" ]; then

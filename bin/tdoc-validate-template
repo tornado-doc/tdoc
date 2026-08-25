@@ -49,6 +49,7 @@ class ContractParser(HTMLParser):
         self.in_body = False
         self.body_depth = 0
         self.in_style = False
+        self.in_reader_style = False
         self.style_chunks: list[str] = []
         self.styles: list[str] = []
         self.has_viewport = False
@@ -68,6 +69,10 @@ class ContractParser(HTMLParser):
             self.has_viewport = True
         if tag == "style":
             self.in_style = True
+            # <style id="tdoc-reader"> is the reader template ITSELF, baked in
+            # by tdoc-new so docs are self-contained under the shell. It is
+            # tdoc's CSS, not author CSS — exempt it from author-style checks.
+            self.in_reader_style = attrs.get("id", "") == "tdoc-reader"
             self.style_chunks = []
         if tag == "footer":
             self.has_footer = True
@@ -99,9 +104,11 @@ class ContractParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
         if tag == "style" and self.in_style:
-            self.styles.append("".join(self.style_chunks))
+            if not self.in_reader_style:
+                self.styles.append("".join(self.style_chunks))
             self.style_chunks = []
             self.in_style = False
+            self.in_reader_style = False
         if tag == "body":
             self.in_body = False
             self.body_depth = 0

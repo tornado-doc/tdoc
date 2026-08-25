@@ -47,6 +47,7 @@ const OFFLINE = [
   'agent-runtime.test.js',    // host-runtime detect + agent logos
   'pins-layout.test.js',      // v0.8.0 pins clustering/spread/overflow-fold core
   'worker-shell.test.js',     // step7 worker shell parity: /frame route, CSP, bundled builders
+  'bake-reader.test.js',      // tdoc-new bakes the reader template → self-contained docs (shell)
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'notifications.test.js',    // inbox aggregation + Reddit recipients
