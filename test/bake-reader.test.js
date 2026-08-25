@@ -25,7 +25,8 @@ const FIXTURE = `<!doctype html><html><head><meta name="viewport" content="width
 function runNew(tmp, slug, html) {
   const f = path.join(tmp, `${slug}.html`);
   fs.writeFileSync(f, html);
-  cp.execFileSync('bash', [path.join(ROOT, 'bin', 'tdoc-new'), '--slug', slug, '--title', slug, '--html-file', f], {
+  // --no-server: scaffold-only (CI has no installed skill dir and no server).
+  cp.execFileSync('bash', [path.join(ROOT, 'bin', 'tdoc-new'), '--slug', slug, '--title', slug, '--html-file', f, '--no-server'], {
     env: { ...process.env, TDOC_DIR: path.join(tmp, 'tdocs') }, stdio: ['ignore', 'ignore', 'pipe'],
   });
   return fs.readFileSync(path.join(tmp, 'tdocs', slug, 'v1', 'index.html'), 'utf8');
