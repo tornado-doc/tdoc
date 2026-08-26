@@ -120,13 +120,23 @@ async function loadWorker() {
     /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
     'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
   );
-  // Reader CSS is a standalone file now — inline it like the bundler does so
-  // /export stamps #tdoc-reader in this in-process worker too.
+  // Inline the shell modules exactly like bin/tdoc-bundle, so the in-process
+  // worker renders the real shell (doc pages carry the cfg with versions/
+  // identity) instead of the bare no-SHELL fallback.
   const readerCss = fs.readFileSync(path.join(root, 'server', 'reader.css'), 'utf8');
   src = src.replace(
     /const READER_CSS = `__TDOC_READER_CSS__`;/,
     'const READER_CSS = ' + JSON.stringify(readerCss) + ';'
   );
+  const chromeMod = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8');
+  const shellMod = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
+  const probeJs = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
+  const chromeCss = fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8');
+  src = src.replace('/* __TDOC_CHROME_MODULE__ */', chromeMod);
+  src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
+  src = src.replace(/const CHROME_JS = `__TDOC_CHROME_JS__`;/, 'const CHROME_JS = ' + JSON.stringify(chromeMod) + ';');
+  src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
+  src = src.replace(/const CHROME_CSS = `__TDOC_CHROME_CSS__`;/, 'const CHROME_CSS = ' + JSON.stringify(chromeCss) + ';');
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);
   const mod = await import(`file://${tmp}`);
