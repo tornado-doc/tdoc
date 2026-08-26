@@ -26,7 +26,6 @@ function childEnv() {
 
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
-const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
 const CHROME_PATH = path.join(__dirname, 'chrome.js');
 // Shared chrome module, also loaded server-side so the shell can render the real
 // bar/footer markup statically (same source the browser gets as window.TDOC_CHROME).

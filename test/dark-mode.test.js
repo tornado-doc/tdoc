@@ -16,7 +16,8 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
+// Theme wiring lives in the shell client; the invert CSS lives in the probe.
+const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'shell.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'server', 'frame-probe.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'server', 'chrome.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'server', 'chrome.css'), 'utf8');
 
 console.log('dark-mode (#120 bar switch + localStorage)');
 
@@ -25,13 +26,13 @@ t('bar has #tdoc-theme-btn', () => {
 });
 
 t('theme is stored under tdoc-theme', () => {
-  assert(src.includes("const THEME_KEY = 'tdoc-theme'"), 'THEME_KEY missing');
-  assert(src.includes('localStorage.setItem(THEME_KEY, theme)'), 'does not persist on switch');
-  assert(src.includes('localStorage.getItem(THEME_KEY)'), 'does not restore stored theme');
+  assert(src.includes("KEY='tdoc-theme'"), 'theme storage key missing');
+  assert(src.includes("localStorage.setItem(KEY,dark?'dark':'light')"), 'does not persist on switch');
+  assert(src.includes("localStorage.getItem(KEY)==='dark'"), 'does not restore stored theme');
 });
 
 t('applies html[data-tdoc-theme]', () => {
-  assert(src.includes("setAttribute('data-tdoc-theme', theme)"), 'does not set data-tdoc-theme');
+  assert(src.includes("setAttribute('data-tdoc-theme', t)"), 'does not set data-tdoc-theme');
   assert(src.includes('html[data-tdoc-theme="dark"]'), 'no dark CSS');
 });
 
@@ -53,42 +54,32 @@ t('dark mode keeps form-control labels visible under invert', () => {
 });
 
 t('dark mode restores native emoji colors (not inverted)', () => {
-  assert(
-    /html\[data-tdoc-theme="dark"\][\s\S]*?\.tdoc-emoji/.test(src),
-    'dark CSS must re-invert .tdoc-emoji like photos'
-  );
-  assert(src.includes('function renderReactionGlyph'), 'missing glyph helper');
+  // The frame inverts wholesale; media un-inverts via the probe theme CSS.
+  assert(/img:not\(\[data-tdoc-dark="invert"\]\)/.test(src),
+    'dark CSS must re-invert photos/media back to native colors');
+  // Reaction glyphs (chrome.js reactionGlyph): color emoji wrap in .tdoc-emoji
+  // so the chrome dark CSS can re-invert them; LGTM stays plain text.
+  assert(src.includes('function reactionGlyph'), 'missing glyph helper');
   assert(src.includes('class="tdoc-emoji"'), 'reaction glyphs must wrap in .tdoc-emoji');
-  assert(
-    src.includes('if (QUICK_TEXT_REACTIONS.includes(s)) return safe;'),
-    'LGTM must stay text so invert keeps it readable'
-  );
-  assert(
-    src.includes('${renderReactionGlyph(emoji)}'),
-    'reaction chips must use renderReactionGlyph'
-  );
-  assert(
-    src.includes('QUICK_EMOJIS.map(e => `<button data-emoji="${e}">${renderReactionGlyph(e)}</button>`'),
-    'emoji picker buttons must wrap color emoji'
-  );
-  assert(
-    src.includes('QUICK_TEXT_REACTIONS.map(t => `<button class="tdoc-emoji-text" data-emoji="${t}">${t}</button>`'),
-    'LGTM picker row must stay unwrapped text'
-  );
+  assert(src.includes("QUICK_TEXT_REACTIONS.indexOf(s) >= 0 ? safe"),
+    'LGTM must stay text so invert keeps it readable');
+  assert(src.includes('reactionGlyph(emoji)'), 'reaction chips must use reactionGlyph');
+  assert(src.includes('tdoc-emoji-text'), 'LGTM picker row must stay unwrapped text');
 });
 
 t('default is light — dark only if storage says dark or the doc declares it', () => {
-  const m = /function readStoredTheme\(\)[\s\S]*?\n  \}/.exec(src);
-  assert(m, 'readStoredTheme not found');
-  const body = m[0];
-  // A saved choice still wins outright.
-  assert(/getItem\(THEME_KEY\)/.test(body) && /'dark'/.test(body) && /'light'/.test(body),
+  // The shell applies the hint in its tdoc:ready handler (probe reports it).
+  const i = src.indexOf("d.defaultTheme === 'dark'");
+  assert(i >= 0, 'default-theme hint handling not found');
+  const body = src.slice(i - 400, i + 400);
+  // A saved choice still wins outright (the hint only applies with no pref).
+  assert(/getItem\('tdoc-theme'\)/.test(body) && /!storedTheme/.test(body),
     'a stored dark/light preference must win first');
-  // With no saved choice, honor a doc that declares its default look, else light.
-  assert(/data-tdoc-default-theme/.test(body),
+  // The probe reports the doc-declared default (data-tdoc-default-theme).
+  assert(/data-tdoc-default-theme/.test(src),
     'no stored pref → fall back to the doc-declared default theme');
-  assert(/=== 'dark' \? 'dark' : 'light'/.test(body),
-    'an absent/unknown declared theme still defaults to light — never a surprise dark');
+  // The hint never persists a preference.
+  assert(!/setItem/.test(body), 'the hint must not persist a preference');
 });
 
 t('does not auto-follow the OS theme', () => {
@@ -97,9 +88,9 @@ t('does not auto-follow the OS theme', () => {
 
 t('toggle writes storage then paints', () => {
   assert(src.includes('tdoc-theme-btn').valueOf());
-  assert(/tdoc-theme-btn'\)\.onclick/.test(src), 'no click handler on #tdoc-theme-btn');
-  assert(src.includes('persistTheme(next)'), 'click does not persist');
-  assert(src.includes('paintTheme(next)'), 'click does not paint');
+  assert(src.includes("wire('#tdoc-theme-btn','click'"), 'no click handler on #tdoc-theme-btn');
+  assert(src.includes("localStorage.setItem(KEY,dark?'dark':'light')"), 'click does not persist');
+  assert(src.includes("apply(dark?'dark':'light')"), 'click does not paint');
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);

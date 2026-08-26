@@ -115,11 +115,6 @@ class FakeDurableNamespace {
 async function loadWorker() {
   const root = path.join(__dirname, '..');
   let src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
-  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
-  src = src.replace(
-    /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
-    'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
-  );
   // Inline the shell modules exactly like bin/tdoc-bundle, so the in-process
   // worker renders the real shell (doc pages carry the cfg with versions/
   // identity) instead of the bare no-SHELL fallback.

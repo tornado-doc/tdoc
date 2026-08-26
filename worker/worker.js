@@ -1162,13 +1162,21 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
   const onboardJs = ((slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce) ? ONBOARD_JS : '';
   const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog, stars: stars }) : '';
+  // Old-version strip — published + multi-version + viewing an old one (1:1
+  // with the overlay: fork/landing and the latest version itself get nothing).
+  let oldverHtml = '';
+  const latestVersion = vlist.length ? Math.max(...vlist.map(v => Number(v.n) || 0)) : version;
+  if (!isLanding && vlist.length > 1 && typeof version === 'number' && version < latestVersion) {
+    const latestUrl = `/d/${encodeURIComponent(slug)}/v/${latestVersion}`;
+    oldverHtml = `<div class="tdoc-oldver-strip"><span>You're viewing v${version} — the latest is <a href="${latestUrl}">v${latestVersion}</a></span></div>`;
+  }
   const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
   return SHELL.shellHtml({
     title,
     frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame`,
     nonceAttr,
     chromeCssStr: (typeof CHROME_CSS === 'string' && CHROME_CSS.indexOf('__TDOC_') !== 0) ? CHROME_CSS : '',
-    barInner, footerInner,
+    barInner, footerInner, oldverHtml,
     chromeJs: CHROME_JS,
     authCfgJson: safeJsonForScript(cfg),
     cfgJson: safeJsonForScript(cfg),

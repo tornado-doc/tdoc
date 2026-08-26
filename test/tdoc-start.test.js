@@ -134,11 +134,15 @@ t('the prompt survives the page it was copied from', () => {
 t('the dialogs are not commentable surfaces', () => {
   // Selecting text inside a dialog was raising a comment pill on the page
   // behind it, because the overlay treated product chrome as author content.
-  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
-  const m = overlay.match(/const UI_CONTAINERS = '[^']*'/);
-  assert(m, 'UI_CONTAINERS not found');
-  assert(/\.tdo-bg/.test(m[0]) && /\.tds-bg/.test(m[0]),
-    'the onboarding and sign-in dialogs must be listed as overlay UI');
+  // Structural in the shell: dialogs live in the SHELL document; the selection
+  // probe (the only comment reporter) runs inside the author frame only — so
+  // product dialogs can never become commentable surfaces.
+  const shell = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
+  assert(shell.includes('d.signinJs') && shell.includes('d.onboardJs'),
+    'sign-in/onboarding dialogs must be injected into the shell document, not the frame');
+  const probe = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
+  assert(probe.includes("type: 'tdoc:selection'"),
+    'selection reporting must live in the frame probe only');
 });
 
 t('signing in updates the page it was started from', () => {
@@ -147,9 +151,9 @@ t('signing in updates the page it was started from', () => {
   // announcement from the shared module; no second implementation.
   const signin = fs.readFileSync(path.join(root, 'server', 'signin.js'), 'utf8');
   assert(/tdoc:signedin/.test(signin), 'the shared flow announces nothing on success');
-  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
-  assert(/addEventListener\('tdoc:signedin'/.test(overlay),
-    'the overlay does not refresh when sign-in happened elsewhere');
+  const shell = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
+  assert(/addEventListener\('tdoc:signedin'/.test(shell),
+    'the shell does not refresh when sign-in happened elsewhere');
 });
 
 t('the device code can be copied', () => {
@@ -246,8 +250,8 @@ t('the sign-in it drops is still offered where the server enforces it', () => {
   // Commenting is the only action that hard-requires a session, and the
   // overlay already asks there. That is what makes dropping it from
   // onboarding safe rather than merely shorter.
-  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
-  assert(/Sign in with GitHub to comment/.test(overlay),
+  const chrome = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8');
+  assert(/Sign in with GitHub to comment/.test(chrome),
     'the composer no longer offers sign-in, so removing it from onboarding would strand the user');
 });
 

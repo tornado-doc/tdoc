@@ -1,9 +1,9 @@
 // Inbox click → doc/comment deep-link contract. #180
 //
-// Overlay UI is mostly un-runnable DOM, so this suite pins the wiring in
-// source: destination URL, stopPropagation on the row, outside-click must
-// not unpin overlay chrome, ?comment= expands the thread before buildCard
-// and opens the phone drawer.
+// The inbox lives in the shell client script (server/shell.js) now. Chrome UI
+// is mostly un-runnable DOM, so this suite pins the wiring in source:
+// destination URL builder, stopPropagation on the row, consume-once deep-link
+// re-arming for same-doc clicks, and mark-read on open.
 //
 // Run with: node test/overlay-inbox.test.js
 
@@ -16,7 +16,7 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'shell.js'), 'utf8');
 
 function sliceFn(name) {
   const start = src.indexOf(`function ${name}(`);
@@ -29,69 +29,64 @@ function sliceFn(name) {
   return src.slice(start, i);
 }
 
-console.log('overlay inbox (#180 notification deep-link)');
+console.log('shell inbox (#180 notification deep-link)');
 
 t('inboxTargetUrl is the only destination builder', () => {
   const open = sliceFn('openInboxTarget');
-  assert(open.includes('inboxTargetUrl(row, { slug, version })'), 'openInboxTarget must use inboxTargetUrl');
+  assert(open.includes('inboxTargetUrl(row)'), 'openInboxTarget must use inboxTargetUrl');
   assert(open.includes('location.assign(href)'), 'other-doc clicks must navigate');
-  assert(!/\/d\/\$\{encodeURIComponent\(destSlug\)\}/.test(open),
-    'openInboxTarget still interpolates destSlug itself');
-  assert(!open.includes("location.href = `/d/"), 'legacy location.href assignment came back');
+  assert(!open.includes('/d/'), 'openInboxTarget must not build /d/ URLs itself');
+});
+
+t('inboxTargetUrl never emits /d/undefined and encodes its parts', () => {
+  const fn = sliceFn('inboxTargetUrl');
+  assert(fn.includes("if (!destSlug) return ''"), 'empty slug must return empty, never /d/undefined');
+  assert(fn.includes('encodeURIComponent(destSlug)'), 'slug must be encoded');
+  assert(fn.includes('encodeURIComponent(target)'), 'comment id must be encoded');
 });
 
 t('inbox row click stops the document unpin handler from seeing it', () => {
   const write = sliceFn('writeInboxRows');
-  assert(write.includes('e.stopPropagation'), 'row go() must stopPropagation');
-  assert(/btn\.onclick = go/.test(write), 'row click must call go');
+  assert(write.includes('e.stopPropagation'), 'row click must stopPropagation');
+  assert(write.includes('openInboxTarget(row)'), 'row click must open the target');
+  assert(write.includes('closeAuxModal()'), 'row click must close the panel');
 });
 
-t('outside-click unpin ignores overlay chrome (inbox modal)', () => {
-  const unpin = src.indexOf("Click outside an open pinned card");
-  assert(unpin !== -1, 'unpin handler missing');
-  const window = src.slice(unpin - 400, unpin + 200);
-  assert(window.includes('if (isInUI(e.target)) return;'),
-    'unpin handler must bail out for overlay UI clicks');
-});
-
-t('?comment= expands the thread before cards are built', () => {
-  const refresh = sliceFn('refreshComments');
-  const expandAt = refresh.indexOf('if (deepRoot) state.openReplyThreads.add(deepRoot)');
-  const buildAt = refresh.indexOf('const card = buildCard(comment)');
-  assert(expandAt !== -1, 'deep-link does not add the root to openReplyThreads');
-  assert(buildAt !== -1, 'buildCard missing from refreshComments');
-  assert(expandAt < buildAt, 'thread must be marked open before buildCard');
-});
-
-t('applyCommentDeepLink opens the phone drawer and the card', () => {
-  const fn = sliceFn('applyCommentDeepLink');
-  assert(fn.includes("commentLayer.classList.add('open')"), 'narrow mode must open the drawer');
-  assert(fn.includes('setActiveComment(root)'), 'top-level comment must activate');
-  assert(fn.includes('pinOpenCard(root)'), 'reply deep-link must pin the root card');
-  assert(fn.includes('markInboxSeen(want)'), 'deep-link must mark the notification read');
-});
-
-t('applyCommentDeepLink expands an already-built collapsed thread', () => {
-  const fn = sliceFn('applyCommentDeepLink');
-  assert(fn.includes("card.querySelector('.tdoc-replies')?.classList.add('open')"),
-    'same-doc must add .open on the live .tdoc-replies list');
-  assert(fn.includes("card.querySelector('.tdoc-replies-toggle')?.classList.add('open')"),
-    'same-doc must flip the replies chevron');
-  assert(fn.includes('requestAnimationFrame(repositionCards)'),
-    'expanding replies must reflow the card');
-});
-
-t('deep-link reads ?comment= from the page URL', () => {
-  const refresh = sliceFn('refreshComments');
-  assert(refresh.includes("URLSearchParams(location.search).get('comment')"),
-    'refreshComments must read location.search comment');
-});
-
-t('/me catalog still has the inbox and navigates via inboxTargetUrl', () => {
-  assert(src.includes('const isCatalog = !!cfg.isCatalog'), 'catalog mode missing');
+t('same-doc inbox click re-arms the consume-once deep link in place', () => {
   const open = sliceFn('openInboxTarget');
-  assert(open.includes('!isCatalog && herePath === destPath'),
+  assert(open.includes('deepLinkDone = false'), 'same-doc must re-arm the consumed deep link');
+  assert(open.includes('history.replaceState'), 'same-doc must update the URL without navigation');
+  assert(open.includes('!cfg.isCatalog && location.pathname === destPath'),
     'catalog must not take the in-place path');
+});
+
+t('opening a comment card marks its notification read', () => {
+  const openCard = sliceFn('openCard');
+  assert(openCard.includes('markInboxSeen(id)'), 'openCard must mark the notification read');
+  const seen = sliceFn('markInboxSeen');
+  assert(seen.includes("'/api/notifications/read'"), 'mark-read must hit the notifications API');
+  assert(seen.includes("credentials:'same-origin'") || seen.includes("credentials: 'same-origin'"),
+    'mark-read must send the session cookie');
+});
+
+t('inbox poll is fingerprint-diffed and paused while typing or hidden', () => {
+  const tick = sliceFn('tickInbox');
+  assert(tick.includes('document.hidden'), 'poll must not run in background tabs');
+  assert(tick.includes("textarea:focus"), 'poll must not run while typing');
+  assert(tick.includes('inboxFingerprint'), 'poll must diff payloads before repainting');
+  assert(tick.includes('loadComments()'), 'a changed inbox refreshes comments');
+});
+
+t('reply deep-links expand the thread when the card opens', () => {
+  const deep = sliceFn('tryDeepLink');
+  assert(deep.includes("classList.add('open')"), 'reply deep-link must expand .tdoc-replies');
+});
+
+t('deep-link reads ?comment= from the page URL, consume-once', () => {
+  const cap = sliceFn('captureDeepLink');
+  assert(cap.includes("URLSearchParams(location.search).get('comment')"),
+    'captureDeepLink must read location.search comment');
+  assert(cap.includes('deepLinkDone'), 'deep link must be consume-once (no re-fire after posts)');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

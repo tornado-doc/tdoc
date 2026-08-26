@@ -395,7 +395,11 @@
     //     of it touches the author DOM. Owner manage panel (access/unpublish/
     //     delete) and the inbox are tracked follow-ups; Share falls back to the
     //     copy-link modal for owners until the manage panel is ported. ---
-    function publicShareUrl(){ return location.origin + '/d/' + encodeURIComponent(cfg.slug) + '/v/' + cfg.version; }
+    function publicShareUrl(){
+      // The homepage shares its canonical URL, never the /d/<slug>/v/<n> storage path.
+      if (cfg.isLanding) return location.origin + '/';
+      return location.origin + '/d/' + encodeURIComponent(cfg.slug) + '/v/' + cfg.version;
+    }
     function showShareModal(){
       // Owners get the manage panel (access control / invite / delete) — the
       // standalone manage.js module; everyone else gets copy-link.
@@ -768,6 +772,9 @@
       requestAnimationFrame(function(){ t.style.opacity = '0.95'; });
       setTimeout(function(){ t.style.opacity = '0'; setTimeout(function(){ t.remove(); }, 200); }, 1400);
     }
+    // Sign-in finished elsewhere (onboarding modal, device flow): reload so the
+    // identity chip, ownerManage and comments rebuild with the session.
+    document.addEventListener('tdoc:signedin', function(){ location.reload(); });
     document.addEventListener('click', function(){ closeMenus(); closeEmojiPicker(); closeCard(); closeClusterPopover(); });
     layout();
   })();`;
@@ -797,6 +804,7 @@
 '</style>\n' +
 '</head><body>\n' +
 '  <div class="tdoc-bar">' + (d.barInner || '') + '</div>\n' +
+'  ' + (d.oldverHtml || '') + '\n' +
 '  <div class="tdoc-reanchor-banner"><span class="label">Select text to move anchor</span><button type="button" id="tdoc-reanchor-remove">Remove anchor</button><button type="button" id="tdoc-reanchor-cancel" class="danger">Cancel</button></div>\n' +
 '  <iframe class="tdoc-doc-frame" title="Document content" sandbox="allow-scripts" src="' + esc(d.frameSrc) + '"></iframe>\n' +
 '  <footer class="tdoc-footer">' + (d.footerInner || '') + '</footer>\n' +

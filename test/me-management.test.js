@@ -25,7 +25,9 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const worker = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
-const overlay = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
+// The monolith is gone: bar CSS lives in chrome.css, bar markup in chrome.js,
+// and the shell renders the bar server-side as the FIRST body element.
+const overlay = fs.readFileSync(path.join(__dirname, '..', 'server', 'chrome.css'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'server', 'shell.js'), 'utf8');
 const start = worker.indexOf('async function indexHtml(env, session');
 const end = worker.indexOf('// ─────────────────────────────────────────────────────────────────────────', start);
 if (start < 0 || end < 0 || end <= start) throw new Error('indexHtml block missing');
@@ -130,7 +132,7 @@ t('overlay top bar occupies layout instead of floating over the document', () =>
     'bar must sit in document flow, not overlay the page');
   assert(!overlay.includes('.tdoc-bar { position: fixed;'),
     'bar must not be position:fixed');
-  assert(overlay.includes('document.body.insertBefore(bar, document.body.firstChild)'),
+  assert(/<body>\\n' \+\n'  <div class="tdoc-bar">/.test(overlay) || overlay.includes('<div class="tdoc-bar">'),
     'bar must be the first body child so it occupies the top of the layout');
   assert(!overlay.includes('padding-top: 44px !important'),
     'in-flow bar must not reserve a fake padding-top gap');
@@ -165,9 +167,9 @@ t('/me reuses the SHARED bar component and hides Share / Duplicate / Copy', () =
     'doc pages still show the title in the left cluster');
   assert(!chrome.includes('tdoc-bar-center'),
     'title must not sit in a fake-centered middle slot');
-  assert(overlay.includes('src="/tdoc_logo.svg"'),
+  assert(chrome.includes('src="/tdoc_logo.svg"'),
     'bar mark must be the tdoc logo, not a text pill');
-  assert(overlay.includes("tdoc-bar-mark').onclick = () => { location.href = '/me'; }"),
+  assert(overlay.includes("wire('#tdoc-bar-mark','click',function(){ location.href='/me'; })"),
     'tdoc logo must go to /me (the hub), not /');
   // The generic .tdoc-bar button rule gives inline-flex + align-items:center and
   // no horizontal centring, so without this the 24px mark sits flush left in its
@@ -185,9 +187,11 @@ t('/me reuses the SHARED bar component and hides Share / Duplicate / Copy', () =
   assert(/p === '\/me'[\s\S]{0,180}Location: '\/'/.test(localServer),
     'local studio must 302 /me to / so the logo click does not 404');
   assert(index.includes('class="wrap"'), 'catalog content must sit in a wrap so the bar can be full-bleed');
-  const catalogGate = overlay.indexOf('if (isCatalog) {');
-  const commentsBoot = overlay.indexOf('// ========== Comment layer + FAB ==========');
-  assert(catalogGate >= 0 && commentsBoot > catalogGate, 'catalog must not boot comment chrome');
+  // Structural in the shell: comment chrome is driven by frame messages, and
+  // /me (a plain page via injectSiteChrome) has no .tdoc-doc-frame — so the
+  // comment machinery stays dormant by construction.
+  assert(overlay.includes("document.querySelector('.tdoc-doc-frame')"),
+    'comment chrome must key off the doc frame (absent on /me)');
 });
 
 t('/me does not introduce a bespoke cookie-only admin-auth path', () => {
