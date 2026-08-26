@@ -1091,7 +1091,12 @@ function isValidWidgetName(name) {
   return typeof name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
 }
 function widgetCspHeader() {
-  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
+  // NO frame-ancestors: the author document embeds widgets from inside the
+  // sandboxed /frame, whose origin is OPAQUE — 'self' can never match it, so
+  // the browser would refuse every widget ("refused to connect"). The Sec-
+  // Fetch-Dest gate (must load as an iframe), the widget's own sandbox
+  // (opaque origin, no credentials), and enforceDocAccess remain the controls.
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
 }
 function isWidgetFrameRequest(dest) {
   return String(dest || '').toLowerCase() === 'iframe';

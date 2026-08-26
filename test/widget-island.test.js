@@ -114,11 +114,14 @@ function get(port, p, headers = {}) {
     }
   });
 
-  await t('framed widget CSP allows inline script and forbids framing by others', async () => {
+  await t('framed widget CSP allows inline script and stays sandboxed', async () => {
     const csp = framed.headers['content-security-policy'] || '';
     if (!csp.includes("script-src 'unsafe-inline'")) throw new Error(`missing script-src unsafe-inline: ${csp}`);
     if (!csp.includes("default-src 'none'")) throw new Error(`missing default-src none: ${csp}`);
-    if (!csp.includes("frame-ancestors 'self'")) throw new Error(`missing frame-ancestors: ${csp}`);
+    // NO frame-ancestors: the author doc embeds widgets from inside the
+    // sandboxed /frame (opaque origin) — 'self' could never match it and the
+    // browser refused every widget. The Dest gate + sandbox remain the controls.
+    if (csp.includes('frame-ancestors')) throw new Error(`frame-ancestors is back — widgets inside the opaque /frame would be refused: ${csp}`);
     if (!csp.includes("worker-src 'none'")) throw new Error(`missing worker-src none: ${csp}`);
     if (!csp.includes('sandbox allow-scripts')) throw new Error(`missing CSP sandbox allow-scripts: ${csp}`);
     if (/sandbox[^;]*allow-same-origin/.test(csp)) throw new Error(`CSP sandbox must not allow-same-origin: ${csp}`);
@@ -204,7 +207,7 @@ function get(port, p, headers = {}) {
   await t('worker widgetCspHeader unique-origins the widget document', async () => {
     const s = workerSrc.indexOf('function widgetCspHeader');
     if (s < 0) throw new Error('widgetCspHeader missing');
-    const body = workerSrc.slice(s, s + 400);
+    const body = workerSrc.slice(s, s + 900);
     if (!body.includes('sandbox allow-scripts')) throw new Error('widgetCspHeader must include sandbox allow-scripts');
     if (/sandbox[^"]*allow-same-origin/.test(body)) throw new Error('widget CSP sandbox must not allow-same-origin');
   });
