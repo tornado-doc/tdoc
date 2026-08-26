@@ -2689,6 +2689,10 @@
   }
   function closeClusterPopover() { clusterPop.classList.remove('open'); clusterPop._key = null; }
   document.addEventListener('click', (e) => {
+    // Click anywhere outside an open new-comment sheet cancels it (and clears
+    // the pending highlight). Skip the same click cycle that opened it — the
+    // data-tdoc-select path opens on click, which would otherwise self-close.
+    if (popup && !popup.contains(e.target) && performance.now() - popupOpenedAt > 250) closePopup();
     if (!clusterPop.contains(e.target) && !e.target.closest?.('.tdoc-pin-cluster')) closeClusterPopover();
     // Inbox / Share / profile chrome is overlay UI. A click there must not
     // count as "outside the card" or opening a notification would pin the
@@ -3008,6 +3012,10 @@
   // floating card (most-transient-first so one Esc peels one layer).
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    // A new-comment sheet is the most modal thing on screen; Escape cancels it
+    // first — and closePopup() clears the pending highlight, so the yellow does
+    // not linger after cancel. (Only the × used to do this.)
+    if (popup) { closePopup(); return; }
     if (state.reanchoringId) { exitReanchor(); return; }
     if (clusterPop.classList.contains('open')) { closeClusterPopover(); return; }
     if (state.pinnedId) { const id = state.pinnedId; state.pinnedId = null; hideCardIfIdle(id); markPinActive(id, false); setActiveComment(null); }
@@ -3512,6 +3520,7 @@
 
   // ========== Popup (new-comment): text + element anchors ==========
   let popup = null;
+  let popupOpenedAt = 0;   // guards the opening click from self-closing the sheet
   let pendingElementOutline = null;
 
   function setPendingTextHighlight(range) {
@@ -3552,6 +3561,7 @@
     hideHoverUI();
     popup = document.createElement('div');
     popup.className = 'tdoc-popup';
+    popupOpenedAt = performance.now();
     const needsSignIn = isPublished && !identity;
     const preview = anchor.kind === 'text'
       ? `"${escapeHtml(anchor.text.slice(0, 80))}${anchor.text.length > 80 ? '…' : ''}"`
@@ -4099,6 +4109,31 @@
     maybeOpenSelectionPopup(invite);
   }, true);
 
+  // A text selection should stay inside one "artifact context": bare prose, or
+  // the inside of a single commentable artifact. A drag that starts in prose and
+  // overshoots into a table used to paint the whole table (the pending highlight
+  // spans every text node the range crosses) and fold table text into a prose
+  // comment. Clamp the range to the start's context so the selection is what the
+  // reader actually meant. Selecting *within* one artifact (both ends inside the
+  // same table) is untouched — that is a legitimate comment on that text.
+  function artifactContextOf(node) {
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    return el ? el.closest(COMMENTABLE) : null;   // null = the bare prose column
+  }
+  function clampRangeToArtifactContext(range) {
+    const startCtx = artifactContextOf(range.startContainer);
+    const endCtx = artifactContextOf(range.endContainer);
+    if (startCtx === endCtx) return range;        // same context — nothing to clamp
+    try {
+      if (endCtx && !endCtx.contains(range.startContainer)) {
+        range.setEndBefore(endCtx);               // bled forward into an artifact — stop before it
+      } else if (startCtx && !startCtx.contains(range.endContainer)) {
+        range.setStartAfter(startCtx);            // started inside an artifact, ran out — start after it
+      }
+    } catch (e) { /* setEnd/StartBefore can throw on detached / cross-root nodes */ }
+    return range;
+  }
+
   function maybeOpenSelectionPopup(target, event) {
     // Selected text wins over "comment whole artifact." If there's a real text
     // selection, open the text-selection popup regardless of whether the
@@ -4107,12 +4142,16 @@
     // because they're driven by different gestures (hover vs. drag-select).
     if (target && target.nodeType === 1 && isInUI(target)) return;
     const sel = window.getSelection();
-    const text = sel && sel.toString().trim();
+    let text = sel && sel.toString().trim();
     if (!text || text.length < 2 || !sel.rangeCount) return;
     const anchorNode = sel.anchorNode;
     const anchorEl = anchorNode?.nodeType === 1 ? anchorNode : anchorNode?.parentElement;
     if (anchorEl && isInUI(anchorEl)) return;
-    const range = sel.getRangeAt(0).cloneRange();
+    const range = clampRangeToArtifactContext(sel.getRangeAt(0).cloneRange());
+    // The clamp may have trimmed a bled-into artifact; re-derive from the range
+    // so text, highlight, and the committed anchor all agree.
+    text = range.toString().trim();
+    if (!text || text.length < 2) return;
     const ctx = getContext(range, 60);
     // Re-anchor mode: rebind an existing unanchored comment to this selection
     // instead of creating a new one. Captured fallback position is refreshed

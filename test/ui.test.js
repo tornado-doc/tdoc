@@ -426,6 +426,63 @@ function tShellGap(name, reason, _fn) {
     await page.click('.tdoc-popup .head .x').catch(() => {});
   });
 
+  await t('A prose selection bleeding into a table does NOT highlight the whole table', async () => {
+    // Regression: a drag that starts in prose and overshoots into a table used
+    // to paint every cell (the pending highlight spans the range) and fold table
+    // text into the comment. The range must clamp to the prose before the table.
+    const res = await page.evaluate(() => {
+      const table = document.querySelector('.wrap table');
+      const p = table && [...document.querySelectorAll('.wrap p')]
+        .find(x => x.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING && x.firstChild);
+      const lastCell = table && [...table.querySelectorAll('td')].pop();
+      if (!p || !lastCell || !lastCell.firstChild) return { skip: true };
+      const r = document.createRange();
+      r.setStart(p.firstChild, 0);
+      r.setEnd(lastCell.firstChild, Math.min(3, lastCell.firstChild.textContent.length));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      const rect = r.getBoundingClientRect();
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: rect.right - 5, clientY: rect.bottom - 5 }));
+      const hl = window.CSS && CSS.highlights && CSS.highlights.get('tdoc-pending');
+      let spansTable = false, ranges = 0;
+      if (hl) for (const rg of hl) { ranges++; if (rg.intersectsNode && rg.intersectsNode(table)) spansTable = true; }
+      return { popup: !!document.querySelector('.tdoc-popup'), ranges, spansTable };
+    });
+    if (res.skip) { console.log('  (fixture has no prose-then-table, skipping)'); return; }
+    if (!res.popup) throw new Error('selection did not open the comment popup');
+    if (res.spansTable) throw new Error('pending highlight still spans the table — clamp failed');
+    await page.keyboard.press('Escape').catch(() => {});
+  });
+
+  await t('Escape and click-outside cancel the popup AND clear the pending highlight', async () => {
+    const hlCount = () => page.evaluate(() => {
+      const hl = window.CSS && CSS.highlights && CSS.highlights.get('tdoc-pending');
+      let n = 0; if (hl) for (const _ of hl) n++; return n;
+    });
+    async function openOnProse() {
+      return page.evaluate(() => {
+        const p = [...document.querySelectorAll('.wrap p')].find(x => x.firstChild && x.textContent.trim().length > 12);
+        const r = document.createRange();
+        r.setStart(p.firstChild, 0); r.setEnd(p.firstChild, Math.min(12, p.firstChild.textContent.length));
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        const rect = r.getBoundingClientRect();
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: rect.right - 4, clientY: rect.bottom - 4 }));
+        return !!document.querySelector('.tdoc-popup');
+      });
+    }
+    // Escape
+    if (!await openOnProse()) throw new Error('popup did not open (Escape case)');
+    if (await hlCount() < 1) throw new Error('no pending highlight after opening');
+    await page.keyboard.press('Escape');
+    if (await page.$('.tdoc-popup')) throw new Error('Escape did not close the popup');
+    if (await hlCount() !== 0) throw new Error('Escape did not clear the pending highlight');
+    // click-outside (wait past the 250ms self-close guard)
+    if (!await openOnProse()) throw new Error('popup did not open (click-outside case)');
+    await page.waitForTimeout(320);
+    await page.click('.wrap h1', { position: { x: 5, y: 5 } }).catch(() => page.click('.tdoc-bar .doc-title').catch(() => {}));
+    if (await page.$('.tdoc-popup')) throw new Error('click-outside did not close the popup');
+    if (await hlCount() !== 0) throw new Error('click-outside did not clear the pending highlight');
+  });
+
   await t('Drag STARTED INSIDE canvas does NOT open popup (passes through)', async () => {
     const canvas = await page.$('canvas');
     if (!canvas) { console.log('  (no canvas, skipping)'); return; }

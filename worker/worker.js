@@ -315,6 +315,32 @@ function accessDeniedHtml({ status, title, body, slug, version }) {
 </div></body></html>`, { status });
 }
 
+// A CLI request proves who it is with the account token from
+// ~/.tdoc/published.json, not with a browser cookie, so getSession() sees an
+// anonymous visitor. Resolve the token exactly the way the upload path does and
+// accept it when it owns THIS doc.
+//
+// This grants read access to precisely the set of docs the same token can
+// already overwrite — requireDocWriteAccess compares the same two account ids —
+// so it widens nothing. It deliberately does NOT produce a session: the caller
+// keeps the real (possibly null) one, so no synthetic identity can be rendered
+// into a page or attributed to a comment.
+async function docOwnerToken(env, req, meta) {
+  const auth = req.headers.get('authorization') || '';
+  const m = auth.match(/^Bearer\s+(.+)$/);
+  if (!m) return null;
+  const token = m[1];
+  // Self-host: the worker's own admin token already writes anything here.
+  if (env.TDOC_UPLOAD_TOKEN && await timingSafeEqual(token, env.TDOC_UPLOAD_TOKEN)) {
+    return { kind: 'admin' };
+  }
+  const actor = await hostedTokenActor(env, token);
+  if (!actor) return null;
+  const ownerId = meta && meta.hosted && meta.hosted.account_id;
+  if (!ownerId || ownerId !== actor.account_id) return null;
+  return actor;
+}
+
 async function enforceDocAccess(env, req, slug, version) {
   const meta = await loadDocMeta(env, slug);
   // No meta yet (orphan R2 object) — treat as public so legacy uploads still work.
@@ -322,6 +348,12 @@ async function enforceDocAccess(env, req, slug, version) {
   const session = await getSession(env, req);
   if (canReadDoc(access, session, env, meta)) {
     return { ok: true, access, session, meta };
+  }
+  // Without this the owner is denied their own private doc from their own
+  // terminal: /tdoc pull is the documented pre-step to /tdoc edit, and
+  // FIRST-DOC.md publishes every new user's first doc as private. See #278.
+  if (await docOwnerToken(env, req, meta)) {
+    return { ok: true, access, session, meta, ownerToken: true };
   }
   if (!sessionLogin(session)) {
     return {
@@ -1230,7 +1262,8 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   let versions = [{ n: version, created: null }];
   try {
     const meta = gate.meta;
-    if (meta && Array.isArray(meta.versions) && canSeeHistory(gate.access, session, env, meta)) {
+    if (meta && Array.isArray(meta.versions)
+        && (gate.ownerToken || canSeeHistory(gate.access, session, env, meta))) {
       versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
     } else if (meta && Array.isArray(meta.versions)) {
       const hit = meta.versions.find(v => Number(v.n) === version);
