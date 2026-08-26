@@ -3346,6 +3346,18 @@ export default {
       let body = '';
       if (method !== 'HEAD') {
         body = forceWidgetSandbox(await obj.text());
+        // Legacy template-reliant docs (published before creation-time baking):
+        // no #tdoc-reader block AND no styling of their own reading column →
+        // inject the reader CSS into the FRAME RESPONSE (never into storage).
+        // Self-contained docs are excluded by the max-width check; the template
+        // is :where() zero-specificity, so author CSS always wins.
+        if (SHELL && !body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+          const rcss = SHELL.sliceReaderCss(typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '');
+          if (rcss) {
+            const rtag = `<style id="tdoc-reader">${rcss}</style>`;
+            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+          }
+        }
         const tag = `<script nonce="${nonce}">${PROBE_JS}</script>`;
         body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
       }

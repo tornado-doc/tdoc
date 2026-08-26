@@ -61,7 +61,7 @@ const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8')
   await t('worker /frame route is Sec-Fetch-Dest gated, access-gated, probe-injected, frame-CSP\'d', async () => {
     const s = workerSrc.indexOf('const frameMatch = p.match(/^\\/d\\/([^/]+)\\/v\\/(\\d+)\\/frame');
     if (s < 0) throw new Error('/frame route not found');
-    const block = workerSrc.slice(s, s + 1200);
+    const block = workerSrc.slice(s, s + 2400);
     if (!/isWidgetFrameRequest\(req\.headers\.get\('sec-fetch-dest'\)\)/.test(block)) throw new Error('/frame must gate on Sec-Fetch-Dest: iframe');
     if (!/enforceDocAccess\(/.test(block)) throw new Error('/frame must run enforceDocAccess (same gate as the doc view)');
     if (!/\$\{PROBE_JS\}/.test(block)) throw new Error('/frame must inject the nonced probe');
@@ -105,6 +105,21 @@ const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8')
     if (!/<div class="tdoc-bar">/.test(doc)) throw new Error('shell doc missing the chrome bar');
     if (!doc.includes('nonce="abc"')) throw new Error('shell doc scripts must carry the nonce');
     fs.rmSync(outDir, { recursive: true, force: true });
+  });
+
+  // ── legacy-doc serve-time reader fallback ──────────────────────────────────
+  // Docs published before creation-time baking (no #tdoc-reader, no own
+  // max-width) get the reader CSS injected into the /frame RESPONSE — never
+  // into storage. Self-contained docs are excluded by the max-width check.
+  await t('both /frame routes carry the legacy reader-CSS fallback', async () => {
+    const serverSrc = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
+    for (const [name, src] of [['server.js', serverSrc], ['worker.js', workerSrc]]) {
+      const i = src.indexOf('/frame');
+      if (!src.includes(`id="tdoc-reader"') && !body.includes('max-width')`)) {
+        throw new Error(`${name} /frame route lost the legacy reader-CSS fallback gate`);
+      }
+      if (!src.includes('sliceReaderCss')) throw new Error(`${name} missing sliceReaderCss use`);
+    }
   });
 
   // ── the GENERATED client script must parse ─────────────────────────────────

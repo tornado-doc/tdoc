@@ -649,6 +649,20 @@ const server = http.createServer(async (req, res) => {
     let body = '';
     if (req.method !== 'HEAD') {
       body = forceWidgetSandbox(fs.readFileSync(file, 'utf8'));
+      // Legacy template-reliant docs (published before creation-time baking):
+      // no #tdoc-reader block AND no styling of their own reading column →
+      // inject the reader CSS into the FRAME RESPONSE (never into storage).
+      // Self-contained docs are excluded by the max-width check, and the
+      // template is :where() zero-specificity, so author CSS always wins.
+      if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+        try {
+          const rcss = SHELL.sliceReaderCss(fs.readFileSync(OVERLAY_PATH, 'utf8'));
+          if (rcss) {
+            const rtag = `<style id="tdoc-reader">${rcss}</style>`;
+            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+          }
+        } catch {}
+      }
       // Inject the anchoring probe — the only tdoc code allowed into the author
       // DOM. Nonced so it runs under the frame CSP while author <script> stays
       // inert (same guarantee as the single-origin path).
