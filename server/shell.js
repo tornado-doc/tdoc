@@ -171,6 +171,7 @@
       document.body.appendChild(card);
       openCardId = id;
       wireCard(card, id);
+      markInboxSeen(id);   // opening a comment clears its notification
       positionCard();
     }
     // Wire a comment card's interactive controls (reactions/replies/reply-form/
@@ -467,24 +468,172 @@
         })
         .catch(function(e){ showAccountCopyModal({ title: 'Could not duplicate', body: e.message || 'network error', offerDownload: true }); });
     }
-    // Identity slot: avatar chip + menu (My docs / Sign out) when signed in, a
-    // sign-in chip otherwise. Inbox is a tracked follow-up.
+    // --- inbox (notifications) — port of overlay.js inbox module. Unread dot
+    //     on the identity chip, Notifications entry in its menu, modal panel,
+    //     8s poll (visible tab, not while typing). Rows deep-link to the doc.
+    var INBOX_POLL_MS = 8000;
+    var inboxUnreadN = 0, inboxSig = '', inboxPollTimer = null;
+    function inboxBadgeText(n){ if (!n) return ''; return n > 99 ? '99+' : String(n); }
+    function inboxMenuLabel(n){ var t = inboxBadgeText(n); return t ? 'Notifications (' + t + ')' : 'Notifications'; }
+    function formatRelativeTime(iso){
+      if (!iso) return '';
+      var d = new Date(iso); if (isNaN(d.getTime())) return '';
+      var sec = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+      if (sec < 60) return 'now';
+      if (sec < 3600) return Math.floor(sec / 60) + 'm';
+      if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+      if (sec < 604800) return Math.floor(sec / 86400) + 'd';
+      return d.toLocaleString([], { month: 'short', day: 'numeric' });
+    }
+    function inboxRowLabel(row){
+      var n = row.count || 1;
+      var who = (row.actor && (row.actor.login || row.actor.name)) || 'someone';
+      var title = row.title || row.slug || 'a doc';
+      if (row.kind === 'comment') return n > 1 ? n + ' new comments on ' + title : who + ' commented on ' + title;
+      if (row.kind === 'reply') return n > 1 ? n + ' new replies to your comment' : who + ' replied to your comment';
+      if (row.kind === 'reaction') return n > 1 ? n + ' people reacted to your comment' : who + ' reacted to your comment';
+      return 'Notification';
+    }
+    function inboxTargetUrl(row){
+      row = row || {};
+      var destSlug = row.slug || cfg.slug || '';
+      if (!destSlug) return '';
+      var rawVer = row.version != null && row.version !== '' ? row.version : cfg.version;
+      var destVer = Number(rawVer);
+      var ver = isFinite(destVer) && destVer > 0 ? destVer : 1;
+      var target = row.comment_id || row.thread_id || '';
+      var href = '/d/' + encodeURIComponent(destSlug) + '/v/' + ver;
+      if (target) href += '?comment=' + encodeURIComponent(target);
+      return href;
+    }
+    function inboxFingerprint(body){
+      var items = (body && Array.isArray(body.items)) ? body.items : [];
+      return (body && body.unread) + '|' + items.map(function(i){ return [i.id, i.count, i.at, i.read].join(':'); }).join(',');
+    }
+    function paintInboxChrome(){
+      var dot = document.getElementById('tdoc-inbox-dot');
+      if (dot) dot.hidden = !inboxUnreadN;
+      var menu = document.getElementById('tdoc-inbox-open');
+      if (menu) menu.textContent = inboxMenuLabel(inboxUnreadN);
+    }
+    function openInboxTarget(row){
+      var href = inboxTargetUrl(row); if (!href) return;
+      var q = href.indexOf('?');
+      var destPath = q >= 0 ? href.slice(0, q) : href;
+      var destSearch = q >= 0 ? href.slice(q) : '';
+      // Same doc: re-arm the (consume-once) deep link in place instead of a
+      // full navigation; anywhere else navigates.
+      if (!cfg.isCatalog && location.pathname === destPath) {
+        var want = (row && (row.comment_id || row.thread_id)) || '';
+        if (want) { deepLinkDone = false; pendingDeepLink = null; try { if (destSearch && location.search !== destSearch) history.replaceState(null, '', href); } catch (e) {} captureDeepLink(); tryDeepLink(); }
+        return;
+      }
+      location.assign(href);
+    }
+    function writeInboxRows(listEl, items, append){
+      if (!listEl) return;
+      var esc = window.TDOC_CHROME.escapeHtml;
+      if (!items.length && !append) { listEl.innerHTML = '<p class="muted">No notifications yet.</p>'; return; }
+      var html = items.map(function(row){
+        var when = formatRelativeTime(row.at);
+        var whenFull = row.at ? new Date(row.at).toLocaleString() : '';
+        var cur = row.read ? '' : ' tdoc-cluster-current';
+        return '<div class="tdoc-cluster-row' + cur + '" role="button" tabindex="0" data-id="' + esc(row.id) + '">' +
+          window.TDOC_CHROME.avatarHtml(row.actor, 'tdoc-cluster-anon') +
+          '<span class="tdoc-cluster-snip">' + esc(inboxRowLabel(row)) + '</span>' +
+          (when ? '<span class="muted" title="' + esc(whenFull) + '">' + esc(when) + '</span>' : '') + '</div>';
+      }).join('');
+      if (!append) listEl.innerHTML = html; else listEl.insertAdjacentHTML('beforeend', html);
+      items.forEach(function(row){
+        var btn = listEl.querySelector('.tdoc-cluster-row[data-id="' + (window.CSS && CSS.escape ? CSS.escape(row.id) : row.id) + '"]');
+        if (!btn || btn._bound) return;
+        btn._bound = true;
+        btn.addEventListener('click', function(e){ e.stopPropagation(); openInboxTarget(row); closeAuxModal(); });
+        btn.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openInboxTarget(row); closeAuxModal(); } });
+      });
+    }
+    function tickInbox(){
+      if (!cfg.identity || document.hidden) return;
+      if (document.querySelector('.tdoc-reply-form.open, .tdoc-popup, textarea:focus')) return;
+      fetch('/api/notifications?offset=0', { credentials: 'same-origin' })
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(body){
+          if (!body) return;
+          var sig = inboxFingerprint(body);
+          var first = !inboxSig, changed = sig !== inboxSig;
+          if (typeof body.unread === 'number') inboxUnreadN = body.unread;
+          inboxSig = sig;
+          paintInboxChrome();
+          if (!first && changed) loadComments();
+          var listEl = document.getElementById('tdoc-inbox-list');
+          if (listEl && changed) {
+            var more = document.getElementById('tdoc-inbox-more');
+            if (more) { more.dataset.offset = '0'; more.hidden = !body.has_more; }
+            writeInboxRows(listEl, Array.isArray(body.items) ? body.items : [], false);
+          }
+        }).catch(function(){});
+    }
+    function startInboxPoll(){ if (!inboxPollTimer) inboxPollTimer = setInterval(tickInbox, INBOX_POLL_MS); }
+    function stopInboxPoll(){ if (inboxPollTimer) { clearInterval(inboxPollTimer); inboxPollTimer = null; } }
+    document.addEventListener('visibilitychange', function(){ if (!document.hidden) tickInbox(); });
+    function markInboxSeen(commentId){
+      if (!cfg.identity || !commentId) return;
+      fetch('/api/notifications/read', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ comment_id: commentId }) })
+        .then(function(){ tickInbox(); }).catch(function(){});
+    }
+    function showInboxPanel(){
+      closeAuxModal();
+      var bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg'; bg.id = 'tdoc-aux-modal';
+      bg.innerHTML = '<div class="tdoc-modal"><h3>Notifications</h3>' +
+        '<div id="tdoc-inbox-list"><p class="muted">Loading…</p></div>' +
+        '<div class="actions"><button type="button" id="tdoc-inbox-more" hidden>Load more</button><button type="button" id="tdoc-inbox-close">Close</button></div></div>';
+      document.body.appendChild(bg);
+      bg.addEventListener('click', function(e){ if (e.target === bg) closeAuxModal(); });
+      document.getElementById('tdoc-inbox-close').onclick = closeAuxModal;
+      var more = document.getElementById('tdoc-inbox-more');
+      more.dataset.offset = '0';
+      function paint(){
+        var listEl = document.getElementById('tdoc-inbox-list');
+        var offset = Number(more.dataset.offset) || 0;
+        fetch('/api/notifications?offset=' + offset, { credentials: 'same-origin' })
+          .then(function(r){ return r.ok ? r.json() : null; })
+          .then(function(body){
+            if (!body) { if (listEl) listEl.innerHTML = '<p class="muted">Could not load notifications.</p>'; return; }
+            var items = Array.isArray(body.items) ? body.items : [];
+            writeInboxRows(listEl, items, offset > 0);
+            more.hidden = !body.has_more;
+            more.onclick = function(){ more.dataset.offset = String(offset + items.length); paint(); };
+            if (typeof body.unread === 'number') { inboxUnreadN = body.unread; inboxSig = inboxFingerprint(body); paintInboxChrome(); }
+          })
+          .catch(function(){ if (listEl) listEl.innerHTML = '<p class="muted">Could not load notifications.</p>'; });
+      }
+      paint();
+    }
+    // Identity slot: avatar chip (with unread dot) + menu (Notifications /
+    // My docs / Sign out) when signed in, a sign-in chip otherwise.
     function renderIdentity(){
       var slot = document.getElementById('tdoc-identity-slot'); if (!slot) return;
       var esc = window.TDOC_CHROME.escapeHtml;
       if (cfg.identity) {
         slot.innerHTML = '<div class="tdoc-menu-wrap"><button class="tdoc-chip" id="tdoc-me" aria-haspopup="menu" aria-expanded="false">' +
-          '<img src="' + esc(cfg.identity.avatar_url || '') + '" alt=""><span class="name">' + esc(cfg.identity.login) + '</span></button>' +
+          '<img src="' + esc(cfg.identity.avatar_url || '') + '" alt=""><span class="name">' + esc(cfg.identity.login) + '</span>' +
+          '<span class="tdoc-unread-dot" id="tdoc-inbox-dot"' + (inboxUnreadN ? '' : ' hidden') + '></span></button>' +
           '<div class="tdoc-menu" id="tdoc-me-menu" role="menu">' +
-          (cfg.canSeeMyDocs ? '<button id="tdoc-my-docs" role="menuitem">My docs</button>' : '') +
+          '<button id="tdoc-inbox-open" role="menuitem">' + esc(inboxMenuLabel(inboxUnreadN)) + '</button>' +
+          (cfg.canSeeMyDocs && !cfg.isCatalog ? '<button id="tdoc-my-docs" role="menuitem">My docs</button>' : '') +
           '<button id="tdoc-signout" role="menuitem">Sign out</button></div></div>';
         var meBtn = document.getElementById('tdoc-me'), meMenu = document.getElementById('tdoc-me-menu');
         meBtn.onclick = function(e){ e.stopPropagation(); var open = meMenu.classList.toggle('open'); meBtn.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+        document.getElementById('tdoc-inbox-open').onclick = function(){ meMenu.classList.remove('open'); showInboxPanel(); };
         var myDocs = document.getElementById('tdoc-my-docs');
         if (myDocs) myDocs.onclick = function(){ window.open('/me', '_blank', 'noopener'); };
         document.getElementById('tdoc-signout').onclick = function(){
+          stopInboxPoll();
           fetch('/api/auth/logout', { method: 'POST' }).then(function(){ location.reload(); });
         };
+        tickInbox();
+        startInboxPoll();
       } else if (cfg.mode === 'published') {
         slot.innerHTML = '<button class="tdoc-chip signin" id="tdoc-signin">Sign in with GitHub</button>';
         document.getElementById('tdoc-signin').onclick = function(){ if (window.__tdocSignIn) window.__tdocSignIn().then(function(){ location.reload(); }, function(){}); };
