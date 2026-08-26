@@ -1174,7 +1174,7 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
 // local and production render 1:1. The published-mode bar + client cfg carry
 // the same fields injectOverlay used, so identity/owner/manage/share behave as
 // before once the shell client wires them.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
   if (!SHELL) return injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth);
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const vlist = Array.isArray(versions) && versions.length ? versions : [{ n: version }];
@@ -1197,7 +1197,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // doc carrying the /start CTA) — same rule injectOverlay uses.
   const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
   const onboardJs = ((slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce) ? ONBOARD_JS : '';
-  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog }) : '';
+  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog, stars: stars }) : '';
   const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
   return SHELL.shellHtml({
     title,
@@ -1211,6 +1211,31 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     signinJs: SIGNIN_JS,
     onboardJs,
   });
+}
+
+// Site chrome for PLAIN pages (/me): the page's own content stays inline (it is
+// tdoc-generated, not author content — no sandbox needed), and we add the
+// shared bar component + theme/identity wiring. The shell client script runs
+// dormant here: with no .tdoc-doc-frame in the DOM, all comment machinery is
+// message-driven and never activates; only the bar wiring (theme, menus,
+// identity, sign-in) is live. One chrome, two page kinds.
+function injectSiteChrome(rawHtml, cfg, nonce) {
+  if (!SHELL || !CHROME.buildBar) return rawHtml;   // unbundled worker — serve bare
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const barInner = CHROME.buildBar({ mode: 'published', slug: cfg.slug || '', version: cfg.version || 0, versions: [], isLanding: !!cfg.isLanding, isCatalog: !!cfg.isCatalog, stars: cfg.stars });
+  const chromeCssTag = `<style>${SHELL.sliceChromeCss(typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '')}</style>`;
+  const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
+  const scripts =
+    `<script${nonceAttr}>${CHROME_JS}</script>\n` +
+    `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>window.__TDOC_SHELL__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
+    `<script${nonceAttr}>${SHELL.shellScript()}</script>`;
+  let out = rawHtml;
+  out = /<head[^>]*>/i.test(out) ? out.replace(/<head[^>]*>/i, (m) => `${m}\n${chromeCssTag}`) : chromeCssTag + out;
+  out = /<body[^>]*>/i.test(out) ? out.replace(/<body[^>]*>/i, (m) => `${m}\n<div class="tdoc-bar">${barInner}</div>`) : `<div class="tdoc-bar">${barInner}</div>` + out;
+  out = out.includes('</body>') ? out.replace('</body>', `${scripts}\n</body>`) : out + scripts;
+  return out;
 }
 
 // The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
@@ -1301,12 +1326,12 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
   }
   const nonce = rand(16);
-  // Docs render as the cross-origin shell (chrome outside, author content in the
-  // /frame iframe). The homepage (isLanding) stays a normal overlay page: its
-  // marketing copy must be crawlable, not buried in an opaque-origin iframe.
-  // Stars are landing-only chrome (the bar's GitHub star count).
+  // Every doc — the landing docs included — renders as the cross-origin shell
+  // (full migration; the overlay monolith is being deleted). Homepage SEO is
+  // handled by the crawlable-content-URL plan (#258, separate PR). Stars are
+  // landing-only chrome (the bar's GitHub star count).
   const stars = isLanding ? await fetchStars(env) : null;
-  const render = isLanding ? injectOverlay : shellDocumentWorker;
+  const render = shellDocumentWorker;
   return {
     ok: true,
     response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars), {
@@ -3291,7 +3316,12 @@ export default {
       const nonce = rand(16);
       const page = await indexHtml(env, s, url.origin, nonce);
       const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
-      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true, !!env.GITHUB_CLIENT_SECRET), {
+      // /me is a PLAIN site page (tdoc-generated content, no author HTML): the
+      // shared bar + identity wiring go in via injectSiteChrome, no iframe.
+      return html(injectSiteChrome(page, {
+        slug: '', version: 0, identity, isOwner: false, canSeeMyDocs: true,
+        isCatalog: true, authConfigured: true, webAuth: !!env.GITHUB_CLIENT_SECRET, mode: 'published', versions: [],
+      }, nonce), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
       });
     }

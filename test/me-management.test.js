@@ -138,27 +138,32 @@ t('overlay top bar occupies layout instead of floating over the document', () =>
     'old-version strip must occupy flow, not extra body padding');
 });
 
-t('/me reuses the overlay top bar and hides Share / Duplicate / Copy', () => {
+t('/me reuses the SHARED bar component and hides Share / Duplicate / Copy', () => {
+  // /me is a plain site page now: content stays inline (tdoc-generated), the
+  // shared chrome.js bar goes in via injectSiteChrome. Same intent as before —
+  // ONE bar component, never a bespoke second bar.
   const meStart = worker.indexOf("if (p === '/me' && method === 'GET')");
   const meEnd = worker.indexOf('// ---- interactive island', meStart);
   assert(meStart >= 0 && meEnd > meStart, '/me route block missing');
   const meRoute = worker.slice(meStart, meEnd);
-  assert(meRoute.includes('injectOverlay('), '/me must inject overlay.js for the site bar');
-  assert(meRoute.includes("'Content-Security-Policy': cspHeader(nonce)"), '/me overlay needs the same CSP as docs');
-  assert(worker.includes('isCatalog: !!isCatalog'), 'injectOverlay must pass isCatalog');
+  assert(meRoute.includes('injectSiteChrome('), '/me must use injectSiteChrome (shared bar component)');
+  assert(meRoute.includes('isCatalog: true'), '/me must render the catalog bar variant');
+  assert(meRoute.includes("'Content-Security-Policy': cspHeader(nonce)"), '/me needs the same CSP as docs');
+  assert(worker.includes('CHROME.buildBar'), 'the site bar must come from the shared CHROME.buildBar');
   assert(!worker.includes('function siteChromeCss'), '/me must not fork a second top bar');
-  assert(!index.includes('class="who"'), 'identity belongs in the overlay chip');
+  assert(!index.includes('class="who"'), 'identity belongs in the shared identity chip');
   assert(index.includes('nonce="${nonce}"'), '/me catalog script must carry the CSP nonce');
-  assert(overlay.includes('const isCatalog = !!cfg.isCatalog'), 'overlay must read isCatalog');
-  // Copy now lives in the ⋯ overflow, and the whole overflow is !isSiteBar-gated,
-  // so the catalog bar drops Copy/Duplicate/Download together.
-  assert(overlay.includes('<button data-action="copy">Copy as Markdown</button>'), 'Copy lives in the ⋯ overflow menu');
-  assert(overlay.includes('${!isSiteBar ? `<div class="tdoc-menu-wrap">'), 'catalog must hide Copy (⋯ overflow is !isSiteBar-gated)');
-  assert(overlay.includes("${isSiteBar ? '' : primaryCtaHtml}"), 'catalog must hide Share');
-  assert(overlay.includes("${isSiteBar ? '' : forkBtnHtml}"), 'catalog must hide Duplicate/Download');
-  assert(overlay.includes('id="tdoc-title"'),
+  const chrome = fs.readFileSync(path.join(__dirname, '..', 'server', 'chrome.js'), 'utf8');
+  // Copy lives in the ⋯ overflow, and the overflow/CTA/fork clusters are all
+  // isSiteBar-gated in the shared component, so the catalog bar drops
+  // Copy/Duplicate/Download/Share together.
+  assert(chrome.includes('<button data-action="copy">Copy as Markdown</button>'), 'Copy lives in the ⋯ overflow menu');
+  assert(chrome.includes("(isSiteBar ? '' : secondaryMenuHtml)"), 'catalog must hide Copy (⋯ overflow is isSiteBar-gated)');
+  assert(chrome.includes("(isSiteBar ? '' : primaryCtaHtml)"), 'catalog must hide Share');
+  assert(chrome.includes("(isSiteBar ? '' : forkBtnHtml)"), 'catalog must hide Duplicate/Download');
+  assert(chrome.includes('id="tdoc-title"'),
     'doc pages still show the title in the left cluster');
-  assert(!overlay.includes('tdoc-bar-center'),
+  assert(!chrome.includes('tdoc-bar-center'),
     'title must not sit in a fake-centered middle slot');
   assert(overlay.includes('src="/tdoc_logo.svg"'),
     'bar mark must be the tdoc logo, not a text pill');

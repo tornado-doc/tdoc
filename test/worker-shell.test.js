@@ -68,13 +68,14 @@ const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8')
     if (!/frameCspHeader\(nonce\)/.test(block)) throw new Error('/frame must set frameCspHeader');
   });
 
-  await t('worker serveDocVersion renders the shell for docs, keeps the overlay for the homepage', async () => {
+  await t('worker serveDocVersion renders the shell for EVERY doc (landing included)', async () => {
     const s = workerSrc.indexOf('async function serveDocVersion(');
     const e = workerSrc.indexOf('async function landingResponse', s);
     const block = workerSrc.slice(s, e);
-    if (!/isLanding \? injectOverlay : shellDocumentWorker/.test(block)) {
-      throw new Error('serveDocVersion must render shellDocumentWorker for docs and injectOverlay for isLanding');
+    if (!/const render = shellDocumentWorker;/.test(block)) {
+      throw new Error('serveDocVersion must render the shell unconditionally — the overlay path is deleted');
     }
+    if (/injectOverlay/.test(block)) throw new Error('serveDocVersion still references injectOverlay');
     if (!block.includes("'Content-Security-Policy': cspHeader(nonce)")) throw new Error('doc-view must keep cspHeader(nonce)');
   });
 
