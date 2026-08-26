@@ -273,12 +273,20 @@
   // gutter just right of the reading column — not pinned to the viewport edge.
   // Mirrors overlay.js getArticleMetrics: widest wrapper, else widest prose.
   function articleRight() {
-    var best = 0, bw = 0, els = document.querySelectorAll('main, article, .wrap, .content, .container');
-    for (var i = 0; i < els.length; i++) { var r = els[i].getBoundingClientRect(); if (r.width > bw && r.width > 200 && r.width < window.innerWidth) { bw = r.width; best = r.right; } }
+    // A qualifying wrapper must plausibly BE the reading column: at least half
+    // the viewport wide (an interior grid cell can match .content/.container
+    // and would park pins mid-screen) but narrower than the viewport itself.
+    var best = 0, bw = 0, minW = Math.max(200, window.innerWidth * 0.5);
+    var els = document.querySelectorAll('main, article, .wrap, .content, .container');
+    for (var i = 0; i < els.length; i++) { var r = els[i].getBoundingClientRect(); if (r.width > bw && r.width > minW && r.width < window.innerWidth) { bw = r.width; best = r.right; } }
     if (bw) return best;
-    var ps = document.querySelectorAll('p, h1, h2, h3, li');
-    for (var j = 0; j < ps.length; j++) { var rr = ps[j].getBoundingClientRect(); if (rr.width > bw && rr.width > 300 && rr.width < window.innerWidth) { bw = rr.width; best = rr.right; } }
-    return bw ? best : window.innerWidth;
+    // No wrapper narrower than the viewport — on narrow windows the column IS
+    // the viewport. The reading column's right edge is the RIGHTMOST prose
+    // edge, not the widest block's: in grid/column layouts the widest
+    // paragraph can be a left column ending mid-screen (pins parked centered).
+    var right = 0, ps = document.querySelectorAll('p, h1, h2, h3, li');
+    for (var j = 0; j < ps.length; j++) { var rr = ps[j].getBoundingClientRect(); if (rr.width > 120 && rr.right > right && rr.right <= window.innerWidth) right = rr.right; }
+    return right || window.innerWidth;
   }
   // The author document is static in shell mode, so cache the text-model view
   // and each anchor's resolved Range. Re-resolving after a comment/reply then
