@@ -168,31 +168,35 @@ t('FOLD: deleted reply is excluded', () => {
 });
 
 // ---- bundle_worker overlay inlining (the deploy-critical transform) ----
-t('BUNDLE: inlining replaces the placeholder with the real overlay, valid JS', () => {
+t('BUNDLE: inlining replaces the placeholders with the real modules, valid JS', () => {
   const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
-  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
-  // same transform as bin/tdoc-bundle
+  const chromeMod = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8');
+  const probe = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
+  // same transform as bin/tdoc-bundle (chrome inlined as a client string)
   const replaced = worker.replace(
-    /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
-    'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
+    /const CHROME_JS = `__TDOC_CHROME_JS__`;/,
+    'const CHROME_JS = ' + JSON.stringify(chromeMod) + ';'
+  ).replace(
+    /const PROBE_JS = `__TDOC_PROBE_JS__`;/,
+    'const PROBE_JS = ' + JSON.stringify(probe) + ';'
   ).replace(
     /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,
     'const TDOC_BUILD_INFO = ' + JSON.stringify({
       source_sha: 'testsha',
       source_dirty: false,
       worker_sha: 'worker123',
-      overlay_sha: 'overlay123',
       bundle_sha: 'bundle123',
       built_at: '2026-01-01T00:00:00.000Z',
       generated_by: 'coverage.test',
     }) + ';'
   );
   assert(replaced !== worker, 'placeholder not found — bundle would fail');
-  // The ACTIVE placeholder (the const declaration) must be gone. A mention in a
-  // comment is fine — only the value-bearing declaration matters.
-  assert(!/const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/.test(replaced),
-    'active OVERLAY_JS placeholder still present after bundle');
-  assert(/const OVERLAY_JS = "/.test(replaced), 'overlay was not inlined as a string');
+  // The ACTIVE placeholders (the const declarations) must be gone. A mention in
+  // a comment is fine — only the value-bearing declarations matter.
+  assert(!/const CHROME_JS = `__TDOC_CHROME_JS__`;/.test(replaced),
+    'active CHROME_JS placeholder still present after bundle');
+  assert(/const CHROME_JS = "/.test(replaced), 'chrome module was not inlined as a string');
+  assert(/const PROBE_JS = "/.test(replaced), 'frame probe was not inlined as a string');
   assert(!/const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/.test(replaced),
     'active TDOC_BUILD_INFO placeholder still present after bundle');
   assert(/const TDOC_BUILD_INFO = \{/.test(replaced), 'build info was not inlined as an object');

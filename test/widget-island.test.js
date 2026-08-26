@@ -218,11 +218,14 @@ function get(port, p, headers = {}) {
     }
   });
 
-  await t('worker injectOverlayCfg runs forceWidgetSandbox', async () => {
-    const s = workerSrc.indexOf('function injectOverlayCfg');
-    const body = workerSrc.slice(s, s + 400);
-    if (!body.includes('forceWidgetSandbox(rawHtml)')) {
-      throw new Error('injectOverlayCfg must rewrite widget iframes');
+  await t('worker /frame route runs forceWidgetSandbox on author HTML', async () => {
+    // Author widget iframes are rewritten where author HTML is served now:
+    // the /frame route (the overlay boot that used to do this is deleted).
+    const s = workerSrc.indexOf("const frameMatch = p.match(/^\\/d\\/([^/]+)\\/v\\/(\\d+)\\/frame");
+    if (s < 0) throw new Error('/frame route not found');
+    const body = workerSrc.slice(s, s + 1200);
+    if (!body.includes('forceWidgetSandbox(await obj.text())')) {
+      throw new Error('the /frame route must rewrite widget iframes via forceWidgetSandbox');
     }
   });
 

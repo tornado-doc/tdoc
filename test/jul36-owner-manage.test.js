@@ -79,20 +79,19 @@ t('doc-view never leaks private doc metadata (version count) to non-owners via t
     'the non-history branch must collapse `versions` to the single viewed version, not the full list');
 });
 
-// Anchored on the parameters this file actually reasons about; #127 appends
-// an isLanding flag after `nonce`, and a later caller may append more.
-const injectOverlayStart = worker.search(
-  /function injectOverlay\(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce[^)]*\) \{/);
-const injectOverlayEnd = worker.indexOf('\n}', injectOverlayStart);
-if (injectOverlayStart < 0) throw new Error('injectOverlay() signature not found — did it change?');
-const injectOverlayFn = worker.slice(injectOverlayStart, injectOverlayEnd);
+// The overlay boot is gone — the shell renderer carries the same guarantee.
+const shellFnStart = worker.search(
+  /function shellDocumentWorker\(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce[^)]*\) \{/);
+if (shellFnStart < 0) throw new Error('shellDocumentWorker() signature not found — did it change?');
+const shellFnEnd = worker.indexOf('\n}', shellFnStart);
+const shellFn = worker.slice(shellFnStart, shellFnEnd);
 
-t('injectOverlay re-checks isOwner itself before embedding ownerManage (defense in depth)', () => {
+t('shellDocumentWorker re-checks isOwner itself before embedding ownerManage (defense in depth)', () => {
   // Even if a future caller passed real data with isOwner falsy, this line
   // must still force null — the boot config a non-owner receives can never
   // carry manage data, regardless of what upstream computed.
-  assert(injectOverlayFn.includes('ownerManage: isOwner ? (ownerManage || null) : null'),
-    'injectOverlay must force ownerManage to null whenever isOwner is falsy');
+  assert(shellFn.includes('ownerManage: isOwner ? (ownerManage || null) : null'),
+    'shellDocumentWorker must force ownerManage to null whenever isOwner is falsy');
 });
 
 t('overlay has no separate Share settings menu item — Share is the single owner entry', () => {

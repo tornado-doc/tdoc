@@ -29,7 +29,7 @@ const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8')
     for (const marker of ['/* __TDOC_CHROME_MODULE__ */', '/* __TDOC_SHELL_MODULE__ */', '__TDOC_CHROME_JS__', '__TDOC_PROBE_JS__']) {
       if (!bundleSrc.includes(marker)) throw new Error(`tdoc-bundle no longer references ${marker}`);
     }
-    if (!/bundleSha = sha\(\[worker, overlay, chromeMod, shellMod, frameProbe, chromeCss, readerCss\]/.test(bundleSrc)) {
+    if (!/bundleSha = sha\(\[worker, chromeMod, shellMod, frameProbe, chromeCss, readerCss\]/.test(bundleSrc)) {
       throw new Error('bundle_sha must cover chrome/shell/probe/css so drift changes the hash');
     }
   });

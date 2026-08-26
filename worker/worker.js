@@ -8,12 +8,10 @@
 // Secrets:
 //   TDOC_UPLOAD_TOKEN — shared secret for /api/upload from `tdoc publish`
 //
-// IMPORTANT: This file contains placeholder strings `__TDOC_OVERLAY_JS__` and
-// `__TDOC_BUILD_INFO__`. The publish script replaces them before deploy,
-// producing worker/_worker.bundled.js. Do not deploy worker.js directly — the
-// overlay/provenance would be missing.
-
-const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;
+// IMPORTANT: This file contains placeholder strings (`__TDOC_BUILD_INFO__`,
+// the chrome/shell/probe module and CSS placeholders below). bin/tdoc-bundle
+// replaces them before deploy, producing worker/_worker.bundled.js. Do not
+// deploy worker.js directly — the chrome/provenance would be missing.
 
 // Cross-origin shell modules, inlined by bin/tdoc-bundle. The chrome + shell
 // builder are inlined as CODE right here (Workers ban eval, so each self-
@@ -64,7 +62,6 @@ function runtimeInfo() {
     source_sha: b.source_sha || null,
     source_dirty: !!b.source_dirty,
     worker_sha: b.worker_sha || null,
-    overlay_sha: b.overlay_sha || null,
     bundle_sha: b.bundle_sha || null,
     built_at: b.built_at || null,
     generated_by: b.generated_by || 'unknown',
@@ -1086,29 +1083,6 @@ function forceWidgetSandbox(html) {
   });
 }
 
-// Inject the overlay boot + an arbitrary cfg into a document. Single source of
-// truth for "put window.__TDOC__ + overlay.js before </body>" — used by both
-// the published view and the /fork view (which previously re-implemented this
-// inline, risking drift).
-//
-// `nonce` (when supplied) is stamped onto BOTH injected <script> tags so they
-// — and only they — run under the CSP set by cspHeader() above. Callers that
-// don't pass a nonce (there are none left in this file, but keep the param
-// optional so a future caller can't silently omit CSP without an explicit
-// choice) get unnonced tags, which simply won't execute under a nonce-based
-// CSP — fail closed, not fail open.
-function injectOverlayCfg(rawHtml, cfg, nonce) {
-  rawHtml = forceWidgetSandbox(rawHtml);
-  const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
-  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
-  const inject =
-    `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
-    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
-    `<script${nonceAttr}>${OVERLAY_JS}</script>`;
-  if (rawHtml.includes('</body>')) return rawHtml.replace('</body>', `${inject}\n</body>`);
-  return rawHtml + inject;
-}
-
 // Download (/export) stamps the reader template as a static <style> so the
 // saved file matches the published reading column. READER_CSS is the
 // standalone server/reader.css inlined by the bundler (empty when unbundled).
@@ -1122,51 +1096,12 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
-  // The onboarding modal is product UI, so it ships from here under the page
-  // nonce. The doc's own <script> would never run (#138), which is why the
-  // landing CTA still carries a plain href: with scripting off the visitor
-  // gets the /start page instead of a dead button.
-  // The modal ships wherever its trigger is. Gating on the slug meant a doc
-  // could carry the CTA and get a dead link to /start instead — which is what
-  // happened the first time the landing page was drafted under another slug.
-  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml);
-  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce
-    ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
-    : rawHtml;
-  return injectOverlayCfg(withOnboard, {
-    slug, version,
-    identity: identity || null,
-    isOwner: !!isOwner,
-    // Hosted tdoc.dev: any signed-in GitHub user. BYOK: TDOC_OWNER only.
-    // Never fall back to isOwner — that hid My docs from hosted readers.
-    canSeeMyDocs: !!canSeeMyDocsFlag,
-    // `/` is the site itself, not a doc someone published. The slug and the
-    // version number are storage detail; printing them in the bar tells a
-    // first-time visitor they are looking at somebody's document.
-    isLanding: !!isLanding,
-    // Live GitHub star count for the landing header (null when unknown).
-    stars: (typeof stars === 'number' ? stars : null),
-    // /me catalog: same overlay bar, no Share / Duplicate / Copy.
-    isCatalog: !!isCatalog,
-    // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
-    // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
-    ownerManage: isOwner ? (ownerManage || null) : null,
-    authConfigured: true,
-    // When the client secret is set, browsers use the redirect flow (signin.js
-    // sends them to /api/auth/web/login) instead of the device-code modal.
-    webAuth: !!webAuth,
-    mode: 'published',
-    versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
-  }, nonce);
-}
-
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // isolated in the same-origin, sandboxed /frame iframe. Mirrors the local
 // server's shellDocument, built from the SAME shared modules (SHELL/CHROME) so
 // local and production render 1:1. The published-mode bar + client cfg carry
-// the same fields injectOverlay used, so identity/owner/manage/share behave as
+// the same fields the old overlay boot used, so identity/owner/manage/share behave as
 // before once the shell client wires them.
 function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
@@ -1190,7 +1125,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     runtime: runtimeInfo(),
   };
   // Onboarding modal ships wherever its trigger is (landing/start slug, or any
-  // doc carrying the /start CTA) — same rule injectOverlay uses.
+  // doc carrying the /start CTA) — same rule the old overlay boot used.
   const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
   const onboardJs = ((slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce) ? ONBOARD_JS : '';
   const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog, stars: stars }) : '';

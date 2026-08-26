@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// tdoc-bundle — inline overlay.js + provenance into _worker.bundled.js
+// tdoc-bundle — inline the chrome/shell modules + provenance into _worker.bundled.js
 //
 // Used by tdoc-publish (BYOK) and by the tdoc.dev CD workflow. Same transform
 // either way; GENERATED_BY distinguishes who produced the bundle.
@@ -21,7 +21,6 @@ const outDir = process.env.OUT_DIR || path.join(skill, 'worker');
 const generatedBy = process.env.TDOC_GENERATED_BY || 'tdoc-bundle';
 
 const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
-const overlay = fs.readFileSync(path.join(skill, 'server/overlay.js'), 'utf8');
 const onboard = fs.readFileSync(path.join(skill, 'server/onboard.js'), 'utf8');
 const signin = fs.readFileSync(path.join(skill, 'server/signin.js'), 'utf8');
 // Cross-origin shell modules: the shared chrome + shell builder run server-side
@@ -48,29 +47,24 @@ const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12',
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines — so a change to the chrome,
 // shell, or probe modules produces a new bundle_sha (drift can't slip through).
-const bundleSha = sha([worker, overlay, chromeMod, shellMod, frameProbe, chromeCss, readerCss].join('\0'));
+const bundleSha = sha([worker, chromeMod, shellMod, frameProbe, chromeCss, readerCss].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
   worker_sha: sha(worker).slice(0, 12),
-  overlay_sha: sha(overlay).slice(0, 12),
   bundle_sha: bundleSha.slice(0, 12),
   built_at: new Date().toISOString(),
   generated_by: generatedBy,
 };
 
 let replaced = worker.replace(
-  /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
-  'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
-);
-if (replaced === worker) {
-  console.error('bundle: failed to find OVERLAY_JS placeholder');
-  process.exit(1);
-}
-replaced = replaced.replace(
   /const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;/,
   'const ONBOARD_JS = ' + JSON.stringify(onboard) + ';'
 );
+if (replaced === worker) {
+  console.error('bundle: failed to find ONBOARD_JS placeholder');
+  process.exit(1);
+}
 replaced = replaced.replace(
   /const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;/,
   'const SIGNIN_JS = ' + JSON.stringify(signin) + ';'
