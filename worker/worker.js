@@ -8,12 +8,24 @@
 // Secrets:
 //   TDOC_UPLOAD_TOKEN — shared secret for /api/upload from `tdoc publish`
 //
-// IMPORTANT: This file contains placeholder strings `__TDOC_OVERLAY_JS__` and
-// `__TDOC_BUILD_INFO__`. The publish script replaces them before deploy,
-// producing worker/_worker.bundled.js. Do not deploy worker.js directly — the
-// overlay/provenance would be missing.
+// IMPORTANT: This file contains placeholder strings (`__TDOC_BUILD_INFO__`,
+// the chrome/shell/probe module and CSS placeholders below). bin/tdoc-bundle
+// replaces them before deploy, producing worker/_worker.bundled.js. Do not
+// deploy worker.js directly — the chrome/provenance would be missing.
 
-const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;
+// Cross-origin shell modules, inlined by bin/tdoc-bundle. The chrome + shell
+// builder are inlined as CODE right here (Workers ban eval, so each self-
+// registers on globalThis when it runs at module load); the chrome + probe are
+// also kept as client strings for inlining into the shell / frame documents.
+/* __TDOC_CHROME_MODULE__ */
+/* __TDOC_SHELL_MODULE__ */
+const CHROME_JS = `__TDOC_CHROME_JS__`;
+const PROBE_JS = `__TDOC_PROBE_JS__`;
+const CHROME_CSS = `__TDOC_CHROME_CSS__`;
+const MANAGE_JS = `__TDOC_MANAGE_JS__`;
+const READER_CSS = `__TDOC_READER_CSS__`;
+const CHROME = (typeof globalThis !== 'undefined' && globalThis.TDOC_CHROME) || {};
+const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
 
 const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";
@@ -51,7 +63,6 @@ function runtimeInfo() {
     source_sha: b.source_sha || null,
     source_dirty: !!b.source_dirty,
     worker_sha: b.worker_sha || null,
-    overlay_sha: b.overlay_sha || null,
     bundle_sha: b.bundle_sha || null,
     built_at: b.built_at || null,
     generated_by: b.generated_by || 'unknown',
@@ -1057,8 +1068,19 @@ function reconcileAnchors(comments, aidsInVersion, V) {
 // a maintenance trap if it ever needs to). object-src/base-uri are locked
 // down too (classic plugin/base-tag CSP-bypass vectors) — nothing else is
 // restricted, so author CSS/images/fonts/etc. are untouched.
+// frame-src 'self': the shell document embeds author content only via the
+// same-origin /frame route (itself sandboxed to an opaque origin), and can
+// never be made to frame anything else.
 function cspHeader(nonce) {
-  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; frame-src 'self'; object-src 'none'; base-uri 'none';`;
+}
+
+// The author document is served from /d/<slug>/v/<n>/frame under a CSP
+// `sandbox` (opaque origin) so its CSS/DOM can never touch the shell chrome.
+// Same isolation the widget islands use, applied to the whole author doc; only
+// our own nonced probe runs inside (author JS stays inert).
+function frameCspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts`;
 }
 
 // Interactive islands (#138). Host documents keep cspHeader(); computation
@@ -1069,7 +1091,12 @@ function isValidWidgetName(name) {
   return typeof name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
 }
 function widgetCspHeader() {
-  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
+  // NO frame-ancestors: the author document embeds widgets from inside the
+  // sandboxed /frame, whose origin is OPAQUE — 'self' can never match it, so
+  // the browser would refuse every widget ("refused to connect"). The Sec-
+  // Fetch-Dest gate (must load as an iframe), the widget's own sandbox
+  // (opaque origin, no credentials), and enforceDocAccess remain the controls.
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
 }
 function isWidgetFrameRequest(dest) {
   return String(dest || '').toLowerCase() === 'iframe';
@@ -1094,42 +1121,11 @@ function forceWidgetSandbox(html) {
   });
 }
 
-// Inject the overlay boot + an arbitrary cfg into a document. Single source of
-// truth for "put window.__TDOC__ + overlay.js before </body>" — used by both
-// the published view and the /fork view (which previously re-implemented this
-// inline, risking drift).
-//
-// `nonce` (when supplied) is stamped onto BOTH injected <script> tags so they
-// — and only they — run under the CSP set by cspHeader() above. Callers that
-// don't pass a nonce (there are none left in this file, but keep the param
-// optional so a future caller can't silently omit CSP without an explicit
-// choice) get unnonced tags, which simply won't execute under a nonce-based
-// CSP — fail closed, not fail open.
-function injectOverlayCfg(rawHtml, cfg, nonce) {
-  rawHtml = forceWidgetSandbox(rawHtml);
-  const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
-  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
-  const inject =
-    `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
-    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
-    `<script${nonceAttr}>${OVERLAY_JS}</script>`;
-  if (rawHtml.includes('</body>')) return rawHtml.replace('</body>', `${inject}\n</body>`);
-  return rawHtml + inject;
-}
-
-// Download (/export) has no overlay JS, so the live reading-column CSS never
-// runs. Slice the marked Classic template out of overlay.js (same source as
-// the published view) and stamp it as a static <style>. Bar / comments stay
-// out — those need overlay JS. Empty when OVERLAY_JS is still the bundle
-// placeholder (unbundled worker.js in some tests).
-const READER_CSS_START = '/* TDOC_READER_CSS_START */';
-const READER_CSS_END = '/* TDOC_READER_CSS_END */';
-function readerCssFromOverlay() {
-  const src = typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '';
-  const i = src.indexOf(READER_CSS_START);
-  const j = src.indexOf(READER_CSS_END);
-  if (i < 0 || j < 0 || j <= i) return '';
-  return src.slice(i + READER_CSS_START.length, j).trim();
+// Download (/export) stamps the reader template as a static <style> so the
+// saved file matches the published reading column. READER_CSS is the
+// standalone server/reader.css inlined by the bundler (empty when unbundled).
+function readerCssSource() {
+  return (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
 }
 function injectReaderCss(html, css) {
   if (!css) return html;
@@ -1138,43 +1134,86 @@ function injectReaderCss(html, css) {
   return tag + html;
 }
 
-function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
-  // The onboarding modal is product UI, so it ships from here under the page
-  // nonce. The doc's own <script> would never run (#138), which is why the
-  // landing CTA still carries a plain href: with scripting off the visitor
-  // gets the /start page instead of a dead button.
-  // The modal ships wherever its trigger is. Gating on the slug meant a doc
-  // could carry the CTA and get a dead link to /start instead — which is what
-  // happened the first time the landing page was drafted under another slug.
-  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml);
-  const withOnboard = (slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce
-    ? rawHtml.replace('</body>', `<script nonce="${nonce}">${ONBOARD_JS}</script>\n</body>`)
-    : rawHtml;
-  return injectOverlayCfg(withOnboard, {
+// Render one published doc version as the cross-origin SHELL: chrome (bar,
+// footer, composer, pins, cards) in this outer document; the author content
+// isolated in the same-origin, sandboxed /frame iframe. Mirrors the local
+// server's shellDocument, built from the SAME shared modules (SHELL/CHROME) so
+// local and production render 1:1. The published-mode bar + client cfg carry
+// the same fields the old overlay boot used, so identity/owner/manage/share behave as
+// before once the shell client wires them.
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
+  // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
+  // the author document bare rather than injecting anything.
+  if (!SHELL) return rawHtml;
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const vlist = Array.isArray(versions) && versions.length ? versions : [{ n: version }];
+  let title = slug;
+  const cfg = {
     slug, version,
     identity: identity || null,
     isOwner: !!isOwner,
-    // Hosted tdoc.dev: any signed-in GitHub user. BYOK: TDOC_OWNER only.
-    // Never fall back to isOwner — that hid My docs from hosted readers.
     canSeeMyDocs: !!canSeeMyDocsFlag,
-    // `/` is the site itself, not a doc someone published. The slug and the
-    // version number are storage detail; printing them in the bar tells a
-    // first-time visitor they are looking at somebody's document.
     isLanding: !!isLanding,
-    // Live GitHub star count for the landing header (null when unknown).
-    stars: (typeof stars === 'number' ? stars : null),
-    // /me catalog: same overlay bar, no Share / Duplicate / Copy.
     isCatalog: !!isCatalog,
-    // Always null for non-owners (never just omitted-but-truthy-elsewhere) so
-    // the overlay's `if (!cfg.ownerManage) return;` guard is unambiguous.
     ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
-    // When the client secret is set, browsers use the redirect flow (signin.js
-    // sends them to /api/auth/web/login) instead of the device-code modal.
     webAuth: !!webAuth,
     mode: 'published',
-    versions: Array.isArray(versions) && versions.length ? versions : [{ n: version }],
-  }, nonce);
+    versions: vlist,
+    runtime: runtimeInfo(),
+  };
+  // Onboarding modal ships wherever its trigger is (landing/start slug, or any
+  // doc carrying the /start CTA) — same rule the old overlay boot used.
+  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
+  const onboardJs = ((slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce) ? ONBOARD_JS : '';
+  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog, stars: stars }) : '';
+  // Old-version strip — published + multi-version + viewing an old one (1:1
+  // with the overlay: fork/landing and the latest version itself get nothing).
+  let oldverHtml = '';
+  const latestVersion = vlist.length ? Math.max(...vlist.map(v => Number(v.n) || 0)) : version;
+  if (!isLanding && vlist.length > 1 && typeof version === 'number' && version < latestVersion) {
+    const latestUrl = `/d/${encodeURIComponent(slug)}/v/${latestVersion}`;
+    oldverHtml = `<div class="tdoc-oldver-strip"><span>You're viewing v${version} — the latest is <a href="${latestUrl}">v${latestVersion}</a></span></div>`;
+  }
+  const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
+  return SHELL.shellHtml({
+    title,
+    frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame`,
+    nonceAttr,
+    chromeCssStr: (typeof CHROME_CSS === 'string' && CHROME_CSS.indexOf('__TDOC_') !== 0) ? CHROME_CSS : '',
+    barInner, footerInner, oldverHtml,
+    chromeJs: CHROME_JS,
+    authCfgJson: safeJsonForScript(cfg),
+    cfgJson: safeJsonForScript(cfg),
+    signinJs: SIGNIN_JS,
+    manageJs: (typeof MANAGE_JS === 'string' && MANAGE_JS.indexOf('__TDOC_') !== 0) ? MANAGE_JS : '',
+    onboardJs,
+  });
+}
+
+// Site chrome for PLAIN pages (/me): the page's own content stays inline (it is
+// tdoc-generated, not author content — no sandbox needed), and we add the
+// shared bar component + theme/identity wiring. The shell client script runs
+// dormant here: with no .tdoc-doc-frame in the DOM, all comment machinery is
+// message-driven and never activates; only the bar wiring (theme, menus,
+// identity, sign-in) is live. One chrome, two page kinds.
+function injectSiteChrome(rawHtml, cfg, nonce) {
+  if (!SHELL || !CHROME.buildBar) return rawHtml;   // unbundled worker — serve bare
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  const barInner = CHROME.buildBar({ mode: 'published', slug: cfg.slug || '', version: cfg.version || 0, versions: [], isLanding: !!cfg.isLanding, isCatalog: !!cfg.isCatalog, stars: cfg.stars });
+  const chromeCssTag = `<style>${(typeof CHROME_CSS === 'string' && CHROME_CSS.indexOf('__TDOC_') !== 0) ? CHROME_CSS : ''}</style>`;
+  const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
+  const scripts =
+    `<script${nonceAttr}>${CHROME_JS}</script>\n` +
+    `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>window.__TDOC_SHELL__ = ${safeJsonForScript(bootCfg)};</script>\n` +
+    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
+    `<script${nonceAttr}>${SHELL.shellScript()}</script>`;
+  let out = rawHtml;
+  out = /<head[^>]*>/i.test(out) ? out.replace(/<head[^>]*>/i, (m) => `${m}\n${chromeCssTag}`) : chromeCssTag + out;
+  out = /<body[^>]*>/i.test(out) ? out.replace(/<body[^>]*>/i, (m) => `${m}\n<div class="tdoc-bar">${barInner}</div>`) : `<div class="tdoc-bar">${barInner}</div>` + out;
+  out = out.includes('</body>') ? out.replace('</body>', `${scripts}\n</body>`) : out + scripts;
+  return out;
 }
 
 // The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
@@ -1266,10 +1305,15 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
   }
   const nonce = rand(16);
+  // Every doc — the landing docs included — renders as the cross-origin shell
+  // (full migration; the overlay monolith is being deleted). Homepage SEO is
+  // handled by the crawlable-content-URL plan (#258, separate PR). Stars are
+  // landing-only chrome (the bar's GitHub star count).
   const stars = isLanding ? await fetchStars(env) : null;
+  const render = shellDocumentWorker;
   return {
     ok: true,
-    response: html(injectOverlay(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -3251,7 +3295,12 @@ export default {
       const nonce = rand(16);
       const page = await indexHtml(env, s, url.origin, nonce);
       const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
-      return html(injectOverlay(page, '', 0, identity, [], false, null, nonce, false, true, true, !!env.GITHUB_CLIENT_SECRET), {
+      // /me is a PLAIN site page (tdoc-generated content, no author HTML): the
+      // shared bar + identity wiring go in via injectSiteChrome, no iframe.
+      return html(injectSiteChrome(page, {
+        slug: '', version: 0, identity, isOwner: false, canSeeMyDocs: true,
+        isCatalog: true, authConfigured: true, webAuth: !!env.GITHUB_CLIENT_SECRET, mode: 'published', versions: [],
+      }, nonce), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
       });
     }
@@ -3279,6 +3328,51 @@ export default {
       return html(raw, {
         headers: {
           'Content-Security-Policy': widgetCspHeader(),
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'no-store',
+          'Vary': 'Sec-Fetch-Dest',
+        },
+      });
+    }
+
+    // ---- author document frame (shell mode) ----
+    // The author content, isolated in an opaque-origin sandboxed iframe that the
+    // shell embeds. Gated on Sec-Fetch-Dest: iframe like widgets, so it can never
+    // be loaded top-level — only inside the shell. Access-gated identically to
+    // the doc view. Only our nonced probe runs inside; author JS stays inert.
+    const frameMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/frame\/?$/);
+    if (frameMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr] = frameMatch;
+      if (!isValidSlug(slug)) return text('invalid slug', { status: 400 });
+      if (!isWidgetFrameRequest(req.headers.get('sec-fetch-dest'))) {
+        return text('document frame must be framed', { status: 403 });
+      }
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
+      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
+      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+      const nonce = rand(16);
+      let body = '';
+      if (method !== 'HEAD') {
+        body = forceWidgetSandbox(await obj.text());
+        // Legacy template-reliant docs (published before creation-time baking):
+        // no #tdoc-reader block AND no styling of their own reading column →
+        // inject the reader CSS into the FRAME RESPONSE (never into storage).
+        // Self-contained docs are excluded by the max-width check; the template
+        // is :where() zero-specificity, so author CSS always wins.
+        if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+          const rcss = (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
+          if (rcss) {
+            const rtag = `<style id="tdoc-reader">${rcss}</style>`;
+            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+          }
+        }
+        const tag = `<script nonce="${nonce}">${PROBE_JS}</script>`;
+        body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
+      }
+      return html(body, {
+        headers: {
+          'Content-Security-Policy': frameCspHeader(nonce),
           'X-Content-Type-Options': 'nosniff',
           'Cache-Control': 'no-store',
           'Vary': 'Sec-Fetch-Dest',
@@ -3385,27 +3479,12 @@ export default {
         html = html.slice(0, idx) + replacement + html.slice(idx + needle.length);
       }
 
-      // The fork route boots the overlay in read-only "fork" mode so the
-      // user can SEE what they just downloaded — comments rendered as cards,
-      // anchors highlighted — without any backend.
-      // Same confused-deputy surface as the doc-view route (same-origin
-      // cookie, arbitrary author HTML) even though fork/export don't expose
-      // owner-manage UI — a script here could still ride the viewer's session
-      // cookie to hit /api/doc*. Nonce the injected overlay script the same
-      // way; author content stays unnonced and inert under the CSP below.
+      // Both kinds are STATIC now. /fork's interactive overlay mode is retired
+      // (dead route — Duplicate is the product feature; agents read the banner
+      // + JSON block, which both kinds still carry). Bake the reading-column
+      // CSS so the page/file looks like the published doc.
       const nonce = rand(16);
-      let bodyHtml = html;
-      if (kind === 'export') {
-        // File save has no overlay JS. Bake the reading-column CSS so a
-        // downloaded slug-vN.html still looks like the published doc.
-        bodyHtml = injectReaderCss(bodyHtml, readerCssFromOverlay());
-      }
-      if (kind === 'fork') {
-        bodyHtml = injectOverlayCfg(bodyHtml, {
-          slug, version: Number(vStr), identity: null,
-          authConfigured: false, mode: 'fork', originalSlug: slug,
-        }, nonce);
-      }
+      const bodyHtml = injectReaderCss(html, readerCssSource());
 
       const finalHtml = banner + jsonBlock + bodyHtml;
       const dl = url.searchParams.get('download');

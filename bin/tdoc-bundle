@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// tdoc-bundle — inline overlay.js + provenance into _worker.bundled.js
+// tdoc-bundle — inline the chrome/shell modules + provenance into _worker.bundled.js
 //
 // Used by tdoc-publish (BYOK) and by the tdoc.dev CD workflow. Same transform
 // either way; GENERATED_BY distinguishes who produced the bundle.
@@ -21,9 +21,18 @@ const outDir = process.env.OUT_DIR || path.join(skill, 'worker');
 const generatedBy = process.env.TDOC_GENERATED_BY || 'tdoc-bundle';
 
 const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
-const overlay = fs.readFileSync(path.join(skill, 'server/overlay.js'), 'utf8');
 const onboard = fs.readFileSync(path.join(skill, 'server/onboard.js'), 'utf8');
 const signin = fs.readFileSync(path.join(skill, 'server/signin.js'), 'utf8');
+// Cross-origin shell modules: the shared chrome + shell builder run server-side
+// in the worker (inlined as CODE — Workers ban eval — so they self-register on
+// globalThis), and the chrome + probe are ALSO shipped as client strings the
+// worker inlines into the shell document / the /frame document.
+const chromeMod = fs.readFileSync(path.join(skill, 'server/chrome.js'), 'utf8');
+const shellMod = fs.readFileSync(path.join(skill, 'server/shell.js'), 'utf8');
+const frameProbe = fs.readFileSync(path.join(skill, 'server/frame-probe.js'), 'utf8');
+const chromeCss = fs.readFileSync(path.join(skill, 'server/chrome.css'), 'utf8');
+const readerCss = fs.readFileSync(path.join(skill, 'server/reader.css'), 'utf8');
+const manageJs = fs.readFileSync(path.join(skill, 'server/manage.js'), 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -37,33 +46,46 @@ const git = (...args) => {
 
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
-const bundleSha = sha(worker + '\0' + overlay);
+// bundleSha covers every source the bundle inlines — so a change to the chrome,
+// shell, or probe modules produces a new bundle_sha (drift can't slip through).
+const bundleSha = sha([worker, chromeMod, shellMod, frameProbe, chromeCss, readerCss, manageJs].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
   worker_sha: sha(worker).slice(0, 12),
-  overlay_sha: sha(overlay).slice(0, 12),
   bundle_sha: bundleSha.slice(0, 12),
   built_at: new Date().toISOString(),
   generated_by: generatedBy,
 };
 
 let replaced = worker.replace(
-  /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
-  'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
-);
-if (replaced === worker) {
-  console.error('bundle: failed to find OVERLAY_JS placeholder');
-  process.exit(1);
-}
-replaced = replaced.replace(
   /const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;/,
   'const ONBOARD_JS = ' + JSON.stringify(onboard) + ';'
 );
+if (replaced === worker) {
+  console.error('bundle: failed to find ONBOARD_JS placeholder');
+  process.exit(1);
+}
 replaced = replaced.replace(
   /const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;/,
   'const SIGNIN_JS = ' + JSON.stringify(signin) + ';'
 );
+// Shell modules. The chrome + shell builder are inlined as CODE (they self-
+// register on globalThis); the chrome + probe are also inlined as client
+// STRINGS. Each replace is checked so a renamed/absent placeholder fails the
+// build instead of silently shipping the shell architecture disabled.
+function mustReplace(hay, needle, sub, label) {
+  const out = hay.replace(needle, sub);
+  if (out === hay) { console.error('bundle: failed to find ' + label + ' placeholder'); process.exit(1); }
+  return out;
+}
+replaced = mustReplace(replaced, '/* __TDOC_CHROME_MODULE__ */', chromeMod, 'CHROME_MODULE');
+replaced = mustReplace(replaced, '/* __TDOC_SHELL_MODULE__ */', shellMod, 'SHELL_MODULE');
+replaced = mustReplace(replaced, /const CHROME_JS = `__TDOC_CHROME_JS__`;/, 'const CHROME_JS = ' + JSON.stringify(chromeMod) + ';', 'CHROME_JS');
+replaced = mustReplace(replaced, /const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(frameProbe) + ';', 'PROBE_JS');
+replaced = mustReplace(replaced, /const CHROME_CSS = `__TDOC_CHROME_CSS__`;/, 'const CHROME_CSS = ' + JSON.stringify(chromeCss) + ';', 'CHROME_CSS');
+replaced = mustReplace(replaced, /const READER_CSS = `__TDOC_READER_CSS__`;/, 'const READER_CSS = ' + JSON.stringify(readerCss) + ';', 'READER_CSS');
+replaced = mustReplace(replaced, /const MANAGE_JS = `__TDOC_MANAGE_JS__`;/, 'const MANAGE_JS = ' + JSON.stringify(manageJs) + ';', 'MANAGE_JS');
 
 let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,

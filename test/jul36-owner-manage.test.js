@@ -32,7 +32,8 @@ async function tAsync(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e.m
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const worker = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
-const overlay = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
+// Manage panel is a standalone module now.
+const overlay = fs.readFileSync(path.join(__dirname, '..', 'server', 'manage.js'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', 'server', 'shell.js'), 'utf8');
 
 console.log('JUL-36 owner manage UX');
 
@@ -79,31 +80,29 @@ t('doc-view never leaks private doc metadata (version count) to non-owners via t
     'the non-history branch must collapse `versions` to the single viewed version, not the full list');
 });
 
-// Anchored on the parameters this file actually reasons about; #127 appends
-// an isLanding flag after `nonce`, and a later caller may append more.
-const injectOverlayStart = worker.search(
-  /function injectOverlay\(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce[^)]*\) \{/);
-const injectOverlayEnd = worker.indexOf('\n}', injectOverlayStart);
-if (injectOverlayStart < 0) throw new Error('injectOverlay() signature not found — did it change?');
-const injectOverlayFn = worker.slice(injectOverlayStart, injectOverlayEnd);
+// The overlay boot is gone — the shell renderer carries the same guarantee.
+const shellFnStart = worker.search(
+  /function shellDocumentWorker\(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce[^)]*\) \{/);
+if (shellFnStart < 0) throw new Error('shellDocumentWorker() signature not found — did it change?');
+const shellFnEnd = worker.indexOf('\n}', shellFnStart);
+const shellFn = worker.slice(shellFnStart, shellFnEnd);
 
-t('injectOverlay re-checks isOwner itself before embedding ownerManage (defense in depth)', () => {
+t('shellDocumentWorker re-checks isOwner itself before embedding ownerManage (defense in depth)', () => {
   // Even if a future caller passed real data with isOwner falsy, this line
   // must still force null — the boot config a non-owner receives can never
   // carry manage data, regardless of what upstream computed.
-  assert(injectOverlayFn.includes('ownerManage: isOwner ? (ownerManage || null) : null'),
-    'injectOverlay must force ownerManage to null whenever isOwner is falsy');
+  assert(shellFn.includes('ownerManage: isOwner ? (ownerManage || null) : null'),
+    'shellDocumentWorker must force ownerManage to null whenever isOwner is falsy');
 });
 
 t('overlay has no separate Share settings menu item — Share is the single owner entry', () => {
   assert(!overlay.includes('id="tdoc-manage-doc"'),
     'the identity-menu Share settings item must be gone; the bar Share button is the only entry');
-  const fnStart = overlay.indexOf('function showShareModal() {');
+  const fnStart = overlay.indexOf('function showShareModal(){');
   assert(fnStart >= 0, 'showShareModal not found');
-  const fnEnd = overlay.indexOf('function showManageModal()', fnStart);
-  const body = overlay.slice(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 600);
-  assert(body.includes('if (cfg.ownerManage)') && body.includes('showManageModal()'),
-    'showShareModal must dispatch to showManageModal for owners before rendering the copy-link-only panel');
+  const body = overlay.slice(fnStart, fnStart + 600);
+  assert(body.includes('cfg.ownerManage') && body.includes('window.__tdocManage()'),
+    'showShareModal must dispatch to the manage module for owners before rendering the copy-link-only panel');
 });
 
 t('showManageModal() bails before creating any DOM when cfg.ownerManage is absent', () => {
@@ -311,7 +310,8 @@ async function main() {
   });
 
   t('overlay.js manage flow never uses window.confirm() either', () => {
-    const start = overlay.indexOf('// ========== Owner manage');
+    // The manage flow is the standalone manage.js module now — scan it whole.
+    const start = 0;
     // End marker was `async function pollDevice`, which left with the
     // device-flow merge into server/signin.js. startDeviceFlow now sits
     // ABOVE this section, so anchor on the next section header instead.

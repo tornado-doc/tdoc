@@ -48,7 +48,8 @@ const norm = (s) => s == null ? null : s.replace(/\s+/g, ' ').trim();
 
 const worker = read('worker/worker.js');
 const server = read('server/server.js');
-const overlay = read('server/overlay.js');
+// overlay.js is deleted; chrome.js is the shared client-markup module now.
+const overlay = read('server/chrome.js');
 const githubOauth = require(path.join(root, 'shared/github-oauth.js'));
 
 console.log('no-drift (duplicated helper guard)');
@@ -88,12 +89,7 @@ t('safeJsonForScript is identical in worker.js and server.js', () => {
   assert(a === b, `safeJsonForScript has DRIFTED between worker.js and server.js:\n      worker: ${a}\n      server: ${b}`);
 });
 
-t('cyrb53 algorithm body is identical in worker.js and overlay.js (modulo indentation)', () => {
-  const a = norm(fnBody(worker, 'cyrb53'));
-  const b = norm(fnBody(overlay, 'cyrb53'));
-  assert(a && b, 'cyrb53 missing from one of the files');
-  assert(a === b, `cyrb53 has DRIFTED between worker.js and overlay.js:\n      worker: ${a}\n      overlay: ${b}`);
-});
+// (cyrb53 lives only in worker.js now — its overlay twin died with the monolith.)
 
 for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAgentLogin', 'detectAgentRuntime', 'agentIdentity', 'isValidWidgetName', 'widgetCspHeader', 'isWidgetFrameRequest', 'forceWidgetSandbox']) {
   t(`${name} is identical in worker.js and server.js`, () => {

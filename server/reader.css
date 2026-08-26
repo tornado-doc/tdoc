@@ -1,0 +1,135 @@
+/* tdoc READER CSS — the reading column, typography, tables, code blocks.
+   All :where() zero-specificity: author CSS always wins. Single source of
+   truth (extracted from overlay.js). Consumed by: tdoc-new (creation-time
+   bake), /frame legacy fallback, /export. */
+:root {
+    --td-accent: #1652f0;
+    --td-accent-hover: #1245d0;
+    --td-accent-ring: rgba(22,82,240,0.35);
+    --td-accent-ring-soft: rgba(22,82,240,0.18);
+    --td-accent-wash: rgba(22,82,240,0.06);
+    --td-accent-tint: #e8eeff;
+    --td-danger: #b42318;
+    --td-danger-hover: #931c14;
+    --td-danger-tint: #fdeceb;
+    --td-ground: #fff;
+    --td-ink: #1a1a1a;
+    --td-heading: #1a1a1a;
+    --td-muted: #6b6a66;
+    --td-line: #e8e7e3;
+    --td-surface: #f0f0ee;
+    --td-surface-2: #f7f7f5;
+    --td-pre-ink: #1a1a1a;
+    --td-th-bg: #f0f0ee;
+    --td-th-ink: #1a1a1a;
+    --td-check: #1a1a1a;
+    --td-font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --td-h2-rule: transparent;
+    --td-selection: #cfe0ff;
+    --td-quote: #d9d8d3;
+  }
+  /* Default template ("Classic" = original tdoc look), all colors via tokens. */
+  :where(body) {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--td-ink);
+    background: var(--td-ground);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  :where(body h1) { font-family: var(--td-font-display); font-size: 38px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 20px; color: var(--td-heading); }
+  :where(body h2) { font-family: var(--td-font-display); font-size: 27px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 44px 0 14px; color: var(--td-heading); padding-bottom: 6px; border-bottom: 1px solid var(--td-h2-rule); }
+  :where(body h3) { font-family: var(--td-font-display); font-size: 21px; line-height: 1.35; font-weight: 700; margin: 32px 0 10px; color: var(--td-heading); }
+  :where(body h4) { font-size: 17px; font-weight: 700; margin: 22px 0 6px; color: var(--td-heading); }
+  :where(body h5, body h6) { font-size: 14px; font-weight: 600; margin: 16px 0 4px; color: var(--td-heading); text-transform: uppercase; letter-spacing: 0.06em; }
+  :where(body p) { margin: 0 0 16px; }
+  :where(body a) { color: var(--td-accent); text-decoration: underline; text-underline-offset: 2px; }
+  :where(body a:hover) { text-decoration-thickness: 2px; }
+  :where(body ul, body ol) { margin: 0 0 18px; padding-left: 26px; }
+  :where(body li) { margin: 8px 0; }
+  :where(body blockquote) { margin: 20px 0; padding: 2px 0 2px 20px; border-left: 3px solid var(--td-quote); color: var(--td-muted); }
+  :where(body code) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; background: var(--td-surface); padding: 2px 6px; border-radius: 6px; }
+  :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: var(--td-surface-2); color: var(--td-pre-ink); border: 1px solid var(--td-line); border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
+  :where(body pre code) { background: transparent; color: inherit; padding: 0; border-radius: 0; }
+  :where(body hr) { border: 0; border-top: 1px solid var(--td-line); margin: 36px 0; }
+  /* Tables: rounded cells with gutters — header tint comes from the theme.
+     No negative horizontal margin: that clips the first column inside any
+     overflow-x:auto wrapper (author skill tells agents to wrap tables). */
+  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
+  :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
+  :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
+  :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
+  :where(body) ::selection { background: var(--td-selection); }
+  /* Task lists: circle checkboxes, Claude Code style. Works for raw
+     <input type=checkbox> in lists and markdown-converted .task-list-item. */
+  :where(body li:has(> input[type="checkbox"]), body li.task-list-item) { list-style: none; margin-left: -26px; }
+  :where(body input[type="checkbox"]) {
+    appearance: none; -webkit-appearance: none;
+    width: 17px; height: 17px;
+    border: 1.5px solid #c9c8c3; border-radius: 50%;
+    vertical-align: -3px; margin: 0 8px 0 0;
+    background: var(--td-ground); cursor: default;
+  }
+  :where(body input[type="checkbox"]:checked) {
+    background: var(--td-check) center / 11px no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 5" stroke="white" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    border-color: var(--td-check);
+  }
+  /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
+     buttons / cards keep their inline layout instead of stacking to 16px tall. */
+  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(.tdo *):not(.tds *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
+  /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
+     column, wrapper or not. Two halves: (a) recognized wrappers get max-width
+     AND margin:auto (previously margin was missing, so wrapped docs without
+     their own margin rule sat left-aligned); (b) docs with no wrapper at all
+     get the same column applied to body itself via :has(). :where() keeps both
+     at zero specificity so a doc that truly wants full-bleed can override. */
+  :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 56px 24px 80px;
+    box-sizing: border-box;
+  }
+  :where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 56px 24px 80px;
+    box-sizing: border-box;
+  }
+  /* End default template. ====================================================== */
+
+  /* Defensive responsive defaults for artifacts. Docs sometimes hardcode pixel
+     widths (e.g. <canvas width="640">) that overflow on phones. These rules
+     constrain every artifact to its container width without changing its
+     aspect ratio. Wrapped in :where() so the doc's own CSS wins if specified. */
+  :where(body img, body video, body iframe, body svg, body canvas) {
+    max-width: 100% !important;
+    height: auto;
+    box-sizing: border-box;
+  }
+  /* Canvas needs special handling: scaling its CSS size doesn't change its
+     drawing-buffer size, but at least the box won't overflow. */
+  :where(body canvas) { display: block; }
+  /* Wide tables: keep TRUE table layout always — display:block on a table
+     discards real table layout for anonymous-box fixup (uneven row heights).
+     Scroll a wrapper instead of the table element. NOTE: no backticks in
+     comments here — this CSS lives inside a JS template literal. */
+  :where(body table) { max-width: 100%; }
+  .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tdoc-table-scroll > table { max-width: none; }
+  /* Pre/code blocks scroll horizontally instead of breaking the layout. */
+  :where(body pre) { max-width: 100%; overflow-x: auto; }
+  @media print {
+    .tdoc-bar, .tdoc-fab, .tdoc-footer, .tdoc-oldver-strip,
+    #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop,
+    .tdoc-popup, .tdoc-modal-bg, .tdoc-hover-outline,
+    .tdoc-comment-pill, .tdoc-drag-marquee, .tdoc-emoji-picker,
+    .tdoc-reanchor-banner { display: none !important; }
+    body { padding-top: 0 !important; padding-right: 0 !important; padding-left: 0 !important; }
+    :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
+      padding-top: 24px;
+    }
+    @page { margin: 14mm; }
+  }

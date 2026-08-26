@@ -31,8 +31,8 @@ rather than stark white. h1 and h2 must set their family explicitly, or the
 overlay's heading rule wins.
 
 **Generous, unhurried spacing.** Paragraphs breathe (24px gaps), the measure
-stays narrow (~640px feel — but let the overlay own the column; don't set
-max-width). Restraint over density.
+stays narrow (~640px feel — but let the baked reader template own the column;
+don't set max-width yourself, the validator rejects it). Restraint over density.
 
 **One clay accent, used sparingly.** Links and the rare emphasis in `#c15f3c`.
 No second hue.

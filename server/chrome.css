@@ -1,0 +1,550 @@
+/* tdoc CHROME CSS — the bar/footer/composer/cards/pins/drawer/menus.
+   Single source of truth (extracted from the old overlay.js monolith).
+   Consumed by: server/server.js (shell), worker (bundled as CHROME_CSS). */
+:root {
+    --td-accent: #1652f0;
+    --td-accent-hover: #1245d0;
+    --td-accent-ring: rgba(22,82,240,0.35);
+    --td-accent-ring-soft: rgba(22,82,240,0.18);
+    --td-accent-wash: rgba(22,82,240,0.06);
+    --td-accent-tint: #e8eeff;
+    --td-danger: #b42318;
+    --td-danger-hover: #931c14;
+    --td-danger-tint: #fdeceb;
+    --td-ground: #fff;
+    --td-ink: #1a1a1a;
+    --td-heading: #1a1a1a;
+    --td-muted: #6b6a66;
+    --td-line: #e8e7e3;
+    --td-surface: #f0f0ee;
+    --td-surface-2: #f7f7f5;
+    --td-pre-ink: #1a1a1a;
+    --td-th-bg: #f0f0ee;
+    --td-th-ink: #1a1a1a;
+    --td-check: #1a1a1a;
+    --td-font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --td-h2-rule: transparent;
+    --td-selection: #cfe0ff;
+    --td-quote: #d9d8d3;
+  }
+
+  /* ========== Top bar ==========
+     Two groups, Google Docs / Notion style: left (logo + crumb + title)
+     and right (identity, primary CTA, more). The title is NOT viewport-
+     centered — left and right chrome are different widths, so a flex
+     "center" slot always looks off. Title truncates in the left group.
+     No borders on individual buttons — hover background instead. */
+  /* In document flow, not position:fixed: the bar occupies the top of the
+     layout so page HTML cannot scroll underneath a floating strip. */
+  .tdoc-bar { position: relative; width: 100%; height: 48px; box-sizing: border-box; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+  .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+  .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
+
+  /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
+  /* justify-content is required: the generic .tdoc-bar button rule supplies
+     display:inline-flex + align-items:center but no horizontal centring, so a
+     24px mark in a 32px padding-0 box sits flush left and the hover highlight
+     lands 8px off to the right of the drawing. */
+  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; justify-content: center; }
+  .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
+  .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; }
+  .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
+  .tdoc-bar .tdoc-github-btn svg { display: block; }
+  .tdoc-bar .tdoc-gh-stars { display: inline-flex; align-items: center; gap: 3px; color: #444; }
+  .tdoc-bar .tdoc-gh-stars svg { display: block; }
+
+  /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
+  .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-bar .crumb-sep { color: #c0c0c4; user-select: none; padding: 0 1px; }
+  .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Default action button — icon and/or label, no border, hover bg only. */
+  .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
+  .tdoc-bar button:hover { background: #f0f1f4; color: #1a1a1a; }
+  .tdoc-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .tdoc-bar button svg { flex-shrink: 0; }
+
+  /* Primary CTA (Share / Publish) — filled blue button at the right. */
+  .tdoc-bar button.primary { background: var(--td-accent); color: #fff; padding: 7px 14px; font-weight: 600; }
+  .tdoc-bar button.primary:hover { background: var(--td-accent-hover); color: #fff; }
+
+  /* Version picker chip — pill in the left breadcrumb. */
+  .tdoc-version-wrap { position: relative; display: inline-block; flex-shrink: 0; }
+  .tdoc-version-toggle { background: #f0f1f4 !important; color: #1a1a1a !important; padding: 3px 10px !important; border-radius: 999px !important; font: 12px ui-monospace, "SF Mono", Menlo, monospace !important; }
+  .tdoc-version-toggle:hover { background: #e5e6ea !important; }
+
+  /* Dropdown menus — light surface to match the bar. */
+  .tdoc-menu, .tdoc-secondary-menu, .tdoc-version-menu { display: none; position: absolute; background: #fff; border: 1px solid #e5e5e7; border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 1000000; min-width: 160px; }
+  .tdoc-version-menu { top: calc(100% + 6px); left: 0; max-height: 60vh; overflow-y: auto; }
+  .tdoc-menu { top: calc(100% + 6px); right: 0; min-width: 180px; }
+  .tdoc-secondary-menu { top: calc(100% + 6px); right: 0; }
+  .tdoc-menu.open, .tdoc-secondary-menu.open, .tdoc-version-menu.open { display: block; }
+  .tdoc-menu button, .tdoc-secondary-menu button, .tdoc-version-menu button { display: block; width: 100%; text-align: left; padding: 7px 10px; border-radius: 4px; color: #1a1a1a; font: 13px system-ui, sans-serif; }
+  .tdoc-version-menu button { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .tdoc-menu button:hover, .tdoc-secondary-menu button:hover, .tdoc-version-menu button:hover { background: #f0f1f4; }
+  .tdoc-secondary-menu button.tdoc-sec-danger { color: var(--td-danger); }
+  .tdoc-secondary-menu button.tdoc-sec-danger:hover { background: var(--td-danger); color: #fff; }
+  .tdoc-version-menu button.current { color: var(--td-accent); font-weight: 600; }
+
+  /* Version switcher folded into the ⋯ overflow menu. The inline version chip
+     is hidden at <700px (phones), so surface the same list here — otherwise
+     there is no way to switch versions on a phone. Shown only at that width;
+     wider layouts keep the inline chip. */
+  .tdoc-secondary-menu .tdoc-sec-versions { display: none; }
+  @media (max-width: 700px) { .tdoc-secondary-menu .tdoc-sec-versions { display: block; } }
+  .tdoc-secondary-menu .tdoc-sec-label { padding: 6px 10px 2px; font: 600 11px system-ui, sans-serif; color: #8a8a8a; text-transform: uppercase; letter-spacing: .04em; }
+  .tdoc-secondary-menu .tdoc-sec-version { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .tdoc-secondary-menu .tdoc-sec-version.current { color: var(--td-accent); font-weight: 600; }
+  .tdoc-secondary-menu .tdoc-sec-sep { border-top: 1px solid #eee; margin: 4px 6px; }
+
+  .tdoc-menu-wrap { position: relative; display: inline-block; }
+  /* ⋯ overflow is the single home for secondary actions (Copy / Duplicate /
+     Download) at every width. Their inline bar buttons stay in the DOM for the
+     #146 chrome contract but never render — the ⋯ menu drives them. */
+  .tdoc-bar .tdoc-secondary-toggle { display: inline-flex; padding: 6px 10px; }
+  .tdoc-bar #tdoc-duplicate-btn, .tdoc-bar #tdoc-download-wrap, .tdoc-bar #tdoc-saveas-btn { display: none; }
+  /* Identity chip — avatar + name (name hides on narrow). */
+  .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; position: relative; }
+  .tdoc-chip:hover { background: #e5e6ea; }
+  .tdoc-chip img { width: 26px; height: 26px; border-radius: 50%; }
+  .tdoc-chip .name { font-size: 13px; font-weight: 500; }
+  .tdoc-chip.signin { padding: 7px 14px; background: var(--td-accent); color: #fff; font-weight: 600; }
+  .tdoc-chip.signin:hover { background: var(--td-accent-hover); }
+  /* Only new inbox chrome: a red dot on the existing identity chip. */
+  .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; border: 1.5px solid #fff; pointer-events: none; }
+  /* Inbox rows reuse cluster-row: action + preview stacked, relative time on the right. */
+  #tdoc-inbox-list .tdoc-cluster-row > .muted { flex-shrink: 0; white-space: nowrap; font-size: 12px; }
+
+  /* Comment cards */
+  /* The layer is the narrow-mode drawer and nothing else: outside narrow mode
+     it must never paint — resizing back above the breakpoint used to leave its
+     rendered cards absolutely-positioned at the page's top-left corner. */
+  #tdoc-comment-layer { display: none; }
+  .tdoc-margin-comment { position: absolute; width: 280px; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font: 13px system-ui, sans-serif; transition: box-shadow .15s, transform .15s; z-index: 999996; pointer-events: auto; }
+  .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
+  .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
+  /* A resolved (agent-applied) comment whose anchor text was rewritten is the
+     EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
+     push the re-anchor affordance. Keep it solid and quiet. */
+  .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
+  .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored .tdoc-reanchor-btn { display: none; }
+  /* Parent-level resolved chip (distinct from the per-reply status chip). */
+  .tdoc-resolved-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #e8f5ed; color: #1a7340; }
+  .tdoc-reanchor-btn { display: none; font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 6px; cursor: pointer; background: none; border: none; padding: 0; text-align: left; }
+  .tdoc-margin-comment.tdoc-unanchored .tdoc-reanchor-btn { display: block; }
+  /* Anchored cards also expose a "move anchor" action when they're active. */
+  .tdoc-margin-comment.active .tdoc-reanchor-btn { display: block; }
+  .tdoc-reanchor-btn:hover { color: var(--td-accent); }
+  /* Label swap: "unanchored" wording on unanchored cards, "move anchor" on
+     active anchored cards. */
+  .tdoc-reanchor-btn .tdoc-reanchor-unanchored,
+  .tdoc-reanchor-btn .tdoc-reanchor-anchored { display: none; }
+  .tdoc-margin-comment.tdoc-unanchored .tdoc-reanchor-btn .tdoc-reanchor-unanchored { display: inline; }
+  .tdoc-margin-comment:not(.tdoc-unanchored).active .tdoc-reanchor-btn .tdoc-reanchor-anchored { display: inline; }
+  /* Container for the anchor action buttons. */
+  .tdoc-anchor-actions { display: flex; gap: 12px; align-items: center; margin: 0 0 6px; }
+  /* While re-anchor mode is active, dim the rest of the UI and prompt the
+     user to select. */
+  /* Re-anchor banner: pinned below the bar with three actions. Visible
+     only while body.tdoc-reanchoring is set. */
+  .tdoc-reanchor-banner { display: none; position: fixed; top: 56px; left: 50%; transform: translateX(-50%); background: var(--td-accent); color: #fff; padding: 6px 10px 6px 14px; border-radius: 999px; font: 12px system-ui; z-index: 999999; align-items: center; gap: 6px; box-shadow: 0 4px 16px var(--td-accent-ring); }
+  body.tdoc-reanchoring .tdoc-reanchor-banner { display: inline-flex; }
+  .tdoc-reanchor-banner .label { padding: 0 4px; }
+  .tdoc-reanchor-banner button { background: rgba(255,255,255,0.15); border: none; color: #fff; padding: 4px 10px; border-radius: 999px; font: 12px system-ui; cursor: pointer; }
+  .tdoc-reanchor-banner button:hover { background: rgba(255,255,255,0.28); }
+  .tdoc-reanchor-banner button.danger { background: rgba(255,255,255,0.15); }
+  .tdoc-reanchor-banner button.danger:hover { background: #c33; }
+  /* Old-version strip — a thin, quiet bar just under the top bar shown when
+     the viewer is on a non-latest version. Single-direction nudge: it only
+     points forward to the latest version. Hidden by default; the bar-setup
+     code reveals it only when version < latest. In flow under the top bar. */
+  .tdoc-oldver-strip { display: none; position: relative; width: 100%; height: 28px; box-sizing: border-box; background: #fbf6e9; color: #6b5e3a; border-bottom: 1px solid #efe6cd; font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; align-items: center; justify-content: center; gap: 6px; z-index: 999998; padding: 0 12px; }
+  body.tdoc-has-oldver-strip .tdoc-oldver-strip { display: flex; }
+  .tdoc-oldver-strip a { color: #8a6d1f; font-weight: 600; text-decoration: none; border-bottom: 1px solid currentColor; }
+  .tdoc-oldver-strip a:hover { color: #6b5413; }
+  /* Ghost marker — a faint horizontal line at the unanchored comment's
+     original Y position, so the user can see where the deleted text used
+     to be. Stays in document coordinates. */
+  .tdoc-ghost-marker { position: absolute; left: 0; right: 320px; height: 0; border-top: 1px dashed #d4d4d4; pointer-events: none; z-index: 999990; }
+  body.tdoc-narrow .tdoc-ghost-marker { display: none; }
+  .tdoc-margin-comment .author { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .tdoc-margin-comment .author img { width: 24px; height: 24px; border-radius: 50%; }
+  .tdoc-margin-comment .author .login { font-weight: 600; color: #111; font-size: 13px; }
+  .tdoc-margin-comment .author .anon { color: #888; font-style: italic; }
+  /* Agent identity — runtime logo when we know the host (Grok / Claude /
+     Codex / …), otherwise the tdoc project mark. Status chips still carry
+     applied / partial / question. */
+  .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #f2f2f2; flex-shrink: 0; }
+  .tdoc-agent-author img { width: 24px; height: 24px; border-radius: 50%; object-fit: contain; background: #fff; flex-shrink: 0; }
+  .tdoc-agent-reply { background: #fafafb; border-left: 3px solid #111; padding-left: 8px; }
+  .tdoc-agent-status { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; margin: 0 0 6px; font-weight: 600; }
+  .tdoc-agent-status-applied { background: #e8f5ed; color: #1a7340; }
+  .tdoc-agent-status-partial { background: #fff4dc; color: #8a5a00; }
+  .tdoc-agent-status-question { background: #ffe7e7; color: #a52323; }
+  .tdoc-margin-comment .text { color: #111; line-height: 1.45; word-wrap: break-word; }
+  .tdoc-margin-comment .meta { font-size: 11px; color: #888; margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .tdoc-margin-comment .meta > span:first-child { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tdoc-margin-comment .del { cursor: pointer; color: #c33; }
+  .tdoc-margin-comment .del:hover { text-decoration: underline; }
+  .tdoc-margin-comment .actions { display: inline-flex; gap: 8px; align-items: center; flex-shrink: 0; }
+  .tdoc-margin-comment .copy-md { cursor: pointer; color: #888; display: inline-flex; align-items: center; }
+  .tdoc-margin-comment .copy-md:hover { color: var(--td-accent); }
+  .tdoc-margin-comment .copy-md svg { width: 14px; height: 14px; display: block; }
+  .tdoc-margin-comment .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); }
+  .tdoc-margin-comment .tdoc-reply-toggle:hover { text-decoration: underline; }
+
+  /* ===== Pins model (wide mode only) =====
+     In wide mode the right gutter shows one PIN per comment (or a count badge
+     for a cluster of same-Y pins) instead of a stack of full cards. The full
+     card floats open on hover and stays open ("pinned") on click. This makes
+     the margin overflow-proof: it only ever holds markers, never a tall column
+     of cards. Narrow mode is untouched (cards flow in the bottom drawer). */
+  #tdoc-pin-layer { position: absolute; top: 0; left: 0; width: 100%; height: 0; pointer-events: none; z-index: 999996; }
+  body.tdoc-narrow #tdoc-pin-layer { display: none; }
+  /* When the pins model is active, hide every card by default; only the
+     hovered/pinned card is shown (it gets .tdoc-floating-open). */
+  body.tdoc-pins:not(.tdoc-narrow) .tdoc-margin-comment { display: none; }
+  body.tdoc-pins:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { display: block; }
+
+  .tdoc-pin { position: absolute; pointer-events: auto; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #cdd3dc; box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; transition: transform .12s, border-color .12s, box-shadow .12s; box-sizing: border-box; }
+  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active { transform: scale(1.12); border-color: var(--td-accent); box-shadow: 0 2px 8px var(--td-accent-ring-soft); z-index: 1; }
+  .tdoc-pin img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+  .tdoc-pin .tdoc-pin-anon { width: 100%; height: 100%; border-radius: 50%; background: #8a93a2; }
+  /* Resolved pins get a green ring + a small ✓ overlay badge. */
+  .tdoc-pin.tdoc-pin-resolved { border-color: #1a7340; }
+  .tdoc-pin.tdoc-pin-resolved::after { content: "✓"; position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; background: #1a7340; color: #fff; font-size: 9px; line-height: 14px; text-align: center; font-weight: 700; }
+  /* Cluster badge — N comments at the same Y collapsed into one marker. */
+  .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
+  .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
+  .tdoc-pin.tdoc-pin-cluster::after { content: none; }
+
+  /* Floating card: when open via a pin, it sits to the left of the gutter and
+     is allowed to scroll internally so even a long thread can't overflow. */
+  body.tdoc-pins:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { max-height: 70vh; overflow-y: auto; box-shadow: 0 6px 24px rgba(0,0,0,0.16); }
+
+  /* Cluster popover: a compact list of the comments under a badge. Click one
+     to open its full card. */
+  .tdoc-cluster-pop { position: absolute; pointer-events: auto; width: 260px; max-height: 60vh; overflow-y: auto; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.16); padding: 6px; z-index: 999997; font: 13px system-ui; display: none; }
+  .tdoc-cluster-row.tdoc-cluster-current { background: #eef2ff; }
+  .tdoc-cluster-pop.open { display: block; }
+  .tdoc-cluster-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+  .tdoc-cluster-row:hover { background: #f5f6f8; }
+  .tdoc-cluster-row img { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; }
+  .tdoc-cluster-row .tdoc-cluster-anon { width: 20px; height: 20px; border-radius: 50%; background: #8a93a2; flex-shrink: 0; }
+  .tdoc-cluster-row .tdoc-cluster-snip { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #333; }
+  .tdoc-cluster-row .tdoc-cluster-done { color: #1a7340; font-size: 11px; flex-shrink: 0; }
+
+  /* Reactions + emoji picker */
+  .tdoc-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; align-items: center; }
+  .tdoc-react-chip { position: relative; display: inline-flex; align-items: center; gap: 4px; font: 12px system-ui; background: #f5f6f8; border: 1px solid #e5e5e5; border-radius: 999px; padding: 2px 8px; cursor: pointer; color: #333; transition: background .12s, border-color .12s; }
+  .tdoc-react-chip:hover { background: #eef0f3; }
+  .tdoc-react-chip.mine { background: var(--td-accent-tint); border-color: var(--td-accent); color: var(--td-accent); }
+  /* Agent reactions get a tinted background so users can scan a long doc
+     and spot which comments the agent has already responded to. */
+  .tdoc-react-chip.agent { background: #f3eaff; border-color: #c3a8f0; color: #5a2da8; }
+  .tdoc-react-chip.agent.mine { background: #f3eaff; border-color: #c3a8f0; color: #5a2da8; }
+  /* Reactors tooltip — shows the GitHub logins (or agent labels) of everyone
+     who used this emoji. Rendered as a BODY-LEVEL element (not a ::after on the
+     chip) so it escapes the floating card's overflow:auto clip and can be
+     clamped to the viewport — a ::after centered on a chip near the card's left
+     edge was truncated. Positioned by JS on hover. */
+  #tdoc-reactors-tip {
+    position: absolute;
+    display: none;
+    background: #111;
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font: 11px/1.4 system-ui;
+    white-space: pre;
+    max-width: 260px;
+    pointer-events: none;
+    z-index: 1000000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  }
+  #tdoc-reactors-tip.open { display: block; }
+  .tdoc-react-add { background: transparent; border: none; color: #aaa; padding: 0; cursor: pointer; line-height: 1; transition: color .12s, opacity .12s; display: inline-flex; align-items: center; }
+  .tdoc-react-add svg { width: 16px; height: 16px; display: block; }
+  .tdoc-reactions .tdoc-react-add { opacity: 0; padding: 2px 4px; }
+  .tdoc-margin-comment:hover .tdoc-reactions .tdoc-react-add, .tdoc-reply:hover .tdoc-reactions .tdoc-react-add, .tdoc-reactions:has(.tdoc-react-chip) .tdoc-react-add { opacity: 1; }
+  .tdoc-react-add.inline svg { width: 14px; height: 14px; }
+  .tdoc-react-add.inline { opacity: 0.55; vertical-align: middle; }
+  .tdoc-react-add:hover { color: var(--td-accent); opacity: 1; }
+  .tdoc-emoji-picker { position: absolute; background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 6px; display: grid; grid-template-columns: repeat(6, 32px); gap: 2px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 1000001; }
+  .tdoc-emoji-picker button { background: transparent; border: none; padding: 0; cursor: pointer; border-radius: 4px; width: 32px; height: 32px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+  .tdoc-emoji-picker button:hover { background: #f5f6f8; }
+  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: var(--td-accent); }
+  .tdoc-emoji-picker button.tdoc-emoji-text:hover { background: var(--td-accent-tint); }
+
+  /* Replies + reply form */
+  .tdoc-replies-toggle { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-size: 12px; color: var(--td-accent); user-select: none; }
+  .tdoc-replies-toggle:hover { text-decoration: underline; }
+  .tdoc-replies-toggle .chev { transition: transform .15s; }
+  .tdoc-replies-toggle.open .chev { transform: rotate(90deg); }
+  .tdoc-replies { display: none; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .tdoc-replies.open { display: flex; }
+  .tdoc-reply { padding-left: 12px; border-left: 2px solid #e5e5e5; }
+  .tdoc-reply-kids { margin: 8px 0 0 10px; display: flex; flex-direction: column; gap: 10px; }
+  .tdoc-reply .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
+  .tdoc-reply .tdoc-reply-toggle:hover { text-decoration: underline; }
+  .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
+  .tdoc-reply .author { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
+  .tdoc-reply .author .login { font-weight: 600; font-size: 12px; color: #111; }
+  .tdoc-reply .author .anon { color: #888; font-style: italic; font-size: 12px; }
+  .tdoc-reply .text { color: #222; font-size: 13px; line-height: 1.4; word-wrap: break-word; }
+  .tdoc-reply .meta { font-size: 11px; color: #888; margin-top: 4px; display: flex; justify-content: space-between; }
+  .tdoc-reply .del { cursor: pointer; color: #c33; }
+  .tdoc-reply .del:hover { text-decoration: underline; }
+  .tdoc-reply-form { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; }
+  .tdoc-reply-form.open { display: block; }
+  .tdoc-reply-form textarea { width: 100%; min-height: 48px; box-sizing: border-box; padding: 6px 8px; font: 13px system-ui; border: 1px solid #ccc; border-radius: 6px; resize: vertical; outline: none; }
+  .tdoc-reply-form textarea:focus { border-color: var(--td-accent); }
+  .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+  .tdoc-reply-form-foot .hint { color: #888; font-size: 11px; }
+  .tdoc-reply-form-foot .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
+  .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: var(--td-accent-hover); }
+
+  /* Anchor highlights (Custom Highlight API + fallback span) */
+  ::highlight(tdoc-pending) { background-color: #fff3a8; }
+  ::highlight(tdoc-anchor) { background-color: #fff7d0; }
+  /* Active = clicked. Visibly different from resting: vivid yellow + thick
+     gold underline. (The CSS Highlight API only supports background-color,
+     color, and text-decoration — so we stack those.) */
+  ::highlight(tdoc-anchor-active) {
+    background-color: #ffd84d;
+    text-decoration: underline solid #b8860b;
+    text-decoration-thickness: 3px;
+    text-underline-offset: 2px;
+  }
+  .tdoc-anchor-mark { background: #fff7d0; cursor: pointer; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  .tdoc-anchor-mark:hover { background: #fdedb0; }
+  .tdoc-anchor-mark.active { background: #ffd84d; box-shadow: 0 -3px 0 -1px #b8860b inset; }
+
+  /* Element outlines + hover affordance */
+  .tdoc-element-outline { position: absolute; pointer-events: none; border: 1.5px solid var(--td-accent-ring); border-radius: 4px; box-sizing: border-box; z-index: 999995; transition: border-color .15s, box-shadow .15s, border-width .15s; }
+  .tdoc-element-outline.pending { border-color: #f0d000; border-width: 2px; background: transparent; }
+  .tdoc-element-outline.active { border-color: var(--td-accent); border-width: 2px; box-shadow: 0 0 0 4px var(--td-accent-ring-soft); }
+  .tdoc-hover-outline { position: absolute; pointer-events: none; z-index: 999995; border: 2px dashed var(--td-accent); border-radius: 4px; background: var(--td-accent-wash); box-sizing: border-box; transition: opacity .12s; }
+  /* Icon-only button that appears on commentable artifacts (img/canvas/svg/video/pre).
+     Positioned just outside the artifact's right edge so it can't obscure
+     content. Uses !important on the visible colors to defend against doc-side
+     button:hover rules that would otherwise repaint our background. */
+  .tdoc-comment-pill {
+    position: absolute !important; z-index: 999998 !important;
+    width: 30px !important; height: 30px !important; padding: 0 !important;
+    background: rgba(255,255,255,0.96) !important; color: var(--td-accent) !important;
+    border: 1px solid #dedee3 !important; border-radius: 999px !important;
+    cursor: pointer !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 3px 10px rgba(0,0,0,0.08) !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    transition: transform .12s, background-color .12s, border-color .12s, color .12s, box-shadow .12s !important;
+    line-height: 1 !important;
+    text-decoration: none !important;
+    visibility: visible !important;
+  }
+  .tdoc-comment-pill:hover {
+    background: var(--td-accent) !important; color: #fff !important;
+    border-color: var(--td-accent) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 8px 22px var(--td-accent-ring-soft) !important;
+  }
+  .tdoc-comment-pill:active { background: var(--td-accent-hover) !important; transform: translateY(0) !important; }
+  .tdoc-comment-pill svg { width: 14px !important; height: 14px !important; flex-shrink: 0 !important; stroke: currentColor !important; margin: 0 !important; }
+  .tdoc-comment-pill:hover svg { stroke: #fff !important; }
+  .tdoc-drag-marquee { position: absolute; pointer-events: none; z-index: 999997; border: 1.5px solid var(--td-accent); background: var(--td-accent-wash); box-sizing: border-box; }
+
+  /* Popup (new-comment) */
+  .tdoc-popup { position: absolute; background: #0a0a0a; color: #fff; border-radius: 10px; padding: 14px; width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); z-index: 999998; font: 13px system-ui, sans-serif; }
+  .tdoc-popup .head { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .tdoc-popup .head .h { color: #aaa; }
+  .tdoc-popup .head .x { cursor: pointer; color: #888; }
+  .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
+  .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  .tdoc-popup .hint { color: #888; font-size: 11px; }
+  .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
+  .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
+  .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
+
+  /* Modal (sign-in) */
+  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
+  .tdoc-modal { background: #fff; color: #111; border-radius: 12px; padding: 28px; width: min(460px, calc(100vw - 48px)); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .tdoc-modal h3 { margin: 0 0 8px; font-size: 20px; }
+  .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
+  .tdoc-modal .code { background: #0a0a0a; color: #fff; padding: 18px; border-radius: 8px; font: 24px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.15em; text-align: center; margin: 0 0 14px; user-select: all; cursor: copy; }
+  .tdoc-modal .step { display: flex; gap: 10px; margin-bottom: 8px; color: #444; }
+  .tdoc-modal .step .n { width: 22px; height: 22px; border-radius: 50%; background: var(--td-accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+  .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .tdoc-modal button { padding: 8px 16px; border-radius: 6px; font: inherit; cursor: pointer; border: 1px solid #ccc; background: #fff; }
+  .tdoc-modal button.primary { background: var(--td-accent); border-color: var(--td-accent); color: #fff; }
+  .tdoc-modal button.primary:hover { background: var(--td-accent-hover); }
+  .tdoc-modal .status { color: #888; font-size: 13px; }
+  /* Modal helper classes used by Publish/Share so dark-mode can override. */
+  .tdoc-modal .muted { color: #666; font-size: 13px; }
+  .tdoc-modal .divider { border-top: 1px solid #eee; padding-top: 12px; margin-top: 12px; }
+  .tdoc-modal .danger { color: #c33; font-size: 13px; }
+  .tdoc-modal code { background: #f5f6f8; padding: 1px 5px; border-radius: 3px; }
+
+  /* Share panel (copy link for everyone; owners also get visibility/history/
+     commenting/allowed_users + Delete/Unpublish — session-authorized). */
+  .tdoc-modal .manage-section { margin: 16px 0; }
+  .tdoc-modal .manage-section:first-of-type { margin-top: 4px; }
+  .tdoc-modal label.field { display: block; font-size: 12px; color: #666; margin: 0 0 4px; font-weight: 600; }
+  .tdoc-modal input[type="password"], .tdoc-modal input[type="text"] { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; }
+  .tdoc-modal input[type="password"]:focus, .tdoc-modal input[type="text"]:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-seg { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+  .tdoc-seg button { border: none; border-radius: 0; padding: 7px 14px; background: #fff; color: #444; }
+  .tdoc-seg button + button { border-left: 1px solid #ddd; }
+  .tdoc-seg button.active { background: var(--td-accent); color: #fff; }
+  .tdoc-modal .manage-hint { font-size: 12px; color: #888; margin: 6px 0 0; }
+  .tdoc-modal .manage-action { width: 100%; text-align: left; }
+  .tdoc-modal .manage-action.danger-btn { color: var(--td-danger); border-color: #f1b8b2; }
+  .tdoc-modal .manage-action.danger-btn:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
+  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
+  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
+  /* Allowed-users token field: chips (avatar + login + remove) plus a live
+     GitHub handle autocomplete. Candidate search and avatar validation hit
+     GitHub straight from the owner's browser (their IP, their ~10 req/min
+     budget) — no server proxy, no API key. The doc CSP (worker cspHeader)
+     restricts only script/object/base-uri, so these fetches + <img>s pass. */
+  .tdoc-token-field { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid #ccc; border-radius: 6px; padding: 6px; box-sizing: border-box; cursor: text; }
+  .tdoc-token-field.focus { border-color: var(--td-accent); }
+  .tdoc-token-field input[type="text"] { flex: 1 1 120px; min-width: 90px; width: auto; border: none; padding: 3px 4px; }
+  .tdoc-token-field input[type="text"]:focus { border: none; outline: none; }
+  .tdoc-token { display: inline-flex; align-items: center; gap: 6px; background: #f2f4f7; border: 1px solid #e2e6ea; border-radius: 999px; padding: 2px 4px 2px 2px; font-size: 13px; line-height: 1.4; }
+  .tdoc-token.invalid { background: #fdeceb; border-color: #f1b8b2; color: var(--td-danger); }
+  .tdoc-token img, .tdoc-token .mark { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
+  .tdoc-token .mark { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; background: #f1b8b2; color: #fff; }
+  .tdoc-token .rm { cursor: pointer; color: #999; font-size: 15px; padding: 0 3px; }
+  .tdoc-token .rm:hover { color: var(--td-danger); }
+  .tdoc-ac { position: relative; }
+  .tdoc-ac-list { position: absolute; left: 0; right: 0; top: 2px; z-index: 10; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
+  .tdoc-ac-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; }
+  .tdoc-ac-item:hover, .tdoc-ac-item.active { background: #f2f4f7; }
+  .tdoc-ac-item img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
+  .tdoc-ac-item .login { font-size: 13px; font-weight: 600; color: #222; }
+  /* Simplified Share panel: one plain-language access dropdown, an Advanced
+     disclosure for the secondary axes, and a de-emphasised danger row. */
+  .tdoc-modal .tdoc-select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 10px; font: inherit; color: inherit; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
+  .tdoc-modal .tdoc-select:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-modal .tdoc-adv { margin: 16px 0 0; border-top: 1px solid #eee; padding-top: 6px; }
+  .tdoc-modal .tdoc-adv > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #555; padding: 6px 0; }
+  .tdoc-modal .tdoc-adv > summary:hover { color: #222; }
+
+  /* Bar collapse breakpoints — tied to viewport width, not layout class.
+     The bar progressively hides elements as the viewport tightens, so it
+     stays elegant at every size.
+       ≥1100px: logo · slug · v · title ……………… identity · share · ⋯
+       <1100px: logo ·      · v · title ……………… identity · share · ⋯  (slug hides)
+       < 900px: logo ·      · v · title ……………… avatar   · share · ⋯  (name hides)
+       < 700px: logo ·          title ………………            share · ⋯  (version+identity into ⋯) */
+  @media (max-width: 1100px) {
+    .tdoc-bar .crumb-slug, .tdoc-bar .crumb-sep-slug { display: none; }
+  }
+  @media (max-width: 900px) {
+    .tdoc-chip .name { display: none; }
+    .tdoc-chip { padding: 3px; }
+  }
+  @media (max-width: 700px) {
+    .tdoc-bar { padding: 0 8px; gap: 4px; }
+    .tdoc-version-wrap { display: none; }
+    .tdoc-bar .doc-title { font-size: 13px; }
+    /* Small screens: the primary CTA collapses to just its icon (label is kept
+       in title/aria-label). Keeps the phone bar to a compact icon + ⋯. */
+    .tdoc-bar #tdoc-publish-btn span, .tdoc-bar #tdoc-share-btn span { display: none; }
+    .tdoc-bar #tdoc-publish-btn, .tdoc-bar #tdoc-share-btn { padding: 7px 9px; }
+  }
+
+  /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
+     it can also kick in when the comment column would crowd the article. */
+  body.tdoc-narrow #tdoc-comment-layer { display: block; position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
+  body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
+  /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
+     tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
+     plain body text, so the document-level "close on outside click" never fires
+     there — but a real element with its own listener does. It also dims the doc
+     so the "tap anywhere out here to close" affordance is visible without a drag.
+     Sibling combinator keeps visibility purely CSS-driven off the drawer's
+     .open class, so every open/close path (fab, handle, drag, resize) stays in
+     sync with no extra JS. */
+  #tdoc-drawer-scrim { display: none; }
+  body.tdoc-narrow #tdoc-comment-layer.open ~ #tdoc-drawer-scrim { display: block; position: fixed; inset: 0; z-index: 999997; background: rgba(0,0,0,0.28); -webkit-tap-highlight-color: transparent; }
+  body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle { display: block; width: 36px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 12px; cursor: grab; touch-action: none; user-select: none; }
+  body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
+  body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
+  body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
+  body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
+  body.tdoc-narrow .tdoc-modal { padding: 20px; }
+  body.tdoc-narrow .tdoc-modal .code { font-size: 20px; }
+  body.tdoc-narrow .tdoc-hover-outline, body.tdoc-narrow .tdoc-comment-pill, body.tdoc-narrow .tdoc-drag-marquee { display: none; }
+  body.tdoc-narrow .tdoc-emoji-picker { grid-template-columns: repeat(6, 36px); }
+  body.tdoc-narrow .tdoc-emoji-picker button { width: 36px; height: 36px; font-size: 20px; }
+  @media (max-width: 480px) {
+    .tdoc-bar { padding: 0 10px; gap: 8px; }
+    .tdoc-bar button, .tdoc-bar .tdoc-menu-wrap > button { padding: 4px 8px; font-size: 12px; }
+    .tdoc-icon-btn span { display: none; }
+    .tdoc-emoji-picker { grid-template-columns: repeat(5, 40px); padding: 8px; }
+    .tdoc-emoji-picker button { width: 40px; height: 40px; font-size: 22px; }
+    .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 5; }
+  }
+
+  /* Theme toggle — icon-only, lives in the bar's right cluster. */
+  .tdoc-theme-btn { flex-shrink: 0; }
+  .tdoc-theme-icon-sun { display: none; }
+  html[data-tdoc-theme="dark"] .tdoc-theme-icon-moon { display: none; }
+  html[data-tdoc-theme="dark"] .tdoc-theme-icon-sun { display: block; }
+
+  /* Dark mode: invert the painted page (Dark Reader / "filter" style).
+     One transform hits author CSS, artifacts, replies, and chrome — no
+     per-color list. hue-rotate keeps blues roughly blue. Photos / video /
+     canvas / iframes are inverted back so they don't look like negatives. */
+  html[data-tdoc-theme="dark"] {
+    color-scheme: dark;
+    background: #fff;
+    filter: invert(1) hue-rotate(180deg);
+  }
+  /* Native buttons/inputs follow color-scheme. Dark UA styles paint light
+     text onto an author light fill; invert then makes the label vanish
+     (e.g. "Differences only" on a white chip). Keep form controls in the
+     light scheme so invert can flip their author colors as a unit. */
+  html[data-tdoc-theme="dark"] button,
+  html[data-tdoc-theme="dark"] input,
+  html[data-tdoc-theme="dark"] select,
+  html[data-tdoc-theme="dark"] textarea {
+    color-scheme: light;
+  }
+  html[data-tdoc-theme="dark"] img:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] video:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] canvas:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] iframe:not([data-tdoc-dark="invert"]),
+  html[data-tdoc-theme="dark"] .tdoc-emoji {
+    filter: invert(1) hue-rotate(180deg);
+  }
+  /* Opt out via data-tdoc-dark="invert": this is a drawing, not a
+     photograph. Photos and video have to come back to their true colours or
+     they look like negatives, but a chart or a simulation drawn in ink on a
+     white field should go dark with everything else — otherwise it sits in a
+     dark page as a glowing white slab. */
+  /* The site mark keeps its white field in dark mode. It is ink on an opaque
+     white field, so it is restored like a photograph by the rule above rather
+     than inverted with the page: inverting turned the field black, which is the
+     bar's own dark colour, and the drawing read as a see-through outline. */
+  /* Color emoji are OS bitmaps. The page invert turns ❤️ purple; wrap
+     them in .tdoc-emoji so they get the same restore as photos. */
+  .tdoc-emoji { display: inline-block; line-height: 1; }
+
+  /* /me catalog: overlay reader template would otherwise restyle the list. */
+  body.tdoc-catalog :where(body) { font-size: 15px; line-height: 1.5; }
+  body.tdoc-catalog :where(body h1) { font-size: 28px; line-height: 1.2; color: var(--td-accent); margin: 0 0 24px; letter-spacing: -0.01em; }
+  body.tdoc-catalog :where(body a) { text-decoration: none; }
+  body.tdoc-catalog :where(body a):hover { text-decoration: underline; }
+
+  /* Footer */
+  .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
+  .tdoc-footer .tdoc-footer-row { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; row-gap: 4px; }
+  .tdoc-footer a { color: #666; text-decoration: none; }
+  .tdoc-footer a:hover { color: var(--td-accent); text-decoration: underline; }
+  .tdoc-footer .sep { color: #ccc; }
+  @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
+  

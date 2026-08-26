@@ -27,7 +27,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 // isGithubHttpsUrl moved to server/signin.js when the two device-flow
 // implementations were merged into one. Search both files for a function so
 // this stays a test of behaviour rather than of file layout.
-const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8')
+const src = ['frame-probe.js', 'chrome.js', 'shell.js', 'signin.js'].map(f => fs.readFileSync(path.join(__dirname, '..', 'server', f), 'utf8')).join('\n')
   + '\n' + fs.readFileSync(path.join(__dirname, '..', 'server', 'signin.js'), 'utf8');
 function sliceFn(name) {
   // overlay functions are indented inside the IIFE; match `function name(`
@@ -45,16 +45,15 @@ function sliceFn(name) {
 const box = { URL };
 vm.createContext(box);
 vm.runInContext([
-  'escapeHtml', 'normalizeNeedle', 'normalizeContext', 'normalizeQuery',
+  'escapeHtml', 'normalizeNeedle', 'normalizeContext',
   'commonPrefixLen', 'commonSuffixLen', 'isGithubHttpsUrl',
-  'isAnthropicCompanyMark', 'tdocLogoUrl', 'agentLogoUrl', 'childrenOf',
+  'isAnthropicCompanyMark', 'tdocLogoUrl', 'agentLogoUrl',
   'inboxTargetUrl', 'findCommentRoot',
-  'isVisibleClientRect', 'nearestClientRect', 'endRectOnLine',
 ].map(sliceFn).join('\n\n'), box);
-const { escapeHtml, normalizeNeedle, normalizeContext, normalizeQuery,
+box.cfg = {};   // the shell inboxTargetUrl reads the page cfg for fallbacks
+const { escapeHtml, normalizeNeedle, normalizeContext,
         commonPrefixLen, commonSuffixLen, isGithubHttpsUrl, agentLogoUrl,
-        childrenOf, inboxTargetUrl, findCommentRoot,
-        isVisibleClientRect, nearestClientRect, endRectOnLine } = box;
+        inboxTargetUrl, findCommentRoot } = box;
 
 console.log('overlay-pure (#23 testable surface)');
 
@@ -82,10 +81,7 @@ t('normalizeContext collapses whitespace but does NOT trim (preserves edges)', (
   assert(normalizeContext('  a  b  ') === ' a b ');
   assert(normalizeContext(null) === '');
 });
-t('normalizeQuery aliases normalizeNeedle', () => {
-  assert(normalizeQuery('  x   y  ') === normalizeNeedle('  x   y  '));
-});
-
+// (normalizeQuery was an overlay alias of normalizeNeedle; gone with the monolith.)
 // common prefix/suffix — used by the fuzzy re-anchor fallback.
 t('commonPrefixLen counts the shared leading run', () => {
   assert(commonPrefixLen('abcXYZ', 'abcDEF') === 3);
@@ -139,17 +135,8 @@ t('agentLogoUrl never shows the Anthropic company AI mark for Claude', () => {
   assert(agentLogoUrl({ login: 'tdoc-agent', avatar_url: company }) === star, 'orphan company mark remapped');
   assert(!String(agentLogoUrl({ login: 'claude' }) || '').includes('anthropics'), 'mapped url is not anthropics');
 });
-t('childrenOf nests replies under their immediate parent', () => {
-  const replies = [
-    { id: 'r1', parent_id: 'c1' },
-    { id: 'r2', parent_id: 'r1' },
-    { id: 'r3', parent_id: 'c1' },
-  ];
-  assert(childrenOf(replies, 'c1', 'c1').map(r => r.id).join() === 'r1,r3', 'tops');
-  assert(childrenOf(replies, 'r1', 'c1').map(r => r.id).join() === 'r2', 'nested');
-  assert(childrenOf(replies, 'r2', 'c1').length === 0, 'leaf');
-});
-
+// (childrenOf died with the overlay reply-tree renderer; the shell renders
+// replies flat via chrome.js buildCard, covered by artifact-shell.test.js.)
 t('inboxTargetUrl builds /d/<slug>/v/<n>?comment=<id>', () => {
   assert(inboxTargetUrl(
     { slug: 'conway-life', version: 3, comment_id: 'c_1' },
@@ -157,10 +144,9 @@ t('inboxTargetUrl builds /d/<slug>/v/<n>?comment=<id>', () => {
   ) === '/d/conway-life/v/3?comment=c_1');
 });
 t('inboxTargetUrl falls back to the current doc when the row has no slug', () => {
-  assert(inboxTargetUrl(
-    { comment_id: 'r_9', thread_id: 'c_1' },
-    { slug: 'sample-doc', version: 2 }
-  ) === '/d/sample-doc/v/2?comment=r_9');
+  box.cfg = { slug: 'sample-doc', version: 2 };
+  assert(inboxTargetUrl({ comment_id: 'r_9', thread_id: 'c_1' }) === '/d/sample-doc/v/2?comment=r_9');
+  box.cfg = {};
 });
 t('inboxTargetUrl never emits /d/undefined', () => {
   assert(inboxTargetUrl({}, {}) === '');
@@ -177,62 +163,39 @@ t('inboxTargetUrl treats bad versions as 1', () => {
   assert(inboxTargetUrl({ slug: 'd', version: 'nope', comment_id: 'c' }, {}) === '/d/d/v/1?comment=c');
   assert(inboxTargetUrl({ slug: 'd', version: 0 }, {}) === '/d/d/v/1');
 });
-t('isVisibleClientRect rejects empty / missing boxes', () => {
-  assert(isVisibleClientRect(null) === false);
-  assert(isVisibleClientRect({ width: 0, height: 0 }) === false);
-  assert(isVisibleClientRect({ width: 12, height: 0 }) === true);
-  assert(isVisibleClientRect({ width: 0, height: 16 }) === true);
-});
-t('endRectOnLine sits at the caret X, not the line origin', () => {
-  const line = { left: 40, right: 400, top: 120, bottom: 140, width: 360, height: 20 };
-  const end = endRectOnLine(line, 280);
-  assert(end.left === 280 && end.right === 280, 'x is the caret, not line.left');
-  assert(end.top === 120 && end.bottom === 140, 'stays on the same line');
-  assert(endRectOnLine(line).left === 400, 'no x → line end');
-  assert(endRectOnLine(null) === null);
-});
-t('nearestClientRect picks the line box under the caret, not the union', () => {
-  const line1 = { left: 40, right: 400, top: 100, bottom: 120, width: 360, height: 20 };
-  const line2 = { left: 40, right: 180, top: 120, bottom: 140, width: 140, height: 20 };
-  const empty = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
-  const hit = nearestClientRect([line1, empty, line2], 170, 132);
-  assert(hit === line2, 'caret on the second line should not snap to line 1');
-  const up = nearestClientRect([line1, line2], 80, 108);
-  assert(up === line1, 'upward selection caret stays on the first line');
-  assert(nearestClientRect([], 0, 0) === null);
-});
+// (isVisibleClientRect / endRectOnLine / nearestClientRect died with the overlay
+// popup geometry; the probe's selectionRect + boundary tests cover that behavior.)
 t('findCommentRoot maps a reply id to its top-level card', () => {
   const list = [
     { id: 'c1', replies: [{ id: 'r1' }, { id: 'r2' }] },
     { id: 'c2', replies: [] },
   ];
-  assert(findCommentRoot(list, 'c1') === 'c1');
-  assert(findCommentRoot(list, 'r2') === 'c1');
-  assert(findCommentRoot(list, 'c2') === 'c2');
-  assert(findCommentRoot(list, 'missing') === 'missing');
-  assert(findCommentRoot(list, '') === null);
-  assert(findCommentRoot(null, 'c1') === 'c1');
+  box.commentList = list;   // the shell version reads the page comment list
+  assert(findCommentRoot('c1') === 'c1');
+  assert(findCommentRoot('r2') === 'c1');
+  assert(findCommentRoot('c2') === 'c2');
+  assert(findCommentRoot('missing') === null);   // shell: unknown id resolves to null (deep link ignored)
+  box.commentList = [];
+  assert(findCommentRoot('') === null);
+  assert(findCommentRoot('c1') === null);   // empty list → nothing to map to
 });
 
 // --- dark-default hint + copy primitive (source guards; live behavior in ui.test.js) ---
 // These features are DOM/clipboard-bound so they can't run pure here; guard the
 // wiring at the source so an accidental removal or the flashCopied() name
 // collision (two same-named fns → last wins) can't slip back in unnoticed.
-t('readStoredTheme honors data-tdoc-default-theme, stored pref still wins', () => {
-  const fn = sliceFn('readStoredTheme');
-  assert(/getItem\(THEME_KEY\)/.test(fn), 'a stored tdoc-theme must be read first');
-  assert(/data-tdoc-default-theme/.test(fn), 'must fall back to the doc-declared default theme');
+t('default-theme hint: probe reports it, shell applies only without a stored pref', () => {
+  assert(/data-tdoc-default-theme/.test(src), 'probe must report the doc-declared default theme');
+  assert(/defaultTheme === 'dark'/.test(src), 'shell must apply the dark hint');
+  assert(/localStorage.getItem\('tdoc-theme'\)/.test(src), 'a stored tdoc-theme must win over the hint');
 });
-t('overlay exposes a data-tdoc-copy click-to-copy primitive', () => {
-  assert(/function wireCopyTriggers\(/.test(src), 'wireCopyTriggers must be defined');
-  assert(/\n\s*wireCopyTriggers\(\);/.test(src), 'wireCopyTriggers must be called on bar mount');
-  const body = sliceFn('wireCopyTriggers');
-  assert(/\[data-tdoc-copy\]/.test(body), 'delegated handler targets [data-tdoc-copy]');
-  assert(/writeText/.test(body), 'copy uses navigator.clipboard.writeText');
-  assert(/,\s*true\s*\)/.test(body), 'listener is capture-phase (beats artifact/comment handlers)');
+t('the probe exposes the data-tdoc-copy click-to-copy primitive', () => {
+  assert(/\[data-tdoc-copy\]/.test(src), 'delegated handler targets [data-tdoc-copy]');
+  assert(/tdoc:copyText/.test(src), 'copy text is bridged to the shell (frame clipboard is unreliable)');
+  assert(/function tdocFallbackCopy/.test(src), 'execCommand fallback must run on the user gesture');
 });
 t('copy primitives use distinctly named flash helpers (no flashCopied collision)', () => {
-  assert(/function flashCopyTrigger\(/.test(src), 'flashCopyTrigger must exist');
+  assert(/function flashCopy\(/.test(src), 'the probe flashCopy helper must exist');
   // Copy-as-Markdown moved into the ⋯ menu and now confirms with a toast, so the
   // old bar-button flashCopied helper is gone — there must be none left to collide.
   const n = (src.match(/function flashCopied\(/g) || []).length;

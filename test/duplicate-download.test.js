@@ -15,7 +15,8 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const root = path.join(__dirname, '..');
-const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
+// The monolith is gone — bar markup lives in chrome.js, wiring in shell.js.
+const overlay = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8') + fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 
 function block(src, startNeedle, endNeedle) {
@@ -52,15 +53,15 @@ t('Download hits /export and never opens a blob fork tab', () => {
   assert(overlay.includes('/export?download=1'), 'Download HTML must use /export?download=1');
   assert(!overlay.includes("fetch(`${base}/fork`)"), 'Download must not fetch /fork');
   assert(!overlay.includes('-fork.html'), 'download filename must not still say -fork.html');
-  assert(overlay.includes('`${slug}-v${version}.html`'), 'HTML filename should be slug-vN.html');
-  assert(overlay.includes("doc.title = `${slug}-v${version}`"), 'print PDF should title the export slug-vN');
+  assert(overlay.includes("cfg.slug + '-v' + cfg.version + '.html'"), 'HTML filename should be slug-vN.html');
+  assert(overlay.includes("doc.title = cfg.slug + '-v' + cfg.version"), 'print PDF should title the export slug-vN');
   assert(overlay.includes('/export?download=0'), 'PDF must print the export reading column');
 });
 
 t('Duplicate POSTs /api/doc/duplicate and signs in when needed', () => {
   assert(overlay.includes("fetch('/api/doc/duplicate'"), 'overlay must POST /api/doc/duplicate');
   assert(overlay.includes("error === 'sign_in_required'"), '401 must start device flow');
-  assert(overlay.includes('pendingDuplicate'), 'sign-in must retry Duplicate');
+  assert(overlay.includes("__tdocSignIn().then(function(){ duplicateDoc(); }"), 'sign-in must retry Duplicate');
   assert(overlay.includes("error === 'account_copy_unavailable'"), 'self-host non-owner needs an honest modal');
   assert(overlay.includes("error === 'islands_not_supported'"), 'island docs must surface a typed error');
 });
@@ -95,11 +96,10 @@ t('export attachment filename is slug-vN.html, not -fork.html', () => {
   assert(!exp.includes('-fork.html'), 'export filename must not still say -fork.html');
 });
 
-t('Download /export bakes overlay reader CSS, not bar chrome', () => {
-  const start = overlay.indexOf('/* TDOC_READER_CSS_START */');
-  const end = overlay.indexOf('/* TDOC_READER_CSS_END */');
-  assert(start >= 0 && end > start, 'overlay must mark the reader CSS slice');
-  const css = overlay.slice(start, end);
+t('Download /export bakes the reader CSS, not bar chrome', () => {
+  // Reader CSS is a standalone file now (server/reader.css) — extracted from
+  // the overlay monolith; the bundler inlines it as READER_CSS.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'server', 'reader.css'), 'utf8');
   assert(css.includes('--td-accent'), 'reader CSS missing theme tokens');
   assert(css.includes(':where(body h1)'), 'reader CSS missing heading template');
   assert(css.includes('max-width: 720px'), 'reader CSS missing reading column');
@@ -107,7 +107,7 @@ t('Download /export bakes overlay reader CSS, not bar chrome', () => {
   assert(!css.includes('.tdoc-bar {'), 'reader CSS must not include the overlay bar');
   const exp = block(worker, '// ---- doc export / fork ----', '// ---- account duplicate');
   assert(worker.includes('function injectReaderCss'), 'worker must stamp reader CSS into export HTML');
-  assert(exp.includes('injectReaderCss(bodyHtml, readerCssFromOverlay())'), 'export must inject reader CSS');
+  assert(exp.includes('injectReaderCss(html, readerCssSource())'), 'export must inject reader CSS');
 });
 
 t('/me hides another GitHub user\'s hosted duplicate from the worker-owner catalog', () => {

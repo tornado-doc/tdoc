@@ -19,7 +19,7 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'reader.css'), 'utf8');
 
 console.log('reader-overflow (tables + diagrams stay unclipped)');
 
@@ -35,21 +35,14 @@ t('overlay never display:block a document table', () => {
     'display:block on table is back (breaks table layout)');
 });
 
-t('wide tables scroll via a wrapper, not the table element', () => {
+// RETIRED with the overlay monolith: wrapScrollableTables()/preserveSvgAspect()
+// were JS that mutated AUTHOR DOM at overlay boot — the injection-layer class of
+// behavior model B removes (main's #284 reverted a table treatment for exactly
+// this reason). Docs are self-contained now; the reader.css that ships (baked
+// at creation / legacy serve-time fallback) keeps the CSS-only defenses.
+
+t('wide-table scroll wrapper CSS survives for docs that use it', () => {
   assert(src.includes('.tdoc-table-scroll'), 'missing .tdoc-table-scroll wrapper class');
-  assert(src.includes('function wrapScrollableTables('), 'missing wrapScrollableTables()');
-  assert(src.includes("wrap.className = 'tdoc-table-scroll'"), 'wrapper is not applied to document tables');
-});
-
-t('document SVGs use overflow:visible so viewBox content is not cropped', () => {
-  assert(/body img, body svg, body canvas, body video[\s\S]*?overflow: visible/.test(src),
-    'doc svg/img rule must set overflow: visible');
-  assert(src.includes('function preserveSvgAspect('), 'missing preserveSvgAspect()');
-});
-
-t('layout helpers run at overlay boot', () => {
-  assert(/wrapScrollableTables\(\);\s*preserveSvgAspect\(\);\s*refreshComments\(\);/.test(src),
-    'boot must wrap tables and pin svg aspect before refreshComments');
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);

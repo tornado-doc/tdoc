@@ -303,8 +303,13 @@ t('doc view and homepage share one render path', () => {
   // Regression guard: the /d/ route used to inline the whole render. If it
   // grows a second copy, the homepage and doc pages drift on access/CSP.
   assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?\)/.test(worker), 'missing serveDocVersion');
-  const occurrences = (worker.match(/injectOverlay\(raw,/g) || []).length;
-  assert(occurrences === 1, `injectOverlay(raw, ...) called ${occurrences} times; expected exactly 1 shared call site`);
+  // One shared render call site: EVERYTHING (homepage included) renders as the
+  // cross-origin shell — the overlay path is deleted. Access/CSP/version wiring
+  // cannot drift because there is exactly one render.
+  const occurrences = (worker.match(/\brender\(raw,/g) || []).length;
+  assert(occurrences === 1, `render(raw, ...) called ${occurrences} times; expected exactly 1 shared call site`);
+  assert(/const render = shellDocumentWorker;/.test(worker),
+    'render must be the shell unconditionally (overlay path deleted)');
 });
 
 t('homepage bar is site chrome, not a document toolbar', () => {
@@ -321,37 +326,34 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage no longer marks the render as the landing page');
   assert(/isLanding: !!isLanding/.test(worker), 'bootCfg no longer carries isLanding');
 
-  const overlay = fs.readFileSync(path.join(root, 'server', 'overlay.js'), 'utf8');
-  const left = overlay.match(/const leftHtml = `[\s\S]*?`;\n/);
-  assert(left, 'overlay leftHtml block not found');
-  assert(/isSiteBar \? '' :/.test(left[0]),
-    'overlay still renders the slug crumb and version picker on the homepage');
-  assert(/tdoc-bar-mark/.test(left[0].split('isSiteBar')[0]),
-    'the tdoc mark must stay outside the landing conditional');
-  assert(/tdoc_logo\.svg/.test(left[0]),
-    'the mark must be the tdoc logo, not a text pill');
-  assert(/tdoc-title/.test(left[0]) && /isSiteBar \? '' :/.test(left[0]),
-    'homepage bar must not repeat the page title');
-  assert(!overlay.includes('tdoc-bar-center'),
+  // Bar markup lives in the shared chrome.js component now (string-concat).
+  const chrome = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8');
+  assert(chrome.includes("(isSiteBar ? '' :"),
+    'chrome still renders the slug crumb and version picker on the homepage');
+  assert(chrome.indexOf('tdoc-bar-mark') >= 0 &&
+         chrome.indexOf('tdoc-bar-mark') < chrome.indexOf("(isSiteBar ? '' :"),
+    'the tdoc mark must render before (outside) the landing conditional');
+  assert(/tdoc_logo\.svg/.test(chrome), 'the mark must be the tdoc logo, not a text pill');
+  assert(!chrome.includes('tdoc-bar-center'),
     'title must sit in the left cluster, not a fake-centered slot');
-  assert(overlay.includes("${cfg.isLanding ? githubBtnHtml : ''}"),
+  assert(chrome.includes("(o.isLanding ? githubBtnHtml : '')"),
     'homepage bar must expose a GitHub icon');
-  // Copy now sits in the ⋯ overflow, which is only rendered when !isSiteBar,
-  // so the homepage (site bar) drops it along with Duplicate/Download.
-  assert(overlay.includes('<button data-action="copy">Copy as Markdown</button>') &&
-         overlay.includes('${!isSiteBar ? `<div class="tdoc-menu-wrap">'),
-    'homepage bar must drop Copy (it lives in the !isSiteBar ⋯ overflow)');
-  assert(overlay.includes("${isSiteBar ? '' : primaryCtaHtml}"),
+  assert(chrome.includes('<button data-action="copy">Copy as Markdown</button>') &&
+         chrome.includes("(isSiteBar ? '' : secondaryMenuHtml)"),
+    'homepage bar must drop Copy (it lives in the isSiteBar-gated ⋯ overflow)');
+  assert(chrome.includes("(isSiteBar ? '' : primaryCtaHtml)"),
     'homepage bar must drop Share');
 
+  const shellSrc = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
   // Share on `/` must copy the canonical homepage, not /d/tornado-doc/v/N.
-  const shareFn = overlay.match(/function publicShareUrl\(\) \{[\s\S]*?\n  \}/);
-  assert(shareFn, 'overlay must have a single share-URL helper');
-  assert(/cfg\.isLanding/.test(shareFn[0]) && /\$\{location\.origin\}\//.test(shareFn[0]),
+  const shareStart = shellSrc.indexOf('function publicShareUrl()');
+  assert(shareStart >= 0, 'the shell must have a single share-URL helper');
+  const shareFn = shellSrc.slice(shareStart, shareStart + 500);
+  assert(shareFn.includes('cfg.isLanding') && shareFn.includes("location.origin + '/'"),
     'Share on the homepage must copy location.origin/');
-  assert(/\/d\/\$\{encodeURIComponent\(slug\)\}\/v\/\$\{version\}/.test(shareFn[0]),
+  assert(shareFn.includes("'/d/' + encodeURIComponent(cfg.slug) + '/v/' + cfg.version"),
     'Share on /d/ must still copy the versioned URL');
-  assert(/const url = publicShareUrl\(\)/.test(overlay),
+  assert(shellSrc.includes('publicShareUrl()'),
     'share modals must use publicShareUrl, not build /d/ themselves');
 });
 

@@ -52,7 +52,7 @@ t('credentials come from GitHub secrets, not the repo or published.json', () => 
 t('CD bundles overlay via bin/tdoc-bundle with hosted provenance', () => {
   assert(wf.includes('node bin/tdoc-bundle'), 'workflow must call bin/tdoc-bundle');
   assert(wf.includes('TDOC_GENERATED_BY: tdoc-cd'), 'hosted deploys must label generated_by=tdoc-cd');
-  assert(bundle.includes('JSON.stringify(overlay)'), 'tdoc-bundle must inline overlay.js');
+  assert(bundle.includes('JSON.stringify(chromeMod)') && bundle.includes('JSON.stringify(frameProbe)'), 'tdoc-bundle must inline the chrome module and frame probe');
   assert(bundle.includes('generated_by'), 'tdoc-bundle must stamp provenance');
 });
 

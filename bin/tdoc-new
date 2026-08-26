@@ -41,6 +41,9 @@
 #                              scoped to document-specific widgets.
 #   --force                    overwrite an existing slug directory. Without
 #                              this, an existing slug is a hard error.
+#   --no-server                scaffold only: skip starting/pinging the local
+#                              server (CI, or programmatic callers that serve
+#                              elsewhere). Prints the doc path instead of a URL.
 #
 # Behavior:
 #   - Refuses to clobber an existing slug unless --force.
@@ -83,6 +86,7 @@ while [ $# -gt 0 ]; do
     --style)      STYLE="${2:-}"; shift 2 ;;
     --custom-template) CUSTOM_TEMPLATE=1; shift ;;
     --force)      FORCE=1; shift ;;
+    --no-server)  NO_SERVER=1; shift ;;   # scaffold only — skip serving (CI / programmatic callers)
     -h|--help)
       sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
@@ -187,6 +191,26 @@ if ! "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
   die "default-template validation failed (existing doc, if any, left untouched)"
 fi
 
+# Bake the reader template into the doc so it is SELF-CONTAINED (the cross-
+# origin shell serves author HTML in an isolated frame and injects nothing).
+# The template is all :where() zero-specificity, so author CSS always wins;
+# <style id="tdoc-reader"> is the same block /export stamps. Skipped when the
+# doc already carries one (re-runs, hand-authored docs).
+if ! grep -q 'id="tdoc-reader"' "$STAGE_HTML"; then
+  BAKE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const root = process.argv[1], file = process.argv[2];
+    let css = "";
+    try { css = fs.readFileSync(path.join(root, "server", "reader.css"), "utf8"); } catch (e) {}
+    if (!css) process.exit(0);   // css missing — serve unbaked rather than die
+    let html = fs.readFileSync(file, "utf8");
+    const tag = "<style id=\"tdoc-reader\">" + css + "</style>\n";
+    html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, tag + "</head>") : tag + html;
+    fs.writeFileSync(file, html);
+  ' "$BAKE_ROOT" "$STAGE_HTML" || die "reader-template bake failed (existing doc left untouched)"
+fi
+
 # Validation passed — NOW it's safe to replace. Swap the existing doc out only
 # at this point. (Same-filesystem mv under TDOC_DIR, so this is atomic-ish.)
 if [ -d "$DOC_DIR" ]; then
@@ -220,6 +244,14 @@ print(json.dumps({
 printf '%s\n' "$META_JSON" > "$DOC_DIR/meta.json"
 printf '[]\n' > "$DOC_DIR/comments.json"
 info "scaffolded $DOC_DIR (v1)"
+
+# --no-server: scaffold-only mode for CI and programmatic callers that don't
+# want a local server (or run where $SKILL_DIR isn't installed). Prints the
+# doc path instead of a URL and skips publish-independent serving entirely.
+if [ "${NO_SERVER:-0}" = "1" ]; then
+  echo "$DOC_DIR/v1/index.html"
+  exit 0
+fi
 
 # ───────────────────────── ensure local server up ────────────────────────
 # A 200 on /api/ping is not proof the answerer is tdoc — another local

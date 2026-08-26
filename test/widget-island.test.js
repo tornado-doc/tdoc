@@ -114,11 +114,14 @@ function get(port, p, headers = {}) {
     }
   });
 
-  await t('framed widget CSP allows inline script and forbids framing by others', async () => {
+  await t('framed widget CSP allows inline script and stays sandboxed', async () => {
     const csp = framed.headers['content-security-policy'] || '';
     if (!csp.includes("script-src 'unsafe-inline'")) throw new Error(`missing script-src unsafe-inline: ${csp}`);
     if (!csp.includes("default-src 'none'")) throw new Error(`missing default-src none: ${csp}`);
-    if (!csp.includes("frame-ancestors 'self'")) throw new Error(`missing frame-ancestors: ${csp}`);
+    // NO frame-ancestors: the author doc embeds widgets from inside the
+    // sandboxed /frame (opaque origin) — 'self' could never match it and the
+    // browser refused every widget. The Dest gate + sandbox remain the controls.
+    if (csp.includes('frame-ancestors')) throw new Error(`frame-ancestors is back — widgets inside the opaque /frame would be refused: ${csp}`);
     if (!csp.includes("worker-src 'none'")) throw new Error(`missing worker-src none: ${csp}`);
     if (!csp.includes('sandbox allow-scripts')) throw new Error(`missing CSP sandbox allow-scripts: ${csp}`);
     if (/sandbox[^;]*allow-same-origin/.test(csp)) throw new Error(`CSP sandbox must not allow-same-origin: ${csp}`);
@@ -144,8 +147,10 @@ function get(port, p, headers = {}) {
     if (csp.includes('unsafe-inline')) throw new Error(`host CSP gained unsafe-inline: ${csp}`);
   });
 
-  await t('host doc rewrites widget iframe sandbox to allow-scripts only', async () => {
-    const res = await get(PORT, `/d/${SLUG}/v/1`);
+  await t('the /frame document rewrites widget iframe sandbox to allow-scripts only', async () => {
+    // Author content (incl. its widget iframes) now lives in the isolated
+    // /frame document, where forceWidgetSandbox runs — not in the shell chrome.
+    const res = await get(PORT, `/d/${SLUG}/v/1/frame`, { 'Sec-Fetch-Dest': 'iframe' });
     const iframes = [...res.body.matchAll(/<iframe\b([^>]*)>/gi)].map(m => m[0]);
     const widgetIframe = iframes.find(t => t.includes('/d/island-fixture/v/1/widget/'));
     if (!widgetIframe) throw new Error(`widget iframe missing from host doc: ${iframes.join(' | ')}`);
@@ -202,7 +207,7 @@ function get(port, p, headers = {}) {
   await t('worker widgetCspHeader unique-origins the widget document', async () => {
     const s = workerSrc.indexOf('function widgetCspHeader');
     if (s < 0) throw new Error('widgetCspHeader missing');
-    const body = workerSrc.slice(s, s + 400);
+    const body = workerSrc.slice(s, s + 900);
     if (!body.includes('sandbox allow-scripts')) throw new Error('widgetCspHeader must include sandbox allow-scripts');
     if (/sandbox[^"]*allow-same-origin/.test(body)) throw new Error('widget CSP sandbox must not allow-same-origin');
   });
@@ -216,11 +221,14 @@ function get(port, p, headers = {}) {
     }
   });
 
-  await t('worker injectOverlayCfg runs forceWidgetSandbox', async () => {
-    const s = workerSrc.indexOf('function injectOverlayCfg');
-    const body = workerSrc.slice(s, s + 400);
-    if (!body.includes('forceWidgetSandbox(rawHtml)')) {
-      throw new Error('injectOverlayCfg must rewrite widget iframes');
+  await t('worker /frame route runs forceWidgetSandbox on author HTML', async () => {
+    // Author widget iframes are rewritten where author HTML is served now:
+    // the /frame route (the overlay boot that used to do this is deleted).
+    const s = workerSrc.indexOf("const frameMatch = p.match(/^\\/d\\/([^/]+)\\/v\\/(\\d+)\\/frame");
+    if (s < 0) throw new Error('/frame route not found');
+    const body = workerSrc.slice(s, s + 1200);
+    if (!body.includes('forceWidgetSandbox(await obj.text())')) {
+      throw new Error('the /frame route must rewrite widget iframes via forceWidgetSandbox');
     }
   });
 

@@ -23,7 +23,7 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'overlay.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'chrome.js'), 'utf8');
 function sliceFn(name) {
   const start = src.indexOf(`function ${name}(`);
   if (start === -1) throw new Error(`fn ${name} not found in overlay.js`);

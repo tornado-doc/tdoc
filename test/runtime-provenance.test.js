@@ -22,7 +22,6 @@ const RUNTIME_PUBLIC_KEYS = [
   'source_sha',
   'source_dirty',
   'worker_sha',
-  'overlay_sha',
   'bundle_sha',
   'built_at',
   'generated_by',
@@ -63,7 +62,7 @@ t('/api/runtime exposes only the intended public provenance fields', () => {
 });
 
 t('publish bundles deterministic provenance fields', () => {
-  for (const field of ['source_sha', 'source_dirty', 'worker_sha', 'overlay_sha', 'bundle_sha', 'generated_by']) {
+  for (const field of ['source_sha', 'source_dirty', 'worker_sha', 'bundle_sha', 'generated_by']) {
     assert(bundle.includes(field), `bundle build info missing ${field} in tdoc-bundle`);
   }
   assert(bundle.includes('const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";'),

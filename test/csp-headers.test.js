@@ -43,9 +43,9 @@ function waitReady(port, ms = 5000) {
     })();
   });
 }
-function get(port, p) {
+function get(port, p, headers) {
   return new Promise((resolve, reject) => {
-    http.get({ host: '127.0.0.1', port, path: p }, (res) => {
+    http.get({ host: '127.0.0.1', port, path: p, headers: headers || {} }, (res) => {
       let buf = '';
       res.on('data', d => buf += d);
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: buf }));
@@ -108,28 +108,48 @@ function get(port, p) {
     if (m2[1] === nonce) throw new Error('nonce was reused across two separate responses — must be per-request random');
   });
 
-  await t('both overlay-injected <script> tags carry the CSP nonce', async () => {
+  await t('the shell doc carries its chrome scripts nonced (all inline JS is ours)', async () => {
     const scriptTags = [...res.body.matchAll(/<script([^>]*)>/gi)];
-    // Expect: window.__TDOC__ boot script + the overlay bundle script — both
-    // injected by injectOverlay()/injectOverlayCfg(), both nonced.
+    // The shell inlines several of its own scripts (chrome module, __TDOC__ /
+    // __TDOC_SHELL__ boot cfg, sign-in, shell client) — all nonced. Author JS
+    // never appears here; it lives in the isolated /frame document.
     const nonced = scriptTags.filter(m => m[1].includes(`nonce="${nonce}"`));
     if (nonced.length < 2) {
-      throw new Error(`expected >=2 nonced <script> tags (boot cfg + overlay bundle), found ${nonced.length} of ${scriptTags.length} total`);
+      throw new Error(`expected >=2 nonced <script> tags (shell chrome), found ${nonced.length} of ${scriptTags.length} total`);
     }
+    const unnonced = scriptTags.filter(m => m[1].trim() && !m[1].includes(`nonce="${nonce}"`));
+    if (unnonced.length) throw new Error(`shell doc has an inline <script> without our nonce: ${unnonced[0][0]}`);
   });
 
-  await t('the author <script> in the doc body does NOT carry the nonce (stays inert under the CSP)', async () => {
-    const idx = res.body.indexOf('window.__XSS__=1');
-    if (idx < 0) throw new Error('fixture author script not found in response body — test setup broken');
-    const tagStart = res.body.lastIndexOf('<script', idx);
-    const tagOpenEnd = res.body.indexOf('>', tagStart);
-    const openTag = res.body.slice(tagStart, tagOpenEnd + 1);
+  await t('the shell doc does NOT embed the author document (isolation)', async () => {
+    // The whole point of the shell: author markup/scripts are isolated in the
+    // /frame iframe and never inlined into the chrome document.
+    if (res.body.includes('window.__XSS__=1')) throw new Error('author <script> leaked into the shell document');
+    if (res.body.includes('onclick="window.__XSS__=2"')) throw new Error('author onclick= leaked into the shell document');
+  });
+
+  // Author-inertness now lives on the /frame route (author content moved there).
+  // The frame is gated on Sec-Fetch-Dest: iframe, so request it as a subframe.
+  let frameRes;
+  await t('the /frame document carries the sandbox CSP (opaque origin)', async () => {
+    frameRes = await get(PORT, `/d/${SLUG}/v/1/frame`, { 'sec-fetch-dest': 'iframe' });
+    if (frameRes.status !== 200) throw new Error(`/frame status ${frameRes.status}`);
+    const csp = frameRes.headers['content-security-policy'] || '';
+    if (!/\bsandbox\b/.test(csp)) throw new Error(`/frame CSP must include a sandbox directive: ${csp}`);
+  });
+
+  await t('the author <script> in the /frame body does NOT carry the nonce (stays inert under the CSP)', async () => {
+    const idx = frameRes.body.indexOf('window.__XSS__=1');
+    if (idx < 0) throw new Error('fixture author script not found in /frame body — test setup broken');
+    const tagStart = frameRes.body.lastIndexOf('<script', idx);
+    const tagOpenEnd = frameRes.body.indexOf('>', tagStart);
+    const openTag = frameRes.body.slice(tagStart, tagOpenEnd + 1);
     if (openTag.includes('nonce=')) throw new Error(`author <script> must not carry a nonce: ${openTag}`);
   });
 
-  await t('the author onclick= attribute is left as plain markup (CSP blocks it at execution time, not by stripping)', async () => {
-    if (!res.body.includes('onclick="window.__XSS__=2"')) {
-      throw new Error('fixture onclick handler not found — test setup broken, or something is now stripping it (unexpected either way)');
+  await t('the author onclick= attribute is left as plain markup in /frame (CSP blocks it at execution, not by stripping)', async () => {
+    if (!frameRes.body.includes('onclick="window.__XSS__=2"')) {
+      throw new Error('fixture onclick handler not found in /frame — test setup broken, or something is now stripping it (unexpected either way)');
     }
   });
 

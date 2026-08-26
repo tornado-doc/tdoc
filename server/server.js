@@ -26,9 +26,17 @@ function childEnv() {
 
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
-const OVERLAY_PATH = path.join(__dirname, 'overlay.js');
+const CHROME_PATH = path.join(__dirname, 'chrome.js');
+// Shared chrome module, also loaded server-side so the shell can render the real
+// bar/footer markup statically (same source the browser gets as window.TDOC_CHROME).
+let CHROME = {};
+try { CHROME = require(CHROME_PATH); } catch {}
+const FRAME_PROBE_PATH = path.join(__dirname, 'frame-probe.js');
 const ONBOARD_PATH = path.join(__dirname, 'onboard.js');
 const SIGNIN_PATH = path.join(__dirname, 'signin.js');
+// Shared shell builder (sliceChromeCss/shellScript/shellHtml) — same source the
+// worker inlines, so the local shell and the production shell stay 1:1.
+const SHELL = require('./shell.js');
 // Slugs that carry the onboarding modal. Product UI, injected under the same
 // nonce as the overlay, because a doc's own <script> never runs.
 const ONBOARD_SLUGS = new Set(['tornado-doc', 'tdoc-start']);
@@ -252,7 +260,10 @@ function safeJsonForScript(obj) {
 // author sees locally matches what ships (no "worked in dev, XSS in prod"
 // surprise), and costs nothing since 0 published docs use <script>.
 function cspHeader(nonce) {
-  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none';`;
+  // frame-src 'self': the shell document embeds the author content only via the
+  // same-origin /frame route (which is itself sandboxed to an opaque origin).
+  // Locking it to 'self' means the shell can never be made to frame anything else.
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; frame-src 'self'; object-src 'none'; base-uri 'none';`;
 }
 
 // Interactive islands (#138). Host documents keep cspHeader(); computation
@@ -263,7 +274,12 @@ function isValidWidgetName(name) {
   return typeof name === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(name);
 }
 function widgetCspHeader() {
-  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
+  // NO frame-ancestors: the author document embeds widgets from inside the
+  // sandboxed /frame, whose origin is OPAQUE — 'self' can never match it, so
+  // the browser would refuse every widget ("refused to connect"). The Sec-
+  // Fetch-Dest gate (must load as an iframe), the widget's own sandbox
+  // (opaque origin, no credentials), and enforceDocAccess remain the controls.
+  return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; worker-src 'none'; form-action 'none'; sandbox allow-scripts";
 }
 function isWidgetFrameRequest(dest) {
   return String(dest || '').toLowerCase() === 'iframe';
@@ -288,8 +304,32 @@ function forceWidgetSandbox(html) {
   });
 }
 
-// Local preview of the landing header's live star count. Production fetches
-// this in the Cloudflare Worker (edge-cached); here we just refresh hourly.
+// --- Cross-origin iframe "shell" (single path; see PLAN.md). ---
+// The author document is served from /d/<slug>/v/<n>/frame under a CSP `sandbox`
+// (opaque origin) so its CSS/DOM can never touch the overlay chrome, which lives
+// in the shell document. Same isolation mechanism as widget islands, applied to
+// the whole doc. Only our own nonced scripts run in the frame (author JS stays
+// inert, exactly as in the single-origin path); the sandbox directive is what
+// makes the origin opaque.
+function frameCspHeader(nonce) {
+  return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts`;
+}
+
+// The CHROME CSS (bar/footer/composer/cards/pins/drawer/menus) and READER CSS
+// (reading column/typography) are standalone files now — extracted from the
+// old overlay.js monolith so components live in their own modules.
+const CHROME_CSS_PATH = path.join(__dirname, 'chrome.css');
+const READER_CSS_PATH = path.join(__dirname, 'reader.css');
+function chromeCss() {
+  try { return fs.readFileSync(CHROME_CSS_PATH, 'utf8'); } catch { return ''; }
+}
+function readerCss() {
+  try { return fs.readFileSync(READER_CSS_PATH, 'utf8'); } catch { return ''; }
+}
+
+// Local preview of the landing header's live star count (from main). Production
+// fetches this in the Cloudflare Worker (edge-cached); here we refresh hourly.
+// Threaded into the shell cfg so a landing bar variant can consume it.
 let cachedStars = null;
 async function refreshStars() {
   try {
@@ -299,49 +339,47 @@ async function refreshStars() {
 }
 refreshStars(); const _starTimer = setInterval(refreshStars, 3600e3); if (_starTimer.unref) _starTimer.unref();
 
-function injectOverlay(html, slug, version, nonce) {
-  html = forceWidgetSandbox(html);
-  if (ONBOARD_SLUGS.has(slug)) {
-    try {
-      const onboard = fs.readFileSync(ONBOARD_PATH, 'utf8');
-      const tag = `<script${nonce ? ` nonce="${nonce}"` : ''}>${onboard}</script>`;
-      html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
-    } catch {}
-  }
-  // The shared device flow goes in before the overlay, which calls into it.
-  try {
-    const signin = fs.readFileSync(SIGNIN_PATH, 'utf8');
-    const tag = `<script${nonce ? ` nonce="${nonce}"` : ''}>${signin}</script>`;
-    html = html.includes('</body>') ? html.replace('</body>', `${tag}\n</body>`) : html + tag;
-  } catch {}
-  const overlay = fs.readFileSync(OVERLAY_PATH, 'utf8');
-  // Hand the overlay the full version list so the bar can offer a version
-  // picker. Read straight from meta.json; ignore failures and fall back to
-  // the current version only.
-  let versions = [{ n: version }];
+// P1: the shell renders a top bar + embeds the author frame. P2 adds the
+// postMessage anchoring bridge + comment chrome (composer/pins/cards) here.
+function shellDocument(slug, version, nonce) {
+  let title = slug, versions = [{ n: version }];
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8'));
-    if (Array.isArray(meta.versions) && meta.versions.length) {
-      versions = meta.versions.map(v => ({ n: v.n, created: v.created || null }));
-    }
+    if (meta && meta.title) title = meta.title;
+    if (Array.isArray(meta.versions) && meta.versions.length) versions = meta.versions.map((v) => ({ n: v.n }));
   } catch {}
-  // nonce is stamped onto BOTH injected <script> tags so only they run under
-  // the CSP set by cspHeader() above — author content in `html` has no nonce
-  // and is inert.
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const ident = e2eIdentity();
-  const cfg = `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript({
-    slug, version,
-    identity: ident,
-    isOwner: !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase()),
-    authConfigured: !!ident, mode: 'local', versions,
-    isLanding: slug === 'tornado-doc',
-    stars: cachedStars,
-  })};</script>`;
-  const inject = `${cfg}\n<script${nonceAttr}>${overlay}</script>`;
-  if (html.includes('</body>')) return html.replace('</body>', `${inject}\n</body>`);
-  return html + inject;
+  const isOwner = !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase());
+  // window.__TDOC__ powers the chrome-level modals (sign-in device flow +
+  // onboarding), which read it exactly as they did in the single-origin path.
+  // window.__TDOC_SHELL__ carries the shell client's own config (incl. identity
+  // so reaction "mine" detection works). Both are nonced. isLanding/stars come
+  // from main's landing-bar star count (consumed by a landing bar variant).
+  const isLanding = slug === 'tornado-doc';
+  const authCfgJson = safeJsonForScript({ slug, version, identity: ident, isOwner, authConfigured: !!ident, mode: 'local', versions, isLanding, stars: cachedStars });
+  const cfgJson = safeJsonForScript({ slug, version, mode: 'local', versions, identity: ident });
+  // Sign-in (always) + onboarding (start docs only) are chrome, so they live in
+  // the shell, not the isolated author frame — same modules as the overlay path.
+  let signinJs = '', onboardJs = '', manageJs = '';
+  try { signinJs = fs.readFileSync(SIGNIN_PATH, 'utf8'); } catch {}
+  try { manageJs = fs.readFileSync(path.join(__dirname, 'manage.js'), 'utf8'); } catch {}
+  if (ONBOARD_SLUGS.has(slug)) { try { onboardJs = fs.readFileSync(ONBOARD_PATH, 'utf8'); } catch {} }
+  // Shared chrome module (Contract 1): rendered server-side for the static bar +
+  // footer (1:1 with overlay), AND inlined as a nonced <script> so the shell's
+  // client logic can build the composer/pins from window.TDOC_CHROME.
+  let chromeJs = '';
+  try { chromeJs = fs.readFileSync(CHROME_PATH, 'utf8'); } catch {}
+  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'local', slug, version, versions }) : '';
+  const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
+  return SHELL.shellHtml({
+    title, frameSrc, nonceAttr, chromeCssStr: chromeCss(), barInner, footerInner,
+    chromeJs, authCfgJson, cfgJson, signinJs, onboardJs, manageJs,
+  });
 }
+
 
 // Always returns an array for a comments file. A comments.json that parses to a
 // non-array (corrupt / hand-edited to `{}`) would otherwise crash the .filter/
@@ -601,6 +639,54 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Author document frame (shell mode). Served under a CSP `sandbox` (opaque
+  // origin), gated on Sec-Fetch-Dest: iframe like widgets, so it can only be
+  // loaded inside the shell — never top-level.
+  const frameMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/frame\/?$/);
+  if (frameMatch) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return send(res, 405, 'method not allowed', { Allow: 'GET, HEAD' });
+    }
+    const [, rawSlug, vStr] = frameMatch;
+    const slug = safeSlug(rawSlug);
+    if (!slug) return send(res, 400, 'invalid slug');
+    if (!isWidgetFrameRequest(req.headers['sec-fetch-dest'])) return send(res, 403, 'document frame must be framed');
+    const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
+    if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
+    const nonce = crypto.randomBytes(16).toString('hex');
+    let body = '';
+    if (req.method !== 'HEAD') {
+      body = forceWidgetSandbox(fs.readFileSync(file, 'utf8'));
+      // Legacy template-reliant docs (published before creation-time baking):
+      // no #tdoc-reader block AND no styling of their own reading column →
+      // inject the reader CSS into the FRAME RESPONSE (never into storage).
+      // Self-contained docs are excluded by the max-width check, and the
+      // template is :where() zero-specificity, so author CSS always wins.
+      if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+        const rcss = readerCss();
+        if (rcss) {
+          const rtag = `<style id="tdoc-reader">${rcss}</style>`;
+          body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+        }
+      }
+      // Inject the anchoring probe — the only tdoc code allowed into the author
+      // DOM. Nonced so it runs under the frame CSP while author <script> stays
+      // inert (same guarantee as the single-origin path).
+      try {
+        const probe = fs.readFileSync(FRAME_PROBE_PATH, 'utf8');
+        const tag = `<script nonce="${nonce}">${probe}</script>`;
+        body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
+      } catch {}
+    }
+    return send(res, 200, body, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': frameCspHeader(nonce),
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
+      'Vary': 'Sec-Fetch-Dest',
+    });
+  }
+
   const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
   if (docMatch) {
     const [, rawSlug, vStr] = docMatch;
@@ -608,9 +694,11 @@ const server = http.createServer(async (req, res) => {
     if (!slug) return send(res, 400, 'invalid slug');
     const file = path.join(ROOT, slug, `v${vStr}`, 'index.html');
     if (!fs.existsSync(file)) return send(res, 404, `Not found: ${slug} v${vStr}`);
-    const html = fs.readFileSync(file, 'utf8');
     const nonce = crypto.randomBytes(16).toString('hex');
-    return send(res, 200, injectOverlay(html, slug, Number(vStr), nonce), {
+    // Single path: every doc renders the cross-origin shell (chrome in the outer
+    // document, author content isolated in the /frame iframe). The legacy
+    // single-origin overlay-injection path is gone — see the git history / PLAN.md.
+    return send(res, 200, shellDocument(slug, Number(vStr), nonce), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': cspHeader(nonce),
     });
