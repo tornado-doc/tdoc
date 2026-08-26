@@ -1169,7 +1169,9 @@ function injectOverlay(rawHtml, slug, version, identity, versions, isOwner, owne
 // the same fields injectOverlay used, so identity/owner/manage/share behave as
 // before once the shell client wires them.
 function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
-  if (!SHELL) return injectOverlay(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth);
+  // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
+  // the author document bare rather than injecting anything.
+  if (!SHELL) return rawHtml;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const vlist = Array.isArray(versions) && versions.length ? versions : [{ n: version }];
   let title = slug;
@@ -3494,27 +3496,12 @@ export default {
         html = html.slice(0, idx) + replacement + html.slice(idx + needle.length);
       }
 
-      // The fork route boots the overlay in read-only "fork" mode so the
-      // user can SEE what they just downloaded — comments rendered as cards,
-      // anchors highlighted — without any backend.
-      // Same confused-deputy surface as the doc-view route (same-origin
-      // cookie, arbitrary author HTML) even though fork/export don't expose
-      // owner-manage UI — a script here could still ride the viewer's session
-      // cookie to hit /api/doc*. Nonce the injected overlay script the same
-      // way; author content stays unnonced and inert under the CSP below.
+      // Both kinds are STATIC now. /fork's interactive overlay mode is retired
+      // (dead route — Duplicate is the product feature; agents read the banner
+      // + JSON block, which both kinds still carry). Bake the reading-column
+      // CSS so the page/file looks like the published doc.
       const nonce = rand(16);
-      let bodyHtml = html;
-      if (kind === 'export') {
-        // File save has no overlay JS. Bake the reading-column CSS so a
-        // downloaded slug-vN.html still looks like the published doc.
-        bodyHtml = injectReaderCss(bodyHtml, readerCssSource());
-      }
-      if (kind === 'fork') {
-        bodyHtml = injectOverlayCfg(bodyHtml, {
-          slug, version: Number(vStr), identity: null,
-          authConfigured: false, mode: 'fork', originalSlug: slug,
-        }, nonce);
-      }
+      const bodyHtml = injectReaderCss(html, readerCssSource());
 
       const finalHtml = banner + jsonBlock + bodyHtml;
       const dl = url.searchParams.get('download');

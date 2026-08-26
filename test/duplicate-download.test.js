@@ -106,7 +106,7 @@ t('Download /export bakes the reader CSS, not bar chrome', () => {
   assert(!css.includes('.tdoc-bar {'), 'reader CSS must not include the overlay bar');
   const exp = block(worker, '// ---- doc export / fork ----', '// ---- account duplicate');
   assert(worker.includes('function injectReaderCss'), 'worker must stamp reader CSS into export HTML');
-  assert(exp.includes('injectReaderCss(bodyHtml, readerCssSource())'), 'export must inject reader CSS');
+  assert(exp.includes('injectReaderCss(html, readerCssSource())'), 'export must inject reader CSS');
 });
 
 t('/me hides another GitHub user\'s hosted duplicate from the worker-owner catalog', () => {
