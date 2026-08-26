@@ -285,8 +285,10 @@
   // only pays findTextRange for NEW anchors (O(D) each) instead of re-walking
   // the whole doc + re-scanning every anchor (O(N + C·D)) every time.
   var _view = null, _rangeCache = {};
+  var _lastComments = [];   // re-report pins when layout settles (images/fonts)
   function docView() { return _view || (_view = collectTextNodes()); }
   function reportPins(comments) {
+    _lastComments = comments || [];
     var pins = [], hl = HL ? new Highlight() : null;
     (comments || []).forEach(function (c) {
       if (!c || !c.anchor) return;
@@ -305,6 +307,16 @@
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
+  }
+
+  // Geometry can settle AFTER the first pin report (images/fonts load, layout
+  // shifts): re-resolve + re-report so pins/cards move to the real article
+  // edge instead of sticking mid-screen until the next comment arrives.
+  var _geoTimer = null;
+  function rereportPins() { if (_geoTimer) clearTimeout(_geoTimer); _geoTimer = setTimeout(function () { _view = null; _rangeCache = {}; reportPins(_lastComments); }, 150); }
+  window.addEventListener('load', rereportPins);
+  if (typeof ResizeObserver !== 'undefined') {
+    try { new ResizeObserver(rereportPins).observe(document.body); } catch (e) {}
   }
 
   // Doc → Markdown (verbatim port of overlay.js htmlToMarkdown 4176-4253). Runs
