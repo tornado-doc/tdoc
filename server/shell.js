@@ -8,41 +8,6 @@
   'use strict';
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]); }); }
 
-  // The CHROME-only CSS for the shell: the :root design tokens + the chrome CSS
-  // block (bar/footer/composer/cards/pins/drawer/menus) sliced from overlay.js
-  // between the TDOC_CHROME_CSS_START/END markers. Excludes reader/content-column
-  // rules. Single source (overlay.js) so the shell chrome stays 1:1, no drift.
-  function sliceChromeCss(src) {
-    if (typeof src !== 'string' || !src) return '';
-    var root = '';
-    var ri = src.indexOf(':root {');
-    if (ri !== -1) { var re = src.indexOf('}', ri); if (re !== -1) root = src.slice(ri, re + 1); }
-    var chrome = '';
-    var s = src.indexOf('TDOC_CHROME_CSS_START');
-    var e = src.indexOf('TDOC_CHROME_CSS_END');
-    if (s !== -1 && e !== -1 && e > s) {
-      var from = src.indexOf('*/', s);
-      var to = src.lastIndexOf('/*', e);
-      if (from !== -1 && to !== -1 && to > from) chrome = src.slice(from + 2, to);
-    }
-    return root + '\n' + chrome;
-  }
-
-  // The READER CSS (reading column, typography, tables, code blocks), sliced
-  // from overlay.js between the TDOC_READER_CSS markers. Used by bin/tdoc-new to
-  // BAKE the template into new docs at creation (as <style id="tdoc-reader">,
-  // the same id /export stamps) so documents are self-contained under the
-  // shell. All rules are :where() zero-specificity — author CSS always wins.
-  function sliceReaderCss(src) {
-    if (typeof src !== 'string' || !src) return '';
-    var s = src.indexOf('TDOC_READER_CSS_START');
-    var e = src.indexOf('TDOC_READER_CSS_END');
-    if (s === -1 || e === -1 || e <= s) return '';
-    var from = src.indexOf('*/', s);
-    var to = src.lastIndexOf('/*', e);
-    return (from !== -1 && to !== -1 && to > from) ? src.slice(from + 2, to).trim() : '';
-  }
-
   function shellScript() {
     return `(function(){
     'use strict';
@@ -692,7 +657,7 @@
 '</body></html>';
   }
 
-  var api = { sliceChromeCss: sliceChromeCss, sliceReaderCss: sliceReaderCss, shellScript: shellScript, shellHtml: shellHtml };
+  var api = { shellScript: shellScript, shellHtml: shellHtml };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.TDOC_SHELL_BUILDER = api;
 })();

@@ -311,13 +311,16 @@ function frameCspHeader(nonce) {
   return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts`;
 }
 
-// The CHROME-only CSS for the shell: the :root design tokens + the chrome CSS
-// block (bar/footer/composer/cards/pins/drawer/menus) sliced from overlay.js
-// between the TDOC_CHROME_CSS_START/END markers. Excludes the reader/content-
-// column rules (those would wrongly constrain the shell body). Single source
-// (overlay.js) so the shell chrome stays 1:1 with the overlay, no drift.
+// The CHROME CSS (bar/footer/composer/cards/pins/drawer/menus) and READER CSS
+// (reading column/typography) are standalone files now — extracted from the
+// old overlay.js monolith so components live in their own modules.
+const CHROME_CSS_PATH = path.join(__dirname, 'chrome.css');
+const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function chromeCss() {
-  try { return SHELL.sliceChromeCss(fs.readFileSync(OVERLAY_PATH, 'utf8')); } catch { return ''; }
+  try { return fs.readFileSync(CHROME_CSS_PATH, 'utf8'); } catch { return ''; }
+}
+function readerCss() {
+  try { return fs.readFileSync(READER_CSS_PATH, 'utf8'); } catch { return ''; }
 }
 
 // Local preview of the landing header's live star count (from main). Production
@@ -655,13 +658,11 @@ const server = http.createServer(async (req, res) => {
       // Self-contained docs are excluded by the max-width check, and the
       // template is :where() zero-specificity, so author CSS always wins.
       if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
-        try {
-          const rcss = SHELL.sliceReaderCss(fs.readFileSync(OVERLAY_PATH, 'utf8'));
-          if (rcss) {
-            const rtag = `<style id="tdoc-reader">${rcss}</style>`;
-            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
-          }
-        } catch {}
+        const rcss = readerCss();
+        if (rcss) {
+          const rtag = `<style id="tdoc-reader">${rcss}</style>`;
+          body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+        }
       }
       // Inject the anchoring probe — the only tdoc code allowed into the author
       // DOM. Nonced so it runs under the frame CSP while author <script> stays

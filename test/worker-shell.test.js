@@ -29,8 +29,8 @@ const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8')
     for (const marker of ['/* __TDOC_CHROME_MODULE__ */', '/* __TDOC_SHELL_MODULE__ */', '__TDOC_CHROME_JS__', '__TDOC_PROBE_JS__']) {
       if (!bundleSrc.includes(marker)) throw new Error(`tdoc-bundle no longer references ${marker}`);
     }
-    if (!/bundleSha = sha\(\[worker, overlay, chromeMod, shellMod, frameProbe\]/.test(bundleSrc)) {
-      throw new Error('bundle_sha must cover chrome/shell/probe so drift changes the hash');
+    if (!/bundleSha = sha\(\[worker, overlay, chromeMod, shellMod, frameProbe, chromeCss, readerCss\]/.test(bundleSrc)) {
+      throw new Error('bundle_sha must cover chrome/shell/probe/css so drift changes the hash');
     }
   });
 
@@ -114,12 +114,11 @@ const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8')
   // into storage. Self-contained docs are excluded by the max-width check.
   await t('both /frame routes carry the legacy reader-CSS fallback', async () => {
     const serverSrc = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
-    for (const [name, src] of [['server.js', serverSrc], ['worker.js', workerSrc]]) {
-      const i = src.indexOf('/frame');
+    for (const [name, src, cssRef] of [['server.js', serverSrc, 'readerCss()'], ['worker.js', workerSrc, 'READER_CSS']]) {
       if (!src.includes(`id="tdoc-reader"') && !body.includes('max-width')`)) {
         throw new Error(`${name} /frame route lost the legacy reader-CSS fallback gate`);
       }
-      if (!src.includes('sliceReaderCss')) throw new Error(`${name} missing sliceReaderCss use`);
+      if (!src.includes(cssRef)) throw new Error(`${name} missing ${cssRef} use (standalone reader.css)`);
     }
   });
 

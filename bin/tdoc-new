@@ -201,9 +201,9 @@ if ! grep -q 'id="tdoc-reader"' "$STAGE_HTML"; then
   node -e '
     const fs = require("fs"), path = require("path");
     const root = process.argv[1], file = process.argv[2];
-    const shell = require(path.join(root, "server", "shell.js"));
-    const css = shell.sliceReaderCss(fs.readFileSync(path.join(root, "server", "overlay.js"), "utf8"));
-    if (!css) process.exit(0);   // markers missing — serve unbaked rather than die
+    let css = "";
+    try { css = fs.readFileSync(path.join(root, "server", "reader.css"), "utf8"); } catch (e) {}
+    if (!css) process.exit(0);   // css missing — serve unbaked rather than die
     let html = fs.readFileSync(file, "utf8");
     const tag = "<style id=\"tdoc-reader\">" + css + "</style>\n";
     html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, tag + "</head>") : tag + html;

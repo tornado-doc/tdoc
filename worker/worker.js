@@ -23,6 +23,8 @@ const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;
 /* __TDOC_SHELL_MODULE__ */
 const CHROME_JS = `__TDOC_CHROME_JS__`;
 const PROBE_JS = `__TDOC_PROBE_JS__`;
+const CHROME_CSS = `__TDOC_CHROME_CSS__`;
+const READER_CSS = `__TDOC_READER_CSS__`;
 const CHROME = (typeof globalThis !== 'undefined' && globalThis.TDOC_CHROME) || {};
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
@@ -1107,19 +1109,11 @@ function injectOverlayCfg(rawHtml, cfg, nonce) {
   return rawHtml + inject;
 }
 
-// Download (/export) has no overlay JS, so the live reading-column CSS never
-// runs. Slice the marked Classic template out of overlay.js (same source as
-// the published view) and stamp it as a static <style>. Bar / comments stay
-// out — those need overlay JS. Empty when OVERLAY_JS is still the bundle
-// placeholder (unbundled worker.js in some tests).
-const READER_CSS_START = '/* TDOC_READER_CSS_START */';
-const READER_CSS_END = '/* TDOC_READER_CSS_END */';
-function readerCssFromOverlay() {
-  const src = typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '';
-  const i = src.indexOf(READER_CSS_START);
-  const j = src.indexOf(READER_CSS_END);
-  if (i < 0 || j < 0 || j <= i) return '';
-  return src.slice(i + READER_CSS_START.length, j).trim();
+// Download (/export) stamps the reader template as a static <style> so the
+// saved file matches the published reading column. READER_CSS is the
+// standalone server/reader.css inlined by the bundler (empty when unbundled).
+function readerCssSource() {
+  return (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
 }
 function injectReaderCss(html, css) {
   if (!css) return html;
@@ -1203,7 +1197,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     title,
     frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame`,
     nonceAttr,
-    chromeCssStr: SHELL.sliceChromeCss(typeof OVERLAY_JS === 'string' ? OVERLAY_JS : ''),
+    chromeCssStr: (typeof CHROME_CSS === 'string' && CHROME_CSS.indexOf('__TDOC_') !== 0) ? CHROME_CSS : '',
     barInner, footerInner,
     chromeJs: CHROME_JS,
     authCfgJson: safeJsonForScript(cfg),
@@ -1223,7 +1217,7 @@ function injectSiteChrome(rawHtml, cfg, nonce) {
   if (!SHELL || !CHROME.buildBar) return rawHtml;   // unbundled worker — serve bare
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const barInner = CHROME.buildBar({ mode: 'published', slug: cfg.slug || '', version: cfg.version || 0, versions: [], isLanding: !!cfg.isLanding, isCatalog: !!cfg.isCatalog, stars: cfg.stars });
-  const chromeCssTag = `<style>${SHELL.sliceChromeCss(typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '')}</style>`;
+  const chromeCssTag = `<style>${(typeof CHROME_CSS === 'string' && CHROME_CSS.indexOf('__TDOC_') !== 0) ? CHROME_CSS : ''}</style>`;
   const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
   const scripts =
     `<script${nonceAttr}>${CHROME_JS}</script>\n` +
@@ -3381,8 +3375,8 @@ export default {
         // inject the reader CSS into the FRAME RESPONSE (never into storage).
         // Self-contained docs are excluded by the max-width check; the template
         // is :where() zero-specificity, so author CSS always wins.
-        if (SHELL && !body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
-          const rcss = SHELL.sliceReaderCss(typeof OVERLAY_JS === 'string' ? OVERLAY_JS : '');
+        if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+          const rcss = (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
           if (rcss) {
             const rtag = `<style id="tdoc-reader">${rcss}</style>`;
             body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
@@ -3513,7 +3507,7 @@ export default {
       if (kind === 'export') {
         // File save has no overlay JS. Bake the reading-column CSS so a
         // downloaded slug-vN.html still looks like the published doc.
-        bodyHtml = injectReaderCss(bodyHtml, readerCssFromOverlay());
+        bodyHtml = injectReaderCss(bodyHtml, readerCssSource());
       }
       if (kind === 'fork') {
         bodyHtml = injectOverlayCfg(bodyHtml, {

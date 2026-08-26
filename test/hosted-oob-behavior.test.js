@@ -120,6 +120,13 @@ async function loadWorker() {
     /const OVERLAY_JS = `__TDOC_OVERLAY_JS__`;/,
     'const OVERLAY_JS = ' + JSON.stringify(overlay) + ';'
   );
+  // Reader CSS is a standalone file now — inline it like the bundler does so
+  // /export stamps #tdoc-reader in this in-process worker too.
+  const readerCss = fs.readFileSync(path.join(root, 'server', 'reader.css'), 'utf8');
+  src = src.replace(
+    /const READER_CSS = `__TDOC_READER_CSS__`;/,
+    'const READER_CSS = ' + JSON.stringify(readerCss) + ';'
+  );
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);
   const mod = await import(`file://${tmp}`);

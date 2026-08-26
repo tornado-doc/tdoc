@@ -95,11 +95,10 @@ t('export attachment filename is slug-vN.html, not -fork.html', () => {
   assert(!exp.includes('-fork.html'), 'export filename must not still say -fork.html');
 });
 
-t('Download /export bakes overlay reader CSS, not bar chrome', () => {
-  const start = overlay.indexOf('/* TDOC_READER_CSS_START */');
-  const end = overlay.indexOf('/* TDOC_READER_CSS_END */');
-  assert(start >= 0 && end > start, 'overlay must mark the reader CSS slice');
-  const css = overlay.slice(start, end);
+t('Download /export bakes the reader CSS, not bar chrome', () => {
+  // Reader CSS is a standalone file now (server/reader.css) — extracted from
+  // the overlay monolith; the bundler inlines it as READER_CSS.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'server', 'reader.css'), 'utf8');
   assert(css.includes('--td-accent'), 'reader CSS missing theme tokens');
   assert(css.includes(':where(body h1)'), 'reader CSS missing heading template');
   assert(css.includes('max-width: 720px'), 'reader CSS missing reading column');
@@ -107,7 +106,7 @@ t('Download /export bakes overlay reader CSS, not bar chrome', () => {
   assert(!css.includes('.tdoc-bar {'), 'reader CSS must not include the overlay bar');
   const exp = block(worker, '// ---- doc export / fork ----', '// ---- account duplicate');
   assert(worker.includes('function injectReaderCss'), 'worker must stamp reader CSS into export HTML');
-  assert(exp.includes('injectReaderCss(bodyHtml, readerCssFromOverlay())'), 'export must inject reader CSS');
+  assert(exp.includes('injectReaderCss(bodyHtml, readerCssSource())'), 'export must inject reader CSS');
 });
 
 t('/me hides another GitHub user\'s hosted duplicate from the worker-owner catalog', () => {

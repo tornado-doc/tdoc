@@ -15,8 +15,6 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e.message || e}`); fail++; }
 function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e); } }
 
 const ROOT = path.join(__dirname, '..');
-const SHELL = require(path.join(ROOT, 'server', 'shell.js'));
-const overlaySrc = fs.readFileSync(path.join(ROOT, 'server', 'overlay.js'), 'utf8');
 
 const FIXTURE = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>bake</title>
 <style>body { background:#fff; } .note { border-left:3px solid #888; }</style>
@@ -34,9 +32,9 @@ function runNew(tmp, slug, html) {
 
 console.log('reader-template bake (tdoc-new self-contained docs)\n');
 
-t('sliceReaderCss extracts the reading-column template from overlay.js', () => {
-  const css = SHELL.sliceReaderCss(overlaySrc);
-  if (!css || css.length < 1000) throw new Error(`slice too small (${css.length})`);
+t('server/reader.css is the standalone reading-column template', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'server', 'reader.css'), 'utf8');
+  if (!css || css.length < 1000) throw new Error(`reader.css too small (${css.length})`);
   if (!css.includes('max-width: 720px')) throw new Error('missing the 720px reading column');
   if (!/:where\(/.test(css)) throw new Error('template must be :where() zero-specificity');
 });
