@@ -22,6 +22,7 @@
 const CHROME_JS = `__TDOC_CHROME_JS__`;
 const PROBE_JS = `__TDOC_PROBE_JS__`;
 const CHROME_CSS = `__TDOC_CHROME_CSS__`;
+const MANAGE_JS = `__TDOC_MANAGE_JS__`;
 const READER_CSS = `__TDOC_READER_CSS__`;
 const CHROME = (typeof globalThis !== 'undefined' && globalThis.TDOC_CHROME) || {};
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
@@ -1172,6 +1173,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     authCfgJson: safeJsonForScript(cfg),
     cfgJson: safeJsonForScript(cfg),
     signinJs: SIGNIN_JS,
+    manageJs: (typeof MANAGE_JS === 'string' && MANAGE_JS.indexOf('__TDOC_') !== 0) ? MANAGE_JS : '',
     onboardJs,
   });
 }

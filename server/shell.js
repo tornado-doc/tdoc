@@ -397,6 +397,9 @@
     //     copy-link modal for owners until the manage panel is ported. ---
     function publicShareUrl(){ return location.origin + '/d/' + encodeURIComponent(cfg.slug) + '/v/' + cfg.version; }
     function showShareModal(){
+      // Owners get the manage panel (access control / invite / delete) — the
+      // standalone manage.js module; everyone else gets copy-link.
+      if (cfg.ownerManage && window.__tdocManage) { window.__tdocManage(); return; }
       closeAuxModal();
       var esc = window.TDOC_CHROME.escapeHtml, url = publicShareUrl();
       var bg = document.createElement('div');
@@ -801,6 +804,7 @@
 '  <script' + d.nonceAttr + '>window.__TDOC__ = ' + d.authCfgJson + ';</scr' + 'ipt>\n' +
 '  <script' + d.nonceAttr + '>window.__TDOC_SHELL__ = ' + d.cfgJson + ';</scr' + 'ipt>\n' +
 '  <script' + d.nonceAttr + '>' + d.signinJs + '</scr' + 'ipt>\n' +
+'  ' + (d.manageJs ? ('<script' + d.nonceAttr + '>' + d.manageJs + '</scr' + 'ipt>') : '') + '\n' +
 '  ' + (d.onboardJs ? ('<script' + d.nonceAttr + '>' + d.onboardJs + '</scr' + 'ipt>') : '') + '\n' +
 '  <script' + d.nonceAttr + '>' + shellScript() + '</scr' + 'ipt>\n' +
 '</body></html>';

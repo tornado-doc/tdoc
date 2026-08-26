@@ -32,6 +32,7 @@ const shellMod = fs.readFileSync(path.join(skill, 'server/shell.js'), 'utf8');
 const frameProbe = fs.readFileSync(path.join(skill, 'server/frame-probe.js'), 'utf8');
 const chromeCss = fs.readFileSync(path.join(skill, 'server/chrome.css'), 'utf8');
 const readerCss = fs.readFileSync(path.join(skill, 'server/reader.css'), 'utf8');
+const manageJs = fs.readFileSync(path.join(skill, 'server/manage.js'), 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -47,7 +48,7 @@ const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12',
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines — so a change to the chrome,
 // shell, or probe modules produces a new bundle_sha (drift can't slip through).
-const bundleSha = sha([worker, chromeMod, shellMod, frameProbe, chromeCss, readerCss].join('\0'));
+const bundleSha = sha([worker, chromeMod, shellMod, frameProbe, chromeCss, readerCss, manageJs].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -84,6 +85,7 @@ replaced = mustReplace(replaced, /const CHROME_JS = `__TDOC_CHROME_JS__`;/, 'con
 replaced = mustReplace(replaced, /const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(frameProbe) + ';', 'PROBE_JS');
 replaced = mustReplace(replaced, /const CHROME_CSS = `__TDOC_CHROME_CSS__`;/, 'const CHROME_CSS = ' + JSON.stringify(chromeCss) + ';', 'CHROME_CSS');
 replaced = mustReplace(replaced, /const READER_CSS = `__TDOC_READER_CSS__`;/, 'const READER_CSS = ' + JSON.stringify(readerCss) + ';', 'READER_CSS');
+replaced = mustReplace(replaced, /const MANAGE_JS = `__TDOC_MANAGE_JS__`;/, 'const MANAGE_JS = ' + JSON.stringify(manageJs) + ';', 'MANAGE_JS');
 
 let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,

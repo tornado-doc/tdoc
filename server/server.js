@@ -359,8 +359,9 @@ function shellDocument(slug, version, nonce) {
   const cfgJson = safeJsonForScript({ slug, version, mode: 'local', versions, identity: ident });
   // Sign-in (always) + onboarding (start docs only) are chrome, so they live in
   // the shell, not the isolated author frame — same modules as the overlay path.
-  let signinJs = '', onboardJs = '';
+  let signinJs = '', onboardJs = '', manageJs = '';
   try { signinJs = fs.readFileSync(SIGNIN_PATH, 'utf8'); } catch {}
+  try { manageJs = fs.readFileSync(path.join(__dirname, 'manage.js'), 'utf8'); } catch {}
   if (ONBOARD_SLUGS.has(slug)) { try { onboardJs = fs.readFileSync(ONBOARD_PATH, 'utf8'); } catch {} }
   // Shared chrome module (Contract 1): rendered server-side for the static bar +
   // footer (1:1 with overlay), AND inlined as a nonced <script> so the shell's
@@ -371,7 +372,7 @@ function shellDocument(slug, version, nonce) {
   const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
   return SHELL.shellHtml({
     title, frameSrc, nonceAttr, chromeCssStr: chromeCss(), barInner, footerInner,
-    chromeJs, authCfgJson, cfgJson, signinJs, onboardJs,
+    chromeJs, authCfgJson, cfgJson, signinJs, onboardJs, manageJs,
   });
 }
 
