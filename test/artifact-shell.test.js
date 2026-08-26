@@ -455,6 +455,29 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('#tdoc-comment-layer .tdoc-margin-comment[data-comment-id="c_fixture_1"]', { timeout: 2000 });
     });
 
+    await t('resizing back to wide leaves no drawer residue on screen', async () => {
+      // Narrow first so the drawer DOM gets created and populated, then widen:
+      // the layer must not paint (it used to fall back to absolute top-left,
+      // parking a stack of comment cards in the page corner that no pin click
+      // could dismiss).
+      await page.setViewportSize({ width: 480, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.waitForSelector('.tdoc-fab', { state: 'visible', timeout: 2000 });
+      await page.setViewportSize({ width: 1200, height: 900 });
+      await page.waitForTimeout(300);
+      const leak = await page.evaluate(() => {
+        const layer = document.getElementById('tdoc-comment-layer');
+        if (!layer) return null;
+        const cs = getComputedStyle(layer);
+        if (cs.display === 'none') return null;
+        const r = layer.getBoundingClientRect();
+        return { display: cs.display, top: Math.round(r.top), left: Math.round(r.left) };
+      });
+      if (leak) throw new Error('drawer layer still paints in wide mode: ' + JSON.stringify(leak));
+      const fabVisible = await page.evaluate(() => { const f = document.querySelector('.tdoc-fab'); return !!f && getComputedStyle(f).display !== 'none'; });
+      if (fabVisible) throw new Error('fab still visible after widening');
+    });
+
   } finally {
     await browser.close();
     await target.stop();

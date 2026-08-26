@@ -116,7 +116,10 @@
   #tdoc-inbox-list .tdoc-cluster-row > .muted { flex-shrink: 0; white-space: nowrap; font-size: 12px; }
 
   /* Comment cards */
-  #tdoc-comment-layer { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; z-index: 999996; }
+  /* The layer is the narrow-mode drawer and nothing else: outside narrow mode
+     it must never paint — resizing back above the breakpoint used to leave its
+     rendered cards absolutely-positioned at the page's top-left corner. */
+  #tdoc-comment-layer { display: none; }
   .tdoc-margin-comment { position: absolute; width: 280px; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font: 13px system-ui, sans-serif; transition: box-shadow .15s, transform .15s; z-index: 999996; pointer-events: auto; }
   .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
   .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
@@ -454,7 +457,7 @@
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow #tdoc-comment-layer { position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
+  body.tdoc-narrow #tdoc-comment-layer { display: block; position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
   body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
   /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
      tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
