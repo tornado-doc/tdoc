@@ -24,7 +24,7 @@
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
   if (HL) {
     var st = document.createElement('style');
-    st.textContent = '::highlight(tdoc-anchor){background:rgba(255,214,0,.38);}';
+    st.textContent = '::highlight(tdoc-anchor){background:rgba(255,214,0,.38);} ::highlight(tdoc-pending){background:rgba(255,214,0,.55);}';
     (document.head || document.documentElement).appendChild(st);
   }
   // Element-comment affordances live IN the frame (they hug author artifacts).
@@ -66,6 +66,9 @@
     if (!text) return;
     var range = sel.getRangeAt(0);
     var ctx = context(range, 60);
+    // Paint the pending anchor so it stays visibly marked while the composer
+    // (in the shell document) has focus; cleared on cancel/close (#281 parity).
+    if (HL) { try { CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange())); } catch (e) {} }
     post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after, rect: selectionRect(range) });
   }
   // Links: a click inside the sandboxed frame would navigate the FRAME (nested
@@ -87,6 +90,7 @@
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
     if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
+    if (HL) CSS.highlights.delete('tdoc-pending');
     post({ type: 'tdoc:cleared' });
   }, true);
 
@@ -292,7 +296,7 @@
         return;
       }
       if (c.anchor.kind !== 'text') return;
-      var key = (c.anchor.text || '') + ' ' + (c.anchor.context_before || '') + ' ' + (c.anchor.context_after || '');
+      var key = (c.anchor.text || '') + '\u0000' + (c.anchor.context_before || '') + '\u0000' + (c.anchor.context_after || '');
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
       if (!r) return;
       if (hl) hl.add(r);
@@ -374,6 +378,7 @@
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || d.source !== 'tdoc-shell') return;
     if (d.type === 'tdoc:anchors') reportPins(d.comments);
+    else if (d.type === 'tdoc:clearPending') { if (HL) CSS.highlights.delete('tdoc-pending'); }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {

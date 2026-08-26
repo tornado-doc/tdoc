@@ -41,13 +41,16 @@ jobs:
       # documenting and survives a runner restructure.)
       - name: Validate plugin/marketplace manifests
         run: node test/manifest.test.js
-      # Static guard: the bundled worker must not still contain the overlay
-      # placeholder, and worker/server/overlay must parse.
+      # Static guard: worker/server and every injected chrome module must parse.
+      # (overlay.js is deleted — the monolith was split into these modules.)
       - name: Syntax check
         run: |
           node --check worker/worker.js
           node --check server/server.js
-          node --check server/overlay.js
+          node --check server/chrome.js
+          node --check server/shell.js
+          node --check server/frame-probe.js
+          node --check server/manage.js
           bash -n bin/tdoc-publish
           bash -n bin/tdoc-pull
           bash -n bin/tdoc-new

@@ -454,31 +454,38 @@ function tShellGap(name, reason, _fn) {
   });
 
   await t('Escape and click-outside cancel the popup AND clear the pending highlight', async () => {
-    const hlCount = () => page.evaluate(() => {
+    // The selection + pending highlight live in the author FRAME; the composer
+    // lives in the shell. Escape (shell) and click-outside (frame mousedown →
+    // tdoc:cleared) must both close the composer and clear the frame highlight.
+    const authorFrame = page.frames().find(f => f !== page.mainFrame());
+    if (!authorFrame) throw new Error('author frame not found');
+    const hlCount = () => authorFrame.evaluate(() => {
       const hl = window.CSS && CSS.highlights && CSS.highlights.get('tdoc-pending');
       let n = 0; if (hl) for (const _ of hl) n++; return n;
     });
     async function openOnProse() {
-      return page.evaluate(() => {
-        const p = [...document.querySelectorAll('.wrap p')].find(x => x.firstChild && x.textContent.trim().length > 12);
+      await authorFrame.evaluate(() => {
+        const p = [...document.querySelectorAll('p')].find(x => x.firstChild && x.textContent.trim().length > 12);
         const r = document.createRange();
         r.setStart(p.firstChild, 0); r.setEnd(p.firstChild, Math.min(12, p.firstChild.textContent.length));
         const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
         const rect = r.getBoundingClientRect();
         document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: rect.right - 4, clientY: rect.bottom - 4 }));
-        return !!document.querySelector('.tdoc-popup');
       });
+      await page.waitForSelector('.tdoc-popup', { timeout: 2000 }).catch(() => {});
+      return !!(await page.$('.tdoc-popup'));
     }
     // Escape
     if (!await openOnProse()) throw new Error('popup did not open (Escape case)');
     if (await hlCount() < 1) throw new Error('no pending highlight after opening');
     await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
     if (await page.$('.tdoc-popup')) throw new Error('Escape did not close the popup');
     if (await hlCount() !== 0) throw new Error('Escape did not clear the pending highlight');
-    // click-outside (wait past the 250ms self-close guard)
+    // click-outside: a mousedown in the frame fires tdoc:cleared
     if (!await openOnProse()) throw new Error('popup did not open (click-outside case)');
-    await page.waitForTimeout(320);
-    await page.click('.wrap h1', { position: { x: 5, y: 5 } }).catch(() => page.click('.tdoc-bar .doc-title').catch(() => {}));
+    await authorFrame.click('h1', { position: { x: 5, y: 5 } });
+    await page.waitForTimeout(200);
     if (await page.$('.tdoc-popup')) throw new Error('click-outside did not close the popup');
     if (await hlCount() !== 0) throw new Error('click-outside did not clear the pending highlight');
   });

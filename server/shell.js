@@ -648,9 +648,9 @@
         slot.innerHTML = '';
       }
     }
-    function close(){ var el = document.querySelector('.tdoc-popup'); if (el) el.remove(); pending = null; }
+    function close(keepPending){ var el = document.querySelector('.tdoc-popup'); if (el) el.remove(); pending = null; if (!keepPending) sendFrame({ type: 'tdoc:clearPending' }); }
     function open(d){
-      close();
+      close(true);   // replacing the composer must not clear the fresh pending highlight
       pending = { kind: d.kind || 'text', selector: d.selector, label: d.label, text: d.text, context_before: d.context_before, context_after: d.context_after };
       var pop = document.createElement('div');
       pop.className = 'tdoc-popup';
@@ -775,6 +775,8 @@
     // Sign-in finished elsewhere (onboarding modal, device flow): reload so the
     // identity chip, ownerManage and comments rebuild with the session.
     document.addEventListener('tdoc:signedin', function(){ location.reload(); });
+    // Escape cancels the composer (and clears its pending highlight) + any open chrome.
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') { close(); closeCard(); closeEmojiPicker(); closeMenus(); closeClusterPopover(); closeAuxModal(); } });
     document.addEventListener('click', function(){ closeMenus(); closeEmojiPicker(); closeCard(); closeClusterPopover(); });
     layout();
   })();`;
