@@ -1901,6 +1901,11 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
 
     // Star toggle: optimistic flip (every button for the same slug, across
     // panes), revert on failure. Session cookie authorizes /api/star.
+    // One BroadcastChannel instance for this page: posts our own star changes
+    // (so open doc tabs repaint their bar star) and hears other tabs' changes
+    // (a channel never delivers a message back to the instance that sent it).
+    var channel = null;
+    try { channel = new BroadcastChannel('tdoc-doc-state'); } catch (e) {}
     function paintStar(slug, on) {
       document.querySelectorAll('.star-btn').forEach(function (b) {
         if (b.dataset.slug !== slug) return;
@@ -1908,6 +1913,54 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
         b.textContent = on ? '★' : '☆';
         b.setAttribute('aria-pressed', String(on));
       });
+    }
+    function starredEmpty(pane) {
+      if (!pane.querySelector('.doc-row')) {
+        pane.innerHTML = '<p class="empty">Star docs to find them again quickly.</p>';
+      }
+    }
+    // A fresh star must show up when the user flips to the Starred tab NOW —
+    // the server render is behind us. Clone the essentials from any rendered
+    // row for that slug (My docs or Recent) into a flat row, DOM-built.
+    function addToStarredPane(slug) {
+      var pane = document.getElementById('pane-starred');
+      if (!pane) return;
+      var rows = Array.prototype.slice.call(document.querySelectorAll('.doc-row'));
+      if (rows.some(function (r) { return r.dataset.slug === slug && pane.contains(r); })) return;
+      var src = null;
+      rows.forEach(function (r) { if (!src && r.dataset.slug === slug && r.querySelector('.doc-title')) src = r; });
+      if (!src) return;
+      var list = pane.querySelector('.doc-list');
+      if (!list) {
+        pane.innerHTML = '<div class="doc-list"></div>';
+        list = pane.querySelector('.doc-list');
+      }
+      var row = document.createElement('div');
+      row.className = 'doc-row flat-row';
+      row.dataset.slug = slug;
+      row.dataset.title = src.dataset.title || slug;
+      var info = document.createElement('div');
+      info.className = 'doc-info';
+      var a = document.createElement('a');
+      a.className = 'doc-title';
+      a.href = src.querySelector('.doc-title').href;
+      a.textContent = src.dataset.title || slug;
+      var meta = document.createElement('div');
+      meta.className = 'doc-meta';
+      meta.textContent = 'starred ' + new Date().toISOString().slice(0, 10);
+      info.appendChild(a);
+      info.appendChild(meta);
+      var actions = document.createElement('div');
+      actions.className = 'row-actions';
+      var b = document.createElement('button');
+      b.className = 'star-btn is-starred';
+      b.dataset.slug = slug;
+      b.setAttribute('aria-pressed', 'true');
+      b.textContent = '★';
+      actions.appendChild(b);
+      row.appendChild(info);
+      row.appendChild(actions);
+      list.insertBefore(row, list.firstChild);
     }
     document.addEventListener('click', async function (e) {
       var btn = e.target && e.target.closest ? e.target.closest('.star-btn') : null;
@@ -1924,21 +1977,36 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
           body: JSON.stringify({ slug: slug, starred: starred }),
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        if (!starred) {
-          // Unstarring from the Starred pane removes the row right away.
-          var pane = document.getElementById('pane-starred');
-          if (pane) {
-            pane.querySelectorAll('.doc-row').forEach(function (row) {
-              if (row.dataset.slug === slug) row.remove();
-            });
-            if (!pane.querySelector('.doc-row')) {
-              pane.innerHTML = '<p class="empty">Star docs to find them again quickly.</p>';
-            }
-          }
+        var pane = document.getElementById('pane-starred');
+        if (starred) {
+          addToStarredPane(slug);
+        } else if (pane) {
+          // Unstarring removes the row from the Starred pane right away.
+          pane.querySelectorAll('.doc-row').forEach(function (row) {
+            if (row.dataset.slug === slug) row.remove();
+          });
+          starredEmpty(pane);
         }
+        if (channel) { try { channel.postMessage({ type: 'star', slug: slug, starred: starred }); } catch (e2) {} }
       } catch (err) {
         paintStar(slug, !starred);
       }
+    });
+
+    // Server-rendered pages go stale two ways: a bfcache Back into an old
+    // copy, and star changes made from a doc page in another tab. Reload on
+    // both signals (deferred to the next focus while hidden) — this page has
+    // no client data layer to patch instead (deliberate; see issue #287).
+    var stale = false;
+    window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
+    if (channel) channel.addEventListener('message', function (ev) {
+      var d = ev.data || {};
+      if (d.type !== 'star') return;
+      if (document.hidden) stale = true;
+      else location.reload();
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && stale) location.reload();
     });
   })();
 

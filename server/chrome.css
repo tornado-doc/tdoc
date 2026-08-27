@@ -64,7 +64,9 @@
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
   .tdoc-bar button:hover { background: #f0f1f4; color: #1a1a1a; }
-  .tdoc-bar button.tdoc-star-btn { font-size: 15px; padding: 4px 7px; color: #b9bfca; line-height: 1; }
+  /* flex-shrink 0: when the narrow bar squeezes the title into its ellipsis,
+     the star must keep its full hit target rather than collapse. */
+  .tdoc-bar button.tdoc-star-btn { font-size: 15px; padding: 4px 7px; color: #b9bfca; line-height: 1; flex-shrink: 0; }
   .tdoc-bar button.tdoc-star-btn:hover { color: #f5a623; background: #f0f1f4; }
   .tdoc-bar button.tdoc-star-btn.is-starred { color: #f5a623; }
   .tdoc-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
