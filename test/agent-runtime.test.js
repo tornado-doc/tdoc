@@ -104,11 +104,14 @@ t('tdoc_logo.svg is the vector SoT; PNG stays for Open Graph', () => {
   assert(/<svg[\s>]/.test(svg), 'not an SVG');
   assert(/<path[\s>]/.test(svg), 'SVG has no path');
   assert(/currentColor/.test(svg), 'SVG must follow currentColor');
-  // The mark is ink on an opaque white field, the same look as the landing hero
-  // (a raster measured at 0% transparent). A transparent mark reads as a
-  // see-through outline on any non-white surface, and in dark mode the
-  // page-level invert has no field to flip.
-  assert(/<rect[^>]*fill="#ffffff"/i.test(svg), 'the mark needs an opaque white field');
+  // The mark carries no background field. It used to sit on an opaque white
+  // rect, which stayed invisible in both themes because the page-level
+  // `filter: invert(1)` flips the rect and the page background together. That
+  // only holds while the mark sits on the page's own background: on a tinted
+  // surface, a favicon, or somebody else's README the white box shows. Line
+  // art in currentColor needs no field — it follows the text in light mode and
+  // inverts to white with it in dark.
+  assert(!/<rect[^>]*fill="#(fff|ffffff)"/i.test(svg), 'the mark must not carry a background field');
   assert(svg.indexOf('fill="#ffffff"') < svg.indexOf('fill="currentColor"'),
     'the field must be painted before the ink, or it covers the drawing');
   assert(/fill-rule\s*=\s*["']evenodd["']/.test(svg), 'outline holes need evenodd');
