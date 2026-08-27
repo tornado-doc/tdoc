@@ -455,6 +455,35 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('#tdoc-comment-layer .tdoc-margin-comment[data-comment-id="c_fixture_1"]', { timeout: 2000 });
     });
 
+    await t('hover outline clips to a horizontal scroll container, not the full graph', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      if (!frame) throw new Error('author frame not found');
+      await frame.evaluate(() => document.getElementById('wide-graph').scrollIntoView({ block: 'center' }));
+      let geo = null;
+      for (let i = 0; i < 20 && !geo; i++) {
+        await frame.evaluate(() => {
+          const g = document.getElementById('wide-graph');
+          const w = document.getElementById('scroll-wrap').getBoundingClientRect();
+          g.dispatchEvent(new MouseEvent('mousemove', { clientX: w.left + 40, clientY: w.top + w.height / 2, bubbles: true, view: window }));
+        });
+        await page.waitForTimeout(150);
+        geo = await frame.evaluate(() => {
+          const o = document.querySelector('.tdoc-hover-outline');
+          const p = document.querySelector('.tdoc-comment-pill');
+          if (!o || o.style.display === 'none' || !p || p.style.display === 'none') return null;
+          const wrap = document.getElementById('scroll-wrap').getBoundingClientRect();
+          return { oRight: o.getBoundingClientRect().right, pillRight: p.getBoundingClientRect().right, wrapRight: wrap.right, graphRight: document.getElementById('wide-graph').getBoundingClientRect().right };
+        });
+      }
+      if (!geo) throw new Error('hover outline never appeared over the wide graph');
+      // sanity: the graph really overflows its container in this fixture
+      if (geo.graphRight <= geo.wrapRight + 100) throw new Error('fixture graph does not overflow: ' + JSON.stringify(geo));
+      if (geo.oRight > geo.wrapRight + 2) throw new Error('outline escapes the scroll container: ' + JSON.stringify(geo));
+      if (geo.pillRight > geo.wrapRight + 2) throw new Error('pill escapes the scroll container: ' + JSON.stringify(geo));
+    });
+
     await t('resizing back to wide leaves no drawer residue on screen', async () => {
       // Narrow first so the drawer DOM gets created and populated, then widen:
       // the layer must not paint (it used to fall back to absolute top-left,
