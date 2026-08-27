@@ -1313,6 +1313,9 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   const render = shellDocumentWorker;
   return {
     ok: true,
+    // session rides along so the /d/ route can record the visit (recents)
+    // without a second session lookup.
+    session,
     response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
@@ -1479,6 +1482,106 @@ function redirectTo(location, cookies) {
 // a quiet ⋯ Delete. No access data of any kind is computed or emitted here
 // (gate: response HTML must not contain `allowed_users` — there is nothing
 // here that could).
+// ---- personal docs state: stars, recents, folders ----
+// Per-user KV values, same shape discipline as the notifications inbox: one
+// small JSON blob per login, get→mutate→put, capped lists, only the four KV
+// ops the Vercel shim implements. Stars and recents are viewer-scoped (they
+// follow the signed-in reader across docs they do not own); folders organize
+// only the viewer's own catalog on /me.
+const RECENTS_MAX = 30;
+const STARS_MAX = 200;
+const FOLDERS_MAX = 50;
+const FOLDER_NAME_MAX = 60;
+// A reload of the doc already at the head of the recents list within this
+// window does not rewrite KV — visits are a signal, not an access log.
+const RECENT_REVISIT_MS = 5 * 60 * 1000;
+
+function personalKey(prefix, login) {
+  const n = normalizeGithubLogin(login);
+  return n ? `${prefix}:${n}` : null;
+}
+
+async function loadPersonal(env, key) {
+  if (!key) return null;
+  try {
+    const raw = await env.META.get(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function personalItems(state) {
+  if (!state || !Array.isArray(state.items)) return [];
+  return state.items.filter((i) => i && typeof i.slug === 'string');
+}
+
+async function loadStars(env, login) {
+  return personalItems(await loadPersonal(env, personalKey('stars', login)));
+}
+
+async function loadRecents(env, login) {
+  return personalItems(await loadPersonal(env, personalKey('recents', login)));
+}
+
+async function setDocStar(env, login, slug, starred) {
+  const key = personalKey('stars', login);
+  if (!key) return;
+  const items = personalItems(await loadPersonal(env, key)).filter((i) => i.slug !== slug);
+  if (starred) items.unshift({ slug, at: new Date().toISOString() });
+  await env.META.put(key, JSON.stringify({ items: items.slice(0, STARS_MAX) }));
+}
+
+async function recordDocVisit(env, login, slug) {
+  const key = personalKey('recents', login);
+  if (!key || !isValidSlug(slug)) return;
+  const items = personalItems(await loadPersonal(env, key));
+  if (items[0] && items[0].slug === slug
+      && Date.now() - (Date.parse(items[0].at) || 0) < RECENT_REVISIT_MS) return;
+  const next = [{ slug, at: new Date().toISOString() }, ...items.filter((i) => i.slug !== slug)];
+  await env.META.put(key, JSON.stringify({ items: next.slice(0, RECENTS_MAX) }));
+}
+
+function normalizeFolderState(state) {
+  const folders = state && Array.isArray(state.folders)
+    ? state.folders.filter((f) => f && typeof f.id === 'string' && typeof f.name === 'string')
+    : [];
+  const ids = new Set(folders.map((f) => f.id));
+  const docs = {};
+  if (state && state.docs && typeof state.docs === 'object') {
+    for (const [slug, fid] of Object.entries(state.docs)) {
+      // Drop mappings to folders that no longer exist — docs fall back to root.
+      if (typeof fid === 'string' && ids.has(fid)) docs[slug] = fid;
+    }
+  }
+  return { folders, docs };
+}
+
+async function loadFolderState(env, login) {
+  return normalizeFolderState(await loadPersonal(env, personalKey('folders', login)));
+}
+
+async function saveFolderState(env, login, state) {
+  const key = personalKey('folders', login);
+  if (!key) return;
+  await env.META.put(key, JSON.stringify(normalizeFolderState(state)));
+}
+
+function validFolderName(name) {
+  const n = String(name == null ? '' : name).replace(/[\x00-\x1f\x7f]/g, '').trim();
+  if (!n || n.length > FOLDER_NAME_MAX) return null;
+  return n;
+}
+
+// /me needs to know whether a recent/starred doc — possibly someone else's —
+// is still readable by this viewer. Policy evaluation stays out here so the
+// catalog renderer never touches access data; it only sees the verdict.
+function docReadableBy(env, session, meta) {
+  return canReadDoc(accessFromMeta(meta || {}), session, env, meta);
+}
+
 async function indexHtml(env, session, origin, nonce) {
   // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
   // comment logs here — that was N serial Durable-Object + R2 round trips
@@ -1495,37 +1598,89 @@ async function indexHtml(env, session, origin, nonce) {
   } while (cursor);
 
   const hosted = hostedRegistrationEnabled(env, origin);
-  const docs = (await Promise.all(list.map(async (k) => {
+  const catalog = await Promise.all(list.map(async (k) => {
     const slug = k.name.slice('meta:'.length);
     const metaRaw = await env.META.get(k.name);
     let meta = {};
     try { meta = JSON.parse(metaRaw || '{}'); } catch {}
-    const latest = meta.versions?.[meta.versions.length - 1]?.n || 1;
-    return { slug, title: meta.title || slug, latest, meta };
-  }))).filter((row) => {
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions[versions.length - 1]?.n || 1;
+    const created = meta.created || versions[0]?.created || '';
+    const updated = versions[versions.length - 1]?.created || created;
+    return { slug, title: meta.title || slug, latest, created, updated, meta };
+  }));
+  const docs = catalog.filter((row) => {
     if (hosted) return isDocOwnerSession(env, session, row.meta);
     // BYOK operator catalog: keep other people's hosted copies off the list (#146).
     const hostedLogin = hostedGithubLogin(row.meta);
     if (hostedLogin && hostedLogin !== sessionLogin(session)) return false;
     return true;
   });
+  // Newest activity first — the catalog default. The sort select re-orders
+  // client-side off each row's data-updated/data-created attributes.
+  docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
   const visible = docs;
 
-  const rows = visible.map(({ slug, title, latest }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">
+  // Viewer-scoped state: stars and recents may point at docs the viewer does
+  // not own (a colleague's shared doc). Rows render only for docs that still
+  // exist on this worker AND are still readable by this viewer.
+  const viewerLogin = sessionLogin(session);
+  const [starItems, recentItems, folderState] = viewerLogin
+    ? await Promise.all([loadStars(env, viewerLogin), loadRecents(env, viewerLogin), loadFolderState(env, viewerLogin)])
+    : [[], [], { folders: [], docs: {} }];
+  const bySlug = new Map(catalog.map((r) => [r.slug, r]));
+  const starredSet = new Set(starItems.map((i) => i.slug));
+  const readableRow = (slug) => {
+    const row = bySlug.get(slug);
+    return row && docReadableBy(env, session, row.meta) ? row : null;
+  };
+  const recentRows = recentItems
+    .map((i) => { const r = readableRow(i.slug); return r && { ...r, at: i.at }; })
+    .filter(Boolean);
+  const starRows = starItems
+    .map((i) => { const r = readableRow(i.slug); return r && { ...r, at: i.at }; })
+    .filter(Boolean);
+
+  const day = (iso) => (typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '');
+  const starBtn = (slug) => `<button class="star-btn${starredSet.has(slug) ? ' is-starred' : ''}" data-slug="${escapeHtml(slug)}" aria-pressed="${starredSet.has(slug)}" aria-label="${starredSet.has(slug) ? 'Unstar' : 'Star'} ${escapeHtml(slug)}">${starredSet.has(slug) ? '★' : '☆'}</button>`;
+
+  const rows = visible.map(({ slug, title, latest, created, updated }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}" data-created="${escapeHtml(created)}" data-updated="${escapeHtml(updated)}" data-folder="${escapeHtml(folderState.docs[slug] || '')}">
       <label class="row-check">
         <input type="checkbox" class="doc-check" aria-label="Select ${escapeHtml(title)}">
       </label>
       <div class="doc-info">
         <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(title)}</a>
-        <div class="doc-meta">${escapeHtml(slug)} · v${latest}</div>
+        <div class="doc-meta">${escapeHtml(slug)} · v${latest}${day(updated) ? ` · updated ${day(updated)}` : ''}</div>
       </div>
       <div class="row-actions">
+        ${starBtn(slug)}
         <button class="row-menu-btn" aria-label="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>
         <div class="row-menu" hidden>
+          <button class="row-move" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">Move to folder…</button>
           <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">Delete…</button>
         </div>
       </div>
     </div>`);
+
+  // Recent / Starred panes: read-only rows (no select, no manage menu — the
+  // viewer may not own these docs), a byline for someone else's doc, and the
+  // same star toggle.
+  const flatRow = (row, label) => {
+    const owner = hostedGithubLogin(row.meta);
+    const by = owner && owner !== viewerLogin ? `by ${owner} · ` : '';
+    return `<div class="doc-row flat-row" data-slug="${escapeHtml(row.slug)}" data-title="${escapeHtml(row.title)}">
+      <div class="doc-info">
+        <a class="doc-title" href="/d/${encodeURIComponent(row.slug)}/v/${row.latest}">${escapeHtml(row.title)}</a>
+        <div class="doc-meta">${escapeHtml(by)}${label} ${day(row.at)}</div>
+      </div>
+      <div class="row-actions">${starBtn(row.slug)}</div>
+    </div>`;
+  };
+  const recentList = recentRows.map((r) => flatRow(r, 'visited')).join('');
+  const starList = starRows.map((r) => flatRow(r, 'starred')).join('');
+
+  const folderChips = folderState.folders.map((f) => `<button class="chip folder-chip" data-folder="${escapeHtml(f.id)}">${escapeHtml(f.name)}</button>`).join('');
+  const foldersJson = JSON.stringify(folderState.folders.map((f) => ({ id: f.id, name: f.name }))).replace(/</g, '\\u003c');
 
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My docs</title>
 <style>
@@ -1603,20 +1758,82 @@ async function indexHtml(env, session, origin, nonce) {
   .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
   .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
+  .tdoc-modal input[type="text"] { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid var(--td-line); border-radius: 8px; margin: 0 0 14px; }
+  .tdoc-modal input[type="text"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
+  /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
+     switches over the already-rendered page — no fetch on tab change. */
+  .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--td-line); }
+  .tab { border: none; background: none; font: inherit; font-weight: 600; color: var(--td-muted); padding: 8px 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--td-ink); }
+  .tab.is-active { color: var(--td-accent); border-bottom-color: var(--td-accent); }
+  .pane[hidden] { display: none !important; }
+  .toolbar select { font: inherit; padding: 8px 10px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
+  .folder-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+  .chip { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--td-line); background: #fff; color: var(--td-ink); }
+  .chip.is-active { background: var(--td-accent-tint); border-color: var(--td-accent); color: var(--td-accent); font-weight: 600; }
+  .chip.new-folder { color: var(--td-muted); border-style: dashed; }
+  .folder-tools { display: none; gap: 2px; }
+  .folder-tools.is-visible { display: inline-flex; }
+  .folder-tools button { font-size: 12px; border: none; background: none; color: var(--td-muted); padding: 4px 6px; border-radius: 6px; }
+  .folder-tools button:hover { background: var(--td-line); color: var(--td-ink); }
+  .star-btn { border: none; background: none; font-size: 17px; color: #ccc; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+  .doc-row:hover .star-btn { color: var(--td-muted); }
+  .star-btn:hover { background: var(--td-line); color: #f5a623; }
+  .star-btn.is-starred, .doc-row:hover .star-btn.is-starred { color: #f5a623; }
+  .batch-actions { display: flex; gap: 8px; }
+  .batch-move { display: none; font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-accent); background: #fff; color: var(--td-accent); }
+  .batch-move.is-visible { display: inline-block; }
+  .batch-move:hover { background: var(--td-accent); color: #fff; }
+  .batch-move:disabled { opacity: 0.5; cursor: default; }
+  .row-move { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-ink); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
+  .row-move:hover { background: var(--td-surface); }
+  .move-list { display: flex; flex-direction: column; gap: 4px; margin: 0 0 14px; max-height: 40vh; overflow: auto; }
+  .move-list button { text-align: left; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--td-line); background: #fff; }
+  .move-list button:hover { background: var(--td-accent-tint); border-color: var(--td-accent); }
 </style>
 </head><body>
 <div class="wrap">
 <div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
+<div class="tabs" role="tablist">
+  <button type="button" class="tab is-active" data-pane="pane-mine" role="tab" aria-selected="true">My docs</button>
+  <button type="button" class="tab" data-pane="pane-recent" role="tab" aria-selected="false">Recent</button>
+  <button type="button" class="tab" data-pane="pane-starred" role="tab" aria-selected="false">Starred</button>
+</div>
+<section class="pane" id="pane-mine">
 ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how, or <a href="/templates">browse templates</a> for a look to start from.</p>' :
   `<div class="toolbar">
     <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
+    <select id="doc-sort" aria-label="Sort docs">
+      <option value="updated">Last updated</option>
+      <option value="created">Created</option>
+      <option value="title">Title</option>
+    </select>
+  </div>
+  <div class="folder-bar" id="folder-bar">
+    <button type="button" class="chip is-active" data-folder="">All docs</button>
+    ${folderChips}
+    <button type="button" class="chip new-folder" id="new-folder">+ New folder</button>
+    <span class="folder-tools" id="folder-tools">
+      <button type="button" id="folder-rename">Rename</button>
+      <button type="button" id="folder-delete">Delete folder</button>
+    </span>
   </div>
   <div class="batch-bar">
     <label class="select-all"><input type="checkbox" id="select-all"> <span id="select-all-label">Select all</span></label>
-    <button type="button" id="batch-delete" class="batch-delete">Delete selected</button>
+    <span class="batch-actions">
+      <button type="button" id="batch-move" class="batch-move">Move</button>
+      <button type="button" id="batch-delete" class="batch-delete">Delete selected</button>
+    </span>
   </div>
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
+</section>
+<section class="pane" id="pane-recent" hidden>
+  ${recentList ? `<div class="doc-list">${recentList}</div>` : '<p class="empty">Docs you open show up here.</p>'}
+</section>
+<section class="pane" id="pane-starred" hidden>
+  ${starList ? `<div class="doc-list">${starList}</div>` : '<p class="empty">Star docs to find them again quickly.</p>'}
+</section>
 </div>
 
 <div class="mk-bg" id="mk-bg" hidden>
@@ -1646,6 +1863,66 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     document.getElementById('mk-x').onclick = function () { show(false); };
     bg.addEventListener('click', function (e) { if (e.target === bg) show(false); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !bg.hidden) show(false); });
+  })();
+
+  // Tabs + stars — wired independently of the catalog block below, which
+  // bails out early when the viewer has no docs of their own (Recent and
+  // Starred can still have rows in that case).
+  (function () {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        tabs.forEach(function (t) {
+          var active = t === tab;
+          t.classList.toggle('is-active', active);
+          t.setAttribute('aria-selected', String(active));
+          var pane = document.getElementById(t.dataset.pane);
+          if (pane) pane.hidden = !active;
+        });
+      });
+    });
+
+    // Star toggle: optimistic flip (every button for the same slug, across
+    // panes), revert on failure. Session cookie authorizes /api/star.
+    function paintStar(slug, on) {
+      document.querySelectorAll('.star-btn').forEach(function (b) {
+        if (b.dataset.slug !== slug) return;
+        b.classList.toggle('is-starred', on);
+        b.textContent = on ? '★' : '☆';
+        b.setAttribute('aria-pressed', String(on));
+      });
+    }
+    document.addEventListener('click', async function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.star-btn') : null;
+      if (!btn) return;
+      e.stopPropagation();
+      var slug = btn.dataset.slug;
+      var starred = !btn.classList.contains('is-starred');
+      paintStar(slug, starred);
+      try {
+        var res = await fetch('/api/star', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug: slug, starred: starred }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        if (!starred) {
+          // Unstarring from the Starred pane removes the row right away.
+          var pane = document.getElementById('pane-starred');
+          if (pane) {
+            pane.querySelectorAll('.doc-row').forEach(function (row) {
+              if (row.dataset.slug === slug) row.remove();
+            });
+            if (!pane.querySelector('.doc-row')) {
+              pane.innerHTML = '<p class="empty">Star docs to find them again quickly.</p>';
+            }
+          }
+        }
+      } catch (err) {
+        paintStar(slug, !starred);
+      }
+    });
   })();
 
 (() => {
@@ -1686,6 +1963,79 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
       goBtn.onclick = () => done(true);
       document.body.appendChild(bg);
     });
+  }
+  // Styled text prompt (folder names) — same modal chrome as showConfirm.
+  // Resolves the trimmed value, or null on cancel/backdrop.
+  function showPrompt({ title, confirmLabel, value = '', placeholder = '' }) {
+    return new Promise((resolve) => {
+      const bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg';
+      bg.innerHTML = '<div class="tdoc-modal">' +
+        '<h3></h3><input type="text" maxlength="60">' +
+        '<div class="actions">' +
+          '<button type="button" data-act="cancel">Cancel</button>' +
+          '<button type="button" data-act="go"></button>' +
+        '</div></div>';
+      bg.querySelector('h3').textContent = title;
+      const input = bg.querySelector('input');
+      input.value = value;
+      input.placeholder = placeholder;
+      bg.querySelector('[data-act="go"]').textContent = confirmLabel;
+      const done = (v) => { bg.remove(); resolve(v); };
+      const go = () => { const v = input.value.trim(); if (v) done(v); };
+      bg.querySelector('[data-act="cancel"]').onclick = () => done(null);
+      bg.querySelector('[data-act="go"]').onclick = go;
+      bg.addEventListener('click', (e) => { if (e.target === bg) done(null); });
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+      document.body.appendChild(bg);
+      input.focus();
+    });
+  }
+  // Folder picker for Move — a button per destination, DOM-built (no
+  // innerHTML with user-named folders). Resolves {folder} or null.
+  function pickFolder(title) {
+    return new Promise((resolve) => {
+      const bg = document.createElement('div');
+      bg.className = 'tdoc-modal-bg';
+      const box = document.createElement('div');
+      box.className = 'tdoc-modal';
+      const h = document.createElement('h3');
+      h.textContent = title;
+      box.appendChild(h);
+      const done = (v) => { bg.remove(); resolve(v); };
+      const listBox = document.createElement('div');
+      listBox.className = 'move-list';
+      const add = (id, name) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = name;
+        b.onclick = () => done({ folder: id });
+        listBox.appendChild(b);
+      };
+      add('', 'All docs (no folder)');
+      FOLDERS.forEach((f) => add(f.id, f.name));
+      box.appendChild(listBox);
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.textContent = 'Cancel';
+      cancel.onclick = () => done(null);
+      actions.appendChild(cancel);
+      box.appendChild(actions);
+      bg.appendChild(box);
+      bg.addEventListener('click', (e) => { if (e.target === bg) done(null); });
+      document.body.appendChild(bg);
+    });
+  }
+  async function moveDocs(slugs, folder) {
+    const res = await fetch('/api/folders/move', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slugs, folder: folder || null }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
   }
   // ⋯ overflow menu — one open at a time; a click anywhere else closes it.
   function closeMenus(except) {
@@ -1751,13 +2101,16 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
 
   // Search + batch select — client-side only over the already-rendered rows.
   // No access data, no extra KV/R2; keep the catalog fast (#115).
-  const listEl = document.querySelector('.doc-list');
+  const listEl = document.querySelector('#pane-mine .doc-list');
   if (!listEl) return;
   const search = document.getElementById('doc-search');
   const selectAll = document.getElementById('select-all');
   const selectAllLabel = document.getElementById('select-all-label');
   const batchDelete = document.getElementById('batch-delete');
+  const batchMove = document.getElementById('batch-move');
   const noMatch = document.getElementById('no-match');
+  const FOLDERS = ${foldersJson};
+  let activeFolder = '';
 
   function visibleRows() {
     return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => !row.hidden);
@@ -1779,6 +2132,8 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     });
     batchDelete.classList.toggle('is-visible', n > 0);
     batchDelete.textContent = n <= 1 ? 'Delete' : ('Delete ' + n);
+    batchMove.classList.toggle('is-visible', n > 0);
+    batchMove.textContent = n <= 1 ? 'Move' : ('Move ' + n);
     const allVisibleChecked = visible.length > 0 && visible.every((row) => {
       const box = row.querySelector('.doc-check');
       return box && box.checked;
@@ -1804,7 +2159,8 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     let shown = 0;
     listEl.querySelectorAll('.doc-row').forEach((row) => {
       const hay = ((row.dataset.title || '') + ' ' + (row.dataset.slug || '')).toLowerCase();
-      const match = !q || hay.includes(q);
+      const inFolder = !activeFolder || (row.dataset.folder || '') === activeFolder;
+      const match = (!q || hay.includes(q)) && inFolder;
       row.hidden = !match;
       if (match) shown += 1;
       else {
@@ -1857,6 +2213,123 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     if (failed && ok) toast("Deleted " + ok + " · couldn't delete " + failed, 'error');
     else if (failed) toast("Couldn't delete", 'error');
     else toast('Deleted');
+  });
+
+  // Sort — re-orders the rendered rows off their data attributes; the server
+  // default is last-updated-first, matching the select's initial value.
+  const sortSel = document.getElementById('doc-sort');
+  sortSel.addEventListener('change', () => {
+    const key = sortSel.value;
+    const all = Array.from(listEl.querySelectorAll('.doc-row'));
+    all.sort((a, b) => {
+      if (key === 'title') {
+        return (a.dataset.title || '').localeCompare(b.dataset.title || '', undefined, { sensitivity: 'base' });
+      }
+      return (b.dataset[key] || '').localeCompare(a.dataset[key] || '');
+    });
+    all.forEach((row) => listEl.appendChild(row));
+  });
+
+  // Folders — chips filter the list; the ⋯ menu and the batch bar move docs.
+  // Create/rename/delete reload the page (the chip row and FOLDERS list are
+  // server-rendered); move updates rows in place.
+  const folderBar = document.getElementById('folder-bar');
+  const folderTools = document.getElementById('folder-tools');
+  function setFolder(id) {
+    activeFolder = id;
+    folderBar.querySelectorAll('.chip[data-folder]').forEach((c) => {
+      c.classList.toggle('is-active', c.dataset.folder === id);
+    });
+    folderTools.classList.toggle('is-visible', !!id);
+    applySearch();
+  }
+  folderBar.addEventListener('click', (e) => {
+    const chip = e.target && e.target.closest ? e.target.closest('.chip[data-folder]') : null;
+    if (chip) setFolder(chip.dataset.folder);
+  });
+  document.getElementById('new-folder').addEventListener('click', async () => {
+    const name = await showPrompt({ title: 'New folder', confirmLabel: 'Create', placeholder: 'Folder name' });
+    if (!name) return;
+    const res = await fetch('/api/folders', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) { toast("Couldn't create folder", 'error'); return; }
+    location.reload();
+  });
+  document.getElementById('folder-rename').addEventListener('click', async () => {
+    if (!activeFolder) return;
+    const cur = FOLDERS.find((f) => f.id === activeFolder);
+    const name = await showPrompt({ title: 'Rename folder', confirmLabel: 'Rename', value: cur ? cur.name : '' });
+    if (!name) return;
+    const res = await fetch('/api/folders', {
+      method: 'PATCH',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: activeFolder, name }),
+    });
+    if (!res.ok) { toast("Couldn't rename folder", 'error'); return; }
+    location.reload();
+  });
+  document.getElementById('folder-delete').addEventListener('click', async () => {
+    if (!activeFolder) return;
+    const cur = FOLDERS.find((f) => f.id === activeFolder);
+    const proceed = await showConfirm({
+      title: 'Delete folder "' + ((cur && cur.name) || '') + '"?',
+      body: 'Docs inside go back to All docs. No documents are deleted.',
+      confirmLabel: 'Delete folder',
+      danger: true,
+    });
+    if (!proceed) return;
+    const res = await fetch('/api/folders?id=' + encodeURIComponent(activeFolder), {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
+    if (!res.ok) { toast("Couldn't delete folder", 'error'); return; }
+    location.reload();
+  });
+  document.querySelectorAll('.row-move').forEach((button) => {
+    button.addEventListener('click', async () => {
+      closeMenus(null);
+      const pick = await pickFolder('Move "' + (button.dataset.title || button.dataset.slug) + '" to…');
+      if (!pick) return;
+      try {
+        await moveDocs([button.dataset.slug], pick.folder);
+      } catch {
+        toast("Couldn't move", 'error');
+        return;
+      }
+      const row = button.closest('.doc-row');
+      row.dataset.folder = pick.folder || '';
+      applySearch();
+      toast('Moved');
+    });
+  });
+  batchMove.addEventListener('click', async () => {
+    const rows = selectedRows();
+    if (!rows.length) return;
+    const pick = await pickFolder(rows.length === 1
+      ? ('Move "' + (rows[0].dataset.title || rows[0].dataset.slug) + '" to…')
+      : ('Move ' + rows.length + ' docs to…'));
+    if (!pick) return;
+    batchMove.disabled = true;
+    try {
+      await moveDocs(rows.map((row) => row.dataset.slug), pick.folder);
+    } catch {
+      batchMove.disabled = false;
+      toast("Couldn't move", 'error');
+      return;
+    }
+    batchMove.disabled = false;
+    rows.forEach((row) => {
+      row.dataset.folder = pick.folder || '';
+      const box = row.querySelector('.doc-check');
+      if (box) box.checked = false;
+    });
+    applySearch();
+    toast('Moved');
   });
   syncBatchUi();
 })();
@@ -3385,6 +3858,15 @@ export default {
     if (docMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr] = docMatch;
       const res = await serveDocVersion(env, req, slug, Number(vStr));
+      // Google-Docs-style recents: remember the visit — owned or not — for
+      // the signed-in viewer's /me Recent tab. Only successful reads count
+      // (the access gate already passed), HEAD probes and anonymous readers
+      // don't, and the KV write never blocks the response.
+      if (res.ok && method === 'GET' && sessionLogin(res.session)) {
+        const record = recordDocVisit(env, res.session.login, slug).catch(() => {});
+        if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(record);
+        else await record;
+      }
       return res.response;
     }
 
@@ -3754,6 +4236,108 @@ export default {
       inbox = markInboxRead(inbox, { ids: body.ids, comment_id: body.comment_id });
       await env.META.put(key, JSON.stringify(inbox));
       return json({ ok: true, unread: inboxUnread(inbox) });
+    }
+
+    // ---- personal docs state (stars / folders) ----
+    // Viewer-scoped, cookie-authorized: stars follow the signed-in reader
+    // across any doc they can read; folders organize only their own catalog.
+    // No cross-user state is ever touched — each login mutates its own
+    // stars:<login> / folders:<login> KV value.
+    if (p === '/api/star' && method === 'POST') {
+      const s = await getSession(env, req);
+      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body.slug;
+      const starred = !!body.starred;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      if (starred) {
+        // Star only docs that exist here and that this viewer can read —
+        // otherwise /api/star is an existence oracle for private slugs.
+        const meta = await loadDocMeta(env, slug);
+        if (!meta || !docReadableBy(env, s, meta)) return json({ error: 'not_found' }, { status: 404 });
+      }
+      await setDocStar(env, s.login, slug, starred);
+      return json({ ok: true, slug, starred });
+    }
+
+    if (p === '/api/folders' && method === 'POST') {
+      const s = await getSession(env, req);
+      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const name = validFolderName(body.name);
+      if (!name) return json({ error: 'invalid_name' }, { status: 400 });
+      const state = await loadFolderState(env, s.login);
+      if (state.folders.length >= FOLDERS_MAX) return json({ error: 'too_many_folders' }, { status: 400 });
+      if (state.folders.some((f) => f.name.toLowerCase() === name.toLowerCase())) {
+        return json({ error: 'duplicate_name' }, { status: 400 });
+      }
+      const folder = { id: `f_${Date.now()}_${rand(4)}`, name, created: new Date().toISOString() };
+      state.folders.push(folder);
+      await saveFolderState(env, s.login, state);
+      return json({ ok: true, folder: { id: folder.id, name: folder.name } });
+    }
+
+    if (p === '/api/folders' && method === 'PATCH') {
+      const s = await getSession(env, req);
+      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const name = validFolderName(body.name);
+      if (!name) return json({ error: 'invalid_name' }, { status: 400 });
+      const state = await loadFolderState(env, s.login);
+      const folder = state.folders.find((f) => f.id === body.id);
+      if (!folder) return json({ error: 'not_found' }, { status: 404 });
+      if (state.folders.some((f) => f !== folder && f.name.toLowerCase() === name.toLowerCase())) {
+        return json({ error: 'duplicate_name' }, { status: 400 });
+      }
+      folder.name = name;
+      await saveFolderState(env, s.login, state);
+      return json({ ok: true, folder: { id: folder.id, name: folder.name } });
+    }
+
+    if (p === '/api/folders' && method === 'DELETE') {
+      const s = await getSession(env, req);
+      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      const id = url.searchParams.get('id');
+      const state = await loadFolderState(env, s.login);
+      if (!state.folders.some((f) => f.id === id)) return json({ error: 'not_found' }, { status: 404 });
+      state.folders = state.folders.filter((f) => f.id !== id);
+      // normalizeFolderState in the save path drops the now-orphaned doc
+      // mappings, so the docs fall back to the root ("All docs").
+      await saveFolderState(env, s.login, state);
+      return json({ ok: true });
+    }
+
+    if (p === '/api/folders/move' && method === 'POST') {
+      const s = await getSession(env, req);
+      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const folderId = body.folder == null ? null : String(body.folder);
+      const slugs = Array.isArray(body.slugs) ? body.slugs : [];
+      if (!slugs.length || slugs.length > 100 || !slugs.every((x) => typeof x === 'string' && isValidSlug(x))) {
+        return json({ error: 'invalid_slugs' }, { status: 400 });
+      }
+      const state = await loadFolderState(env, s.login);
+      if (folderId && !state.folders.some((f) => f.id === folderId)) {
+        return json({ error: 'folder_not_found' }, { status: 404 });
+      }
+      // Folders shelve the viewer's OWN catalog — moving someone else's doc
+      // is meaningless here and refused rather than silently recorded.
+      for (const slug of slugs) {
+        const meta = await loadDocMeta(env, slug);
+        if (!meta || !isDocOwnerSession(env, s, meta)) {
+          return json({ error: 'not_owner', slug }, { status: 403 });
+        }
+      }
+      for (const slug of slugs) {
+        if (folderId) state.docs[slug] = folderId;
+        else delete state.docs[slug];
+      }
+      await saveFolderState(env, s.login, state);
+      return json({ ok: true, moved: slugs.length, folder: folderId });
     }
 
     // ---- hosted publish token bootstrap ----
