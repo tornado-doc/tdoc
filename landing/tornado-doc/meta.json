@@ -1,228 +1,233 @@
 {
-  "title": "tornado-doc",
-  "slug": "tornado-doc",
-  "created": "2026-08-15T00:00:00Z",
-  "versions": [
-    {
-      "n": 1,
-      "created": "2026-08-15T00:00:00Z",
-      "prompt": "Simple tornado-doc landing page"
-    },
-    {
-      "n": 2,
-      "created": "2026-08-16T03:30:00Z",
-      "prompt": "Apply the 16 comments left on v1: real Conway board, OpenTag viz idiom, marquee, big runtime logos, compare marks, social proof"
-    },
-    {
-      "n": 3,
-      "created": "2026-08-16T04:05:00Z",
-      "prompt": "Apply the 11 comments left on v2: real avatars, no viz captions, equal card and CTA sizing, readable compare cells, self-host wording, fewer feature cards, wider stage"
-    },
-    {
-      "n": 4,
-      "created": "2026-08-16T04:10:00Z",
-      "prompt": "v4: restore the 11 v2 comments that v3 wiped, and drop the social-proof wall v3 put back (real names from another product next to PLACEHOLDER quotes)."
-    },
-    {
-      "n": 5,
-      "created": "2026-08-16T04:50:00Z",
-      "prompt": "Real tdoc screenshots for the artifact tiles, collaboration and replies cards, equal CTAs, demo inside the page width, self host merged into bring-your-own-agent"
-    },
-    {
-      "n": 6,
-      "created": "2026-08-16T05:10:00Z",
-      "prompt": "Real tdoc comment card styling in the hero, host logos beside runtimes, table gap and style, equal CTA grid, tighter social proof cards"
-    },
-    {
-      "n": 7,
-      "created": "2026-08-16T06:25:00Z",
-      "prompt": "Phone: headline actually shrinks (h1.tagline beats 56px), CTA grid stacks so 216+216 cannot overflow 375, close the browser wrapper"
-    },
-    {
-      "n": 8,
-      "created": "2026-08-16T05:55:00Z",
-      "prompt": "Override the overlay rules breaking table seams, avatar alignment and runtime/host balance; keep the 375px CTA stack"
-    },
-    {
-      "n": 9,
-      "created": "2026-08-16T06:20:00Z",
-      "prompt": "Fix the six UI defects found by screenshotting each section, plus rebalance runtimes and hosts"
-    },
-    {
-      "n": 10,
-      "created": "2026-08-16T07:00:00Z",
-      "prompt": "Replicate the real published comment card from tdoc.dev/d/conway-life/v/2 exactly"
-    },
-    {
-      "n": 11,
-      "created": "2026-08-16T07:20:00Z",
-      "prompt": "Agent avatar renders the full Claude mark like the real reader, not a glyph on a white disc"
-    },
-    {
-      "n": 12,
-      "created": "2026-08-16T07:45:00Z",
-      "prompt": "CTA reworked toward the OpenTag treatment: pill buttons, icon trust line above, explicit secondary label"
-    },
-    {
-      "n": 13,
-      "created": "2026-08-16T07:35:00Z",
-      "prompt": "Agent avatar is a terracotta disc. Phone CTA max-width matches the new 232px pills so Star on GitHub does not wrap."
-    },
-    {
-      "n": 14,
-      "created": "2026-08-16T08:40:00Z",
-      "prompt": "Four features led by replies, no margin panel, aligned card grid, header-weight compare label column"
-    },
-    {
-      "n": 15,
-      "created": "2026-08-16T09:00:00Z",
-      "prompt": "Hero direction C: the doc your AI can actually edit, with a shorter sub anchored to Google Docs"
-    },
-    {
-      "n": 16,
-      "created": "2026-08-16T09:20:00Z",
-      "prompt": "Hero leads with the chore being removed: stop babysitting comments"
-    },
-    {
-      "n": 17,
-      "created": "2026-08-16T09:40:00Z",
-      "prompt": "Restore the 52px CTA pill lock v14 dropped; the used GitHub mark overflowed its 1em box and stretched Star to 77px"
-    },
-    {
-      "n": 18,
-      "created": "2026-08-16T10:05:00Z",
-      "prompt": "Hero: a doc that answers its own comments. Compare against ChatGPT and Claude artifacts instead of Mintlify"
-    },
-    {
-      "n": 19,
-      "created": "2026-08-16T10:25:00Z",
-      "prompt": "Sub fits two lines; the overlay image margin was also pushing the agent mark out of its disc"
-    },
-    {
-      "n": 20,
-      "created": "2026-08-16T10:40:00Z",
-      "prompt": "Bring your own AI lede cut to three beats and says open source outright"
-    },
-    {
-      "n": 21,
-      "created": "2026-08-16T11:00:00Z",
-      "prompt": "Features heading hooks the hero claim; card 02 moves off the agent and onto the reader so the four stop overlapping"
-    },
-    {
-      "n": 22,
-      "created": "2026-08-16T11:20:00Z",
-      "prompt": "Compare table trimmed to five rows, AI identity row replaces the replies row"
-    },
-    {
-      "n": 23,
-      "created": "2026-08-16T11:45:00Z",
-      "prompt": "Drop the artifact tile section; its examples were mostly Notion-native and it restated the ANYTHING card"
-    },
-    {
-      "n": 24,
-      "created": "2026-08-16T12:05:00Z",
-      "prompt": "Four features rewritten so each one breaks if you swap in Notion, with titles that name the feature outright"
-    },
-    {
-      "n": 25,
-      "created": "2026-08-16T12:25:00Z",
-      "prompt": "One sentence per line in the sub; brand mark large enough to read"
-    },
-    {
-      "n": 26,
-      "created": "2026-08-16T12:45:00Z",
-      "prompt": "Comment mock matched to a real thread: fixed-in-version chip, applied chip on the agent reply, heart reaction, delete action"
-    },
-    {
-      "n": 27,
-      "created": "2026-08-16T13:05:00Z",
-      "prompt": "Hero sub takes the middleman line; closing section gets its own heading back"
-    },
-    {
-      "n": 28,
-      "created": "2026-08-16T13:25:00Z",
-      "prompt": "Unframed logo at double size, hero spacing regrouped, embeds aside dropped from the table"
-    },
-    {
-      "n": 29,
-      "created": "2026-08-16T13:40:00Z",
-      "prompt": "Phone: restack the loop, feature cards, and quote wall. Three 164px quote columns overflowed 375 to 545; the loop was 98px, one word per line."
-    },
-    {
-      "n": 30,
-      "created": "2026-08-16T14:10:00Z",
-      "prompt": "Hero spacing reduced to two values: 12 inside a group, 40 between groups"
-    },
-    {
-      "n": 31,
-      "created": "2026-08-16T14:30:00Z",
-      "prompt": "Four feature titles reworded: babysits, own identity, version control, agent native HTML"
-    },
-    {
-      "n": 32,
-      "created": "2026-08-16T14:50:00Z",
-      "prompt": "Version control card states what it survives instead of what it is not"
-    },
-    {
-      "n": 33,
-      "created": "2026-08-16T15:05:00Z",
-      "prompt": "Invented commenter name replaced with the anonymous author the real reader shows"
-    },
-    {
-      "n": 34,
-      "created": "2026-08-16T15:25:00Z",
-      "prompt": "Mock commenter named Anna; photo avatar pending a licensed image"
-    },
-    {
-      "n": 35,
-      "created": "2026-08-16T15:50:00Z",
-      "prompt": "Phone CTAs share one row instead of stacking"
-    },
-    {
-      "n": 36,
-      "created": "2026-08-16T16:10:00Z",
-      "prompt": "Loop step 2: drop the orphan rects left outside the svg after the early close"
-    },
-    {
-      "n": 37,
-      "created": "2026-08-16T23:47:00Z",
-      "prompt": "v37: replace the six PLACEHOLDER quotes with same-length tdoc lines; keep the six people; swap OpenTag trusted-by leftovers for agents and hosts tdoc runs on"
-    },
-    {
-      "n": 38,
-      "created": "2026-08-17T00:40:00Z",
-      "prompt": "Ring the Conway board and align the thread to it, so the comment reads as anchored to the artifact"
-    },
-    {
-      "n": 39,
-      "created": "2026-08-17T01:00:00Z",
-      "prompt": "Hero board becomes a real Conway widget island instead of a CSS keyframe"
-    },
-    {
-      "n": 40,
-      "created": "2026-08-17T07:20:00Z",
-      "prompt": "The Create-your-first-doc button opens onboarding instead of a GitHub markdown file"
-    },
-    {
-      "n": 41,
-      "created": "2026-08-18T06:40:00Z",
-      "prompt": "The demo commenter is Jesse Pollak, with his own avatar"
-    },
-    {
-      "n": 42,
-      "created": "2026-08-18T14:30:00Z",
-      "prompt": "Docs that act on your comments: work-angle landing page with four real demo tabs"
-    },
-    {
-      "n": 43,
-      "created": "2026-08-20T00:00:00Z",
-      "prompt": "Redesign: clear value prop (agent writes, you comment, AI updates all), star to top, single CTA, drop font picker + fluff"
-    }
-  ],
-  "access": {
-    "visibility": "public",
-    "history_visibility": "owner",
-    "commenting": "signed_in",
-    "allowed_users": []
+ "title": "tornado-doc",
+ "slug": "tornado-doc",
+ "created": "2026-08-15T00:00:00Z",
+ "versions": [
+  {
+   "n": 1,
+   "created": "2026-08-15T00:00:00Z",
+   "prompt": "Simple tornado-doc landing page"
+  },
+  {
+   "n": 2,
+   "created": "2026-08-16T03:30:00Z",
+   "prompt": "Apply the 16 comments left on v1: real Conway board, OpenTag viz idiom, marquee, big runtime logos, compare marks, social proof"
+  },
+  {
+   "n": 3,
+   "created": "2026-08-16T04:05:00Z",
+   "prompt": "Apply the 11 comments left on v2: real avatars, no viz captions, equal card and CTA sizing, readable compare cells, self-host wording, fewer feature cards, wider stage"
+  },
+  {
+   "n": 4,
+   "created": "2026-08-16T04:10:00Z",
+   "prompt": "v4: restore the 11 v2 comments that v3 wiped, and drop the social-proof wall v3 put back (real names from another product next to PLACEHOLDER quotes)."
+  },
+  {
+   "n": 5,
+   "created": "2026-08-16T04:50:00Z",
+   "prompt": "Real tdoc screenshots for the artifact tiles, collaboration and replies cards, equal CTAs, demo inside the page width, self host merged into bring-your-own-agent"
+  },
+  {
+   "n": 6,
+   "created": "2026-08-16T05:10:00Z",
+   "prompt": "Real tdoc comment card styling in the hero, host logos beside runtimes, table gap and style, equal CTA grid, tighter social proof cards"
+  },
+  {
+   "n": 7,
+   "created": "2026-08-16T06:25:00Z",
+   "prompt": "Phone: headline actually shrinks (h1.tagline beats 56px), CTA grid stacks so 216+216 cannot overflow 375, close the browser wrapper"
+  },
+  {
+   "n": 8,
+   "created": "2026-08-16T05:55:00Z",
+   "prompt": "Override the overlay rules breaking table seams, avatar alignment and runtime/host balance; keep the 375px CTA stack"
+  },
+  {
+   "n": 9,
+   "created": "2026-08-16T06:20:00Z",
+   "prompt": "Fix the six UI defects found by screenshotting each section, plus rebalance runtimes and hosts"
+  },
+  {
+   "n": 10,
+   "created": "2026-08-16T07:00:00Z",
+   "prompt": "Replicate the real published comment card from tdoc.dev/d/conway-life/v/2 exactly"
+  },
+  {
+   "n": 11,
+   "created": "2026-08-16T07:20:00Z",
+   "prompt": "Agent avatar renders the full Claude mark like the real reader, not a glyph on a white disc"
+  },
+  {
+   "n": 12,
+   "created": "2026-08-16T07:45:00Z",
+   "prompt": "CTA reworked toward the OpenTag treatment: pill buttons, icon trust line above, explicit secondary label"
+  },
+  {
+   "n": 13,
+   "created": "2026-08-16T07:35:00Z",
+   "prompt": "Agent avatar is a terracotta disc. Phone CTA max-width matches the new 232px pills so Star on GitHub does not wrap."
+  },
+  {
+   "n": 14,
+   "created": "2026-08-16T08:40:00Z",
+   "prompt": "Four features led by replies, no margin panel, aligned card grid, header-weight compare label column"
+  },
+  {
+   "n": 15,
+   "created": "2026-08-16T09:00:00Z",
+   "prompt": "Hero direction C: the doc your AI can actually edit, with a shorter sub anchored to Google Docs"
+  },
+  {
+   "n": 16,
+   "created": "2026-08-16T09:20:00Z",
+   "prompt": "Hero leads with the chore being removed: stop babysitting comments"
+  },
+  {
+   "n": 17,
+   "created": "2026-08-16T09:40:00Z",
+   "prompt": "Restore the 52px CTA pill lock v14 dropped; the used GitHub mark overflowed its 1em box and stretched Star to 77px"
+  },
+  {
+   "n": 18,
+   "created": "2026-08-16T10:05:00Z",
+   "prompt": "Hero: a doc that answers its own comments. Compare against ChatGPT and Claude artifacts instead of Mintlify"
+  },
+  {
+   "n": 19,
+   "created": "2026-08-16T10:25:00Z",
+   "prompt": "Sub fits two lines; the overlay image margin was also pushing the agent mark out of its disc"
+  },
+  {
+   "n": 20,
+   "created": "2026-08-16T10:40:00Z",
+   "prompt": "Bring your own AI lede cut to three beats and says open source outright"
+  },
+  {
+   "n": 21,
+   "created": "2026-08-16T11:00:00Z",
+   "prompt": "Features heading hooks the hero claim; card 02 moves off the agent and onto the reader so the four stop overlapping"
+  },
+  {
+   "n": 22,
+   "created": "2026-08-16T11:20:00Z",
+   "prompt": "Compare table trimmed to five rows, AI identity row replaces the replies row"
+  },
+  {
+   "n": 23,
+   "created": "2026-08-16T11:45:00Z",
+   "prompt": "Drop the artifact tile section; its examples were mostly Notion-native and it restated the ANYTHING card"
+  },
+  {
+   "n": 24,
+   "created": "2026-08-16T12:05:00Z",
+   "prompt": "Four features rewritten so each one breaks if you swap in Notion, with titles that name the feature outright"
+  },
+  {
+   "n": 25,
+   "created": "2026-08-16T12:25:00Z",
+   "prompt": "One sentence per line in the sub; brand mark large enough to read"
+  },
+  {
+   "n": 26,
+   "created": "2026-08-16T12:45:00Z",
+   "prompt": "Comment mock matched to a real thread: fixed-in-version chip, applied chip on the agent reply, heart reaction, delete action"
+  },
+  {
+   "n": 27,
+   "created": "2026-08-16T13:05:00Z",
+   "prompt": "Hero sub takes the middleman line; closing section gets its own heading back"
+  },
+  {
+   "n": 28,
+   "created": "2026-08-16T13:25:00Z",
+   "prompt": "Unframed logo at double size, hero spacing regrouped, embeds aside dropped from the table"
+  },
+  {
+   "n": 29,
+   "created": "2026-08-16T13:40:00Z",
+   "prompt": "Phone: restack the loop, feature cards, and quote wall. Three 164px quote columns overflowed 375 to 545; the loop was 98px, one word per line."
+  },
+  {
+   "n": 30,
+   "created": "2026-08-16T14:10:00Z",
+   "prompt": "Hero spacing reduced to two values: 12 inside a group, 40 between groups"
+  },
+  {
+   "n": 31,
+   "created": "2026-08-16T14:30:00Z",
+   "prompt": "Four feature titles reworded: babysits, own identity, version control, agent native HTML"
+  },
+  {
+   "n": 32,
+   "created": "2026-08-16T14:50:00Z",
+   "prompt": "Version control card states what it survives instead of what it is not"
+  },
+  {
+   "n": 33,
+   "created": "2026-08-16T15:05:00Z",
+   "prompt": "Invented commenter name replaced with the anonymous author the real reader shows"
+  },
+  {
+   "n": 34,
+   "created": "2026-08-16T15:25:00Z",
+   "prompt": "Mock commenter named Anna; photo avatar pending a licensed image"
+  },
+  {
+   "n": 35,
+   "created": "2026-08-16T15:50:00Z",
+   "prompt": "Phone CTAs share one row instead of stacking"
+  },
+  {
+   "n": 36,
+   "created": "2026-08-16T16:10:00Z",
+   "prompt": "Loop step 2: drop the orphan rects left outside the svg after the early close"
+  },
+  {
+   "n": 37,
+   "created": "2026-08-16T23:47:00Z",
+   "prompt": "v37: replace the six PLACEHOLDER quotes with same-length tdoc lines; keep the six people; swap OpenTag trusted-by leftovers for agents and hosts tdoc runs on"
+  },
+  {
+   "n": 38,
+   "created": "2026-08-17T00:40:00Z",
+   "prompt": "Ring the Conway board and align the thread to it, so the comment reads as anchored to the artifact"
+  },
+  {
+   "n": 39,
+   "created": "2026-08-17T01:00:00Z",
+   "prompt": "Hero board becomes a real Conway widget island instead of a CSS keyframe"
+  },
+  {
+   "n": 40,
+   "created": "2026-08-17T07:20:00Z",
+   "prompt": "The Create-your-first-doc button opens onboarding instead of a GitHub markdown file"
+  },
+  {
+   "n": 41,
+   "created": "2026-08-18T06:40:00Z",
+   "prompt": "The demo commenter is Jesse Pollak, with his own avatar"
+  },
+  {
+   "n": 42,
+   "created": "2026-08-18T14:30:00Z",
+   "prompt": "Docs that act on your comments: work-angle landing page with four real demo tabs"
+  },
+  {
+   "n": 43,
+   "created": "2026-08-20T00:00:00Z",
+   "prompt": "Redesign: clear value prop (agent writes, you comment, AI updates all), star to top, single CTA, drop font picker + fluff"
+  },
+  {
+   "n": 44,
+   "created": "2026-08-27T00:00:00Z",
+   "prompt": "Swap the brand mark for the tornado: transparent line art, 192px, so the page-level dark invert turns it white"
   }
+ ],
+ "access": {
+  "visibility": "public",
+  "history_visibility": "owner",
+  "commenting": "signed_in",
+  "allowed_users": []
+ }
 }

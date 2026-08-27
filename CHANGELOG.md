@@ -6,6 +6,27 @@ file and `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Changed
+
+- **The mark is a tornado, and it carries no background.** The dog is
+  replaced by a line-art vortex, traced to vector at `assets/tdoc_logo.svg`
+  and kept byte-identical in `worker.js`. The old SVG sat on an opaque white
+  rect, which stayed invisible in both themes because the page-level
+  `filter: invert(1)` flips the rect and the page background together — but
+  only while the mark sits on the page's own background. On a tinted surface,
+  a favicon, or somebody else's README the white box showed. Line art in
+  `currentColor` needs no field: it follows the text in light mode and inverts
+  to white with it in dark. `assets/tdoc_logo_black.png` and
+  `tdoc_logo_white.png` are transparent 2500px rasters for use off-page.
+  `tdoc_logo.png` keeps a solid field because it is the Open Graph card, and a
+  transparent card renders on whatever colour the reader's client picks.
+- **Relicensed from MIT to Apache License 2.0.** Agreed by both maintainers.
+  MIT grants the right to sublicense, which is what makes the change possible;
+  the notice covering every contribution made before 2026-08-27 is retained at
+  the foot of `LICENSE` as that licence requires. Third-party code vendored
+  under its own terms is untouched — `authoring/vendor/no-ai-slop.md` stays
+  MIT under Peter Yang's notice.
+
 ### Added
 
 - **Onboarding offers the `CLAUDE.md` routing line, once.** The skill
