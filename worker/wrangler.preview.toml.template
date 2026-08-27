@@ -24,7 +24,10 @@ id = "PLACEHOLDER_PREVIEW_KV_ID"
 
 [vars]
 GITHUB_CLIENT_ID = "Ov23liZ1UAGOchvKPmlS"
-TDOC_OWNER = ""
+# Owner login so /me is reviewable on previews: device-code sign-in as this
+# GitHub user unlocks the BYOK operator catalog (all docs on the preview
+# worker). Hosted registration stays off — nobody else can mint tokens here.
+TDOC_OWNER = "yayashuxue"
 # KV writes get a 14-day TTL in worker.js when this is "1".
 # R2 objects expire via the bucket lifecycle rule expire-preview-14d.
 TDOC_PREVIEW = "1"
