@@ -1756,8 +1756,11 @@ async function indexHtml(env, session, origin, nonce) {
   .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
   .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
   .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
+  .tdoc-modal button:hover { border-color: #999; }
   .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
   .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
+  .tdoc-modal button.primary { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font-weight: 600; }
+  .tdoc-modal button.primary:hover { background: var(--td-accent-hover); border-color: var(--td-accent-hover); }
   .tdoc-modal input[type="text"] { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid var(--td-line); border-radius: 8px; margin: 0 0 14px; }
   .tdoc-modal input[type="text"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
   /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
@@ -1767,7 +1770,12 @@ async function indexHtml(env, session, origin, nonce) {
   .tab:hover { color: var(--td-ink); }
   .tab.is-active { color: var(--td-accent); border-bottom-color: var(--td-accent); }
   .pane[hidden] { display: none !important; }
-  .toolbar select { font: inherit; padding: 8px 10px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
+  .toolbar select { -webkit-appearance: none; appearance: none; font: inherit; padding: 8px 30px 8px 12px;
+    border: 1px solid var(--td-line); border-radius: 8px; color: var(--td-ink); cursor: pointer;
+    background: #fff url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23666' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+    background-size: 11px; }
+  .toolbar select:hover { border-color: #ccc; }
+  .toolbar select:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
   .folder-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
   .chip { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--td-line); background: #fff; color: var(--td-ink); }
   .chip.is-active { background: var(--td-accent-tint); border-color: var(--td-accent); color: var(--td-accent); font-weight: 600; }
@@ -1956,7 +1964,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
       bg.querySelector('p').innerHTML = body;
       const goBtn = bg.querySelector('[data-act="go"]');
       goBtn.textContent = confirmLabel;
-      if (danger) goBtn.className = 'danger';
+      goBtn.className = danger ? 'danger' : 'primary';
       const done = (v) => { bg.remove(); resolve(v); };
       bg.querySelector('[data-act="cancel"]').onclick = () => done(false);
       bg.addEventListener('click', (e) => { if (e.target === bg) done(false); });
@@ -1980,7 +1988,9 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
       const input = bg.querySelector('input');
       input.value = value;
       input.placeholder = placeholder;
-      bg.querySelector('[data-act="go"]').textContent = confirmLabel;
+      const goBtn = bg.querySelector('[data-act="go"]');
+      goBtn.textContent = confirmLabel;
+      goBtn.className = 'primary';
       const done = (v) => { bg.remove(); resolve(v); };
       const go = () => { const v = input.value.trim(); if (v) done(v); };
       bg.querySelector('[data-act="cancel"]').onclick = () => done(null);
