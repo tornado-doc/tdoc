@@ -325,6 +325,26 @@ function pane(html, id) {
     assert(stored.folders.length === 1 && stored.folders[0].name === 'Renamed', 'rename must persist');
   });
 
+  await t('doc-page bar carries the star beside the title — signed-in viewers only, state server-rendered', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await seedDoc(env, 'bar-doc', { owner: 'bob' });
+    // chrome.js/chrome.css ship inline on every page, so the button's source
+    // strings are always present. Only the RENDERED markup has the class
+    // attribute closed with a double quote — key the checks off that.
+    const rendered = /class="tdoc-star-btn( is-starred)?" aria-pressed="(true|false)"/;
+    const anonHtml = await (await worker.fetch(req('/d/bar-doc/v/1'), env, {})).text();
+    assert(!rendered.test(anonHtml), 'anonymous doc view must not render the bar star');
+    const cookie = await putSession(env, 'alice');
+    let html = await (await worker.fetch(req('/d/bar-doc/v/1', { cookie }), env, {})).text();
+    assert(/class="tdoc-star-btn" aria-pressed="false"/.test(html), 'signed-in view must render the empty-star state');
+    assert(!html.includes('class="tdoc-star-btn is-starred"'), 'unstarred doc must not render as starred');
+    await worker.fetch(req('/api/star', { method: 'POST', cookie, body: { slug: 'bar-doc', starred: true } }), env, {});
+    html = await (await worker.fetch(req('/d/bar-doc/v/1', { cookie }), env, {})).text();
+    assert(/class="tdoc-star-btn is-starred" aria-pressed="true"/.test(html), 'starred doc must render the filled state');
+    const me = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
+    assert(!rendered.test(me), 'the /me site bar must not carry the doc star (rows have their own)');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

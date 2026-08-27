@@ -741,6 +741,29 @@
     })();
     // My docs
     wire('#tdoc-bar-mark','click',function(){ location.href='/me'; });
+    // Star (bar, beside the title). The button only exists when the server
+    // rendered it for a signed-in viewer; flip optimistically, revert on error.
+    wire('#tdoc-star-btn','click',function(e){
+      e.stopPropagation();
+      var btn = document.getElementById('tdoc-star-btn'); if (!btn) return;
+      var next = btn.getAttribute('aria-pressed') !== 'true';
+      function paintStar(on){
+        btn.classList.toggle('is-starred', on);
+        btn.textContent = on ? '★' : '☆';
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.title = on ? 'Unstar' : 'Star';
+        btn.setAttribute('aria-label', on ? 'Unstar this doc' : 'Star this doc');
+      }
+      paintStar(next);
+      fetch('/api/star', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: cfg.slug, starred: next }),
+      }).then(function(r){
+        if (!r.ok) throw new Error('star failed');
+        flashToast(next ? 'Starred — find it in My docs' : 'Star removed');
+      }).catch(function(){ paintStar(!next); });
+    });
     // Publish (local mode) / Share (published mode)
     wire('#tdoc-publish-btn','click',function(e){ e.stopPropagation(); showPublishModal(); });
     wire('#tdoc-share-btn','click',function(e){ e.stopPropagation(); showShareModal(); });

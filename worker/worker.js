@@ -1141,7 +1141,7 @@ function injectReaderCss(html, css) {
 // local and production render 1:1. The published-mode bar + client cfg carry
 // the same fields the old overlay boot used, so identity/owner/manage/share behave as
 // before once the shell client wires them.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
@@ -1166,7 +1166,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // doc carrying the /start CTA) — same rule the old overlay boot used.
   const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
   const onboardJs = ((slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce) ? ONBOARD_JS : '';
-  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog, stars: stars }) : '';
+  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog, stars: stars, viewerStar: viewerStar || null }) : '';
   // Old-version strip — published + multi-version + viewing an old one (1:1
   // with the overlay: fork/landing and the latest version itself get nothing).
   let oldverHtml = '';
@@ -1310,13 +1310,22 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   // handled by the crawlable-content-URL plan (#258, separate PR). Stars are
   // landing-only chrome (the bar's GitHub star count).
   const stars = isLanding ? await fetchStars(env) : null;
+  // Viewer star state for the bar (beside the title, Google-Docs style):
+  // only for signed-in readers on non-landing pages. One KV get; sign-in
+  // elsewhere reloads the page, so server-rendered state stays fresh.
+  let viewerStar = null;
+  if (!isLanding && sessionLogin(session)) {
+    try {
+      viewerStar = { starred: (await loadStars(env, sessionLogin(session))).some((i) => i.slug === slug) };
+    } catch {}
+  }
   const render = shellDocumentWorker;
   return {
     ok: true,
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
