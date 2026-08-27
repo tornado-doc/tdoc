@@ -55,7 +55,11 @@
               versions.map(function (v) { return '<button role="option" data-version="' + v.n + '" class="' + (v.n === version ? 'current' : '') + '">v' + v.n + (v.n === version ? ' · current' : '') + '</button>'; }).join('') +
             '</div>' : '') +
         '</div>' +
-        '<span class="doc-title" id="tdoc-title">tdoc</span>');
+        '<span class="doc-title" id="tdoc-title">tdoc</span>' +
+        // Star sits beside the title (Google-Docs placement). Rendered only
+        // when the server hands us the viewer's state (signed-in reader on a
+        // published doc) — anonymous readers and site bars get nothing.
+        (o.viewerStar ? '<button id="tdoc-star-btn" class="tdoc-star-btn' + (o.viewerStar.starred ? ' is-starred' : '') + '" aria-pressed="' + (o.viewerStar.starred ? 'true' : 'false') + '" title="' + (o.viewerStar.starred ? 'Unstar' : 'Star') + '" aria-label="' + (o.viewerStar.starred ? 'Unstar this doc' : 'Star this doc') + '">' + (o.viewerStar.starred ? '★' : '☆') + '</button>' : ''));
 
     // Copy / Duplicate / Download all live inside the ⋯ menu now (matches the
     // overlay's redesigned right cluster) — no standalone Copy button.
