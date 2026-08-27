@@ -1,12 +1,13 @@
 {
   "name": "tdoc",
+  "license": "Apache-2.0",
   "private": true,
-  "description": "Prompt-native interactive HTML documents — local server, Cloudflare Worker, browser overlay.",
+  "description": "Prompt-native interactive HTML documents \u2014 local server, Cloudflare Worker, browser overlay.",
   "scripts": {
     "test": "node test/run.js",
     "test:all": "node test/run.js --all"
   },
-  "//devDependencies": "playwright is optional — only needed for the gated UI suites (ui/responsive/dimensions). Without it they skip loudly. Install with: npm i -D playwright && npx playwright install chromium",
+  "//devDependencies": "playwright is optional \u2014 only needed for the gated UI suites (ui/responsive/dimensions). Without it they skip loudly. Install with: npm i -D playwright && npx playwright install chromium",
   "optionalDependencies": {
     "playwright": "^1.60.0"
   }

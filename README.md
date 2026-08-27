@@ -260,4 +260,5 @@ Originally inspired by [bdocs](https://x.com/jessepollak/status/2054313757543964
 
 ## License
 
-MIT
+Apache License 2.0. Released under MIT through 2026-08-27; the original
+notice covering contributions made before that date is kept in `LICENSE`.
