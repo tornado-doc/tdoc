@@ -1741,6 +1741,15 @@ async function indexHtml(env, session, origin, nonce) {
   .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
   .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
   .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+  /* Drive-style quiet checkboxes: the box keeps its slot (no layout jump) but
+     stays invisible until the row is hovered/focused, or while any selection
+     is active (.is-selecting on the list). Touch devices have no hover to
+     reveal with, so they keep the boxes always visible. */
+  @media (hover: hover) {
+    .doc-list:not(.is-selecting) .row-check { opacity: 0; transition: opacity .12s; }
+    .doc-list:not(.is-selecting) .doc-row:hover .row-check,
+    .doc-list:not(.is-selecting) .doc-row:focus-within .row-check { opacity: 1; }
+  }
   .row-check input, .select-all input { width: 15px; height: 15px; accent-color: var(--td-accent); cursor: pointer; }
   .doc-info { min-width: 0; flex: 1 1 auto; }
   .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2212,6 +2221,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     const visible = visibleRows();
     const selected = selectedRows();
     const n = selected.length;
+    listEl.classList.toggle('is-selecting', n > 0);
     selected.forEach((row) => row.classList.add('is-selected'));
     listEl.querySelectorAll('.doc-row').forEach((row) => {
       const box = row.querySelector('.doc-check');
