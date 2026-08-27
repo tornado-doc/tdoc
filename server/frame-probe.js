@@ -128,12 +128,37 @@
     hoverPill = document.createElement('button'); hoverPill.className = 'tdoc-comment-pill'; hoverPill.type = 'button'; hoverPill.style.display = 'none';
     hoverPill.setAttribute('aria-label', 'Comment on this');
     hoverPill.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-    document.body.appendChild(hoverOutline); document.body.appendChild(hoverPill);
+    // Parent on <html>, NOT <body>: a transformed body (see the hostile fixture)
+    // becomes the containing block for absolute descendants, so viewport-derived
+    // coordinates written to a body child render shifted/scaled. <html> keeps
+    // document coordinates honest, and body clones (copyDoc) never include the UI.
+    document.documentElement.appendChild(hoverOutline); document.documentElement.appendChild(hoverPill);
     hoverPill.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); if (hoverEl) commentOnElement(hoverEl); });
+  }
+  // The element's VISIBLE box: its rect intersected with every clipping
+  // ancestor (overflow scroll/auto/hidden/clip). A wide graph inside an
+  // overflow-x container has a bounding rect far wider than what's on screen —
+  // painting the outline/pill from the raw rect runs them outside the
+  // container, across the page.
+  function clipRect(el) {
+    var r = el.getBoundingClientRect();
+    var L = r.left, T = r.top, R = r.right, B = r.bottom;
+    var p = el.parentElement;
+    while (p && p !== document.documentElement) {
+      var cs; try { cs = getComputedStyle(p); } catch (x) { break; }
+      if (/auto|scroll|hidden|clip/.test(cs.overflowX + cs.overflowY)) {
+        var pr = p.getBoundingClientRect();
+        if (pr.left > L) L = pr.left; if (pr.top > T) T = pr.top;
+        if (pr.right < R) R = pr.right; if (pr.bottom < B) B = pr.bottom;
+      }
+      p = p.parentElement;
+    }
+    return { left: L, top: T, right: R, bottom: B, width: Math.max(0, R - L), height: Math.max(0, B - T) };
   }
   function positionHover(el) {
     ensureHoverUI();
-    var r = el.getBoundingClientRect(), sx = window.scrollX || 0, sy = window.scrollY || 0;
+    var r = clipRect(el), sx = window.scrollX || 0, sy = window.scrollY || 0;
+    if (r.width < 12 || r.height < 12) { hideHover(); return; }   // scrolled out of its container
     hoverOutline.style.display = 'block';
     hoverOutline.style.left = (r.left + sx) + 'px'; hoverOutline.style.top = (r.top + sy) + 'px';
     hoverOutline.style.width = r.width + 'px'; hoverOutline.style.height = r.height + 'px';
@@ -142,7 +167,7 @@
   }
   function hideHover() { hoverEl = null; if (hoverOutline) hoverOutline.style.display = 'none'; if (hoverPill) hoverPill.style.display = 'none'; }
   function commentOnElement(el) {
-    var r = el.getBoundingClientRect();
+    var r = clipRect(el);   // visible box — the raw rect of a scroll-container child can be miles wide
     var label = el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('data-tdoc-artifact') || el.tagName.toLowerCase();
     // Anchor the composer to the PILL the user just clicked (element top-right),
     // not the element box — a tall section would otherwise park the composer
