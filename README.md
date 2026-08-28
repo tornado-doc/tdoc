@@ -260,5 +260,16 @@ Originally inspired by [bdocs](https://x.com/jessepollak/status/2054313757543964
 
 ## License
 
-Apache License 2.0. Released under MIT through 2026-08-27; the original
-notice covering contributions made before that date is kept in `LICENSE`.
+AGPL v3, with a commercial licence available.
+
+Use it, change it, run it, share it. The one thing the AGPL asks is that if
+you modify tdoc and serve it to other people over a network, those people can
+get your modified source.
+
+If that does not fit — you want to embed tdoc in a closed-source product, or
+run a modified version as a hosted service without publishing the changes —
+see [COMMERCIAL.md](COMMERCIAL.md). Asking costs nothing, and often the answer
+is that you did not need one.
+
+tdoc was MIT through 2026-08-27 and Apache 2.0 until 2026-08-28; both notices
+are kept in `LICENSE`. Vendored third-party code keeps its own terms.

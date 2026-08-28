@@ -1,6 +1,6 @@
 {
   "name": "tdoc",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-or-later",
   "private": true,
   "description": "Prompt-native interactive HTML documents \u2014 local server, Cloudflare Worker, browser overlay.",
   "scripts": {
