@@ -66,7 +66,7 @@ t('delete uses a styled React confirmation and never native confirm()', () => {
 });
 
 t('GitHub invite autocomplete remains client-side and token-free', () => {
-  assert(dialog.includes('https://api.github.com/search/users'), 'GitHub user lookup missing');
+  assert(/fetch\(`https:\/\/api\.github\.com\/search\/users\?/.test(dialog), 'GitHub user lookup missing');
   assert(dialog.includes('AbortController'), 'stale autocomplete request cancellation missing');
   assert(!/Authorization|Bearer|access_token/i.test(dialog.slice(dialog.indexOf('function InviteField'), dialog.indexOf('export function OwnerAccessDialog'))), 'autocomplete sends a credential');
 });

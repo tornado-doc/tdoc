@@ -333,7 +333,7 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'the tdoc logo must remain in the shared top bar');
   assert(toolbar.includes('if (config.isLanding) return null'),
     'homepage must hide document breadcrumbs');
-  assert(toolbar.includes('export function LandingActions') && toolbar.includes('https://github.com/tornado-doc/tdoc'),
+  assert(toolbar.includes('export function LandingActions') && /href="https:\/\/github\.com\/tornado-doc\/tdoc"/.test(toolbar),
     'homepage bar must expose the GitHub action');
   assert(documentShell.includes('config.isLanding ? <LandingActions /> : ('),
     'homepage must not receive the document Share/Copy/Download actions');
