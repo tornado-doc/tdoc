@@ -3,7 +3,7 @@
   "version": "0.9.0",
   "description": "Prompt-native interactive HTML docs — turn a prompt into a shareable, commentable live doc.",
   "homepage": "https://github.com/tornado-doc/tdoc",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "author": {
     "name": "Tornado",
     "url": "https://github.com/tornado-doc"
