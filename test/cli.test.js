@@ -138,6 +138,52 @@ t('tdoc default-template validator accepts scoped widget CSS', () => {
   }
 });
 
+t('validator rejects a figure whose ink floats inside its own viewBox', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-viewbox-'));
+  const page = (svg) => `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; }</style>
+      </head><body><div class="wrap"><h1>Title</h1>${svg}</div></body></html>`;
+  const run = (name, svg) => {
+    const html = path.join(dir, name);
+    fs.writeFileSync(html, page(svg));
+    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+  };
+  try {
+    // ink spans x=34..86 in a 120-wide box: 28% of the width wasted each side,
+    // which reads as an indent against every paragraph on the page
+    const padded = run('padded.html',
+      '<svg viewBox="0 0 120 64" aria-label="Padded"><rect x="34" y="8" width="52" height="48"/></svg>');
+    assert(padded.status !== 0, 'baked viewBox padding should be rejected');
+    assert(/inside its own viewBox/.test(padded.stderr), padded.stderr);
+
+    // same drawing, viewBox set to its bounds
+    const flush = run('flush.html',
+      '<svg viewBox="0 0 120 64" aria-label="Flush"><rect x="6" y="8" width="108" height="48"/></svg>');
+    assert(flush.status === 0, `flush figure rejected: ${flush.stderr}`);
+
+    // a non-zero viewBox origin is the documented way to tighten a drawing,
+    // so the offset must be measured against min-x rather than assumed zero
+    const shifted = run('shifted.html',
+      '<svg viewBox="12 4 696 215" aria-label="Shifted"><rect x="14" y="6" width="692" height="210"/></svg>');
+    assert(shifted.status === 0, `tightened viewBox rejected: ${shifted.stderr}`);
+
+    // geometry inside a <path> is not parseable here, so those figures opt out
+    // rather than being failed on a guess
+    const opaque = run('opaque.html',
+      '<svg viewBox="0 0 120 64" aria-label="Path"><path d="M34,8 L86,56"/><rect x="34" y="8" width="52" height="48"/></svg>');
+    assert(opaque.status === 0, `figure containing <path> should skip the inset check: ${opaque.stderr}`);
+
+    // clipping is a different fault and must still be caught
+    const overflow = run('overflow.html',
+      '<svg viewBox="0 0 120 64" aria-label="Over"><rect x="6" y="8" width="160" height="20"/></svg>');
+    assert(overflow.status !== 0, 'overflow check regressed');
+    assert(/overflows its viewBox/.test(overflow.stderr), overflow.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 t('tdoc default-template validator rejects global restyling by default', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-template-'));
   try {
