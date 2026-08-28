@@ -50,6 +50,26 @@ body { background:#fff; }
 .note { border-top:1px solid #e5e5e5; padding-top:12px; margin:20px 0; color:#555; font-size:15px; }
 ```
 
+## Tokens
+
+A component — including one this file has never heard of — dresses itself from
+these. That is what makes a component someone else wrote swap styles correctly:
+it names tokens, not colours.
+
+| Token | Value here |
+|---|---|
+| `ink` | `#0a0a0a` |
+| `rule` | `#111` for a figure frame, `#e5e5e5` for a hairline divider |
+| `muted` | `#555` |
+| `surface` | `#f5f5f5` |
+| `accent-fill` | `#f7d7d1` (pink) or `#dde7f9` (blue) — one per figure |
+| `accent-stroke` | `#e0a99e` / `#a9c0ee`, matching the fill |
+| `accent-text` | `#b3503c` / `#26407a`, matching the fill |
+| `label-type` | uppercase mono, `~10.5px`, `letter-spacing:.04em` |
+
+A texture is `accent-fill` with `accent-stroke` marks over it, drawn inside the
+`<pattern>` tile rather than on top of white.
+
 ## Component treatment (the OpenAI-index look)
 
 `structure/components.md` says what these parts are. This is what they look

@@ -53,6 +53,27 @@ body { background:#f7f6f5; }
 .diagram-box { max-width:100%; overflow-x:auto; margin:20px 0; }
 ```
 
+## Tokens
+
+A component — including one this file has never heard of — dresses itself from
+these. That is what makes a component someone else wrote swap styles correctly:
+it names tokens, not colours.
+
+| Token | Value here |
+|---|---|
+| `ink` | `#0a0a0a` |
+| `rule` | `#b3bdc9` |
+| `muted` | `#5b6672` |
+| `surface` | `#eef1fb` |
+| `accent-fill` | `#eef1fb` |
+| `accent-stroke` | `#3a55f4` |
+| `accent-text` | `#2200ff` |
+| `label-type` | sans, `~10.5px` |
+
+`#4ba181` marks a positive outcome and `#cc7c5e` a negative one. Neither is a
+second accent — a component that reaches for them is making a claim about the
+result, not decorating.
+
 ## Component treatment
 
 `structure/components.md` says what these parts are. This style marks meaning

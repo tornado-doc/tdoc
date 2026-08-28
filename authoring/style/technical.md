@@ -93,6 +93,26 @@ If a `<canvas>` or `<iframe>` is a *drawing* (a chart, a simulation) that should
 darken with the page rather than glow as a white slab, mark it
 `data-tdoc-dark="invert"` so it inverts with everything else.
 
+## Tokens
+
+A component — including one this file has never heard of — dresses itself from
+these. That is what makes a component someone else wrote swap styles correctly:
+it names tokens, not colours.
+
+| Token | Value here |
+|---|---|
+| `ink` | `#0a0a0a` |
+| `rule` | `#d4d4d4` |
+| `muted` | `#737373` |
+| `surface` | `#f5f5f5`, `#f0f0f0` for a code cell |
+| `accent-fill` | `#fff5f3` |
+| `accent-stroke` | `#ff4b2e` |
+| `accent-text` | `#ff4b2e` |
+| `label-type` | mono, `~10.5px` — identifiers and metrics are mono here, inside figures too |
+
+Draw with these light values and let the page-level invert carry the component
+into dark, the same way the rest of this style works.
+
 ## Component treatment
 
 `structure/components.md` says what these parts are. Here they are drawn in the

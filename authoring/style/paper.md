@@ -55,6 +55,26 @@ body { background:#faf9f5; }
 .aside { border-left:2px solid #c15f3c; background:#f4efe7; padding:14px 18px; margin:20px 0; border-radius:0 6px 6px 0; }
 ```
 
+## Tokens
+
+A component — including one this file has never heard of — dresses itself from
+these. That is what makes a component someone else wrote swap styles correctly:
+it names tokens, not colours.
+
+| Token | Value here |
+|---|---|
+| `ink` | `#141413` — no pure black anywhere |
+| `rule` | `#dcd3c4` |
+| `muted` | `#6b6355` |
+| `surface` | `#f4efe7` |
+| `accent-fill` | `#f4e3dc` |
+| `accent-stroke` | `#e3c4b6` |
+| `accent-text` | `#c15f3c` |
+| `label-type` | small-caps sans, `~11px` — the display serif stays out of figures |
+
+Corners are softened (`rx:3`) rather than sharp, which is the one structural
+habit this style asks of a component.
+
 ## Component treatment
 
 `structure/components.md` says what these parts are. On paper they are drawn

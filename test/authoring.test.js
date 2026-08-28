@@ -58,6 +58,26 @@ t('every style gives the same components a treatment', () => {
     const missing = parts.filter(part => !text.includes(part));
     assert(missing.length === 0,
       `style/${entry}.md gives no treatment for: ${missing.join(', ')}`);
+    // Tokens are what let a component nobody anticipated pick up this style.
+    // Without them the listed parts still work and everything else is undressed,
+    // which is the failure that made styles unswappable in the first place.
+    const tokens = ['ink', 'rule', 'muted', 'surface',
+                    'accent-fill', 'accent-stroke', 'accent-text', 'label-type'];
+    const noToken = tokens.filter(tk => !new RegExp('`' + tk + '`').test(text));
+    assert(noToken.length === 0,
+      `style/${entry}.md declares no value for: ${noToken.join(', ')}`);
+  }
+});
+
+t('the component list is open, not a vocabulary limit', () => {
+  const c = read('authoring/structure/components.md');
+  assert(/not on this list/i.test(c),
+    'components.md does not say how to write a component it does not list');
+  // The extension contract is the whole point: meet these and a user's own
+  // component behaves like a listed one. If they drift, an invented component
+  // silently stops swapping style or stops being commentable.
+  for (const rule of ['token', 'data-tdoc-artifact']) {
+    assert(c.includes(rule), `components.md extension contract lost "${rule}"`);
   }
 });
 

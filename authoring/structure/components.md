@@ -5,16 +5,18 @@ the style's answer, and every entry in `style/` gives its own. That split is the
 point: a stat tile is a stat tile in `paper` and in `technical`, and swapping the
 style should change how it reads, never what it is.
 
-These are reference implementations. Take one, adapt it, or write your own — an
-agent bringing its own design system is composing with tdoc, not fighting it.
-What follows is what tdoc reaches for when nobody has said otherwise.
+**This list is open.** What follows is what tdoc reaches for when nobody has
+said otherwise, not the set of components a doc is allowed to contain. Take one,
+adapt it, or write something that is not here at all — see "Writing a component
+that is not on this list" below. An agent bringing its own design system is
+composing with tdoc, not fighting it.
 
 ## Where each decision lives
 
 | Question | Answered by |
 |---|---|
 | Which component fits this data? | `visuals.md` |
-| What is that component, structurally? | this file |
+| What is that component, structurally? | this file — or your own, see below |
 | What colour, stroke, type, texture? | `style/<name>.md` |
 | Which sections does the doc have? | the prompt, or a `structure/` entry |
 
@@ -86,6 +88,38 @@ artifact — which is the whole point of putting it in a tdoc.
 | **Radar** | Many attributes, few items | Three or four items maximum before it turns to mud |
 | **Gauge** | A magnitude on a scale | The scale's ends are visible, or the reading means nothing |
 | **Small multiples** | The same chart repeated | Shared axes across every panel, or they cannot be compared |
+
+## Writing a component that is not on this list
+
+The nine parts and twelve chart types above cover what has come up so far. They
+are not a vocabulary limit — a doc that needs a decision ladder, an org chart, a
+burndown, a seating plan should have one, and no permission is required.
+
+What a new component has to satisfy is short, and none of it is about taste:
+
+**Name tokens, not colours.** Every `style/` entry declares `ink`, `rule`,
+`muted`, `surface`, `accent-fill`, `accent-stroke`, `accent-text` and
+`label-type`. A component built from those is dressed correctly by all four
+styles — and by any style added later, which has to answer for the same tokens.
+A component with a pure-black stroke written into it looks wrong the moment
+somebody picks `paper`, where nothing is pure black.
+
+**Be one comment anchor.** A component assembled from `<div>`s is invisible to
+the overlay as a unit: readers end up commenting on fragments of its text.
+Either use a semantic tag — `<section>`, `<aside>`, `<details>` — or mark it
+`data-tdoc-artifact`. That is what makes it something a reader can point at,
+which is the reason it is in a tdoc rather than a screenshot.
+
+**Survive a phone.** Fluid widths, a `viewBox` rather than pixel `width`/
+`height`, and a scroll wrapper if it genuinely cannot narrow.
+
+**Compute nothing in the host.** The same rule as everything else: `:checked`
+for state, CSS `@keyframes` for motion, a sandboxed widget island if it truly
+needs to calculate.
+
+Meet those four and the component behaves like the ones listed here: it swaps
+style, it takes comments, it survives a regeneration. Nothing else is required
+of it, and it does not need to be added to this file to be used.
 
 ## Two rules that outlive any style
 

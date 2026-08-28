@@ -280,8 +280,14 @@ When two fit, take the calmer one. The entries in full:
 a stat tile, a comparison matrix, a container frame or a label chip *is*,
 with no colour on it. Each `style/` entry gives the same parts its own
 treatment, so switching style changes how a component reads and never what
-it is. Section skeletons are still an empty slot — derive the document's
-shape from the prompt.
+it is.
+
+**The list is open.** A doc that needs a component nobody wrote down should
+have one. Build it from the tokens every style declares — `ink`, `rule`,
+`muted`, `surface`, `accent-fill`, `accent-stroke`, `accent-text`,
+`label-type` — and it is dressed correctly by every style, including any
+added later. The rest of the contract is in that file. Section skeletons
+are still an empty slot — derive the document's shape from the prompt.
 
 `visuals.md` is the visual-first floor: lead with charts, diagrams, tables, and
 stat tiles rather than paragraphs; pick the visual type that fits the data
