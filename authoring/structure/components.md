@@ -48,22 +48,29 @@ rather than a tinted band, and numbers are tabular so a column lines up.
 </div>
 ```
 
-The shape matters more than it looks. Filling every cell and spacing them apart
-turns a table into a pile of blocks: the gutters cut the columns, so the eye has
-no continuous edge to scan down, and rounded corners multiply with every row.
-Fills are also the worst case for this reader — dark mode is a whole-page
-invert, so a filled cell becomes a slab where a hairline only changes colour.
+The header is a label, so it takes the style's `label-type` register rather
+than a smaller, greyer version of the body. Set at body size in the muted ink
+it reads as a quieter row instead of a different kind of row; in the label
+register it is unmistakable at a glance, whatever its size. Give it its own
+rule, a step stronger than the row rules under it.
 
-Rounding a table needs `border-collapse: separate` with `border-spacing: 0` and
-`overflow: hidden` to clip; `collapse` will not round.
+**Square corners.** No radius on the table and none on its cells. A rounded
+card competes with the figures around it, and a radius on the cells is worse
+than decorative: under `border-collapse: separate` each cell is its own box, so
+a rounded one truncates the row rule at both ends and two of those meeting in
+the middle read as a break in the line rather than a continuous edge to scan
+down.
+
+Filling every cell and spacing them apart has the same effect for a different
+reason: the gutters cut the columns, leaving nothing continuous to follow. A
+fill is also the worst case for this reader — dark mode is a whole-page invert,
+so a filled cell becomes a slab where a hairline only changes colour.
 
 Reset the cell's own shape, not only the parts you are changing. The reader
 styles cells as standalone chips — a fill and a corner radius of their own —
-and those survive any rule that does not name them. A treatment that sets
-borders and padding alone comes out filled; one that also clears the fill but
-leaves the radius comes out with row rules that curve away at every cell
-boundary instead of crossing the table. Set `background` and `border-radius`
-on the cell explicitly; the card carries the radius, the cells do not.
+and those survive any rule that does not name them, so a treatment that sets
+borders and padding alone comes out filled and rounded anyway. Name
+`background` and `border-radius` explicitly.
 
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`, and both need the child to have a

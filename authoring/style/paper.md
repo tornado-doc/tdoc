@@ -92,7 +92,7 @@ only saturated thing on the page and it stays rationed.
 | Accent fill | `fill:#f4e3dc stroke:#e3c4b6`, text `#c15f3c` |
 | Textured variant | Sparse dot in `#e3c4b6` over the same fill |
 | Stacked bar | Paper tints `#f4efe7` / `#ece5d8` / `#dcd3c4` with `#c9bfae` strokes |
-| Table | `rule` hairline border, `rx:6` card; row rules in `rule`; header small-caps in `muted`, no fill |
+| Table | `rule` hairline border, square corners; row rules in `rule`; header in `label-type` small-caps, `muted`, over its own `rule`; no fill |
 
 Figure labels are the body sans, not the display serif — the serif is for
 headings, and inside a drawing it turns decorative.
