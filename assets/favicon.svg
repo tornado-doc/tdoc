@@ -1,13 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="201.2 205.2 597.6 597.6" role="img" aria-label="tdoc">
-  <!-- The viewBox is the mark's own bounds plus 6%. It used to be the full
-       1000 square, which left 23% margin baked into the file: at the 24px bar
-       and the 16px tab slot the drawing was only about half the box and its
-       strokes washed out — 108/255 peak ink at 24px against the old mark's
-       255. Consumers add their own padding in CSS; the file should not.
-       No background field: the ink is currentColor, so an inlined copy
-       follows the surrounding text and the page-level dark invert turns it
-       white on its own. A solid field would flip to a black box instead. -->
-  <g transform="translate(0,1000) scale(1,-1)" fill="currentColor" fill-rule="evenodd">
+  <!-- The favicon crops to the mark itself. The full logo carries 23% margin,
+       which at a 16px tab slot leaves the strokes too thin to separate — they
+       washed out to a smudge at 89/255 opacity. Cropped, the same drawing
+       reaches 224 at the 32px a retina tab actually renders. -->
+  <style>
+    /* A tab strip is dark in dark mode and the mark would vanish into it.
+       currentColor cannot help here: a favicon has no surrounding text to
+       inherit from, so the swap is explicit. */
+    path { fill: #0a0a0a; }
+    @media (prefers-color-scheme: dark) { path { fill: #f5f5f5; } }
+  </style>
+  <g transform="translate(0,1000) scale(1,-1)"  fill-rule="evenodd">
     <path d="M748.54 760.56 c-1.59 -0.11 -6.24 -0.32 -10.32 -0.48 -8.89 -0.32 -16.27 -0.71 -20.77 -1.11
 -3.6 -0.32 -10.26 -0.63 -21.03 -1.03 -3.78 -0.13 -7.59 -0.32 -8.47 -0.37 -2.7 -0.26 -10.66 -0.66 -20.5
 -1.08 -5.16 -0.24 -10.69 -0.53 -12.3 -0.66 -1.59 -0.16 -6.11 -0.4 -10.05 -0.53 -7.35 -0.29 -12.94 -0.58

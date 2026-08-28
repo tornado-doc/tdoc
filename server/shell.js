@@ -818,6 +818,11 @@
   function shellHtml(d) {
     return '<!doctype html><html lang="en"><head>\n' +
 '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+/* One declaration for every shell page. The icon file carries its own fills
+   rather than currentColor: a tab strip is browser chrome, so there is no
+   surrounding text to inherit from and no tdoc theme toggle reaching it. See
+   assets/favicon.svg for how it handles a dark strip. */
+'<link rel="icon" href="/favicon.svg" type="image/svg+xml">\n' +
 '<title>' + esc(d.title) + '</title>\n' +
 '<style>' + (d.chromeCssStr || '') + '</style>\n' +
 '<style>\n' +
