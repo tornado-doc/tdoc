@@ -93,6 +93,29 @@ button.tdoc-cluster-row {
   position: static;
 }
 
+/* Shell toast. The React shell introduced this element and never styled it,
+   so every failure it reported — a rejected re-anchor, a failed copy — was
+   invisible. Same pill the Docs Hub uses. */
+.tdoc-shell-toast {
+  position: fixed;
+  top: 62px;
+  right: 18px;
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--td-accent);
+  box-shadow: 0 6px 24px rgb(15 23 42 / 22%);
+  color: #fff;
+  font: 600 13px var(--td-font-display);
+}
+
+.tdoc-shell-toast.error {
+  background: var(--td-danger);
+}
+
 /* Composer close: the legacy popup used a bare × span. */
 .tdoc-popup .head button.x {
   appearance: none;

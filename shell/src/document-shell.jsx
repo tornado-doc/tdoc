@@ -99,6 +99,9 @@ export function DocumentShell({ boot, config }) {
   const [reanchorId, setReanchorId] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [toast, setToast] = useState(null);
+  // setToast('done') for confirmations; setToast('...', true) for failures,
+  // which are painted in the danger tone and stay long enough to read.
+  const showToast = useCallback((text, error = false) => setToast({ text, error }), []);
   const [theme, setTheme] = useState(() => (
     localStorage.getItem('tdoc-theme') === 'dark' ? 'dark' : 'light'
   ));
@@ -140,8 +143,10 @@ export function DocumentShell({ boot, config }) {
       setOpenCommentId(null);
       comments.moveAnchor(reanchoring, selection)
         // `send` is stable, so reading it off the current bridge is safe here.
-        .then(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }))
-        .catch((error) => setToast(error.message || 'Could not move anchor'));
+        // Clear the pending selection either way: on failure the anchor stays
+        // put, and leaving the selection painted looks like a second anchor.
+        .catch((error) => showToast(error.message || 'Could not move anchor', true))
+        .finally(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }));
       return;
     }
     setComposer(selection);
@@ -164,7 +169,7 @@ export function DocumentShell({ boot, config }) {
     'tdoc:copyText': (message) => copyText(message.text || ''),
     'tdoc:docMarkdown': (message) => {
       copyText(message.markdown || '').then((copied) => {
-        setToast(copied ? 'Copied as Markdown' : 'Copy failed');
+        showToast(copied ? 'Copied as Markdown' : 'Copy failed', !copied);
       });
     },
     'tdoc:navigate': (message) => {
@@ -208,7 +213,7 @@ export function DocumentShell({ boot, config }) {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 1800);
+    const timer = window.setTimeout(() => setToast(null), toast.error ? 5000 : 1800);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -259,7 +264,7 @@ export function DocumentShell({ boot, config }) {
       await operation();
       return true;
     } catch (error) {
-      setToast(error.message || 'Request failed');
+      showToast(error.message || 'Request failed', true);
       return false;
     }
   };
@@ -286,7 +291,7 @@ export function DocumentShell({ boot, config }) {
     setStarred(next);
     try {
       await setDocumentStar(config.slug, next);
-      setToast(next ? 'Starred - find it in My docs' : 'Star removed');
+      showToast(next ? 'Starred - find it in My docs' : 'Star removed');
     } catch {
       setStarred(!next);
     }
@@ -479,14 +484,14 @@ export function DocumentShell({ boot, config }) {
           config={config}
           url={shareUrl}
           onOpenChange={(open) => !open && setDialog(null)}
-          onCopied={() => setToast('Link copied')}
+          onCopied={() => showToast('Link copied')}
         />
       ) : (
         <ShareDialog
           open={dialog?.type === 'share'}
           url={shareUrl}
           onOpenChange={(open) => !open && setDialog(null)}
-          onCopied={() => setToast('Link copied')}
+          onCopied={() => showToast('Link copied')}
         />
       )}
       <DeleteDocumentDialog
@@ -505,7 +510,11 @@ export function DocumentShell({ boot, config }) {
       />
       <OnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
 
-      {toast ? <div className="tdoc-shell-toast" role="status">{toast}</div> : null}
+      {toast ? (
+        <div className={`tdoc-shell-toast${toast.error ? ' error' : ''}`} role="status">
+          {toast.text}
+        </div>
+      ) : null}
     </div>
   );
 }
