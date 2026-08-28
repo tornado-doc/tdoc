@@ -46,7 +46,7 @@ No second hue.
 ```css
 body { background:#faf9f5; }
 .wrap { font-family:"Inter",system-ui,-apple-system,sans-serif; color:#141413; font-size:19px; line-height:1.65; }
-.wrap h1 { font-family:"Fraunces","Newsreader",Georgia,serif; font-weight:500; letter-spacing:-.005em; color:#141413; }
+.wrap h1 { font-family:"Fraunces","Newsreader",Georgia,serif; font-weight:500; font-size:clamp(28px,3.6vw,36px); letter-spacing:-.005em; color:#141413; }
 .wrap h2 { font-family:"Fraunces","Newsreader",Georgia,serif; font-weight:500; color:#141413; }
 .wrap h3 { font-family:"Fraunces","Newsreader",Georgia,serif; font-weight:500; }
 .wrap a  { color:#c15f3c; text-decoration:none; border-bottom:1px solid #e3c4b6; }

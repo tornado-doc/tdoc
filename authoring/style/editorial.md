@@ -43,7 +43,7 @@ overlay's heading rule wins and it comes out sans.
 ```css
 body { background:#f7f6f5; }
 .wrap { font-family:"Iowan Old Style", Georgia, "Times New Roman", serif; color:#000; }
-.wrap h1 { font-family:"Iowan Old Style", Georgia, serif; font-weight:300; letter-spacing:-.02em; }
+.wrap h1 { font-family:"Iowan Old Style", Georgia, serif; font-weight:300; font-size:clamp(28px,3.6vw,36px); letter-spacing:-.02em; }
 .wrap h2 { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-weight:500; }
 .wrap a  { color:#2200ff; text-decoration:none; border-bottom:2px solid #2200ff; }
 

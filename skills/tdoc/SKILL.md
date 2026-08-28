@@ -244,7 +244,7 @@ voice is being preserved when the agent is the one writing.
 
 `style/default.md` is the stark sans style: pure white, pure black, one clean
 sans everywhere (open Inter, standing in for the proprietary OpenAI Sans), an
-oversized tight-tracked headline, near-zero color, and a full technical-diagram
+tight-tracked headline, near-zero color, and a full technical-diagram
 vocabulary (thin frames, mono pill labels, numbered containers, solid/dashed
 arrows, one accent per figure, dot/hatch textured fills). The OpenAI-index
 aesthetic, done with open fonts — no brand assets, a look not an identity.
