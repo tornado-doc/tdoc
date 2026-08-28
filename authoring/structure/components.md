@@ -55,9 +55,15 @@ Fills are also the worst case for this reader — dark mode is a whole-page
 invert, so a filled cell becomes a slab where a hairline only changes colour.
 
 Rounding a table needs `border-collapse: separate` with `border-spacing: 0` and
-`overflow: hidden` to clip; `collapse` will not round. Clear the cell fill
-explicitly — the reader supplies one, and a rule that sets only borders and
-padding leaves it in place, so the card comes out filled anyway.
+`overflow: hidden` to clip; `collapse` will not round.
+
+Reset the cell's own shape, not only the parts you are changing. The reader
+styles cells as standalone chips — a fill and a corner radius of their own —
+and those survive any rule that does not name them. A treatment that sets
+borders and padding alone comes out filled; one that also clears the fill but
+leaves the radius comes out with row rules that curve away at every cell
+boundary instead of crossing the table. Set `background` and `border-radius`
+on the cell explicitly; the card carries the radius, the cells do not.
 
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`, and both need the child to have a
