@@ -130,12 +130,7 @@
 .tdoc-toast.error { background: var(--td-danger); }
 .tdoc-avatar-fallback { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--td-accent); color: #fff; font-weight: 700; }
 
-html[data-tdoc-theme="dark"] .docs-hub,
-html[data-tdoc-theme="dark"] .docs-hub .tdoc-bar {
-  filter: invert(1) hue-rotate(180deg);
-}
-html[data-tdoc-theme="dark"] .docs-hub img,
-html[data-tdoc-theme="dark"] .docs-hub svg,
-html[data-tdoc-theme="dark"] .docs-hub [data-tdoc-dark="invert"] {
-  filter: invert(1) hue-rotate(180deg);
-}
+/* Dark mode is the page-level invert in chrome.css — the Docs Hub inherits it
+   like every other surface. It used to invert `.docs-hub` a second time, which
+   was right when /me was its own server-rendered page outside that rule, but
+   inside the shell it cancelled the page invert out and /me stayed light. */

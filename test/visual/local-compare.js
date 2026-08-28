@@ -85,6 +85,7 @@ const SCENES = [
   { name: '14-me-hub', url: '/me', run: async (p) => {} },
   // Landing: the site bar carries the GitHub mark and star count, and none of
   // the document actions (Share / ⋯ / breadcrumbs).
+  { name: '14c-me-dark', url: '/me', theme: 'dark', run: async (p) => {} },
   { name: '14b-landing', url: '/d/tornado-doc/v/2', rewrite: (html) => html.replace('"stars":null', '"stars":103'), run: async (p) => {} },
   { name: '15-signin', run: async (p) => { await tryClick(p, '#tdoc-signin-btn, .tdoc-signin-btn, button:has-text("Sign in")'); await settle(p, 500); } },
 ];
@@ -97,6 +98,9 @@ const SCENES = [
     const row = { name: scene.name };
     for (const side of ['old', 'new']) {
       const ctx = await browser.newContext({ viewport: scene.viewport || { width: 1280, height: 800 } });
+      // `theme` seeds the stored preference, so a page can be compared as the
+      // reader would meet it — dark chrome applied before first paint.
+      if (scene.theme) await ctx.addInitScript((t) => { try { localStorage.setItem('tdoc-theme', t); } catch (e) {} }, scene.theme);
       const page = await ctx.newPage();
       const errors = []; page.on('pageerror', (e) => errors.push(String(e).split('\n')[0]));
       const rewrite = scene.owner
