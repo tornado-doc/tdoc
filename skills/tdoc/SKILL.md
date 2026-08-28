@@ -230,7 +230,8 @@ Three files are required reading before you write doc HTML, on every
 |---|---|---|
 | `$SKILL_DIR/authoring/voice.md` | how the prose reads | No. A floor — no switch, no doc exempt. |
 | `$SKILL_DIR/authoring/visuals.md` | how much of the doc is a picture | No. A floor — be visual-first, many visuals, varied types. |
-| `$SKILL_DIR/authoring/style/default.md` | what the page looks like | Only by naming another entry in `style/`. |
+| `$SKILL_DIR/authoring/structure/components.md` | what the parts are | No. The parts are the same in every style. |
+| `$SKILL_DIR/authoring/style/<picked>.md` | what those parts look like | Yes — you pick the entry that fits the content. |
 
 `$SKILL_DIR` is the installed skill directory resolved in "Setup check"
 above (`~/.claude/skills/tdoc`, or `~/.codex/skills/tdoc` under Codex) —
@@ -247,9 +248,21 @@ oversized tight-tracked headline, near-zero color, and a full technical-diagram
 vocabulary (thin frames, mono pill labels, numbered containers, solid/dashed
 arrows, one accent per figure, dot/hatch textured fills). The OpenAI-index
 aesthetic, done with open fonts — no brand assets, a look not an identity.
-Apply it unless the user names a different entry in `$SKILL_DIR/authoring/style/`.
+**Choose the style that fits the document you are about to write.** It is a
+judgment call, not a setting the user has to know exists: read what the content
+is, then pick. A user who names one has overridden you, and that stands — but
+saying nothing is not a vote for the default, it is leaving the choice to you.
 
-The other entries a user can name:
+- **`default`** — specs, explainers, anything carried by diagrams. The stark
+  register keeps the page quiet so the figures do the talking.
+- **`technical`** — dense engineering writeups, benchmarks, anything where the
+  identifiers and the numbers are the content. Opens dark-first.
+- **`paper`** — a long read meant to be read end to end: a vision doc, a
+  post-mortem with a story in it, an essay.
+- **`editorial`** — the same length, but argumentative: a position piece where
+  terms need marking as they are introduced.
+
+When two fit, take the calmer one. The entries in full:
 
 - `$SKILL_DIR/authoring/style/technical.md` — a cold engineering-blog register:
   mono for identifiers and metrics, neutral greys for structure, a single
@@ -263,8 +276,18 @@ The other entries a user can name:
   one clay accent. The Anthropic-blog aesthetic, done with open fonts (not
   the proprietary brand fonts, no logo/byline — a look, not an identity).
 
-`$SKILL_DIR/authoring/structure/` is still an empty mount point. Empty means
-no choice to make: derive the document's shape from the prompt.
+`$SKILL_DIR/authoring/structure/components.md` is the component library: what
+a stat tile, a comparison matrix, a container frame or a label chip *is*,
+with no colour on it. Each `style/` entry gives the same parts its own
+treatment, so switching style changes how a component reads and never what
+it is.
+
+**The list is open.** A doc that needs a component nobody wrote down should
+have one. Build it from the tokens every style declares — `ink`, `rule`,
+`muted`, `surface`, `accent-fill`, `accent-stroke`, `accent-text`,
+`label-type` — and it is dressed correctly by every style, including any
+added later. The rest of the contract is in that file. Section skeletons
+are still an empty slot — derive the document's shape from the prompt.
 
 `visuals.md` is the visual-first floor: lead with charts, diagrams, tables, and
 stat tiles rather than paragraphs; pick the visual type that fits the data
@@ -316,7 +339,7 @@ that a GitHub page has opened and that the code is in the terminal; then keep
 working. Skip Step 0 entirely for the local-only and self-host destinations.
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, and `$SKILL_DIR/authoring/style/default.md`.**
+2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, `$SKILL_DIR/authoring/structure/components.md`, and the `$SKILL_DIR/authoring/style/` entry you picked.**
    Voice constrains the prose as you generate it, not as a later cleanup
    pass. The style tells you which components to reach for and its palette —
    apply it unless the user named another entry in `$SKILL_DIR/authoring/style/`.
@@ -328,7 +351,7 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
      CSP and therefore create controls or empty panels that cannot work. If
      the idea needs computation, write `v1/widgets/<name>.html` and iframe it.
    - No external CDNs in the host unless requested. No build step.
-   - The default style is mandatory when the user names no style. A full-page
+   - Pick the style that fits the content when the user names none. A full-page
      custom design is allowed only when the user explicitly requests one;
      programmatic callers must make that exception visible with
      `--custom-template`.
@@ -482,7 +505,7 @@ comments you handled unless you reply on each one. Skipping comments
 silently is the #1 source of regression complaints.
 
 1. Read `~/tdocs/<slug>/comments.json` — filter to `status: "open"`.
-2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md` and `$SKILL_DIR/authoring/visuals.md`.
+2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice, and
@@ -917,8 +940,8 @@ The overlay's template is modeled after the `conway-life` doc ("What if a doc co
 - pre: mono 15px, light gray background, left-rule, scrolling overflow
 - Code (inline): 0.92em mono, light-gray rounded chip
 
-**The default style is mandatory when the user names no other style.** Use the
-CSS from `$SKILL_DIR/authoring/style/default.md` as written. Add only the
+**Pick a style from `$SKILL_DIR/authoring/style/` for every doc**, and use that
+entry's CSS as written. Add only the
 house style's components and tightly scoped CSS for content-specific charts,
 diagrams, and controls. Do not invent additional bare-element rules or change
 the content root's width, margins, or padding.

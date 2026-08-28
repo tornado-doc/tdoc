@@ -1,8 +1,12 @@
-# structure/ — section skeletons
+# structure/ — the parts, and the shapes they go in
 
-**Empty. Reserved. The default is no structure at all.**
+`components.md` is the component library: what a stat tile, a comparison
+matrix, a container frame or a label chip *is*, with no colour on it. Every
+`style/` entry gives those same parts its own treatment, which is what makes
+a style swappable rather than a rewrite.
 
-A structure entry answers "which sections does this kind of doc have":
+**Section skeletons are still an empty slot.** A structure entry would answer
+"which sections does this kind of doc have":
 a post-mortem is timeline, blast radius, root cause, action items; a PRD
 is problem, user, non-goals, success measures.
 
