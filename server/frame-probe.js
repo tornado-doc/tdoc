@@ -426,7 +426,14 @@
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || d.source !== 'tdoc-shell') return;
     if (d.type === 'tdoc:anchors') reportPins(d.comments);
-    else if (d.type === 'tdoc:clearPending') { if (HL) CSS.highlights.delete('tdoc-pending'); }
+    else if (d.type === 'tdoc:clearPending') {
+      if (HL) CSS.highlights.delete('tdoc-pending');
+      // Drop the reader's own selection too. The browser paints it OVER our
+      // anchor highlight, so after a comment is posted or an anchor is moved
+      // the yellow would not appear until the reader happened to click away —
+      // it looked as though the anchor had not moved at all.
+      try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
+    }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {

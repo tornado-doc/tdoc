@@ -57,6 +57,21 @@ const SCENES = [
   { name: '06-reply-form', run: async (p) => { await tryClick(p, '.tdoc-pin'); await tryClick(p, '.tdoc-reply-toggle, .tdoc-reply'); } },
   { name: '06b-reaction-picker', run: async (p) => { await tryClick(p, '.tdoc-pin'); await tryClick(p, '.tdoc-reactions .tdoc-react-add, .tdoc-react-add'); await settle(p, 400); } },
   { name: '07-composer', run: async (p) => { await selectInFrame(p); } },
+  // Re-anchor with a real drag: the frame highlight must land on the new text
+  // straight away, not sit under the reader's own selection until they click.
+  { name: '07b-reanchored', run: async (p) => {
+    await tryClick(p, '.tdoc-pin');
+    await tryClick(p, '.tdoc-reanchor-btn');
+    const frame = p.frames().find((f) => f !== p.mainFrame());
+    const target = frame.locator('p', { hasText: 'Some prose so the article column' }).first();
+    const box = await target.boundingBox();
+    if (!box) return;
+    await p.mouse.move(box.x + 4, box.y + box.height / 2);
+    await p.mouse.down();
+    await p.mouse.move(box.x + box.width - 8, box.y + box.height / 2, { steps: 12 });
+    await p.mouse.up();
+    await settle(p, 900);
+  } },
   { name: '08-dark', run: async (p) => { await tryClick(p, '#tdoc-theme-btn'); await settle(p, 600); } },
   { name: '09-dark-card', run: async (p) => { await tryClick(p, '#tdoc-theme-btn'); await tryClick(p, '.tdoc-pin'); await settle(p, 400); } },
   { name: '10-mobile-drawer', viewport: { width: 375, height: 812 }, run: async (p) => { await tryClick(p, '.tdoc-fab'); await settle(p, 500); } },

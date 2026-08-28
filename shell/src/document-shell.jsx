@@ -91,6 +91,7 @@ function OldVersionNotice({ value }) {
 export function DocumentShell({ boot, config }) {
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
+  const bridgeRef = useRef(null);
   const [composer, setComposer] = useState(null);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
@@ -129,12 +130,17 @@ export function DocumentShell({ boot, config }) {
   });
 
   const selectFromFrame = useCallback((selection) => {
-    if (reanchorRef.current) {
-      comments.moveAnchor(reanchorRef.current, selection)
-        .then(() => {
-          setReanchorId(null);
-          setOpenCommentId(null);
-        })
+    const reanchoring = reanchorRef.current;
+    if (reanchoring) {
+      // Leave re-anchor mode before the request, as the pre-React shell did:
+      // a second selection while the PATCH is in flight must not move the
+      // anchor a second time.
+      reanchorRef.current = null;
+      setReanchorId(null);
+      setOpenCommentId(null);
+      comments.moveAnchor(reanchoring, selection)
+        // `send` is stable, so reading it off the current bridge is safe here.
+        .then(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }))
         .catch((error) => setToast(error.message || 'Could not move anchor'));
       return;
     }
@@ -190,6 +196,10 @@ export function DocumentShell({ boot, config }) {
     bridge.send({ type: 'tdoc:anchors', comments: comments.comments });
     if (!comments.loading) document.body.dataset.tdocReady = '1';
   }, [bridge.send, comments.comments, comments.loading]);
+
+  useEffect(() => {
+    bridgeRef.current = bridge.send;
+  }, [bridge.send]);
 
   useEffect(() => {
     reanchorRef.current = reanchorId;
