@@ -591,6 +591,16 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, unread: items.filter(i => i && !i.read).length });
   }
 
+  if (p === '/favicon.svg') {
+    const logoPath = path.join(__dirname, '..', 'assets', 'favicon.svg');
+    if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(logoPath), {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+
   if (p === '/tdoc_logo.svg') {
     const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.svg');
     if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');

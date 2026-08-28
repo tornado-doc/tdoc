@@ -44,7 +44,7 @@
     var isSiteBar = !!(o.isLanding || o.isCatalog);
 
     var leftHtml = '' +
-      '<button class="tdoc-bar-mark" id="tdoc-bar-mark" title="My docs" aria-label="My docs"><img src="/tdoc_logo.svg" alt="" width="24" height="24"></button>' +
+      '<button class="tdoc-bar-mark" id="tdoc-bar-mark" title="My docs" aria-label="My docs"><img src="/tdoc_logo.svg" alt="" width="24" height="24" data-tdoc-dark="invert"></button>' +
       (isSiteBar ? '' :
         '<span class="crumb crumb-slug" title="' + escapeHtml(slugCrumbLabel) + '">' + escapeHtml(slugCrumbLabel) + '</span>' +
         '<span class="crumb-sep crumb-sep-slug" aria-hidden="true">/</span>' +
