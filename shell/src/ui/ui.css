@@ -81,6 +81,26 @@ button.tdoc-cluster-row {
 
 .tdoc-pin .tdoc-pin-anon { display: block; }
 
+/* Composer close: the legacy popup used a bare × span. */
+.tdoc-popup .head button.x {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 0 0 8px;
+  margin: 0;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: #888;
+  cursor: pointer;
+  flex: none;
+  align-self: flex-start;
+}
+
+.tdoc-popup .head button.x:hover {
+  color: #fff;
+}
+
 button.tdoc-pin {
   padding: 0;
   margin: 0;

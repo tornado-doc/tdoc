@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { X } from 'lucide-react';
 import { TOP_BAR_HEIGHT } from './model.js';
 
 export function CommentComposer({ selection, onSubmit, onClose }) {
@@ -17,9 +16,10 @@ export function CommentComposer({ selection, onSubmit, onClose }) {
     );
   }
 
+  const quoted = String(selection.text || '');
   const preview = selection.kind === 'element'
     ? selection.label || 'Selected element'
-    : `“${String(selection.text || '').slice(0, 80)}”`;
+    : `"${quoted.slice(0, 80)}${quoted.length > 80 ? '…' : ''}"`;
 
   const submit = () => {
     if (text.trim()) onSubmit(text);
@@ -33,9 +33,7 @@ export function CommentComposer({ selection, onSubmit, onClose }) {
     >
       <div className="head">
         <span className="h">{preview}</span>
-        <button type="button" className="x" onClick={onClose}>
-          <X size={14} />
-        </button>
+        <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
       </div>
       <textarea
         autoFocus
