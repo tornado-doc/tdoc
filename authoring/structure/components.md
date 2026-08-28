@@ -51,8 +51,15 @@ rather than a tinted band, and numbers are tabular so a column lines up.
 The header is a label, so it takes the style's `label-type` register rather
 than a smaller, greyer version of the body. Set at body size in the muted ink
 it reads as a quieter row instead of a different kind of row; in the label
-register it is unmistakable at a glance, whatever its size. Give it its own
-rule, a step stronger than the row rules under it.
+register it is unmistakable at a glance, whatever its size.
+
+Under it goes a rule in `ink`, heavier than the hairlines between rows. That
+separation is structural rather than typographic, which is why it is worth
+spending: the register already carries every typographic signal available —
+case, tracking, size, face — so making the header bolder or darker competes
+with the body text on an axis that is used up. A rule does not. A hairline in
+the same weight as the row rules below is not a header rule at all; the eye
+reads the header as one more row.
 
 **Square corners.** No radius on the table and none on its cells. A rounded
 card competes with the figures around it, and a radius on the cells is worse

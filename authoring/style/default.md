@@ -87,7 +87,7 @@ white with one pastel accent, and it draws any figure the content asks for.
 | Accent fill | Pink `fill:#f7d7d1 stroke:#e0a99e`, text `#b3503c`; or blue `fill:#dde7f9 stroke:#a9c0ee`, text `#26407a` |
 | Textured variant | Dot over the pink for a live state; diagonal hatch over the blue for a transformed one |
 | Stacked bar | Blue shades `#c4d4f5` / `#d4e0f8` / `#e8eefb` with `#a9c0ee` strokes and mono labels; a hatched segment marks a transformed part, a dashed baseline marks a limit |
-| Table | `rule` hairline border, square corners; row rules in `rule`; header in `label-type` — uppercase mono, `muted` — over its own `rule`; no fill |
+| Table | `rule` hairline border, square corners; row rules in `rule`; header in `label-type` — uppercase mono, `muted` — over a rule in `ink`; no fill |
 
 Solid pastel is the base and the texture is the *variant*, not the fill. Put
 the colour inside the pattern tile so the texture reads on top of it rather
