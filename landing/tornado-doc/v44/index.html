@@ -367,7 +367,7 @@
     .host p { font-size:13.5px; margin:0; color:var(--muted); }
 
     /* compare, opentag marks */
-    .tablewrap { overflow-x:auto; border:1px solid var(--rule); border-radius:13px; scrollbar-width:thin; }
+    .tablewrap { overflow-x:auto; border:1px solid var(--rule); border-radius:0; scrollbar-width:thin; }
     /* Below the table's own floor the last column is cut with nothing to show
        for it — under overlay scrollbars the table looks complete and is not.
        Fade the right edge so the cut is visible, and let the columns shrink
@@ -381,34 +381,33 @@
        pulls the table out of its own scroll wrapper and leaves a gap on the
        right and bottom. Neutralised here with a more specific selector so the
        homepage renders correctly today; the real fix is PR #128. */
-    .tablewrap table { margin:0; border-radius:13px; overflow:hidden; }
-    /* The overlay normalises author tables (border-collapse:separate,
-       border-spacing:3px). That put a gap and a rounded corner around every
-       cell in the middle of the grid. Only the outer corners round. */
+    .tablewrap table { margin:0; border-radius:0; }
+    /* One bordered card, ruled inside, nothing filled. The header is a label
+       sitting over a rule heavier than the hairlines between the rows, and the
+       corners are square. The overlay normalises author tables to
+       border-collapse:separate with spacing, which reopens a gap and a radius
+       around every interior cell, so both are forced back. */
     .tablewrap table, body .tablewrap table { border-collapse:collapse !important; border-spacing:0 !important; }
     .tablewrap th, .tablewrap td { border-radius:0 !important; }
-    .tablewrap tr:first-child th:first-child { border-top-left-radius:13px; }
-    .tablewrap tr:first-child th:last-child { border-top-right-radius:13px; }
-    .tablewrap tr:last-child td:first-child { border-bottom-left-radius:13px; }
-    .tablewrap tr:last-child td:last-child { border-bottom-right-radius:13px; }
     table { border-collapse:collapse; border-spacing:0; width:100%; min-width:840px; font-size:14px; background:#fff; table-layout:fixed; }
-    th, td { padding:12px 14px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:middle; }
-    tbody tr:hover td { background:#fbfcfe; }
-    tbody tr:hover td.us { background:#eaf0fe; }
-    thead th { font-size:11.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); font-weight:700; background:var(--wash); }
-    thead th:first-child { background:#eef0f5; }
-    thead th.us { background:var(--soft); color:var(--accent); }
-    td.us { background:#fafbff; }
-    .lbl { font-weight:700; color:var(--ink); width:27%; background:#f2f4f8; font-size:14px; }
+    th, td { padding:13px 14px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:middle; background:transparent; }
+    thead th { font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-weight:700; border-bottom:2px solid var(--ink); }
+    /* The tdoc column is marked by type and a bracketing rule, never a fill. */
+    thead th.us { color:var(--accent); }
+    th.us, td.us { border-left:1px solid var(--rule); border-right:1px solid var(--rule); }
+    tbody td.us { color:var(--ink); }
+    .lbl { font-weight:600; color:var(--ink); width:27%; font-size:14px; }
     tbody tr:last-child td { border-bottom:0; }
-    .yes,.no,.part { display:inline-flex; align-items:center; gap:7px; font-weight:500; }
-    .yes { color:var(--ink); }
-    .no { color:#5b6070; }
+    .yes,.no,.part { display:inline-flex; align-items:center; gap:8px; font-weight:400; }
+    .yes { color:var(--body); }
+    .no { color:var(--muted); }
     .part { color:var(--body); }
-    .yes svg,.no svg,.part svg { width:18px; height:18px; flex:none; border-radius:50%; padding:2.5px; }
-    .yes svg { background:var(--good); color:#fff; }
-    .no svg { background:#8a90a0; color:#fff; }
-    .part svg { background:#c9a227; color:#fff; }
+    /* Stroke glyphs carry the verdict in their own colour. No chip, no circle:
+       the three marks are already distinct shapes at this size. */
+    .yes svg,.no svg,.part svg { width:15px; height:15px; flex:none; }
+    .yes svg { color:var(--good); }
+    .no svg { color:#b4b9c5; }
+    .part svg { color:#b8860b; }
 
     /* hero split: doc left, comments in the right margin, as on desktop */
     .stage { display:grid; grid-template-columns:1fr 300px; }
@@ -477,7 +476,7 @@
        3. author `img { display:block; margin:16px auto }` centred every
           avatar and added 16px of vertical air, which is what pushed the
           names and roles away from their faces. */
-    .tablewrap table { border-collapse:collapse; border-spacing:0; margin:0; border-radius:13px; overflow:hidden; }
+    .tablewrap table { border-collapse:collapse; border-spacing:0; margin:0; border-radius:0; }
     /* The overlay's author-image rule is a long :not() chain, so it outranks
        a plain selector. Narrowly scoped !important is the honest tool here:
        margin:16px auto was resolving to 34px of side air and shoving every
@@ -583,7 +582,7 @@
       .tablewrap td { display:block; background:none !important; border:0; padding:0; text-align:left; font-size:12.5px; }
       .tablewrap td:not(.lbl):before { content:attr(data-col); display:block; font-size:10px; font-weight:700;
         letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:0 0 2px; }
-      .tablewrap td.us { grid-column:1 / -1; background:var(--soft) !important; border-radius:8px; padding:7px 9px; min-height:0; }
+      .tablewrap td.us { grid-column:1 / -1; border-left:2px solid var(--accent) !important; border-radius:0; padding:2px 0 2px 9px; min-height:0; }
       .tablewrap td span.yes, .tablewrap td span.no, .tablewrap td span.part { vertical-align:-2px; }
     }
 </style>
