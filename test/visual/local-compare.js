@@ -24,6 +24,9 @@ async function startServer(root) {
   const port = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cmp-'));
   fs.cpSync(path.join(root, 'test/fixtures/tdocs/sample-doc'), path.join(dir, SLUG), { recursive: true });
+  // `tornado-doc` is the landing slug, so the same fixture also exercises the
+  // site bar (GitHub mark + star count, no document actions).
+  fs.cpSync(path.join(root, 'test/fixtures/tdocs/sample-doc'), path.join(dir, 'tornado-doc'), { recursive: true });
   const proc = spawn('node', [path.join(root, 'server/server.js')], { env: { ...process.env, TDOC_PORT: String(port), TDOC_HOST: '127.0.0.1', TDOC_DIR: dir, TDOC_E2E_USER: 'alice' }, stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('server start timeout ' + root)), 8000); proc.stdout.on('data', (d) => { if (String(d).includes('tdoc server')) { clearTimeout(t); res(); } }); proc.stderr.on('data', (d) => process.stderr.write(`[${path.basename(root)}] ${d}`)); });
   return { proc, base: `http://127.0.0.1:${port}` };
@@ -80,6 +83,9 @@ const SCENES = [
   { name: '12-owner-share', owner: true, run: async (p) => { await tryClick(p, '#tdoc-share-btn'); await settle(p, 800); } },
   { name: '13-owner-share-adv', owner: true, run: async (p) => { await tryClick(p, '#tdoc-share-btn'); await settle(p, 500); await tryClick(p, '.tdoc-adv summary, details summary'); } },
   { name: '14-me-hub', url: '/me', run: async (p) => {} },
+  // Landing: the site bar carries the GitHub mark and star count, and none of
+  // the document actions (Share / ⋯ / breadcrumbs).
+  { name: '14b-landing', url: '/d/tornado-doc/v/2', rewrite: (html) => html.replace('"stars":null', '"stars":103'), run: async (p) => {} },
   { name: '15-signin', run: async (p) => { await tryClick(p, '#tdoc-signin-btn, .tdoc-signin-btn, button:has-text("Sign in")'); await settle(p, 500); } },
 ];
 
@@ -93,10 +99,12 @@ const SCENES = [
       const ctx = await browser.newContext({ viewport: scene.viewport || { width: 1280, height: 800 } });
       const page = await ctx.newPage();
       const errors = []; page.on('pageerror', (e) => errors.push(String(e).split('\n')[0]));
-      if (scene.owner) {
-        await page.route(`${servers[side].base}/d/${SLUG}/v/2`, async (route) => {
-          const res = await route.fetch(); let html = await res.text();
-          html = html.replace('"mode":"local"', `"mode":"remote","isOwner":true,"ownerManage":${JSON.stringify(OWNER)}`);
+      const rewrite = scene.owner
+        ? (html) => html.replace('"mode":"local"', `"mode":"remote","isOwner":true,"ownerManage":${JSON.stringify(OWNER)}`)
+        : scene.rewrite;
+      if (rewrite) {
+        await page.route(servers[side].base + (scene.url || `/d/${SLUG}/v/2`), async (route) => {
+          const res = await route.fetch(); const html = rewrite(await res.text());
           await route.fulfill({ response: res, body: html, headers: { ...res.headers(), 'content-length': String(Buffer.byteLength(html)) } });
         });
       }

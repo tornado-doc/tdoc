@@ -335,7 +335,13 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage must hide document breadcrumbs');
   assert(toolbar.includes('export function LandingActions') && /href="https:\/\/github\.com\/tornado-doc\/tdoc"/.test(toolbar),
     'homepage bar must expose the GitHub action');
-  assert(documentShell.includes('config.isLanding ? <LandingActions /> : ('),
+  // The landing entry is the GitHub mark plus the live star count, not a
+  // generic link glyph (it read as a share control after the React migration).
+  assert(/className="tdoc-github-btn"/.test(toolbar) && /viewBox="0 0 16 16"/.test(toolbar),
+    'homepage bar must draw the GitHub mark itself');
+  assert(/className="tdoc-gh-stars"/.test(toolbar) && /function starCount/.test(toolbar),
+    'homepage bar must show the star count beside the mark');
+  assert(/config\.isLanding \? <LandingActions stars=\{config\.stars\} \/> : \(/.test(documentShell),
     'homepage must not receive the document Share/Copy/Download actions');
 });
 
