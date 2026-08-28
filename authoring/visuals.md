@@ -6,20 +6,18 @@ words; this governs how much of the doc is a picture instead of words.
 
 ## Be visual-first
 
-A tdoc doc should lead with visuals, not paragraphs. If a claim has data, a
-comparison, a structure, a sequence, or a tradeoff in it, **draw it** — prose
-is the connective tissue between visuals, not the main body. Aim for a visual
-roughly every screenful. A wall of text with one diagram is a failure of this
-contract, not a neutral choice.
+Draw generously. If a claim has data, a comparison, a structure, a sequence, or
+a tradeoff in it, **draw it** — prose is the connective tissue between visuals,
+not the main body. Aim for a visual roughly every screenful, wherever in the
+doc the material earns one.
 
 Everything here is buildable as inline SVG or CSS — the host runs no author
 JS, so no chart library. An SVG chart is also a commentable artifact, which is
 the point of tdoc. Draw honestly: real numbers, labeled axes, no chartjunk.
 
-## Don't default to a flowchart. Match the visual to the data.
+## Match the visual to the data
 
-A flowchart is one option among many, and the most overused. Pick by what the
-data *is*:
+Pick by what the data *is*:
 
 | The data is… | Reach for |
 |---|---|
