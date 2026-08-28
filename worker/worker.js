@@ -13,18 +13,15 @@
 // replaces them before deploy, producing worker/_worker.bundled.js. Do not
 // deploy worker.js directly — the chrome/provenance would be missing.
 
-// Cross-origin shell modules, inlined by bin/tdoc-bundle. The chrome + shell
-// builder are inlined as CODE right here (Workers ban eval, so each self-
-// registers on globalThis when it runs at module load); the chrome + probe are
-// also kept as client strings for inlining into the shell / frame documents.
-/* __TDOC_CHROME_MODULE__ */
+// Cross-origin shell builder is inlined as code. The frame probe remains a
+// framework-free string injected only into isolated author frames.
 /* __TDOC_SHELL_MODULE__ */
-const CHROME_JS = `__TDOC_CHROME_JS__`;
 const PROBE_JS = `__TDOC_PROBE_JS__`;
-const CHROME_CSS = `__TDOC_CHROME_CSS__`;
-const MANAGE_JS = `__TDOC_MANAGE_JS__`;
 const READER_CSS = `__TDOC_READER_CSS__`;
-const CHROME = (typeof globalThis !== 'undefined' && globalThis.TDOC_CHROME) || {};
+const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RUNTIME_JS_PATH__";
+const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`;
+const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";
+const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
 
@@ -1476,11 +1473,7 @@ function injectReaderCss(html, css) {
 
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
-// isolated in the same-origin, sandboxed /frame iframe. Mirrors the local
-// server's shellDocument, built from the SAME shared modules (SHELL/CHROME) so
-// local and production render 1:1. The published-mode bar + client cfg carry
-// the same fields the old overlay boot used, so identity/owner/manage/share behave as
-// before once the shell client wires them.
+// stays isolated in the same-origin, sandboxed /frame iframe.
 function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
@@ -1489,7 +1482,9 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   const vlist = Array.isArray(versions) && versions.length ? versions : [{ n: version }];
   let title = slug;
   const cfg = {
-    slug, version,
+    slug,
+    title,
+    version,
     identity: identity || null,
     isOwner: !!isOwner,
     canSeeMyDocs: !!canSeeMyDocsFlag,
@@ -1500,60 +1495,33 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     webAuth: !!webAuth,
     mode: 'published',
     versions: vlist,
+    stars: stars || null,
+    viewerStar: viewerStar || null,
     runtime: runtimeInfo(),
   };
-  // Onboarding modal ships wherever its trigger is (landing/start slug, or any
-  // doc carrying the /start CTA) — same rule the old overlay boot used.
   const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
-  const onboardJs = ((slug === LANDING_SLUG || slug === START_SLUG || hasCta) && nonce) ? ONBOARD_JS : '';
-  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'published', slug, version, versions: vlist, isLanding: !!isLanding, isCatalog: !!isCatalog, stars: stars, viewerStar: viewerStar || null }) : '';
-  // Old-version strip — published + multi-version + viewing an old one (1:1
-  // with the overlay: fork/landing and the latest version itself get nothing).
-  let oldverHtml = '';
+  cfg.onboarding = slug === LANDING_SLUG || slug === START_SLUG || hasCta;
+
+  let oldVersion = null;
   const latestVersion = vlist.length ? Math.max(...vlist.map(v => Number(v.n) || 0)) : version;
   if (!isLanding && vlist.length > 1 && typeof version === 'number' && version < latestVersion) {
-    const latestUrl = `/d/${encodeURIComponent(slug)}/v/${latestVersion}`;
-    oldverHtml = `<div class="tdoc-oldver-strip"><span>You're viewing v${version} — the latest is <a href="${latestUrl}">v${latestVersion}</a></span></div>`;
+    oldVersion = {
+      current: version,
+      latest: latestVersion,
+      latestUrl: `/d/${encodeURIComponent(slug)}/v/${latestVersion}`,
+    };
   }
-  const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
   return SHELL.shellHtml({
     title,
-    frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame`,
     nonceAttr,
-    chromeCssStr: (typeof CHROME_CSS === 'string' && CHROME_CSS.indexOf('__TDOC_') !== 0) ? CHROME_CSS : '',
-    barInner, footerInner, oldverHtml,
-    chromeJs: CHROME_JS,
-    authCfgJson: safeJsonForScript(cfg),
     cfgJson: safeJsonForScript(cfg),
-    signinJs: SIGNIN_JS,
-    manageJs: (typeof MANAGE_JS === 'string' && MANAGE_JS.indexOf('__TDOC_') !== 0) ? MANAGE_JS : '',
-    onboardJs,
+    bootJson: safeJsonForScript({
+      frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame`,
+      oldVersion,
+    }),
+    runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+    runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
   });
-}
-
-// Site chrome for PLAIN pages (/me): the page's own content stays inline (it is
-// tdoc-generated, not author content — no sandbox needed), and we add the
-// shared bar component + theme/identity wiring. The shell client script runs
-// dormant here: with no .tdoc-doc-frame in the DOM, all comment machinery is
-// message-driven and never activates; only the bar wiring (theme, menus,
-// identity, sign-in) is live. One chrome, two page kinds.
-function injectSiteChrome(rawHtml, cfg, nonce) {
-  if (!SHELL || !CHROME.buildBar) return rawHtml;   // unbundled worker — serve bare
-  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
-  const barInner = CHROME.buildBar({ mode: 'published', slug: cfg.slug || '', version: cfg.version || 0, versions: [], isLanding: !!cfg.isLanding, isCatalog: !!cfg.isCatalog, stars: cfg.stars });
-  const chromeCssTag = `<style>${(typeof CHROME_CSS === 'string' && CHROME_CSS.indexOf('__TDOC_') !== 0) ? CHROME_CSS : ''}</style>`;
-  const bootCfg = { ...cfg, runtime: cfg.runtime || runtimeInfo() };
-  const scripts =
-    `<script${nonceAttr}>${CHROME_JS}</script>\n` +
-    `<script${nonceAttr}>window.__TDOC__ = ${safeJsonForScript(bootCfg)};</script>\n` +
-    `<script${nonceAttr}>window.__TDOC_SHELL__ = ${safeJsonForScript(bootCfg)};</script>\n` +
-    `<script${nonceAttr}>${SIGNIN_JS}</script>\n` +
-    `<script${nonceAttr}>${SHELL.shellScript()}</script>`;
-  let out = rawHtml;
-  out = /<head[^>]*>/i.test(out) ? out.replace(/<head[^>]*>/i, (m) => `${m}\n${chromeCssTag}`) : chromeCssTag + out;
-  out = /<body[^>]*>/i.test(out) ? out.replace(/<body[^>]*>/i, (m) => `${m}\n<div class="tdoc-bar">${barInner}</div>`) : `<div class="tdoc-bar">${barInner}</div>` + out;
-  out = out.includes('</body>') ? out.replace('</body>', `${scripts}\n</body>`) : out + scripts;
-  return out;
 }
 
 // The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
@@ -1567,14 +1535,6 @@ const START_SLUG = 'tdoc-start';
 // `/templates` — the template gallery: pick a look, copy a prompt, hand it to
 // your agent. Same landing-doc mechanism as `/start`.
 const TEMPLATES_SLUG = 'tdoc-templates';
-
-// The onboarding modal, bundled in by bin/tdoc-bundle. Kept as a placeholder
-// here so the source file stays readable and the bundle stays one artifact.
-const ONBOARD_JS = `__TDOC_ONBOARD_JS__`;
-
-// The one GitHub device-flow client, shared by the overlay and the neutral
-// landing page so a fix or a new provider lands once. See server/signin.js.
-const SIGNIN_JS = `__TDOC_SIGNIN_JS__`;
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -1685,11 +1645,11 @@ async function landingResponse(env, req, slug = LANDING_SLUG) {
   try {
     const meta = await loadDocMeta(env, slug);
     const latest = meta?.versions?.[meta.versions.length - 1]?.n;
-    if (!latest) return html(landingHtml(env));
+    if (!latest) return neutralLandingResponse(env);
     const res = await serveDocVersion(env, req, slug, Number(latest), true);
-    return res.ok ? res.response : html(landingHtml(env));
+    return res.ok ? res.response : neutralLandingResponse(env);
   } catch {
-    return html(landingHtml(env));
+    return neutralLandingResponse(env);
   }
 }
 
@@ -1698,81 +1658,25 @@ async function landingResponse(env, req, slug = LANDING_SLUG) {
 // just brand + sign-in (when auth is configured) + a link to the open-source
 // project. Docs are link-only. `notice` is an optional toast reason when we
 // bounce users here from /me or an unknown path.
-function landingHtml(env, notice) {
-  const authOk = !!(env && String(env.GITHUB_CLIENT_ID || '').trim());
-  const authWeb = !!(env && env.GITHUB_CLIENT_SECRET);
-  const toastMsg = ({
+function neutralLandingResponse(env, notice) {
+  const messages = {
     me: 'My docs is only available after you sign in as the worker owner.',
     signin: 'Sign in with GitHub to continue.',
     notfound: 'That page was not found. Sign in or open a doc from its shared link.',
-  })[notice] || '';
-  const toastJson = JSON.stringify(toastMsg);
-  return `<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tdoc</title>
-<style>
-  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh;
-    margin: 0; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; color: #111; background: #fff; gap: 10px; }
-  h1 { font-size: 30px; margin: 0; color: #1652f0; }
-  p { color: #666; margin: 0; }
-  a { color: #1652f0; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .sub { margin-top: 14px; font-size: 13px; color: #888; }
-  .actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
-  button.signin { font: inherit; padding: 8px 16px; border-radius: 8px; border: none;
-    background: #1652f0; color: #fff; font-weight: 600; cursor: pointer; }
-  button.signin:hover { background: #1245d0; }
-  button.signin:disabled { opacity: 0.6; cursor: default; }
-  #toast { position: fixed; top: 16px; right: 16px; max-width: min(360px, calc(100vw - 32px));
-    background: #111; color: #fff; padding: 12px 14px; border-radius: 10px; font-size: 13px;
-    line-height: 1.4; box-shadow: 0 8px 24px rgba(0,0,0,0.18); opacity: 0;
-    transform: translateY(-6px); transition: opacity .18s, transform .18s; pointer-events: none; }
-  #toast.show { opacity: 1; transform: translateY(0); }
-  .status { font-size: 13px; color: #888; min-height: 1.2em; }
-</style></head><body>
-  <h1>tdoc</h1>
-  <p>Prompt-native, commentable documents.</p>
-  <div class="actions">
-    ${authOk ? '<button type="button" class="signin" id="signin">Sign in with GitHub</button>' : ''}
-  </div>
-  <p class="status" id="status"></p>
-  <p class="sub">Open a document from its shared link ·
-    <a href="https://github.com/tornado-doc/tdoc">github.com/tornado-doc/tdoc</a></p>
-  <div id="toast" role="status" aria-live="polite"></div>
-<script>window.__TDOC__ = { authConfigured: true, webAuth: ${authWeb ? 'true' : 'false'}, signinReturn: '/me' };</script>
-<script>${SIGNIN_JS}</script>
-<script>
-  // One shared sign-in (server/signin.js): web redirect flow when webAuth is on,
-  // else the device-code modal. On the redirect path __tdocSignIn navigates away
-  // and never resolves, so the .then below only runs on the device path.
-  (function () {
-    var btn = document.getElementById('signin');
-    if (!btn || !window.__tdocSignIn) return;
-    btn.onclick = function () {
-      btn.disabled = true;
-      window.__tdocSignIn().then(function () { location.href = '/me'; },
-        function () { btn.disabled = false; });
-    };
-  })();
-</script>
-</body></html>`;
-}
-
-function authDoneHtml() {
-  return `<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tdoc — signed in</title>
-<style>
-  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh; margin: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    color: #111; background: #fff; gap: 8px; }
-  h1 { font-size: 22px; margin: 0; color: #1652f0; }
-  p { color: #666; margin: 0; }
-</style></head><body>
-  <h1>You're signed in</h1>
-  <p>You can close this tab and return to tdoc.</p>
-</body></html>`;
+  };
+  const nonce = rand(16);
+  return html(SHELL.appHtml({
+    title: 'tdoc',
+    nonceAttr: ` nonce="${nonce}"`,
+    runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+    runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+    bootJson: safeJsonForScript({
+      page: 'neutral-landing',
+      authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
+      webAuth: !!env?.GITHUB_CLIENT_SECRET,
+      notice: messages[notice] || '',
+    }),
+  }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
 }
 
 // Web OAuth redirect flow (browsers). Device flow stays for CLIs; this is the
@@ -1780,23 +1684,23 @@ function authDoneHtml() {
 // Approve, so nobody is stranded on GitHub's "Congratulations" page. Active
 // only when GITHUB_CLIENT_SECRET is set (the token exchange requires it), so a
 // deploy without the secret silently keeps the device flow.
-function authErrorHtml(msg) {
-  const safe = String(msg || 'Sign-in failed.').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]);
-  return `<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tdoc — sign-in</title>
-<style>
-  body { font: 15px system-ui, -apple-system, sans-serif; min-height: 100vh; margin: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    color: #111; background: #fff; gap: 8px; text-align: center; padding: 0 20px; }
-  h1 { font-size: 22px; margin: 0; color: #c3452f; }
-  p { color: #666; margin: 0; }
-  a { color: #1652f0; }
-</style></head><body>
-  <h1>Sign-in failed</h1>
-  <p>${safe}</p>
-  <p><a href="/">Back to tdoc</a></p>
-</body></html>`;
+function authStatusResponse(message, { error = false, status = 200 } = {}) {
+  const nonce = rand(16);
+  return html(SHELL.appHtml({
+    title: error ? 'tdoc - sign-in failed' : 'tdoc - signed in',
+    nonceAttr: ` nonce="${nonce}"`,
+    runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+    runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+    bootJson: safeJsonForScript({
+      page: 'status',
+      title: error ? 'Sign-in failed' : "You're signed in",
+      message,
+      error,
+    }),
+  }), {
+    status,
+    headers: { 'Content-Security-Policy': cspHeader(nonce) },
+  });
 }
 
 // Only ever redirect to a same-origin path we produced. Reject absolute URLs
@@ -1963,1096 +1867,69 @@ function docReadableBy(env, session, meta) {
   return canReadDoc(accessFromMeta(meta || {}), session, env, meta);
 }
 
-async function indexHtml(env, session, origin, nonce) {
-  // Catalog is title/slug/version from KV meta only. Do NOT HEAD R2 or fold
-  // comment logs here — that was N serial Durable-Object + R2 round trips
-  // per page load. Search + batch select are client-side over the rendered
-  // rows (no extra KV/R2 work). Delete confirm is immediate (no comment
-  // pre-flight) so the catalog stays snappy.
-  let list = [];
+async function indexData(env, session, origin) {
+  let keys = [];
   let cursor;
   do {
-    const r = await env.META.list({ prefix: 'meta:', cursor });
-    list = list.concat(r.keys);
-    cursor = r.cursor;
-    if (r.list_complete) break;
+    const page = await env.META.list({ prefix: 'meta:', cursor });
+    keys = keys.concat(page.keys);
+    cursor = page.cursor;
+    if (page.list_complete) break;
   } while (cursor);
 
-  const hosted = hostedRegistrationEnabled(env, origin);
-  const catalog = await Promise.all(list.map(async (k) => {
-    const slug = k.name.slice('meta:'.length);
-    const metaRaw = await env.META.get(k.name);
+  const catalog = await Promise.all(keys.map(async (key) => {
+    const slug = key.name.slice('meta:'.length);
     let meta = {};
-    try { meta = JSON.parse(metaRaw || '{}'); } catch {}
+    try { meta = JSON.parse(await env.META.get(key.name) || '{}'); } catch {}
     const versions = Array.isArray(meta.versions) ? meta.versions : [];
-    const latest = versions[versions.length - 1]?.n || 1;
-    const created = meta.created || versions[0]?.created || '';
-    const updated = versions[versions.length - 1]?.created || created;
-    return { slug, title: meta.title || slug, latest, created, updated, meta };
-  }));
-  const docs = catalog.filter((row) => {
-    if (hosted) return isDocOwnerSession(env, session, row.meta);
-    // BYOK operator catalog: keep other people's hosted copies off the list (#146).
-    const hostedLogin = hostedGithubLogin(row.meta);
-    if (hostedLogin && hostedLogin !== sessionLogin(session)) return false;
-    return true;
-  });
-  // Newest activity first — the catalog default. The sort select re-orders
-  // client-side off each row's data-updated/data-created attributes.
-  docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
-  const visible = docs;
-
-  // Viewer-scoped state: stars and recents may point at docs the viewer does
-  // not own (a colleague's shared doc). Rows render only for docs that still
-  // exist on this worker AND are still readable by this viewer.
-  const viewerLogin = sessionLogin(session);
-  const [starItems, recentItems, folderState] = viewerLogin
-    ? await Promise.all([loadStars(env, viewerLogin), loadRecents(env, viewerLogin), loadFolderState(env, viewerLogin)])
-    : [[], [], { folders: [], docs: {} }];
-  const bySlug = new Map(catalog.map((r) => [r.slug, r]));
-  const starredSet = new Set(starItems.map((i) => i.slug));
-  const readableRow = (slug) => {
-    const row = bySlug.get(slug);
-    return row && docReadableBy(env, session, row.meta) ? row : null;
-  };
-  const recentRows = recentItems
-    .map((i) => { const r = readableRow(i.slug); return r && { ...r, at: i.at }; })
-    .filter(Boolean);
-  const starRows = starItems
-    .map((i) => { const r = readableRow(i.slug); return r && { ...r, at: i.at }; })
-    .filter(Boolean);
-
-  const day = (iso) => (typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '');
-  const starBtn = (slug) => `<button class="star-btn${starredSet.has(slug) ? ' is-starred' : ''}" data-slug="${escapeHtml(slug)}" aria-pressed="${starredSet.has(slug)}" aria-label="${starredSet.has(slug) ? 'Unstar' : 'Star'} ${escapeHtml(slug)}">${starredSet.has(slug) ? '★' : '☆'}</button>`;
-
-  // Location model (Drive-style, one level for now — a folder `parent`
-  // field is reserved for nesting): folders render as rows above the doc
-  // list, filed docs leave the root view, navigation is ?folder=<id>.
-  const folderById = new Map(folderState.folders.map((f) => [f.id, f]));
-  const folderCounts = {};
-  for (const row of visible) {
-    const fid = folderState.docs[row.slug];
-    if (fid) folderCounts[fid] = (folderCounts[fid] || 0) + 1;
-  }
-  const locHint = (slug) => {
-    const f = folderById.get(folderState.docs[slug]);
-    return f ? `<span class="loc-hint" hidden> · in ${escapeHtml(f.name)}</span>` : '';
-  };
-
-  const rows = visible.map(({ slug, title, latest, created, updated }) => `<div class="doc-row" draggable="true" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}" data-created="${escapeHtml(created)}" data-updated="${escapeHtml(updated)}" data-folder="${escapeHtml(folderState.docs[slug] || '')}">
-      <label class="row-check">
-        <input type="checkbox" class="doc-check" aria-label="Select ${escapeHtml(title)}">
-      </label>
-      <div class="doc-info">
-        <a class="doc-title" draggable="false" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(title)}</a>
-        <div class="doc-meta">${escapeHtml(slug)} · v${latest}${day(updated) ? ` · updated ${day(updated)}` : ''}${locHint(slug)}</div>
-      </div>
-      <div class="row-actions">
-        ${starBtn(slug)}
-        <button class="row-menu-btn" aria-label="More actions" aria-haspopup="true" aria-expanded="false">⋯</button>
-        <div class="row-menu" hidden>
-          <button class="row-move" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">Move to folder…</button>
-          <button class="row-delete" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}">Delete…</button>
-        </div>
-      </div>
-    </div>`);
-
-  // Recent / Starred panes: read-only rows (no select, no manage menu — the
-  // viewer may not own these docs), a byline for someone else's doc, and the
-  // same star toggle.
-  const flatRow = (row, label) => {
-    const owner = hostedGithubLogin(row.meta);
-    const by = owner && owner !== viewerLogin ? `by ${owner} · ` : '';
-    return `<div class="doc-row flat-row" data-slug="${escapeHtml(row.slug)}" data-title="${escapeHtml(row.title)}">
-      <div class="doc-info">
-        <a class="doc-title" href="/d/${encodeURIComponent(row.slug)}/v/${row.latest}">${escapeHtml(row.title)}</a>
-        <div class="doc-meta">${escapeHtml(by)}${label} ${day(row.at)}</div>
-      </div>
-      <div class="row-actions">${starBtn(row.slug)}</div>
-    </div>`;
-  };
-  const recentList = recentRows.map((r) => flatRow(r, 'visited')).join('');
-  const starList = starRows.map((r) => flatRow(r, 'starred')).join('');
-
-  const folderRows = folderState.folders
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-    .map((f) => {
-      const n = folderCounts[f.id] || 0;
-      const sub = folderState.folders.filter((x) => (x.parent || '') === f.id).length;
-      return `<div class="doc-row folder-row" data-folder-id="${escapeHtml(f.id)}" data-parent="${escapeHtml(f.parent || '')}" data-name="${escapeHtml(f.name)}" role="button" tabindex="0" aria-label="Open folder ${escapeHtml(f.name)}">
-      <span class="folder-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
-      <div class="doc-info">
-        <span class="doc-title">${escapeHtml(f.name)}</span>
-        <div class="doc-meta">${sub ? `${sub} ${sub === 1 ? 'folder' : 'folders'} · ` : ''}${n} ${n === 1 ? 'doc' : 'docs'}</div>
-      </div>
-      <div class="row-actions">
-        <button class="row-menu-btn" aria-label="Folder actions" aria-haspopup="true" aria-expanded="false">⋯</button>
-        <div class="row-menu" hidden>
-          <button class="folder-rename" data-id="${escapeHtml(f.id)}">Rename…</button>
-          <button class="folder-delete" data-id="${escapeHtml(f.id)}" data-name="${escapeHtml(f.name)}">Delete folder…</button>
-        </div>
-      </div>
-    </div>`;
-    }).join('');
-  const foldersJson = JSON.stringify(folderState.folders.map((f) => ({ id: f.id, name: f.name, parent: f.parent || '' }))).replace(/</g, '\\u003c');
-
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My docs</title>
-<style>
-  :root {
-    --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
-    --td-danger: #b42318; --td-danger-hover: #931c14; --td-danger-tint: #fdeceb; --td-ok: #087443;
-    --td-ink: #111; --td-muted: #666; --td-line: #eee; --td-surface: #f7f7f7;
-  }
-  body { font: 15px system-ui, -apple-system, sans-serif; margin: 0; color: var(--td-ink); }
-  .wrap { max-width: 680px; margin: 0 auto; padding: 24px 20px 48px; }
-  h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
-  a { color: var(--td-accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
-  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
-  .toolbar input[type="search"] { flex: 1 1 220px; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
-  .toolbar input[type="search"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
-  .batch-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin: 0 0 8px; min-height: 32px; }
-  .select-all { display: inline-flex; align-items: center; gap: 8px; color: var(--td-muted); font-size: 13px; cursor: pointer; user-select: none; }
-  .batch-delete { display: none; font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-danger); background: #fff; color: var(--td-danger); }
-  .batch-delete.is-visible { display: inline-block; }
-  .batch-delete:hover { background: var(--td-danger); color: #fff; }
-  .batch-delete:disabled { opacity: 0.5; cursor: default; }
-  .doc-list { display: flex; flex-direction: column; }
-  .doc-list[hidden], .doc-row[hidden], .empty[hidden] { display: none !important; }
-  /* Create-a-doc: /me is where someone lands after publishing, so it is also
-     where they come back to make the next one. The button teaches rather than
-     creates, because nothing here can create a doc — their agent writes it. */
-  .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
-  .page-hd h1 { margin: 0; }
-  .mk-btn { margin-left: auto; border: 0; border-radius: 999px; background: var(--td-accent); color: #fff;
-    font: inherit; font-weight: 650; padding: 9px 16px; cursor: pointer; }
-  .mk-bg { position: fixed; inset: 0; background: rgba(16,18,26,.55); display: grid; place-items: center;
-    z-index: 99999; padding: 20px; }
-  .mk-bg[hidden] { display: none; }
-  .mk { width: min(480px, 100%); background: #fff; border-radius: 16px; overflow: hidden;
-    box-shadow: 0 24px 60px rgba(16,18,26,.28); text-align: left; }
-  .mk-hd { display: flex; align-items: center; padding: 17px 20px; border-bottom: 1px solid var(--td-line); }
-  .mk-hd strong { font-size: 15px; }
-  .mk-hd button { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1;
-    color: #767c8b; cursor: pointer; }
-  .mk-bd { padding: 18px 20px; }
-  .mk-bd ol { margin: 0; padding-left: 18px; color: #5b6070; font-size: 14px; }
-  .mk-bd li { margin: 0 0 9px; }
-  .mk-bd b { color: var(--td-ink); }
-  .mk-say { display: block; margin: 6px 0 0; padding: 9px 11px; background: #f5f6f8;
-    border: 1px solid var(--td-line); border-radius: 8px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--td-ink); }
-  .mk-ft { padding: 14px 20px; border-top: 1px solid var(--td-line); font-size: 12.5px; color: #767c8b; }
-  .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
-  .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
-  .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
-  /* Drive-style quiet checkboxes: the box keeps its slot (no layout jump) but
-     stays invisible until the row is hovered/focused, or while any selection
-     is active (.is-selecting on the list). Touch devices have no hover to
-     reveal with, so they keep the boxes always visible. */
-  @media (hover: hover) {
-    .doc-list:not(.is-selecting) .row-check { opacity: 0; transition: opacity .12s; }
-    .doc-list:not(.is-selecting) .doc-row:hover .row-check,
-    .doc-list:not(.is-selecting) .doc-row:focus-within .row-check { opacity: 1; }
-  }
-  .row-check input, .select-all input { width: 15px; height: 15px; accent-color: var(--td-accent); cursor: pointer; }
-  .doc-info { min-width: 0; flex: 1 1 auto; }
-  .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
-  button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
-  /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
-     not a management console. Faint by default, clearer on row hover. */
-  .row-actions { position: relative; flex-shrink: 0; margin-left: auto; }
-  .row-menu-btn { border: none; background: none; color: #ccc; font-size: 20px; line-height: 1; padding: 2px 8px; border-radius: 6px; }
-  .doc-row:hover .row-menu-btn { color: var(--td-muted); }
-  .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
-  .row-menu { position: absolute; right: 0; top: 100%; margin-top: 4px; min-width: 128px; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 4px; z-index: 10; }
-  .row-menu[hidden] { display: none; }
-  .row-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
-  .row-delete:hover { background: var(--td-danger-tint); }
-  /* Styled confirm modal — replaces window.confirm() (JUL-36). Overlay.js
-     supplies the site bar; this modal stays local because catalog delete
-     is not a document Share flow. */
-  .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
-  .tdoc-modal { background: #fff; color: var(--td-ink); border-radius: 12px; padding: 26px; width: 420px; max-width: calc(100vw - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-  .tdoc-modal h3 { margin: 0 0 10px; font-size: 18px; }
-  .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
-  .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
-  .tdoc-modal button { padding: 8px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
-  .tdoc-modal button:hover { border-color: #999; }
-  .tdoc-modal button.danger { background: var(--td-danger); border-color: var(--td-danger); color: #fff; }
-  .tdoc-modal button.danger:hover { background: var(--td-danger-hover); border-color: var(--td-danger-hover); }
-  .tdoc-modal button.primary { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font-weight: 600; }
-  .tdoc-modal button.primary:hover { background: var(--td-accent-hover); border-color: var(--td-accent-hover); }
-  .tdoc-modal input[type="text"] { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid var(--td-line); border-radius: 8px; margin: 0 0 14px; }
-  .tdoc-modal input[type="text"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
-  /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
-     switches over the already-rendered page — no fetch on tab change. */
-  .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--td-line); }
-  .tab { border: none; background: none; font: inherit; font-weight: 600; color: var(--td-muted); padding: 8px 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-  .tab:hover { color: var(--td-ink); }
-  .tab.is-active { color: var(--td-accent); border-bottom-color: var(--td-accent); }
-  .pane[hidden] { display: none !important; }
-  .toolbar select { -webkit-appearance: none; appearance: none; font: inherit; padding: 8px 30px 8px 12px;
-    border: 1px solid var(--td-line); border-radius: 8px; color: var(--td-ink); cursor: pointer;
-    background: #fff url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23666' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
-    background-size: 11px; }
-  .toolbar select:hover { border-color: #ccc; }
-  .toolbar select:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
-  .folder-row { cursor: pointer; }
-  .folder-row:hover { background: var(--td-surface); }
-  .folder-ico { display: flex; align-items: center; color: var(--td-muted); flex-shrink: 0; padding: 0 2px; }
-  .folder-row:hover .folder-ico { color: var(--td-accent); }
-  .folder-rename { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-ink); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
-  .folder-rename:hover { background: var(--td-surface); }
-  .folder-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
-  .folder-delete:hover { background: var(--td-danger-tint); }
-  .crumbs { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 14px; }
-  .crumbs[hidden] { display: none !important; }
-  .crumb-root { border: none; background: none; font: inherit; color: var(--td-accent); padding: 2px 6px; border-radius: 6px; cursor: pointer; }
-  .crumb-root:hover { background: var(--td-accent-tint); }
-  .crumbs .sep { color: #c0c0c4; user-select: none; }
-  .crumbs .cur { font-weight: 600; }
-  .new-folder-btn { font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 8px; border: 1px dashed var(--td-line); background: #fff; color: var(--td-muted); white-space: nowrap; }
-  .new-folder-btn:hover { border-color: var(--td-accent); color: var(--td-accent); }
-  .loc-hint { color: var(--td-muted); }
-  .loc-hint[hidden] { display: none !important; }
-  .folder-row[hidden] { display: none !important; }
-  .doc-row.dragging { opacity: 0.45; }
-  .folder-row.drop-hover, .crumb-root.drop-hover { background: var(--td-accent-tint); }
-  .folder-row.drop-hover .folder-ico { color: var(--td-accent); }
-  .folder-row.drop-hover .doc-title { color: var(--td-accent); }
-  .star-btn { border: none; background: none; font-size: 17px; color: #ccc; padding: 2px 6px; border-radius: 6px; line-height: 1; }
-  .doc-row:hover .star-btn { color: var(--td-muted); }
-  .star-btn:hover { background: var(--td-line); color: #f5a623; }
-  .star-btn.is-starred, .doc-row:hover .star-btn.is-starred { color: #f5a623; }
-  .batch-actions { display: flex; gap: 8px; }
-  .batch-move { display: none; font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-accent); background: #fff; color: var(--td-accent); }
-  .batch-move.is-visible { display: inline-block; }
-  .batch-move:hover { background: var(--td-accent); color: #fff; }
-  .batch-move:disabled { opacity: 0.5; cursor: default; }
-  .row-move { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-ink); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
-  .row-move:hover { background: var(--td-surface); }
-  .move-list { display: flex; flex-direction: column; gap: 4px; margin: 0 0 14px; max-height: 40vh; overflow: auto; }
-  .move-list button { text-align: left; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--td-line); background: #fff; }
-  .move-list button:hover { background: var(--td-accent-tint); border-color: var(--td-accent); }
-</style>
-</head><body>
-<div class="wrap">
-<div class="page-hd"><h1>My docs</h1><button class="mk-btn" id="mk-open" type="button">Create a doc</button></div>
-<div class="tabs" role="tablist">
-  <button type="button" class="tab is-active" data-pane="pane-mine" role="tab" aria-selected="true">My docs</button>
-  <button type="button" class="tab" data-pane="pane-recent" role="tab" aria-selected="false">Recent</button>
-  <button type="button" class="tab" data-pane="pane-starred" role="tab" aria-selected="false">Starred</button>
-</div>
-<section class="pane" id="pane-mine">
-${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a doc</b> to see how, or <a href="/templates">browse templates</a> for a look to start from.</p>' :
-  `<div class="toolbar">
-    <input type="search" id="doc-search" placeholder="Search title or slug…" autocomplete="off" aria-label="Search docs">
-    <select id="doc-sort" aria-label="Sort docs">
-      <option value="updated">Last updated</option>
-      <option value="created">Created</option>
-      <option value="title">Title</option>
-    </select>
-    <button type="button" id="new-folder" class="new-folder-btn">+ New folder</button>
-  </div>
-  <div class="crumbs" id="crumbs" hidden></div>
-  <div class="batch-bar">
-    <label class="select-all"><input type="checkbox" id="select-all"> <span id="select-all-label">Select all</span></label>
-    <span class="batch-actions">
-      <button type="button" id="batch-move" class="batch-move">Move</button>
-      <button type="button" id="batch-delete" class="batch-delete">Delete selected</button>
-    </span>
-  </div>
-  <div id="folder-rows">${folderRows}</div>
-  <div class="doc-list">${rows.join('')}</div>
-  <p id="no-match" class="empty" hidden>No matches.</p>`}
-</section>
-<section class="pane" id="pane-recent" hidden>
-  ${recentList ? `<div class="doc-list">${recentList}</div>` : '<p class="empty">Docs you open show up here.</p>'}
-</section>
-<section class="pane" id="pane-starred" hidden>
-  ${starList ? `<div class="doc-list">${starList}</div>` : '<p class="empty">Star docs to find them again quickly.</p>'}
-</section>
-</div>
-
-<div class="mk-bg" id="mk-bg" hidden>
-  <div class="mk" role="dialog" aria-modal="true" aria-label="Create a doc">
-    <div class="mk-hd"><strong>Create a doc</strong><button type="button" id="mk-x" aria-label="Close">&times;</button></div>
-    <div class="mk-bd">
-      <ol>
-        <li>Open the AI you already use.
-          <span class="mk-say">Use tdoc to make me a one page summary of this quarter, with a chart of weekly signups.</span>
-        </li>
-        <li>It writes the page, publishes it, and hands you the link.</li>
-        <li>Send that link to anyone. They comment on the page, and your AI answers them.</li>
-      </ol>
-    </div>
-    <div class="mk-ft">Want a specific look first? <a href="/templates">Browse templates</a>. &nbsp;·&nbsp; Not set up yet? <a href="/start">Start here</a>.</div>
-  </div>
-</div>
-<script${nonce ? ` nonce="${nonce}"` : ''}>
-  // Create-a-doc tutorial. /me cannot create anything — the doc is written by
-  // the user's own agent — so this explains where creation actually happens.
-  (function () {
-    var bg = document.getElementById('mk-bg');
-    var openBtn = document.getElementById('mk-open');
-    if (!bg || !openBtn) return;
-    function show(on) { bg.hidden = !on; if (on) document.getElementById('mk-x').focus(); }
-    openBtn.onclick = function () { show(true); };
-    document.getElementById('mk-x').onclick = function () { show(false); };
-    bg.addEventListener('click', function (e) { if (e.target === bg) show(false); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !bg.hidden) show(false); });
-  })();
-
-  // Tabs + stars — wired independently of the catalog block below, which
-  // bails out early when the viewer has no docs of their own (Recent and
-  // Starred can still have rows in that case).
-  (function () {
-    var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
-    tabs.forEach(function (tab) {
-      tab.addEventListener('click', function () {
-        tabs.forEach(function (t) {
-          var active = t === tab;
-          t.classList.toggle('is-active', active);
-          t.setAttribute('aria-selected', String(active));
-          var pane = document.getElementById(t.dataset.pane);
-          if (pane) pane.hidden = !active;
-        });
-      });
-    });
-
-    // Star toggle: optimistic flip (every button for the same slug, across
-    // panes), revert on failure. Session cookie authorizes /api/star.
-    // One BroadcastChannel instance for this page: posts our own star changes
-    // (so open doc tabs repaint their bar star) and hears other tabs' changes
-    // (a channel never delivers a message back to the instance that sent it).
-    var channel = null;
-    try { channel = new BroadcastChannel('tdoc-doc-state'); } catch (e) {}
-    function paintStar(slug, on) {
-      document.querySelectorAll('.star-btn').forEach(function (b) {
-        if (b.dataset.slug !== slug) return;
-        b.classList.toggle('is-starred', on);
-        b.textContent = on ? '★' : '☆';
-        b.setAttribute('aria-pressed', String(on));
-      });
-    }
-    function starredEmpty(pane) {
-      if (!pane.querySelector('.doc-row')) {
-        pane.innerHTML = '<p class="empty">Star docs to find them again quickly.</p>';
-      }
-    }
-    // A fresh star must show up when the user flips to the Starred tab NOW —
-    // the server render is behind us. Clone the essentials from any rendered
-    // row for that slug (My docs or Recent) into a flat row, DOM-built.
-    function addToStarredPane(slug) {
-      var pane = document.getElementById('pane-starred');
-      if (!pane) return;
-      var rows = Array.prototype.slice.call(document.querySelectorAll('.doc-row'));
-      if (rows.some(function (r) { return r.dataset.slug === slug && pane.contains(r); })) return;
-      var src = null;
-      rows.forEach(function (r) { if (!src && r.dataset.slug === slug && r.querySelector('.doc-title')) src = r; });
-      if (!src) return;
-      var list = pane.querySelector('.doc-list');
-      if (!list) {
-        pane.innerHTML = '<div class="doc-list"></div>';
-        list = pane.querySelector('.doc-list');
-      }
-      var row = document.createElement('div');
-      row.className = 'doc-row flat-row';
-      row.dataset.slug = slug;
-      row.dataset.title = src.dataset.title || slug;
-      var info = document.createElement('div');
-      info.className = 'doc-info';
-      var a = document.createElement('a');
-      a.className = 'doc-title';
-      a.href = src.querySelector('.doc-title').href;
-      a.textContent = src.dataset.title || slug;
-      var meta = document.createElement('div');
-      meta.className = 'doc-meta';
-      meta.textContent = 'starred ' + new Date().toISOString().slice(0, 10);
-      info.appendChild(a);
-      info.appendChild(meta);
-      var actions = document.createElement('div');
-      actions.className = 'row-actions';
-      var b = document.createElement('button');
-      b.className = 'star-btn is-starred';
-      b.dataset.slug = slug;
-      b.setAttribute('aria-pressed', 'true');
-      b.textContent = '★';
-      actions.appendChild(b);
-      row.appendChild(info);
-      row.appendChild(actions);
-      list.insertBefore(row, list.firstChild);
-    }
-    document.addEventListener('click', async function (e) {
-      var btn = e.target && e.target.closest ? e.target.closest('.star-btn') : null;
-      if (!btn) return;
-      e.stopPropagation();
-      var slug = btn.dataset.slug;
-      var starred = !btn.classList.contains('is-starred');
-      paintStar(slug, starred);
-      try {
-        var res = await fetch('/api/star', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slug: slug, starred: starred }),
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        var pane = document.getElementById('pane-starred');
-        if (starred) {
-          addToStarredPane(slug);
-        } else if (pane) {
-          // Unstarring removes the row from the Starred pane right away.
-          pane.querySelectorAll('.doc-row').forEach(function (row) {
-            if (row.dataset.slug === slug) row.remove();
-          });
-          starredEmpty(pane);
-        }
-        if (channel) { try { channel.postMessage({ type: 'star', slug: slug, starred: starred }); } catch (e2) {} }
-      } catch (err) {
-        paintStar(slug, !starred);
-      }
-    });
-
-    // Server-rendered pages go stale two ways: a bfcache Back into an old
-    // copy, and star changes made from a doc page in another tab. Reload on
-    // both signals (deferred to the next focus while hidden) — this page has
-    // no client data layer to patch instead (deliberate; see issue #287).
-    var stale = false;
-    window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
-    if (channel) channel.addEventListener('message', function (ev) {
-      var d = ev.data || {};
-      if (d.type !== 'star') return;
-      if (document.hidden) stale = true;
-      else location.reload();
-    });
-    document.addEventListener('visibilitychange', function () {
-      if (!document.hidden && stale) location.reload();
-    });
-  })();
-
-(() => {
-  // Tiny top-right toast — no third-party runtime on the privileged /me page.
-  function toast(message, kind = '') {
-    if (!message) return;
-    document.querySelectorAll('.tdoc-toast').forEach((n) => n.remove());
-    const t = document.createElement('div');
-    t.className = 'tdoc-toast';
-    t.textContent = message;
-    t.setAttribute('role', 'status');
-    t.style.cssText = 'position:fixed;top:62px;right:18px;z-index:1000001;background:' +
-      (kind === 'error' ? '#b42318' : '#1652f0') +
-      ';color:#fff;padding:12px 16px;border-radius:8px;font:14px system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.18)';
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 4000);
-  }
-  // Styled confirm — replaces window.confirm(). Resolves true/false; never
-  // silently proceeds (Cancel and the backdrop both resolve false).
-  function showConfirm({ title, body, confirmLabel, danger }) {
-    return new Promise((resolve) => {
-      const bg = document.createElement('div');
-      bg.className = 'tdoc-modal-bg';
-      bg.innerHTML = '<div class="tdoc-modal">' +
-        '<h3></h3><p></p>' +
-        '<div class="actions">' +
-          '<button type="button" data-act="cancel">Cancel</button>' +
-          '<button type="button" data-act="go"></button>' +
-        '</div></div>';
-      bg.querySelector('h3').textContent = title;
-      bg.querySelector('p').innerHTML = body;
-      const goBtn = bg.querySelector('[data-act="go"]');
-      goBtn.textContent = confirmLabel;
-      goBtn.className = danger ? 'danger' : 'primary';
-      const done = (v) => { bg.remove(); resolve(v); };
-      bg.querySelector('[data-act="cancel"]').onclick = () => done(false);
-      bg.addEventListener('click', (e) => { if (e.target === bg) done(false); });
-      goBtn.onclick = () => done(true);
-      document.body.appendChild(bg);
-    });
-  }
-  // Styled text prompt (folder names) — same modal chrome as showConfirm.
-  // Resolves the trimmed value, or null on cancel/backdrop.
-  function showPrompt({ title, confirmLabel, value = '', placeholder = '' }) {
-    return new Promise((resolve) => {
-      const bg = document.createElement('div');
-      bg.className = 'tdoc-modal-bg';
-      bg.innerHTML = '<div class="tdoc-modal">' +
-        '<h3></h3><input type="text" maxlength="60">' +
-        '<div class="actions">' +
-          '<button type="button" data-act="cancel">Cancel</button>' +
-          '<button type="button" data-act="go"></button>' +
-        '</div></div>';
-      bg.querySelector('h3').textContent = title;
-      const input = bg.querySelector('input');
-      input.value = value;
-      input.placeholder = placeholder;
-      const goBtn = bg.querySelector('[data-act="go"]');
-      goBtn.textContent = confirmLabel;
-      goBtn.className = 'primary';
-      const done = (v) => { bg.remove(); resolve(v); };
-      const go = () => { const v = input.value.trim(); if (v) done(v); };
-      bg.querySelector('[data-act="cancel"]').onclick = () => done(null);
-      bg.querySelector('[data-act="go"]').onclick = go;
-      bg.addEventListener('click', (e) => { if (e.target === bg) done(null); });
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-      document.body.appendChild(bg);
-      input.focus();
-    });
-  }
-  // Folder picker for Move — a button per destination, DOM-built (no
-  // innerHTML with user-named folders). Resolves {folder} or null.
-  function pickFolder(title) {
-    return new Promise((resolve) => {
-      const bg = document.createElement('div');
-      bg.className = 'tdoc-modal-bg';
-      const box = document.createElement('div');
-      box.className = 'tdoc-modal';
-      const h = document.createElement('h3');
-      h.textContent = title;
-      box.appendChild(h);
-      const done = (v) => { bg.remove(); resolve(v); };
-      const listBox = document.createElement('div');
-      listBox.className = 'move-list';
-      const add = (id, name) => {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.textContent = name;
-        b.onclick = () => done({ folder: id });
-        listBox.appendChild(b);
-        return b;
-      };
-      add('', 'My docs (no folder)');
-      const addTree = (parentId, depth) => {
-        FOLDERS
-          .filter((f) => (f.parent || '') === parentId)
-          .slice()
-          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-          .forEach((f) => {
-            const b = add(f.id, f.name);
-            if (b) b.style.paddingLeft = (12 + depth * 18) + 'px';
-            addTree(f.id, depth + 1);
-          });
-      };
-      addTree('', 0);
-      box.appendChild(listBox);
-      const actions = document.createElement('div');
-      actions.className = 'actions';
-      const cancel = document.createElement('button');
-      cancel.type = 'button';
-      cancel.textContent = 'Cancel';
-      cancel.onclick = () => done(null);
-      actions.appendChild(cancel);
-      box.appendChild(actions);
-      bg.appendChild(box);
-      bg.addEventListener('click', (e) => { if (e.target === bg) done(null); });
-      document.body.appendChild(bg);
-    });
-  }
-  async function moveDocs(slugs, folder) {
-    const res = await fetch('/api/folders/move', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slugs, folder: folder || null }),
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-  }
-  // ⋯ overflow menu — one open at a time; a click anywhere else closes it.
-  function closeMenus(except) {
-    document.querySelectorAll('.row-menu').forEach((m) => {
-      if (m === except) return;
-      m.hidden = true;
-      m.previousElementSibling.setAttribute('aria-expanded', 'false');
-    });
-  }
-  document.querySelectorAll('.row-menu-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const menu = btn.nextElementSibling;
-      const willOpen = menu.hidden;
-      closeMenus(willOpen ? menu : null);
-      menu.hidden = !willOpen;
-      btn.setAttribute('aria-expanded', String(willOpen));
-    });
-  });
-  document.addEventListener('click', () => closeMenus(null));
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(null); });
-
-  // Delete: no token — the browser is already signed in as the owner (this
-  // page 302s away for anyone else), so the session cookie alone authorizes
-  // DELETE /api/doc (authorizeOwnerMutation in worker.js). Plain same-origin
-  // fetch sends the cookie automatically; no Authorization header needed.
-  // Confirm copy stays quiet ("This can't be undone.") — no version/comment
-  // inventory, no infra jargon, no pre-flight comment fetch.
-  async function deleteDoc(slug) {
-    const res = await fetch('/api/doc?slug=' + encodeURIComponent(slug), {
-      method: 'DELETE',
-      credentials: 'same-origin',
-    });
-    if (!res.ok) {
-      let body = {};
-      try { body = await res.json(); } catch {}
-      throw new Error(body.error || ('HTTP ' + res.status));
-    }
-  }
-  document.querySelectorAll('.row-delete').forEach((button) => {
-    button.addEventListener('click', async () => {
-      closeMenus(null);
-      const slug = button.dataset.slug;
-      const title = button.dataset.title || slug;
-      const proceed = await showConfirm({
-        title: 'Delete "' + title + '"?',
-        body: "This can't be undone.",
-        confirmLabel: 'Delete',
-        danger: true,
-      });
-      if (!proceed) return;
-      try {
-        await deleteDoc(slug);
-      } catch {
-        toast("Couldn't delete", 'error');
-        return;
-      }
-      button.closest('.doc-row').remove();
-      applySearch();
-      toast('Deleted');
-    });
-  });
-
-  // Search + batch select — client-side only over the already-rendered rows.
-  // No access data, no extra KV/R2; keep the catalog fast (#115).
-  const listEl = document.querySelector('#pane-mine .doc-list');
-  if (!listEl) return;
-  const search = document.getElementById('doc-search');
-  const selectAll = document.getElementById('select-all');
-  const selectAllLabel = document.getElementById('select-all-label');
-  const batchDelete = document.getElementById('batch-delete');
-  const batchMove = document.getElementById('batch-move');
-  const noMatch = document.getElementById('no-match');
-  const FOLDERS = ${foldersJson};
-  let activeFolder = '';
-
-  function visibleRows() {
-    return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => !row.hidden);
-  }
-  function selectedRows() {
-    return Array.from(listEl.querySelectorAll('.doc-row')).filter((row) => {
-      const box = row.querySelector('.doc-check');
-      return box && box.checked;
-    });
-  }
-  function syncBatchUi() {
-    const visible = visibleRows();
-    const selected = selectedRows();
-    const n = selected.length;
-    listEl.classList.toggle('is-selecting', n > 0);
-    selected.forEach((row) => row.classList.add('is-selected'));
-    listEl.querySelectorAll('.doc-row').forEach((row) => {
-      const box = row.querySelector('.doc-check');
-      if (!(box && box.checked)) row.classList.remove('is-selected');
-    });
-    batchDelete.classList.toggle('is-visible', n > 0);
-    batchDelete.textContent = n <= 1 ? 'Delete' : ('Delete ' + n);
-    batchMove.classList.toggle('is-visible', n > 0);
-    batchMove.textContent = n <= 1 ? 'Move' : ('Move ' + n);
-    const allVisibleChecked = visible.length > 0 && visible.every((row) => {
-      const box = row.querySelector('.doc-check');
-      return box && box.checked;
-    });
-    const someVisibleChecked = visible.some((row) => {
-      const box = row.querySelector('.doc-check');
-      return box && box.checked;
-    });
-    selectAll.checked = allVisibleChecked;
-    selectAll.indeterminate = someVisibleChecked && !allVisibleChecked;
-    selectAllLabel.textContent = allVisibleChecked ? 'Deselect all' : 'Select all';
-    selectAll.disabled = visible.length === 0;
-    if (!listEl.querySelector('.doc-row')) {
-      search.closest('.toolbar').hidden = true;
-      selectAll.closest('.batch-bar').hidden = true;
-      listEl.insertAdjacentHTML('afterend', '<p class="empty">No published docs yet.</p>');
-      listEl.remove();
-      if (noMatch) noMatch.hidden = true;
-    }
-  }
-  function applySearch() {
-    const q = (search.value || '').trim().toLowerCase();
-    const searching = !!q;
-    let shown = 0;
-    listEl.querySelectorAll('.doc-row').forEach((row) => {
-      const hay = ((row.dataset.title || '') + ' ' + (row.dataset.slug || '')).toLowerCase();
-      // Browsing shows the current location only; searching goes global,
-      // with the "in <folder>" hint on so filed docs are never lost.
-      const inLoc = searching || (row.dataset.folder || '') === activeFolder;
-      const match = (!q || hay.includes(q)) && inLoc;
-      row.hidden = !match;
-      const hint = row.querySelector('.loc-hint');
-      if (hint) hint.hidden = !searching;
-      if (match) shown += 1;
-      else {
-        const box = row.querySelector('.doc-check');
-        if (box) box.checked = false;
-      }
-    });
-    let foldersShown = 0;
-    if (folderRowsEl) {
-      folderRowsEl.querySelectorAll('.folder-row').forEach((fr) => {
-        const vis = !searching && (fr.dataset.parent || '') === activeFolder;
-        fr.hidden = !vis;
-        if (vis) foldersShown += 1;
-      });
-    }
-    buildCrumbs();
-    if (noMatch) {
-      noMatch.textContent = !searching && activeFolder ? 'This folder is empty.' : 'No matches.';
-      noMatch.hidden = shown > 0 || (!searching && !activeFolder && foldersShown > 0);
-    }
-    listEl.hidden = shown === 0;
-    // Folder counts track the live rows, so drags, menu moves and deletes
-    // never leave a stale number behind.
-    if (folderRowsEl) {
-      folderRowsEl.querySelectorAll('.folder-row').forEach((fr) => {
-        let n = 0;
-        listEl.querySelectorAll('.doc-row').forEach((row) => {
-          if ((row.dataset.folder || '') === fr.dataset.folderId) n += 1;
-        });
-        const sub = FOLDERS.filter((x) => (x.parent || '') === fr.dataset.folderId).length;
-        const meta = fr.querySelector('.doc-meta');
-        if (meta) meta.textContent = (sub ? sub + (sub === 1 ? ' folder' : ' folders') + ' · ' : '') + n + (n === 1 ? ' doc' : ' docs');
-      });
-    }
-    syncBatchUi();
-  }
-
-  search.addEventListener('input', applySearch);
-  listEl.addEventListener('change', (e) => {
-    if (e.target && e.target.classList && e.target.classList.contains('doc-check')) syncBatchUi();
-  });
-  selectAll.addEventListener('change', () => {
-    const on = selectAll.checked;
-    visibleRows().forEach((row) => {
-      const box = row.querySelector('.doc-check');
-      if (box) box.checked = on;
-    });
-    syncBatchUi();
-  });
-  batchDelete.addEventListener('click', async () => {
-    const rows = selectedRows();
-    if (!rows.length) return;
-    const proceed = await showConfirm({
-      title: rows.length === 1
-        ? ('Delete "' + (rows[0].dataset.title || rows[0].dataset.slug) + '"?')
-        : ('Delete ' + rows.length + ' docs?'),
-      body: "This can't be undone.",
-      confirmLabel: rows.length === 1 ? 'Delete' : ('Delete ' + rows.length),
-      danger: true,
-    });
-    if (!proceed) return;
-    batchDelete.disabled = true;
-    let ok = 0, failed = 0;
-    for (const row of rows) {
-      try {
-        await deleteDoc(row.dataset.slug);
-        row.remove();
-        ok += 1;
-      } catch {
-        failed += 1;
-      }
-    }
-    batchDelete.disabled = false;
-    applySearch();
-    if (failed && ok) toast("Deleted " + ok + " · couldn't delete " + failed, 'error');
-    else if (failed) toast("Couldn't delete", 'error');
-    else toast('Deleted');
-  });
-
-  // Sort — re-orders the rendered rows off their data attributes; the server
-  // default is last-updated-first, matching the select's initial value.
-  const sortSel = document.getElementById('doc-sort');
-  sortSel.addEventListener('change', () => {
-    const key = sortSel.value;
-    const all = Array.from(listEl.querySelectorAll('.doc-row'));
-    all.sort((a, b) => {
-      if (key === 'title') {
-        return (a.dataset.title || '').localeCompare(b.dataset.title || '', undefined, { sensitivity: 'base' });
-      }
-      return (b.dataset[key] || '').localeCompare(a.dataset[key] || '');
-    });
-    all.forEach((row) => listEl.appendChild(row));
-  });
-
-  // Folders are places (Drive-style, one level): folder rows sit above the
-  // doc list at the root, clicking one navigates into it (?folder=<id> via
-  // pushState), the breadcrumb walks back. Create/rename/delete reload the
-  // page (rows and FOLDERS are server-rendered); move updates rows in place.
-  const folderRowsEl = document.getElementById('folder-rows');
-  const crumbsEl = document.getElementById('crumbs');
-  // Breadcrumb = the full ancestor path (My docs / A / B); every segment is
-  // clickable and doubles as a drag-drop target for moving docs up the tree.
-  function buildCrumbs() {
-    if (!crumbsEl) return;
-    crumbsEl.hidden = !activeFolder;
-    crumbsEl.textContent = '';
-    if (!activeFolder) return;
-    const chain = [];
-    const seen = new Set();
-    let cur = FOLDERS.find((f) => f.id === activeFolder);
-    while (cur && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      chain.unshift(cur);
-      cur = FOLDERS.find((f) => f.id === cur.parent);
-    }
-    const addSeg = (label, id) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'crumb-root';
-      b.textContent = label;
-      b.addEventListener('click', () => setFolder(id, true));
-      wireDropTarget(b, () => id);
-      crumbsEl.appendChild(b);
-      const sep = document.createElement('span');
-      sep.className = 'sep';
-      sep.setAttribute('aria-hidden', 'true');
-      sep.textContent = '/';
-      crumbsEl.appendChild(sep);
+    return {
+      slug,
+      title: meta.title || slug,
+      latest: versions[versions.length - 1]?.n || 1,
+      created: meta.created || versions[0]?.created || '',
+      updated: versions[versions.length - 1]?.created || meta.created || versions[0]?.created || '',
+      owner: hostedGithubLogin(meta) || '',
+      meta,
     };
-    addSeg('My docs', '');
-    chain.slice(0, -1).forEach((f) => addSeg(f.name, f.id));
-    const curSpan = document.createElement('span');
-    curSpan.className = 'cur';
-    curSpan.textContent = chain[chain.length - 1].name;
-    crumbsEl.appendChild(curSpan);
-  }
-  function setFolder(id, push) {
-    activeFolder = FOLDERS.some((f) => f.id === id) ? id : '';
-    if (push) {
-      const url = activeFolder ? '?folder=' + encodeURIComponent(activeFolder) : location.pathname;
-      history.pushState({ folder: activeFolder }, '', url);
-    }
-    applySearch();
-  }
-  window.addEventListener('popstate', () => {
-    setFolder(new URLSearchParams(location.search).get('folder') || '', false);
-  });
-  if (folderRowsEl) {
-    folderRowsEl.addEventListener('click', (e) => {
-      if (e.target && e.target.closest && e.target.closest('.row-actions')) return;
-      const fr = e.target && e.target.closest ? e.target.closest('.folder-row') : null;
-      if (fr) setFolder(fr.dataset.folderId, true);
-    });
-    folderRowsEl.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      const fr = e.target && e.target.closest ? e.target.closest('.folder-row') : null;
-      if (fr) { e.preventDefault(); setFolder(fr.dataset.folderId, true); }
-    });
-  }
+  }));
 
-  document.getElementById('new-folder').addEventListener('click', async () => {
-    const here = FOLDERS.find((f) => f.id === activeFolder);
-    const name = await showPrompt({
-      title: here ? 'New folder in "' + here.name + '"' : 'New folder',
-      confirmLabel: 'Create',
-      placeholder: 'Folder name',
-    });
-    if (!name) return;
-    const res = await fetch('/api/folders', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(activeFolder ? { name, parent: activeFolder } : { name }),
-    });
-    if (!res.ok) {
-      let body = {};
-      try { body = await res.json(); } catch {}
-      toast(body.error === 'too_deep' ? 'Folders can only nest 4 levels deep' : "Couldn't create folder", 'error');
-      return;
-    }
-    // Reload keeps the current location (?folder= is already in the URL).
-    location.reload();
-  });
-  document.querySelectorAll('.folder-rename').forEach((button) => {
-    button.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      closeMenus(null);
-      const cur = FOLDERS.find((f) => f.id === button.dataset.id);
-      const name = await showPrompt({ title: 'Rename folder', confirmLabel: 'Rename', value: cur ? cur.name : '' });
-      if (!name) return;
-      const res = await fetch('/api/folders', {
-        method: 'PATCH',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: button.dataset.id, name }),
-      });
-      if (!res.ok) { toast("Couldn't rename folder", 'error'); return; }
-      location.reload();
-    });
-  });
-  document.querySelectorAll('.folder-delete').forEach((button) => {
-    button.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      closeMenus(null);
-      const proceed = await showConfirm({
-        title: 'Delete folder "' + (button.dataset.name || '') + '"?',
-        body: 'Docs inside move back to My docs. No documents are deleted.',
-        confirmLabel: 'Delete folder',
-        danger: true,
-      });
-      if (!proceed) return;
-      const res = await fetch('/api/folders?id=' + encodeURIComponent(button.dataset.id), {
-        method: 'DELETE',
-        credentials: 'same-origin',
-      });
-      if (!res.ok) { toast("Couldn't delete folder", 'error'); return; }
-      location.reload();
-    });
-  });
-  document.querySelectorAll('.row-move').forEach((button) => {
-    button.addEventListener('click', async () => {
-      closeMenus(null);
-      const pick = await pickFolder('Move "' + (button.dataset.title || button.dataset.slug) + '" to…');
-      if (!pick) return;
-      try {
-        await moveDocs([button.dataset.slug], pick.folder);
-      } catch {
-        toast("Couldn't move", 'error');
-        return;
-      }
-      const row = button.closest('.doc-row');
-      row.dataset.folder = pick.folder || '';
-      setRowHint(row, pick.folder || '');
-      applySearch();
-      toast('Moved');
-    });
-  });
-  batchMove.addEventListener('click', async () => {
-    const rows = selectedRows();
-    if (!rows.length) return;
-    const pick = await pickFolder(rows.length === 1
-      ? ('Move "' + (rows[0].dataset.title || rows[0].dataset.slug) + '" to…')
-      : ('Move ' + rows.length + ' docs to…'));
-    if (!pick) return;
-    batchMove.disabled = true;
-    try {
-      await moveDocs(rows.map((row) => row.dataset.slug), pick.folder);
-    } catch {
-      batchMove.disabled = false;
-      toast("Couldn't move", 'error');
-      return;
-    }
-    batchMove.disabled = false;
-    rows.forEach((row) => {
-      row.dataset.folder = pick.folder || '';
-      setRowHint(row, pick.folder || '');
-      const box = row.querySelector('.doc-check');
-      if (box) box.checked = false;
-    });
-    applySearch();
-    toast('Moved');
-  });
-  // Drag to file (Drive-style): drag a doc row onto a folder row, or onto
-  // "My docs" in the crumbs to move it back to the root. Dragging a selected
-  // row drags the whole selection. HTML5 DnD — touch devices keep the
-  // Move menu, which stays available everywhere.
-  let dragSlugs = null;
-  listEl.addEventListener('dragstart', (e) => {
-    const row = e.target && e.target.closest ? e.target.closest('.doc-row') : null;
-    if (!row) return;
-    const selected = selectedRows();
-    const dragRows = selected.includes(row) ? selected : [row];
-    dragSlugs = dragRows.map((r) => r.dataset.slug);
-    dragRows.forEach((r) => r.classList.add('dragging'));
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', dragSlugs.join(',')); } catch {}
-    }
-  });
-  listEl.addEventListener('dragend', () => {
-    dragSlugs = null;
-    listEl.querySelectorAll('.dragging').forEach((r) => r.classList.remove('dragging'));
-    document.querySelectorAll('.drop-hover').forEach((el) => el.classList.remove('drop-hover'));
-  });
-  async function dropInto(folderId) {
-    const slugs = dragSlugs;
-    dragSlugs = null;
-    if (!slugs || !slugs.length) return;
-    try {
-      await moveDocs(slugs, folderId);
-    } catch {
-      toast("Couldn't move", 'error');
-      return;
-    }
-    listEl.querySelectorAll('.doc-row').forEach((row) => {
-      if (!slugs.includes(row.dataset.slug)) return;
-      row.dataset.folder = folderId || '';
-      setRowHint(row, folderId || '');
-      const box = row.querySelector('.doc-check');
-      if (box) box.checked = false;
-    });
-    applySearch();
-    toast('Moved');
-  }
-  function wireDropTarget(el, getFolderId) {
-    el.addEventListener('dragover', (e) => {
-      if (!dragSlugs) return;
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-      el.classList.add('drop-hover');
-    });
-    el.addEventListener('dragleave', () => el.classList.remove('drop-hover'));
-    el.addEventListener('drop', (e) => {
-      e.preventDefault();
-      el.classList.remove('drop-hover');
-      dropInto(getFolderId());
-    });
-  }
-  if (folderRowsEl) folderRowsEl.querySelectorAll('.folder-row').forEach((fr) => wireDropTarget(fr, () => fr.dataset.folderId));
+  const hosted = hostedRegistrationEnabled(env, origin);
+  const viewer = sessionLogin(session);
+  const mine = catalog.filter((row) => {
+    if (hosted) return isDocOwnerSession(env, session, row.meta);
+    return !row.owner || row.owner === viewer;
+  }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 
-  // Keep the search-time location hint honest after an in-place move.
-  function setRowHint(row, folderId) {
-    let hint = row.querySelector('.loc-hint');
-    const f = FOLDERS.find((x) => x.id === folderId);
-    if (!f) { if (hint) hint.remove(); return; }
-    if (!hint) {
-      hint = document.createElement('span');
-      hint.className = 'loc-hint';
-      hint.hidden = true;
-      const meta = row.querySelector('.doc-meta');
-      if (meta) meta.appendChild(hint);
-    }
-    hint.textContent = ' · in ' + f.name;
-  }
-  // Boot into the location the URL names (?folder=<id>; unknown ids fall
-  // back to the root) — this first applySearch also hides filed docs.
-  setFolder(new URLSearchParams(location.search).get('folder') || '', false);
-  syncBatchUi();
-})();
-</script>
-</body></html>`;
+  const [starItems, recentItems, folderState] = viewer
+    ? await Promise.all([loadStars(env, viewer), loadRecents(env, viewer), loadFolderState(env, viewer)])
+    : [[], [], { folders: [], docs: {} }];
+  const starred = new Set(starItems.map((item) => item.slug));
+  const bySlug = new Map(catalog.map((row) => [row.slug, row]));
+  const savedRows = (items) => items.map((item) => {
+    const row = bySlug.get(item.slug);
+    return row && docReadableBy(env, session, row.meta) ? { ...row, at: item.at } : null;
+  }).filter(Boolean);
+  const publicRow = (row) => ({
+    slug: row.slug,
+    title: row.title,
+    latest: row.latest,
+    created: row.created,
+    updated: row.updated,
+    owner: row.owner,
+    starred: starred.has(row.slug),
+  });
+
+  return {
+    docs: mine.map((row) => ({ ...publicRow(row), folder: folderState.docs[row.slug] || '' })),
+    recent: savedRows(recentItems).map(publicRow),
+    starred: savedRows(starItems).map(publicRow),
+    folders: folderState.folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      parent: folder.parent || '',
+    })),
+  };
 }
-
-// ─────────────────────────────────────────────────────────────────────────
-// EVENT-LOG COMMENT MODEL (v0.2)
-//
-// Each comment is stored as { id, author, created_in, created, events: [...] }.
-// Events: created, text_edited, anchor_changed, marked_applied, deleted,
-//   reaction_added, reaction_removed, reply_added, reply_text_edited,
-//   reply_deleted, reply_reaction_added, reply_reaction_removed.
-// Every event carries `at_version` and `at` (ISO timestamp).
-//
-// THE FUNDAMENTAL RULE: every version is a snapshot. Reading a comment "as
-// of version N" folds events with at_version <= N. Mutations NEVER overwrite
-// past state — they append a new event. Going back to an older version
-// shows the comment exactly as it existed then; going forward shows the
-// latest state.
-//
-// Agent emoji (✅🟡❓) is rendered at fold time from marked_applied events,
-// not stored as a reaction record. That way the agent verdict is per-version
-// just like any other status.
-
-const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
 
 function isFiniteVersion(v) {
   return Number.isFinite(v) && v >= 0;
@@ -4348,6 +3225,24 @@ export default {
 
     if (p === '/api/ping') return json({ ok: true, service: 'tdoc' });
     if (p === '/api/runtime') return json({ ok: true, runtime: runtimeInfo() });
+    if (p === SHELL_RUNTIME_JS_PATH && (method === 'GET' || method === 'HEAD')) {
+      return new Response(method === 'HEAD' ? null : SHELL_RUNTIME_JS, {
+        headers: {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+    if (p === SHELL_RUNTIME_CSS_PATH && (method === 'GET' || method === 'HEAD')) {
+      return new Response(method === 'HEAD' ? null : SHELL_RUNTIME_CSS, {
+        headers: {
+          'Content-Type': 'text/css; charset=utf-8',
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     if (p === '/favicon.svg' && method === 'GET') {
       return new Response(TDOC_FAVICON_SVG, {
         headers: {
@@ -4384,7 +3279,7 @@ export default {
     // the marketing page for that one request.
     if (p === '/' && (method === 'GET' || method === 'HEAD')) {
       const notice = (url.searchParams.get('notice') || '').trim();
-      if (notice) return html(landingHtml(env, notice));
+      if (notice) return neutralLandingResponse(env, notice);
       return landingResponse(env, req);
     }
 
@@ -4409,16 +3304,16 @@ export default {
     // soft landing GitHub may bounce to after Approve; keep the friendly page.
     if (p === '/auth/github/callback' && method === 'GET') {
       const code = url.searchParams.get('code');
-      if (!code) return html(authDoneHtml());
+      if (!code) return authStatusResponse('You can close this tab and return to tdoc.');
       const state = url.searchParams.get('state');
       // Anchor to a cookie-pair boundary so a cookie merely ending in
       // "tdoc_oauth" (e.g. "xtdoc_oauth=") can't supply the nonce.
       const cookieNonce = (/(?:^|;\s*)tdoc_oauth=([a-f0-9]+)/.exec(req.headers.get('cookie') || '') || [])[1];
       if (!state || !cookieNonce || state !== cookieNonce) {
-        return html(authErrorHtml('Sign-in could not be verified (state mismatch). Please try again.'), { status: 400 });
+        return authStatusResponse('Sign-in could not be verified (state mismatch). Please try again.', { error: true, status: 400 });
       }
       if (!env.GITHUB_CLIENT_SECRET) {
-        return html(authErrorHtml('Web sign-in is not configured on this host.'), { status: 500 });
+        return authStatusResponse('Web sign-in is not configured on this host.', { error: true, status: 500 });
       }
       const ret = sanitizeReturn(await env.META.get(`oauthstate:${state}`));
       await env.META.delete(`oauthstate:${state}`);
@@ -4430,10 +3325,10 @@ export default {
           redirect_uri: `${url.origin}/auth/github/callback`,
         });
         if (r.error || !r.access_token) {
-          return html(authErrorHtml('GitHub sign-in failed: ' + (r.error_description || r.error || 'no token returned')), { status: 400 });
+          return authStatusResponse('GitHub sign-in failed: ' + (r.error_description || r.error || 'no token returned'), { error: true, status: 400 });
         }
         const user = await ghUser(r.access_token);
-        if (!user.login) return html(authErrorHtml('GitHub returned no account.'), { status: 500 });
+        if (!user.login) return authStatusResponse('GitHub returned no account.', { error: true, status: 500 });
         const sid = rand(24);
         const session = {
           login: user.login,
@@ -4447,12 +3342,12 @@ export default {
           'tdoc_oauth=; Path=/; Max-Age=0',
         ]);
       } catch (e) {
-        return html(authErrorHtml('Sign-in error: ' + e.message), { status: 500 });
+        return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
       }
     }
     // Static soft landing (device flow, or the OAuth App's callback URL).
     if (p === '/auth/done' && method === 'GET') {
-      return html(authDoneHtml());
+      return authStatusResponse('You can close this tab and return to tdoc.');
     }
 
     // ---- owner catalog ----
@@ -4471,14 +3366,20 @@ export default {
         });
       }
       const nonce = rand(16);
-      const page = await indexHtml(env, s, url.origin, nonce);
       const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
-      // /me is a PLAIN site page (tdoc-generated content, no author HTML): the
-      // shared bar + identity wiring go in via injectSiteChrome, no iframe.
-      return html(injectSiteChrome(page, {
-        slug: '', version: 0, identity, isOwner: false, canSeeMyDocs: true,
-        isCatalog: true, authConfigured: true, webAuth: !!env.GITHUB_CLIENT_SECRET, mode: 'published', versions: [],
-      }, nonce), {
+      const data = await indexData(env, s, url.origin);
+      return html(SHELL.appHtml({
+        title: 'My docs',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'docs-hub',
+          identity,
+          runtime: runtimeInfo(),
+          ...data,
+        }),
+      }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
       });
     }

@@ -72,7 +72,9 @@ function freePort() {
 
   await t('Click Publish opens modal with slug + Publish action', async () => {
     await page.click('#tdoc-publish-btn');
-    await page.waitForSelector('#tdoc-aux-modal', { timeout: 2000 });
+    // The React shell renders dialogs through the shared AppDialog facade
+    // (Base UI portal) — the contract is an accessible dialog, not a fixed id.
+    await page.waitForSelector('[role="dialog"] .ui-dialog-popup, .ui-dialog-popup[role="dialog"]', { timeout: 2000 });
     const slugTxt = await page.$eval('#tdoc-pub-slug', el => el.textContent);
     if (slugTxt !== SLUG) throw new Error(`slug "${slugTxt}"`);
     const go = await page.$('#tdoc-pub-go');
@@ -81,7 +83,7 @@ function freePort() {
 
   await t('Clicking Publish (dry-run) → result URL surfaces', async () => {
     await page.click('#tdoc-pub-go');
-    await page.waitForSelector('#tdoc-pub-result[style*="display: block"], #tdoc-pub-result:not([style*="display: none"])', { timeout: 5000 });
+    await page.waitForSelector('#tdoc-pub-url', { timeout: 5000 });
     const url = await page.$eval('#tdoc-pub-url', el => el.textContent.trim());
     if (!url.startsWith('https://')) throw new Error(`dry url: "${url}"`);
     if (!url.includes(SLUG)) throw new Error(`url missing slug: "${url}"`);

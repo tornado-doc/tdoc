@@ -1,0 +1,11 @@
+{
+  "shell/src/main.jsx": {
+    "file": "shell.C5Ivxk5v.js",
+    "name": "main",
+    "src": "shell/src/main.jsx",
+    "isEntry": true,
+    "css": [
+      "shell.BzcMYtyR.css"
+    ]
+  }
+}

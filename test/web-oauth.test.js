@@ -21,7 +21,9 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const worker = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
-const signin = fs.readFileSync(path.join(__dirname, '..', 'server', 'signin.js'), 'utf8');
+const documentShell = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document-shell.jsx'), 'utf8');
+const neutralLanding = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'neutral-landing.jsx'), 'utf8');
+const signInDialog = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'sign-in-dialog.jsx'), 'utf8');
 const tomlProd = fs.readFileSync(path.join(__dirname, '..', 'worker', 'wrangler.toml.template'), 'utf8');
 const tomlPrev = fs.readFileSync(path.join(__dirname, '..', 'worker', 'wrangler.preview.toml.template'), 'utf8');
 
@@ -85,7 +87,7 @@ t('the callback is CSRF-guarded and mints the same session as device flow', () =
 });
 
 t('a callback with no code stays a friendly static page (device soft-landing)', () => {
-  assert(/if \(!code\) return html\(authDoneHtml\(\)\)/.test(worker),
+  assert(/if \(!code\) return authStatusResponse\(/.test(worker),
     'a code-less callback must not error — it is the device-flow soft landing');
 });
 
@@ -97,11 +99,13 @@ t('web flow is gated on the secret so a deploy without it keeps device flow', ()
     'the page cfg must expose webAuth from the secret');
 });
 
-t('signin.js takes the redirect when webAuth is on, else the device modal', () => {
-  assert(/cfg\.webAuth/.test(signin), 'signin.js does not branch on webAuth');
-  assert(/\/api\/auth\/web\/login\?return=/.test(signin),
-    'signin.js does not hand off to the web login route');
-  assert(/tds-code/.test(signin), 'the device-code modal must remain as the fallback');
+t('React surfaces take the redirect when webAuth is on, else the device modal', () => {
+  assert(/config\.webAuth/.test(documentShell), 'document shell does not branch on webAuth');
+  assert(/\/api\/auth\/web\/login\?return=/.test(documentShell),
+    'document shell does not hand off to the web login route');
+  assert(/boot\.webAuth/.test(neutralLanding), 'neutral landing does not branch on webAuth');
+  assert(/<SignInDialog/.test(documentShell) && /tdoc-device-code/.test(signInDialog),
+    'the device-code modal must remain as the fallback');
 });
 
 t('both wrangler templates document GITHUB_CLIENT_SECRET as a secret, not a var', () => {

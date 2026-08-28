@@ -41,16 +41,18 @@ jobs:
       # documenting and survives a runner restructure.)
       - name: Validate plugin/marketplace manifests
         run: node test/manifest.test.js
-      # Static guard: worker/server and every injected chrome module must parse.
-      # (overlay.js is deleted — the monolith was split into these modules.)
+      # Static guard: worker/server, the shell boot builder, and the only script
+      # injected into author HTML (frame-probe) must parse. The provider UI
+      # itself is a React app under shell/src; its built runtime is checked by
+      # the `shell runtime` job below.
       - name: Syntax check
         run: |
           node --check worker/worker.js
           node --check server/server.js
-          node --check server/chrome.js
           node --check server/shell.js
           node --check server/frame-probe.js
-          node --check server/manage.js
+          node --check server/runtime-assets.js
+          node --check bin/tdoc-bundle
           bash -n bin/tdoc-publish
           bash -n bin/tdoc-pull
           bash -n bin/tdoc-new
@@ -68,3 +70,28 @@ jobs:
       # the dangerous classes (quoting/word-splitting/injection), not lint nits.
       - name: ShellCheck CLIs
         run: shellcheck --severity=warning --exclude=SC2034 bin/tdoc-publish bin/tdoc-doctor bin/tdoc-pull bin/tdoc-new bin/tdoc-unpublish bin/tdoc-update
+
+  shell-runtime:
+    name: shell runtime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: npm
+      # The React provider UI (shell/src) is built by Vite into server/runtime/
+      # and the output is COMMITTED: skill users run server/server.js straight
+      # from the checkout, and bin/tdoc-bundle embeds the same bytes into the
+      # Worker — neither runs npm install. Vite's output is content-hashed and
+      # deterministic, so rebuilding must reproduce the committed bytes exactly.
+      # A diff here means someone edited shell/src without `npm run build:shell`.
+      - run: npm ci
+      - run: npm run build:shell
+      - name: Committed runtime matches shell/src
+        run: |
+          git add -N server/runtime
+          git diff --exit-code --stat server/runtime || {
+            echo "server/runtime is stale — run npm run build:shell and commit the result" >&2
+            exit 1
+          }

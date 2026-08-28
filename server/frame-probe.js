@@ -327,7 +327,10 @@
       if (!c || !c.anchor) return;
       if (c.anchor.kind === 'element' && c.anchor.selector) {
         var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
-        if (eel) pins.push({ id: c.id, docY: eel.getBoundingClientRect().top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
+        if (eel) {
+          var er = eel.getBoundingClientRect();
+          pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
+        }
         return;
       }
       if (c.anchor.kind !== 'text') return;

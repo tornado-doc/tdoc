@@ -48,8 +48,6 @@ const norm = (s) => s == null ? null : s.replace(/\s+/g, ' ').trim();
 
 const worker = read('worker/worker.js');
 const server = read('server/server.js');
-// overlay.js is deleted; chrome.js is the shared client-markup module now.
-const overlay = read('server/chrome.js');
 const githubOauth = require(path.join(root, 'shared/github-oauth.js'));
 
 console.log('no-drift (duplicated helper guard)');

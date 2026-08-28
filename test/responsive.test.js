@@ -81,7 +81,7 @@ async function tPub(name, fn) {
       });
       return {
         narrow: document.body.classList.contains('tdoc-narrow'),
-        hasComments: document.querySelectorAll('.tdoc-margin-comment').length > 0,
+        hasComments: document.querySelector('.tdoc-fab') !== null || document.querySelectorAll('.tdoc-margin-comment').length > 0,
         bar: !!document.querySelector('.tdoc-bar'),
         more: vis('#tdoc-more-btn'),
         fab: vis('.tdoc-fab'),
@@ -130,7 +130,7 @@ async function tPub(name, fn) {
           await page.waitForTimeout(250);
           const open = await page.evaluate(() => document.querySelector('#tdoc-comment-layer.open') !== null);
           if (!open) throw new Error('drawer did not gain .open');
-          await page.evaluate(() => document.querySelector('#tdoc-comment-layer').classList.remove('open'));
+          await page.keyboard.press('Escape');
           await page.waitForTimeout(120);
         });
         await t('narrow mode: tapping the backdrop scrim dismisses the drawer', async () => {
@@ -139,16 +139,16 @@ async function tPub(name, fn) {
           await page.evaluate(() => document.querySelector('.tdoc-fab').click());
           await page.waitForTimeout(250);
           const scrimShown = await page.evaluate(() => {
-            const s = document.querySelector('#tdoc-drawer-scrim');
+            const s = document.querySelector('.tdoc-drawer-backdrop');
             return s && getComputedStyle(s).display !== 'none';
           });
           if (!scrimShown) throw new Error('scrim not visible while drawer is open');
-          await page.evaluate(() => document.querySelector('#tdoc-drawer-scrim').click());
+          await page.evaluate(() => document.querySelector('.tdoc-drawer-backdrop').click());
           await page.waitForTimeout(250);
           const stillOpen = await page.evaluate(() => document.querySelector('#tdoc-comment-layer.open') !== null);
           if (stillOpen) throw new Error('drawer stayed open after tapping the scrim');
           const scrimHidden = await page.evaluate(() => {
-            const s = document.querySelector('#tdoc-drawer-scrim');
+            const s = document.querySelector('.tdoc-drawer-backdrop');
             return !s || getComputedStyle(s).display === 'none';
           });
           if (!scrimHidden) throw new Error('scrim stayed visible after the drawer closed');
@@ -158,8 +158,8 @@ async function tPub(name, fn) {
         await t('narrow mode: More opens the secondary menu', async () => {
           await page.evaluate(() => document.querySelector('#tdoc-more-btn').click());
           await page.waitForTimeout(150);
-          const open = await page.evaluate(() => document.querySelector('#tdoc-secondary-menu.open') !== null);
-          await page.evaluate(() => { const m = document.querySelector('#tdoc-secondary-menu'); if (m) m.classList.remove('open'); });
+          const open = await page.evaluate(() => document.querySelector('.ui-menu-popup [data-action="copy"]') !== null);
+          await page.keyboard.press('Escape');
           if (!open) throw new Error('secondary menu did not open');
         });
       }
@@ -190,16 +190,15 @@ async function tPub(name, fn) {
     await t('⋯ menu carries a Copy as Markdown action', async () => {
       await page.evaluate(() => document.querySelector('#tdoc-more-btn').click());
       await page.waitForTimeout(120);
-      const hasCopy = await page.evaluate(() => !!document.querySelector('#tdoc-secondary-menu.open [data-action="copy"]'));
-      await page.evaluate(() => { const m = document.querySelector('#tdoc-secondary-menu'); if (m) m.classList.remove('open'); });
+      const hasCopy = await page.evaluate(() => !!document.querySelector('.ui-menu-popup [data-action="copy"]'));
+      await page.keyboard.press('Escape');
       if (!hasCopy) throw new Error('no Copy action in the ⋯ menu');
     });
 
     // Published-only: identity chip present.
     await tPub('sign-in / identity chip present', async () => {
       const present = await page.evaluate(() => {
-        const slot = document.querySelector('#tdoc-identity-slot');
-        return !!(slot && slot.children.length > 0);
+        return !!document.querySelector('.tdoc-chip');
       });
       if (!present) throw new Error('identity slot empty');
     });

@@ -88,7 +88,8 @@ t('worker shellDocumentWorker still contains the published+multi-version guard',
   // latestVersion must be robust to unsorted versions (Math.max over the list).
   assert(/Math\.max\(\.\.\.vlist\.map/.test(src),
     'latestVersion must be derived from the whole version list');
-  assert(src.includes('tdoc-oldver-strip'), 'strip markup missing from the shell render');
+  const react = fs.readFileSync(path.join(__dirname, '..', 'shell/src/document-shell.jsx'), 'utf8');
+  assert(react.includes('tdoc-oldver-strip'), 'strip markup missing from the React shell');
 
 });
 

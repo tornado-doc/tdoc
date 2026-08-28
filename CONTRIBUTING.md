@@ -57,9 +57,30 @@ Install the optional browser dep with `npm i -D playwright && npx playwright ins
 
 `npm test` must be green before any commit to `main`.
 
+## The provider UI is a React app — build it, then commit the build
+
+The top bar, comment layer, dialogs, sign-in, and the `/me` Docs Hub live in
+`shell/src` (React + Vite, headless primitives from `@base-ui/react` wrapped in
+`shell/src/ui/`). Author HTML never sees React: it renders only inside the
+sandboxed `/frame` iframe, where `server/frame-probe.js` is the sole script.
+
+```bash
+npm install              # once — React, Vite, and the Base UI primitives
+npm run dev:shell        # Vite dev server for shell/src
+npm run build:shell      # writes server/runtime/{manifest.json, shell.<hash>.js, shell.<hash>.css}
+```
+
+`server/runtime/` is **committed on purpose**: skill users run
+`server/server.js` straight from the checkout and `bin/tdoc-bundle` embeds the
+same bytes into the Worker — neither runs `npm install`. The Vite output is
+content-hashed and deterministic, so after any edit under `shell/src` run
+`npm run build:shell` and commit the result together with the source. CI's
+`shell runtime` job rebuilds and fails on a byte diff. See `IMPLEMENTATION.md`
+for the runtime boundary and component layers.
+
 ## Hard rule: run tests before every push
 
-The skill ships JS that runs in users' browsers and a worker that runs on Cloudflare, both deployed on every `/tdoc publish`. Run `npm test` before pushing; for overlay or worker changes also run the matching gated suite via `npm run test:all`. Doc-only changes still need a `grep` for stale references (counts, command names, version numbers).
+The skill ships JS that runs in users' browsers and a worker that runs on Cloudflare, both deployed on every `/tdoc publish`. Run `npm test` before pushing; for shell (`shell/src`, `server/frame-probe.js`) or worker changes also run the matching gated suite via `npm run test:all`. Doc-only changes still need a `grep` for stale references (counts, command names, version numbers).
 
 ## AGENTS.md
 

@@ -1,68 +1,52 @@
-// #179: the sign-in dialog hands GitHub off to a new tab the visitor opens.
-//
-// The device flow's only route to GitHub used to be a scripted
-// window.open() fired after `await api('/api/auth/device/start')`. That is
-// outside the click's activation window, so Safari and in-app webviews
-// either swallow it — leaving a dialog whose verification URL was plain
-// text with nothing to click — or open it in the current tab. Losing this
-// tab loses the poll loop, and the sign-in can never finish.
-//
-// #179 answered that with a native <a target="_blank"> AND an auto
-// window.open() "convenience popup". The popup was the mistake: on desktop it
-// lands, so the dialog yanks the visitor to a GitHub tab the instant it opens
-// — reads as a hijack, not a sign-in. So the anchor is now the ONLY hop, and
-// the visitor takes it. The guard: the anchor exists, points at the
-// verification URL, cannot navigate this page, and nothing opens GitHub for
-// the visitor.
+// GitHub device sign-in remains a deliberate native-link handoff from the
+// reusable React dialog. No scripted popup may steal the current interaction.
 const fs = require('fs');
 const path = require('path');
 
 let pass = 0, fail = 0;
-function ok(n) { console.log(`  ✓ ${n}`); pass++; }
-function bad(n, e) { console.log(`  ✗ ${n}\n    ${e}`); fail++; }
-function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
-function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
+function t(name, fn) { try { fn(); console.log(`  ✓ ${name}`); pass++; } catch (error) { console.log(`  ✗ ${name}\n    ${error.message}`); fail++; } }
+function assert(value, message) { if (!value) throw new Error(message); }
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'signin.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'sign-in-dialog.jsx'), 'utf8');
+const api = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'api.js'), 'utf8');
 
-console.log('sign-in hands GitHub to a new tab (#179)');
+console.log('React sign-in GitHub handoff');
 
-t('the dialog ships a real anchor to the verification URL', () => {
-  assert(/<a class="tds-open"/.test(src),
-    'no anchor in the dialog: a blocked popup leaves the user with nothing to click');
-  assert(/href="' \+ esc\(uri\) \+ '"/.test(src),
-    'the anchor must point at the verification URL the API returned');
+t('the dialog uses the shared dialog primitive and a real anchor', () => {
+  assert(/<AppDialog/.test(src), 'shared dialog primitive missing');
+  assert(/<a[\s\S]*className="tdoc-open-github"[\s\S]*href=\{verificationUrl\}/.test(src), 'verification anchor missing');
 });
 
-t('the anchor opens a new tab and cannot move the page it sits on', () => {
-  const anchor = src.match(/<a class="tds-open"[\s\S]{0,240}?>/);
-  assert(anchor, 'could not isolate the anchor');
-  assert(/target="_blank"/.test(anchor[0]), 'anchor must target _blank');
-  assert(/rel="noopener noreferrer"/.test(anchor[0]),
-    'anchor must carry noopener noreferrer: the new tab gets no handle on this one');
+t('the anchor opens a protected new tab', () => {
+  assert(/target="_blank"/.test(src), 'anchor must target _blank');
+  assert(/rel="noopener noreferrer"/.test(src), 'anchor must isolate the new tab');
 });
 
-t('only an https github.com URL is ever linked or opened', () => {
-  assert(/if \(isGithubHttpsUrl\(uri\)\) \{/.test(src),
-    'the anchor and the popup must both sit behind isGithubHttpsUrl');
+t('only an HTTPS github.com URL is linked', () => {
+  assert(/url\.protocol === 'https:'/.test(src), 'HTTPS check missing');
+  assert(/github\\\.com\$/.test(src), 'github.com hostname check missing');
+  assert(/isGitHubUrl\(verificationUrl\)/.test(src), 'anchor is not guarded');
 });
 
-t('nothing opens GitHub for the visitor — they tap the anchor', () => {
-  // A dialog that auto-opens a GitHub tab the instant it appears reads as a
-  // hijack; on desktop the scripted open lands and the visitor is gone before
-  // reading anything. The anchor tap is the only hop.
-  assert(!/window\.open\(/.test(src),
-    'the dialog must not open GitHub itself; the visitor taps the anchor');
-  assert(/getElementById\('tds-open'\)\.addEventListener\('click'/.test(src),
-    'the anchor tap must be wired: it copies the code as the visitor leaves');
-  assert(/Click Open GitHub to approve/.test(src),
-    'the status must point the visitor at the Open GitHub button');
+t('nothing opens GitHub automatically', () => {
+  assert(!/window\.open|\bopen\(/.test(src), 'dialog opens GitHub itself');
+  assert(/onClick=\{\(\) => device\?\.user_code && copyText/.test(src), 'anchor tap should copy the device code');
 });
 
-t('the poll keeps running however the visitor reaches GitHub', () => {
-  const after = src.slice(src.indexOf('if (isGithubHttpsUrl(uri))'));
-  assert(/\(function poll\(\)/.test(after),
-    'the poll must start regardless of how the user reaches GitHub');
+t('polling continues after the handoff and can be cancelled', () => {
+  assert(/const poll = \(deviceCode\)/.test(src) && /pollDeviceSignIn\(deviceCode\)/.test(src), 'poll loop missing');
+  // The effect's `device` state is the value captured at mount (null); polling
+  // through it never sends a real code. The code must travel via the closure.
+  assert(!/pollDeviceSignIn\(device\.device_code\)/.test(src), 'poll reads device_code from stale React state');
+  assert(/poll\(result\.device_code\)/.test(src), 'start() must hand the fresh device code to the poll loop');
+  assert(/cancelled = true/.test(src) && /clearTimeout\(timer\)/.test(src), 'poll cleanup missing');
+  assert(/authorization_pending/.test(src) && /slow_down/.test(src), 'device-flow polling states missing');
+});
+
+t('device endpoints stay behind the client API boundary', () => {
+  assert(/export function startDeviceSignIn/.test(api), 'start API wrapper missing');
+  assert(/export function pollDeviceSignIn/.test(api), 'poll API wrapper missing');
+  assert(!/fetch\('/.test(src), 'dialog bypasses the API module');
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);

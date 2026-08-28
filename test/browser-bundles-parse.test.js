@@ -21,7 +21,7 @@ const root = path.join(__dirname, '..');
 console.log('browser bundles parse');
 
 // Everything the worker injects into a page.
-for (const rel of ['server/manage.js', 'server/shell.js', 'server/chrome.js', 'server/frame-probe.js', 'server/onboard.js', 'server/signin.js']) {
+for (const rel of ['server/shell.js', 'server/frame-probe.js']) {
   t(`${rel} is valid JavaScript`, () => {
     const src = fs.readFileSync(path.join(root, rel), 'utf8');
     // Compile without running: catches syntax errors, touches no globals.
@@ -51,6 +51,13 @@ t('the bundled worker is valid JavaScript', () => {
   // The bundle inlines the three files above as string literals. If one of
   // them was unbalanced, the bundle is where it detonates.
   new vm.Script(asScript(fs.readFileSync(bundled, 'utf8')), { filename: '_worker.bundled.js' });
+});
+
+t('the built React shell runtime is valid JavaScript', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'server/runtime/manifest.json'), 'utf8'));
+  const entry = Object.values(manifest).find((item) => item && item.isEntry);
+  if (!entry || !entry.file) throw new Error('shell runtime manifest has no entry');
+  new vm.Script(fs.readFileSync(path.join(root, 'server/runtime', entry.file), 'utf8'), { filename: entry.file });
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);

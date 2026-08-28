@@ -166,8 +166,8 @@ const SLUG = 'hostile-body-css';
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       await page.click('#tdoc-more-btn');
-      await page.waitForSelector('#tdoc-secondary-menu.open', { timeout: 2000 });
-      await page.click('#tdoc-secondary-menu.open [data-action="copy"]');
+      await page.waitForSelector('.ui-menu-popup', { timeout: 2000 });
+      await page.click('.ui-menu-popup [data-action="copy"]');
       await page.waitForFunction(
         () => [...document.querySelectorAll('div')].some(d => d.textContent === 'Copied as Markdown'),
         null, { timeout: 2000 }
@@ -218,8 +218,8 @@ const SLUG = 'hostile-body-css';
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       await page.click('#tdoc-publish-btn');
-      await page.waitForSelector('.tdoc-modal-bg .tdoc-modal', { timeout: 2000 });
-      const h = await page.$eval('.tdoc-modal h3', el => el.textContent);
+      await page.waitForSelector('.ui-dialog-popup', { timeout: 2000 });
+      const h = await page.$eval('.ui-dialog-title', el => el.textContent);
       if (!/Publish/.test(h)) throw new Error('publish modal missing: ' + h);
     });
 
