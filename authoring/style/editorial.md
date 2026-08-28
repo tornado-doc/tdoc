@@ -91,6 +91,7 @@ is a pointer, not a decoration, and it lands on one element.
 | Accent fill | `fill:#eef1fb stroke:#3a55f4`, text `#2200ff` |
 | Textured variant | Hatch in `#3a55f4` over the same fill; the green `#4ba181` is reserved for a positive outcome and never used as a second accent |
 | Stacked bar | Blues `#eef1fb` / `#dbe3fa` / `#c3d0f6` with `#b3bdc9` strokes |
+| Table | `rule` hairline border, `rx:10` card; row rules in `rule`; header serif in `muted`, no fill |
 
 The underline that marks a term in prose has no figure equivalent. Inside a
 drawing, emphasis is the accent fill.
@@ -110,5 +111,5 @@ requires, forbids, or limits any kind of visual.
 ## Style is visual only
 
 Governs how the page looks — never section numbering, language, tone, or
-structure. Tables inherit the overlay's rounded-cell default. Link generously
+structure. Tables take the treatment above. Link generously
 (the blue is this style's main accent).
