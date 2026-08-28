@@ -26,17 +26,11 @@ function childEnv() {
 
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
-const CHROME_PATH = path.join(__dirname, 'chrome.js');
-// Shared chrome module, also loaded server-side so the shell can render the real
-// bar/footer markup statically (same source the browser gets as window.TDOC_CHROME).
-let CHROME = {};
-try { CHROME = require(CHROME_PATH); } catch {}
 const FRAME_PROBE_PATH = path.join(__dirname, 'frame-probe.js');
-const ONBOARD_PATH = path.join(__dirname, 'onboard.js');
-const SIGNIN_PATH = path.join(__dirname, 'signin.js');
-// Shared shell builder (sliceChromeCss/shellScript/shellHtml) — same source the
-// worker inlines, so the local shell and the production shell stay 1:1.
+// Shared shell builder keeps local and production boot markup identical.
 const SHELL = require('./shell.js');
+const { loadRuntimeAssets } = require('./runtime-assets.js');
+const SHELL_RUNTIME = loadRuntimeAssets();
 // Slugs that carry the onboarding modal. Product UI, injected under the same
 // nonce as the overlay, because a doc's own <script> never runs.
 const ONBOARD_SLUGS = new Set(['tornado-doc', 'tdoc-start']);
@@ -315,14 +309,8 @@ function frameCspHeader(nonce) {
   return `script-src 'nonce-${nonce}' 'strict-dynamic'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts`;
 }
 
-// The CHROME CSS (bar/footer/composer/cards/pins/drawer/menus) and READER CSS
-// (reading column/typography) are standalone files now — extracted from the
-// old overlay.js monolith so components live in their own modules.
-const CHROME_CSS_PATH = path.join(__dirname, 'chrome.css');
+// Reader CSS remains provider-enforced inside the isolated author frame.
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
-function chromeCss() {
-  try { return fs.readFileSync(CHROME_CSS_PATH, 'utf8'); } catch { return ''; }
-}
 function readerCss() {
   try { return fs.readFileSync(READER_CSS_PATH, 'utf8'); } catch { return ''; }
 }
@@ -353,30 +341,64 @@ function shellDocument(slug, version, nonce) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const ident = e2eIdentity();
   const isOwner = !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase());
-  // window.__TDOC__ powers the chrome-level modals (sign-in device flow +
-  // onboarding), which read it exactly as they did in the single-origin path.
-  // window.__TDOC_SHELL__ carries the shell client's own config (incl. identity
-  // so reaction "mine" detection works). Both are nonced. isLanding/stars come
-  // from main's landing-bar star count (consumed by a landing bar variant).
   const isLanding = slug === 'tornado-doc';
-  const authCfgJson = safeJsonForScript({ slug, version, identity: ident, isOwner, authConfigured: !!ident, mode: 'local', versions, isLanding, stars: cachedStars });
-  const cfgJson = safeJsonForScript({ slug, version, mode: 'local', versions, identity: ident });
-  // Sign-in (always) + onboarding (start docs only) are chrome, so they live in
-  // the shell, not the isolated author frame — same modules as the overlay path.
-  let signinJs = '', onboardJs = '', manageJs = '';
-  try { signinJs = fs.readFileSync(SIGNIN_PATH, 'utf8'); } catch {}
-  try { manageJs = fs.readFileSync(path.join(__dirname, 'manage.js'), 'utf8'); } catch {}
-  if (ONBOARD_SLUGS.has(slug)) { try { onboardJs = fs.readFileSync(ONBOARD_PATH, 'utf8'); } catch {} }
-  // Shared chrome module (Contract 1): rendered server-side for the static bar +
-  // footer (1:1 with overlay), AND inlined as a nonced <script> so the shell's
-  // client logic can build the composer/pins from window.TDOC_CHROME.
-  let chromeJs = '';
-  try { chromeJs = fs.readFileSync(CHROME_PATH, 'utf8'); } catch {}
-  const barInner = CHROME.buildBar ? CHROME.buildBar({ mode: 'local', slug, version, versions }) : '';
-  const footerInner = CHROME.buildFooter ? CHROME.buildFooter() : '';
+  const cfgJson = safeJsonForScript({
+    slug,
+    title,
+    version,
+    mode: 'local',
+    versions,
+    identity: ident,
+    isOwner,
+    authConfigured: false,
+    webAuth: false,
+    isLanding,
+    onboarding: ONBOARD_SLUGS.has(slug),
+    stars: cachedStars,
+  });
   return SHELL.shellHtml({
-    title, frameSrc, nonceAttr, chromeCssStr: chromeCss(), barInner, footerInner,
-    chromeJs, authCfgJson, cfgJson, signinJs, onboardJs, manageJs,
+    title,
+    nonceAttr,
+    cfgJson,
+    bootJson: safeJsonForScript({ frameSrc, oldVersion: null }),
+    runtimeJsPath: SHELL_RUNTIME.js.path,
+    runtimeCssPath: SHELL_RUNTIME.css.path,
+  });
+}
+
+function localDocsData() {
+  const docs = [];
+  for (const entry of fs.readdirSync(ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !safeSlug(entry.name)) continue;
+    const slug = entry.name;
+    const meta = readJson(path.join(ROOT, slug, 'meta.json'), {});
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions.length
+      ? Number(versions[versions.length - 1].n) || 1
+      : fs.readdirSync(path.join(ROOT, slug), { withFileTypes: true })
+        .filter((item) => item.isDirectory() && /^v\d+$/.test(item.name))
+        .map((item) => Number(item.name.slice(1))).sort((a, b) => b - a)[0] || 1;
+    const created = meta.created || versions[0]?.created || '';
+    const updated = versions[versions.length - 1]?.created || created;
+    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '' });
+  }
+  docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)) || a.title.localeCompare(b.title));
+  return { docs, recent: [], starred: [], folders: [] };
+}
+
+function localHubDocument(nonce) {
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  return SHELL.appHtml({
+    title: 'My docs',
+    nonceAttr,
+    runtimeJsPath: SHELL_RUNTIME.js.path,
+    runtimeCssPath: SHELL_RUNTIME.css.path,
+    bootJson: safeJsonForScript({
+      page: 'docs-hub',
+      identity: e2eIdentity(),
+      capabilities: { folders: false, delete: false, star: false },
+      ...localDocsData(),
+    }),
   });
 }
 
@@ -619,12 +641,22 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  if (p === '/') return send(res, 200, indexPage(), { 'Content-Type': 'text/html; charset=utf-8' });
-  // Overlay mark always goes to /me. Local studio has no hosted catalog, so
-  // send them to the local index — the analog of My docs.
-  if (p === '/me') {
-    res.writeHead(302, { Location: '/' });
-    return res.end();
+  const runtimeAsset = [SHELL_RUNTIME.js, SHELL_RUNTIME.css].find((asset) => asset.path === p);
+  if (runtimeAsset && (req.method === 'GET' || req.method === 'HEAD')) {
+    const body = req.method === 'HEAD' ? '' : fs.readFileSync(runtimeAsset.file);
+    return send(res, 200, body, {
+      'Content-Type': runtimeAsset.type,
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+
+  if ((p === '/' || p === '/me') && (req.method === 'GET' || req.method === 'HEAD')) {
+    const nonce = crypto.randomBytes(16).toString('hex');
+    return send(res, 200, req.method === 'HEAD' ? '' : localHubDocument(nonce), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': cspHeader(nonce),
+    });
   }
 
   const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);

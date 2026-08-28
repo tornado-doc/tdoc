@@ -1,0 +1,74 @@
+html,
+body,
+#tdoc-shell-root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: #fff;
+}
+
+#tdoc-shell-root {
+  display: flex;
+  flex-direction: column;
+}
+
+.tdoc-document-app {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+.tdoc-oldver-strip.tdoc-oldver-visible {
+  display: flex;
+}
+
+.tdoc-doc-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  display: block;
+}
+
+.tdoc-footer {
+  margin-top: 0;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  background: #fff;
+  opacity: 0;
+  transform: translateY(100%);
+  transition: opacity .18s ease, transform .18s ease;
+  pointer-events: none;
+}
+
+.tdoc-footer.tdoc-footer-show {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+@media (max-width: 700px) {
+  .tdoc-footer .tdoc-footer-row {
+    flex-direction: row;
+  }
+
+  .tdoc-footer .tdoc-footer-row > a:first-child {
+    display: none;
+  }
+}
+
+.tdoc-pin,
+.tdoc-popup,
+.tdoc-margin-comment {
+  position: fixed;
+}
+
+body.tdoc-narrow .tdoc-pin {
+  display: none;
+}
+
+.tdoc-fab {
+  display: none;
+}

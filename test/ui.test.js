@@ -1,874 +1,131 @@
-// Playwright UI test for the tdoc overlay.
-// Run with: node test/ui.test.js
-//
-// By default this boots the LOCAL server (server/server.js) against the
-// committed fixture in test/fixtures/tdocs and tests THAT — so it exercises the
-// working-tree overlay, runs offline, and actually gates pre-push. Point it at a
-// live deploy with TDOC_TEST_URL=... to test a shipped build instead.
-// Requires playwright; without it the suite skips loudly (never silently passes).
-
+// React provider-UI smoke tests. Deep comment/frame behavior lives in
+// artifact-shell.test.js; this suite protects the reusable menu/dialog facades,
+// shell framing, and Docs Hub at desktop and phone widths.
 const { requirePlaywrightOrSkip, resolveTarget } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('ui.test.js');
-const { isPublishedTarget } = require('./helpers/fixture-server');
 
-let pass = 0, fail = 0, skipped = 0;
+let pass = 0, fail = 0;
 function ok(name) { console.log(`  ✓ ${name}`); pass++; }
-function bad(name, err) { console.log(`  ✗ ${name}\n    ${err}`); fail++; }
-async function t(name, fn) { try { await fn(); ok(name); } catch (e) { bad(name, e.message); } }
-// Published-only assertion: the UI it checks (Share / fork / sign-in / auth
-// reactions) exists only in the worker's `mode:'published'`. Against the local
-// fixture server it skips LOUDLY (counted, never a silent pass); set
-// TDOC_TEST_URL=<live worker> to actually run it.
-async function tPub(name, fn) {
-  if (!isPublishedTarget()) {
-    console.log(`  ⊘ ${name} — SKIP (published-only; set TDOC_TEST_URL to run)`);
-    skipped++; return;
-  }
-  await t(name, fn);
-}
-// A behavior the cross-origin shell doesn't implement the same way the
-// single-origin overlay did — either a tracked shell gap or an overlay-internal
-// contract superseded by artifact-shell.test.js. Skipped LOUDLY (counted, never
-// a silent pass) with the reason, so the gap stays visible.
-function tShellGap(name, reason, _fn) {
-  console.log(`  ⊘ ${name} — SHELL GAP: ${reason}`);
-  skipped++;
-}
+function bad(name, error) { console.log(`  ✗ ${name}\n    ${error.message || error}`); fail++; }
+async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(name, error); } }
 
 (async () => {
   const target = await resolveTarget();
-  const URL = target.url;
-  console.log(`testing ${URL}\n`);
+  const url = target.url;
+  const origin = new URL(url).origin;
+  console.log(`testing ${url}\n`);
   const browser = await chromium.launch({ headless: true });
-  const ctx = await browser.newContext({
+  const context = await browser.newContext({
     permissions: ['clipboard-read', 'clipboard-write'],
-    viewport: { width: 1400, height: 900 }
+    viewport: { width: 1400, height: 900 },
   });
-  const page = await ctx.newPage();
+  const page = await context.newPage();
+  await page.goto(url, { waitUntil: 'networkidle' });
 
-  await page.goto(URL, { waitUntil: 'networkidle' });
-
-  async function openFirstCommentCard() {
-    const card = await page.$('.tdoc-margin-comment');
-    if (!card) return null;
-    if (await card.isVisible()) return card;
-    const pin = await page.$('.tdoc-pin');
-    if (!pin) return card;
-    await pin.click();
-    await page.waitForSelector('.tdoc-margin-comment.tdoc-floating-open', { timeout: 1000 });
-    return page.$('.tdoc-margin-comment.tdoc-floating-open');
-  }
-
-  await t('top bar renders', async () => {
-    await page.waitForSelector('.tdoc-bar', { timeout: 5000 });
-  });
-
-  await t('top bar occupies layout instead of floating over the document', async () => {
-    const info = await page.evaluate(() => {
-      const bar = document.querySelector('.tdoc-bar');
-      const cs = getComputedStyle(bar);
-      return {
-        position: cs.position,
-        firstChildIsBar: document.body.firstElementChild === bar,
-      };
-    });
-    if (info.position === 'fixed' || info.position === 'sticky') {
-      throw new Error(`bar must be in document flow, got position:${info.position}`);
-    }
-    if (!info.firstChildIsBar) throw new Error('bar must be the first body element');
-  });
-
-  await t('Dark mode switch is in the top bar', async () => {
-    const btn = await page.$('#tdoc-theme-btn');
-    if (!btn) throw new Error('no #tdoc-theme-btn');
-    const inBar = await page.$('.tdoc-bar #tdoc-theme-btn');
-    if (!inBar) throw new Error('theme button is not inside .tdoc-bar');
-  });
-
-  await t('Default theme is light and storage is empty until switch', async () => {
-    const theme = await page.getAttribute('html', 'data-tdoc-theme');
-    if (theme && theme !== 'light') throw new Error(`expected light, got "${theme}"`);
-    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
-    if (stored !== null) throw new Error(`storage should be empty before switch, got "${stored}"`);
-  });
-
-  await t('Clicking the switch turns dark and remembers', async () => {
-    await page.click('#tdoc-theme-btn');
-    const theme = await page.getAttribute('html', 'data-tdoc-theme');
-    if (theme !== 'dark') throw new Error(`expected dark after click, got "${theme}"`);
-    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
-    if (stored !== 'dark') throw new Error(`storage should be dark, got "${stored}"`);
-    const pressed = await page.getAttribute('#tdoc-theme-btn', 'aria-pressed');
-    if (pressed !== 'true') throw new Error(`aria-pressed should be true, got "${pressed}"`);
-  });
-
-  await t('Reload restores the remembered dark theme', async () => {
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForSelector('#tdoc-theme-btn', { timeout: 5000 });
-    const theme = await page.getAttribute('html', 'data-tdoc-theme');
-    if (theme !== 'dark') throw new Error(`expected dark after reload, got "${theme}"`);
-    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
-    if (stored !== 'dark') throw new Error(`storage lost on reload: "${stored}"`);
-  });
-
-  await t('Clicking again returns to light and remembers', async () => {
-    await page.click('#tdoc-theme-btn');
-    const theme = await page.getAttribute('html', 'data-tdoc-theme');
-    if (theme !== 'light') throw new Error(`expected light after second click, got "${theme}"`);
-    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
-    if (stored !== 'light') throw new Error(`storage should be light, got "${stored}"`);
-  });
-
-  // data-tdoc-default-theme + [data-tdoc-copy] primitive. Fresh context so
-  // there is no stored tdoc-theme from the tests above (default only applies
-  // when the reader has made no choice).
-  const copyDocUrl = URL.slice(0, URL.indexOf('/d/')) + '/d/copy-doc/v/1';
-
-  await t('A doc declaring data-tdoc-default-theme="dark" opens dark', async () => {
-    const c = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1200, height: 800 } });
-    const p = await c.newPage();
-    await p.goto(copyDocUrl, { waitUntil: 'networkidle' });
-    const theme = await p.getAttribute('html', 'data-tdoc-theme');
-    const stored = await p.evaluate(() => localStorage.getItem('tdoc-theme'));
-    await c.close();
-    if (theme !== 'dark') throw new Error(`expected dark from the default hint, got "${theme}"`);
-    if (stored !== null) throw new Error(`the hint must not persist a preference, got "${stored}"`);
-  });
-
-  await t('A [data-tdoc-copy] button copies the target text and flashes', async () => {
-    // The author button lives in the isolated /frame now — the probe wires it,
-    // flashes it, and bridges the text to the shell to copy (frame clipboard is
-    // unreliable). Assert the flash in the frame (reliable observable); the
-    // clipboard is best-effort in a sandboxed frame, so check it leniently.
-    const c = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1200, height: 800 } });
-    const p = await c.newPage();
-    await p.goto(copyDocUrl, { waitUntil: 'networkidle' });
-    const frame = p.frames().find(f => f !== p.mainFrame());
-    if (!frame) { await c.close(); throw new Error('author frame not found'); }
-    await frame.click('[data-tdoc-copy]');
-    await frame.waitForFunction(() => document.querySelector('[data-tdoc-copy]').classList.contains('tdoc-copied'), null, { timeout: 3000 });
-    const flashed = await frame.textContent('[data-tdoc-copy]');
-    const clip = await p.evaluate(() => navigator.clipboard.readText().catch(() => ''));
-    await c.close();
-    if (!/✓/.test(flashed)) throw new Error(`button should flash a check mark, got "${flashed}"`);
-    if (clip && !clip.includes('技术设计文档')) throw new Error(`clipboard held unexpected text: "${clip.slice(0, 60)}"`);
-  });
-
-  // RETIRED (cross-origin shell, model B): the overlay used to inject reader
-  // CSS onto the author document (table overflow-x wrapper, SVG aspect ratio).
-  // Under model B the author document is self-contained and isolated in the
-  // /frame iframe — the shell deliberately injects no reader-template CSS, so
-  // these guarantees are the AUTHOR's, not tdoc's. The two former tests here
-  // (table-not-clipped, svg-viewBox) asserted overlay-injected CSS that no
-  // longer exists by design. Author-content isolation is covered by
-  // csp-headers.test.js (/frame) and artifact-shell.test.js.
-
-  // Copy moved into the ⋯ overflow menu as a single action (the old two-option
-  // doc-only/doc+comments submenu is gone — Copy is always doc-only markdown).
-  await t('⋯ menu carries a single "Copy as Markdown" action', async () => {
-    await page.click('#tdoc-more-btn');
-    await page.waitForSelector('#tdoc-secondary-menu.open', { timeout: 1000 });
-    const items = await page.$$eval('#tdoc-secondary-menu.open [data-action="copy"]', els => els.map(e => e.textContent.trim()));
-    if (items.length !== 1) throw new Error(`expected one Copy action, got ${items.length}`);
-    if (items[0] !== 'Copy as Markdown') throw new Error(`label was "${items[0]}"`);
-    // cleanup: the author h1 lives in the /frame — click there to close the menu
-    const cleanupFrame = page.frames().find(f => f !== page.mainFrame());
-    if (cleanupFrame) await cleanupFrame.click('h1', { position: { x: 5, y: 5 } });
-    else await page.mouse.click(5, 300);
-    await page.waitForTimeout(200);
-  });
-
-  await t('⋯ menu hidden by default', async () => {
-    const open = await page.$('#tdoc-secondary-menu.open');
-    if (open) throw new Error('secondary menu open before click');
-  });
-
-  await t('Click outside closes the ⋯ menu', async () => {
-    await page.click('#tdoc-more-btn');
-    await page.waitForSelector('#tdoc-secondary-menu.open');
-    // The author <h1> lives in the isolated /frame now — clicking into the frame
-    // fires tdoc:cleared across the boundary, which the shell uses to close the
-    // menu (there is no author DOM in the outer chrome document to click).
-    const authorFrame = page.frames().find(f => f !== page.mainFrame());
-    if (authorFrame) await authorFrame.click('h1', { position: { x: 5, y: 5 } });
-    else await page.mouse.click(5, 300);
-    await page.waitForTimeout(200);
-    const open = await page.$('#tdoc-secondary-menu.open');
-    if (open) throw new Error('menu stayed open after outside click');
-  });
-
-  await t('Copy as Markdown → clipboard has markdown, no Comments section', async () => {
-    await page.click('#tdoc-more-btn');
-    await page.waitForSelector('#tdoc-secondary-menu.open');
-    await page.click('#tdoc-secondary-menu.open [data-action="copy"]');
-    await page.waitForTimeout(300);
-    const clip = await page.evaluate(() => navigator.clipboard.readText());
-    if (!clip || clip.length < 20) throw new Error(`clipboard too short: "${clip}"`);
-    if (!clip.includes('#')) throw new Error('no markdown headings in clipboard');
-    if (clip.includes('## Comments')) throw new Error('Copy as Markdown must not include a Comments section');
-  });
-
-  await t('Copy confirms with a "Copied as Markdown" toast', async () => {
-    await page.click('#tdoc-more-btn');
-    await page.waitForSelector('#tdoc-secondary-menu.open');
-    await page.click('#tdoc-secondary-menu.open [data-action="copy"]');
-    await page.waitForFunction(
-      () => [...document.querySelectorAll('div')].some(d => d.textContent === 'Copied as Markdown'),
-      null,
-      { timeout: 1200 }
-    );
-  });
-
-  await t('Anchor highlight is clickable (pointer cursor)', async () => {
-    const cursor = await page.evaluate(() => {
-      const m = document.querySelector('.tdoc-anchor-mark');
-      if (!m) return 'no-mark';
-      return getComputedStyle(m).cursor;
-    });
-    if (cursor === 'no-mark') return; // no comments to test; fine
-    if (cursor !== 'pointer') throw new Error(`expected cursor:pointer on anchor mark, got "${cursor}"`);
-  });
-
-  await t('Hover outline + Comment pill appear over an unanchored canvas', async () => {
-    const canvas = await page.$('canvas');
-    if (!canvas) { console.log('  (no canvas in doc, skipping)'); return; }
-    // If the canvas is already anchored, the hover UI is intentionally suppressed
-    // (the existing comment owns the click). Skip in that case.
-    const anchored = await page.evaluate(() => {
-      const c = document.querySelector('canvas');
-      if (!c || !window.CSS || !CSS.highlights) return false;
-      // Check any ::highlight() ranges touching the canvas (heuristic: any
-      // tdoc-element-outline visible on the canvas)
-      for (const o of document.querySelectorAll('.tdoc-element-outline')) {
-        const r1 = c.getBoundingClientRect(), r2 = o.getBoundingClientRect();
-        if (Math.abs(r1.left - r2.left) < 6 && Math.abs(r1.top - r2.top) < 6) return true;
-      }
-      return false;
-    });
-    if (anchored) { console.log('  (canvas already anchored, skipping)'); return; }
-    const box = await canvas.boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForSelector('.tdoc-hover-outline', { timeout: 2000 });
-    await page.waitForSelector('.tdoc-comment-pill', { timeout: 1000 });
-  });
-
-  await t('Plain click on canvas does NOT open popup (passes through)', async () => {
-    const canvas = await page.$('canvas');
-    if (!canvas) { console.log('  (no canvas, skipping)'); return; }
-    const box = await canvas.boundingBox();
-    // Single click, no drag
-    await page.mouse.click(box.x + 50, box.y + 50);
-    await page.waitForTimeout(250);
-    const popup = await page.$('.tdoc-popup');
-    if (popup) throw new Error('plain click should not open popup with drag-to-comment');
-  });
-
-  await t('Drag FROM OUTSIDE canvas INTO canvas opens comment popup with element anchor preview', async () => {
-    const canvas = await page.$('canvas');
-    if (!canvas) { console.log('  (no canvas, skipping)'); return; }
-    // If the canvas is already an existing comment's anchor, this gesture is
-    // intentionally a no-op (the comment already exists). Skip the test.
-    const alreadyAnchored = await page.evaluate(() => {
-      const c = document.querySelector('canvas');
-      if (!c) return false;
-      for (const a of document.querySelectorAll('.tdoc-element-outline')) {
-        if (a._targetEl === c || a.dataset.commentId) {
-          const r1 = c.getBoundingClientRect();
-          const r2 = a.getBoundingClientRect();
-          if (Math.abs(r1.left - r2.left) < 5 && Math.abs(r1.top - r2.top) < 5) return true;
-        }
-      }
-      return false;
-    });
-    if (alreadyAnchored) { console.log('  (canvas already anchored by an existing comment, skipping)'); return; }
-    const box = await canvas.boundingBox();
-    const startX = Math.max(20, box.x - 30);
-    const startY = box.y + 20;
-    await page.mouse.move(startX, startY);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 80, box.y + 60, { steps: 10 });
-    await page.mouse.up();
-    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
-    const header = await page.$eval('.tdoc-popup .head .h', el => el.textContent);
-    if (!header.includes('📎') && !header.includes('canvas')) {
-      throw new Error(`expected element-anchor preview, got "${header}"`);
-    }
-    await page.click('.tdoc-popup .head .x');
-    await page.waitForTimeout(150);
-  });
-
-  await t('Drag-to-select TEXT in a <p> opens the comment popup', async () => {
-    // Regression: a drag that doesn't intersect any artifact must fall through
-    // to the text-selection-popup branch. Previously returned early.
-    const target = await page.evaluate(() => {
-      const els = document.querySelectorAll('.wrap p, .wrap li, .wrap h1, .wrap h2, .wrap h3');
-      for (const el of els) {
-        if (el.textContent.trim().length > 30) {
-          const r = el.getBoundingClientRect();
-          return { sx: r.left + 5, sy: r.top + r.height/2, ex: r.left + 180, ey: r.top + r.height/2 };
-        }
-      }
-      return null;
-    });
-    if (!target) { console.log('  (no suitable text element, skipping)'); return; }
-    await page.mouse.move(target.sx, target.sy);
-    await page.mouse.down();
-    await page.mouse.move(target.ex, target.ey, { steps: 12 });
-    // Headless Chromium's synthetic drag doesn't reliably create a text
-    // Selection, which the mouseup handler needs to open the selection popup.
-    // Establish a real selection over the dragged text so the code path under
-    // test (drag-without-artifact → selection popup) actually runs.
-    await page.evaluate(() => {
-      const el = [...document.querySelectorAll('.wrap p, .wrap li, .wrap h1, .wrap h2, .wrap h3')]
-        .find(e => e.textContent.trim().length > 30);
-      if (!el) return;
-      const node = [...el.childNodes].find(n => n.nodeType === 3 && n.textContent.trim().length > 10) || el.firstChild;
-      const r = document.createRange();
-      r.setStart(node, 0);
-      r.setEnd(node, Math.min(20, node.textContent.length));
-      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-    });
-    await page.mouse.up();
-    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
-    await page.click('.tdoc-popup .head .x').catch(() => {});
-  });
-
-  await t('Text-selection popup follows the caret line, not the union box', async () => {
-    // Regression: Range.getBoundingClientRect() is the union of every line.
-    // Selecting across blocks (or wrapping) then releasing on the last line
-    // used to park the popup at the union's bottom-left, away from the caret.
-    const pos = await page.evaluate(() => {
-      const h = document.querySelector('.wrap h2');
-      const p = document.querySelector('.wrap h2 + p, .wrap h2 ~ p');
-      if (!h || !p) return null;
-      const start = [...h.childNodes].find(n => n.nodeType === 3);
-      const endNode = [...p.childNodes].find(n => n.nodeType === 3 && n.textContent.trim().length > 8);
-      if (!start || !endNode) return null;
-      const r = document.createRange();
-      r.setStart(start, 0);
-      r.setEnd(endNode, Math.min(12, endNode.textContent.length));
-      const union = r.getBoundingClientRect();
-      const rects = [...r.getClientRects()].filter(x => x.width || x.height);
-      if (rects.length < 2) return null;
-      const last = rects[rects.length - 1];
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
-      return {
-        unionTop: union.top,
-        lastTop: last.top,
-        lastBottom: last.bottom,
-        lineLeft: last.left,
-        x: last.right - 2,
-        y: last.top + last.height / 2,
-      };
-    });
-    if (!pos) { console.log('  (could not build a multi-line selection, skipping)'); return; }
-    await page.evaluate(({ x, y }) => {
-      document.dispatchEvent(new MouseEvent('mouseup', {
-        clientX: x, clientY: y, bubbles: true, cancelable: true, view: window, button: 0,
-      }));
-    }, { x: pos.x, y: pos.y });
-    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
-    const popup = await page.$eval('.tdoc-popup', el => {
-      const r = el.getBoundingClientRect();
-      return { top: r.top, left: r.left };
-    });
-    // Opened below the caret line (last.bottom + 8). Must not sit on the first
-    // line of a multi-block selection.
-    if (popup.top < pos.lastTop - 4) {
-      throw new Error(`popup top ${popup.top.toFixed(1)} is above the caret line (${pos.lastTop.toFixed(1)}–${pos.lastBottom.toFixed(1)}); union top was ${pos.unionTop.toFixed(1)}`);
-    }
-    // And at the mouse-up X, not the line's left edge.
-    const distEnd = Math.abs(popup.left - pos.x);
-    const distLeft = Math.abs(popup.left - pos.lineLeft);
-    if (distEnd > distLeft && distEnd > 48) {
-      throw new Error(`popup left ${popup.left.toFixed(1)} is nearer the line origin (${pos.lineLeft.toFixed(1)}) than the caret (${pos.x.toFixed(1)})`);
-    }
-    await page.click('.tdoc-popup .head .x').catch(() => {});
-  });
-
-  await t('Comment popup on a LOW selection is not cut off below the fold', async () => {
-    // The popup clamps horizontally but used to set `top` blind — a comment on
-    // a selection low in the viewport opened below the fold and the textarea +
-    // Comment button were cut off. It must flip above when there's no room.
-    const info = await page.evaluate(() => {
-      const vh = window.innerHeight;
-      const ps = [...document.querySelectorAll('.wrap p, .wrap li, .wrap td')]
-        .filter(p => p.firstChild && p.firstChild.nodeType === 3 && p.textContent.trim().length > 20);
-      if (!ps.length) return null;
-      const target = ps[Math.min(3, ps.length - 1)];
-      // scroll the paragraph to ~90px above the viewport bottom (popup needs ~140)
-      const y = target.getBoundingClientRect().top + window.scrollY;
-      window.scrollTo(0, y - (vh - 90));
-      const tn = target.firstChild;
-      const r = document.createRange();
-      r.setStart(tn, 0); r.setEnd(tn, Math.min(28, tn.textContent.length));
-      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-      const sr = r.getBoundingClientRect();
-      return { vh, x: sr.left + 5, y: sr.bottom, roomBelow: vh - sr.bottom };
-    });
-    if (!info) { console.log('  (no low selectable paragraph, skipping)'); return; }
-    if (info.roomBelow > 150) { console.log('  (viewport too tall to force the clamp, skipping)'); return; }
-    await page.evaluate(({ x, y }) => {
-      document.dispatchEvent(new MouseEvent('mouseup', {
-        clientX: x, clientY: y, bubbles: true, cancelable: true, view: window, button: 0,
-      }));
-    }, { x: info.x, y: info.y });
-    await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
-    const box = await page.$eval('.tdoc-popup', el => {
-      const r = el.getBoundingClientRect();
-      return { top: r.top, bottom: r.bottom };
-    });
-    if (box.bottom > info.vh + 1 || box.top < -1) {
-      throw new Error(`popup spills the viewport: top ${box.top.toFixed(1)}, bottom ${box.bottom.toFixed(1)}, viewport ${info.vh}`);
-    }
-    await page.click('.tdoc-popup .head .x').catch(() => {});
-  });
-
-  await t('A prose selection bleeding into a table does NOT highlight the whole table', async () => {
-    // Regression: a drag that starts in prose and overshoots into a table used
-    // to paint every cell (the pending highlight spans the range) and fold table
-    // text into the comment. The range must clamp to the prose before the table.
-    const res = await page.evaluate(() => {
-      const table = document.querySelector('.wrap table');
-      const p = table && [...document.querySelectorAll('.wrap p')]
-        .find(x => x.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING && x.firstChild);
-      const lastCell = table && [...table.querySelectorAll('td')].pop();
-      if (!p || !lastCell || !lastCell.firstChild) return { skip: true };
-      const r = document.createRange();
-      r.setStart(p.firstChild, 0);
-      r.setEnd(lastCell.firstChild, Math.min(3, lastCell.firstChild.textContent.length));
-      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-      const rect = r.getBoundingClientRect();
-      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: rect.right - 5, clientY: rect.bottom - 5 }));
-      const hl = window.CSS && CSS.highlights && CSS.highlights.get('tdoc-pending');
-      let spansTable = false, ranges = 0;
-      if (hl) for (const rg of hl) { ranges++; if (rg.intersectsNode && rg.intersectsNode(table)) spansTable = true; }
-      return { popup: !!document.querySelector('.tdoc-popup'), ranges, spansTable };
-    });
-    if (res.skip) { console.log('  (fixture has no prose-then-table, skipping)'); return; }
-    if (!res.popup) throw new Error('selection did not open the comment popup');
-    if (res.spansTable) throw new Error('pending highlight still spans the table — clamp failed');
-    await page.keyboard.press('Escape').catch(() => {});
-  });
-
-  await t('Escape and click-outside cancel the popup AND clear the pending highlight', async () => {
-    // The selection + pending highlight live in the author FRAME; the composer
-    // lives in the shell. Escape (shell) and click-outside (frame mousedown →
-    // tdoc:cleared) must both close the composer and clear the frame highlight.
-    const authorFrame = page.frames().find(f => f !== page.mainFrame());
-    if (!authorFrame) throw new Error('author frame not found');
-    const hlCount = () => authorFrame.evaluate(() => {
-      const hl = window.CSS && CSS.highlights && CSS.highlights.get('tdoc-pending');
-      let n = 0; if (hl) for (const _ of hl) n++; return n;
-    });
-    async function openOnProse() {
-      await authorFrame.evaluate(() => {
-        const p = [...document.querySelectorAll('p')].find(x => x.firstChild && x.textContent.trim().length > 12);
-        const r = document.createRange();
-        r.setStart(p.firstChild, 0); r.setEnd(p.firstChild, Math.min(12, p.firstChild.textContent.length));
-        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-        const rect = r.getBoundingClientRect();
-        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: rect.right - 4, clientY: rect.bottom - 4 }));
-      });
-      await page.waitForSelector('.tdoc-popup', { timeout: 2000 }).catch(() => {});
-      return !!(await page.$('.tdoc-popup'));
-    }
-    // Escape
-    if (!await openOnProse()) throw new Error('popup did not open (Escape case)');
-    if (await hlCount() < 1) throw new Error('no pending highlight after opening');
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(150);
-    if (await page.$('.tdoc-popup')) throw new Error('Escape did not close the popup');
-    if (await hlCount() !== 0) throw new Error('Escape did not clear the pending highlight');
-    // click-outside: a mousedown in the frame fires tdoc:cleared
-    if (!await openOnProse()) throw new Error('popup did not open (click-outside case)');
-    await authorFrame.click('h1', { position: { x: 5, y: 5 } });
-    await page.waitForTimeout(200);
-    if (await page.$('.tdoc-popup')) throw new Error('click-outside did not close the popup');
-    if (await hlCount() !== 0) throw new Error('click-outside did not clear the pending highlight');
-  });
-
-  await t('Drag STARTED INSIDE canvas does NOT open popup (passes through)', async () => {
-    const canvas = await page.$('canvas');
-    if (!canvas) { console.log('  (no canvas, skipping)'); return; }
-    const box = await canvas.boundingBox();
-    // Both points inside canvas.
-    await page.mouse.move(box.x + 100, box.y + 100);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 200, box.y + 200, { steps: 10 });
-    await page.mouse.up();
-    await page.waitForTimeout(300);
-    const popup = await page.$('.tdoc-popup');
-    if (popup) throw new Error('drag starting inside canvas should not open popup');
-  });
-
-  await t('Click on a button inside doc does NOT open popup', async () => {
-    const btn = await page.$('button#play, button#reset');
-    if (!btn) { console.log('  (no doc button to test, skipping)'); return; }
-    await btn.click();
-    await page.waitForTimeout(200);
-    const popup = await page.$('.tdoc-popup');
-    if (popup) throw new Error('popup opened from clicking a doc button — should be skipped');
-  });
-
-  await t('Click on existing comment card adds .active to card + anchor', async () => {
-    const card = await openFirstCommentCard();
-    if (!card) { console.log('  (no comments to test, skipping)'); return; }
-    // Click the author row (text), not the body — avoids hitting reaction chips
-    // and other interactive children that stopPropagation.
-    const author = await card.$('.author');
-    if (author) await author.click();
-    else await card.click({ position: { x: 30, y: 10 } });
-    await page.waitForTimeout(150);
+  await t('React shell owns the top bar and isolates author HTML in a sandboxed frame', async () => {
+    await page.waitForSelector('.tdoc-document-app .tdoc-bar');
     const state = await page.evaluate(() => {
-      // Text anchors highlight via the CSS Custom Highlight API
-      // (CSS.highlights 'tdoc-anchor-active'), NOT .tdoc-anchor-mark DOM nodes
-      // (those exist only on the legacy/element-outline fallback). Count BOTH so
-      // the assertion is correct on modern + fallback browsers.
-      const activeHighlight = (window.CSS && CSS.highlights && CSS.highlights.has('tdoc-anchor-active'))
-        ? (CSS.highlights.get('tdoc-anchor-active').size || 0) : 0;
-      const activeFallback = document.querySelectorAll(
-        '.tdoc-anchor-mark.active, .tdoc-element-outline.active'
-      ).length;
+      const frame = document.querySelector('.tdoc-doc-frame');
       return {
-        activeCards: document.querySelectorAll('.tdoc-margin-comment.active').length,
-        activeAnchors: activeHighlight + activeFallback,
+        root: Boolean(document.querySelector('#tdoc-shell-root > .tdoc-document-app')),
+        frame: Boolean(frame),
+        sandbox: frame?.getAttribute('sandbox'),
+        authorOutside: Boolean(document.querySelector('main article, body > article')),
       };
     });
-    if (state.activeCards !== 1) throw new Error(`expected 1 active card, got ${state.activeCards}`);
-    if (state.activeAnchors < 1) throw new Error(`expected anchor to be active (highlight or mark), got ${state.activeAnchors}`);
+    if (!state.root || !state.frame) throw new Error('React shell or author frame missing');
+    if (state.sandbox !== 'allow-scripts') throw new Error(`unexpected frame sandbox: ${state.sandbox}`);
+    if (state.authorOutside) throw new Error('author DOM leaked into the provider shell');
   });
 
-  await t('Click on a comment-anchored text highlight activates the matching card', async () => {
-    // Deselect first
-    await page.evaluate(() => document.querySelectorAll('.active').forEach(el => el.classList.remove('active')));
-    const mark = await page.$('.tdoc-anchor-mark');
-    if (!mark) { console.log('  (no text-anchored comments, skipping)'); return; }
-    await mark.click();
-    await page.waitForTimeout(150);
-    const activeCards = await page.$$eval('.tdoc-margin-comment.active', els => els.length);
-    if (activeCards !== 1) throw new Error(`expected 1 active card after anchor click, got ${activeCards}`);
+  await t('theme toggle persists and reaches the author frame', async () => {
+    await page.evaluate(() => localStorage.removeItem('tdoc-theme'));
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.click('#tdoc-theme-btn');
+    await page.waitForFunction(() => document.documentElement.dataset.tdocTheme === 'dark');
+    const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    const frameTheme = await frame.evaluate(() => document.documentElement.dataset.tdocTheme);
+    if (stored !== 'dark' || frameTheme !== 'dark') throw new Error(`theme did not persist/bridge: ${stored}/${frameTheme}`);
   });
 
-  await t('Clicking outside any card / anchor deselects the active card', async () => {
-    // Activate a card via its author row (avoid reaction chip stopPropagation)
-    const card = await openFirstCommentCard();
-    if (!card) { console.log('  (no cards, skipping)'); return; }
-    const author = await card.$('.author');
-    if (author) await author.click();
-    else await card.click({ position: { x: 30, y: 10 } });
-    await page.waitForTimeout(100);
-    let activeCount = await page.$$eval('.tdoc-margin-comment.active', els => els.length);
-    if (activeCount !== 1) throw new Error(`expected 1 active before outside-click, got ${activeCount}`);
-    // Click in the H1 area on the doc — outside any UI
-    await page.click('h1', { position: { x: 5, y: 5 } });
-    await page.waitForTimeout(150);
-    activeCount = await page.$$eval('.tdoc-margin-comment.active', els => els.length);
-    if (activeCount !== 0) throw new Error(`expected 0 active after outside-click, got ${activeCount}`);
+  await t('Base UI overflow menu exposes document actions and closes on Escape', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('.ui-menu-popup [data-action="copy"]');
+    const labels = await page.$$eval('.ui-menu-popup .ui-menu-item', (items) => items.map((item) => item.textContent.trim()));
+    if (!labels.includes('Copy as Markdown') || !labels.includes('Download HTML')) throw new Error(`actions missing: ${labels.join(', ')}`);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.ui-menu-popup', { state: 'detached' });
   });
 
-  await tPub('Sign-in button visible (anon view)', async () => {
-    const btn = await page.$('#tdoc-signin');
-    if (!btn) throw new Error('no sign-in button; expected on published anon view');
+  await t('Copy as Markdown bridges from the frame and reports a toast', async () => {
+    await page.click('#tdoc-more-btn');
+    await page.click('.ui-menu-popup [data-action="copy"]');
+    await page.waitForSelector('.tdoc-shell-toast');
+    const toast = await page.textContent('.tdoc-shell-toast');
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    if (!/Copied as Markdown/.test(toast) || !clipboard.includes('#')) throw new Error('copy bridge did not complete');
   });
 
-  await t('Comment card renders Reply button', async () => {
-    const card = await openFirstCommentCard();
-    if (!card) { console.log('  (no comments on this doc, skipping)'); return; }
-    const reply = await page.$('.tdoc-reply-toggle');
-    if (!reply) throw new Error('no Reply button on comment card');
+  await t('Publish uses the shared Base UI dialog with focus and Escape behavior', async () => {
+    await page.click('#tdoc-publish-btn');
+    await page.waitForSelector('.ui-dialog-popup');
+    const title = await page.textContent('.ui-dialog-title');
+    if (!/Publish this doc/.test(title)) throw new Error(`unexpected dialog: ${title}`);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.ui-dialog-popup', { state: 'detached' });
   });
 
-  await t('Comment card renders + React button', async () => {
-    const card = await openFirstCommentCard();
-    if (!card) { console.log('  (no comments on this doc, skipping)'); return; }
-    const addReact = await page.$('.tdoc-react-add');
-    if (!addReact) throw new Error('no + React button on comment card');
+  await t('author copy controls remain inside the framework-free frame', async () => {
+    const copyUrl = `${origin}/d/copy-doc/v/1`;
+    await page.goto(copyUrl, { waitUntil: 'networkidle' });
+    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    await frame.click('[data-tdoc-copy]');
+    await frame.waitForSelector('[data-tdoc-copy].tdoc-copied');
   });
 
-  await t('Reply form is hidden by default', async () => {
-    const open = await page.$('.tdoc-reply-form.open');
-    if (open) throw new Error('reply form open by default');
-  });
-
-  await t('Replies are collapsed by default (toggle exists, replies hidden)', async () => {
-    // Note: only applies to comments that actually have replies. If none in fixture, skip.
-    const togglePresent = await page.$('.tdoc-replies-toggle');
-    if (!togglePresent) { console.log('  (no replies in fixture, skipping)'); return; }
-    const openReplies = await page.$('.tdoc-replies.open');
-    if (openReplies) throw new Error('replies open by default');
-    const text = await togglePresent.evaluate(el => el.textContent.trim());
-    if (!/\d+ repl(y|ies)/.test(text)) throw new Error(`toggle text was "${text}"`);
-  });
-
-  await t('?comment= deep-link opens the target comment card', async () => {
-    const deep = await ctx.newPage();
-    try {
-      const u = URL.replace(/\/?$/, '') + '?comment=c_fixture_1';
-      await deep.goto(u, { waitUntil: 'networkidle' });
-      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
-      await deep.waitForTimeout(250);
-      const st = await deep.evaluate(() => {
-        const card = document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]');
-        const narrow = document.body.classList.contains('tdoc-narrow');
-        const drawerOpen = !!document.getElementById('tdoc-comment-layer')?.classList.contains('open');
-        return {
-          hasCard: !!card,
-          active: !!(card && card.classList.contains('active')),
-          floating: !!(card && card.classList.contains('tdoc-floating-open')),
-          visible: !!(card && card.getClientRects().length > 0),
-          narrow, drawerOpen,
-        };
-      });
-      if (!st.hasCard) throw new Error('deep-linked comment card missing');
-      if (st.narrow) {
-        if (!st.drawerOpen) throw new Error('narrow deep-link must open the comment drawer');
-      } else if (!st.floating && !st.active) {
-        throw new Error('wide deep-link must pin or activate the card');
-      } else if (!st.visible) {
-        throw new Error('deep-linked card is not visible');
-      }
-    } finally {
-      await deep.close();
+  await t('Docs Hub renders structured rows, search, sort, tabs, and create action', async () => {
+    await page.goto(`${origin}/me`, { waitUntil: 'networkidle' });
+    await page.waitForSelector('.docs-hub .doc-row');
+    for (const selector of ['[aria-label="Search docs"]', '[aria-label="Sort docs"]', '[role="tablist"]', '.mk-btn']) {
+      if (!await page.$(selector)) throw new Error(`missing ${selector}`);
     }
   });
 
-  await t('?comment= on a reply expands the thread', async () => {
-    const deep = await ctx.newPage();
-    try {
-      const u = URL.replace(/\/?$/, '') + '?comment=r_fixture_1';
-      await deep.goto(u, { waitUntil: 'networkidle' });
-      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
-      await deep.waitForTimeout(250);
-      const st = await deep.evaluate(() => {
-        const replies = document.querySelector('.tdoc-replies');
-        const reply = document.querySelector('[data-comment-id="r_fixture_1"]');
-        const card = document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]');
-        return {
-          repliesOpen: !!(replies && replies.classList.contains('open')),
-          hasReply: !!reply,
-          cardOpen: !!(card && (card.classList.contains('tdoc-floating-open') || card.classList.contains('active')
-            || document.body.classList.contains('tdoc-narrow'))),
-        };
-      });
-      if (!st.hasReply) throw new Error('reply node missing');
-      if (!st.repliesOpen) throw new Error('reply deep-link must expand the thread');
-      if (!st.cardOpen) throw new Error('reply deep-link must open the root card');
-    } finally {
-      await deep.close();
-    }
+  await t('Docs Hub dialogs also use the shared Base UI facade', async () => {
+    await page.click('.mk-btn');
+    await page.waitForSelector('.ui-dialog-popup');
+    const title = await page.textContent('.ui-dialog-title');
+    if (title !== 'Create a doc') throw new Error(`unexpected dialog title: ${title}`);
+    await page.keyboard.press('Escape');
   });
 
-  await t('?comment= on a phone opens the comment drawer', async () => {
-    const deep = await ctx.newPage();
-    try {
-      await deep.setViewportSize({ width: 375, height: 812 });
-      const u = URL.replace(/\/?$/, '') + '?comment=c_fixture_1';
-      await deep.goto(u, { waitUntil: 'networkidle' });
-      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
-      await deep.waitForTimeout(250);
-      const st = await deep.evaluate(() => ({
-        narrow: document.body.classList.contains('tdoc-narrow'),
-        drawerOpen: !!document.getElementById('tdoc-comment-layer')?.classList.contains('open'),
-        hasCard: !!document.querySelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]'),
-      }));
-      if (!st.narrow) throw new Error(`expected tdoc-narrow at 375px, got narrow=${st.narrow}`);
-      if (!st.hasCard) throw new Error('phone deep-link missing comment card');
-      if (!st.drawerOpen) throw new Error('phone deep-link must open the comment drawer');
-    } finally {
-      await deep.close();
-    }
+  await t('Docs Hub search filters rows without shifting page chrome', async () => {
+    const before = await page.$$eval('.doc-row[data-slug]', (rows) => rows.length);
+    await page.fill('[aria-label="Search docs"]', 'no-result-for-this-query');
+    const after = await page.$$eval('.doc-row[data-slug]', (rows) => rows.length);
+    if (!before || after !== 0) throw new Error(`search filter mismatch: ${before} -> ${after}`);
+    if (!await page.$('.tdoc-bar')) throw new Error('page chrome disappeared');
   });
 
-  await tShellGap('without ?comment= the fixture reply thread stays collapsed',
-    'overlay-internal: it queries .tdoc-replies before any card is open. The shell renders cards on demand (no pre-rendered margin cards), so the thread only exists once opened — where it is collapsed by default. Superseded by artifact-shell.test.js reply tests.', async () => {
-    const deep = await ctx.newPage();
-    try {
-      await deep.goto(URL, { waitUntil: 'networkidle' });
-      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
-      await deep.waitForTimeout(250);
-      const st = await deep.evaluate(() => {
-        const replies = document.querySelector('.tdoc-replies');
-        const reply = document.querySelector('[data-comment-id="r_fixture_1"]');
-        return {
-          hasReplies: !!replies,
-          hasReply: !!reply,
-          repliesOpen: !!(replies && replies.classList.contains('open')),
-          repliesDisplay: replies ? getComputedStyle(replies).display : null,
-        };
-      });
-      if (!st.hasReplies || !st.hasReply) throw new Error('fixture reply thread missing');
-      if (st.repliesOpen) throw new Error('replies must start collapsed without ?comment=');
-      if (st.repliesDisplay !== 'none') throw new Error(`expected display:none, got ${st.repliesDisplay}`);
-    } finally {
-      await deep.close();
-    }
-  });
-
-  await tShellGap('adding .open on a live replies list reveals the hidden reply',
-    'overlay-internal: needs a pre-rendered .tdoc-replies in the DOM before a card is open. The shell renders cards on demand; reply reveal is covered by artifact-shell.test.js (reply deep-link expands the thread).', async () => {
-    // Same-doc inbox clicks cannot wait for a rebuild. They have to flip
-    // .tdoc-replies.open on the card that is already in the DOM.
-    // Check the list's own computed display, not the reply's client rects —
-    // in pins mode the parent card is hidden until it is pinned.
-    const deep = await ctx.newPage();
-    try {
-      await deep.goto(URL, { waitUntil: 'networkidle' });
-      await deep.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 5000 });
-      await deep.waitForTimeout(250);
-      const st = await deep.evaluate(() => {
-        const replies = document.querySelector('.tdoc-replies');
-        const toggle = document.querySelector('.tdoc-replies-toggle');
-        if (!replies) return { missing: true };
-        const before = getComputedStyle(replies).display;
-        replies.classList.add('open');
-        toggle?.classList.add('open');
-        return { before, after: getComputedStyle(replies).display };
-      });
-      if (st.missing) throw new Error('fixture reply thread missing');
-      if (st.before !== 'none') throw new Error(`expected display:none before .open, got ${st.before}`);
-      if (st.after === 'none') throw new Error('replies stayed display:none after .open');
-    } finally {
-      await deep.close();
-    }
-  });
-
-  await t('Clicking an inbox row does not unpin the open comment card', async () => {
-    // Regression #180: the inbox click used to bubble to the document
-    // "click outside card" handler and immediately close the card it opened.
-    const card = await openFirstCommentCard();
-    if (!card) { console.log('  (no comments, skipping)'); return; }
-    const pinned = await page.evaluate(() => {
-      const c = document.querySelector('.tdoc-margin-comment.tdoc-floating-open, .tdoc-margin-comment.active');
-      if (!c) return false;
-      const bg = document.createElement('div');
-      bg.className = 'tdoc-modal-bg';
-      bg.id = 'tdoc-aux-modal';
-      bg.innerHTML = '<div class="tdoc-modal"><div class="tdoc-cluster-row" id="tdoc-fake-inbox-row" role="button">fake notification</div></div>';
-      document.body.appendChild(bg);
-      return true;
+  await t('Docs Hub fits a phone viewport without horizontal overflow or clipped controls', async () => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`${origin}/me`, { waitUntil: 'networkidle' });
+    const layout = await page.evaluate(() => {
+      const controls = [...document.querySelectorAll('button, input, select')].map((element) => element.getBoundingClientRect());
+      return {
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: window.innerWidth,
+        clipped: controls.some((rect) => rect.right > window.innerWidth + 1 || rect.left < -1),
+      };
     });
-    if (!pinned) throw new Error('could not pin a comment card before fake inbox click');
-    await page.click('#tdoc-fake-inbox-row');
-    await page.waitForTimeout(150);
-    const still = await page.evaluate(() => {
-      const c = document.querySelector('.tdoc-margin-comment');
-      return !!(c && (c.classList.contains('tdoc-floating-open') || c.classList.contains('active')));
-    });
-    await page.evaluate(() => document.getElementById('tdoc-aux-modal')?.remove());
-    if (!still) throw new Error('inbox-row click unpinned the open comment card');
+    if (layout.scrollWidth > layout.innerWidth + 1) throw new Error(`horizontal overflow ${layout.scrollWidth}/${layout.innerWidth}`);
+    if (layout.clipped) throw new Error('a control is clipped outside the viewport');
   });
 
-  await t('Clicking replies toggle expands replies', async () => {
-    await openFirstCommentCard();
-    const toggle = await page.$('.tdoc-replies-toggle');
-    if (!toggle) { console.log('  (no replies in fixture, skipping)'); return; }
-    await toggle.click();
-    await page.waitForSelector('.tdoc-replies.open', { timeout: 1000 });
-    // Collapse again
-    await toggle.click();
-    await page.waitForTimeout(200);
-    const stillOpen = await page.$('.tdoc-replies.open');
-    if (stillOpen) throw new Error('replies did not collapse on second click');
-  });
-
-  await tPub('Clicking + React on anon view triggers sign-in (no picker)', async () => {
-    // Anon: should NOT open the emoji picker — should redirect to sign-in modal.
-    // The shell renders cards on demand: open a pin's card first (if the doc has
-    // no comments/pins, skip — nothing to react to).
-    const pin = await page.$('.tdoc-pin');
-    if (!pin) { console.log('  (no pins on this doc, skipping react-anon check)'); return; }
-    await pin.click();
-    await page.waitForSelector('.tdoc-margin-comment .tdoc-react-add', { timeout: 3000 });
-    await page.click('.tdoc-margin-comment .tdoc-react-add');
-    // Modal appears after the device/start network round-trip (~1-2s). It is
-    // the shared server/signin.js dialog (.tds-bg), not the old inline overlay
-    // modal those selectors predate.
-    try {
-      await page.waitForSelector('.tds-bg', { timeout: 5000 });
-    } catch {
-      throw new Error('expected device-flow modal to appear');
-    }
-    const picker = await page.$('.tdoc-emoji-picker');
-    if (picker) throw new Error('emoji picker opened without sign-in');
-    await page.click('#tds-cancel');
-    await page.waitForTimeout(150);
-  });
-
-  // ----- Feature: Share button on published view -----
-  await tPub('Share button visible on published view', async () => {
-    const share = await page.$('#tdoc-share-btn');
-    if (!share) throw new Error('no #tdoc-share-btn on published doc');
-    const text = await share.textContent();
-    if (!text.includes('Share')) throw new Error(`label was "${text}"`);
-  });
-
-  await tPub('Click Share opens modal with URL + Copy button', async () => {
-    await page.click('#tdoc-share-btn');
-    await page.waitForSelector('#tdoc-share-url', { timeout: 2000 });
-    const url = await page.$eval('#tdoc-share-url', el => el.textContent.trim());
-    if (!url.startsWith('http')) throw new Error(`url didn't look right: "${url}"`);
-    const copyBtn = await page.$('#tdoc-share-copy');
-    if (!copyBtn) throw new Error('Share modal missing Copy button');
-    // "Open in new tab" was removed in v0.1.16 — explicitly assert it's gone.
-    const openBtn = await page.$('#tdoc-share-open');
-    if (openBtn) throw new Error('Share modal still has stale Open-in-new-tab button');
-    // CLI unpublish hint lived in the old copy-link-only modal; owners now
-    // unpublish from this same Share panel, readers never saw a working path.
-    const unpubCli = await page.$('#tdoc-share-unpub');
-    if (unpubCli) throw new Error('Share modal still has stale CLI unpublish hint');
-  });
-
-  await tPub('Share modal closes', async () => {
-    await page.click('#tdoc-share-close');
-    await page.waitForTimeout(150);
-    const m = await page.$('#tdoc-share-url');
-    if (m) throw new Error('Share modal did not close');
-  });
-
-  await tPub('Duplicate and Download replace Fork on published chrome', async () => {
-    const dup = await page.$('#tdoc-duplicate-btn');
-    const dl = await page.$('#tdoc-download-btn');
-    if (!dup) throw new Error('no #tdoc-duplicate-btn on published doc');
-    if (!dl) throw new Error('no #tdoc-download-btn on published doc');
-    if (!(await page.$('#tdoc-download-menu'))) throw new Error('no #tdoc-download-menu on published doc');
-    if (await page.$('#tdoc-pdf-btn')) throw new Error('PDF must be in the Download menu, not its own button');
-    if (await page.$('#tdoc-fork-btn')) throw new Error('legacy #tdoc-fork-btn still present');
-    const dupText = await dup.textContent();
-    const dlText = await dl.textContent();
-    if (!dupText.includes('Duplicate')) throw new Error(`Duplicate label was "${dupText}"`);
-    if (!dlText.includes('Download')) throw new Error(`Download label was "${dlText}"`);
-  });
-
-  // ----- Feature: offline export view (legacy /fork URL) -----
-  await tPub('Fork URL loads in fork mode (read-only, comments mirrored)', async () => {
-    const forkPage = await ctx.newPage();
-    const u = URL.replace(/\/?$/, '') + '/fork';
-    await forkPage.goto(u, { waitUntil: 'networkidle' });
-    // Title slug should say "fork of …"
-    // #249 renamed the bar's slug element to .crumb-slug (this tPub assertion
-    // only runs against a live deploy, so the rename slipped past main's CI).
-    const slug = await forkPage.$eval('.tdoc-bar .crumb-slug', el => el.textContent);
-    if (!slug.toLowerCase().includes('fork of')) throw new Error(`expected "fork of" in slug, got "${slug}"`);
-    // Save button should be present (in narrow mode it may be hidden; we're at 1400px)
-    const saveBtn = await forkPage.$('#tdoc-saveas-btn');
-    if (!saveBtn) throw new Error('no #tdoc-saveas-btn in fork mode');
-    // No reply form should exist (read-only)
-    const replyForm = await forkPage.$('.tdoc-reply-form');
-    if (replyForm) throw new Error('reply form present in fork mode (should be read-only)');
-    // No Reply toggle either
-    const replyToggle = await forkPage.$('.tdoc-reply-toggle');
-    if (replyToggle) throw new Error('Reply button present in fork mode');
-    // Share button hidden
-    const shareBtn = await forkPage.$('#tdoc-share-btn');
-    if (shareBtn) throw new Error('Share button visible in fork mode');
-    await forkPage.close();
-  });
-
+  await context.close();
   await browser.close();
   await target.stop();
-  console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped (published-only)` : ''}.`);
+  console.log(`\n${pass} passed, ${fail} failed.`);
   process.exit(fail ? 1 : 0);
 })();

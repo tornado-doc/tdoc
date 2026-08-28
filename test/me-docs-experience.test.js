@@ -101,15 +101,10 @@ async function loadWorker() {
     /const READER_CSS = `__TDOC_READER_CSS__`;/,
     'const READER_CSS = ' + JSON.stringify(readerCss) + ';'
   );
-  const chromeMod = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8');
   const shellMod = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
   const probeJs = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
-  const chromeCss = fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8');
-  src = src.replace('/* __TDOC_CHROME_MODULE__ */', chromeMod);
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
-  src = src.replace(/const CHROME_JS = `__TDOC_CHROME_JS__`;/, 'const CHROME_JS = ' + JSON.stringify(chromeMod) + ';');
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
-  src = src.replace(/const CHROME_CSS = `__TDOC_CHROME_CSS__`;/, 'const CHROME_CSS = ' + JSON.stringify(chromeCss) + ';');
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);
   const mod = await import(`file://${tmp}`);
@@ -157,11 +152,13 @@ async function seedDoc(env, slug, { owner, created = '2026-01-01T00:00:00.000Z',
   for (const v of vs) await env.DOCS.put(`docs/${slug}/v${v.n}/index.html`, `<h1>${slug}</h1>`);
 }
 
-function pane(html, id) {
-  const start = html.indexOf(`id="${id}"`);
-  assert(start >= 0, `pane ${id} missing`);
-  const end = html.indexOf('</section>', start);
-  return html.slice(start, end);
+function bootData(html, name) {
+  const marker = `window.${name} = `;
+  const start = html.indexOf(marker);
+  assert(start >= 0, `${name} missing`);
+  const end = html.indexOf(';</script>', start);
+  assert(end >= 0, `${name} script is not terminated`);
+  return JSON.parse(html.slice(start + marker.length, end));
 }
 
 (async () => {
@@ -179,16 +176,14 @@ function pane(html, id) {
     ] });
     const r = await worker.fetch(req('/me', { cookie }), env, {});
     assert(r.status === 200, `/me ${r.status}`);
-    const html = await r.text();
-    const iNew = html.indexOf('data-slug="z-newer"');
-    const iOld = html.indexOf('data-slug="a-older"');
-    assert(iNew >= 0 && iOld >= 0, 'both rows must render');
-    assert(iNew < iOld, 'latest-updated doc must come first (KV order is alphabetical, so this proves the sort)');
-    assert(html.includes('id="doc-sort"'), 'sort select missing');
-    assert(html.includes('data-updated="2026-03-01T00:00:00.000Z"'), 'rows must carry data-updated for client re-sort');
-    assert(html.includes('data-created='), 'rows must carry data-created');
-    assert(html.includes('data-pane="pane-recent"') && html.includes('data-pane="pane-starred"'), 'Recent/Starred tabs missing');
-    assert(html.includes('updated 2026-03-01'), 'row meta should show the update day');
+    const boot = bootData(await r.text(), '__TDOC_APP_BOOT__');
+    assert(boot.page === 'docs-hub', 'Docs Hub boot discriminator missing');
+    assert(boot.docs.length === 2, 'both rows must be present');
+    assert(boot.docs[0].slug === 'z-newer' && boot.docs[1].slug === 'a-older',
+      'latest-updated doc must come first (KV order is alphabetical, so this proves the sort)');
+    assert(boot.docs[0].updated === '2026-03-01T00:00:00.000Z', 'updated timestamp missing');
+    assert(boot.docs.every((doc) => Object.hasOwn(doc, 'created')), 'created timestamp missing');
+    assert(Array.isArray(boot.recent) && Array.isArray(boot.starred), 'Recent/Starred data missing');
   });
 
   await t('a signed-in visit to a readable doc records recents:<login>; /me shows it with a byline', async () => {
@@ -201,12 +196,11 @@ function pane(html, id) {
     assert(recents && recents.items.length === 1 && recents.items[0].slug === 'bobs-doc',
       `visit not recorded: ${await env.META.get('recents:alice')}`);
     const me = await worker.fetch(req('/me', { cookie }), env, {});
-    const html = await me.text();
-    const recent = pane(html, 'pane-recent');
-    assert(recent.includes('data-slug="bobs-doc"'), 'Recent pane must list the visited doc');
-    assert(recent.includes('by bob'), 'Recent row must say whose doc it is');
+    const boot = bootData(await me.text(), '__TDOC_APP_BOOT__');
+    assert(boot.recent.some((doc) => doc.slug === 'bobs-doc'), 'Recent data must list the visited doc');
+    assert(boot.recent.find((doc) => doc.slug === 'bobs-doc').owner === 'bob', 'Recent row must identify whose doc it is');
     // Not alice's doc — it must NOT appear in her own catalog list.
-    assert(!pane(html, 'pane-mine').includes('data-slug="bobs-doc"'), "someone else's doc must stay out of My docs");
+    assert(!boot.docs.some((doc) => doc.slug === 'bobs-doc'), "someone else's doc must stay out of My docs");
   });
 
   await t('anonymous and denied visits record nothing; HEAD records nothing', async () => {
@@ -253,13 +247,13 @@ function pane(html, id) {
     assert(noDoc.status === 404, `missing doc should 404, got ${noDoc.status}`);
     const priv = await worker.fetch(req('/api/star', { method: 'POST', cookie, body: { slug: 'hidden', starred: true } }), env, {});
     assert(priv.status === 404, `unreadable doc must 404 (no existence oracle), got ${priv.status}`);
-    let html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
-    assert(pane(html, 'pane-starred').includes('data-slug="starrable"'), 'Starred pane must list the doc');
+    let boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(boot.starred.some((doc) => doc.slug === 'starrable'), 'Starred data must list the doc');
     const unstar = await worker.fetch(req('/api/star', { method: 'POST', cookie, body: { slug: 'starrable', starred: false } }), env, {});
     assert(unstar.status === 200, `unstar ${unstar.status}`);
     assert(JSON.parse(await env.META.get('stars:alice')).items.length === 0, 'unstar must remove the item');
-    html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
-    assert(!pane(html, 'pane-starred').includes('data-slug="starrable"'), 'unstarred doc must leave the pane');
+    boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(!boot.starred.some((doc) => doc.slug === 'starrable'), 'unstarred doc must leave the data');
   });
 
   await t('starred/recent rows vanish when the doc becomes unreadable or is deleted', async () => {
@@ -272,9 +266,9 @@ function pane(html, id) {
     const meta = JSON.parse(await env.META.get('meta:was-open'));
     meta.access = { visibility: 'private' };
     await env.META.put('meta:was-open', JSON.stringify(meta));
-    const html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
-    assert(!pane(html, 'pane-recent').includes('data-slug="was-open"'), 'Recent must drop unreadable docs');
-    assert(!pane(html, 'pane-starred').includes('data-slug="was-open"'), 'Starred must drop unreadable docs');
+    const boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(!boot.recent.some((doc) => doc.slug === 'was-open'), 'Recent must drop unreadable docs');
+    assert(!boot.starred.some((doc) => doc.slug === 'was-open'), 'Starred must drop unreadable docs');
   });
 
   await t('folders as places: folder row + count + crumbs; delete returns docs to root', async () => {
@@ -294,26 +288,21 @@ function pane(html, id) {
 
     const move = await worker.fetch(req('/api/folders/move', { method: 'POST', cookie, body: { slugs: ['my-doc'], folder: folder.id } }), env, {});
     assert(move.status === 200, `move ${move.status}: ${await move.clone().text()}`);
-    let html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
-    assert(html.includes(`data-folder="${folder.id}"`), 'moved row must carry its folder id');
-    // Location model: the folder renders as a ROW in the table (name + count),
-    // navigation is crumbs + ?folder=, and filed rows carry a search-time
-    // location hint.
-    assert(html.includes(`data-folder-id="${folder.id}"`), 'folder must render as a folder row');
-    assert(/folder-row[^>]*data-name="Work"/.test(html), 'folder row must carry its name');
-    assert(html.includes('>1 doc<'), 'folder row must show its doc count');
-    assert(html.includes('id="crumbs"'), 'breadcrumb container must render');
-    assert(html.includes('in Work'), 'filed doc row must carry the location hint');
+    let boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(boot.docs.find((doc) => doc.slug === 'my-doc')?.folder === folder.id,
+      'moved row must carry its folder id');
+    assert(boot.folders.some((item) => item.id === folder.id && item.name === 'Work' && item.parent === ''),
+      'folder boot data must carry its name and root parent');
 
     const bogus = await worker.fetch(req('/api/folders/move', { method: 'POST', cookie, body: { slugs: ['my-doc'], folder: 'f_nope' } }), env, {});
     assert(bogus.status === 404, `move to unknown folder should 404, got ${bogus.status}`);
 
     const del = await worker.fetch(req('/api/folders?id=' + folder.id, { method: 'DELETE', cookie }), env, {});
     assert(del.status === 200, `delete folder ${del.status}`);
-    html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
-    assert(html.includes('data-slug="my-doc"'), 'doc must survive folder deletion');
-    assert(html.includes('data-folder=""'), 'doc must fall back to the root after its folder is deleted');
-    assert(!html.includes('data-folder-id='), 'deleted folder must not leave a folder row behind');
+    boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(boot.docs.some((doc) => doc.slug === 'my-doc'), 'doc must survive folder deletion');
+    assert(boot.docs.find((doc) => doc.slug === 'my-doc').folder === '', 'doc must fall back to the root after its folder is deleted');
+    assert(!boot.folders.some((item) => item.id === folder.id), 'deleted folder must not remain in boot data');
   });
 
   await t('folders shelve only your own docs; rename works; state is per-login', async () => {
@@ -362,29 +351,30 @@ function pane(html, id) {
     assert(state.docs['deep-doc'] === a.body.folder.id, "doc must move up to the deleted folder's parent, not to root");
     const cRec = state.folders.find((f) => f.id === c.body.folder.id);
     assert(cRec && cRec.parent === a.body.folder.id, "subfolder must reparent to the deleted folder's parent");
-    const html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
-    assert(html.includes(`data-parent="${a.body.folder.id}"`), 'folder rows must carry data-parent for level filtering');
-    assert(html.includes('draggable="true"'), 'doc rows must be draggable');
+    const boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(boot.folders.some((folder) => folder.id === c.body.folder.id && folder.parent === a.body.folder.id),
+      'folder boot data must carry parent relationships');
+    assert(boot.docs.find((doc) => doc.slug === 'deep-doc')?.folder === a.body.folder.id,
+      'document boot data must carry its new parent');
   });
 
-  await t('doc-page bar carries the star beside the title — signed-in viewers only, state server-rendered', async () => {
+  await t('doc-page boot carries viewer star state for signed-in viewers only', async () => {
     const env = makeEnv(mod.CommentsStore);
     await seedDoc(env, 'bar-doc', { owner: 'bob' });
-    // chrome.js/chrome.css ship inline on every page, so the button's source
-    // strings are always present. Only the RENDERED markup has the class
-    // attribute closed with a double quote — key the checks off that.
-    const rendered = /class="tdoc-star-btn( is-starred)?" aria-pressed="(true|false)"/;
     const anonHtml = await (await worker.fetch(req('/d/bar-doc/v/1'), env, {})).text();
-    assert(!rendered.test(anonHtml), 'anonymous doc view must not render the bar star');
+    assert(bootData(anonHtml, '__TDOC_SHELL__').viewerStar === null,
+      'anonymous doc view must not receive viewer star state');
     const cookie = await putSession(env, 'alice');
     let html = await (await worker.fetch(req('/d/bar-doc/v/1', { cookie }), env, {})).text();
-    assert(/class="tdoc-star-btn" aria-pressed="false"/.test(html), 'signed-in view must render the empty-star state');
-    assert(!html.includes('class="tdoc-star-btn is-starred"'), 'unstarred doc must not render as starred');
+    assert(bootData(html, '__TDOC_SHELL__').viewerStar?.starred === false,
+      'signed-in view must receive the empty-star state');
     await worker.fetch(req('/api/star', { method: 'POST', cookie, body: { slug: 'bar-doc', starred: true } }), env, {});
     html = await (await worker.fetch(req('/d/bar-doc/v/1', { cookie }), env, {})).text();
-    assert(/class="tdoc-star-btn is-starred" aria-pressed="true"/.test(html), 'starred doc must render the filled state');
-    const me = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
-    assert(!rendered.test(me), 'the /me site bar must not carry the doc star (rows have their own)');
+    assert(bootData(html, '__TDOC_SHELL__').viewerStar?.starred === true,
+      'starred doc must receive the filled state');
+    const meBoot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(meBoot.starred.some((doc) => doc.slug === 'bar-doc' && doc.starred),
+      'the Docs Hub must receive row-level starred state');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

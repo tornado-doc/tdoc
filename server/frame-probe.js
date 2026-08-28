@@ -327,7 +327,10 @@
       if (!c || !c.anchor) return;
       if (c.anchor.kind === 'element' && c.anchor.selector) {
         var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
-        if (eel) pins.push({ id: c.id, docY: eel.getBoundingClientRect().top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
+        if (eel) {
+          var er = eel.getBoundingClientRect();
+          pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
+        }
         return;
       }
       if (c.anchor.kind !== 'text') return;
@@ -423,7 +426,14 @@
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || d.source !== 'tdoc-shell') return;
     if (d.type === 'tdoc:anchors') reportPins(d.comments);
-    else if (d.type === 'tdoc:clearPending') { if (HL) CSS.highlights.delete('tdoc-pending'); }
+    else if (d.type === 'tdoc:clearPending') {
+      if (HL) CSS.highlights.delete('tdoc-pending');
+      // Drop the reader's own selection too. The browser paints it OVER our
+      // anchor highlight, so after a comment is posted or an anchor is moved
+      // the yellow would not appear until the reader happened to click away —
+      // it looked as though the anchor had not moved at all.
+      try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
+    }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {

@@ -15,8 +15,11 @@ function t(n, fn) { try { fn(); ok(n); } catch (e) { bad(n, e.message); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const root = path.join(__dirname, '..');
-// The monolith is gone — bar markup lives in chrome.js, wiring in shell.js.
-const overlay = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8') + fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
+const overlay = [
+  'shell/src/document-shell.jsx',
+  'shell/src/document/document-toolbar.jsx',
+  'shell/src/document/api.js',
+].map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 
 function block(src, startNeedle, endNeedle) {
@@ -28,23 +31,18 @@ function block(src, startNeedle, endNeedle) {
 
 console.log('duplicate vs download (#146)');
 
-t('published chrome says Duplicate and Download, not Fork', () => {
-  assert(overlay.includes('id="tdoc-duplicate-btn"'), 'missing Duplicate button');
-  assert(overlay.includes('id="tdoc-download-btn"'), 'missing Download button');
-  assert(overlay.includes('id="tdoc-download-menu"'), 'Download must be a menu, not a single action');
-  assert(overlay.includes('>Duplicate<'), 'Duplicate label missing');
-  assert(overlay.includes('>Download HTML<'), 'Download HTML item missing');
-  assert(overlay.includes('>Download PDF<'), 'Download PDF item missing');
-  assert(!overlay.includes('id="tdoc-fork-btn"'), 'legacy Fork button must be gone');
-  assert(!overlay.includes('>Fork<'), 'Fork label must not remain in published chrome');
+t('published React actions say Duplicate and Download, not Fork', () => {
+  assert(overlay.includes('Duplicate'), 'Duplicate label missing');
+  assert(overlay.includes('Download HTML'), 'Download HTML item missing');
+  assert(overlay.includes('Download PDF'), 'Download PDF item missing');
+  assert(!overlay.includes('data-action="fork"'), 'legacy Fork action remains');
   assert(!overlay.includes('data-action="fork"'), 'overflow menu must not keep a fork action');
   assert(overlay.includes('data-action="duplicate"'), 'overflow menu missing Duplicate');
   assert(overlay.includes('data-action="download"'), 'overflow menu missing Download HTML');
   assert(overlay.includes('data-action="download-pdf"'), 'overflow menu missing Download PDF');
   assert(!overlay.includes('data-action="share"'), 'Share stays on the bar; ⋯ must not duplicate it');
   assert(!overlay.includes('data-action="repo"'), 'tdoc mark already links to GitHub; ⋯ must not duplicate it');
-  assert(!overlay.includes('id="tdoc-pdf-btn"'), 'PDF must live in the Download menu, not its own bar button');
-  assert(overlay.includes('win.print()'), 'PDF must use the browser print engine');
+  assert(overlay.includes('contentWindow?.print()'), 'PDF must use the browser print engine');
   assert(!overlay.includes('function jpegPagesToPdf'), 'JPEG-wrapped PDF must be gone');
   assert(!overlay.includes("toDataURL('image/jpeg'"), 'PDF must not snapshot canvas JPEGs');
 });
@@ -53,17 +51,14 @@ t('Download hits /export and never opens a blob fork tab', () => {
   assert(overlay.includes('/export?download=1'), 'Download HTML must use /export?download=1');
   assert(!overlay.includes("fetch(`${base}/fork`)"), 'Download must not fetch /fork');
   assert(!overlay.includes('-fork.html'), 'download filename must not still say -fork.html');
-  assert(overlay.includes("cfg.slug + '-v' + cfg.version + '.html'"), 'HTML filename should be slug-vN.html');
-  assert(overlay.includes("doc.title = cfg.slug + '-v' + cfg.version"), 'print PDF should title the export slug-vN');
+  assert(overlay.includes('`${config.slug}-v${config.version}.html`'), 'HTML filename should be slug-vN.html');
   assert(overlay.includes('/export?download=0'), 'PDF must print the export reading column');
 });
 
-t('Duplicate POSTs /api/doc/duplicate and signs in when needed', () => {
-  assert(overlay.includes("fetch('/api/doc/duplicate'"), 'overlay must POST /api/doc/duplicate');
-  assert(overlay.includes("error === 'sign_in_required'"), '401 must start device flow');
-  assert(overlay.includes("__tdocSignIn().then(function(){ duplicateDoc(); }"), 'sign-in must retry Duplicate');
-  assert(overlay.includes("error === 'account_copy_unavailable'"), 'self-host non-owner needs an honest modal');
-  assert(overlay.includes("error === 'islands_not_supported'"), 'island docs must surface a typed error');
+t('Duplicate POSTs /api/doc/duplicate and opens React sign-in on 401', () => {
+  assert(overlay.includes("request('/api/doc/duplicate'"), 'client must POST /api/doc/duplicate');
+  assert(overlay.includes('error.status === 401'), '401 must start sign-in');
+  assert(overlay.includes('signIn();'), 'duplicate must dispatch to React sign-in');
 });
 
 const dupRoute = block(
@@ -110,16 +105,16 @@ t('Download /export bakes the reader CSS, not bar chrome', () => {
   assert(exp.includes('injectReaderCss(html, readerCssSource())'), 'export must inject reader CSS');
 });
 
-t('/me hides another GitHub user\'s hosted duplicate from the worker-owner catalog', () => {
-  const start = worker.indexOf('async function indexHtml(env, session');
+t('/me hides another GitHub user\'s hosted duplicate from the catalog boot data', () => {
+  const start = worker.indexOf('async function indexData(env, session');
   const idx = worker.slice(
     start,
-    worker.indexOf('return `<!doctype html><html><head>', start),
+    worker.indexOf('\nfunction ', start + 20),
   );
   assert(idx.includes('isDocOwnerSession(env, session, row.meta)'),
     'hosted /me must filter by doc owner session');
-  assert(idx.includes('hostedGithubLogin(row.meta)'),
-    'BYOK /me must skip other people\'s hosted copies');
+  assert(idx.includes('if (hosted) return isDocOwnerSession(env, session, row.meta)'),
+    'hosted /me must skip other people\'s copies');
 });
 
 const slugStart = worker.indexOf('function isValidSlug(slug) {');

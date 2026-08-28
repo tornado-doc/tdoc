@@ -123,15 +123,10 @@ async function loadWorker() {
     /const READER_CSS = `__TDOC_READER_CSS__`;/,
     'const READER_CSS = ' + JSON.stringify(readerCss) + ';'
   );
-  const chromeMod = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8');
   const shellMod = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
   const probeJs = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
-  const chromeCss = fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8');
-  src = src.replace('/* __TDOC_CHROME_MODULE__ */', chromeMod);
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
-  src = src.replace(/const CHROME_JS = `__TDOC_CHROME_JS__`;/, 'const CHROME_JS = ' + JSON.stringify(chromeMod) + ';');
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
-  src = src.replace(/const CHROME_CSS = `__TDOC_CHROME_CSS__`;/, 'const CHROME_CSS = ' + JSON.stringify(chromeCss) + ';');
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);
   const mod = await import(`file://${tmp}`);
@@ -150,16 +145,26 @@ function makeEnv(StoreClass, extra = {}) {
   return env;
 }
 
-function req(pathname, { method = 'GET', token = '', body = null, cookie = '', host = 'tdoc.dev' } = {}) {
+function req(pathname, { method = 'GET', token = '', body = null, cookie = '', host = 'tdoc.dev', dest = '' } = {}) {
   return new Request(`https://${host}${pathname}`, {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(cookie ? { Cookie: cookie.includes('=') ? cookie : `tdoc_sid=${cookie}` } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(dest ? { 'Sec-Fetch-Dest': dest } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+}
+
+function bootData(html, name) {
+  const marker = `window.${name} = `;
+  const start = html.indexOf(marker);
+  assert(start >= 0, `${name} missing`);
+  const end = html.indexOf(';</script>', start);
+  assert(end >= 0, `${name} script is not terminated`);
+  return JSON.parse(html.slice(start + marker.length, end));
 }
 
 async function putSession(env, login, sid) {
@@ -502,23 +507,23 @@ async function issue(worker, env, login = 'alice', label = login) {
 
     const aliceMe = await worker.fetch(req('/me', { cookie: alice.cookie }), env, {});
     assert(aliceMe.status === 200, `/me alice ${aliceMe.status}`);
-    const aliceHtml = await aliceMe.text();
-    assert(aliceHtml.includes('alice-doc'), 'alice must see her slug');
-    assert(!aliceHtml.includes('data-slug="bob-doc"'), 'alice must not see bob');
-    assert(!aliceHtml.includes('data-slug="legacy"'), 'alice must not see operator legacy docs');
+    const aliceBoot = bootData(await aliceMe.text(), '__TDOC_APP_BOOT__');
+    assert(aliceBoot.docs.some((doc) => doc.slug === 'alice-doc'), 'alice must see her slug');
+    assert(!aliceBoot.docs.some((doc) => doc.slug === 'bob-doc'), 'alice must not see bob');
+    assert(!aliceBoot.docs.some((doc) => doc.slug === 'legacy'), 'alice must not see operator legacy docs');
 
     const bobMe = await worker.fetch(req('/me', { cookie: bob.cookie }), env, {});
-    const bobHtml = await bobMe.text();
-    assert(bobHtml.includes('bob-doc'), 'bob must see his slug');
-    assert(!bobHtml.includes('alice-doc'), 'bob must not see alice');
+    const bobBoot = bootData(await bobMe.text(), '__TDOC_APP_BOOT__');
+    assert(bobBoot.docs.some((doc) => doc.slug === 'bob-doc'), 'bob must see his slug');
+    assert(!bobBoot.docs.some((doc) => doc.slug === 'alice-doc'), 'bob must not see alice');
 
     const julieSid = await putSession(env, 'julie');
     const julieMe = await worker.fetch(req('/me', { cookie: julieSid }), env, {});
     assert(julieMe.status === 200, `/me julie ${julieMe.status}`);
-    const julieHtml = await julieMe.text();
-    assert(julieHtml.includes('data-slug="legacy"'), 'operator must still see unhosted legacy docs');
-    assert(!julieHtml.includes('data-slug="alice-doc"'), 'operator /me must not list other tenants');
-    assert(!julieHtml.includes('data-slug="bob-doc"'), 'operator /me must not list other tenants');
+    const julieBoot = bootData(await julieMe.text(), '__TDOC_APP_BOOT__');
+    assert(julieBoot.docs.some((doc) => doc.slug === 'legacy'), 'operator must still see unhosted legacy docs');
+    assert(!julieBoot.docs.some((doc) => doc.slug === 'alice-doc'), 'operator /me must not list other tenants');
+    assert(!julieBoot.docs.some((doc) => doc.slug === 'bob-doc'), 'operator /me must not list other tenants');
   });
 
   await t('hosted create enforces per-account doc quota; retry of same slug does not consume another slot', async () => {
@@ -845,12 +850,14 @@ async function issue(worker, env, login = 'alice', label = login) {
     const r = await worker.fetch(req('/d/multi-doc/v/3', { token: owner.token }), env, {});
     assert(r.status === 200, `owner token denied the HTML: ${r.status}`);
     const body = await r.text();
-    assert(/v3/.test(body), 'the document body did not come back');
-    // All three versions reachable, not just the one being viewed.
-    const nav = body.match(/"versions":\s*(\[[^\]]*\])/);
-    assert(nav, 'the page did not carry a version list');
-    assert(JSON.parse(nav[1]).length === 3,
-      `owner should see 3 versions, saw ${JSON.parse(nav[1]).length}`);
+    const config = bootData(body, '__TDOC_SHELL__');
+    const boot = bootData(body, '__TDOC_SHELL_BOOT__');
+    assert(config.versions.length === 3,
+      `owner should see 3 versions, saw ${config.versions.length}`);
+    assert(boot.frameSrc === '/d/multi-doc/v/3/frame', 'shell must point at the isolated author frame');
+    const frame = await worker.fetch(req(boot.frameSrc, { token: owner.token, dest: 'iframe' }), env, {});
+    assert(frame.status === 200, `owner token denied the author frame: ${frame.status}`);
+    assert(/v3/.test(await frame.text()), 'the document body did not come back from the frame route');
   });
 
   await t('reading over a token does not sign the CLI in', async () => {

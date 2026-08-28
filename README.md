@@ -135,9 +135,10 @@ Same document snapshots; different roles (see [AGENTS.md](AGENTS.md)):
   hosted comments. **Source of truth.** Document delete/unpublish/management
   targets remote storage via skill + API, not a particular local port UI.
 
-Overlay code is bundled into the hosted runtime at publish time from the skill
-checkout; local overlay edits only affect Local Studio until the next publish
-redeploy. Published pages also expose the bundled runtime provenance at
+The reader shell (a React app under `shell/src`, prebuilt into
+`server/runtime/`) is bundled into the hosted runtime at publish time from the
+skill checkout; local shell edits only affect Local Studio until the next
+publish redeploy. Published pages also expose the bundled runtime provenance at
 `/api/runtime` and in `window.__TDOC__.runtime`.
 
 ## How comments work

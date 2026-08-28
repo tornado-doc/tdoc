@@ -45,7 +45,7 @@ t('Worker has a bundled build-info placeholder and runtime endpoint', () => {
     'worker must expose a build-info placeholder for bundling');
   assert(worker.includes("if (p === '/api/runtime') return json({ ok: true, runtime: runtimeInfo() });"),
     'worker must expose /api/runtime');
-  assert(worker.includes("runtime: cfg.runtime || runtimeInfo()"),
+  assert(worker.includes('runtime: runtimeInfo()'),
     'published boot config must include runtime provenance');
 });
 

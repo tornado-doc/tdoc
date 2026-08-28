@@ -2,13 +2,25 @@
   "name": "tdoc",
   "license": "AGPL-3.0-or-later",
   "private": true,
-  "description": "Prompt-native interactive HTML documents \u2014 local server, Cloudflare Worker, browser overlay.",
+  "description": "Prompt-native interactive HTML documents — local server, Cloudflare Worker, React reader shell.",
   "scripts": {
+    "build:shell": "vite build --config shell/vite.config.js",
+    "dev:shell": "vite --config shell/vite.config.js",
     "test": "node test/run.js",
     "test:all": "node test/run.js --all"
   },
-  "//devDependencies": "playwright is optional \u2014 only needed for the gated UI suites (ui/responsive/dimensions). Without it they skip loudly. Install with: npm i -D playwright && npx playwright install chromium",
+  "//devDependencies": "playwright is optional — only needed for the gated UI suites (ui/responsive/dimensions). Without it they skip loudly. Install with: npm i -D playwright && npx playwright install chromium",
   "optionalDependencies": {
     "playwright": "^1.60.0"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.7.0",
+    "lucide-react": "^1.34.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.4.3"
   }
 }

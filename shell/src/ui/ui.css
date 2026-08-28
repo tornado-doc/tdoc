@@ -1,0 +1,382 @@
+.ui-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000000;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.ui-dialog-viewport {
+  position: fixed;
+  inset: 0;
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  font: 14px system-ui, sans-serif;
+}
+
+/* Sizing, type, and buttons come from chrome.css `.tdoc-modal`; the popup only
+   adds what a portal-rendered dialog needs on top of the legacy sheet. */
+.ui-dialog-popup {
+  box-sizing: border-box;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  outline: none;
+}
+
+.ui-dialog-popup .ui-dialog-description {
+  margin: -2px 0 14px;
+}
+
+.ui-dialog-popup .muted {
+  color: #666;
+  font-size: 13px;
+}
+
+.ui-dialog-popup .status {
+  margin-top: 10px;
+}
+
+/* Buttons inside the reader chrome that read as text (the legacy markup used
+   spans): keep the semantics, drop the UA button box. */
+.tdoc-margin-comment button.del,
+.tdoc-margin-comment button.tdoc-reply-toggle,
+.tdoc-margin-comment button.tdoc-replies-toggle,
+.tdoc-margin-comment button.tdoc-reanchor-btn,
+button.tdoc-cluster-row,
+button.tdoc-drawer-handle,
+.tdoc-token button.rm {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tdoc-margin-comment button.tdoc-replies-toggle {
+  display: inline-flex;
+  align-items: center;
+}
+
+button.tdoc-cluster-row {
+  width: 100%;
+}
+
+/* Re-apply the legacy per-control colours the reset above would swallow. */
+.tdoc-margin-comment button.del { color: #c33; }
+.tdoc-margin-comment button.tdoc-reply-toggle { color: var(--td-accent); }
+.tdoc-margin-comment button.tdoc-replies-toggle {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #eee;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--td-accent);
+}
+
+.tdoc-pin .tdoc-pin-anon { display: block; }
+
+/* The emoji picker is placed by Base UI's positioner, so the popup itself must
+   stay in flow — chrome.css gives `.tdoc-emoji-picker` `position: absolute`
+   (it used to be hand-placed on document.body), which breaks both the
+   positioner's offset and its collision flipping. Own the stacking here. */
+.tdoc-picker-positioner {
+  z-index: 1000001;
+}
+
+.tdoc-picker-positioner .tdoc-emoji-picker {
+  position: static;
+}
+
+/* Shell toast. The React shell introduced this element and never styled it,
+   so every failure it reported — a rejected re-anchor, a failed copy — was
+   invisible. Same pill the Docs Hub uses. */
+.tdoc-shell-toast {
+  position: fixed;
+  top: 62px;
+  right: 18px;
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--td-accent);
+  box-shadow: 0 6px 24px rgb(15 23 42 / 22%);
+  color: #fff;
+  font: 600 13px var(--td-font-display);
+}
+
+.tdoc-shell-toast.error {
+  background: var(--td-danger);
+}
+
+/* Composer close: the legacy popup used a bare × span. */
+.tdoc-popup .head button.x {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0 0 0 8px;
+  margin: 0;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: #888;
+  cursor: pointer;
+  flex: none;
+  align-self: flex-start;
+}
+
+.tdoc-popup .head button.x:hover {
+  color: #fff;
+}
+
+button.tdoc-pin {
+  padding: 0;
+  margin: 0;
+  appearance: none;
+}
+
+.tdoc-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.tdoc-ac-item {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.ui-menu-positioner {
+  z-index: 1100;
+}
+
+.ui-menu-popup {
+  padding: 4px;
+  border: 1px solid var(--td-line);
+  background: var(--td-ground);
+  color: var(--td-ink);
+  transform-origin: var(--transform-origin);
+}
+
+.ui-menu-popup {
+  min-width: 160px;
+  border-color: #e5e5e7;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.ui-menu-item {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  color: #1a1a1a;
+  font: 13px system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.ui-menu-item.tdoc-version-item {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.ui-menu-item.tdoc-version-item.current {
+  color: var(--td-accent);
+  font-weight: 600;
+}
+
+.ui-menu-item[data-highlighted] {
+  background: #f0f1f4;
+}
+
+.ui-menu-item[data-disabled] {
+  opacity: 0.5;
+}
+
+.ui-menu-item-danger {
+  color: var(--td-danger);
+}
+
+.ui-menu-item-danger[data-highlighted] {
+  background: var(--td-danger-tint);
+}
+
+.tdoc-notification-list {
+  display: grid;
+  gap: 2px;
+}
+
+.tdoc-notification-list .tdoc-cluster-row {
+  width: 100%;
+}
+
+.tdoc-notification-list .tdoc-cluster-row.unread {
+  background: #eef2ff;
+}
+
+.tdoc-notification-list .tdoc-cluster-row > .muted {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.tdoc-modal .tds-step { display: flex; gap: 9px; align-items: flex-start; margin: 0 0 10px; font-size: 14px; color: #5b6070; }
+.tdoc-modal .tds-n { flex: none; width: 19px; height: 19px; border-radius: 50%; background: #eef3ff; color: var(--td-accent); font-size: 11.5px; font-weight: 700; display: grid; place-items: center; margin-top: 1px; }
+.tdoc-modal .tds-codewrap { position: relative; margin: 0 0 12px; }
+.tdoc-modal .tds-code { font: 22px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .2em; background: #f5f6f8; border: 1px solid #e4e7ee; border-radius: 10px; padding: 15px 15px 46px; text-align: center; user-select: all; }
+.tdoc-modal button.tds-copy { position: absolute; right: 10px; bottom: 10px; border: 1px solid #d3d8e3; background: #fff; color: #10121a; border-radius: 8px; padding: 6px 13px; font: 650 13px system-ui, -apple-system, sans-serif; }
+.tdoc-modal button.tds-copy:hover { border-color: #b9c0cd; }
+.tdoc-modal button.tds-copy.done { background: #1a7340; border-color: #1a7340; color: #fff; }
+.tdoc-modal .tds-open { display: inline-flex; align-items: center; gap: 7px; margin: 2px 0 0; background: var(--td-accent); color: #fff; border-radius: 999px; padding: 6px 14px; font: 650 13px system-ui, -apple-system, sans-serif; text-decoration: none; }
+.tdoc-modal .tds-open:hover { background: var(--td-accent-hover); }
+.tdoc-modal .tds-status { color: #767c8b; font-size: 13px; }
+.tdoc-modal .tds-err { color: var(--td-danger); }
+
+.tdoc-recipe-wrap {
+  position: relative;
+}
+
+.tdoc-recipe-wrap code {
+  display: block;
+  min-height: 72px;
+  padding: 12px 12px 42px;
+  border: 1px solid var(--td-line);
+  border-radius: 6px;
+  background: var(--td-surface-2);
+  font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  word-break: break-word;
+}
+
+.tdoc-modal .tdoc-recipe-wrap button {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+}
+
+.tdoc-modal .tdoc-recipe-wrap button.done {
+  border-color: #1a7340;
+  background: #1a7340;
+  color: #fff;
+}
+
+.tdoc-onboarding-details {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--td-line);
+  border-radius: 6px;
+}
+
+.tdoc-onboarding-details summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.tdoc-neutral-page {
+  display: flex;
+  min-height: 100vh;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--td-ink);
+  font-family: var(--td-font-display);
+  text-align: center;
+}
+
+.tdoc-neutral-page h1,
+.tdoc-neutral-page p {
+  margin: 0;
+}
+
+.tdoc-neutral-page h1 {
+  font-size: 30px;
+}
+
+.tdoc-neutral-page p {
+  color: var(--td-muted);
+}
+
+.tdoc-neutral-page > button {
+  margin-top: 10px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--td-accent);
+  color: #fff;
+  font: 650 14px var(--td-font-display);
+  cursor: pointer;
+}
+
+.tdoc-neutral-page > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--td-accent);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.tdoc-neutral-notice {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--td-ink);
+  color: var(--td-ground);
+  font-size: 13px;
+}
+
+.tdoc-status-page {
+  display: grid;
+  min-height: 100vh;
+  box-sizing: border-box;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--td-ink);
+  font-family: var(--td-font-display);
+  text-align: center;
+}
+
+.tdoc-status-page h1,
+.tdoc-status-page p {
+  margin: 0;
+}
+
+.tdoc-status-page h1 {
+  font-size: 22px;
+}
+
+.tdoc-status-page p {
+  color: var(--td-muted);
+}
+
+.tdoc-status-page.error h1 {
+  color: var(--td-danger);
+}
+
+.tdoc-status-page a {
+  margin-top: 8px;
+  color: var(--td-accent);
+}
+

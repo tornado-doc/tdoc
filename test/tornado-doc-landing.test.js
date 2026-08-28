@@ -281,7 +281,7 @@ t('homepage renders the landing doc, not a hardcoded page', () => {
   // `?notice=…` is a toast for someone bounced here from /me or an unknown
   // path. The landing doc has nowhere to render it, so that one request
   // keeps the neutral page rather than swallowing the message.
-  assert(/if \(notice\) return html\(landingHtml\(env, notice\)\)/.test(route[0]),
+  assert(/if \(notice\) return neutralLandingResponse\(env, notice\)/.test(route[0]),
     'a bounce notice no longer reaches the visitor');
 });
 
@@ -290,12 +290,12 @@ t('homepage fails safe to the neutral page', () => {
   assert(fn, 'landingResponse not found');
   const body = fn[0];
   // Three ways the doc can be unavailable — unpublished, gated, or throwing.
-  // All three must degrade to landingHtml(env), never a 404 or a sign-in
-  // wall. env is load-bearing: landingHtml reads GITHUB_CLIENT_ID from it to
+  // All three must degrade to neutralLandingResponse(env), never a 404 or a sign-in
+  // wall. env is load-bearing: the React boot payload reads GITHUB_CLIENT_ID to
   // decide whether to offer sign-in, so dropping it silently hides the button.
-  assert(/if \(!latest\) return html\(landingHtml\(env\)\)/.test(body), 'no fallback when the doc is unpublished');
-  assert(/res\.ok \? res\.response : html\(landingHtml\(env\)\)/.test(body), 'no fallback when access is denied');
-  assert(/catch \{\s*return html\(landingHtml\(env\)\);/.test(body), 'no fallback when lookup throws');
+  assert(/if \(!latest\) return neutralLandingResponse\(env\)/.test(body), 'no fallback when the doc is unpublished');
+  assert(/res\.ok \? res\.response : neutralLandingResponse\(env\)/.test(body), 'no fallback when access is denied');
+  assert(/catch \{\s*return neutralLandingResponse\(env\);/.test(body), 'no fallback when lookup throws');
   assert(/meta\.versions\.length - 1\]/.test(body), 'does not resolve the LATEST version');
 });
 
@@ -326,35 +326,23 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage no longer marks the render as the landing page');
   assert(/isLanding: !!isLanding/.test(worker), 'bootCfg no longer carries isLanding');
 
-  // Bar markup lives in the shared chrome.js component now (string-concat).
-  const chrome = fs.readFileSync(path.join(root, 'server', 'chrome.js'), 'utf8');
-  assert(chrome.includes("(isSiteBar ? '' :"),
-    'chrome still renders the slug crumb and version picker on the homepage');
-  assert(chrome.indexOf('tdoc-bar-mark') >= 0 &&
-         chrome.indexOf('tdoc-bar-mark') < chrome.indexOf("(isSiteBar ? '' :"),
-    'the tdoc mark must render before (outside) the landing conditional');
-  assert(/tdoc_logo\.svg/.test(chrome), 'the mark must be the tdoc logo, not a text pill');
-  assert(!chrome.includes('tdoc-bar-center'),
-    'title must sit in the left cluster, not a fake-centered slot');
-  assert(chrome.includes("(o.isLanding ? githubBtnHtml : '')"),
-    'homepage bar must expose a GitHub icon');
-  assert(chrome.includes('<button data-action="copy">Copy as Markdown</button>') &&
-         chrome.includes("(isSiteBar ? '' : secondaryMenuHtml)"),
-    'homepage bar must drop Copy (it lives in the isSiteBar-gated ⋯ overflow)');
-  assert(chrome.includes("(isSiteBar ? '' : primaryCtaHtml)"),
-    'homepage bar must drop Share');
-
-  const shellSrc = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
-  // Share on `/` must copy the canonical homepage, not /d/tornado-doc/v/N.
-  const shareStart = shellSrc.indexOf('function publicShareUrl()');
-  assert(shareStart >= 0, 'the shell must have a single share-URL helper');
-  const shareFn = shellSrc.slice(shareStart, shareStart + 500);
-  assert(shareFn.includes('cfg.isLanding') && shareFn.includes("location.origin + '/'"),
-    'Share on the homepage must copy location.origin/');
-  assert(shareFn.includes("'/d/' + encodeURIComponent(cfg.slug) + '/v/' + cfg.version"),
-    'Share on /d/ must still copy the versioned URL');
-  assert(shellSrc.includes('publicShareUrl()'),
-    'share modals must use publicShareUrl, not build /d/ themselves');
+  const topBar = fs.readFileSync(path.join(root, 'shell', 'src', 'top-bar.jsx'), 'utf8');
+  const toolbar = fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'document-toolbar.jsx'), 'utf8');
+  const documentShell = fs.readFileSync(path.join(root, 'shell', 'src', 'document-shell.jsx'), 'utf8');
+  assert(topBar.includes('tdoc-bar-mark') && /tdoc_logo\.svg/.test(topBar),
+    'the tdoc logo must remain in the shared top bar');
+  assert(toolbar.includes('if (config.isLanding) return null'),
+    'homepage must hide document breadcrumbs');
+  assert(toolbar.includes('export function LandingActions') && /href="https:\/\/github\.com\/tornado-doc\/tdoc"/.test(toolbar),
+    'homepage bar must expose the GitHub action');
+  // The landing entry is the GitHub mark plus the live star count, not a
+  // generic link glyph (it read as a share control after the React migration).
+  assert(/className="tdoc-github-btn"/.test(toolbar) && /viewBox="0 0 16 16"/.test(toolbar),
+    'homepage bar must draw the GitHub mark itself');
+  assert(/className="tdoc-gh-stars"/.test(toolbar) && /function starCount/.test(toolbar),
+    'homepage bar must show the star count beside the mark');
+  assert(/config\.isLanding \? <LandingActions stars=\{config\.stars\} \/> : \(/.test(documentShell),
+    'homepage must not receive the document Share/Copy/Download actions');
 });
 
 console.log('tdoc.dev / release payload');
