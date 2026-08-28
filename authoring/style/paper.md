@@ -55,6 +55,27 @@ body { background:#faf9f5; }
 .aside { border-left:2px solid #c15f3c; background:#f4efe7; padding:14px 18px; margin:20px 0; border-radius:0 6px 6px 0; }
 ```
 
+## Component treatment
+
+`structure/components.md` says what these parts are. On paper they are drawn
+warm and low-contrast: no pure black, no hard rectangle. The clay accent is the
+only saturated thing on the page and it stays rationed.
+
+| Component | This style's treatment |
+|---|---|
+| Container frame | `stroke:#dcd3c4; stroke-width:1.2`, `rx:3` — a softened corner, not a sharp one |
+| Label chip | Small-caps sans `~11px` in `#6b6355`, on `#f4efe7`, `rx:3` |
+| Numbered group | Serif title in `#141413`, inside the frame's top-left |
+| Description box | Sans `~11.5px` in `#6b6355`, no box |
+| Primary arrow | `stroke:#141413; stroke-width:1.2` |
+| Secondary arrow | `stroke:#b5ab99`, `stroke-dasharray:4 4` |
+| Accent fill | `fill:#f4e3dc stroke:#e3c4b6`, text `#c15f3c` |
+| Textured variant | Sparse dot in `#e3c4b6` over the same fill |
+| Stacked bar | Paper tints `#f4efe7` / `#ece5d8` / `#dcd3c4` with `#c9bfae` strokes |
+
+Figure labels are the body sans, not the display serif — the serif is for
+headings, and inside a drawing it turns decorative.
+
 ## Visuals are content-driven, never dictated by the style
 
 **This style's diagram vocabulary works for ANY diagram type** — a pipeline, an architecture, a flow, context bars, a chart. The style is the visual *treatment*, never a limit on which visuals appear. Draw diagrams warm: `#faf4ec` fills, `#dcd3c4` strokes, clay `#c15f3c` on the highlighted part, serif labels.

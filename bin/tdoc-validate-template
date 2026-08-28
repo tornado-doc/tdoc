@@ -228,14 +228,16 @@ def _points_x(tag):
     return nums[0::2]
 
 
-def check_svg_bounds(html):
-    """Nothing may be clipped by its own viewBox, and nothing may float inside it.
+def _svg_faults(html):
+    """Measure every figure once; the caller decides which faults it cares about.
 
-    Two separate faults. Overflow clips the drawing. Baked padding is the
-    quieter one: a viewBox larger than its ink indents the figure against the
-    prose column, and only shows once a narrow screen shrinks the column.
+    Returns (clipping, inset). Clipping is a defect in any house style — the
+    drawing is cut off. Inset is taste: a viewBox larger than its ink indents
+    the figure against the prose column, which matters when tdoc is the author
+    and is none of its business when somebody else's agent is.
     """
-    errors = []
+    clipping = []
+    inset = []
     for m in re.finditer(
         r'<svg[^>]*viewBox="\s*(-?[\d.]+)[\s,]+(-?[\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)\s*"(.*?)</svg>',
         html, re.S,
@@ -269,9 +271,9 @@ def check_svg_bounds(html):
             continue
         mx, my = max(xs) + ox, (max(ys) + oy if ys else 0.0)
         if mx > vx + vw + 0.5:
-            errors.append("figure '%s' overflows its viewBox by %dpx across" % (name, round(mx - vx - vw)))
+            clipping.append("figure '%s' overflows its viewBox by %dpx across" % (name, round(mx - vx - vw)))
         if ys and my > vy + vh + 0.5:
-            errors.append("figure '%s' overflows its viewBox by %dpx down" % (name, round(my - vy - vh)))
+            clipping.append("figure '%s' overflows its viewBox by %dpx down" % (name, round(my - vy - vh)))
 
         # A <text> without an explicit anchor starts at its x, so it bounds the
         # ink on the left. text-anchor="middle" or "end" puts glyphs left of x,
@@ -282,12 +284,12 @@ def check_svg_bounds(html):
             xs.append(_attr(t.group(0), "x"))
         left = (min(xs) + ox) - vx
         if left > vw * 0.10:
-            errors.append(
+            inset.append(
                 "figure '%s' starts %d%% inside its own viewBox; set the viewBox to the "
                 "drawing's bounds so the figure lines up with the text column"
                 % (name, round(100 * left / vw))
             )
-    return errors
+    return clipping, inset
 
 
 def check_style_accent(html, style):
@@ -329,6 +331,13 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
         tags = ", ".join(sorted(set(parser.inline_prose_styles)))
         errors.append(f"inline styles override default prose elements: {tags}")
 
+    # Clipping is measured on both paths. A drawing cut off by its own viewBox
+    # is broken whoever wrote it; the house style has no opinion about it. The
+    # inset check is the taste half and stays below the return.
+    raw_html = path.read_text(encoding="utf-8", errors="replace")
+    clipping, inset = _svg_faults(raw_html)
+    errors.extend(clipping)
+
     if custom_template:
         return errors
 
@@ -365,10 +374,12 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
 
     if not body_background:
         errors.append(f"missing required body background for the '{style}' house style")
-    raw = path.read_text(encoding="utf-8", errors="replace")
-    if not custom_template:
-        errors.extend(check_style_contract(parser.styles, style))
-    errors.extend(check_svg_bounds(raw))
+    raw = raw_html
+    errors.extend(check_style_contract(parser.styles, style))
+    # Figure alignment is a house-style judgment, not a correctness one, so it
+    # only applies where tdoc is the author. An agent bringing its own design
+    # system reaches this file through --custom-template and returned above.
+    errors.extend(inset)
     errors.extend(check_style_accent(raw, style))
 
     return errors

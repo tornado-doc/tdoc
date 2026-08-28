@@ -50,33 +50,27 @@ body { background:#fff; }
 .note { border-top:1px solid #e5e5e5; padding-top:12px; margin:20px 0; color:#555; font-size:15px; }
 ```
 
-## The diagram vocabulary (the OpenAI-index look)
+## Component treatment (the OpenAI-index look)
 
-This style has a full technical-diagram vocabulary, verified to render in
-tdoc. It draws ANY diagram — a pipeline, context-window bars, an architecture,
-a flow — from one small set. The style is the *treatment*, not a fixed set of
-shapes; it never limits what kind of visual a doc contains.
+`structure/components.md` says what these parts are. This is what they look
+like here — verified to render in tdoc. The register is thin black line on
+white with one pastel accent, and it draws any figure the content asks for.
 
-- **Container frames — sharp, not rounded.** Thin black rectangles
-  (`stroke:#111; stroke-width:1.3`), square corners, no fill, no shadow. Only
-  the small inner pill labels get a hairline `rx:0–1`.
-- **Mono pill labels.** Uppercase monospace, `~10.5px`, `letter-spacing:.04em`,
-  inside a thin (`stroke-width:1`) box — for the atomic nouns of the figure
-  (an input, a stage, a state). Use your own labels, not a reference's.
-- **Numbered container groups.** A big frame grouping steps, with a sans
-  weight-600 title inside its top-left corner (`1: Author`, `2: Review`).
-- **Description boxes.** Short sans (`~11px`) inside a thin box for a step's
-  one-line explanation.
-- **Arrows.** Thin (`1.2`), small round arrowhead, black for the main path; a
-  **dashed** (`stroke-dasharray:3 3`) variant for a secondary path or a loop.
-- **One accent per figure, filled solid.** Pink (`fill:#f7d7d1
-  stroke:#e0a99e`, text `#b3503c`) or blue (`fill:#dde7f9 stroke:#a9c0ee`,
-  text `#26407a`). Solid pastel is the base; a texture is the *variant*, not
-  the fill.
-- **Textured variants** via SVG `<pattern>` — the signature. A **dot** texture
-  over the pink for a live/active state; a **diagonal hatch** over the blue for
-  a transformed/compressed one. Put the solid color *inside* the pattern tile
-  so the texture reads on top of the fill, not over white:
+| Component | This style's treatment |
+|---|---|
+| Container frame | `stroke:#111; stroke-width:1.3`, square corners, no fill, no shadow |
+| Label chip | Uppercase mono `~10.5px`, `letter-spacing:.04em`, in a `stroke-width:1` box, `rx:0–1` |
+| Numbered group | Sans weight 600 title inside the frame's top-left corner |
+| Description box | Sans `~11px` inside a thin box |
+| Primary arrow | `stroke-width:1.2`, small round arrowhead, `#111` |
+| Secondary arrow | The same, `stroke-dasharray:3 3` |
+| Accent fill | Pink `fill:#f7d7d1 stroke:#e0a99e`, text `#b3503c`; or blue `fill:#dde7f9 stroke:#a9c0ee`, text `#26407a` |
+| Textured variant | Dot over the pink for a live state; diagonal hatch over the blue for a transformed one |
+| Stacked bar | Blue shades `#c4d4f5` / `#d4e0f8` / `#e8eefb` with `#a9c0ee` strokes and mono labels; a hatched segment marks a transformed part, a dashed baseline marks a limit |
+
+Solid pastel is the base and the texture is the *variant*, not the fill. Put
+the colour inside the pattern tile so the texture reads on top of it rather
+than over white:
 
 ```
 <pattern id="pdot" width="6" height="6" patternUnits="userSpaceOnUse">
@@ -87,21 +81,16 @@ shapes; it never limits what kind of visual a doc contains.
   <line x1="0" y1="0" x2="0" y2="7" stroke="#a9c0ee" stroke-width="1.5"/></pattern>
 ```
 
-- **Stacked bars for composition.** A vertical bar split into labeled segments
-  (blue shades `#c4d4f5` / `#d4e0f8` / `#e8eefb`, `#a9c0ee` strokes, mono
-  labels) reads a whole-made-of-parts — a context window, a version stack, a
-  budget. A hatch segment marks a transformed part; a dashed baseline marks a
-  limit.
-
-Keep it airy — generous white space between containers. Outside diagrams the
+Keep it airy — generous white space between containers. Outside figures the
 doc stays greyscale on white; the accent lives in the figures.
 
 ## Visuals are content-driven, never limited by the style
 
-The vocabulary above is a *palette for whatever visual the content needs* — it
-never decides whether a doc has a diagram, nor restricts it to these shapes. A
-doc with a bar chart, a table, a photo, or nothing follows its content; this
-style only says how such a thing looks in this register.
+The table above colours whatever the content needs. It does not decide whether
+a doc has a figure, nor which figure — `visuals.md` picks that from the data
+and `structure/components.md` says what the part is. A doc with a bar chart, a
+table, a photo, or nothing follows its content; this file only says how such a
+thing looks in this register.
 
 ## Style is visual only
 

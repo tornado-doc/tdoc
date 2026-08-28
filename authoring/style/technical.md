@@ -93,6 +93,28 @@ If a `<canvas>` or `<iframe>` is a *drawing* (a chart, a simulation) that should
 darken with the page rather than glow as a white slab, mark it
 `data-tdoc-dark="invert"` so it inverts with everything else.
 
+## Component treatment
+
+`structure/components.md` says what these parts are. Here they are drawn in the
+one light palette above, so the page-level invert carries them into dark with
+everything else. Greys do the structural work and the red-orange is rationed to
+the single thing the figure is about.
+
+| Component | This style's treatment |
+|---|---|
+| Container frame | `stroke:#d4d4d4; stroke-width:1`, square corners, no fill |
+| Label chip | Mono `~10.5px` in `#525252`, on `#f5f5f5`, no border |
+| Numbered group | Mono title, `#737373`, above the frame rather than inside it |
+| Description box | Sans `~11px` in `#737373`, no box — the grey carries it |
+| Primary arrow | `stroke:#0a0a0a; stroke-width:1.2` |
+| Secondary arrow | `stroke:#a3a3a3`, `stroke-dasharray:3 3` |
+| Accent fill | `fill:#fff5f3 stroke:#ff4b2e`, text `#ff4b2e` — **one node per figure** |
+| Textured variant | Diagonal hatch in `#ff4b2e` at 35% over the same fill |
+| Stacked bar | Greys `#f0f0f0` / `#e5e5e5` / `#d4d4d4` with `#a3a3a3` strokes; the segment under discussion takes the accent |
+
+Metric labels are mono here, including inside figures — a number set in the
+body sans reads as prose and gets skimmed.
+
 ## Visuals are content-driven, never dictated by the style
 
 The style is a *treatment* — a system sans, mono identifiers, one red accent,

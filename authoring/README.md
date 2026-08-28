@@ -1,15 +1,30 @@
 # authoring/
 
-What every generated doc must go through, and where the optional
-choices live. Read by the agent at generation time, not by the reader.
+The parts tdoc composes a doc from, and how they fit together. Read by the
+agent at generation time, not by the reader.
 
-Three slots, deliberately separate because they answer different questions:
+These are **references, not a pipeline.** An agent that already has a house
+voice and a design system — through `bin/tdoc-new` — is composing with tdoc,
+and takes what is useful here or none of it. The invariants that keep a doc
+working at all are a separate, much shorter list, enforced by
+`bin/tdoc-validate-template`: no author JavaScript in the host, one content
+root, the reserved `tdoc-*` names, a viewport meta, a body background. Those
+are MUST. Everything in this directory is what tdoc reaches for when nobody
+has said otherwise.
 
-| Slot | Question it answers | Status |
+Four slots, separate because they answer different questions:
+
+| Slot | Question it answers | Who decides |
 |---|---|---|
-| `voice.md` | How does the prose read? | **Always applied.** Not a choice. |
-| `style/` | What does the page look like? | Empty — reserved. |
-| `structure/` | Which sections does this kind of doc have? | Empty — reserved. |
+| `voice.md` | How does the prose read? | Nobody picks "sound like AI" — it applies by default |
+| `visuals.md` | Which component fits this data? | The data |
+| `structure/components.md` | What is that component, structurally? | Fixed across styles — that is what makes a style swappable |
+| `style/` | What does that component look like? | **The agent picks the entry that fits the content** |
+
+The last two are the axis that matters: a stat tile is the same stat tile in
+`paper` and in `technical`, and switching between them changes how it reads,
+never what it is. A style that starts inventing components, or a component
+that hardcodes a colour, has broken that split.
 
 ## voice.md is a floor, not an option
 

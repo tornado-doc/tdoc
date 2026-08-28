@@ -53,6 +53,27 @@ body { background:#f7f6f5; }
 .diagram-box { max-width:100%; overflow-x:auto; margin:20px 0; }
 ```
 
+## Component treatment
+
+`structure/components.md` says what these parts are. This style marks meaning
+with a coloured underline in prose, and figures follow the same logic: the blue
+is a pointer, not a decoration, and it lands on one element.
+
+| Component | This style's treatment |
+|---|---|
+| Container frame | `stroke:#b3bdc9; stroke-width:1`, square corners, no fill |
+| Label chip | Sans `~10.5px` in `#3a55f4`, on `#eef1fb`, `rx:2` |
+| Numbered group | Sans weight 600 title in `#0a0a0a`, above the frame |
+| Description box | Serif `~12px` — the reading voice, so a figure's prose matches the page's |
+| Primary arrow | `stroke:#0a0a0a; stroke-width:1.2` |
+| Secondary arrow | `stroke:#b3bdc9`, `stroke-dasharray:3 3` |
+| Accent fill | `fill:#eef1fb stroke:#3a55f4`, text `#2200ff` |
+| Textured variant | Hatch in `#3a55f4` over the same fill; the green `#4ba181` is reserved for a positive outcome and never used as a second accent |
+| Stacked bar | Blues `#eef1fb` / `#dbe3fa` / `#c3d0f6` with `#b3bdc9` strokes |
+
+The underline that marks a term in prose has no figure equivalent. Inside a
+drawing, emphasis is the accent fill.
+
 ## Visuals are content-driven, never dictated by the style
 
 **This style's diagram vocabulary works for ANY diagram type** — a pipeline, an architecture, a flow, context bars, a chart. The style is the visual *treatment*, never a limit on which visuals appear. Draw diagrams warm and understated: `#fff` node fills, `#b3bdc9` strokes, electric-blue `#3a55f4` on the focus node, terracotta `#cc7c5e` for a caveat path, serif or system labels.

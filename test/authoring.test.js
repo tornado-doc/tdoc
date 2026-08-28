@@ -35,14 +35,30 @@ t('all three slots exist', () => {
   }
 });
 
-t('structure/ is still an empty mount point', () => {
-  // Adding entries is fine — but it must be a deliberate change that also
-  // teaches SKILL.md how to select one, not a stray file. This test is the
-  // reminder to do both.
-  const entries = fs.readdirSync(path.join(root, 'authoring/structure'));
-  assert(entries.length === 1 && entries[0] === 'README.md',
-    `authoring/structure gained ${entries.filter(e => e !== 'README.md').join(', ')} — ` +
-    `if that is intended, teach SKILL.md how a doc selects one, then update this test`);
+t('structure/ carries the component library, and SKILL.md knows about it', () => {
+  // structure/ stopped being an empty slot when the components moved out of
+  // style/default.md. A component here must stay style-free: the moment one
+  // hardcodes a colour, swapping style stops being a swap.
+  const c = read('authoring/structure/components.md');
+  assert(/stat tile|container frame|label chip/i.test(c),
+    'components.md does not describe the parts');
+  const hex = c.match(/#[0-9a-fA-F]{6}/g) || [];
+  assert(hex.length === 0, `components.md hardcodes colour: ${hex.join(', ')} — treatment belongs in style/`);
+  assert(read('SKILL.md').includes('authoring/structure/components.md'),
+    'SKILL.md does not point at the component library');
+});
+
+t('every style gives the same components a treatment', () => {
+  // The swap is only real if each style answers for the same parts. A style
+  // that skips one leaves that component undefined the moment it is selected.
+  const parts = ['Container frame', 'Label chip', 'Numbered group', 'Description box',
+                 'Primary arrow', 'Secondary arrow', 'Accent fill', 'Textured variant', 'Stacked bar'];
+  for (const entry of ['default', 'technical', 'paper', 'editorial']) {
+    const text = read(`authoring/style/${entry}.md`);
+    const missing = parts.filter(part => !text.includes(part));
+    assert(missing.length === 0,
+      `style/${entry}.md gives no treatment for: ${missing.join(', ')}`);
+  }
 });
 
 t('style/ ships a default entry with its vocabulary', () => {
@@ -54,7 +70,7 @@ t('style/ ships a default entry with its vocabulary', () => {
   for (const mark of ['Inter', 'pattern', 'hatch']) {
     assert(d.includes(mark), `default.md no longer carries "${mark}"`);
   }
-  assert(/diagram vocabulary/i.test(d), 'default.md lost its diagram vocabulary section');
+  assert(/component treatment/i.test(d), 'default.md lost its component treatment section');
 });
 
 t('the default style sets its stark typography', () => {
@@ -82,13 +98,17 @@ t('every style/ entry is selectable from SKILL.md', () => {
     '    An entry the agent cannot be told to use is a file nobody reads.');
 });
 
-t('the default style is applied on the generation path, not merely listed', () => {
+t('a style is picked and applied on the generation path, not merely listed', () => {
   const s = read('SKILL.md');
   const a = s.indexOf('### `/tdoc new');
   const b = s.indexOf('### `bin/tdoc-new');
   assert(a !== -1 && b !== -1, '/tdoc new section not found');
-  assert(s.slice(a, b).includes('authoring/style/default.md'),
-    '/tdoc new does not read authoring/style/default.md');
+  const section = s.slice(a, b);
+  assert(/authoring\/style\//.test(section), '/tdoc new does not read an authoring/style/ entry');
+  // The choice is the agent's. If this reverts to "the user names a style",
+  // every doc silently gets `default` again whatever the content is.
+  assert(/Choose the style that fits/.test(s),
+    'SKILL.md no longer asks the agent to choose a style from the content');
 });
 
 t('visuals.md is a wired-in visual-first floor', () => {
