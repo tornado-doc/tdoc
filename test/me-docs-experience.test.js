@@ -333,6 +333,40 @@ function pane(html, id) {
     assert(stored.folders.length === 1 && stored.folders[0].name === 'Renamed', 'rename must persist');
   });
 
+  await t('folders nest: parent chain, sibling-scoped names, depth cap, delete moves contents up', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const cookie = await putSession(env, 'alice');
+    await seedDoc(env, 'deep-doc', { owner: 'alice' });
+    const mk = async (name, parent) => {
+      const r = await worker.fetch(req('/api/folders', { method: 'POST', cookie, body: parent ? { name, parent } : { name } }), env, {});
+      return { status: r.status, body: await r.json() };
+    };
+    const a = await mk('A');
+    assert(a.status === 200, 'root create failed');
+    const b = await mk('B', a.body.folder.id);
+    assert(b.status === 200 && b.body.folder.parent === a.body.folder.id, 'nested folder must record its parent');
+    const sib = await mk('A', a.body.folder.id);
+    assert(sib.status === 200, 'same name under another parent must be allowed');
+    const clash = await mk('a');
+    assert(clash.status === 400 && clash.body.error === 'duplicate_name', 'sibling name clash must 400');
+    const c = await mk('C', b.body.folder.id);
+    const d = await mk('D', c.body.folder.id);
+    assert(c.status === 200 && d.status === 200, 'nesting to depth 4 must pass');
+    const e = await mk('E', d.body.folder.id);
+    assert(e.status === 400 && e.body.error === 'too_deep', `depth 5 must be rejected, got ${e.status}`);
+    const mv = await worker.fetch(req('/api/folders/move', { method: 'POST', cookie, body: { slugs: ['deep-doc'], folder: b.body.folder.id } }), env, {});
+    assert(mv.status === 200, 'move into nested folder failed');
+    const del = await worker.fetch(req('/api/folders?id=' + b.body.folder.id, { method: 'DELETE', cookie }), env, {});
+    assert(del.status === 200, 'delete nested folder failed');
+    const state = JSON.parse(await env.META.get('folders:alice'));
+    assert(state.docs['deep-doc'] === a.body.folder.id, "doc must move up to the deleted folder's parent, not to root");
+    const cRec = state.folders.find((f) => f.id === c.body.folder.id);
+    assert(cRec && cRec.parent === a.body.folder.id, "subfolder must reparent to the deleted folder's parent");
+    const html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
+    assert(html.includes(`data-parent="${a.body.folder.id}"`), 'folder rows must carry data-parent for level filtering');
+    assert(html.includes('draggable="true"'), 'doc rows must be draggable');
+  });
+
   await t('doc-page bar carries the star beside the title — signed-in viewers only, state server-rendered', async () => {
     const env = makeEnv(mod.CommentsStore);
     await seedDoc(env, 'bar-doc', { owner: 'bob' });
