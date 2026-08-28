@@ -8,6 +8,19 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **Relicensed to AGPL v3, with a commercial licence available.** Apache 2.0
+  let anyone embed tdoc in a closed product and keep their changes; AGPL's
+  section 13 makes running a modified tdoc as a network service count as
+  distribution, so those users are entitled to the modified source. That is
+  the protection the project wanted. It is also the wrong shape for some
+  products, so `COMMERCIAL.md` says how to ask for terms that do not require
+  publishing changes — the point is that there is a door, not a wall. Each of
+  MIT and Apache 2.0 grants the right to sublicense, which is what makes the
+  change possible; both notices stay at the foot of `LICENSE` as those
+  licences require. Vendored third-party code is not ours to relicense and is
+  excluded by name: `authoring/vendor/no-ai-slop.md` stays MIT under Peter
+  Yang's notice.
+
 - **The mark is a tornado, and it carries no background.** The dog is
   replaced by a line-art vortex, traced to vector at `assets/tdoc_logo.svg`
   and kept byte-identical in `worker.js`. The old SVG sat on an opaque white
