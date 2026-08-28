@@ -134,8 +134,13 @@ t('a style is picked and applied on the generation path, not merely listed', () 
 t('visuals.md is a wired-in visual-first floor', () => {
   assert(exists('authoring/visuals.md'), 'authoring/visuals.md missing');
   const v = read('authoring/visuals.md');
-  assert(/visual-first/i.test(v) && /flowchart/i.test(v),
-    'visuals.md is not the visual-first floor (no visual-first / flowchart guidance)');
+  assert(/visual-first/i.test(v), 'visuals.md lost its visual-first framing');
+  // The matcher is the working half: without it "be visual-first" collapses to
+  // whichever visual is easiest to produce for any subject.
+  assert(/Match the visual to the data/i.test(v), 'visuals.md lost the matcher heading');
+  for (const kind of ['bar chart', 'scatter', 'timeline', 'stacked bar']) {
+    assert(v.includes(kind), `visuals.md matcher no longer offers "${kind}"`);
+  }
   // must be $SKILL_DIR-anchored and on both generation paths, like voice.md
   const s = read('SKILL.md');
   const seg=(a,b)=>{const x=s.indexOf(a);const y=b?s.indexOf(b,x):s.length;return s.slice(x,y===-1?s.length:y);};

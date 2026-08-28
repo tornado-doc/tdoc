@@ -18,7 +18,7 @@ Four slots, separate because they answer different questions:
 |---|---|---|
 | `voice.md` | How does the prose read? | Nobody picks "sound like AI" — it applies by default |
 | `visuals.md` | Which component fits this data? | The data |
-| `structure/components.md` | What is that component, structurally? | Fixed across styles — that is what makes a style swappable |
+| `structure/components.md` | What is that component, structurally? | Fixed across styles — that is what makes a style swappable. The list is open |
 | `style/` | What does that component look like? | **The agent picks the entry that fits the content** |
 
 The last two are the axis that matters: a stat tile is the same stat tile in

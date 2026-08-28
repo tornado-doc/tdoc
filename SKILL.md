@@ -286,14 +286,14 @@ it is.
 have one. Build it from the tokens every style declares — `ink`, `rule`,
 `muted`, `surface`, `accent-fill`, `accent-stroke`, `accent-text`,
 `label-type` — and it is dressed correctly by every style, including any
-added later. The rest of the contract is in that file. Section skeletons
-are still an empty slot — derive the document's shape from the prompt.
+added later. The rest of the contract is in that file.
 
-`visuals.md` is the visual-first floor: lead with charts, diagrams, tables, and
-stat tiles rather than paragraphs; pick the visual type that fits the data
-(bar, line/scatter, quadrant, matrix, timeline, stacked bar, flow — not a
-flowchart by default); most docs carry several different types. The style
-colors them; this file decides there should be many.
+Which sections a doc has is decided by the prompt and the material, per doc.
+
+`visuals.md` is the visual-first floor: draw generously, and pick the visual
+type that fits the data (bar, line/scatter, quadrant, matrix, timeline,
+stacked bar, flow). Most docs carry several different types. The style colors
+them; this file decides there should be many.
 
 ## Commands
 
