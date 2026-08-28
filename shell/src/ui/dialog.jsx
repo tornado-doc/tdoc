@@ -1,7 +1,10 @@
 import React from 'react';
 import { Dialog } from '@base-ui/react/dialog';
-import { X } from 'lucide-react';
 
+// The one modal surface. Visuals come from chrome.css's `.tdoc-modal` rules —
+// the same sheet the rest of the reader chrome uses — so a dialog looks the
+// same whether it is Publish, Share, Sign in, or a Docs Hub confirm. Base UI
+// supplies the portal, focus trap, Escape, and backdrop dismissal.
 export function AppDialog({
   open,
   onOpenChange,
@@ -15,22 +18,15 @@ export function AppDialog({
       <Dialog.Portal>
         <Dialog.Backdrop className="ui-dialog-backdrop" />
         <Dialog.Viewport className="ui-dialog-viewport">
-          <Dialog.Popup className="ui-dialog-popup">
-            <header className="ui-dialog-header">
-              <div>
-                <Dialog.Title className="ui-dialog-title">{title}</Dialog.Title>
-                {description ? (
-                  <Dialog.Description className="ui-dialog-description">
-                    {description}
-                  </Dialog.Description>
-                ) : null}
-              </div>
-              <Dialog.Close className="ui-icon-button" aria-label="Close">
-                <X size={16} />
-              </Dialog.Close>
-            </header>
+          <Dialog.Popup className="ui-dialog-popup tdoc-modal">
+            <Dialog.Title className="ui-dialog-title" render={<h3 />}>{title}</Dialog.Title>
+            {description ? (
+              <Dialog.Description className="muted ui-dialog-description">
+                {description}
+              </Dialog.Description>
+            ) : null}
             <div className="ui-dialog-body">{children}</div>
-            {actions ? <footer className="ui-dialog-actions">{actions}</footer> : null}
+            {actions ? <div className="actions">{actions}</div> : null}
           </Dialog.Popup>
         </Dialog.Viewport>
       </Dialog.Portal>

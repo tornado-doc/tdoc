@@ -339,15 +339,27 @@ export function DocumentShell({ boot, config }) {
         ),
       )
       : TOP_BAR_HEIGHT + 4,
-    left: Math.max(8, Math.min(pinLeft + 34, window.innerWidth - 288)),
+    // 280px card + 12px padding each side + 1px borders, kept 8px off the edge.
+    left: Math.max(8, Math.min(pinLeft + 34, window.innerWidth - 306 - 8)),
   };
+  // A deep link to a reply (?comment=<reply id>) opens its thread expanded;
+  // any other open card starts with replies collapsed, as before.
   const deepReply = Boolean(
     openComment
+    && new URLSearchParams(location.search).get('comment')
     && new URLSearchParams(location.search).get('comment') !== openComment.id
   );
 
   return (
-    <div className="tdoc-document-app" onPointerDown={() => setOpenClusterKey(null)}>
+    <div
+      className="tdoc-document-app"
+      onPointerDown={() => {
+        // Legacy behavior: a click anywhere outside a card, pin, or composer
+        // closes the open card and cluster popover (they stop propagation).
+        setOpenClusterKey(null);
+        setOpenCommentId(null);
+      }}
+    >
       <TopBar
         identity={config.identity}
         theme={theme}
@@ -439,7 +451,6 @@ export function DocumentShell({ boot, config }) {
           onReact={reactTo}
           onDelete={removeComment}
           onReanchor={setReanchorId}
-          onCloseComment={() => setOpenCommentId(null)}
         />
       )}
 

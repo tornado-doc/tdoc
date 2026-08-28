@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, FileText, LogOut, Moon, Sun } from 'lucide-react';
+import { Moon, Sun } from 'lucide-react';
 import { AppMenu, AppMenuItem } from './ui/menu.jsx';
 import { useNotifications } from './hooks/use-notifications.js';
 import { NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
@@ -74,13 +74,11 @@ export function TopBar({
               {notifications.unread ? <span className="tdoc-unread-dot" /> : null}
             </button>
           )}>
-            <AppMenuItem onClick={() => { location.href = '/me'; }}>
-              <FileText size={14} /> My docs
-            </AppMenuItem>
             <AppMenuItem onClick={openNotifications}>
-              <Bell size={14} /> Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
+              Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
             </AppMenuItem>
-            <AppMenuItem onClick={signOut}><LogOut size={14} /> Sign out</AppMenuItem>
+            <AppMenuItem onClick={() => { location.href = '/me'; }}>My docs</AppMenuItem>
+            <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
         ) : authConfigured ? (
           <button type="button" className="tdoc-chip signin" onClick={onSignIn}>

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ChevronRight, SmilePlus, X } from 'lucide-react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
+import { ChevronRight, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 
@@ -108,10 +108,21 @@ export function CommentCard({
   onReact,
   onDelete,
   onReanchor,
-  onClose,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
   const [replyOpen, setReplyOpen] = useState(false);
+  const cardRef = useRef(null);
+  const [clampedTop, setClampedTop] = useState(null);
+
+  // Legacy positionCard(): keep the whole card on screen, measured after
+  // render so an expanded thread or an open reply form never runs off the
+  // bottom of the viewport.
+  useLayoutEffect(() => {
+    if (!floating || !position || !cardRef.current) return;
+    const limit = window.innerHeight - cardRef.current.offsetHeight - 8;
+    const next = Math.max(52, Math.min(position.top, limit));
+    setClampedTop(next === position.top ? null : next);
+  }, [floating, position, repliesOpen, replyOpen, comment]);
   const reactionCount = Object.values(comment.reactions || {})
     .some((users) => users?.length);
   const createdAt = comment.created
@@ -133,17 +144,12 @@ export function CommentCard({
 
   return (
     <article
+      ref={cardRef}
       className={className}
       data-comment-id={comment.id}
-      style={floating ? position : undefined}
+      style={floating ? { ...position, top: clampedTop ?? position.top } : undefined}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {floating ? (
-        <button type="button" className="card-close" aria-label="Close" onClick={onClose}>
-          <X size={14} />
-        </button>
-      ) : null}
-
       <div className="tdoc-anchor-actions">
         <button className="tdoc-reanchor-btn" type="button" onClick={() => onReanchor(comment.id)}>
           <span className={unanchored ? 'tdoc-reanchor-unanchored' : 'tdoc-reanchor-anchored'}>

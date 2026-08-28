@@ -1,8 +1,10 @@
 import React from 'react';
 
+// Option set styled by chrome.css `.tdoc-seg` (bordered pill, accent-filled
+// active option) — the same control the legacy Share panel used.
 export function SegmentedControl({ value, options, onChange, ariaLabel }) {
   return (
-    <div className="ui-segmented" role="radiogroup" aria-label={ariaLabel}>
+    <div className="tdoc-seg" role="radiogroup" aria-label={ariaLabel}>
       {options.map((option) => (
         <button
           key={option.value}

@@ -1,13 +1,10 @@
 import React from 'react';
 import {
   ChevronDown,
-  Copy,
-  Download,
   ExternalLink,
   MoreHorizontal,
   Share2,
   Star,
-  Trash2,
   Upload,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
@@ -31,13 +28,12 @@ export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
         {(config.versions || []).map((version) => (
           <AppMenuItem
             key={version.n}
+            className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
             onClick={() => {
               location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`;
             }}
           >
-            <span className={version.n === config.version ? 'current' : ''}>
-              v{version.n}{version.n === config.version ? ' · current' : ''}
-            </span>
+            v{version.n}{version.n === config.version ? ' · current' : ''}
           </AppMenuItem>
         ))}
       </AppMenu>
@@ -85,24 +81,14 @@ export function DocumentActions({
           </button>
         )}
       >
-        <AppMenuItem data-action="copy" onClick={onCopyMarkdown}>
-          <Copy size={14} /> Copy as Markdown
-        </AppMenuItem>
+        <AppMenuItem data-action="copy" onClick={onCopyMarkdown}>Copy as Markdown</AppMenuItem>
         {config.mode === 'published' ? (
-          <AppMenuItem data-action="duplicate" onClick={onDuplicate}>
-            <Copy size={14} /> Duplicate
-          </AppMenuItem>
+          <AppMenuItem data-action="duplicate" onClick={onDuplicate}>Duplicate</AppMenuItem>
         ) : null}
-        <AppMenuItem data-action="download" onClick={onDownload}>
-          <Download size={14} /> Download HTML
-        </AppMenuItem>
-        <AppMenuItem data-action="download-pdf" onClick={onPrint}>
-          <Download size={14} /> Download PDF
-        </AppMenuItem>
+        <AppMenuItem data-action="download" onClick={onDownload}>Download HTML</AppMenuItem>
+        <AppMenuItem data-action="download-pdf" onClick={onPrint}>Download PDF</AppMenuItem>
         {config.ownerManage ? (
-          <AppMenuItem data-action="delete" onClick={onDelete}>
-            <Trash2 size={14} /> Delete document
-          </AppMenuItem>
+          <AppMenuItem data-action="delete" tone="danger" onClick={onDelete}>Delete doc…</AppMenuItem>
         ) : null}
       </AppMenu>
     </>

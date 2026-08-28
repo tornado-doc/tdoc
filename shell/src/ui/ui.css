@@ -1,124 +1,108 @@
 .ui-dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1000;
-  background: rgb(15 23 42 / 42%);
+  z-index: 1000000;
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .ui-dialog-viewport {
   position: fixed;
   inset: 0;
-  z-index: 1001;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-}
-
-.ui-dialog-popup {
-  width: min(440px, 100%);
-  max-height: min(680px, calc(100vh - 40px));
-  overflow: auto;
-  border: 1px solid var(--td-line);
-  border-radius: 8px;
-  background: var(--td-ground);
-  color: var(--td-ink);
-  box-shadow: 0 20px 60px rgb(15 23 42 / 24%);
-}
-
-.ui-dialog-header {
+  z-index: 1000001;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 18px 0;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  font: 14px system-ui, sans-serif;
 }
 
-.ui-dialog-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 650;
+/* Sizing, type, and buttons come from chrome.css `.tdoc-modal`; the popup only
+   adds what a portal-rendered dialog needs on top of the legacy sheet. */
+.ui-dialog-popup {
+  box-sizing: border-box;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  outline: none;
 }
 
-.ui-dialog-description {
-  margin: 6px 0 0;
-  color: var(--td-muted);
+.ui-dialog-popup .ui-dialog-description {
+  margin: -2px 0 14px;
+}
+
+.ui-dialog-popup .muted {
+  color: #666;
   font-size: 13px;
 }
 
-.ui-dialog-body {
-  padding: 16px 18px;
+.ui-dialog-popup .status {
+  margin-top: 10px;
 }
 
-.ui-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 0 18px 18px;
-}
-
-.ui-dialog-popup button {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--td-line);
-  border-radius: 6px;
-  background: var(--td-ground);
-  color: var(--td-ink);
-  font: 600 13px var(--td-font-display);
+/* Buttons inside the reader chrome that read as text (the legacy markup used
+   spans): keep the semantics, drop the UA button box. */
+.tdoc-margin-comment button.del,
+.tdoc-margin-comment button.tdoc-reply-toggle,
+.tdoc-margin-comment button.tdoc-replies-toggle,
+.tdoc-margin-comment button.tdoc-reanchor-btn,
+button.tdoc-cluster-row,
+button.tdoc-drawer-handle,
+.tdoc-token button.rm {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.ui-dialog-popup button:hover {
-  background: var(--td-surface-2);
-}
-
-.ui-dialog-popup button.primary {
-  border-color: var(--td-accent);
-  background: var(--td-accent);
-  color: #fff;
-}
-
-.ui-dialog-popup button.primary:hover {
-  background: var(--td-accent-hover);
-}
-
-.ui-dialog-popup button.danger {
-  border-color: var(--td-danger);
-  background: var(--td-danger);
-  color: #fff;
-}
-
-.ui-segmented {
+.tdoc-margin-comment button.tdoc-replies-toggle {
   display: inline-flex;
-  max-width: 100%;
-  padding: 2px;
-  border-radius: 6px;
-  background: var(--td-surface);
+  align-items: center;
 }
 
-.ui-segmented button {
-  min-height: 28px;
-  padding: 4px 8px;
-  border: 0;
-  background: transparent;
-  font-weight: 500;
+button.tdoc-cluster-row {
+  width: 100%;
 }
 
-.ui-segmented button.active {
-  background: var(--td-ground);
-  box-shadow: 0 1px 3px rgb(15 23 42 / 14%);
+/* Re-apply the legacy per-control colours the reset above would swallow. */
+.tdoc-margin-comment button.del { color: #c33; }
+.tdoc-margin-comment button.tdoc-reply-toggle { color: var(--td-accent); }
+.tdoc-margin-comment button.tdoc-replies-toggle {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #eee;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--td-accent);
 }
 
-.ui-icon-button {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  place-items: center;
+.tdoc-pin .tdoc-pin-anon { display: block; }
+
+button.tdoc-pin {
   padding: 0;
+  margin: 0;
+  appearance: none;
+}
+
+.tdoc-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.tdoc-ac-item {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
 }
 
 .ui-menu-positioner {
@@ -126,30 +110,42 @@
 }
 
 .ui-menu-popup {
-  min-width: 180px;
   padding: 4px;
   border: 1px solid var(--td-line);
-  border-radius: 6px;
   background: var(--td-ground);
   color: var(--td-ink);
-  box-shadow: 0 10px 32px rgb(15 23 42 / 16%);
   transform-origin: var(--transform-origin);
 }
 
+.ui-menu-popup {
+  min-width: 160px;
+  border-color: #e5e5e7;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
 .ui-menu-item {
-  display: flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  display: block;
+  padding: 7px 10px;
   border-radius: 4px;
   outline: none;
-  cursor: default;
-  font-size: 13px;
+  cursor: pointer;
+  color: #1a1a1a;
+  font: 13px system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.ui-menu-item.tdoc-version-item {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.ui-menu-item.tdoc-version-item.current {
+  color: var(--td-accent);
+  font-weight: 600;
 }
 
 .ui-menu-item[data-highlighted] {
-  background: var(--td-surface);
+  background: #f0f1f4;
 }
 
 .ui-menu-item[data-disabled] {
@@ -169,76 +165,31 @@
   gap: 2px;
 }
 
-.ui-dialog-popup button.tdoc-notification-row {
-  display: grid;
+.tdoc-notification-list .tdoc-cluster-row {
   width: 100%;
-  grid-template-columns: 32px minmax(0, 1fr);
-  align-items: start;
-  padding: 9px;
-  border: 0;
-  text-align: left;
 }
 
-.tdoc-notification-row.unread {
-  background: var(--td-accent-wash);
+.tdoc-notification-list .tdoc-cluster-row.unread {
+  background: #eef2ff;
 }
 
-.tdoc-notification-row > img {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-}
-
-.tdoc-notification-copy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.tdoc-notification-copy strong,
-.tdoc-notification-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.tdoc-notification-list .tdoc-cluster-row > .muted {
+  flex-shrink: 0;
   white-space: nowrap;
+  font-size: 12px;
 }
 
-.tdoc-signin-steps {
-  display: grid;
-  gap: 16px;
-  margin: 0;
-  padding-left: 22px;
-}
-
-.tdoc-signin-steps li {
-  padding-left: 5px;
-}
-
-.tdoc-signin-steps li > span,
-.tdoc-signin-steps li > small {
-  display: block;
-  margin-bottom: 6px;
-}
-
-.ui-dialog-popup button.tdoc-device-code {
-  width: 100%;
-  min-height: 54px;
-  font: 700 20px ui-monospace, "SF Mono", Menlo, monospace;
-  letter-spacing: 0.12em;
-  user-select: all;
-}
-
-.tdoc-open-github {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--td-accent);
-  font-weight: 650;
-  text-decoration: none;
-}
-
-.tdoc-signin-steps .error {
-  color: var(--td-danger);
-}
+.tdoc-modal .tds-step { display: flex; gap: 9px; align-items: flex-start; margin: 0 0 10px; font-size: 14px; color: #5b6070; }
+.tdoc-modal .tds-n { flex: none; width: 19px; height: 19px; border-radius: 50%; background: #eef3ff; color: var(--td-accent); font-size: 11.5px; font-weight: 700; display: grid; place-items: center; margin-top: 1px; }
+.tdoc-modal .tds-codewrap { position: relative; margin: 0 0 12px; }
+.tdoc-modal .tds-code { font: 22px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .2em; background: #f5f6f8; border: 1px solid #e4e7ee; border-radius: 10px; padding: 15px 15px 46px; text-align: center; user-select: all; }
+.tdoc-modal button.tds-copy { position: absolute; right: 10px; bottom: 10px; border: 1px solid #d3d8e3; background: #fff; color: #10121a; border-radius: 8px; padding: 6px 13px; font: 650 13px system-ui, -apple-system, sans-serif; }
+.tdoc-modal button.tds-copy:hover { border-color: #b9c0cd; }
+.tdoc-modal button.tds-copy.done { background: #1a7340; border-color: #1a7340; color: #fff; }
+.tdoc-modal .tds-open { display: inline-flex; align-items: center; gap: 7px; margin: 2px 0 0; background: var(--td-accent); color: #fff; border-radius: 999px; padding: 6px 14px; font: 650 13px system-ui, -apple-system, sans-serif; text-decoration: none; }
+.tdoc-modal .tds-open:hover { background: var(--td-accent-hover); }
+.tdoc-modal .tds-status { color: #767c8b; font-size: 13px; }
+.tdoc-modal .tds-err { color: var(--td-danger); }
 
 .tdoc-recipe-wrap {
   position: relative;
@@ -255,13 +206,13 @@
   word-break: break-word;
 }
 
-.ui-dialog-popup .tdoc-recipe-wrap button {
+.tdoc-modal .tdoc-recipe-wrap button {
   position: absolute;
   right: 8px;
   bottom: 8px;
 }
 
-.ui-dialog-popup .tdoc-recipe-wrap button.done {
+.tdoc-modal .tdoc-recipe-wrap button.done {
   border-color: #1a7340;
   background: #1a7340;
   color: #fff;
@@ -374,8 +325,3 @@
   color: var(--td-accent);
 }
 
-.tdoc-notification-copy span {
-  color: var(--td-muted);
-  font-size: 12px;
-  font-weight: 400;
-}

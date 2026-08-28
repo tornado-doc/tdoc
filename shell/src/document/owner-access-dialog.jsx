@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Trash2, X } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { deleteDocument, updateDocumentAccess } from './api.js';
@@ -29,6 +29,7 @@ function normalizeLogin(value) {
 function InviteField({ users, onChange }) {
   const [value, setValue] = useState('');
   const [suggestions, setSuggestions] = useState([]);
+  const [focused, setFocused] = useState(false);
 
   useEffect(() => {
     const login = normalizeLogin(value);
@@ -67,8 +68,8 @@ function InviteField({ users, onChange }) {
   };
 
   return (
-    <div className="tdoc-invite-control">
-      <div className="tdoc-token-field">
+    <div className="tdoc-ac">
+      <div className={`tdoc-token-field${focused ? ' focus' : ''}`}>
         {users.map((login) => (
           <span key={login} className="tdoc-token">
             <img src={`https://github.com/${encodeURIComponent(login)}.png?size=48`} alt="" />
@@ -79,15 +80,18 @@ function InviteField({ users, onChange }) {
               aria-label={`Remove ${login}`}
               onClick={() => onChange(users.filter((user) => user !== login))}
             >
-              <X size={12} />
+              ×
             </button>
           </span>
         ))}
         <input
+          type="text"
           value={value}
           autoComplete="off"
           spellCheck="false"
           placeholder="Add a GitHub username…"
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -98,11 +102,11 @@ function InviteField({ users, onChange }) {
         />
       </div>
       {suggestions.length ? (
-        <div className="tdoc-ac open">
+        <div className="tdoc-ac-list">
           {suggestions.map((user) => (
-            <button key={user.id} type="button" onClick={() => add(user.login)}>
+            <button key={user.id} type="button" className="tdoc-ac-item" onMouseDown={(event) => event.preventDefault()} onClick={() => add(user.login)}>
               <img src={user.avatar_url} alt="" />
-              <span>{user.login}</span>
+              <span className="login">{user.login}</span>
             </button>
           ))}
         </div>
@@ -159,17 +163,24 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
       open={open}
       onOpenChange={onOpenChange}
       title="Share"
-      description={`${config.slug} · ${manage.versionCount} versions · ${manage.commentCount} comments`}
       actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
     >
-      <div className="code" id="tdoc-share-url" onClick={() => copyText(url)}>{url}</div>
-      <button
-        type="button"
-        className="primary"
+      <div
+        className="code"
+        id="tdoc-share-url"
+        style={{ fontSize: 14, letterSpacing: 0, textAlign: 'left', cursor: 'copy' }}
         onClick={() => copyText(url).then(onCopied)}
       >
-        Copy link
-      </button>
+        {url}
+      </div>
+      <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
+        <button type="button" className="primary" onClick={() => copyText(url).then(onCopied)}>
+          Copy link
+        </button>
+      </div>
+      <p className="muted" style={{ margin: '8px 0 0' }}>
+        {config.slug} · {manage.versionCount} versions · {manage.commentCount} comments
+      </p>
 
       <section className="manage-section">
         <label className="field" htmlFor="tdoc-access-select">Who has access</label>
@@ -195,10 +206,7 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
         ) : null}
       </section>
 
-      <details
-        className="tdoc-adv"
-        open={normalized.commenting !== 'signed_in' || normalized.history_visibility !== 'owner'}
-      >
+      <details className="tdoc-adv">
         <summary>Advanced</summary>
         <section className="manage-section">
           <label className="field">Who can comment</label>
@@ -219,7 +227,7 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
           />
         </section>
       </details>
-      <p className="manage-hint" role="status">{status || '\u00a0'}</p>
+      <p className="status" role="status">{status || '\u00a0'}</p>
     </AppDialog>
   );
 }

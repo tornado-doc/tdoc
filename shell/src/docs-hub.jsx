@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronRight, Folder, FolderPlus, Search, Trash2, X } from 'lucide-react';
+import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
@@ -84,13 +84,11 @@ export function DocsHub({ boot }) {
   const docMenu = (slugs) => [
     capabilities.folders ? {
       label: 'Move to folder',
-      icon: <Folder size={14} />,
       className: 'row-move',
       onSelect: () => setModal({ type: 'move', slugs }),
     } : null,
     capabilities.delete ? {
       label: 'Delete',
-      icon: <Trash2 size={14} />,
       tone: 'danger',
       className: 'row-delete',
       onSelect: () => setModal({ type: 'delete-docs', slugs }),

@@ -76,7 +76,6 @@ export function DesktopCommentLayer({
   onReact,
   onDelete,
   onReanchor,
-  onCloseComment,
 }) {
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
 
@@ -122,7 +121,6 @@ export function DesktopCommentLayer({
           onReact={onReact}
           onDelete={onDelete}
           onReanchor={onReanchor}
-          onClose={onCloseComment}
         />
       ) : null}
     </>
@@ -168,7 +166,6 @@ export function MobileCommentDrawer({
                   onReact={onReact}
                   onDelete={onDelete}
                   onReanchor={onReanchor}
-                  onClose={() => {}}
                 />
               ))}
             </Drawer.Content>

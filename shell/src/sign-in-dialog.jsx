@@ -83,34 +83,36 @@ export function SignInDialog({ open, onOpenChange, onSuccess }) {
       title="Sign in with GitHub"
       actions={<button type="button" onClick={() => onOpenChange(false)}>Cancel</button>}
     >
-      <ol className="tdoc-signin-steps">
-        <li>
-          <span>Copy this code</span>
-          <button
-            type="button"
-            className="tdoc-device-code"
-            disabled={!device?.user_code}
-            onClick={() => copyText(device.user_code).then(setCopied)}
+      <div className="tds-step"><span className="tds-n">1</span><span>Copy this code:</span></div>
+      <div className="tds-codewrap">
+        <div className="tds-code" id="tds-code">{device?.user_code || '…'}</div>
+        <button
+          type="button"
+          className={`tds-copy${copied ? ' done' : ''}`}
+          disabled={!device?.user_code}
+          onClick={() => copyText(device.user_code).then(setCopied)}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <div className="tds-step">
+        <span className="tds-n">2</span>
+        {isGitHubUrl(verificationUrl) ? (
+          <a
+            className="tds-open"
+            href={verificationUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => device?.user_code && copyText(device.user_code)}
           >
-            {device?.user_code || '…'}
-          </button>
-          {copied ? <small>Copied</small> : null}
-        </li>
-        <li>
-          {isGitHubUrl(verificationUrl) ? (
-            <a
-              className="tdoc-open-github"
-              href={verificationUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => device?.user_code && copyText(device.user_code)}
-            >
-              Open GitHub <ExternalLink size={14} />
-            </a>
-          ) : <span>Waiting for GitHub…</span>}
-        </li>
-        <li><span className={error ? 'error' : undefined}>{error || status}</span></li>
-      </ol>
+            Open GitHub <ExternalLink size={14} />
+          </a>
+        ) : <span>Waiting for GitHub…</span>}
+      </div>
+      <div className="tds-step">
+        <span className="tds-n">3</span>
+        <span className={`tds-status${error ? ' tds-err' : ''}`}>{error || status}</span>
+      </div>
     </AppDialog>
   );
 }

@@ -1,6 +1,16 @@
 import React from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 
+function relativeTime(iso) {
+  const t = Date.parse(iso || '');
+  if (!t) return '';
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
 function notificationLabel(item) {
   const actor = item.actor?.name || item.actor?.login || 'Someone';
   const count = Number(item.count) || 1;
@@ -45,15 +55,13 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
           <button
             key={item.id}
             type="button"
-            className={`tdoc-notification-row${item.read ? '' : ' unread'}`}
+            className={`tdoc-cluster-row${item.read ? '' : ' unread'}`}
+            title={item.preview || ''}
             onClick={() => onSelect(item)}
           >
-            {item.actor?.avatar_url ? <img src={item.actor.avatar_url} alt="" /> : null}
-            <span className="tdoc-notification-copy">
-              <strong>{notificationLabel(item)}</strong>
-              <span>{item.title || item.slug}</span>
-              {item.preview ? <span>{item.preview}</span> : null}
-            </span>
+            {item.actor?.avatar_url ? <img src={item.actor.avatar_url} alt="" /> : <span className="tdoc-cluster-anon" />}
+            <span className="tdoc-cluster-snip">{notificationLabel(item)} on {item.title || item.slug}</span>
+            <span className="muted">{relativeTime(item.created || item.at || item.updated)}</span>
           </button>
         ))}
       </div>

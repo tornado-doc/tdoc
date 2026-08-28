@@ -30,43 +30,46 @@ export function ShareDialog({ open, url, onOpenChange, onCopied }) {
 export function PublishDialog({ open, slug, onOpenChange }) {
   const [status, setStatus] = useState('');
   const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const publish = async () => {
-    setStatus('Publishing…');
+    setBusy(true);
+    setStatus('Publishing — this can take 20–60s on first run…');
     try {
       const result = await publishDocument(slug);
       setUrl(result.url);
       setStatus('');
     } catch (error) {
       setStatus(`Failed: ${error.message}`);
+    } finally {
+      setBusy(false);
     }
   };
-
-  const actions = url ? (
-    <>
-      <button type="button" onClick={() => copyText(url)}>Copy link</button>
-      <button type="button" className="primary" onClick={() => window.open(url, '_blank', 'noopener')}>
-        View live
-      </button>
-    </>
-  ) : (
-    <>
-      <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-      <button type="button" id="tdoc-pub-go" className="primary" onClick={publish}>Publish</button>
-    </>
-  );
 
   return (
     <AppDialog
       open={open}
       onOpenChange={onOpenChange}
       title="Publish this doc"
-      description="Deploy this snapshot so anyone with the link can read it."
-      actions={actions}
+      actions={url ? null : (
+        <>
+          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
+          <button type="button" id="tdoc-pub-go" className="primary" disabled={busy} onClick={publish}>Publish</button>
+        </>
+      )}
     >
-      <p>Slug: <code id="tdoc-pub-slug">{slug}</code></p>
-      {status ? <div className="status">{status}</div> : null}
-      {url ? <div className="code" id="tdoc-pub-url">{url}</div> : null}
+      <p>We'll deploy this so anyone with the link can read it. GitHub sign-in is required for commenting.</p>
+      <div className="step"><span className="n">·</span><span>Slug: <code id="tdoc-pub-slug">{slug}</code></span></div>
+      {status ? <div className="status" style={{ marginTop: 10 }}>{status}</div> : null}
+      {url ? (
+        <div style={{ marginTop: 10 }}>
+          <div className="code" id="tdoc-pub-url" style={{ fontSize: 14, letterSpacing: 0, textAlign: 'left' }}>{url}</div>
+          <div className="actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
+            <button type="button" className="primary" onClick={() => copyText(url)}>Copy link</button>
+            <button type="button" onClick={() => window.open(url, '_blank', 'noopener')}>View live →</button>
+          </div>
+        </div>
+      ) : null}
     </AppDialog>
   );
 }

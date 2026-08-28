@@ -14,7 +14,7 @@ console.log('React sign-in GitHub handoff');
 
 t('the dialog uses the shared dialog primitive and a real anchor', () => {
   assert(/<AppDialog/.test(src), 'shared dialog primitive missing');
-  assert(/<a[\s\S]*className="tdoc-open-github"[\s\S]*href=\{verificationUrl\}/.test(src), 'verification anchor missing');
+  assert(/<a[\s\S]*className="tds-open"[\s\S]*href=\{verificationUrl\}/.test(src), 'verification anchor missing');
 });
 
 t('the anchor opens a protected new tab', () => {

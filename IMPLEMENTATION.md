@@ -23,8 +23,17 @@ frame.
 Reusable headless primitives live under `shell/src/ui/`:
 
 - `AppDialog`: Base UI dialog, portal, focus management, Escape, and backdrop.
-- `AppMenu` / `AppMenuItem`: Base UI anchored menus and keyboard behavior.
-- `SegmentedControl`: option sets used by access policy controls.
+  The popup carries chrome.css's `.tdoc-modal` class, so every dialog keeps the
+  legacy modal's type, spacing, buttons, and dark-mode treatment.
+- `AppMenu` / `AppMenuItem`: Base UI anchored menus and keyboard behavior,
+  styled to the legacy `.tdoc-menu` metrics (13px rows, 7px/10px padding).
+- `SegmentedControl`: option sets used by access policy controls (`.tdoc-seg`).
+
+`server/chrome.css` stays the single source of truth for how the reader chrome
+looks; `shell/src/ui/ui.css` only adds what portal-rendered primitives need on
+top of it (positioning, resets for controls that used to be spans). Visual
+parity with the pre-React chrome is checked with the side-by-side harnesses in
+`test/visual/` (see CONTRIBUTING.md).
 
 Provider features build on those primitives:
 

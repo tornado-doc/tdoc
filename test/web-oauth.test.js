@@ -104,7 +104,7 @@ t('React surfaces take the redirect when webAuth is on, else the device modal', 
   assert(/\/api\/auth\/web\/login\?return=/.test(documentShell),
     'document shell does not hand off to the web login route');
   assert(/boot\.webAuth/.test(neutralLanding), 'neutral landing does not branch on webAuth');
-  assert(/<SignInDialog/.test(documentShell) && /tdoc-device-code/.test(signInDialog),
+  assert(/<SignInDialog/.test(documentShell) && /tds-code/.test(signInDialog),
     'the device-code modal must remain as the fallback');
 });
 
