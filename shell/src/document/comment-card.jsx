@@ -24,7 +24,17 @@ function ReactionPicker({ onPick }) {
         <SmilePlus size={14} />
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Positioner sideOffset={5} className="tdoc-picker-positioner">
+        {/* Legacy placement: under the button, left edges aligned, flipped or
+            shifted to stay on screen. positionMethod="fixed" because the card
+            it opens from is itself fixed to the viewport. */}
+        <Popover.Positioner
+          side="bottom"
+          align="start"
+          sideOffset={6}
+          collisionPadding={8}
+          positionMethod="fixed"
+          className="tdoc-picker-positioner"
+        >
           <Popover.Popup className="tdoc-emoji-picker react-picker">
             {QUICK_REACTIONS.map((emoji) => (
               <Popover.Close

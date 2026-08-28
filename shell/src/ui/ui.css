@@ -81,6 +81,18 @@ button.tdoc-cluster-row {
 
 .tdoc-pin .tdoc-pin-anon { display: block; }
 
+/* The emoji picker is placed by Base UI's positioner, so the popup itself must
+   stay in flow — chrome.css gives `.tdoc-emoji-picker` `position: absolute`
+   (it used to be hand-placed on document.body), which breaks both the
+   positioner's offset and its collision flipping. Own the stacking here. */
+.tdoc-picker-positioner {
+  z-index: 1000001;
+}
+
+.tdoc-picker-positioner .tdoc-emoji-picker {
+  position: static;
+}
+
 /* Composer close: the legacy popup used a bare × span. */
 .tdoc-popup .head button.x {
   appearance: none;
