@@ -38,8 +38,33 @@ scrolls it instead of squashing it.
 `data-tdoc-artifact` makes the whole block one comment anchor rather than
 leaving the reader to comment on fragments of its text.
 
-**Table scroll** — the same idea for tables: `<div class="tdoc-table-scroll">`
-around any table wide enough to overflow.
+**Table** — one bordered card, ruled inside, with nothing filled. A hairline
+under each row does the work of separating them; a header sits in the muted ink
+rather than a tinted band, and numbers are tabular so a column lines up.
+
+```html
+<div class="tdoc-table-scroll">
+  <table> … </table>
+</div>
+```
+
+The shape matters more than it looks. Filling every cell and spacing them apart
+turns a table into a pile of blocks: the gutters cut the columns, so the eye has
+no continuous edge to scan down, and rounded corners multiply with every row.
+Fills are also the worst case for this reader — dark mode is a whole-page
+invert, so a filled cell becomes a slab where a hairline only changes colour.
+
+Rounding a table needs `border-collapse: separate` with `border-spacing: 0` and
+`overflow: hidden` to clip; `collapse` will not round. Clear the cell fill
+explicitly — the reader supplies one, and a rule that sets only borders and
+padding leaves it in place, so the card comes out filled anyway.
+
+**Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
+figure. Both are `overflow-x: auto`, and both need the child to have a
+`min-width` or the wrapper never engages: an `svg` at `width: 100%` shrinks to
+the column instead of overflowing it, and its labels land at a few pixels on a
+phone. Give a wide figure a `min-width` that keeps its smallest type around
+9px, and let it scroll.
 
 **Stat tile row** — a few numbers that carry an argument on their own. Three or
 four; a fifth is a table.

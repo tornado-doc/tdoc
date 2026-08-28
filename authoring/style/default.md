@@ -87,6 +87,7 @@ white with one pastel accent, and it draws any figure the content asks for.
 | Accent fill | Pink `fill:#f7d7d1 stroke:#e0a99e`, text `#b3503c`; or blue `fill:#dde7f9 stroke:#a9c0ee`, text `#26407a` |
 | Textured variant | Dot over the pink for a live state; diagonal hatch over the blue for a transformed one |
 | Stacked bar | Blue shades `#c4d4f5` / `#d4e0f8` / `#e8eefb` with `#a9c0ee` strokes and mono labels; a hatched segment marks a transformed part, a dashed baseline marks a limit |
+| Table | `rule` hairline border, `rx:12` card; row rules in `rule`; header in `muted`, normal case, no fill |
 
 Solid pastel is the base and the texture is the *variant*, not the fill. Put
 the colour inside the pattern tile so the texture reads on top of it rather
@@ -115,4 +116,4 @@ thing looks in this register.
 ## Style is visual only
 
 Governs how the page looks — never section numbering, language, tone, or
-structure. Tables inherit the overlay default. Link generously.
+structure. Tables take the treatment above. Link generously.

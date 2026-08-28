@@ -131,6 +131,7 @@ the single thing the figure is about.
 | Accent fill | `fill:#fff5f3 stroke:#ff4b2e`, text `#ff4b2e` — **one node per figure** |
 | Textured variant | Diagonal hatch in `#ff4b2e` at 35% over the same fill |
 | Stacked bar | Greys `#f0f0f0` / `#e5e5e5` / `#d4d4d4` with `#a3a3a3` strokes; the segment under discussion takes the accent |
+| Table | `rule` hairline border, square corners; row rules in `rule`; header mono in `muted`; figures tabular |
 
 Metric labels are mono here, including inside figures — a number set in the
 body sans reads as prose and gets skimmed.

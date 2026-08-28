@@ -52,7 +52,8 @@ t('every style gives the same components a treatment', () => {
   // The swap is only real if each style answers for the same parts. A style
   // that skips one leaves that component undefined the moment it is selected.
   const parts = ['Container frame', 'Label chip', 'Numbered group', 'Description box',
-                 'Primary arrow', 'Secondary arrow', 'Accent fill', 'Textured variant', 'Stacked bar'];
+                 'Primary arrow', 'Secondary arrow', 'Accent fill', 'Textured variant', 'Stacked bar',
+                 'Table'];
   for (const entry of ['default', 'technical', 'paper', 'editorial']) {
     const text = read(`authoring/style/${entry}.md`);
     const missing = parts.filter(part => !text.includes(part));
