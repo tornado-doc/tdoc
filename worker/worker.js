@@ -1782,13 +1782,27 @@ async function indexHtml(env, session, origin, nonce) {
   const day = (iso) => (typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '');
   const starBtn = (slug) => `<button class="star-btn${starredSet.has(slug) ? ' is-starred' : ''}" data-slug="${escapeHtml(slug)}" aria-pressed="${starredSet.has(slug)}" aria-label="${starredSet.has(slug) ? 'Unstar' : 'Star'} ${escapeHtml(slug)}">${starredSet.has(slug) ? '★' : '☆'}</button>`;
 
+  // Location model (Drive-style, one level for now — a folder `parent`
+  // field is reserved for nesting): folders render as rows above the doc
+  // list, filed docs leave the root view, navigation is ?folder=<id>.
+  const folderById = new Map(folderState.folders.map((f) => [f.id, f]));
+  const folderCounts = {};
+  for (const row of visible) {
+    const fid = folderState.docs[row.slug];
+    if (fid) folderCounts[fid] = (folderCounts[fid] || 0) + 1;
+  }
+  const locHint = (slug) => {
+    const f = folderById.get(folderState.docs[slug]);
+    return f ? `<span class="loc-hint" hidden> · in ${escapeHtml(f.name)}</span>` : '';
+  };
+
   const rows = visible.map(({ slug, title, latest, created, updated }) => `<div class="doc-row" data-slug="${escapeHtml(slug)}" data-title="${escapeHtml(title)}" data-created="${escapeHtml(created)}" data-updated="${escapeHtml(updated)}" data-folder="${escapeHtml(folderState.docs[slug] || '')}">
       <label class="row-check">
         <input type="checkbox" class="doc-check" aria-label="Select ${escapeHtml(title)}">
       </label>
       <div class="doc-info">
         <a class="doc-title" href="/d/${encodeURIComponent(slug)}/v/${latest}">${escapeHtml(title)}</a>
-        <div class="doc-meta">${escapeHtml(slug)} · v${latest}${day(updated) ? ` · updated ${day(updated)}` : ''}</div>
+        <div class="doc-meta">${escapeHtml(slug)} · v${latest}${day(updated) ? ` · updated ${day(updated)}` : ''}${locHint(slug)}</div>
       </div>
       <div class="row-actions">
         ${starBtn(slug)}
@@ -1817,7 +1831,26 @@ async function indexHtml(env, session, origin, nonce) {
   const recentList = recentRows.map((r) => flatRow(r, 'visited')).join('');
   const starList = starRows.map((r) => flatRow(r, 'starred')).join('');
 
-  const folderChips = folderState.folders.map((f) => `<button class="chip folder-chip" data-folder="${escapeHtml(f.id)}">${escapeHtml(f.name)}</button>`).join('');
+  const folderRows = folderState.folders
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    .map((f) => {
+      const n = folderCounts[f.id] || 0;
+      return `<div class="doc-row folder-row" data-folder-id="${escapeHtml(f.id)}" data-name="${escapeHtml(f.name)}" role="button" tabindex="0" aria-label="Open folder ${escapeHtml(f.name)}">
+      <span class="folder-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+      <div class="doc-info">
+        <span class="doc-title">${escapeHtml(f.name)}</span>
+        <div class="doc-meta">${n} ${n === 1 ? 'doc' : 'docs'}</div>
+      </div>
+      <div class="row-actions">
+        <button class="row-menu-btn" aria-label="Folder actions" aria-haspopup="true" aria-expanded="false">⋯</button>
+        <div class="row-menu" hidden>
+          <button class="folder-rename" data-id="${escapeHtml(f.id)}">Rename…</button>
+          <button class="folder-delete" data-id="${escapeHtml(f.id)}" data-name="${escapeHtml(f.name)}">Delete folder…</button>
+        </div>
+      </div>
+    </div>`;
+    }).join('');
   const foldersJson = JSON.stringify(folderState.folders.map((f) => ({ id: f.id, name: f.name }))).replace(/</g, '\\u003c');
 
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My docs</title>
@@ -1923,14 +1956,25 @@ async function indexHtml(env, session, origin, nonce) {
     background-size: 11px; }
   .toolbar select:hover { border-color: #ccc; }
   .toolbar select:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
-  .folder-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
-  .chip { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--td-line); background: #fff; color: var(--td-ink); }
-  .chip.is-active { background: var(--td-accent-tint); border-color: var(--td-accent); color: var(--td-accent); font-weight: 600; }
-  .chip.new-folder { color: var(--td-muted); border-style: dashed; }
-  .folder-tools { display: none; gap: 2px; }
-  .folder-tools.is-visible { display: inline-flex; }
-  .folder-tools button { font-size: 12px; border: none; background: none; color: var(--td-muted); padding: 4px 6px; border-radius: 6px; }
-  .folder-tools button:hover { background: var(--td-line); color: var(--td-ink); }
+  .folder-row { cursor: pointer; }
+  .folder-row:hover { background: var(--td-surface); }
+  .folder-ico { display: flex; align-items: center; color: var(--td-muted); flex-shrink: 0; padding: 0 2px; }
+  .folder-row:hover .folder-ico { color: var(--td-accent); }
+  .folder-rename { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-ink); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
+  .folder-rename:hover { background: var(--td-surface); }
+  .folder-delete { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-danger); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
+  .folder-delete:hover { background: var(--td-danger-tint); }
+  .crumbs { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 14px; }
+  .crumbs[hidden] { display: none !important; }
+  .crumb-root { border: none; background: none; font: inherit; color: var(--td-accent); padding: 2px 6px; border-radius: 6px; cursor: pointer; }
+  .crumb-root:hover { background: var(--td-accent-tint); }
+  .crumbs .sep { color: #c0c0c4; user-select: none; }
+  .crumbs .cur { font-weight: 600; }
+  .new-folder-btn { font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 8px; border: 1px dashed var(--td-line); background: #fff; color: var(--td-muted); white-space: nowrap; }
+  .new-folder-btn:hover { border-color: var(--td-accent); color: var(--td-accent); }
+  .loc-hint { color: var(--td-muted); }
+  .loc-hint[hidden] { display: none !important; }
+  .folder-row[hidden] { display: none !important; }
   .star-btn { border: none; background: none; font-size: 17px; color: #ccc; padding: 2px 6px; border-radius: 6px; line-height: 1; }
   .doc-row:hover .star-btn { color: var(--td-muted); }
   .star-btn:hover { background: var(--td-line); color: #f5a623; }
@@ -1963,15 +2007,12 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
       <option value="created">Created</option>
       <option value="title">Title</option>
     </select>
+    <button type="button" id="new-folder" class="new-folder-btn">+ New folder</button>
   </div>
-  <div class="folder-bar" id="folder-bar">
-    <button type="button" class="chip is-active" data-folder="">All docs</button>
-    ${folderChips}
-    <button type="button" class="chip new-folder" id="new-folder">+ New folder</button>
-    <span class="folder-tools" id="folder-tools">
-      <button type="button" id="folder-rename">Rename</button>
-      <button type="button" id="folder-delete">Delete folder</button>
-    </span>
+  <div class="crumbs" id="crumbs" hidden>
+    <button type="button" class="crumb-root" id="crumb-root">My docs</button>
+    <span class="sep" aria-hidden="true">/</span>
+    <span class="cur" id="crumb-name"></span>
   </div>
   <div class="batch-bar">
     <label class="select-all"><input type="checkbox" id="select-all"> <span id="select-all-label">Select all</span></label>
@@ -1980,6 +2021,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
       <button type="button" id="batch-delete" class="batch-delete">Delete selected</button>
     </span>
   </div>
+  <div id="folder-rows">${folderRows}</div>
   <div class="doc-list">${rows.join('')}</div>
   <p id="no-match" class="empty" hidden>No matches.</p>`}
 </section>
@@ -2237,7 +2279,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
         b.onclick = () => done({ folder: id });
         listBox.appendChild(b);
       };
-      add('', 'All docs (no folder)');
+      add('', 'My docs (no folder)');
       FOLDERS.forEach((f) => add(f.id, f.name));
       box.appendChild(listBox);
       const actions = document.createElement('div');
@@ -2382,19 +2424,40 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
   }
   function applySearch() {
     const q = (search.value || '').trim().toLowerCase();
+    const searching = !!q;
     let shown = 0;
     listEl.querySelectorAll('.doc-row').forEach((row) => {
       const hay = ((row.dataset.title || '') + ' ' + (row.dataset.slug || '')).toLowerCase();
-      const inFolder = !activeFolder || (row.dataset.folder || '') === activeFolder;
-      const match = (!q || hay.includes(q)) && inFolder;
+      // Browsing shows the current location only; searching goes global,
+      // with the "in <folder>" hint on so filed docs are never lost.
+      const inLoc = searching || (row.dataset.folder || '') === activeFolder;
+      const match = (!q || hay.includes(q)) && inLoc;
       row.hidden = !match;
+      const hint = row.querySelector('.loc-hint');
+      if (hint) hint.hidden = !searching;
       if (match) shown += 1;
       else {
         const box = row.querySelector('.doc-check');
         if (box) box.checked = false;
       }
     });
-    if (noMatch) noMatch.hidden = shown > 0;
+    let foldersShown = 0;
+    if (folderRowsEl) {
+      folderRowsEl.querySelectorAll('.folder-row').forEach((fr) => {
+        const vis = !searching && !activeFolder;
+        fr.hidden = !vis;
+        if (vis) foldersShown += 1;
+      });
+    }
+    if (crumbsEl) {
+      crumbsEl.hidden = !activeFolder;
+      const cur = FOLDERS.find((f) => f.id === activeFolder);
+      if (crumbName) crumbName.textContent = (cur && cur.name) || '';
+    }
+    if (noMatch) {
+      noMatch.textContent = !searching && activeFolder ? 'This folder is empty.' : 'No matches.';
+      noMatch.hidden = shown > 0 || (!searching && !activeFolder && foldersShown > 0);
+    }
     listEl.hidden = shown === 0;
     syncBatchUi();
   }
@@ -2456,23 +2519,38 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     all.forEach((row) => listEl.appendChild(row));
   });
 
-  // Folders — chips filter the list; the ⋯ menu and the batch bar move docs.
-  // Create/rename/delete reload the page (the chip row and FOLDERS list are
-  // server-rendered); move updates rows in place.
-  const folderBar = document.getElementById('folder-bar');
-  const folderTools = document.getElementById('folder-tools');
-  function setFolder(id) {
-    activeFolder = id;
-    folderBar.querySelectorAll('.chip[data-folder]').forEach((c) => {
-      c.classList.toggle('is-active', c.dataset.folder === id);
-    });
-    folderTools.classList.toggle('is-visible', !!id);
+  // Folders are places (Drive-style, one level): folder rows sit above the
+  // doc list at the root, clicking one navigates into it (?folder=<id> via
+  // pushState), the breadcrumb walks back. Create/rename/delete reload the
+  // page (rows and FOLDERS are server-rendered); move updates rows in place.
+  const folderRowsEl = document.getElementById('folder-rows');
+  const crumbsEl = document.getElementById('crumbs');
+  const crumbName = document.getElementById('crumb-name');
+  function setFolder(id, push) {
+    activeFolder = FOLDERS.some((f) => f.id === id) ? id : '';
+    if (push) {
+      const url = activeFolder ? '?folder=' + encodeURIComponent(activeFolder) : location.pathname;
+      history.pushState({ folder: activeFolder }, '', url);
+    }
     applySearch();
   }
-  folderBar.addEventListener('click', (e) => {
-    const chip = e.target && e.target.closest ? e.target.closest('.chip[data-folder]') : null;
-    if (chip) setFolder(chip.dataset.folder);
+  window.addEventListener('popstate', () => {
+    setFolder(new URLSearchParams(location.search).get('folder') || '', false);
   });
+  if (folderRowsEl) {
+    folderRowsEl.addEventListener('click', (e) => {
+      if (e.target && e.target.closest && e.target.closest('.row-actions')) return;
+      const fr = e.target && e.target.closest ? e.target.closest('.folder-row') : null;
+      if (fr) setFolder(fr.dataset.folderId, true);
+    });
+    folderRowsEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const fr = e.target && e.target.closest ? e.target.closest('.folder-row') : null;
+      if (fr) { e.preventDefault(); setFolder(fr.dataset.folderId, true); }
+    });
+  }
+  const crumbRoot = document.getElementById('crumb-root');
+  if (crumbRoot) crumbRoot.addEventListener('click', () => setFolder('', true));
   document.getElementById('new-folder').addEventListener('click', async () => {
     const name = await showPrompt({ title: 'New folder', confirmLabel: 'Create', placeholder: 'Folder name' });
     if (!name) return;
@@ -2485,36 +2563,41 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     if (!res.ok) { toast("Couldn't create folder", 'error'); return; }
     location.reload();
   });
-  document.getElementById('folder-rename').addEventListener('click', async () => {
-    if (!activeFolder) return;
-    const cur = FOLDERS.find((f) => f.id === activeFolder);
-    const name = await showPrompt({ title: 'Rename folder', confirmLabel: 'Rename', value: cur ? cur.name : '' });
-    if (!name) return;
-    const res = await fetch('/api/folders', {
-      method: 'PATCH',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: activeFolder, name }),
+  document.querySelectorAll('.folder-rename').forEach((button) => {
+    button.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      closeMenus(null);
+      const cur = FOLDERS.find((f) => f.id === button.dataset.id);
+      const name = await showPrompt({ title: 'Rename folder', confirmLabel: 'Rename', value: cur ? cur.name : '' });
+      if (!name) return;
+      const res = await fetch('/api/folders', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: button.dataset.id, name }),
+      });
+      if (!res.ok) { toast("Couldn't rename folder", 'error'); return; }
+      location.reload();
     });
-    if (!res.ok) { toast("Couldn't rename folder", 'error'); return; }
-    location.reload();
   });
-  document.getElementById('folder-delete').addEventListener('click', async () => {
-    if (!activeFolder) return;
-    const cur = FOLDERS.find((f) => f.id === activeFolder);
-    const proceed = await showConfirm({
-      title: 'Delete folder "' + ((cur && cur.name) || '') + '"?',
-      body: 'Docs inside go back to All docs. No documents are deleted.',
-      confirmLabel: 'Delete folder',
-      danger: true,
+  document.querySelectorAll('.folder-delete').forEach((button) => {
+    button.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      closeMenus(null);
+      const proceed = await showConfirm({
+        title: 'Delete folder "' + (button.dataset.name || '') + '"?',
+        body: 'Docs inside move back to My docs. No documents are deleted.',
+        confirmLabel: 'Delete folder',
+        danger: true,
+      });
+      if (!proceed) return;
+      const res = await fetch('/api/folders?id=' + encodeURIComponent(button.dataset.id), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) { toast("Couldn't delete folder", 'error'); return; }
+      location.reload();
     });
-    if (!proceed) return;
-    const res = await fetch('/api/folders?id=' + encodeURIComponent(activeFolder), {
-      method: 'DELETE',
-      credentials: 'same-origin',
-    });
-    if (!res.ok) { toast("Couldn't delete folder", 'error'); return; }
-    location.reload();
   });
   document.querySelectorAll('.row-move').forEach((button) => {
     button.addEventListener('click', async () => {
@@ -2529,6 +2612,7 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
       }
       const row = button.closest('.doc-row');
       row.dataset.folder = pick.folder || '';
+      setRowHint(row, pick.folder || '');
       applySearch();
       toast('Moved');
     });
@@ -2551,12 +2635,30 @@ ${rows.length === 0 ? '<p class="empty">No published docs yet. Hit <b>Create a d
     batchMove.disabled = false;
     rows.forEach((row) => {
       row.dataset.folder = pick.folder || '';
+      setRowHint(row, pick.folder || '');
       const box = row.querySelector('.doc-check');
       if (box) box.checked = false;
     });
     applySearch();
     toast('Moved');
   });
+  // Keep the search-time location hint honest after an in-place move.
+  function setRowHint(row, folderId) {
+    let hint = row.querySelector('.loc-hint');
+    const f = FOLDERS.find((x) => x.id === folderId);
+    if (!f) { if (hint) hint.remove(); return; }
+    if (!hint) {
+      hint = document.createElement('span');
+      hint.className = 'loc-hint';
+      hint.hidden = true;
+      const meta = row.querySelector('.doc-meta');
+      if (meta) meta.appendChild(hint);
+    }
+    hint.textContent = ' · in ' + f.name;
+  }
+  // Boot into the location the URL names (?folder=<id>; unknown ids fall
+  // back to the root) — this first applySearch also hides filed docs.
+  setFolder(new URLSearchParams(location.search).get('folder') || '', false);
   syncBatchUi();
 })();
 </script>

@@ -277,7 +277,7 @@ function pane(html, id) {
     assert(!pane(html, 'pane-starred').includes('data-slug="was-open"'), 'Starred must drop unreadable docs');
   });
 
-  await t('folders: create → move → chip filter data; delete returns docs to root', async () => {
+  await t('folders as places: folder row + count + crumbs; delete returns docs to root', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'alice');
     await seedDoc(env, 'my-doc', { owner: 'alice' });
@@ -296,7 +296,14 @@ function pane(html, id) {
     assert(move.status === 200, `move ${move.status}: ${await move.clone().text()}`);
     let html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
     assert(html.includes(`data-folder="${folder.id}"`), 'moved row must carry its folder id');
-    assert(html.includes('data-folder="Work"') === false && html.includes('>Work</button>'), 'folder chip must render by name');
+    // Location model: the folder renders as a ROW in the table (name + count),
+    // navigation is crumbs + ?folder=, and filed rows carry a search-time
+    // location hint.
+    assert(html.includes(`data-folder-id="${folder.id}"`), 'folder must render as a folder row');
+    assert(/folder-row[^>]*data-name="Work"/.test(html), 'folder row must carry its name');
+    assert(html.includes('>1 doc<'), 'folder row must show its doc count');
+    assert(html.includes('id="crumbs"'), 'breadcrumb container must render');
+    assert(html.includes('in Work'), 'filed doc row must carry the location hint');
 
     const bogus = await worker.fetch(req('/api/folders/move', { method: 'POST', cookie, body: { slugs: ['my-doc'], folder: 'f_nope' } }), env, {});
     assert(bogus.status === 404, `move to unknown folder should 404, got ${bogus.status}`);
@@ -306,6 +313,7 @@ function pane(html, id) {
     html = await (await worker.fetch(req('/me', { cookie }), env, {})).text();
     assert(html.includes('data-slug="my-doc"'), 'doc must survive folder deletion');
     assert(html.includes('data-folder=""'), 'doc must fall back to the root after its folder is deleted');
+    assert(!html.includes('data-folder-id='), 'deleted folder must not leave a folder row behind');
   });
 
   await t('folders shelve only your own docs; rename works; state is per-login', async () => {
