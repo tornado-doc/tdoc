@@ -21,6 +21,22 @@ file and `.claude-plugin/plugin.json`.
   excluded by name: `authoring/vendor/no-ai-slop.md` stays MIT under Peter
   Yang's notice.
 
+- **The tornado is redrawn as five strokes.** The traced outline is replaced
+  by the drawing it was always meant to be: five round-capped lines, in
+  `assets/tdoc_logo.svg` and kept byte-identical in `worker.js`. It still
+  carries no background field and still inks in `currentColor`, for the
+  reasons the previous entry records — what changed is the technique, so the
+  test that guarded paint order and `evenodd` (both artifacts of tracing a
+  raster) now guards `fill="none"` with a `currentColor` stroke instead. The
+  viewBox crops to the drawing plus 6%: the source art floats inside a 436
+  square, and carrying that margin would leave the mark half the box at the
+  24px bar and the 16px tab. `assets/favicon.svg` follows the same drawing and
+  keeps its explicit light/dark swap, since a tab strip has no page invert to
+  ride on. `assets/tdoc_logo_square.svg` and `tdoc_logo_square_dark.svg` are
+  new: the filled square lockup, for an app icon or a slide — surfaces that
+  bring their own field. The three 2500px rasters are regenerated from the
+  vector.
+
 - **The mark is a tornado, and it carries no background.** The dog is
   replaced by a line-art vortex, traced to vector at `assets/tdoc_logo.svg`
   and kept byte-identical in `worker.js`. The old SVG sat on an opaque white
