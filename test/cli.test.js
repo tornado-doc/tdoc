@@ -138,6 +138,41 @@ t('tdoc default-template validator accepts scoped widget CSS', () => {
   }
 });
 
+t('validator rejects content that escapes the content root', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-root-'));
+  const run = (name, body) => {
+    const html = path.join(dir, name);
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; }</style>
+      </head><body>${body}</body></html>`);
+    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+  };
+  try {
+    // One stray </div> closes .wrap early and the rest of the document becomes a
+    // sibling of it. Every check still passes — the doc has a content root, its
+    // CSS is in contract — but the reading column stops applying and the page
+    // renders full-bleed. Only the nesting shows it.
+    const escaped = run('escaped.html',
+      '<div class="wrap"><h1>T</h1><div class="tiles"><div class="tile">n</div></div></div>' +
+      '<h2>Everything after this is outside</h2><p>and loses the column</p>');
+    assert(escaped.status !== 0, 'content outside the root should be rejected');
+    assert(/outside the content root/.test(escaped.stderr), escaped.stderr);
+
+    const nested = run('nested.html',
+      '<div class="wrap"><h1>T</h1><div class="tiles"><div class="tile">n</div></div>' +
+      '<h2>Still inside</h2><p>keeps the column</p></div>');
+    assert(nested.status === 0, `correctly nested doc rejected: ${nested.stderr}`);
+
+    // <script>/<style> at body level are not content and must not trip it
+    const scripts = run('scripts.html',
+      '<div class="wrap"><h1>T</h1></div><template id="x"></template>');
+    assert(scripts.status === 0, `template beside the root should pass: ${scripts.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 t('validator rejects a figure whose ink floats inside its own viewBox', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-viewbox-'));
   const page = (svg) => `<!doctype html><html><head>
