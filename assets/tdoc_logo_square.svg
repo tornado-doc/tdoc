@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 436 436" role="img" aria-label="tdoc">
+  <!-- The square lockup (light field) — an app icon, an Open Graph card, a slide.
+       In the app the mark is assets/tdoc_logo.svg, which has no field: a
+       filled square reads as a tile against the bar. -->
+  <rect width="436" height="436" fill="#FFFFFF"/>
+  <g fill="none" stroke="#101219" stroke-width="10.5" stroke-linecap="round">
+  <path d="M 88.5 171.5 L 309.5 130.5"/>
+  <path d="M 122.5 200.5 L 279.5 169.5"/>
+  <path d="M 148.5 222 L 278.5 222"/>
+  <path d="M 158.5 271.5 L 255 252.5"/>
+  <path d="M 180.5 306.5 L 243 291.5"/>
+  </g>
+</svg>
