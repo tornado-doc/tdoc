@@ -54,6 +54,7 @@ class ContractParser(HTMLParser):
         self.styles: list[str] = []
         self.has_viewport = False
         self.primary_roots = 0
+        self.stray_body_children: list[str] = []
         self.has_footer = False
         self.inline_prose_styles: list[str] = []
         self.author_scripts = 0
@@ -98,6 +99,11 @@ class ContractParser(HTMLParser):
                 classes = set(attrs.get("class", "").split())
                 if tag in {"main", "article"} or classes.intersection(ROOT_CLASSES):
                     self.primary_roots += 1
+                elif tag not in {"script", "style", "template", "noscript"}:
+                    # A sibling of the content root. Almost always the tail of a
+                    # document whose root was closed early by one stray </div>:
+                    # everything after it lands here and loses the reading column.
+                    self.stray_body_children.append(tag)
             if tag not in VOID_TAGS:
                 self.body_depth += 1
 
@@ -317,6 +323,16 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
         errors.append('missing <meta name="viewport">')
     if parser.primary_roots != 1:
         errors.append("expected exactly one direct body content root (.wrap, main, article, .content, or .container)")
+    # Only when a root exists. A doc with no root at all is a supported shape —
+    # the template applies the column to body itself via :has() — and its
+    # headings are not "escaped", they are the document.
+    if parser.primary_roots >= 1 and parser.stray_body_children:
+        kinds = ", ".join(f"<{t}>" for t in sorted(set(parser.stray_body_children))[:6])
+        errors.append(
+            "%d element(s) sit outside the content root (%s); the reading column does not "
+            "apply to them. One unbalanced </div> closing the root early is the usual cause"
+            % (len(parser.stray_body_children), kinds)
+        )
     if parser.has_footer:
         errors.append("author <footer> is reserved; the tdoc shell supplies the footer")
     if parser.author_scripts:
