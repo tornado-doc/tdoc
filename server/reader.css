@@ -38,7 +38,7 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
   }
-  :where(body h1) { font-family: var(--td-font-display); font-size: 38px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 20px; color: var(--td-heading); }
+  :where(body h1) { font-family: var(--td-font-display); font-size: clamp(28px, 3.6vw, 36px); line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 20px; color: var(--td-heading); }
   :where(body h2) { font-family: var(--td-font-display); font-size: 27px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 44px 0 14px; color: var(--td-heading); padding-bottom: 6px; border-bottom: 1px solid var(--td-h2-rule); }
   :where(body h3) { font-family: var(--td-font-display); font-size: 21px; line-height: 1.35; font-weight: 700; margin: 32px 0 10px; color: var(--td-heading); }
   :where(body h4) { font-size: 17px; font-weight: 700; margin: 22px 0 6px; color: var(--td-heading); }

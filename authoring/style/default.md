@@ -1,8 +1,8 @@
 # default — the stark sans style (applied when a doc selects nothing)
 
 **This is the house default: every doc that names no style gets it.** A cold,
-spare register: pure white, pure black, one clean sans everywhere, an
-oversized headline with tight tracking, and almost no color. The aesthetic of
+spare register: pure white, pure black, one clean sans everywhere, a
+tightly-tracked headline, and almost no color. The aesthetic of
 the OpenAI research index, approximated with **open fonts** — the real page
 uses OpenAI's proprietary OpenAI Sans, which is not ours to ship.
 
@@ -27,8 +27,9 @@ Measured against the live page, then substituted:
 **One sans, no serif, no warmth.** Everything is the same geometric-humanist
 sans. The register comes from scale and restraint, not from type contrast.
 
-**An oversized headline with tight tracking.** h1 is large (≈56px) with
-negative letter-spacing (`-.03em`). That single move is most of the look. h1
+**A tightly-tracked headline.** h1 runs `clamp(28px,3.6vw,36px)` — 36px on a
+desktop, easing to 28px on a phone — with negative letter-spacing (`-.03em`).
+The tracking, not the size, is most of the look. h1
 and h2 set their family explicitly (the overlay colors/styles headings).
 
 **Near-zero color.** Black on white. Links are black dimmed to ~60%, not a
@@ -43,7 +44,7 @@ hue. Reserve any real color for a chart that genuinely needs it.
 ```css
 body { background:#fff; }
 .wrap { font-family:"Inter",system-ui,-apple-system,sans-serif; color:#0a0a0a; font-size:17px; line-height:1.65; }
-.wrap h1 { font-family:"Inter",system-ui,sans-serif; font-weight:600; font-size:clamp(38px,6vw,56px); letter-spacing:-.03em; line-height:1.05; color:#0a0a0a; }
+.wrap h1 { font-family:"Inter",system-ui,sans-serif; font-weight:600; font-size:clamp(28px,3.6vw,36px); letter-spacing:-.03em; line-height:1.05; color:#0a0a0a; }
 .wrap h2 { font-family:"Inter",system-ui,sans-serif; font-weight:600; letter-spacing:-.015em; color:#0a0a0a; margin-top:40px; }
 .wrap a  { color:rgba(10,10,10,.6); text-decoration:none; border-bottom:1px solid rgba(10,10,10,.2); }
 /* a hairline-ruled note — no fill, just a rule */

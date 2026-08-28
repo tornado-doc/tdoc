@@ -68,7 +68,7 @@ mono  ui-monospace, "SF Mono", Menlo, monospace   (theirs is "DM Mono")
    Dark is the overlay's invert of everything below. */
 body  { background:#fff; }
 .wrap { color:rgba(10,10,10,.92); font:16px/1.62 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-.wrap h1 { color:#0a0a0a; font-size:36px; font-weight:500; letter-spacing:-.9px; line-height:1.25; }
+.wrap h1 { color:#0a0a0a; font-size:clamp(28px,3.6vw,36px); font-weight:500; letter-spacing:-.9px; line-height:1.25; }
 .wrap h2 { color:#0a0a0a; font-size:24px; font-weight:500; margin-top:34px; }
 .muted   { color:#737373; }
 .wrap a  { color:#737373; text-decoration:underline; }
