@@ -1,12 +1,5 @@
-// Worker shell-parity guard (Step 7). The offline suite can't boot a Cloudflare
-// Worker, so this does two things:
-//   1. Hermetic SOURCE checks on worker.js — the shell routes/CSP wiring exist
-//      and haven't silently regressed (same convention as csp-headers.test.js).
-//   2. A FUNCTIONAL check: run bin/tdoc-bundle, import the bundled worker as an
-//      ES module, and drive the shared builders it self-registers on globalThis
-//      (TDOC_CHROME.buildBar + TDOC_SHELL_BUILDER.shellHtml) to prove the
-//      published shell actually renders — bar, isolated /frame iframe, and only
-//      our nonced chrome scripts.
+// React/Vite shell architecture guard. Author HTML remains isolated and
+// framework-free; provider UI is emitted as boot data plus hashed assets.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -14,137 +7,112 @@ const cp = require('child_process');
 
 let pass = 0, fail = 0;
 function ok(name) { console.log(`  ✓ ${name}`); pass++; }
-function bad(name, err) { console.log(`  ✗ ${name}\n    ${err}`); fail++; }
-async function t(name, fn) { try { await fn(); ok(name); } catch (e) { bad(name, e.message); } }
+function bad(name, error) { console.log(`  ✗ ${name}\n    ${error}`); fail++; }
+async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(name, error.message); } }
 
 const ROOT = path.join(__dirname, '..');
-const workerSrc = fs.readFileSync(path.join(ROOT, 'worker', 'worker.js'), 'utf8');
-const bundleSrc = fs.readFileSync(path.join(ROOT, 'bin', 'tdoc-bundle'), 'utf8');
+const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
+const worker = read('worker/worker.js');
+const bundler = read('bin/tdoc-bundle');
 
 (async () => {
-  console.log('worker shell parity (hermetic source + bundled-builder functional)\n');
+  console.log('React worker shell architecture\n');
 
-  // ── source: bundler inlines the shell modules ──────────────────────────────
-  await t('bin/tdoc-bundle inlines chrome + shell as code and chrome + probe as strings', async () => {
-    for (const marker of ['/* __TDOC_CHROME_MODULE__ */', '/* __TDOC_SHELL_MODULE__ */', '__TDOC_CHROME_JS__', '__TDOC_PROBE_JS__']) {
-      if (!bundleSrc.includes(marker)) throw new Error(`tdoc-bundle no longer references ${marker}`);
+  await t('bundle embeds only the shell builder, frame probe, reader CSS, and Vite runtime', async () => {
+    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__']) {
+      if (!bundler.includes(marker)) throw new Error(`missing ${marker}`);
     }
-    if (!/bundleSha = sha\(\[worker, chromeMod, shellMod, frameProbe, chromeCss, readerCss, manageJs\]/.test(bundleSrc)) {
-      throw new Error('bundle_sha must cover chrome/shell/probe/css/manage so drift changes the hash');
+    for (const retired of ['CHROME_MODULE', 'CHROME_JS', 'MANAGE_JS', 'SIGNIN_JS', 'ONBOARD_JS']) {
+      if (bundler.includes(retired)) throw new Error(`legacy bundle input remains: ${retired}`);
     }
-  });
-
-  await t('worker.js declares the shell placeholders + globalThis accessors', async () => {
-    for (const marker of ['/* __TDOC_CHROME_MODULE__ */', '/* __TDOC_SHELL_MODULE__ */', 'const CHROME_JS = `__TDOC_CHROME_JS__`', 'const PROBE_JS = `__TDOC_PROBE_JS__`']) {
-      if (!workerSrc.includes(marker)) throw new Error(`worker.js missing ${marker}`);
-    }
-    if (!/globalThis\.TDOC_CHROME/.test(workerSrc) || !/globalThis\.TDOC_SHELL_BUILDER/.test(workerSrc)) {
-      throw new Error('worker.js must read CHROME/SHELL off globalThis (Workers ban eval)');
+    if (!bundler.includes('sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss]')) {
+      throw new Error('bundle hash does not cover the complete runtime input set');
     }
   });
 
-  // ── source: CSP + frame route + doc render ─────────────────────────────────
-  await t('worker cspHeader adds frame-src \'self\' (shell frames only same-origin /frame)', async () => {
-    const s = workerSrc.indexOf('function cspHeader(nonce)');
-    const body = workerSrc.slice(s, s + 260);
-    if (!body.includes("frame-src 'self'")) throw new Error(`cspHeader missing frame-src 'self': ${body}`);
-  });
-
-  await t('worker frameCspHeader sandboxes the author frame to an opaque origin', async () => {
-    const s = workerSrc.indexOf('function frameCspHeader(nonce)');
-    if (s < 0) throw new Error('frameCspHeader() not found');
-    const body = workerSrc.slice(s, s + 240);
-    if (!/\bsandbox allow-scripts\b/.test(body)) throw new Error(`frameCspHeader must set sandbox allow-scripts: ${body}`);
-    if (!body.includes("frame-ancestors 'self'")) throw new Error('frameCspHeader must set frame-ancestors \'self\'');
-  });
-
-  await t('worker /frame route is Sec-Fetch-Dest gated, access-gated, probe-injected, frame-CSP\'d', async () => {
-    const s = workerSrc.indexOf('const frameMatch = p.match(/^\\/d\\/([^/]+)\\/v\\/(\\d+)\\/frame');
-    if (s < 0) throw new Error('/frame route not found');
-    const block = workerSrc.slice(s, s + 2400);
-    if (!/isWidgetFrameRequest\(req\.headers\.get\('sec-fetch-dest'\)\)/.test(block)) throw new Error('/frame must gate on Sec-Fetch-Dest: iframe');
-    if (!/enforceDocAccess\(/.test(block)) throw new Error('/frame must run enforceDocAccess (same gate as the doc view)');
-    if (!/\$\{PROBE_JS\}/.test(block)) throw new Error('/frame must inject the nonced probe');
-    if (!/frameCspHeader\(nonce\)/.test(block)) throw new Error('/frame must set frameCspHeader');
-  });
-
-  await t('worker serveDocVersion renders the shell for EVERY doc (landing included)', async () => {
-    const s = workerSrc.indexOf('async function serveDocVersion(');
-    const e = workerSrc.indexOf('async function landingResponse', s);
-    const block = workerSrc.slice(s, e);
-    if (!/const render = shellDocumentWorker;/.test(block)) {
-      throw new Error('serveDocVersion must render the shell unconditionally — the overlay path is deleted');
+  await t('worker declares the shell/probe/runtime placeholders without legacy chrome globals', async () => {
+    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', 'const PROBE_JS = `__TDOC_PROBE_JS__`', 'const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`']) {
+      if (!worker.includes(marker)) throw new Error(`worker missing ${marker}`);
     }
-    if (/injectOverlay/.test(block)) throw new Error('serveDocVersion still references injectOverlay');
-    if (!block.includes("'Content-Security-Policy': cspHeader(nonce)")) throw new Error('doc-view must keep cspHeader(nonce)');
+    if (!worker.includes('globalThis.TDOC_SHELL_BUILDER')) throw new Error('shell builder accessor missing');
+    if (/TDOC_CHROME|CHROME_JS|MANAGE_JS/.test(worker)) throw new Error('legacy chrome runtime remains');
   });
 
-  // ── functional: bundle, import, drive the shared builders ──────────────────
-  await t('bundled worker self-registers the shell builders and renders a published shell', async () => {
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-wshell-'));
-    cp.execFileSync(process.execPath, [path.join(ROOT, 'bin', 'tdoc-bundle')], {
-      env: { ...process.env, OUT_DIR: outDir }, stdio: ['ignore', 'ignore', 'pipe'],
+  await t('shell HTML is an empty React root plus boot data and hashed assets', async () => {
+    const shell = require(path.join(ROOT, 'server/shell.js'));
+    const doc = shell.shellHtml({
+      title: 'Demo',
+      nonceAttr: ' nonce="abc"',
+      cfgJson: '{"slug":"demo"}',
+      bootJson: '{"frameSrc":"/d/demo/v/3/frame"}',
+      runtimeJsPath: '/shell.abc.js',
+      runtimeCssPath: '/shell.abc.css',
     });
-    const bundled = path.join(outDir, '_worker.bundled.js');
-    const asMjs = path.join(outDir, '_worker.bundled.mjs');
-    fs.copyFileSync(bundled, asMjs);
-    await import('file://' + asMjs);
-    const CHROME = globalThis.TDOC_CHROME, SHELL = globalThis.TDOC_SHELL_BUILDER;
-    if (!CHROME || typeof CHROME.buildBar !== 'function') throw new Error('TDOC_CHROME.buildBar not registered by the bundle');
-    if (!SHELL || typeof SHELL.shellHtml !== 'function') throw new Error('TDOC_SHELL_BUILDER.shellHtml not registered by the bundle');
-    // Published bar carries Share (the published-mode primary CTA).
-    const bar = CHROME.buildBar({ mode: 'published', slug: 'demo', version: 3, versions: [{ n: 3 }] });
-    if (!/id="tdoc-share-btn"/.test(bar)) throw new Error('published bar missing Share button');
-    // The shell document embeds the isolated frame + our chrome, no author HTML.
-    const doc = SHELL.shellHtml({
-      title: 'Demo', frameSrc: '/d/demo/v/3/frame', nonceAttr: ' nonce="abc"',
-      chromeCssStr: '.tdoc-bar{}', barInner: bar, footerInner: '<i></i>',
-      chromeJs: 'window.__c=1;', authCfgJson: '{"mode":"published"}', cfgJson: '{"mode":"published"}',
-      signinJs: 'window.__s=1;', onboardJs: '',
-    });
-    if (!/class="tdoc-doc-frame"[^>]*src="\/d\/demo\/v\/3\/frame"/.test(doc)) throw new Error('shell doc missing the /frame iframe');
-    if (!/<div class="tdoc-bar">/.test(doc)) throw new Error('shell doc missing the chrome bar');
-    if (!doc.includes('nonce="abc"')) throw new Error('shell doc scripts must carry the nonce');
-    fs.rmSync(outDir, { recursive: true, force: true });
+    if (!doc.includes('<div id="tdoc-shell-root"></div>')) throw new Error('empty React root missing');
+    if (!doc.includes('window.__TDOC_SHELL__')) throw new Error('config boot missing');
+    if (!doc.includes('window.__TDOC_SHELL_BOOT__')) throw new Error('page boot missing');
+    if (!doc.includes('type="module" src="/shell.abc.js" nonce="abc"')) throw new Error('Vite module missing');
+    if (/<iframe|class="tdoc-bar"/.test(doc)) throw new Error('server still renders provider UI');
   });
 
-  // ── legacy-doc serve-time reader fallback ──────────────────────────────────
-  // Docs published before creation-time baking (no #tdoc-reader, no own
-  // max-width) get the reader CSS injected into the /frame RESPONSE — never
-  // into storage. Self-contained docs are excluded by the max-width check.
-  await t('both /frame routes carry the legacy reader-CSS fallback', async () => {
-    const serverSrc = fs.readFileSync(path.join(ROOT, 'server', 'server.js'), 'utf8');
-    for (const [name, src, cssRef] of [['server.js', serverSrc, 'readerCss()'], ['worker.js', workerSrc, 'READER_CSS']]) {
-      if (!src.includes(`id="tdoc-reader"') && !body.includes('max-width')`)) {
-        throw new Error(`${name} /frame route lost the legacy reader-CSS fallback gate`);
-      }
-      if (!src.includes(cssRef)) throw new Error(`${name} missing ${cssRef} use (standalone reader.css)`);
-    }
-  });
-
-  // ── the GENERATED client script must parse ─────────────────────────────────
-  // shellScript() is code inside a template literal: an escaped slash or a stray
-  // backtick in it silently corrupts the OUTPUT while shell.js itself still
-  // parses (node -c can't see it). Compile the generated string to catch that.
-  await t('generated shellScript compiles (template-literal corruption guard)', async () => {
-    const shell = require(path.join(ROOT, 'server', 'shell.js'));
-    new Function(shell.shellScript());   // throws on any syntax corruption
-  });
-
-  // ── published-mode bar wiring lives in the shared shellScript ──────────────
-  await t('shellScript wires the published bar (Share/Duplicate/Download/identity)', async () => {
-    const shell = require(path.join(ROOT, 'server', 'shell.js'));
-    const js = shell.shellScript();
-    for (const needle of [
-      "wire('#tdoc-share-btn'", 'function showShareModal', 'function duplicateDoc',
-      'function startDownload', 'function downloadExport', 'function renderIdentity',
-      "'/api/doc/duplicate'", "data-action=\"duplicate\"", "data-action=\"download-pdf\"",
-      'Sign in with GitHub', '__tdocSignIn',
+  await t('document entry renders React components and never starts a legacy engine', async () => {
+    const entry = read('shell/src/main.jsx');
+    if (!entry.includes('createRoot(root).render(<DocumentShell')) throw new Error('DocumentShell render missing');
+    if (/hydrateRoot|legacy-shell|startLegacyShell/.test(entry)) throw new Error('legacy hydration path remains');
+    for (const file of [
+      'shell/src/document/comment-card.jsx',
+      'shell/src/document/comment-layer.jsx',
+      'shell/src/document/document-toolbar.jsx',
+      'shell/src/hooks/use-frame-bridge.js',
+      'shell/src/hooks/use-comments.js',
+      'shell/src/ui/dialog.jsx',
+      'shell/src/ui/menu.jsx',
     ]) {
-      if (!js.includes(needle)) throw new Error(`shellScript missing published wiring: ${needle}`);
+      if (!fs.existsSync(path.join(ROOT, file))) throw new Error(`component boundary missing: ${file}`);
+    }
+  });
+
+  await t('author frame stays destination-gated, access-gated, probed, and sandboxed', async () => {
+    const start = worker.indexOf('const frameMatch = p.match(/^\\/d\\/([^/]+)\\/v\\/(\\d+)\\/frame');
+    const block = worker.slice(start, start + 2400);
+    for (const needle of ['isWidgetFrameRequest', 'enforceDocAccess(', '${PROBE_JS}', 'frameCspHeader(nonce)']) {
+      if (!block.includes(needle)) throw new Error(`/frame missing ${needle}`);
+    }
+    const csp = worker.slice(worker.indexOf('function frameCspHeader'), worker.indexOf('function frameCspHeader') + 300);
+    if (!csp.includes('sandbox allow-scripts') || !csp.includes("frame-ancestors 'self'")) throw new Error('frame CSP weakened');
+  });
+
+  await t('all documents, including landing docs, use the same React shell response', async () => {
+    const start = worker.indexOf('async function serveDocVersion(');
+    const block = worker.slice(start, worker.indexOf('async function landingResponse', start));
+    if (!block.includes('const render = shellDocumentWorker;')) throw new Error('unified render path missing');
+    if (!block.includes("'Content-Security-Policy': cspHeader(nonce)")) throw new Error('shell CSP missing');
+    if (/injectOverlay/.test(block)) throw new Error('overlay render path remains');
+  });
+
+  await t('bundle is importable and registers the shell builder', async () => {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-react-shell-'));
+    cp.execFileSync(process.execPath, [path.join(ROOT, 'bin/tdoc-bundle')], {
+      env: { ...process.env, OUT_DIR: out },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    const modulePath = path.join(out, '_worker.bundled.mjs');
+    fs.copyFileSync(path.join(out, '_worker.bundled.js'), modulePath);
+    await import(`file://${modulePath}`);
+    if (typeof globalThis.TDOC_SHELL_BUILDER?.shellHtml !== 'function') throw new Error('builder not registered');
+    fs.rmSync(out, { recursive: true, force: true });
+  });
+
+  await t('Vite manifest points to committed content-hashed assets', async () => {
+    const manifest = JSON.parse(read('server/runtime/manifest.json'));
+    const entry = Object.values(manifest).find((item) => item?.isEntry);
+    if (!/^shell\.[\w-]+\.js$/.test(entry?.file || '')) throw new Error('hashed JS missing');
+    if (!/^shell\.[\w-]+\.css$/.test(entry?.css?.[0] || '')) throw new Error('hashed CSS missing');
+    for (const asset of [entry.file, entry.css[0]]) {
+      if (!fs.existsSync(path.join(ROOT, 'server/runtime', asset))) throw new Error(`asset missing: ${asset}`);
     }
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
-})().catch((e) => { console.error(e); process.exit(1); });
+})();

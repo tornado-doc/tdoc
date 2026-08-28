@@ -49,10 +49,10 @@ t('credentials come from GitHub secrets, not the repo or published.json', () => 
     'wrangler-action must not bind Worker secrets on every deploy');
 });
 
-t('CD bundles overlay via bin/tdoc-bundle with hosted provenance', () => {
+t('CD bundles the React shell via bin/tdoc-bundle with hosted provenance', () => {
   assert(wf.includes('node bin/tdoc-bundle'), 'workflow must call bin/tdoc-bundle');
   assert(wf.includes('TDOC_GENERATED_BY: tdoc-cd'), 'hosted deploys must label generated_by=tdoc-cd');
-  assert(bundle.includes('JSON.stringify(chromeMod)') && bundle.includes('JSON.stringify(frameProbe)'), 'tdoc-bundle must inline the chrome module and frame probe');
+  assert(bundle.includes('JSON.stringify(frameProbe)') && bundle.includes('JSON.stringify(runtimeJs)'), 'tdoc-bundle must inline the frame probe and React runtime');
   assert(bundle.includes('generated_by'), 'tdoc-bundle must stamp provenance');
 });
 

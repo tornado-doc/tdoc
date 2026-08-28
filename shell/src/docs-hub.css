@@ -1,0 +1,136 @@
+  :root {
+    --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
+    --td-danger: #b42318; --td-danger-hover: #931c14; --td-danger-tint: #fdeceb; --td-ok: #087443;
+    --td-ink: #111; --td-muted: #666; --td-line: #eee; --td-surface: #f7f7f7;
+  }
+  body { font: 15px system-ui, -apple-system, sans-serif; margin: 0; color: var(--td-ink); }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 24px 20px 48px; }
+  h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
+  a { color: var(--td-accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
+  .toolbar input[type="search"] { flex: 1 1 220px; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
+  .toolbar input[type="search"]:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
+  .batch-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin: 0 0 8px; min-height: 32px; }
+  .select-all { display: inline-flex; align-items: center; gap: 8px; color: var(--td-muted); font-size: 13px; cursor: pointer; user-select: none; }
+  .batch-delete { display: none; font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-danger); background: #fff; color: var(--td-danger); }
+  .batch-delete.is-visible { display: inline-block; }
+  .batch-delete:hover { background: var(--td-danger); color: #fff; }
+  .batch-delete:disabled { opacity: 0.5; cursor: default; }
+  .doc-list { display: flex; flex-direction: column; }
+  .doc-list[hidden], .doc-row[hidden], .empty[hidden] { display: none !important; }
+  /* Create-a-doc: /me is where someone lands after publishing, so it is also
+     where they come back to make the next one. The button teaches rather than
+     creates, because nothing here can create a doc — their agent writes it. */
+  .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+  .page-hd h1 { margin: 0; }
+  .mk-btn { margin-left: auto; border: 0; border-radius: 999px; background: var(--td-accent); color: #fff;
+    font: inherit; font-weight: 650; padding: 9px 16px; cursor: pointer; }
+  .mk-bg { position: fixed; inset: 0; background: rgba(16,18,26,.55); display: grid; place-items: center;
+    z-index: 99999; padding: 20px; }
+  .mk-bg[hidden] { display: none; }
+  .mk { width: min(480px, 100%); background: #fff; border-radius: 16px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(16,18,26,.28); text-align: left; }
+  .mk-hd { display: flex; align-items: center; padding: 17px 20px; border-bottom: 1px solid var(--td-line); }
+  .mk-hd strong { font-size: 15px; }
+  .mk-hd button { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1;
+    color: #767c8b; cursor: pointer; }
+  .mk-bd { padding: 18px 20px; }
+  .mk-bd ol { margin: 0; padding-left: 18px; color: #5b6070; font-size: 14px; }
+  .mk-bd li { margin: 0 0 9px; }
+  .mk-bd b { color: var(--td-ink); }
+  .mk-say { display: block; margin: 6px 0 0; padding: 9px 11px; background: #f5f6f8;
+    border: 1px solid var(--td-line); border-radius: 8px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--td-ink); }
+  .mk-ft { padding: 14px 20px; border-top: 1px solid var(--td-line); font-size: 12.5px; color: #767c8b; }
+  .doc-row { display: flex; align-items: center; gap: 12px; padding: 13px 4px; border-bottom: 1px solid var(--td-line); }
+  .doc-row.is-selected { background: var(--td-accent-tint); border-radius: 8px; }
+  .row-check { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+  /* Drive-style quiet checkboxes: the box keeps its slot (no layout jump) but
+     stays invisible until the row is hovered/focused, or while any selection
+     is active (.is-selecting on the list). Touch devices have no hover to
+     reveal with, so they keep the boxes always visible. */
+  @media (hover: hover) {
+    .doc-list:not(.is-selecting) .row-check { opacity: 0; transition: opacity .12s; }
+    .doc-list:not(.is-selecting) .doc-row:hover .row-check,
+    .doc-list:not(.is-selecting) .doc-row:focus-within .row-check { opacity: 1; }
+  }
+  .row-check input, .select-all input { width: 15px; height: 15px; accent-color: var(--td-accent); cursor: pointer; }
+  .doc-info { min-width: 0; flex: 1 1 auto; }
+  .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
+  button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
+  /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
+     not a management console. Faint by default, clearer on row hover. */
+  .row-actions { position: relative; flex-shrink: 0; margin-left: auto; }
+  .row-menu-btn { border: none; background: none; color: #ccc; font-size: 20px; line-height: 1; padding: 2px 8px; border-radius: 6px; }
+  .doc-row:hover .row-menu-btn { color: var(--td-muted); }
+  .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
+  /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
+     switches over the already-rendered page — no fetch on tab change. */
+  .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--td-line); }
+  .tab { border: none; background: none; font: inherit; font-weight: 600; color: var(--td-muted); padding: 8px 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--td-ink); }
+  .tab.is-active { color: var(--td-accent); border-bottom-color: var(--td-accent); }
+  .pane[hidden] { display: none !important; }
+  .toolbar select { -webkit-appearance: none; appearance: none; font: inherit; padding: 8px 30px 8px 12px;
+    border: 1px solid var(--td-line); border-radius: 8px; color: var(--td-ink); cursor: pointer;
+    background: #fff url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23666' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+    background-size: 11px; }
+  .toolbar select:hover { border-color: #ccc; }
+  .toolbar select:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
+  .folder-row { cursor: pointer; }
+  .folder-row:hover { background: var(--td-surface); }
+  .folder-ico { display: flex; align-items: center; color: var(--td-muted); flex-shrink: 0; padding: 0 2px; }
+  .folder-row:hover .folder-ico { color: var(--td-accent); }
+  .folder-rename { display: block; width: 100%; text-align: left; border: none; background: none; color: var(--td-ink); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
+  .folder-rename:hover { background: var(--td-surface); }
+  .crumbs { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 14px; }
+  .crumbs[hidden] { display: none !important; }
+  .crumb-root { border: none; background: none; font: inherit; color: var(--td-accent); padding: 2px 6px; border-radius: 6px; cursor: pointer; }
+  .crumb-root:hover { background: var(--td-accent-tint); }
+  .crumbs .sep { color: #c0c0c4; user-select: none; }
+  .crumbs .cur { font-weight: 600; }
+  .new-folder-btn { font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 8px; border: 1px dashed var(--td-line); background: #fff; color: var(--td-muted); white-space: nowrap; }
+  .new-folder-btn:hover { border-color: var(--td-accent); color: var(--td-accent); }
+  .loc-hint { color: var(--td-muted); }
+  .loc-hint[hidden] { display: none !important; }
+  .folder-row[hidden] { display: none !important; }
+  .doc-row.dragging { opacity: 0.45; }
+  .folder-row.drop-hover, .crumb-root.drop-hover { background: var(--td-accent-tint); }
+  .folder-row.drop-hover .folder-ico { color: var(--td-accent); }
+  .folder-row.drop-hover .doc-title { color: var(--td-accent); }
+  .star-btn { border: none; background: none; font-size: 17px; color: #ccc; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+  .doc-row:hover .star-btn { color: var(--td-muted); }
+  .star-btn:hover { background: var(--td-line); color: #f5a623; }
+  .star-btn.is-starred, .doc-row:hover .star-btn.is-starred { color: #f5a623; }
+  .batch-actions { display: flex; gap: 8px; }
+  .batch-move { display: none; font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-accent); background: #fff; color: var(--td-accent); }
+  .batch-move.is-visible { display: inline-block; }
+  .batch-move:hover { background: var(--td-accent); color: #fff; }
+  .batch-move:disabled { opacity: 0.5; cursor: default; }
+  .move-list { display: flex; flex-direction: column; gap: 4px; margin: 0 0 14px; max-height: 40vh; overflow: auto; }
+  .move-list button { text-align: left; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--td-line); background: #fff; }
+  .move-list button:hover { background: var(--td-accent-tint); border-color: var(--td-accent); }
+
+#tdoc-app-root { min-height: 100vh; }
+.docs-hub { min-height: 100vh; background: #fff; }
+.search-field { flex: 1 1 220px; min-width: 0; position: relative; display: flex; align-items: center; }
+.search-field svg { position: absolute; left: 11px; color: var(--td-muted); pointer-events: none; }
+.toolbar .search-field input[type="search"] { width: 100%; padding-left: 34px; }
+.new-folder-btn { display: inline-flex; align-items: center; gap: 6px; }
+.modal-title { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.modal-title h3 { flex: 1; margin: 0; }
+.icon-btn { border: 0 !important; padding: 5px !important; display: inline-flex; align-items: center; justify-content: center; }
+.create-steps { margin: 0; padding-left: 20px; color: var(--td-muted); }
+.create-steps li { margin: 0 0 10px; }
+.create-steps code { display: block; margin-top: 6px; padding: 10px; border: 1px solid var(--td-line); border-radius: 6px; color: var(--td-ink); background: var(--td-surface); font-size: 13px; }
+.move-list button { display: flex; align-items: center; gap: 8px; }
+.tdoc-toast { position: fixed; top: 62px; right: 18px; z-index: 1000001; display: flex; align-items: center; gap: 8px; background: var(--td-accent); color: #fff; padding: 12px 16px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.tdoc-toast.error { background: var(--td-danger); }
+.tdoc-avatar-fallback { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--td-accent); color: #fff; font-weight: 700; }
+
+/* Dark mode is the page-level invert in chrome.css — the Docs Hub inherits it
+   like every other surface. It used to invert `.docs-hub` a second time, which
+   was right when /me was its own server-rendered page outside that rule, but
+   inside the shell it cancelled the page invert out and /me stayed light. */
