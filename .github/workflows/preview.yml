@@ -192,6 +192,31 @@ jobs:
           seed 1 test/fixtures/tdocs/sample-doc/v1/index.html
           seed 2 test/fixtures/tdocs/sample-doc/v2/index.html
 
+          # The homepage is itself a tdoc (LANDING_SLUG = tornado-doc, served
+          # at `/`). Without it a preview answers `/` with the neutral page, so
+          # anything touching site chrome — a mark, a bar control, a theme —
+          # could not be reviewed where it ships, and two homepages could not
+          # be put side by side at all. Seed the same payload production
+          # publishes: bin/tdoc-landing-release collapses the working copy's
+          # versions to a single v1 and drops the review thread, so the preview
+          # is not a 40-entry version picker over somebody's review notes.
+          node bin/tdoc-landing-release
+          LANDING_DIR=.release/tornado-doc
+          jq -n \
+            --arg slug tornado-doc \
+            --argjson version 1 \
+            --rawfile html "$LANDING_DIR/v1/index.html" \
+            --slurpfile meta "$LANDING_DIR/meta.json" \
+            '{slug:$slug, version:$version, html:$html, meta:$meta[0]}' \
+            > /tmp/tdoc-preview-landing.json
+          curl -sS --connect-timeout 10 --max-time 90 -X POST "$BASE/api/upload" \
+            -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/tdoc-preview-landing.json \
+            | tee /tmp/tdoc-preview-landing-resp.json
+          jq -e '.ok == true' /tmp/tdoc-preview-landing-resp.json >/dev/null
+          echo "seeded landing"
+
       - name: Sticky preview comment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -202,7 +227,9 @@ jobs:
           BODY=$(cat <<EOF
           <!-- tdoc-preview -->
           ### Preview
-          **Open this:** https://${PREVIEW_HOST}/d/conway-life/v/2
+          **Open this:** https://${PREVIEW_HOST}/ — the homepage, this PR's code
+          carrying the landing version in this PR's checkout.
+          **Or a document:** https://${PREVIEW_HOST}/d/conway-life/v/2
 
           This link is unique to this PR. New commits update the same URL. It is not [tdoc.dev](https://tdoc.dev).
 

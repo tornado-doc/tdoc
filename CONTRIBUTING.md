@@ -87,6 +87,11 @@ node test/visual/hosted-compare.mjs /tmp/cmp-hosted /tmp/wb-old/_worker.bundled.
 The rule for a migration or restyle: match the old chrome where it can be
 matched; where it cannot, the new one still has to look finished.
 
+Both harnesses serve the real homepage — the newest `landing/tornado-doc/vN`
+out of the checkout — so site chrome can be judged where it ships rather than
+against the neutral fallback. PR previews seed it too, so the preview's `/` is
+this branch's code carrying this branch's landing.
+
 `server/runtime/` is **committed on purpose**: skill users run
 `server/server.js` straight from the checkout and `bin/tdoc-bundle` embeds the
 same bytes into the Worker — neither runs `npm install`. The Vite output is

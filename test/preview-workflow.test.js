@@ -44,7 +44,14 @@ t('uses pr-<N> alias, not the branch name', () => {
 t('sticky comment matches the #148 template', () => {
   assert(wf.includes('<!-- tdoc-preview -->'), 'must use the sticky HTML marker');
   assert(wf.includes('**Open this:**'), 'must lead with Open this');
-  assert(wf.includes('/d/conway-life/v/2'), 'Open this must be the demo doc, not the host root');
+  // The root used to be the neutral page on a preview, so the comment pointed
+  // at the demo doc instead. The preview now seeds the landing, so `/` is the
+  // real homepage and leads; the demo doc stays as the second link, because a
+  // document is where the comment layer can be exercised.
+  assert(wf.includes('**Open this:** https://${PREVIEW_HOST}/ '),
+    'Open this must be the homepage now that the preview seeds it');
+  assert(wf.includes('/d/conway-life/v/2'), 'the demo doc must still be linked');
+  assert(/seed .*landing|seeded landing/.test(wf), 'the preview must seed the landing doc');
   assert(wf.includes('It is not [tdoc.dev](https://tdoc.dev)'),
     'must say the link is not tdoc.dev');
   assert(wf.includes('issues/comments/'), 'must PATCH an existing comment rather than always POST');

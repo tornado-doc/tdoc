@@ -33,6 +33,27 @@ async function boot(side) {
   const meta = JSON.parse(fs.readFileSync(path.join(FIXTURE, 'meta.json'), 'utf8'));
   meta.hosted = { account_id: 'acct-alice', github_login: 'alice' };
   await env.META.put('meta:sample-doc', JSON.stringify(meta));
+  // The homepage is a tdoc of its own (LANDING_SLUG = tornado-doc, served at
+  // `/`). Seed the newest version out of the checkout so site chrome — the
+  // mark, the bar, the theme — can be compared where it actually ships,
+  // instead of against the neutral fallback page.
+  // `node bin/tdoc-landing-release` first if you want the production shape —
+  // one v1 instead of the working copy's version picker. Falls back to the
+  // newest working version so the harness runs without that step.
+  const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+  const release = path.join(repo, '.release/tornado-doc');
+  const working = path.join(repo, 'landing/tornado-doc');
+  let landing = null;
+  if (fs.existsSync(path.join(release, 'v1/index.html'))) {
+    landing = { n: 1, html: path.join(release, 'v1/index.html') };
+  } else if (fs.existsSync(working)) {
+    const n = Math.max(0, ...fs.readdirSync(working).map((d) => Number((d.match(/^v(\d+)$/) || [])[1]) || 0));
+    if (n) landing = { n, html: path.join(working, `v${n}`, 'index.html') };
+  }
+  if (landing) {
+    await env.META.put('meta:tornado-doc', JSON.stringify({ title: 'tornado-doc', slug: 'tornado-doc', versions: [{ n: landing.n }] }));
+    await env.DOCS.put(`docs/tornado-doc/v${landing.n}/index.html`, fs.readFileSync(landing.html, 'utf8'));
+  }
   for (const v of [1, 2]) await env.DOCS.put(`docs/sample-doc/v${v}/index.html`, fs.readFileSync(path.join(FIXTURE, `v${v}/index.html`), 'utf8'));
   const call = (pathname, init = {}, cookie) => mod.default.fetch(new Request(`https://tdoc.dev${pathname}`, { ...init, headers: { ...(init.headers || {}), ...(cookie ? { Cookie: `tdoc_sid=${cookie}` } : {}) } }), env, { waitUntil() {}, passThroughOnException() {} });
   const fixture = JSON.parse(fs.readFileSync(path.join(FIXTURE, 'comments.json'), 'utf8'));
@@ -75,6 +96,10 @@ const SCENES = [
   { name: 'h09-reader-card', as: 'bob', run: async (p) => { await click(p, '.tdoc-pin'); } },
   { name: 'h10-owner-dark-share', as: 'alice', run: async (p) => { await click(p, '#tdoc-theme-btn'); await click(p, '#tdoc-share-btn'); await settle(p, 800); } },
   { name: 'h11-me', as: 'alice', url: '/me' },
+  // The homepage, full page, signed out and signed in — the surface most
+  // chrome changes are actually judged on.
+  { name: 'h11b-landing', as: null, url: '/', full: true },
+  { name: 'h11c-landing-owner', as: 'alice', url: '/', full: true },
   { name: 'h12-anon-mobile', as: null, viewport: { width: 375, height: 812 }, run: async (p) => { await click(p, '.tdoc-fab'); await settle(p, 500); } },
 ];
 const servers = { old: await boot('old'), new: await boot('new') };
@@ -89,7 +114,7 @@ for (const scene of SCENES) {
       const r = await page.goto(servers[side].base + (scene.url || '/d/sample-doc/v/2'), { waitUntil: 'networkidle' });
       if (!scene.url) await ready(page); else await settle(page, 800);
       if (scene.run) await scene.run(page);
-      await page.screenshot({ path: path.join(OUT, `${scene.name}-${side}.png`) });
+      await page.screenshot({ path: path.join(OUT, `${scene.name}-${side}.png`), fullPage: Boolean(scene.full) });
       row[side] = (r.status() !== 200 ? `HTTP ${r.status()} ` : '') + (errors.length ? 'errors: ' + errors.join(' | ') : 'ok');
     } catch (e) { row[side] = 'FAILED: ' + String(e).split('\n')[0]; try { await page.screenshot({ path: path.join(OUT, `${scene.name}-${side}.png`) }); } catch {} }
     await ctx.close();

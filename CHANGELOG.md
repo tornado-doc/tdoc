@@ -8,6 +8,17 @@ file and `.claude-plugin/plugin.json`.
 
 ### Added
 
+- **PR previews serve the real homepage, and so does the comparison harness.**
+  A preview seeded only the demo doc, so its `/` answered with the neutral
+  fallback page: anything touching site chrome — a mark, a bar control, a
+  theme — could not be reviewed where it actually ships, and two versions of
+  the homepage could not be put side by side at all. `preview.yml` now seeds
+  the same payload production publishes (`bin/tdoc-landing-release`, which
+  collapses the working copy's versions to one v1 and drops the review
+  thread), and the sticky comment leads with the homepage. `test/visual/hosted-compare.mjs` seeds the same doc
+  and grows landing scenes, signed out and signed in.
+
+
 - **Home-screen icons.** Adding tdoc to a phone's home screen showed no mark:
   Add to Home Screen never reads the SVG favicon — iOS takes
   `apple-touch-icon`, Android takes the PNGs a web app manifest names — and
