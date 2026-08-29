@@ -6,6 +6,19 @@ file and `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Added
+
+- **Home-screen icons.** Adding tdoc to a phone's home screen showed no mark:
+  Add to Home Screen never reads the SVG favicon — iOS takes
+  `apple-touch-icon`, Android takes the PNGs a web app manifest names — and
+  the shell declared neither. `assets/apple-touch-icon.png` (180),
+  `assets/icon-192.png`, `assets/icon-512.png` and `assets/site.webmanifest`
+  are new, served by both runtimes and embedded in the Worker like the other
+  marks. These carry a white field, which the mark itself deliberately does
+  not: a home-screen icon sits on the reader's wallpaper, the same reason
+  `tdoc_logo.png` keeps a field for Open Graph. The drawing is set at 68% of
+  the box so it survives iOS's corner mask and Android's maskable safe zone.
+
 ### Changed
 
 - **Relicensed to AGPL v3, with a commercial licence available.** Apache 2.0

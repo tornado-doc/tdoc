@@ -623,6 +623,24 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Home-screen icons and the manifest that points at them (server/shell.js).
+  const HOME_ICONS = {
+    '/apple-touch-icon.png': ['apple-touch-icon.png', 'image/png'],
+    '/icon-192.png': ['icon-192.png', 'image/png'],
+    '/icon-512.png': ['icon-512.png', 'image/png'],
+    '/site.webmanifest': ['site.webmanifest', 'application/manifest+json; charset=utf-8'],
+  };
+  if (HOME_ICONS[p]) {
+    const [name, type] = HOME_ICONS[p];
+    const iconPath = path.join(__dirname, '..', 'assets', name);
+    if (!fs.existsSync(iconPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(iconPath), {
+      'Content-Type': type,
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+
   if (p === '/tdoc_logo.svg') {
     const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.svg');
     if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
