@@ -21,6 +21,7 @@ const OFFLINE = [
   'comment-history.test.js',  // event-log fold + cross-version pull
   'event-convergence.test.js',// eid dedup convergence + fold ordering
   'reconcile.test.js',        // anchor reconcile branches + compaction
+  'agent-status-emoji.test.js',// agent verdict emoji constant must exist (v>=2 folds)
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
