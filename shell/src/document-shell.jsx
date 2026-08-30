@@ -449,6 +449,7 @@ export function DocumentShell({ boot, config }) {
           comments={comments.comments}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
+          isOwner={Boolean(config.isOwner)}
           openCommentId={openCommentId}
           expandReplies={deepReply}
           onOpenChange={setDrawerOpen}
@@ -468,6 +469,7 @@ export function DocumentShell({ boot, config }) {
           openClusterKey={openClusterKey}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
+          isOwner={Boolean(config.isOwner)}
           cardPosition={cardPosition}
           expandReplies={deepReply}
           onOpenComment={(id) => {
