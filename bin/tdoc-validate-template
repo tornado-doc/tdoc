@@ -345,6 +345,30 @@ def check_table_cells(html, styles):
             " or ".join(faults)]
 
 
+def check_figure_width(html, styles):
+    """A figure that never states its width is sized by the page, not the doc.
+
+    An <svg width="960"> renders at 960 physical pixels. The reader currently
+    caps it with `max-width: 100% !important`, so it looks right when tdoc
+    serves it and overflows the moment it is read anywhere else - the wrapper
+    scrolls the last panel out of sight and nothing on screen says so.
+
+    Only figures inside a scroll wrapper are judged. An inline glyph sized by
+    its own attributes is not a figure and has nothing to declare.
+    """
+    if not re.search(r'class="[^"]*\bdiagram-box\b', html, re.I):
+        return []
+    # A figure with no intrinsic width is already fluid.
+    if not re.search(r"<svg[^>]*\bwidth=", html, re.I):
+        return []
+    css = "\n".join(styles)
+    if re.search(r"[^{}]*\bsvg\b[^{}]*\{[^}]*(?<![\w-])(?:width|min-width)\s*:", css, re.I | re.S):
+        return []
+    return ["a figure in a scroll wrapper carries a pixel width but no CSS "
+            "width, so it is sized by the reader rather than by the document - "
+            "set width:100% (and a min-width only if it should scroll)"]
+
+
 def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
     html = path.read_text(encoding="utf-8")
     parser = ContractParser()
@@ -433,6 +457,7 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
     # A caller bringing its own design system returned above with the other
     # house checks, so this only judges documents tdoc itself authored.
     errors.extend(check_table_cells(raw, parser.styles))
+    errors.extend(check_figure_width(raw, parser.styles))
 
     return errors
 
