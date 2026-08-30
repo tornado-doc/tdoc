@@ -76,6 +76,13 @@ t('frame copy and theme protocols remain framework-free', () => {
   assert(combined.includes("message.defaultTheme === 'dark'"), 'shell theme hint handling missing');
 });
 
+t('comment navigation stays a two-way shell/frame protocol', () => {
+  assert(combined.includes("type: 'tdoc:anchorClick'"), 'highlight click message missing');
+  assert(combined.includes("type: 'tdoc:focusAnchor'"), 'anchor focus command missing');
+  assert(combined.includes('anchorIdAtPoint'), 'highlight hit testing missing');
+  assert(combined.includes('setActiveAnchor'), 'active highlight state missing');
+});
+
 t('React text rendering does not reintroduce HTML string escaping helpers', () => {
   const comments = fs.readFileSync(path.join(root, 'shell/src/document/comment-card.jsx'), 'utf8');
   assert(comments.includes('{comment.text}'), 'comment text is not rendered as React text');

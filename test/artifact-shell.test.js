@@ -455,6 +455,61 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('#tdoc-comment-layer .tdoc-margin-comment[data-comment-id="c_fixture_1"]', { timeout: 2000 });
     });
 
+    await t('narrow drawer: tapping a comment reveals its author anchor', async () => {
+      await page.setViewportSize({ width: 480, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      if (!frame) throw new Error('author frame not found');
+      await frame.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await page.waitForTimeout(150);
+      const before = await frame.evaluate(() => window.scrollY);
+      await page.click('.tdoc-fab');
+      await page.waitForSelector('#tdoc-comment-layer.open');
+      await page.click('#tdoc-comment-layer [data-comment-id="c_fixture_1"] > .text');
+      await page.waitForFunction(() => !document.querySelector('#tdoc-comment-layer'));
+      await frame.waitForFunction((previous) => window.scrollY < previous, before);
+      const active = await frame.evaluate(() => CSS.highlights.get('tdoc-anchor-active')?.size || 0);
+      if (active !== 1) throw new Error(`expected one active anchor, got ${active}`);
+    });
+
+    await t('narrow frame: tapping a text highlight opens its comment in the drawer', async () => {
+      await page.setViewportSize({ width: 480, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      if (!frame) throw new Error('author frame not found');
+      await frame.waitForFunction(() => (CSS.highlights.get('tdoc-anchor')?.size || 0) > 0);
+      await frame.evaluate(() => {
+        const range = [...CSS.highlights.get('tdoc-anchor')][0];
+        let rect = range.getClientRects()[0];
+        window.scrollTo(0, Math.max(0, rect.top + window.scrollY - 180));
+        rect = range.getClientRects()[0];
+        const target = document.elementFromPoint(rect.left + Math.min(8, rect.width / 2), rect.top + rect.height / 2);
+        const init = { bubbles: true, cancelable: true, clientX: rect.left + Math.min(8, rect.width / 2), clientY: rect.top + rect.height / 2 };
+        target.dispatchEvent(new MouseEvent('mousedown', init));
+        target.dispatchEvent(new MouseEvent('click', init));
+      });
+      await page.waitForSelector('#tdoc-comment-layer.open');
+      const current = await page.getAttribute('#tdoc-comment-layer .tdoc-current-comment', 'data-comment-id');
+      if (current !== 'c_fixture_1') throw new Error(`highlight opened ${current || 'no comment'}, expected c_fixture_1`);
+    });
+
+    await t('dark mode keeps text highlights visibly painted', async () => {
+      await page.evaluate(() => localStorage.setItem('tdoc-theme', 'light'));
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.click('#tdoc-theme-btn');
+      const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+      await frame.waitForFunction(() => document.documentElement.dataset.tdocTheme === 'dark');
+      const paint = await frame.evaluate(() => {
+        const range = [...CSS.highlights.get('tdoc-anchor')][0];
+        const element = range.startContainer.parentElement;
+        return getComputedStyle(element, '::highlight(tdoc-anchor)').backgroundColor;
+      });
+      const alpha = Number((paint.match(/[\d.]+(?=\)$)/) || ['1'])[0]);
+      if (!paint || paint === 'rgba(0, 0, 0, 0)' || alpha < 0.7) {
+        throw new Error(`dark highlight paint is too faint: ${paint}`);
+      }
+    });
+
     await t('hover outline clips to a horizontal scroll container, not the full graph', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
