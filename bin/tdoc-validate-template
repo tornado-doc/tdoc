@@ -313,6 +313,38 @@ def check_style_accent(html, style):
             "vocabulary is not being applied" % (len(svgs), style)]
 
 
+def check_table_cells(html, styles):
+    """A cell that never names its fill or its radius inherits a chip.
+
+    The reader stamps `background` and `border-radius` onto every th and td at
+    zero specificity. Those survive a document rule that sets only borders and
+    padding, so a table written that way renders as a grid of rounded tinted
+    blocks whatever the style says. Nothing about the document reveals this —
+    it looks correct in the source and wrong on the page — which is why it is
+    checked rather than left to prose.
+
+    A document with no table has nothing to reset.
+    """
+    if not re.search(r"<table[\s>]", html, re.I):
+        return []
+    css = "\n".join(styles)
+    faults = []
+    for prop in ("background", "border-radius"):
+        # Any rule naming a cell and that property counts, in shorthand or long
+        # form: `background:` also matches `background-color:`, and a document
+        # is free to name them in one rule or several.
+        hit = re.search(
+            r"[^{}]*\b(?:th|td)\b[^{}]*\{[^}]*(?<![\w-])" + prop + r"[-\w]*\s*:",
+            css, re.I | re.S)
+        if not hit:
+            faults.append(prop)
+    if not faults:
+        return []
+    return ["a table's cells never set %s, so the reader's chip (a fill and an "
+            "8px radius on every th and td) survives - name it on th, td" %
+            " or ".join(faults)]
+
+
 def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
     html = path.read_text(encoding="utf-8")
     parser = ContractParser()
@@ -397,6 +429,10 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
     # system reaches this file through --custom-template and returned above.
     errors.extend(inset)
     errors.extend(check_style_accent(raw, style))
+    # The cell reset is a house-style rule: tdoc tables are ruled, never filled.
+    # A caller bringing its own design system returned above with the other
+    # house checks, so this only judges documents tdoc itself authored.
+    errors.extend(check_table_cells(raw, parser.styles))
 
     return errors
 

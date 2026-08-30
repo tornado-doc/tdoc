@@ -48,6 +48,12 @@ rather than a tinted band, and numbers are tabular so a column lines up.
 </div>
 ```
 
+```css
+/* The reader styles every cell as a standalone chip, and a chip survives any
+   rule that does not name the two properties making it one. Name them. */
+.wrap th, .wrap td { background: transparent; border-radius: 0; }
+```
+
 The header is a label, so it takes the style's `label-type` register rather
 than a smaller, greyer version of the body. Set at body size in the muted ink
 it reads as a quieter row instead of a different kind of row; in the label
@@ -73,11 +79,11 @@ reason: the gutters cut the columns, leaving nothing continuous to follow. A
 fill is also the worst case for this reader — dark mode is a whole-page invert,
 so a filled cell becomes a slab where a hairline only changes colour.
 
-Reset the cell's own shape, not only the parts you are changing. The reader
-styles cells as standalone chips — a fill and a corner radius of their own —
-and those survive any rule that does not name them, so a treatment that sets
-borders and padding alone comes out filled and rounded anyway. Name
-`background` and `border-radius` explicitly.
+Reset the cell's own shape, not only the parts you are changing. A rule that
+sets borders and padding alone comes out filled and rounded anyway, because the
+fill and the radius are separate properties and nothing in that rule mentions
+them. This is the one part of a table that a document cannot leave unsaid, so
+`bin/tdoc-validate-template` fails a document whose cells never name both.
 
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`, and both need the child to have a
@@ -87,7 +93,9 @@ phone. Give a wide figure a `min-width` that keeps its smallest type around
 9px, and let it scroll.
 
 **Stat tile row** — a few numbers that carry an argument on their own. Three or
-four; a fifth is a table.
+four; a fifth is a table. It earns its place from the numbers in it, like any
+other component, so it goes where those numbers are the point rather than
+standing at the top of every document as a header band.
 
 ```html
 <div class="tiles">
