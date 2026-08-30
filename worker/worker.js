@@ -1953,6 +1953,10 @@ async function indexData(env, session, origin) {
   };
 }
 
+// Agent verdict → emoji, rendered at fold time by snapshotAt (never stored as
+// a reaction event) so the ✅/🟡/❓ on a card is per-version like any status.
+const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
+
 function isFiniteVersion(v) {
   return Number.isFinite(v) && v >= 0;
 }
