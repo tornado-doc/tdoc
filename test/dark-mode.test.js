@@ -41,6 +41,12 @@ t('dark mode remains a page invert with media and controls restored', () => {
   assert(!src.includes('--td-ground: #111111'), 'parallel dark palette returned');
 });
 
+t('dark mode strengthens author anchor highlights', () => {
+  assert(src.includes("dark ? 'rgba(255,214,0,.78)'"), 'dark anchor paint is not strengthened');
+  assert(src.includes('tdoc-anchor-active'), 'active anchor paint missing');
+  assert(src.includes("st.textContent = highlightCss(theme === 'dark')"), 'theme does not repaint frame highlights');
+});
+
 t('emoji reactions preserve color while LGTM remains text', () => {
   assert(src.includes('className="tdoc-emoji"'), 'emoji wrapper missing');
   assert(src.includes("emoji === 'LGTM' ? 'tdoc-emoji-text'"), 'LGTM text handling missing');

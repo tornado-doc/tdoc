@@ -114,6 +114,8 @@ export function CommentCard({
   floating = false,
   position,
   expandReplies = false,
+  selected = false,
+  onActivate,
   onReply,
   onReact,
   onDelete,
@@ -148,6 +150,7 @@ export function CommentCard({
     'tdoc-margin-comment',
     'active',
     floating ? 'tdoc-floating-open' : '',
+    selected ? 'tdoc-current-comment' : '',
     comment.status === 'applied' ? 'tdoc-resolved' : '',
     unanchored ? 'tdoc-unanchored' : '',
   ].filter(Boolean).join(' ');
@@ -159,6 +162,12 @@ export function CommentCard({
       data-comment-id={comment.id}
       style={floating ? { ...position, top: clampedTop ?? position.top } : undefined}
       onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        if (!onActivate) return;
+        if (event.target instanceof Element
+          && event.target.closest('button, a, input, textarea, select, [role="button"]')) return;
+        onActivate(comment.id);
+      }}
     >
       <div className="tdoc-anchor-actions">
         <button className="tdoc-reanchor-btn" type="button" onClick={() => onReanchor(comment.id)}>

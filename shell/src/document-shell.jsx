@@ -172,6 +172,12 @@ export function DocumentShell({ boot, config }) {
         showToast(copied ? 'Copied as Markdown' : 'Copy failed', !copied);
       });
     },
+    'tdoc:anchorClick': (message) => {
+      if (!message.id) return;
+      setOpenCommentId(message.id);
+      setOpenClusterKey(null);
+      if (narrow) setDrawerOpen(true);
+    },
     'tdoc:navigate': (message) => {
       const href = String(message.href || '');
       if (!/^https?:\/\//i.test(href) && !/^\/(?!\/)/.test(href)) return;
@@ -183,6 +189,13 @@ export function DocumentShell({ boot, config }) {
       else location.href = href;
     },
   });
+
+  const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
+    setOpenCommentId(id);
+    setOpenClusterKey(null);
+    if (closeDrawer) setDrawerOpen(false);
+    bridge.send({ type: 'tdoc:focusAnchor', id, scroll });
+  }, [bridge.send]);
 
   const commentsById = useMemo(
     () => new Map(comments.comments.map((comment) => [comment.id, comment])),
@@ -228,6 +241,7 @@ export function DocumentShell({ boot, config }) {
       return;
     }
     if (narrow) {
+      bridge.send({ type: 'tdoc:focusAnchor', id: root.id, scroll: true });
       setDrawerOpen(true);
       setOpenCommentId(root.id);
       setDeepTarget(null);
@@ -442,6 +456,7 @@ export function DocumentShell({ boot, config }) {
           onReact={reactTo}
           onDelete={removeComment}
           onReanchor={setReanchorId}
+          onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
         <DesktopCommentLayer
@@ -456,8 +471,7 @@ export function DocumentShell({ boot, config }) {
           cardPosition={cardPosition}
           expandReplies={deepReply}
           onOpenComment={(id) => {
-            setOpenCommentId(id);
-            setOpenClusterKey(null);
+            focusComment(id);
           }}
           onOpenCluster={(key) => setOpenClusterKey(
             openClusterKey === key ? null : key

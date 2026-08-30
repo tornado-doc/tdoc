@@ -16,15 +16,24 @@
 //   shell → frame:
 //     { type:'tdoc:anchors',   comments:[...] }   // resolve → highlight → report pins
 //     { type:'tdoc:scrollTo',  docY }
+//     { type:'tdoc:focusAnchor', id, scroll }      // activate and optionally reveal an anchor
 (function () {
   'use strict';
   function post(msg) {
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
+  function highlightCss(dark) {
+    var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
+    var pending = dark ? 'rgba(255,214,0,.88)' : 'rgba(255,214,0,.55)';
+    return '::highlight(tdoc-anchor){background:' + anchor + ';text-decoration:underline solid rgba(184,134,11,.7);text-decoration-thickness:2px;}' +
+      '::highlight(tdoc-anchor-active){background:rgba(255,216,77,.94);text-decoration:underline solid #b8860b;text-decoration-thickness:3px;}' +
+      '::highlight(tdoc-pending){background:' + pending + ';}';
+  }
+  var st = null;
   if (HL) {
-    var st = document.createElement('style');
-    st.textContent = '::highlight(tdoc-anchor){background:rgba(255,214,0,.38);} ::highlight(tdoc-pending){background:rgba(255,214,0,.55);}';
+    st = document.createElement('style');
+    st.textContent = highlightCss(false);
     (document.head || document.documentElement).appendChild(st);
   }
   // Element-comment affordances live IN the frame (they hug author artifacts).
@@ -75,6 +84,13 @@
   // shell / 404), not the page. Intercept and hand navigation to the shell,
   // which navigates the top document (or opens a tab for target=_blank).
   document.addEventListener('click', function (e) {
+    var commentId = anchorIdAtPoint(e.clientX, e.clientY);
+    if (commentId) {
+      e.preventDefault(); e.stopPropagation();
+      setActiveAnchor(commentId, false);
+      post({ type: 'tdoc:anchorClick', id: commentId });
+      return;
+    }
     var a = e.target && e.target.closest && e.target.closest('a[href]');
     if (!a) return;
     var href = a.getAttribute('href') || '';
@@ -90,7 +106,9 @@
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
     if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
+    if (anchorIdAtPoint(e.clientX, e.clientY)) return;
     if (HL) CSS.highlights.delete('tdoc-pending');
+    setActiveAnchor(null, false);
     post({ type: 'tdoc:cleared' });
   }, true);
 
@@ -317,17 +335,45 @@
   // and each anchor's resolved Range. Re-resolving after a comment/reply then
   // only pays findTextRange for NEW anchors (O(D) each) instead of re-walking
   // the whole doc + re-scanning every anchor (O(N + C·D)) every time.
-  var _view = null, _rangeCache = {};
+  var _view = null, _rangeCache = {}, _anchorTargets = {}, _activeAnchorId = null;
   var _lastComments = [];   // re-report pins when layout settles (images/fonts)
   function docView() { return _view || (_view = collectTextNodes()); }
+  function anchorIdAtPoint(x, y) {
+    var ids = Object.keys(_anchorTargets);
+    for (var i = ids.length - 1; i >= 0; i--) {
+      var target = _anchorTargets[ids[i]];
+      // Element anchors use an outline rather than a painted text highlight;
+      // do not steal the element's own click behavior.
+      if (!target.range) continue;
+      var rects = target.range.getClientRects();
+      for (var j = 0; j < rects.length; j++) {
+        var rect = rects[j];
+        if (x >= rect.left - 2 && x <= rect.right + 2 && y >= rect.top - 2 && y <= rect.bottom + 2) return ids[i];
+      }
+    }
+    return null;
+  }
+  function setActiveAnchor(id, scroll) {
+    _activeAnchorId = id || null;
+    if (HL) CSS.highlights.delete('tdoc-anchor-active');
+    var target = id && _anchorTargets[id];
+    if (!target) return;
+    if (HL && target.range) CSS.highlights.set('tdoc-anchor-active', new Highlight(target.range));
+    if (!scroll) return;
+    var rect = target.range ? target.range.getBoundingClientRect() : target.element.getBoundingClientRect();
+    var top = rect.top + (window.scrollY || 0) - Math.max(80, window.innerHeight / 3);
+    try { window.scrollTo(0, Math.max(0, top)); } catch (e) {}
+  }
   function reportPins(comments) {
     _lastComments = comments || [];
+    _anchorTargets = {};
     var pins = [], hl = HL ? new Highlight() : null;
     (comments || []).forEach(function (c) {
       if (!c || !c.anchor) return;
       if (c.anchor.kind === 'element' && c.anchor.selector) {
         var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
         if (eel) {
+          _anchorTargets[c.id] = { element: eel };
           var er = eel.getBoundingClientRect();
           pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
         }
@@ -337,11 +383,13 @@
       var key = (c.anchor.text || '') + '\u0000' + (c.anchor.context_before || '') + '\u0000' + (c.anchor.context_after || '');
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
       if (!r) return;
+      _anchorTargets[c.id] = { range: r };
       if (hl) hl.add(r);
       var rect = r.getBoundingClientRect();
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
+    setActiveAnchor(_activeAnchorId, false);
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
 
@@ -415,6 +463,7 @@
   function applyTheme(theme) {
     var html = document.documentElement;
     if (theme === 'dark') html.setAttribute('data-tdoc-theme', 'dark'); else html.removeAttribute('data-tdoc-theme');
+    if (st) st.textContent = highlightCss(theme === 'dark');
     if (!themeStyle) {
       themeStyle = document.createElement('style');
       themeStyle.textContent = 'html[data-tdoc-theme="dark"]{color-scheme:dark;background:#fff;filter:invert(1) hue-rotate(180deg);}html[data-tdoc-theme="dark"] button,html[data-tdoc-theme="dark"] input,html[data-tdoc-theme="dark"] select,html[data-tdoc-theme="dark"] textarea{color-scheme:light;}html[data-tdoc-theme="dark"] img:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] video:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] canvas:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] iframe:not([data-tdoc-dark="invert"]){filter:invert(1) hue-rotate(180deg);}';
@@ -435,6 +484,7 @@
       try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
+    else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {
       var clone = document.body.cloneNode(true);
