@@ -17,7 +17,7 @@ export function useDocumentEditor({
 }) {
   const requests = useRef(new Map());
   const storeKey = useMemo(() => draftKey(config), [config]);
-  const [mode, setMode] = useState('read');
+  const [mode, setMode] = useState(() => (config.canComment ? 'comment' : 'read'));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(null);

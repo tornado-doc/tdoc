@@ -48,6 +48,14 @@ function selectParagraph(frame) {
   });
 }
 
+async function chooseMode(page, label) {
+  const trigger = page.getByRole('button', { name: /Document mode:/ });
+  if ((await trigger.getAttribute('aria-label')) === `Document mode: ${label}`) return;
+  await trigger.click();
+  await page.getByRole('menuitemradio', { name: label }).click();
+  await page.getByRole('button', { name: `Document mode: ${label}` }).waitFor();
+}
+
 (async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-browser-edit-'));
   const slug = 'browser-edit';
@@ -83,21 +91,29 @@ function selectParagraph(frame) {
     const frame = page.frames().find((candidate) => candidate.url().includes('/frame'));
     assert(frame, 'author frame missing');
 
+    await test('comment-capable docs default to compact Comment mode', async () => {
+      await page.getByRole('button', { name: 'Document mode: Comment' }).waitFor();
+      await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
+      assert(await frame.evaluate(() => getComputedStyle(document.body).cursor) === 'crosshair',
+        'Comment mode did not expose its frame cursor state');
+    });
+
     await test('Read mode opens existing anchors but does not create a comment selection', async () => {
+      await chooseMode(page, 'Read');
       await selectParagraph(frame);
       await page.waitForTimeout(150);
       assert(await page.locator('.tdoc-popup').count() === 0, 'Read selection opened the comment composer');
     });
 
     await test('Comment mode turns a selection into a composer', async () => {
-      await page.getByRole('radio', { name: 'Comment' }).click();
+      await chooseMode(page, 'Comment');
       await selectParagraph(frame);
       await page.locator('.tdoc-popup').waitFor({ timeout: 2_000 });
       await page.locator('.tdoc-popup button.x').click();
     });
 
     await test('Edit mode supports bold, italic, undo, and redo shortcuts', async () => {
-      await page.getByRole('radio', { name: 'Edit' }).click();
+      await chooseMode(page, 'Edit');
       await frame.locator('[data-tdoc-editor-root]').waitFor();
       const copy = frame.locator('#artifact-copy');
 
@@ -138,7 +154,7 @@ function selectParagraph(frame) {
     });
 
     await test('Edit mode keeps changes in a recoverable draft until explicit Save', async () => {
-      await page.getByRole('radio', { name: 'Edit' }).click();
+      await chooseMode(page, 'Edit');
       await frame.locator('[data-tdoc-editor-root]').waitFor();
       const editability = await frame.evaluate(() => ({
         artifact: document.getElementById('artifact-copy').isContentEditable,
@@ -154,7 +170,7 @@ function selectParagraph(frame) {
 
       await page.reload({ waitUntil: 'networkidle' });
       const reloadedFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
-      await page.getByRole('radio', { name: 'Edit' }).click();
+      await chooseMode(page, 'Edit');
       await page.waitForFunction(() => {
         const iframe = document.querySelector('.tdoc-doc-frame');
         return iframe && iframe.contentWindow;
@@ -181,7 +197,7 @@ function selectParagraph(frame) {
     });
 
     await test('stale Save shows a conflict and keeps the browser draft', async () => {
-      await page.getByRole('radio', { name: 'Edit' }).click();
+      await chooseMode(page, 'Edit');
       const v2Frame = page.frames().find((candidate) => candidate.url().includes('/frame'));
       await v2Frame.locator('#editable-paragraph').click();
       await v2Frame.locator('#editable-paragraph').press('Meta+A');
@@ -223,9 +239,15 @@ function selectParagraph(frame) {
         scrollWidth: document.documentElement.scrollWidth,
         innerWidth: window.innerWidth,
         toolbarWidth: Math.round(document.querySelector('.tdoc-editor-toolbar').getBoundingClientRect().width),
+        modeWidth: Math.round(document.querySelector('.tdoc-mode-trigger').getBoundingClientRect().width),
+        modeLabelDisplay: getComputedStyle(document.querySelector('.tdoc-mode-label')).display,
       }));
       assert(dimensions.scrollWidth <= dimensions.innerWidth + 1,
         `mobile shell overflows: ${JSON.stringify(dimensions)}`);
+      assert(dimensions.modeWidth <= 34 && dimensions.modeLabelDisplay === 'none',
+        `mobile mode control did not collapse to one icon: ${JSON.stringify(dimensions)}`);
+      await page.getByRole('button', { name: /Document mode:/ }).click();
+      await page.getByRole('menuitemradio', { name: 'Comment' }).waitFor();
       await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-browser-editing-mobile.png'), fullPage: false });
     });
   } finally {

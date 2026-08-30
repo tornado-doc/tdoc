@@ -1,22 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import {
   Bold,
+  Check,
+  ChevronDown,
+  Eye,
   Heading1,
   Heading2,
   Italic,
   Link,
+  MessageCircle,
+  Pencil,
   Redo2,
   RotateCcw,
   Save,
   Undo2,
 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
-import { SegmentedControl } from '../ui/segmented-control.jsx';
+import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 
 const MODES = [
-  { value: 'read', label: 'Read' },
-  { value: 'comment', label: 'Comment' },
-  { value: 'edit', label: 'Edit' },
+  { value: 'read', label: 'Read', Icon: Eye },
+  { value: 'comment', label: 'Comment', Icon: MessageCircle },
+  { value: 'edit', label: 'Edit', Icon: Pencil },
 ];
 
 export function DocumentModeControl({ mode, canComment, canEdit, onChange }) {
@@ -25,13 +30,44 @@ export function DocumentModeControl({ mode, canComment, canEdit, onChange }) {
     || (option.value === 'comment' && canComment)
     || (option.value === 'edit' && canEdit)
   ));
+  if (options.length < 2) return null;
+  const current = options.find((option) => option.value === mode) || options[0];
+  const CurrentIcon = current.Icon;
   return (
-    <SegmentedControl
-      value={mode}
-      options={options}
-      onChange={onChange}
-      ariaLabel="Document mode"
-    />
+    <AppMenu
+      trigger={(
+        <button
+          type="button"
+          className="tdoc-mode-trigger"
+          data-mode={current.value}
+          aria-label={`Document mode: ${current.label}`}
+          title={`Document mode: ${current.label}`}
+        >
+          <CurrentIcon size={15} />
+          <span className="tdoc-mode-label">{current.label}</span>
+          <ChevronDown className="tdoc-mode-chevron" size={13} />
+        </button>
+      )}
+      align="end"
+    >
+      {options.map((option) => {
+        const Icon = option.Icon;
+        const selected = option.value === current.value;
+        return (
+          <AppMenuItem
+            key={option.value}
+            className={`tdoc-mode-item${selected ? ' current' : ''}`}
+            role="menuitemradio"
+            aria-checked={selected}
+            onClick={() => onChange(option.value)}
+          >
+            <Icon size={15} />
+            <span>{option.label}</span>
+            {selected ? <Check className="tdoc-mode-check" size={14} /> : null}
+          </AppMenuItem>
+        );
+      })}
+    </AppMenu>
   );
 }
 

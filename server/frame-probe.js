@@ -51,6 +51,9 @@
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:#4f46e5;border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:#4f46e5;color:#fff;border-color:#4f46e5;}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:currentColor;}' +
+      'html[data-tdoc-interaction-mode="comment"] body{cursor:crosshair;}' +
+      'html[data-tdoc-interaction-mode="comment"] a,html[data-tdoc-interaction-mode="comment"] button{cursor:pointer;}' +
+      'html[data-tdoc-interaction-mode="comment"] input,html[data-tdoc-interaction-mode="comment"] textarea{cursor:text;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]:focus{box-shadow:inset 0 0 0 1px rgba(22,82,240,.18);}';
     (document.head || document.documentElement).appendChild(s);
@@ -608,6 +611,7 @@
     var next = /^(read|comment|edit)$/.test(mode) ? mode : 'read';
     if (interactionMode === 'edit' && next !== 'edit') disableEditing();
     interactionMode = next;
+    document.documentElement.setAttribute('data-tdoc-interaction-mode', next);
     if (next === 'edit') { hideHover(); enableEditing(); }
     else if (next !== 'comment') hideHover();
   }
