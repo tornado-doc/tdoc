@@ -489,7 +489,10 @@
   // The provider owns editability. Author HTML stays framework-free and is
   // never expected to include contenteditable, toolbars, or save scripts.
   var editRoot = null, editDirty = false, editTimer = null, savedRange = null;
-  var ATOMIC = 'img,svg,canvas,video,audio,pre,iframe,table,[data-tdoc-artifact]';
+  // Comment targets are not editing boundaries. Keep only elements whose
+  // native interaction or internal structure should be isolated from the
+  // surrounding editing host; authors can opt other widgets out explicitly.
+  var ATOMIC = 'img,svg,canvas,video,audio,pre,iframe,table,[data-tdoc-edit-atomic]';
   function findEditRoot() {
     if (editRoot && document.contains(editRoot)) return editRoot;
     var children = document.body ? document.body.children : [];
@@ -554,6 +557,20 @@
     }, 350);
   }
   function onEditInput() { setDirty(true); reportDraft(); }
+  function onEditKeydown(event) {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+    var key = String(event.key || '').toLowerCase(), command = null;
+    if (key === 'b' && !event.shiftKey) command = 'bold';
+    else if (key === 'i' && !event.shiftKey) command = 'italic';
+    else if (key === 'z') command = event.shiftKey ? 'redo' : 'undo';
+    else if (key === 'y' && !event.shiftKey) command = 'redo';
+    if (!command) return;
+    event.preventDefault();
+    try {
+      document.execCommand(command, false, null);
+      onEditInput();
+    } catch (e) {}
+  }
   function enableEditing() {
     var root = findEditRoot();
     if (!root) return;
@@ -570,11 +587,13 @@
       node.setAttribute('contenteditable', 'false');
     });
     root.addEventListener('input', onEditInput);
+    root.addEventListener('keydown', onEditKeydown);
     document.documentElement.setAttribute('data-tdoc-editing', '');
   }
   function disableEditing() {
     var root = findEditRoot();
     if (root) root.removeEventListener('input', onEditInput);
+    if (root) root.removeEventListener('keydown', onEditKeydown);
     cleanEditorAttributes(document.documentElement);
     document.documentElement.removeAttribute('data-tdoc-editing');
     savedRange = null;

@@ -8,6 +8,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('browser-editing.test.js');
+const PRIMARY_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 let pass = 0, fail = 0;
 function ok(name) { console.log(`  ✓ ${name}`); pass++; }
@@ -57,6 +58,8 @@ function selectParagraph(frame) {
 <style>body{font:18px/1.6 system-ui;margin:0}.page{max-width:720px;margin:48px auto;padding:0 24px}img{max-width:180px}</style>
 </head><body><main class="page"><h1>Browser editing</h1>
 <p id="editable-paragraph">Edit this sentence and save one snapshot.</p>
+<section id="comment-artifact" data-tdoc-artifact><p id="artifact-copy">Commentable artifact copy.</p></section>
+<section id="edit-atomic" data-tdoc-edit-atomic><p>Explicitly locked widget copy.</p></section>
 <img alt="Atomic artifact" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">
 </main></body></html>`);
   fs.writeFileSync(path.join(docRoot, 'meta.json'), JSON.stringify({
@@ -93,8 +96,35 @@ function selectParagraph(frame) {
       await page.locator('.tdoc-popup button.x').click();
     });
 
+    await test('Edit mode supports bold, italic, undo, and redo shortcuts', async () => {
+      await page.getByRole('radio', { name: 'Edit' }).click();
+      await frame.locator('[data-tdoc-editor-root]').waitFor();
+      const copy = frame.locator('#artifact-copy');
+
+      await copy.click();
+      await copy.selectText();
+      await page.keyboard.press(`${PRIMARY_MODIFIER}+b`);
+      assert(/<(b|strong)>/.test(await copy.innerHTML()), 'primary+B did not apply bold');
+
+      await page.keyboard.press(`${PRIMARY_MODIFIER}+z`);
+      assert(!/<(b|strong)>/.test(await copy.innerHTML()), 'primary+Z did not undo bold');
+      await page.keyboard.press(`${PRIMARY_MODIFIER}+Shift+z`);
+      assert(/<(b|strong)>/.test(await copy.innerHTML()), 'primary+Shift+Z did not redo bold');
+
+      await copy.selectText();
+      await page.keyboard.press(`${PRIMARY_MODIFIER}+i`);
+      assert(/<(i|em)>/.test(await copy.innerHTML()), 'primary+I did not apply italic');
+    });
+
     await test('Edit mode keeps changes in a recoverable draft until explicit Save', async () => {
       await page.getByRole('radio', { name: 'Edit' }).click();
+      await frame.locator('[data-tdoc-editor-root]').waitFor();
+      const editability = await frame.evaluate(() => ({
+        artifact: document.getElementById('artifact-copy').isContentEditable,
+        explicitAtomic: document.getElementById('edit-atomic').isContentEditable,
+      }));
+      assert(editability.artifact, 'commentable artifact copy was incorrectly locked in Edit mode');
+      assert(!editability.explicitAtomic, 'explicit editing-atomic widget was editable');
       await frame.locator('#editable-paragraph').click();
       await frame.locator('#editable-paragraph').press('Meta+A');
       await frame.locator('#editable-paragraph').fill('A draft that survives reload.');
