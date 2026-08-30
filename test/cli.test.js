@@ -123,6 +123,44 @@ t('chat-driven new and edit flows require host validation', () => {
     '/tdoc edit must validate every generated version');
 });
 
+// The reader stamps `background` and `border-radius` onto every th and td at
+// zero specificity, so a table that names neither renders as a grid of rounded
+// tinted chips no matter what the style says. That failure is invisible in the
+// source, which is why the validator checks it instead of leaving it to prose.
+// The contract is "name it", not "make it transparent": a heat-map cell that
+// deliberately sets a fill is a choice, and only silence inherits a chip.
+t('a table whose cells never name background or radius is rejected', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cells-'));
+  const write = (css, body) => {
+    const f = path.join(dir, 'c' + Math.abs(css.length + body.length) + '.html');
+    fs.writeFileSync(f, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } ${css}</style>
+      </head><body><div class="wrap"><h1>T</h1>${body}</div></body></html>`);
+    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [f], { encoding: 'utf8' });
+  };
+  const TABLE = '<table><tr><th>a</th></tr><tr><td>b</td></tr></table>';
+  try {
+    const bare = write('.wrap th, .wrap td { border-bottom:1px solid #eee; padding:8px; }', TABLE);
+    assert(/reader's chip/.test(bare.stdout + bare.stderr),
+      'a table setting only borders and padding must be rejected');
+
+    const reset = write('.wrap th, .wrap td { background:transparent; border-radius:0; border-bottom:1px solid #eee; }', TABLE);
+    assert(!/reader's chip/.test(reset.stdout + reset.stderr),
+      'naming both properties must satisfy the check');
+
+    // A deliberate fill is a choice the author made and can see; it passes.
+    const chosen = write('.wrap th, .wrap td { background:#fafafa; border-radius:4px; }', TABLE);
+    assert(!/reader's chip/.test(chosen.stdout + chosen.stderr),
+      'a deliberately filled cell is a choice, not an inherited chip');
+
+    // A document with no table has nothing to reset.
+    const notable = write('.wrap p { margin:0 }', '<p>no table here</p>');
+    assert(!/reader's chip/.test(notable.stdout + notable.stderr),
+      'a document with no table must not be asked to reset cells');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 t('tdoc default-template validator accepts scoped widget CSS', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-template-'));
   try {
