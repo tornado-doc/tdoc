@@ -488,7 +488,7 @@
   // --- explicit browser editing ------------------------------------------
   // The provider owns editability. Author HTML stays framework-free and is
   // never expected to include contenteditable, toolbars, or save scripts.
-  var editRoot = null, editDirty = false, editTimer = null, savedRange = null;
+  var editRoot = null, editDirty = false, editTimer = null, savedRange = null, editBaselineHtml = null;
   // Comment targets are not editing boundaries. Keep only elements whose
   // native interaction or internal structure should be isolated from the
   // surrounding editing host; authors can opt other widgets out explicitly.
@@ -549,14 +549,19 @@
     editDirty = !!next;
     post({ type: 'tdoc:editState', dirty: editDirty });
   }
-  function reportDraft() {
+  function reportDraft(bodyHtml, dirty) {
     clearTimeout(editTimer);
     editTimer = setTimeout(function () {
-      post({ type: 'tdoc:editSnapshot', bodyHtml: draftBodyHtml() });
+      post({ type: 'tdoc:editSnapshot', bodyHtml: bodyHtml, dirty: dirty });
       rereportPins();
     }, 350);
   }
-  function onEditInput() { setDirty(true); reportDraft(); }
+  function onEditInput() {
+    var bodyHtml = draftBodyHtml();
+    var dirty = bodyHtml !== editBaselineHtml;
+    setDirty(dirty);
+    reportDraft(bodyHtml, dirty);
+  }
   function onEditKeydown(event) {
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
     var key = String(event.key || '').toLowerCase(), command = null;
@@ -586,6 +591,7 @@
       }
       node.setAttribute('contenteditable', 'false');
     });
+    if (editBaselineHtml == null) editBaselineHtml = draftBodyHtml();
     root.addEventListener('input', onEditInput);
     root.addEventListener('keydown', onEditKeydown);
     document.documentElement.setAttribute('data-tdoc-editing', '');
@@ -653,7 +659,11 @@
       if (restoreRoot && typeof d.bodyHtml === 'string') {
         restoreRoot.innerHTML = d.bodyHtml;
         if (interactionMode === 'edit') { disableEditing(); enableEditing(); }
-        setDirty(true); rereportPins();
+        var restoredHtml = draftBodyHtml();
+        var restoredDirty = restoredHtml !== editBaselineHtml;
+        setDirty(restoredDirty);
+        post({ type: 'tdoc:editSnapshot', bodyHtml: restoredHtml, dirty: restoredDirty });
+        rereportPins();
       }
     }
     else if (d.type === 'tdoc:editSerialize') {

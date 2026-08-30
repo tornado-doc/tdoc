@@ -99,8 +99,9 @@ export function useDocumentEditor({
     },
     editSnapshot(message) {
       if (typeof message.bodyHtml !== 'string') return;
-      setDirty(true);
-      saveDraft(storeKey, message.bodyHtml).catch(() => {});
+      const nextDirty = Boolean(message.dirty);
+      if (nextDirty) saveDraft(storeKey, message.bodyHtml).catch(() => {});
+      else clearDraft(storeKey).catch(() => {});
     },
     editDocument(message) {
       const pending = requests.current.get(message.requestId);

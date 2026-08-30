@@ -114,6 +114,27 @@ function selectParagraph(frame) {
       await copy.selectText();
       await page.keyboard.press(`${PRIMARY_MODIFIER}+i`);
       assert(/<(i|em)>/.test(await copy.innerHTML()), 'primary+I did not apply italic');
+
+      await page.keyboard.press(`${PRIMARY_MODIFIER}+z`);
+      await page.keyboard.press(`${PRIMARY_MODIFIER}+z`);
+      await page.getByText('No changes').waitFor({ timeout: 2_000 });
+      assert(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(),
+        'Save stayed enabled after undo returned the document to its baseline');
+    });
+
+    await test('returning edited content to the baseline disables Save', async () => {
+      const paragraph = frame.locator('#editable-paragraph');
+      const original = await paragraph.textContent();
+      await paragraph.fill('Temporary edit.');
+      await page.getByText('Unsaved draft').waitFor({ timeout: 2_000 });
+      await paragraph.fill(original);
+      await page.getByText('No changes').waitFor({ timeout: 2_000 });
+      await page.waitForTimeout(450);
+      const state = await page.evaluate(() => ({
+        status: document.querySelector('.tdoc-editor-status')?.textContent,
+        disabled: document.querySelector('.tdoc-editor-commit .primary')?.disabled,
+      }));
+      assert(state.disabled, `Save stayed enabled after content matched the baseline again: ${JSON.stringify(state)}`);
     });
 
     await test('Edit mode keeps changes in a recoverable draft until explicit Save', async () => {
