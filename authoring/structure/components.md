@@ -86,11 +86,26 @@ them. This is the one part of a table that a document cannot leave unsaid, so
 `bin/tdoc-validate-template` fails a document whose cells never name both.
 
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
-figure. Both are `overflow-x: auto`, and both need the child to have a
-`min-width` or the wrapper never engages: an `svg` at `width: 100%` shrinks to
-the column instead of overflowing it, and its labels land at a few pixels on a
-phone. Give a wide figure a `min-width` that keeps its smallest type around
-9px, and let it scroll.
+figure. Both are `overflow-x: auto`.
+
+A figure has to say how wide it is. An `<svg>` with `width="960"` on the tag
+renders at 960 physical pixels, so in a narrower column it runs past the right
+edge and the wrapper scrolls it out of sight — the last panel is simply gone
+unless the reader thinks to drag it. The document is what has to fix that, not
+the page it happens to be served by:
+
+```css
+.diagram-box svg { display: block; width: 100%; height: auto; }
+```
+
+`width: 100%` makes the drawing fluid: the viewBox does the scaling, so the
+figure fits whatever column it lands in and nothing is ever off-screen.
+
+Add a `min-width` when shrinking to fit would cost more than scrolling does. A
+dense figure squeezed into a phone puts its labels at a few pixels, which is
+worth trading for a swipe — that is the case the wrapper exists for, and
+without a `min-width` it never engages. Pick the width that keeps the smallest
+type around 9px.
 
 **Stat tile row** — a few numbers that carry an argument on their own. Three or
 four; a fifth is a table. It earns its place from the numbers in it, like any

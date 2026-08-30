@@ -129,6 +129,45 @@ t('chat-driven new and edit flows require host validation', () => {
 // source, which is why the validator checks it instead of leaving it to prose.
 // The contract is "name it", not "make it transparent": a heat-map cell that
 // deliberately sets a fill is a choice, and only silence inherits a chip.
+// An <svg width="960"> renders at 960 physical pixels. The reader caps it with
+// `max-width: 100% !important`, so a figure that states no width of its own
+// looks right where tdoc serves it and runs off the right edge anywhere else,
+// with the scroll wrapper hiding the overflow rather than announcing it.
+t('a figure with a pixel width but no CSS width is rejected', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-fig-'));
+  const write = (css, body) => {
+    const f = path.join(dir, 'f' + Math.abs(css.length * 31 + body.length) + '.html');
+    fs.writeFileSync(f, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } ${css}</style>
+      </head><body><div class="wrap"><h1>T</h1>${body}</div></body></html>`);
+    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [f], { encoding: 'utf8' });
+  };
+  const FIG = '<div class="diagram-box"><svg viewBox="0 0 960 200" width="960" height="200"><rect x="0" y="0" width="80" height="40"/></svg></div>';
+  const RE = /sized by the reader rather than by the document/;
+  try {
+    const bare = write('.diagram-box { overflow-x:auto }', FIG);
+    assert(RE.test(bare.stdout + bare.stderr),
+      'a figure with a pixel width and no CSS width must be rejected');
+
+    const fluid = write('.diagram-box { overflow-x:auto } .diagram-box svg { width:100%; height:auto }', FIG);
+    assert(!RE.test(fluid.stdout + fluid.stderr), 'width:100% must satisfy the check');
+
+    // Declaring a min-width is the deliberate scroll case, and is also a width.
+    const scrolls = write('.diagram-box { overflow-x:auto } .diagram-box svg { width:100%; min-width:660px }', FIG);
+    assert(!RE.test(scrolls.stdout + scrolls.stderr), 'a deliberate scroll width must pass');
+
+    // No intrinsic width means the figure is already fluid.
+    const noattr = write('.diagram-box { overflow-x:auto }',
+      '<div class="diagram-box"><svg viewBox="0 0 960 200"><rect x="0" y="0" width="80" height="40"/></svg></div>');
+    assert(!RE.test(noattr.stdout + noattr.stderr), 'a figure with no pixel width has nothing to declare');
+
+    // An inline glyph outside a scroll wrapper is not a figure.
+    const glyph = write('.wrap p { margin:0 }', '<p><svg viewBox="0 0 16 16" width="16" height="16"><rect x="0" y="0" width="8" height="8"/></svg></p>');
+    assert(!RE.test(glyph.stdout + glyph.stderr), 'an inline glyph is not a figure');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 t('a table whose cells never name background or radius is rejected', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cells-'));
   const write = (css, body) => {
