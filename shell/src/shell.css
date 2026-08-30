@@ -29,6 +29,112 @@ body,
   display: block;
 }
 
+.tdoc-bar .tdoc-seg {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  border-radius: 6px;
+}
+
+.tdoc-bar .tdoc-seg button {
+  min-width: 0;
+  padding: 5px 9px;
+  border-radius: 0;
+  font-size: 12px;
+}
+
+.tdoc-editor-toolbar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 46px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #e5e5e7;
+  background: #f7f7f8;
+  color: #333;
+  font: 13px system-ui, sans-serif;
+  gap: 12px;
+  z-index: 5;
+}
+
+.tdoc-editor-tools,
+.tdoc-editor-commit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tdoc-editor-tools {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tdoc-editor-tools::-webkit-scrollbar { display: none; }
+
+.tdoc-editor-toolbar button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: 600 12px system-ui, sans-serif;
+  cursor: pointer;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.tdoc-editor-toolbar button:hover:not(:disabled) {
+  border-color: #d9d9dc;
+  background: #fff;
+}
+
+.tdoc-editor-toolbar button.primary {
+  min-width: 72px;
+  background: var(--td-accent);
+  color: #fff;
+}
+
+.tdoc-editor-toolbar button:disabled { opacity: .45; cursor: default; }
+.tdoc-editor-divider { width: 1px; height: 20px; margin: 0 3px; background: #d9d9dc; flex: none; }
+.tdoc-editor-status { margin-right: 4px; color: #777; font-size: 12px; white-space: nowrap; }
+
+.tdoc-editor-link-field {
+  display: grid;
+  gap: 6px;
+  color: #555;
+  font: 600 12px system-ui, sans-serif;
+}
+
+.tdoc-editor-link-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  font: 14px system-ui, sans-serif;
+}
+
+@media (max-width: 700px) {
+  .tdoc-bar .tdoc-seg button { padding: 5px 7px; font-size: 11px; }
+  .tdoc-editor-toolbar { padding: 6px 8px; gap: 6px; }
+  .tdoc-editor-status { display: none; }
+  .tdoc-editor-toolbar button.primary { min-width: 32px; }
+  .tdoc-editor-toolbar button.primary span { display: none; }
+}
+
+@media (max-width: 480px) {
+  .tdoc-bar .tdoc-seg button { padding: 5px; }
+}
+
 .tdoc-footer {
   margin-top: 0;
   position: fixed;

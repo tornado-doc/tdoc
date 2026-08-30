@@ -22,6 +22,7 @@
   function post(msg) {
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
+  var interactionMode = 'read';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
   function highlightCss(dark) {
     var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
@@ -33,6 +34,8 @@
   var st = null;
   if (HL) {
     st = document.createElement('style');
+    st.id = 'tdoc-provider-highlight-style';
+    st.setAttribute('data-tdoc-provider', '');
     st.textContent = highlightCss(false);
     (document.head || document.documentElement).appendChild(st);
   }
@@ -41,11 +44,15 @@
   // overlay's .tdoc-hover-outline / .tdoc-comment-pill.
   (function () {
     var s = document.createElement('style');
+    s.id = 'tdoc-provider-comment-style';
+    s.setAttribute('data-tdoc-provider', '');
     s.textContent =
       '.tdoc-hover-outline{position:absolute;pointer-events:none;z-index:2147483644;border:2px dashed #4f46e5;border-radius:4px;background:rgba(79,70,229,.08);box-sizing:border-box;}' +
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:#4f46e5;border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:#4f46e5;color:#fff;border-color:#4f46e5;}' +
-      '.tdoc-comment-pill svg{width:14px;height:14px;stroke:currentColor;}';
+      '.tdoc-comment-pill svg{width:14px;height:14px;stroke:currentColor;}' +
+      'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
+      'html[data-tdoc-editing] [data-tdoc-editor-root]:focus{box-shadow:inset 0 0 0 1px rgba(22,82,240,.18);}';
     (document.head || document.documentElement).appendChild(s);
   })();
 
@@ -69,6 +76,7 @@
     } catch (e) { return { before: '', after: '' }; }
   }
   function reportSelection() {
+    if (interactionMode !== 'comment') return;
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     var text = sel.toString().trim();
@@ -84,7 +92,7 @@
   // shell / 404), not the page. Intercept and hand navigation to the shell,
   // which navigates the top document (or opens a tab for target=_blank).
   document.addEventListener('click', function (e) {
-    var commentId = anchorIdAtPoint(e.clientX, e.clientY);
+    var commentId = interactionMode === 'edit' ? null : anchorIdAtPoint(e.clientX, e.clientY);
     if (commentId) {
       e.preventDefault(); e.stopPropagation();
       setActiveAnchor(commentId, false);
@@ -93,6 +101,7 @@
     }
     var a = e.target && e.target.closest && e.target.closest('a[href]');
     if (!a) return;
+    if (interactionMode === 'edit') { e.preventDefault(); return; }
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#') return;                    // in-page anchors stay in the frame
     if (!/^(https?:\/\/|\/(?!\/))/i.test(href)) return;             // javascript:/data: etc. — let CSP kill them
@@ -103,6 +112,7 @@
   document.addEventListener('mouseup', function () { setTimeout(reportSelection, 0); }, true);
   document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
   document.addEventListener('mousedown', function (e) {
+    if (interactionMode === 'edit') return;
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
     if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
@@ -144,6 +154,7 @@
     if (hoverOutline) return;
     hoverOutline = document.createElement('div'); hoverOutline.className = 'tdoc-hover-outline'; hoverOutline.style.display = 'none';
     hoverPill = document.createElement('button'); hoverPill.className = 'tdoc-comment-pill'; hoverPill.type = 'button'; hoverPill.style.display = 'none';
+    hoverOutline.setAttribute('data-tdoc-provider', ''); hoverPill.setAttribute('data-tdoc-provider', '');
     hoverPill.setAttribute('aria-label', 'Comment on this');
     hoverPill.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     // Parent on <html>, NOT <body>: a transformed body (see the hostile fixture)
@@ -200,6 +211,7 @@
     hideHover();
   }
   document.addEventListener('mousemove', function (e) {
+    if (interactionMode !== 'comment') { if (hoverEl) hideHover(); return; }
     var t = e.target;
     if (isProbeUI(t)) return; // keep the pill/outline up while the cursor is on them
     var art = artifactFor(t);
@@ -466,9 +478,140 @@
     if (st) st.textContent = highlightCss(theme === 'dark');
     if (!themeStyle) {
       themeStyle = document.createElement('style');
+      themeStyle.id = 'tdoc-provider-theme-style';
+      themeStyle.setAttribute('data-tdoc-provider', '');
       themeStyle.textContent = 'html[data-tdoc-theme="dark"]{color-scheme:dark;background:#fff;filter:invert(1) hue-rotate(180deg);}html[data-tdoc-theme="dark"] button,html[data-tdoc-theme="dark"] input,html[data-tdoc-theme="dark"] select,html[data-tdoc-theme="dark"] textarea{color-scheme:light;}html[data-tdoc-theme="dark"] img:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] video:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] canvas:not([data-tdoc-dark="invert"]),html[data-tdoc-theme="dark"] iframe:not([data-tdoc-dark="invert"]){filter:invert(1) hue-rotate(180deg);}';
       (document.head || document.documentElement).appendChild(themeStyle);
     }
+  }
+
+  // --- explicit browser editing ------------------------------------------
+  // The provider owns editability. Author HTML stays framework-free and is
+  // never expected to include contenteditable, toolbars, or save scripts.
+  var editRoot = null, editDirty = false, editTimer = null, savedRange = null;
+  var ATOMIC = 'img,svg,canvas,video,audio,pre,iframe,table,[data-tdoc-artifact]';
+  function findEditRoot() {
+    if (editRoot && document.contains(editRoot)) return editRoot;
+    var children = document.body ? document.body.children : [];
+    for (var i = 0; i < children.length; i++) {
+      if (children[i].matches('main,article,.wrap,.content,.container')) {
+        editRoot = children[i]; break;
+      }
+    }
+    return editRoot || (editRoot = document.body);
+  }
+  function selectionInsideRoot() {
+    var sel = window.getSelection(), root = findEditRoot();
+    if (!sel || !root || !sel.rangeCount) return false;
+    var node = sel.getRangeAt(0).commonAncestorContainer;
+    return node === root || root.contains(node.nodeType === 1 ? node : node.parentNode);
+  }
+  document.addEventListener('selectionchange', function () {
+    if (interactionMode !== 'edit' || !selectionInsideRoot()) return;
+    try { savedRange = window.getSelection().getRangeAt(0).cloneRange(); } catch (e) {}
+  });
+  function cleanEditorAttributes(root) {
+    if (!root || !root.querySelectorAll) return;
+    var roots = [];
+    if (root.hasAttribute && root.hasAttribute('data-tdoc-editor-root')) roots.push(root);
+    Array.prototype.push.apply(roots, root.querySelectorAll('[data-tdoc-editor-root]'));
+    roots.forEach(function (node) {
+      node.removeAttribute('data-tdoc-editor-root');
+      var original = node.getAttribute('data-tdoc-editor-original-editable');
+      if (original === '__missing__') {
+        node.removeAttribute('contenteditable');
+      } else if (original != null) {
+        node.setAttribute('contenteditable', original);
+      }
+      node.removeAttribute('data-tdoc-editor-original-editable');
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-editor-atomic]'), function (node) {
+      node.removeAttribute('data-tdoc-editor-atomic');
+      var original = node.getAttribute('data-tdoc-editor-original-editable');
+      if (original === '__missing__') {
+        node.removeAttribute('contenteditable');
+      } else if (original != null) {
+        node.setAttribute('contenteditable', original);
+      }
+      node.removeAttribute('data-tdoc-editor-original-editable');
+    });
+  }
+  function draftBodyHtml() {
+    var clone = findEditRoot().cloneNode(true);
+    cleanEditorAttributes(clone);
+    Array.prototype.forEach.call(clone.querySelectorAll('[data-tdoc-provider]'), function (node) { node.remove(); });
+    return clone.innerHTML;
+  }
+  function setDirty(next) {
+    editDirty = !!next;
+    post({ type: 'tdoc:editState', dirty: editDirty });
+  }
+  function reportDraft() {
+    clearTimeout(editTimer);
+    editTimer = setTimeout(function () {
+      post({ type: 'tdoc:editSnapshot', bodyHtml: draftBodyHtml() });
+      rereportPins();
+    }, 350);
+  }
+  function onEditInput() { setDirty(true); reportDraft(); }
+  function enableEditing() {
+    var root = findEditRoot();
+    if (!root) return;
+    root.setAttribute('data-tdoc-editor-root', '');
+    if (!root.hasAttribute('data-tdoc-editor-original-editable')) {
+      root.setAttribute('data-tdoc-editor-original-editable', root.hasAttribute('contenteditable') ? root.getAttribute('contenteditable') : '__missing__');
+    }
+    root.setAttribute('contenteditable', 'true');
+    Array.prototype.forEach.call(root.querySelectorAll(ATOMIC), function (node) {
+      node.setAttribute('data-tdoc-editor-atomic', '');
+      if (!node.hasAttribute('data-tdoc-editor-original-editable')) {
+        node.setAttribute('data-tdoc-editor-original-editable', node.hasAttribute('contenteditable') ? node.getAttribute('contenteditable') : '__missing__');
+      }
+      node.setAttribute('contenteditable', 'false');
+    });
+    root.addEventListener('input', onEditInput);
+    document.documentElement.setAttribute('data-tdoc-editing', '');
+  }
+  function disableEditing() {
+    var root = findEditRoot();
+    if (root) root.removeEventListener('input', onEditInput);
+    cleanEditorAttributes(document.documentElement);
+    document.documentElement.removeAttribute('data-tdoc-editing');
+    savedRange = null;
+  }
+  function setInteractionMode(mode) {
+    var next = /^(read|comment|edit)$/.test(mode) ? mode : 'read';
+    if (interactionMode === 'edit' && next !== 'edit') disableEditing();
+    interactionMode = next;
+    if (next === 'edit') { hideHover(); enableEditing(); }
+    else if (next !== 'comment') hideHover();
+  }
+  function restoreSelection() {
+    if (!savedRange) return;
+    try {
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(savedRange);
+    } catch (e) {}
+  }
+  function formatEdit(command, value) {
+    if (interactionMode !== 'edit') return;
+    var nextValue = value;
+    if (command === 'createLink') {
+      if (!nextValue) return;
+    }
+    try {
+      findEditRoot().focus();
+      restoreSelection();
+      document.execCommand(command, false, nextValue || null);
+      onEditInput();
+    } catch (e) {}
+  }
+  function serializeDocument() {
+    var clone = document.documentElement.cloneNode(true);
+    Array.prototype.forEach.call(clone.querySelectorAll('[data-tdoc-provider]'), function (node) { node.remove(); });
+    cleanEditorAttributes(clone);
+    clone.removeAttribute('data-tdoc-theme');
+    clone.removeAttribute('data-tdoc-editing');
+    return '<!doctype html>\n' + clone.outerHTML;
   }
 
   window.addEventListener('message', function (e) {
@@ -484,6 +627,19 @@
       try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
+    else if (d.type === 'tdoc:mode') setInteractionMode(d.mode);
+    else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
+    else if (d.type === 'tdoc:editRestore') {
+      var restoreRoot = findEditRoot();
+      if (restoreRoot && typeof d.bodyHtml === 'string') {
+        restoreRoot.innerHTML = d.bodyHtml;
+        if (interactionMode === 'edit') { disableEditing(); enableEditing(); }
+        setDirty(true); rereportPins();
+      }
+    }
+    else if (d.type === 'tdoc:editSerialize') {
+      post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument() });
+    }
     else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {

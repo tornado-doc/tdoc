@@ -8,6 +8,7 @@ async function request(path, options) {
   if (!response.ok) {
     const error = new Error(body?.message || body?.error || `HTTP ${response.status}`);
     error.status = response.status;
+    error.body = body;
     throw error;
   }
   return body;
@@ -60,6 +61,14 @@ export function duplicateDocument(slug, version) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug, version }),
+  });
+}
+
+export function saveDocumentVersion(slug, baseVersion, html) {
+  return request('/api/doc/versions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, baseVersion, html }),
   });
 }
 

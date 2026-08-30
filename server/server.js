@@ -100,12 +100,13 @@ function localDeliver(recipient, ev) {
 }
 // Cap request bodies so a hostile/buggy client can't OOM the local server.
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — comments are small
-function readBody(req) {
+const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
+function readBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let b = '', size = 0;
     req.on('data', d => {
       size += d.length;
-      if (size > MAX_BODY_BYTES) { reject(new Error('body too large')); req.destroy(); return; }
+      if (size > maxBytes) { reject(new Error('body too large')); req.destroy(); return; }
       b += d;
     });
     req.on('end', () => { try { resolve(JSON.parse(b || '{}')); } catch { resolve({}); } });
@@ -119,6 +120,19 @@ function readBody(req) {
 // comment routes). Returns the slug if safe, else null.
 function safeSlug(slug) {
   return (typeof slug === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(slug)) ? slug : null;
+}
+
+function latestLocalVersion(slug, meta) {
+  const declared = Array.isArray(meta && meta.versions)
+    ? meta.versions.map((item) => Number(item && item.n) || 0)
+    : [];
+  let stored = [];
+  try {
+    stored = fs.readdirSync(path.join(ROOT, slug), { withFileTypes: true })
+      .filter((item) => item.isDirectory() && /^v\d+$/.test(item.name))
+      .map((item) => Number(item.name.slice(1)) || 0);
+  } catch {}
+  return Math.max(0, ...declared, ...stored);
 }
 
 // Guard for state-mutating local requests. The local server has no auth (by
@@ -331,10 +345,12 @@ refreshStars(); const _starTimer = setInterval(refreshStars, 3600e3); if (_starT
 // postMessage anchoring bridge + comment chrome (composer/pins/cards) here.
 function shellDocument(slug, version, nonce) {
   let title = slug, versions = [{ n: version }];
+  let latestVersion = version;
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8'));
     if (meta && meta.title) title = meta.title;
     if (Array.isArray(meta.versions) && meta.versions.length) versions = meta.versions.map((v) => ({ n: v.n }));
+    latestVersion = latestLocalVersion(slug, meta) || version;
   } catch {}
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
@@ -350,6 +366,8 @@ function shellDocument(slug, version, nonce) {
     versions,
     identity: ident,
     isOwner,
+    canEdit: !isLanding && Number(version) === Number(latestVersion),
+    canComment: true,
     authConfigured: false,
     webAuth: false,
     isLanding,
@@ -734,7 +752,7 @@ const server = http.createServer(async (req, res) => {
       // inert (same guarantee as the single-origin path).
       try {
         const probe = fs.readFileSync(FRAME_PROBE_PATH, 'utf8');
-        const tag = `<script nonce="${nonce}">${probe}</script>`;
+        const tag = `<script id="tdoc-frame-probe" data-tdoc-provider nonce="${nonce}">${probe}</script>`;
         body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
       } catch {}
     }
@@ -761,6 +779,77 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, shellDocument(slug, Number(vStr), nonce), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': cspHeader(nonce),
+    });
+  }
+
+  // Explicit human save. Keystrokes stay in a browser draft; this endpoint is
+  // the only local-browser path that creates a full document snapshot.
+  if (p === '/api/doc/versions' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req, MAX_DOCUMENT_BYTES + 64 * 1024);
+    const slug = safeSlug(body.slug);
+    const baseVersion = Number(body.baseVersion);
+    const doc = body.html;
+    if (!slug || !Number.isInteger(baseVersion) || baseVersion < 1 || typeof doc !== 'string') {
+      return json(res, 400, { error: 'slug, baseVersion, html required' });
+    }
+    if (Buffer.byteLength(doc, 'utf8') > MAX_DOCUMENT_BYTES) {
+      return json(res, 413, { error: 'payload_too_large', limit: MAX_DOCUMENT_BYTES });
+    }
+    if (!/<html[\s>]/i.test(doc) || !/<body[\s>]/i.test(doc)) {
+      return json(res, 400, { error: 'invalid_document_html' });
+    }
+    if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(doc)) {
+      return json(res, 400, { error: 'provider_markup_forbidden' });
+    }
+
+    const docRoot = path.join(ROOT, slug);
+    const metaFile = path.join(docRoot, 'meta.json');
+    if (!fs.existsSync(docRoot) || !fs.existsSync(metaFile)) {
+      return json(res, 404, { error: 'not_found' });
+    }
+    const meta = readJson(metaFile, null);
+    if (!meta || typeof meta !== 'object') return json(res, 409, { error: 'meta_corrupt' });
+    const latest = latestLocalVersion(slug, meta);
+    if (latest !== baseVersion) {
+      return json(res, 409, { error: 'version_conflict', baseVersion, latestVersion: latest });
+    }
+
+    const nextVersion = latest + 1;
+    const finalDir = path.join(docRoot, `v${nextVersion}`);
+    if (fs.existsSync(finalDir)) {
+      return json(res, 409, { error: 'version_conflict', baseVersion, latestVersion: nextVersion });
+    }
+    const stageDir = path.join(docRoot, `.v${nextVersion}-browser-${crypto.randomBytes(6).toString('hex')}`);
+    const now = new Date().toISOString();
+    try {
+      fs.mkdirSync(stageDir, { recursive: false });
+      const widgetFrom = `/d/${slug}/v/${baseVersion}/widget/`;
+      const widgetTo = `/d/${slug}/v/${nextVersion}/widget/`;
+      fs.writeFileSync(path.join(stageDir, 'index.html'), doc.split(widgetFrom).join(widgetTo));
+      const baseWidgets = path.join(docRoot, `v${baseVersion}`, 'widgets');
+      if (fs.existsSync(baseWidgets)) fs.cpSync(baseWidgets, path.join(stageDir, 'widgets'), { recursive: true });
+      fs.renameSync(stageDir, finalDir);
+
+      const nextMeta = {
+        ...meta,
+        versions: [
+          ...(Array.isArray(meta.versions) ? meta.versions : []),
+          { n: nextVersion, created: now, prompt: 'Browser edit', source: 'browser', ...(E2E_USER ? { author: E2E_USER } : {}) },
+        ],
+      };
+      const metaStage = `${metaFile}.browser-${crypto.randomBytes(6).toString('hex')}`;
+      fs.writeFileSync(metaStage, JSON.stringify(nextMeta, null, 2) + '\n');
+      fs.renameSync(metaStage, metaFile);
+    } catch (error) {
+      try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(finalDir, { recursive: true, force: true }); } catch {}
+      return json(res, 500, { error: 'version_write_failed', message: error.message || String(error) });
+    }
+    return json(res, 200, {
+      ok: true,
+      version: nextVersion,
+      url: `/d/${encodeURIComponent(slug)}/v/${nextVersion}`,
     });
   }
 

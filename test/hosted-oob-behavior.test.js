@@ -80,14 +80,18 @@ class FakeR2 {
 }
 
 class FakeStorage {
-  constructor() { this.map = new Map(); }
+  constructor() { this.map = new Map(); this.queue = Promise.resolve(); }
   async transaction(fn) {
-    const txn = {
-      get: async (k) => this.map.get(k),
-      put: async (k, v) => { this.map.set(k, v); },
-      delete: async (k) => { this.map.delete(k); },
-    };
-    return fn(txn);
+    const run = this.queue.then(() => {
+      const txn = {
+        get: async (k) => this.map.get(k),
+        put: async (k, v) => { this.map.set(k, v); },
+        delete: async (k) => { this.map.delete(k); },
+      };
+      return fn(txn);
+    });
+    this.queue = run.catch(() => {});
+    return run;
   }
 }
 
@@ -892,6 +896,167 @@ async function issue(worker, env, login = 'alice', label = login) {
     const r = await worker.fetch(req('/api/comments?slug=open-doc&version=all'), env, {});
     assert(r.status === 200, `anonymous read of an unlisted doc broke: ${r.status}`);
     assert(Array.isArray(await r.json()), 'unlisted read did not return an array');
+  });
+
+  await t('latest owner shell exposes Edit while old versions and readers do not', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'editor-owner');
+    await publishWith(env, owner, 'editable-doc', { visibility: 'unlisted' });
+    const ownerPage = await worker.fetch(req('/d/editable-doc/v/1', { cookie: owner.cookie }), env, {});
+    const ownerConfig = bootData(await ownerPage.text(), '__TDOC_SHELL__');
+    assert(ownerConfig.canEdit === true, 'latest owner page should expose Edit');
+    assert(ownerConfig.canComment === true, 'signed-in owner should expose Comment');
+
+    const reader = await worker.fetch(req('/d/editable-doc/v/1'), env, {});
+    const readerConfig = bootData(await reader.text(), '__TDOC_SHELL__');
+    assert(readerConfig.canEdit === false, 'anonymous reader must not expose Edit');
+    assert(readerConfig.canComment === false, 'anonymous reader must not expose signed-in commenting');
+  });
+
+  await t('browser Save creates exactly one next snapshot and stale writers conflict', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'browser-editor');
+    await publishWith(env, owner, 'save-race', { visibility: 'unlisted' });
+    const htmlA = '<!doctype html><html><body><h1>Writer A</h1></body></html>';
+    const htmlB = '<!doctype html><html><body><h1>Writer B</h1></body></html>';
+    const [a, b] = await Promise.all([
+      worker.fetch(req('/api/doc/versions', {
+        method: 'POST', cookie: owner.cookie,
+        body: { slug: 'save-race', baseVersion: 1, html: htmlA },
+      }), env, {}),
+      worker.fetch(req('/api/doc/versions', {
+        method: 'POST', cookie: owner.cookie,
+        body: { slug: 'save-race', baseVersion: 1, html: htmlB },
+      }), env, {}),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    assert(statuses[0] === 200 && statuses[1] === 409,
+      `expected one 200 and one 409, got ${statuses.join(',')}`);
+    const meta = JSON.parse(await env.META.get('meta:save-race'));
+    assert(meta.versions.filter((version) => version.n === 2).length === 1,
+      'race created duplicate v2 metadata');
+    assert(await env.DOCS.head('docs/save-race/v2/index.html'), 'v2 bytes missing');
+    assert(!await env.DOCS.head('docs/save-race/v3/index.html'), 'stale writer unexpectedly created v3');
+
+    const oldPage = await worker.fetch(req('/d/save-race/v/1', { cookie: owner.cookie }), env, {});
+    const oldConfig = bootData(await oldPage.text(), '__TDOC_SHELL__');
+    assert(oldConfig.canEdit === false, 'old owner version must not expose Edit');
+  });
+
+  await t('browser Save rejects provider markup and preserves concurrent comments', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'save-comment-owner');
+    await publishWith(env, owner, 'save-comments', {
+      visibility: 'unlisted', commenting: 'signed_in',
+    });
+    const bad = await worker.fetch(req('/api/doc/versions', {
+      method: 'POST', cookie: owner.cookie,
+      body: {
+        slug: 'save-comments', baseVersion: 1,
+        html: '<html><body><div data-tdoc-provider>bad</div></body></html>',
+      },
+    }), env, {});
+    assert(bad.status === 400, `provider markup should be rejected, got ${bad.status}`);
+
+    const readerCookie = await putSession(env, 'commenter');
+    const [save, comment] = await Promise.all([
+      worker.fetch(req('/api/doc/versions', {
+        method: 'POST', cookie: owner.cookie,
+        body: {
+          slug: 'save-comments', baseVersion: 1,
+          html: '<!doctype html><html><body><p>Edited text</p></body></html>',
+        },
+      }), env, {}),
+      worker.fetch(req('/api/comments', {
+        method: 'POST', cookie: readerCookie,
+        body: { slug: 'save-comments', version: 1, text: 'Keep this comment' },
+      }), env, {}),
+    ]);
+    assert(save.status === 200, `save failed ${save.status}: ${await save.clone().text()}`);
+    assert(comment.status === 200, `comment failed ${comment.status}: ${await comment.clone().text()}`);
+    const list = env.COMMENTS.stateFor('save-comments').storage.map.get('list') || [];
+    assert(list.some((entry) => JSON.stringify(entry).includes('Keep this comment')),
+      'concurrent comment was lost during save reconciliation');
+  });
+
+  await t('agent upload and human Save share one version reservation', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'mixed-editor');
+    await publishWith(env, owner, 'mixed-race', { visibility: 'unlisted' });
+    const agentHtml = '<!doctype html><html><body><h1>Agent v2</h1></body></html>';
+    const humanHtml = '<!doctype html><html><body><h1>Human v2</h1></body></html>';
+    const nextMeta = {
+      title: 'Mixed race', slug: 'mixed-race',
+      versions: [{ n: 1 }, { n: 2 }],
+      access: { visibility: 'unlisted' },
+    };
+    const [agent, human] = await Promise.all([
+      worker.fetch(req('/api/upload', {
+        method: 'POST', token: owner.token,
+        body: { slug: 'mixed-race', version: 2, html: agentHtml, meta: nextMeta },
+      }), env, {}),
+      worker.fetch(req('/api/doc/versions', {
+        method: 'POST', cookie: owner.cookie,
+        body: { slug: 'mixed-race', baseVersion: 1, html: humanHtml },
+      }), env, {}),
+    ]);
+    const statuses = [agent.status, human.status].sort();
+    assert(statuses[0] === 200 && statuses[1] === 409,
+      `agent/human race expected one 200 and one 409, got ${statuses.join(',')}`);
+    const meta = JSON.parse(await env.META.get('meta:mixed-race'));
+    assert(meta.versions.filter((item) => Number(item.n) === 2).length === 1,
+      'agent/human race created duplicate v2 metadata');
+    const stored = await (await env.DOCS.get('docs/mixed-race/v2/index.html')).text();
+    assert(stored.includes('Agent v2') !== stored.includes('Human v2'),
+      'v2 contains neither or both competing snapshots');
+
+    const staleAgent = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: owner.token,
+      body: { slug: 'mixed-race', version: 2, html: '<html><body>overwrite</body></html>', meta: nextMeta },
+    }), env, {});
+    assert(staleAgent.status === 409, `stale agent should conflict, got ${staleAgent.status}`);
+  });
+
+  await t('agent history upload cannot rewrite a browser snapshot before appending', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'history-editor');
+    await publishWith(env, owner, 'history-guard', { visibility: 'unlisted' });
+    const browser = await worker.fetch(req('/api/doc/versions', {
+      method: 'POST', cookie: owner.cookie,
+      body: {
+        slug: 'history-guard', baseVersion: 1,
+        html: '<!doctype html><html><body><h1>Browser v2</h1></body></html>',
+      },
+    }), env, {});
+    assert(browser.status === 200, `browser v2 failed with ${browser.status}`);
+
+    const localMeta = {
+      title: 'History guard', slug: 'history-guard',
+      versions: [{ n: 1 }, { n: 2, source: 'agent-local' }, { n: 3, source: 'agent' }],
+      access: { visibility: 'unlisted' },
+    };
+    const oldUpload = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: owner.token,
+      body: {
+        slug: 'history-guard', version: 2,
+        html: '<!doctype html><html><body><h1>Stale local v2</h1></body></html>', meta: localMeta,
+      },
+    }), env, {});
+    assert(oldUpload.status === 409, `stale historical v2 should conflict, got ${oldUpload.status}`);
+
+    const append = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: owner.token,
+      body: {
+        slug: 'history-guard', version: 3,
+        html: '<!doctype html><html><body><h1>Agent v3</h1></body></html>', meta: localMeta,
+      },
+    }), env, {});
+    assert(append.status === 200, `agent v3 append failed ${append.status}: ${await append.clone().text()}`);
+    const v2 = await (await env.DOCS.get('docs/history-guard/v2/index.html')).text();
+    assert(v2.includes('Browser v2') && !v2.includes('Stale local v2'), 'agent history walk overwrote browser v2 bytes');
+    const meta = JSON.parse(await env.META.get('meta:history-guard'));
+    const v2Meta = meta.versions.find((item) => Number(item.n) === 2);
+    assert(v2Meta.source === 'browser', `remote v2 metadata was overwritten: ${JSON.stringify(v2Meta)}`);
   });
 
 
