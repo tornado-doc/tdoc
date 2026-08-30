@@ -339,6 +339,32 @@ t('tdoc host validator rejects inert JavaScript even for a custom template', () 
   }
 });
 
+t('an explicitly transparent body background is an error, not a note', () => {
+  // The check is structural, so it has to read the value: a document that
+  // declares `transparent` composites over the reader's ground exactly like
+  // one that omits the property, and that is the failure the error names.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-bg-'));
+  try {
+    const doc = (bg) => `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:${bg} }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`;
+    for (const bg of ['transparent', 'none', 'rgba(0,0,0,0)', 'hsl(0 0% 100% / 0)']) {
+      const html = path.join(dir, 'bg.html');
+      fs.writeFileSync(html, doc(bg));
+      const r = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+      assert(r.status !== 0, `background:${bg} should be rejected as transparent`);
+      assert(/no opaque background/.test(r.stderr), `expected the opaque-background error for ${bg}: ${r.stderr}`);
+    }
+    const okHtml = path.join(dir, 'ok.html');
+    fs.writeFileSync(okHtml, doc('#fff'));
+    const ok = spawnSync(path.join(BIN, 'tdoc-validate-template'), [okHtml], { encoding: 'utf8' });
+    assert(ok.status === 0, ok.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 t('tdoc host validator accepts the named editorial house-style background', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-style-'));
   try {

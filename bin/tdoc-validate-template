@@ -369,6 +369,30 @@ def check_figure_width(html, styles):
             "set width:100% (and a min-width only if it should scroll)"]
 
 
+# `transparent`, `none` and a zero-alpha color all composite over whatever the
+# reader paints behind the frame, which is the thing an explicit ground exists
+# to prevent.
+def is_transparent(value: str) -> bool:
+    v = compact_css_value(value)
+    if v in {"transparent", "none", "initial", "unset"}:
+        return True
+    m = re.match(r"(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(([^)]*)\)$", v)
+    if m:
+        inner = m.group(1)
+        # Both syntaxes carry alpha last: the legacy comma form as a fourth
+        # argument, the modern form after a slash.
+        alpha = inner.split("/")[1] if "/" in inner else None
+        if alpha is None:
+            parts = [p.strip() for p in inner.split(",")]
+            alpha = parts[3] if len(parts) == 4 else None
+        if alpha is not None:
+            try:
+                return float(alpha.strip().rstrip("%")) == 0
+            except ValueError:
+                return False
+    return False
+
+
 def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str], list[str]]:
     """Return (errors, notes).
 
@@ -448,7 +472,15 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
                         and compact_css_value(value) in HOUSE_BACKGROUNDS[style]
                         for prop, value in declarations
                     )
-                    if any(prop in {"background", "background-color"} for prop, _ in declarations):
+                    # Structural, so it reads the VALUE: an explicitly
+                    # transparent ground is the exact failure the error names,
+                    # and checking only the property name would pass it while
+                    # failing the document that merely omits the property.
+                    if any(
+                        prop in {"background", "background-color"}
+                        and not is_transparent(value)
+                        for prop, value in declarations
+                    ):
                         body_background = True
                     if not (allowed and white):
                         notes.append(f"body background does not match the '{style}' house style")
@@ -465,7 +497,11 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
     if not body_background:
         # An explicit ground is structural: without it the page composites over
         # whatever the reader is painting behind it.
-        errors.append("body sets no background; the page renders transparent over the reader's ground")
+        errors.append(
+            "body sets no opaque background; the page composites over the reader's "
+            "own ground (an omitted property and an explicit transparent/none/"
+            "zero-alpha value are the same failure)"
+        )
     raw = raw_html
     notes.extend(check_style_contract(parser.styles, style))
     # Figure alignment is a house-style judgment, not a correctness one, so it

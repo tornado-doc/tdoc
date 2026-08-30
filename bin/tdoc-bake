@@ -51,12 +51,17 @@ function bakeFile(file, css, stamp) {
   const html = fs.readFileSync(file, 'utf8');
   if (hasBlock(html)) return false;
   const tag = `<style id="tdoc-reader" data-tdoc-template="${stamp}">${css}</style>\n`;
-  const out = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, `${tag}</head>`) : tag + html;
+  // A callback, not a replacement string: `$&`, `$\``, `$'` and `$1` are
+  // substitution patterns there, and `tag` carries the whole template. No `$`
+  // in reader.css today, but `[class$="…"]` is ordinary CSS in a file meant to
+  // grow. Same reason bin/tdoc-bundle uses one.
+  const out = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, () => `${tag}</head>`) : tag + html;
   fs.writeFileSync(file, out);
   return true;
 }
 
-// Every v<n>/index.html under the docs root, newest slug first.
+// Every v<n>/index.html under the docs root, slugs alphabetical and versions
+// in numeric order.
 function* versionFiles(dir) {
   let slugs;
   try {

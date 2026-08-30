@@ -793,7 +793,8 @@ const server = http.createServer(async (req, res) => {
         const rcss = readerCss();
         if (rcss) {
           const rtag = `<style id="tdoc-reader">${rcss}</style>`;
-          body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+          // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
+          body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
         }
       }
       // Inject the anchoring probe — the only tdoc code allowed into the author

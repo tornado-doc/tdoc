@@ -111,6 +111,33 @@ try {
     }
   });
 
+  t('the token block is zero-specificity like the rest of the template', () => {
+    // Dropping the frame's "does this document style itself" guard rests on
+    // the template losing every contest with author CSS. A bare :root is
+    // (0,1,0) and the block is stamped after any author <style> in head, so an
+    // unwrapped token block would override an author's own --td-* values.
+    const css = fs.readFileSync(path.join(ROOT, 'server', 'reader.css'), 'utf8');
+    const bare = css.split('\n').filter((line) => /^\s*:root\s*[,{]/.test(line));
+    if (bare.length) throw new Error(`reader.css has a bare :root (specificity 0,1,0): ${bare[0].trim()}`);
+    if (!/:where\(:root\)/.test(css)) throw new Error('the token block is no longer wrapped in :where()');
+  });
+
+  t('a $ in the template survives baking literally', () => {
+    // `$&`, `$\`` and `$'` are substitution patterns in a replacement string,
+    // and the template is the replacement. [class$="…"] is ordinary CSS.
+    const f = path.join(tmp, 'dollar.html');
+    fs.writeFileSync(f, FIXTURE);
+    const fake = path.join(tmp, 'fake-skill');
+    fs.mkdirSync(path.join(fake, 'server'), { recursive: true });
+    fs.mkdirSync(path.join(fake, 'bin'), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'bin', 'tdoc-bake'), path.join(fake, 'bin', 'tdoc-bake'));
+    fs.writeFileSync(path.join(fake, 'server', 'reader.css'), '[class$="x"]{color:red}/* $& $` $\' $1 */');
+    cp.execFileSync('node', [path.join(fake, 'bin', 'tdoc-bake'), f], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const out = fs.readFileSync(f, 'utf8');
+    if (!out.includes('[class$="x"]')) throw new Error('an attribute-suffix selector did not survive baking');
+    if (!out.includes('$&')) throw new Error('$& was expanded instead of kept literal');
+  });
+
   t('tdoc-write --version next adds a baked version and keeps the thread', () => {
     // The gateway exists because /tdoc edit used to write v<n>/index.html by
     // hand: no validation, no bake, and meta.json updated from prose.

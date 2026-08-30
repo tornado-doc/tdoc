@@ -1,8 +1,18 @@
 /* tdoc READER CSS — the reading column, typography, tables, code blocks.
-   All :where() zero-specificity: author CSS always wins. Single source of
-   truth (extracted from overlay.js). Consumed by: tdoc-new (creation-time
-   bake), /frame legacy fallback, /export. */
-:root {
+   All :where() zero-specificity, INCLUDING the token block below: author CSS
+   always wins. A bare `:root` is (0,1,0), and this file is stamped immediately
+   before </head> — after any author <style> in head — so unwrapped tokens would
+   OVERRIDE an author's own --td-* values instead of losing to them. That
+   invariant is what lets the frame supply this template to a document that
+   styles itself without changing how it renders. Single source of truth
+   (extracted from overlay.js). Consumed by: tdoc-bake (creation-time bake),
+   /frame fallback, /export.
+
+   Two rules are deliberately not zero-specificity, and neither competes with
+   an author for a property they would set: `.tdoc-table-scroll` names tdoc's
+   own wrapper class, and the `@media print` block below only applies to
+   printing. Everything an author might style is inside :where(). */
+:where(:root) {
     --td-accent: #1652f0;
     --td-accent-hover: #1245d0;
     --td-accent-ring: rgba(22,82,240,0.35);
