@@ -369,11 +369,29 @@ def check_figure_width(html, styles):
             "set width:100% (and a min-width only if it should scroll)"]
 
 
-def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
+def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str], list[str]]:
+    """Return (errors, notes).
+
+    Two different kinds of judgment used to share one exit code, and the split
+    matters more than it looks. ERRORS are the things that break the system:
+    markup that is inert under CSP, a missing viewport, a content root the
+    probe cannot measure, a figure that overflows the column. NOTES are taste:
+    which background the house style picked, whether a component's margin is
+    the one the style entry documents, whether the selectors are scoped the way
+    tdoc scopes its own.
+
+    Enforcing taste is the wrong shape for this tool. A document is allowed to
+    bring its own design — the reading template is :where() zero-specificity
+    precisely so the author wins — so a house-style deviation is worth saying
+    out loud and not worth refusing to create the document over. Before the
+    split this file rejected a `.note` whose margin was 22px where the style
+    said 20px, while passing a 1100px-wide inner container.
+    """
     html = path.read_text(encoding="utf-8")
     parser = ContractParser()
     parser.feed(html)
     errors: list[str] = []
+    notes: list[str] = []
 
     if not parser.has_viewport:
         errors.append('missing <meta name="viewport">')
@@ -401,7 +419,7 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
         errors.append("host <canvas> cannot render without JavaScript; use SVG or a sandboxed widget island")
     if parser.inline_prose_styles and not custom_template:
         tags = ", ".join(sorted(set(parser.inline_prose_styles)))
-        errors.append(f"inline styles override default prose elements: {tags}")
+        notes.append(f"inline styles override default prose elements: {tags}")
 
     # Clipping is measured on both paths. A drawing cut off by its own viewBox
     # is broken whoever wrote it; the house style has no opinion about it. The
@@ -411,7 +429,7 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
     errors.extend(clipping)
 
     if custom_template:
-        return errors
+        return errors, notes
 
     body_background = False
     for raw_css in parser.styles:
@@ -430,10 +448,10 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
                         and compact_css_value(value) in HOUSE_BACKGROUNDS[style]
                         for prop, value in declarations
                     )
-                    if allowed and white:
+                    if any(prop in {"background", "background-color"} for prop, _ in declarations):
                         body_background = True
-                    else:
-                        errors.append(f"body background does not match the '{style}' house style")
+                    if not (allowed and white):
+                        notes.append(f"body background does not match the '{style}' house style")
                 elif normalized in {".wrap", ".content", ".container", "main", "article"}:
                     forbidden = sorted({prop for prop, _ in declarations}.intersection(ROOT_LAYOUT_PROPERTIES))
                     if forbidden:
@@ -442,24 +460,31 @@ def validate(path: Path, *, style: str, custom_template: bool) -> list[str]:
                             + ", ".join(forbidden)
                         )
                 elif selector_is_global(normalized):
-                    errors.append(f"global selector '{selector.strip()}' overrides the default template")
+                    notes.append(f"global selector '{selector.strip()}' overrides the default template")
 
     if not body_background:
-        errors.append(f"missing required body background for the '{style}' house style")
+        # An explicit ground is structural: without it the page composites over
+        # whatever the reader is painting behind it.
+        errors.append("body sets no background; the page renders transparent over the reader's ground")
     raw = raw_html
-    errors.extend(check_style_contract(parser.styles, style))
+    notes.extend(check_style_contract(parser.styles, style))
     # Figure alignment is a house-style judgment, not a correctness one, so it
     # only applies where tdoc is the author. An agent bringing its own design
     # system reaches this file through --custom-template and returned above.
+    # A figure whose ink starts inside its own box reads as indented against
+    # every paragraph around it — a defect the reader sees, not a house-style
+    # preference, and visuals.md documents it as a failure.
     errors.extend(inset)
-    errors.extend(check_style_accent(raw, style))
+    notes.extend(check_style_accent(raw, style))
     # The cell reset is a house-style rule: tdoc tables are ruled, never filled.
     # A caller bringing its own design system returned above with the other
     # house checks, so this only judges documents tdoc itself authored.
-    errors.extend(check_table_cells(raw, parser.styles))
+    notes.extend(check_table_cells(raw, parser.styles))
+    # A figure that states a pixel width but no CSS width overflows the column
+    # wherever the reader CSS is not doing the capping (#320) — correctness.
     errors.extend(check_figure_width(raw, parser.styles))
 
-    return errors
+    return errors, notes
 
 
 def main() -> int:
@@ -467,17 +492,27 @@ def main() -> int:
     parser.add_argument("html_file")
     parser.add_argument("--style", choices=sorted(HOUSE_STYLES), default="default")
     parser.add_argument("--custom-template", action="store_true", help="explicitly allow a custom whole-page design")
+    parser.add_argument("--strict", action="store_true", help="fail on house-style notes as well as errors (CI)")
     args = parser.parse_args()
     path = Path(args.html_file)
     if not path.is_file():
         print(f"tdoc-template: file not found: {path}", file=sys.stderr)
         return 2
-    errors = validate(path, style=args.style, custom_template=args.custom_template)
+    errors, notes = validate(path, style=args.style, custom_template=args.custom_template)
+    if notes:
+        print(f"tdoc-template: {len(notes)} house-style note(s) — the document is still valid:", file=sys.stderr)
+        for note in notes:
+            print(f"  · {note}", file=sys.stderr)
+        print("These are taste, not contract. Follow them for a document that matches", file=sys.stderr)
+        print("the house style; ignore them for one that deliberately brings its own.", file=sys.stderr)
     if errors:
-        print("tdoc-template: HTML does not use the default template:", file=sys.stderr)
+        print("tdoc-template: the document would not render correctly:", file=sys.stderr)
         for error in errors:
             print(f"  - {error}", file=sys.stderr)
         print("Keep host HTML static/CSS-only. Put computation in a sandboxed widget island.", file=sys.stderr)
+        return 1
+    if notes and args.strict:
+        print("tdoc-template: --strict, so notes fail the run.", file=sys.stderr)
         return 1
     return 0
 

@@ -117,10 +117,14 @@ t('chat-driven new and edit flows require host validation', () => {
   const rootSkill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
   const packagedSkill = fs.readFileSync(path.join(__dirname, '..', 'skills', 'tdoc', 'SKILL.md'), 'utf8');
   assert(rootSkill === packagedSkill, 'root and packaged SKILL.md copies must stay identical');
-  assert(/mandatory[\s\S]*tdoc-validate-template[\s\S]*do not open,\s*publish, or report/.test(rootSkill),
-    '/tdoc new must validate before completion');
-  assert(/Validate `v<n\+1>\/index\.html`[\s\S]*tdoc-validate-template[\s\S]*never publish or report a broken version/.test(rootSkill),
-    '/tdoc edit must validate every generated version');
+  // Validation is no longer a step the agent performs between writing the file
+  // and publishing it: writing a version goes through bin/tdoc-write, which
+  // validates, bakes and records in one place. Both prose paths must route
+  // through it, or the guarantee is optional again.
+  assert(/Hand the HTML to `bin\/tdoc-write`[\s\S]*Do not write into `~\/tdocs` yourself[\s\S]*not open, publish, or report the document as complete/.test(rootSkill),
+    '/tdoc new must write through the gateway');
+  assert(/Hand it to `bin\/tdoc-write --version next`[\s\S]*Do not write `v<n\+1>\/` yourself/.test(rootSkill),
+    '/tdoc edit must write through the gateway');
 });
 
 // The reader stamps `background` and `border-radius` onto every th and td at
@@ -343,8 +347,14 @@ t('tdoc host validator accepts the named editorial house-style background', () =
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>body { background:#f7f6f5 } .wrap { font-family:Georgia,serif; color:#000 }</style>
       </head><body><div class="wrap"><h1>Title</h1></div></body></html>`);
+    // A ground that belongs to another house style is a taste mismatch, not a
+    // rendering fault: it is reported as a note and the document still stands.
+    // --strict is how a caller that wants house conformance enforced asks.
     const wrong = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
-    assert(wrong.status !== 0, 'editorial background should not pass as default');
+    assert(wrong.status === 0, `editorial background should pass as a note: ${wrong.stderr}`);
+    assert(/house-style note/.test(wrong.stderr), `expected a house-style note, got: ${wrong.stderr}`);
+    const strict = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html, '--strict'], { encoding: 'utf8' });
+    assert(strict.status !== 0, '--strict should fail on a house-style note');
     const right = spawnSync(path.join(BIN, 'tdoc-validate-template'),
       [html, '--style', 'editorial'], { encoding: 'utf8' });
     assert(right.status === 0, right.stderr);
@@ -394,10 +404,13 @@ t('tdoc-new validates the default template before replacing an existing doc', ()
     fs.writeFileSync(path.join(docDir, 'v1', 'index.html'), '<!doctype html><body>ORIGINAL</body>');
     fs.writeFileSync(path.join(docDir, 'meta.json'), JSON.stringify({ slug: 'mydoc', versions: [{ n: 1 }] }));
     fs.writeFileSync(path.join(docDir, 'comments.json'), JSON.stringify([{ id: 'c1', text: 'precious' }]));
+    // Host JavaScript is inert under CSP, so this is a contract failure rather
+    // than a house-style note — the stage-validate-swap guard must refuse it
+    // and leave the existing document and its comments untouched.
     const custom = `<!doctype html><html><head>
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <style>body { background:#fff } h1 { font-size:72px }</style>
-      </head><body><div class="wrap"><h1>Custom</h1></div></body></html>`;
+      <style>body { background:#fff }</style>
+      </head><body><div class="wrap"><h1>Custom</h1><script>1</script></div></body></html>`;
     const r = spawnSync(path.join(BIN, 'tdoc-new'),
       ['--slug', 'mydoc', '--title', 'x', '--html-stdin', '--force'],
       { input: custom, env, encoding: 'utf8', timeout: 20000 });

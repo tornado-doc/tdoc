@@ -549,12 +549,6 @@
      them in .tdoc-emoji so they get the same restore as photos. */
   .tdoc-emoji { display: inline-block; line-height: 1; }
 
-  /* /me catalog: overlay reader template would otherwise restyle the list. */
-  body.tdoc-catalog :where(body) { font-size: 15px; line-height: 1.5; }
-  body.tdoc-catalog :where(body h1) { font-size: 28px; line-height: 1.2; color: var(--td-accent); margin: 0 0 24px; letter-spacing: -0.01em; }
-  body.tdoc-catalog :where(body a) { text-decoration: none; }
-  body.tdoc-catalog :where(body a):hover { text-decoration: underline; }
-
   /* Footer */
   .tdoc-footer { margin-top: 80px; padding: 20px 16px 28px; font: 12px system-ui, sans-serif; color: #888; text-align: center; border-top: 1px solid #eee; box-sizing: border-box; max-width: 100%; }
   .tdoc-footer .tdoc-footer-row { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; row-gap: 4px; }

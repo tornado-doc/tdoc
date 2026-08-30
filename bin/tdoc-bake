@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+// tdoc-bake — stamp the reading template into documents so they are self-contained.
+//
+// The cross-origin shell serves author HTML in an isolated frame and injects
+// nothing into storage, so a document has to carry its own reading template.
+// `bin/tdoc-new` bakes it at creation; this is the same operation applied to
+// documents that predate creation-time baking, or that were written by a path
+// which never baked (a hand-authored version directory, an /tdoc edit that
+// regenerated the HTML from scratch).
+//
+// The template is :where() zero-specificity throughout, so baking never
+// changes how a document that styles itself renders — the author wins every
+// property they declare, exactly as before.
+//
+// Usage:
+//   tdoc-bake <file.html>...            stamp specific files (used by tdoc-new)
+//   tdoc-bake --scan [--dir ~/tdocs]    report which local documents lack it
+//   tdoc-bake --scan --apply            ...and stamp them
+//
+// Exit codes: 0 ok, 1 error. Files that already carry the block are left
+// untouched and reported as "skip", so the operation is idempotent.
+
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.join(__dirname, '..');
+const READER_CSS_PATH = path.join(ROOT, 'server', 'reader.css');
+
+function readerCss() {
+  try {
+    return fs.readFileSync(READER_CSS_PATH, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+// The block carries a short content hash of the template it was stamped from.
+// Each document freezes the template it was created with — that is the price
+// of self-contained documents — so the generation has to be readable from the
+// document itself rather than inferred by diffing rendered type sizes.
+function templateStamp(css) {
+  return require('crypto').createHash('sha256').update(css).digest('hex').slice(0, 8);
+}
+
+function hasBlock(html) {
+  return html.includes('id="tdoc-reader"');
+}
+
+// Returns true when the file was changed.
+function bakeFile(file, css, stamp) {
+  const html = fs.readFileSync(file, 'utf8');
+  if (hasBlock(html)) return false;
+  const tag = `<style id="tdoc-reader" data-tdoc-template="${stamp}">${css}</style>\n`;
+  const out = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, `${tag}</head>`) : tag + html;
+  fs.writeFileSync(file, out);
+  return true;
+}
+
+// Every v<n>/index.html under the docs root, newest slug first.
+function* versionFiles(dir) {
+  let slugs;
+  try {
+    slugs = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory());
+  } catch {
+    return;
+  }
+  for (const slug of slugs.map((e) => e.name).sort()) {
+    const docDir = path.join(dir, slug);
+    let versions;
+    try {
+      versions = fs.readdirSync(docDir).filter((n) => /^v\d+$/.test(n));
+    } catch {
+      continue;
+    }
+    versions.sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+    for (const v of versions) {
+      const f = path.join(docDir, v, 'index.html');
+      if (fs.existsSync(f)) yield { slug, version: v, file: f };
+    }
+  }
+}
+
+function main(argv) {
+  const args = argv.slice(2);
+  const scan = args.includes('--scan');
+  const apply = args.includes('--apply');
+  const dirFlag = args.indexOf('--dir');
+  const files = args.filter((a) => !a.startsWith('--') && (dirFlag === -1 || args[dirFlag + 1] !== a));
+
+  const css = readerCss();
+  if (!css) {
+    // Missing template is not fatal for the creation path: serve unbaked
+    // rather than refuse to create the document.
+    console.error('tdoc-bake: server/reader.css not found — nothing to stamp');
+    return 0;
+  }
+  const stamp = templateStamp(css);
+
+  if (!scan) {
+    if (!files.length) {
+      console.error('usage: tdoc-bake <file.html>... | tdoc-bake --scan [--dir <docs>] [--apply]');
+      return 1;
+    }
+    for (const f of files) {
+      if (!fs.existsSync(f)) {
+        console.error(`tdoc-bake: no such file: ${f}`);
+        return 1;
+      }
+      const changed = bakeFile(f, css, stamp);
+      console.log(`${changed ? 'baked' : 'skip '} ${f}`);
+    }
+    return 0;
+  }
+
+  const dir = dirFlag !== -1 ? args[dirFlag + 1] : (process.env.TDOC_DIR || path.join(process.env.HOME || '', 'tdocs'));
+  const missing = [];
+  let present = 0;
+  for (const item of versionFiles(dir)) {
+    if (hasBlock(fs.readFileSync(item.file, 'utf8'))) present++;
+    else missing.push(item);
+  }
+
+  console.log(`docs root: ${dir}`);
+  console.log(`  with template   : ${present}`);
+  console.log(`  without template: ${missing.length}`);
+  for (const m of missing) console.log(`    ${apply ? 'baking' : 'would bake'}  ${m.slug}/${m.version}`);
+
+  if (apply) {
+    let n = 0;
+    for (const m of missing) if (bakeFile(m.file, css, stamp)) n++;
+    console.log(`baked ${n} version(s) with template ${stamp}`);
+    console.log('published copies are unchanged — re-run tdoc-publish for the docs you want updated remotely');
+  } else if (missing.length) {
+    console.log('\nre-run with --apply to stamp them');
+  }
+  return 0;
+}
+
+process.exit(main(process.argv));
