@@ -125,5 +125,45 @@ t('isLocalMutation allows an explicit localhost Origin JSON POST', () => {
   assert(box.isLocalMutation(hdr({ 'content-type': 'application/json', origin: 'http://localhost:7878' })) === true);
 });
 
+// --- shell comment card: delete / re-anchor are author-or-owner affordances ---
+// The React shell replaced the overlay's `canDelete` gate and shipped without
+// it, so every reader saw "delete" and "move anchor" on everyone's comments —
+// the worker's 403 (`not_author`) was the only thing left. Source-level because
+// the UI suites need playwright; these assert the gate exists and is wired.
+const cardSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'comment-card.jsx'), 'utf8');
+const layerSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'comment-layer.jsx'), 'utf8');
+const shellSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document-shell.jsx'), 'utf8');
+
+// True when `needle` sits inside a `{canMutate ? ... : null}` block.
+function gatedByCanMutate(src, needle) {
+  const at = src.indexOf(needle);
+  if (at === -1) throw new Error(`${needle} not found in comment-card.jsx`);
+  const open = src.lastIndexOf('{canMutate ? (', at);
+  if (open === -1) return false;
+  const close = src.indexOf(') : null}', open);
+  return close !== -1 && close > at;
+}
+
+t('comment card derives canMutate from the author login or doc owner', () => {
+  const decl = cardSrc.slice(cardSrc.indexOf('const canMutate'), cardSrc.indexOf('const canMutate') + 400);
+  assert(decl.includes('isOwner'), 'canMutate ignores the doc owner');
+  assert(decl.includes('comment.author?.login') && decl.includes('currentUser'),
+    'canMutate does not compare the comment author to the signed-in viewer');
+});
+t('comment card renders delete only for the author or the doc owner [the bug]', () => {
+  assert(gatedByCanMutate(cardSrc, 'className="del"'), 'delete button is not gated by canMutate');
+});
+t('comment card renders the re-anchor button only for the author or the doc owner', () => {
+  assert(gatedByCanMutate(cardSrc, 'tdoc-anchor-actions'), 're-anchor action is not gated by canMutate');
+});
+t('both comment layers forward isOwner to the card', () => {
+  assert(layerSrc.split('isOwner={isOwner}').length === 3,
+    'desktop layer and mobile drawer must both pass isOwner to CommentCard');
+});
+t('the document shell sources isOwner from the boot config', () => {
+  assert(shellSrc.split('isOwner={Boolean(config.isOwner)}').length === 3,
+    'both comment layers must receive config.isOwner');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

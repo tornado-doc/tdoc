@@ -110,10 +110,13 @@ function ReplyForm({ commentId, onReply }) {
 export function CommentCard({
   comment,
   currentUser,
+  isOwner = false,
   unanchored,
   floating = false,
   position,
   expandReplies = false,
+  selected = false,
+  onActivate,
   onReply,
   onReact,
   onDelete,
@@ -135,6 +138,18 @@ export function CommentCard({
   }, [floating, position, repliesOpen, replyOpen, comment]);
   const reactionCount = Object.values(comment.reactions || {})
     .some((users) => users?.length);
+  // Mirrors the worker's canMutate(): delete and re-anchor are the comment
+  // author's or the doc owner's, nobody else's. Without this the buttons
+  // rendered for every reader and the server's 403 (`not_author`) was the
+  // only thing stopping them — a toast where there should have been no
+  // affordance at all.
+  const canMutate = Boolean(
+    isOwner
+    || (currentUser
+      && currentUser !== 'anon'
+      && comment.author?.login
+      && comment.author.login === currentUser),
+  );
   const createdAt = comment.created
     ? new Date(comment.created).toLocaleString([], {
       month: 'short',
@@ -148,6 +163,7 @@ export function CommentCard({
     'tdoc-margin-comment',
     'active',
     floating ? 'tdoc-floating-open' : '',
+    selected ? 'tdoc-current-comment' : '',
     comment.status === 'applied' ? 'tdoc-resolved' : '',
     unanchored ? 'tdoc-unanchored' : '',
   ].filter(Boolean).join(' ');
@@ -159,14 +175,22 @@ export function CommentCard({
       data-comment-id={comment.id}
       style={floating ? { ...position, top: clampedTop ?? position.top } : undefined}
       onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        if (!onActivate) return;
+        if (event.target instanceof Element
+          && event.target.closest('button, a, input, textarea, select, [role="button"]')) return;
+        onActivate(comment.id);
+      }}
     >
-      <div className="tdoc-anchor-actions">
-        <button className="tdoc-reanchor-btn" type="button" onClick={() => onReanchor(comment.id)}>
-          <span className={unanchored ? 'tdoc-reanchor-unanchored' : 'tdoc-reanchor-anchored'}>
-            {unanchored ? 'unanchored - click to re-anchor' : '↻ move anchor'}
-          </span>
-        </button>
-      </div>
+      {canMutate ? (
+        <div className="tdoc-anchor-actions">
+          <button className="tdoc-reanchor-btn" type="button" onClick={() => onReanchor(comment.id)}>
+            <span className={unanchored ? 'tdoc-reanchor-unanchored' : 'tdoc-reanchor-anchored'}>
+              {unanchored ? 'unanchored - click to re-anchor' : '↻ move anchor'}
+            </span>
+          </button>
+        </div>
+      ) : null}
 
       {comment.status === 'applied' ? (
         <span className="tdoc-resolved-chip">
@@ -193,9 +217,11 @@ export function CommentCard({
           >
             Reply
           </button>
-          <button type="button" className="del" onClick={() => onDelete(comment.id)}>
-            delete
-          </button>
+          {canMutate ? (
+            <button type="button" className="del" onClick={() => onDelete(comment.id)}>
+              delete
+            </button>
+          ) : null}
         </span>
       </div>
 

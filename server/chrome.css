@@ -130,6 +130,7 @@
   #tdoc-comment-layer { display: none; }
   .tdoc-margin-comment { position: absolute; width: 280px; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font: 13px system-ui, sans-serif; transition: box-shadow .15s, transform .15s; z-index: 999996; pointer-events: auto; }
   .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
+  .tdoc-margin-comment.tdoc-current-comment { box-shadow: 0 0 0 2px var(--td-accent-ring-soft), 0 4px 16px var(--td-accent-ring-soft); }
   .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
   /* A resolved (agent-applied) comment whose anchor text was rewritten is the
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or

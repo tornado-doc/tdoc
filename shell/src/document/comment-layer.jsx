@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Check, MessageCircle } from 'lucide-react';
 import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
@@ -68,6 +68,7 @@ export function DesktopCommentLayer({
   openClusterKey,
   pinIds,
   currentUser,
+  isOwner,
   cardPosition,
   expandReplies,
   onOpenComment,
@@ -113,6 +114,7 @@ export function DesktopCommentLayer({
         <CommentCard
           comment={openComment}
           currentUser={currentUser}
+          isOwner={isOwner}
           unanchored={!pinIds.has(openComment.id)}
           floating
           position={cardPosition}
@@ -132,6 +134,7 @@ export function MobileCommentDrawer({
   comments,
   pinIds,
   currentUser,
+  isOwner,
   openCommentId,
   expandReplies,
   onOpenChange,
@@ -139,7 +142,17 @@ export function MobileCommentDrawer({
   onReact,
   onDelete,
   onReanchor,
+  onNavigate,
 }) {
+  const drawerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open || !openCommentId || !drawerRef.current) return;
+    const card = [...drawerRef.current.querySelectorAll('[data-comment-id]')]
+      .find((element) => element.dataset.commentId === openCommentId);
+    card?.scrollIntoView({ block: 'center' });
+  }, [open, openCommentId]);
+
   if (!comments.length) return null;
 
   return (
@@ -151,7 +164,7 @@ export function MobileCommentDrawer({
       <Drawer.Portal>
         <Drawer.Backdrop className="tdoc-drawer-backdrop" />
         <Drawer.Viewport className="tdoc-drawer-viewport">
-          <Drawer.Popup id="tdoc-comment-layer" className="open">
+          <Drawer.Popup ref={drawerRef} id="tdoc-comment-layer" className="open">
             <Drawer.Title className="tdoc-visually-hidden">Comments</Drawer.Title>
             <Drawer.Close className="tdoc-drawer-handle" aria-label="Close comments" />
             <Drawer.Content className="tdoc-drawer-list">
@@ -160,8 +173,11 @@ export function MobileCommentDrawer({
                   key={comment.id}
                   comment={comment}
                   currentUser={currentUser}
+                  isOwner={isOwner}
                   unanchored={!pinIds.has(comment.id)}
                   expandReplies={openCommentId === comment.id && expandReplies}
+                  selected={openCommentId === comment.id}
+                  onActivate={onNavigate}
                   onReply={onReply}
                   onReact={onReact}
                   onDelete={onDelete}
