@@ -62,6 +62,7 @@ const OFFLINE = [
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)
   'vercel-shim.test.js',      // vercel storage shims (KV/R2 contract, rewrite URL)
   'api.test.js',              // hermetic: spawns its own server in a temp dir
+  'publish-signin.test.js',   // device code reaches the publish modal (expiry/pid/slug guards)
 ];
 
 // Require network (live Cloudflare) or a browser (playwright). Not run in the

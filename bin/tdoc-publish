@@ -145,6 +145,14 @@ TDOC_DIR="${TDOC_DIR:-$HOME/tdocs}"
 DOC_DIR="$TDOC_DIR/$SLUG"
 CONFIG_DIR="$HOME/.tdoc"
 CONFIG_FILE="$CONFIG_DIR/published.json"
+# Sign-in handoff for a non-terminal caller. The device code is printed to
+# stderr, which is the whole story for a human at a prompt but invisible to the
+# publish modal: the local server buffers the child's output and only answers
+# once the child exits, so a browser-triggered first publish would show a blank
+# spinner for the entire 15 minutes the code is alive. The file is the side
+# channel — written before the poll loop, deleted after it, carrying its own
+# expiry and pid so a killed process cannot leave a stale code behind.
+PENDING_SIGNIN_FILE="$CONFIG_DIR/pending-signin.json"
 WORKER_DIR="$SKILL_DIR/worker"
 # Vercel deploys run from a work dir OUTSIDE the skill checkout so the
 # `vercel` CLI's .vercel/ project link and the generated bundle never dirty
@@ -246,6 +254,10 @@ Codex, or any coding agent — it will resolve the issue and re-run publish:
 $prompt
 ────────────────────────────────────────────────────────────────────────
 EOF
+  # Every failure path funnels through here, so this is where a half-finished
+  # sign-in stops being advertised to the modal. A trap would be tidier but
+  # EXIT is already claimed by the platform-switch config restore below.
+  clear_pending_signin
   exit 1
 }
 
@@ -263,6 +275,29 @@ require_vercel() {
       "Install the Vercel CLI globally so tdoc can publish: run 'npm i -g vercel' (or 'pnpm add -g vercel'). After it's installed, run '/tdoc publish $SLUG' again."
   fi
 }
+
+# The user_code is not a secret in the "leaks your account" sense — it is meant
+# to be read aloud off a screen — but it is a live credential-shaped token for
+# as long as it lasts, so it gets the same 600 the upload token gets.
+write_pending_signin() {
+  local code="$1" uri="$2" expires_in="$3" opened="$4"
+  ( umask 077
+    node -e '
+      const [code, uri, expiresIn, opened, slug, pid] = process.argv.slice(1);
+      process.stdout.write(JSON.stringify({
+        user_code: code,
+        verification_uri: uri,
+        expires_at: Date.now() + Number(expiresIn) * 1000,
+        opened: opened === "1",
+        slug,
+        pid: Number(pid),
+      }));
+    ' "$code" "$uri" "$expires_in" "$opened" "$SLUG" "$$" > "$PENDING_SIGNIN_FILE".tmp 2>/dev/null
+  ) || { rm -f "$PENDING_SIGNIN_FILE".tmp; return 0; }
+  chmod 600 "$PENDING_SIGNIN_FILE".tmp 2>/dev/null || true
+  mv -f "$PENDING_SIGNIN_FILE".tmp "$PENDING_SIGNIN_FILE" 2>/dev/null || true
+}
+clear_pending_signin() { rm -f "$PENDING_SIGNIN_FILE" "$PENDING_SIGNIN_FILE".tmp 2>/dev/null || true; }
 
 # GitHub Device Flow against the hosted Worker. Writes the session cookie into
 # $2 (curl cookie jar) so /api/hosted/token can bind the upload token to the
@@ -354,6 +389,10 @@ hosted_github_signin() {
   [ "${opened:-0}" = "1" ] && echo "[tdoc] (If nothing opened: $uri )" >&2
   echo "[tdoc] Then click Authorize. I'll carry on by myself — nothing to do here." >&2
   echo "[tdoc] Waiting for GitHub approval…" >&2
+  # From here the code exists and nothing else will print it. Hand it to the
+  # side channel before the first sleep, so a modal polling for it sees the
+  # code on its next tick rather than after the whole flow resolves.
+  write_pending_signin "$user_code" "$uri" "$expires" "${opened:-0}"
   local waited=0 err
   while [ "$waited" -lt "$expires" ]; do
     sleep "$interval"
@@ -366,6 +405,7 @@ hosted_github_signin() {
     if [ "$(printf '%s' "$payload" | json_get ok)" = "true" ]; then
       _who="$(printf '%s' "$payload" | json_get identity.login)"
       echo "[tdoc] Signed in as ${_who:-github user}" >&2
+      clear_pending_signin
       return 0
     fi
     err="$(printf '%s' "$payload" | json_get error)"
@@ -379,6 +419,9 @@ hosted_github_signin() {
       *)
         echo "[tdoc] GitHub sign-in error: ${err:-HTTP $http}" >&2
         printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
+        # The one exit inside the poll loop that does not go through
+        # fail_with_agent_prompt, so it clears the code itself.
+        clear_pending_signin
         exit 1
         ;;
     esac
