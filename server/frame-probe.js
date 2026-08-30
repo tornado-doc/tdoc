@@ -44,6 +44,7 @@
   // overlay's .tdoc-hover-outline / .tdoc-comment-pill.
   (function () {
     var s = document.createElement('style');
+    var commentCursor = 'url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2724%27%20height%3D%2724%27%20viewBox%3D%270%200%2024%2024%27%3E%3Cpath%20d%3D%27M21%2015a2%202%200%200%201-2%202H7l-4%204V5a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202z%27%20fill%3D%27white%27%20stroke%3D%27%234f46e5%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%2F%3E%3C%2Fsvg%3E") 3 3, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');
     s.textContent =
@@ -51,9 +52,8 @@
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:#4f46e5;border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:#4f46e5;color:#fff;border-color:#4f46e5;}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:currentColor;}' +
-      'html[data-tdoc-interaction-mode="comment"] body{cursor:crosshair;}' +
-      'html[data-tdoc-interaction-mode="comment"] a,html[data-tdoc-interaction-mode="comment"] button{cursor:pointer;}' +
-      'html[data-tdoc-interaction-mode="comment"] input,html[data-tdoc-interaction-mode="comment"] textarea{cursor:text;}' +
+      'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
+      'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]:focus{box-shadow:inset 0 0 0 1px rgba(22,82,240,.18);}';
     (document.head || document.documentElement).appendChild(s);
@@ -114,6 +114,19 @@
 
   document.addEventListener('mouseup', function () { setTimeout(reportSelection, 0); }, true);
   document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
+  document.addEventListener('copy', function (e) {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !e.clipboardData) return;
+    var text = sel.toString();
+    if (!text) return;
+    try {
+      var box = document.createElement('div');
+      box.appendChild(sel.getRangeAt(0).cloneContents());
+      e.clipboardData.setData('text/plain', text);
+      e.clipboardData.setData('text/html', box.innerHTML);
+      e.preventDefault();
+    } catch (x) {}
+  }, true);
   document.addEventListener('mousedown', function (e) {
     if (interactionMode === 'edit') return;
     // Clicking our own comment pill must not fire the clear (it opens the

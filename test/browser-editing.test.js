@@ -84,7 +84,10 @@ async function chooseMode(page, label) {
   try {
     await waitForServer(port);
     browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      permissions: ['clipboard-read', 'clipboard-write'],
+    });
     const page = await context.newPage();
     const url = `http://127.0.0.1:${port}/d/${slug}/v/1`;
     await page.goto(url, { waitUntil: 'networkidle' });
@@ -94,8 +97,9 @@ async function chooseMode(page, label) {
     await test('comment-capable docs default to compact Comment mode', async () => {
       await page.getByRole('button', { name: 'Document mode: Comment' }).waitFor();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
-      assert(await frame.evaluate(() => getComputedStyle(document.body).cursor) === 'crosshair',
-        'Comment mode did not expose its frame cursor state');
+      const cursor = await frame.evaluate(() => getComputedStyle(document.body).cursor);
+      assert(cursor.includes('data:image/svg+xml') && cursor.includes('crosshair'),
+        `Comment mode did not expose its chat cursor: ${cursor}`);
     });
 
     await test('Read mode opens existing anchors but does not create a comment selection', async () => {
@@ -103,6 +107,29 @@ async function chooseMode(page, label) {
       await selectParagraph(frame);
       await page.waitForTimeout(150);
       assert(await page.locator('.tdoc-popup').count() === 0, 'Read selection opened the comment composer');
+    });
+
+    await test('Read mode copies the selected document text', async () => {
+      const paragraph = frame.locator('#editable-paragraph');
+      await paragraph.click();
+      await paragraph.selectText();
+      const fallback = await frame.evaluate(() => {
+        const data = new DataTransfer();
+        const event = new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true });
+        document.dispatchEvent(event);
+        return {
+          prevented: event.defaultPrevented,
+          text: data.getData('text/plain'),
+          html: data.getData('text/html'),
+        };
+      });
+      assert(fallback.prevented && fallback.text === 'Edit this sentence and save one snapshot.',
+        `frame copy fallback did not preserve selected text: ${JSON.stringify(fallback)}`);
+      assert(/Edit this sentence/.test(fallback.html), 'frame copy fallback omitted HTML content');
+      await page.keyboard.press(`${PRIMARY_MODIFIER}+c`);
+      const copied = await page.evaluate(() => navigator.clipboard.readText());
+      assert(copied === 'Edit this sentence and save one snapshot.',
+        `Read copy returned the wrong text: ${JSON.stringify(copied)}`);
     });
 
     await test('Comment mode turns a selection into a composer', async () => {
