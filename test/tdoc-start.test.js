@@ -61,6 +61,13 @@ t('the short prompt points to FIRST-DOC and never embeds a credential', () => {
   assert(/copyText\(RECIPE\)/.test(dialog), 'copy action is not wired to the recipe');
 });
 
+t('the tutorial promises the same private personal AI portrait as FIRST-DOC', () => {
+  assert(/personal AI portrait/i.test(text), 'tutorial does not name the current first-doc outcome');
+  assert(/What does AI know about me\?/i.test(text), 'tutorial first-doc title is stale');
+  assert(/traces you choose to share/i.test(text), 'tutorial omits the portrait privacy boundary');
+  assert(!/You get a Game of Life/i.test(text), 'tutorial still promises the old first doc');
+});
+
 t('hosted availability only controls whether the hub is mentioned', () => {
   assert(/fetch\('\/api\/hosted\/token'/.test(dialog), 'hosted capability probe missing');
   assert(/result\?\.token \|\| result\?\.error === 'sign_in_required'/.test(dialog), 'hosted probe semantics changed');
