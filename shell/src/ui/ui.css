@@ -190,6 +190,35 @@ button.tdoc-pin {
   white-space: nowrap;
 }
 
+.ui-menu-item.tdoc-action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tdoc-mobile-overflow-only,
+.tdoc-mobile-menu-label {
+  display: none !important;
+}
+
+.tdoc-mobile-menu-label {
+  padding: 8px 10px 3px;
+  color: #8a8a8a;
+  font: 600 11px system-ui, sans-serif;
+  text-transform: uppercase;
+}
+
+@media (max-width: 700px) {
+  .ui-menu-popup {
+    min-width: 210px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .tdoc-mobile-overflow-only { display: flex !important; }
+  .tdoc-mobile-menu-label { display: block !important; }
+}
+
 .ui-menu-item.tdoc-version-item {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }

@@ -283,14 +283,30 @@ async function chooseMode(page, label) {
         toolbarWidth: Math.round(document.querySelector('.tdoc-editor-toolbar').getBoundingClientRect().width),
         modeWidth: Math.round(document.querySelector('.tdoc-mode-trigger').getBoundingClientRect().width),
         modeLabelDisplay: getComputedStyle(document.querySelector('.tdoc-mode-label')).display,
+        versionDisplay: getComputedStyle(document.querySelector('#tdoc-version-toggle')).display,
+        publishDisplay: getComputedStyle(document.querySelector('#tdoc-publish-btn')).display,
+        themeDisplay: getComputedStyle(document.querySelector('#tdoc-theme-btn')).display,
+        accountDisplay: getComputedStyle(document.querySelector('.tdoc-account-trigger')).display,
       }));
       assert(dimensions.scrollWidth <= dimensions.innerWidth + 1,
         `mobile shell overflows: ${JSON.stringify(dimensions)}`);
       assert(dimensions.modeWidth === 44 && dimensions.modeLabelDisplay === 'none',
         `mobile mode control did not collapse to one icon: ${JSON.stringify(dimensions)}`);
+      assert(['versionDisplay', 'publishDisplay', 'themeDisplay', 'accountDisplay'].every((key) => dimensions[key] === 'none'),
+        `secondary controls leaked into the mobile primary bar: ${JSON.stringify(dimensions)}`);
       await page.getByRole('button', { name: /Document mode:/ }).click();
       await page.getByRole('menuitemradio', { name: 'Comment' }).waitFor();
       await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-browser-editing-mobile.png'), fullPage: false });
+      await page.keyboard.press('Escape');
+      await page.getByRole('button', { name: 'More actions' }).click();
+      await page.locator('.ui-menu-popup').waitFor();
+      const moreLabels = await page.locator('.ui-menu-popup .ui-menu-item').allTextContents();
+      for (const label of ['Publish', 'Copy as Markdown', 'My docs', 'Sign out']) {
+        assert(moreLabels.some((value) => value.trim() === label), `${label} missing from mobile More: ${moreLabels.join(', ')}`);
+      }
+      assert(moreLabels.some((value) => /^v\d+/.test(value.trim())), `versions missing from mobile More: ${moreLabels.join(', ')}`);
+      assert(moreLabels.some((value) => /^(Dark|Light) mode$/.test(value.trim())), `theme missing from mobile More: ${moreLabels.join(', ')}`);
+      await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-mobile-topbar.png'), fullPage: false });
     });
   } finally {
     if (browser) await browser.close();

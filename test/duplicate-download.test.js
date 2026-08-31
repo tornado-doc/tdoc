@@ -40,7 +40,8 @@ t('published React actions say Duplicate and Download, not Fork', () => {
   assert(overlay.includes('data-action="duplicate"'), 'overflow menu missing Duplicate');
   assert(overlay.includes('data-action="download"'), 'overflow menu missing Download HTML');
   assert(overlay.includes('data-action="download-pdf"'), 'overflow menu missing Download PDF');
-  assert(!overlay.includes('data-action="share"'), 'Share stays on the bar; ⋯ must not duplicate it');
+  assert(/className="[^"]*tdoc-mobile-overflow-only[^"]*" data-action="share"/.test(overlay),
+    'Share must move into overflow only on mobile, while staying primary on desktop');
   assert(!overlay.includes('data-action="repo"'), 'tdoc mark already links to GitHub; ⋯ must not duplicate it');
   assert(overlay.includes('contentWindow?.print()'), 'PDF must use the browser print engine');
   assert(!overlay.includes('function jpegPagesToPdf'), 'JPEG-wrapped PDF must be gone');

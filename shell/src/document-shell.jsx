@@ -12,8 +12,9 @@ import {
   ShareDialog,
 } from './document/document-dialogs.jsx';
 import {
-  DocumentActions,
   DocumentBreadcrumbs,
+  DocumentOverflowActions,
+  DocumentPrimaryAction,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -437,17 +438,26 @@ export function DocumentShell({ boot, config }) {
               canEdit={config.canEdit}
               onChange={editor.changeMode}
             />
-            <DocumentActions
+            <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
               onShare={() => setDialog({ type: 'share' })}
-              onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
-              onDuplicate={duplicate}
-              onDownload={download}
-              onPrint={printPdf}
-              onDelete={() => setDialog({ type: 'delete' })}
             />
           </>
+        )}
+        overflowActions={config.isLanding ? null : (
+          <DocumentOverflowActions
+            config={config}
+            starred={starred}
+            onToggleStar={toggleStar}
+            onPublish={() => setDialog({ type: 'publish' })}
+            onShare={() => setDialog({ type: 'share' })}
+            onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
+            onDuplicate={duplicate}
+            onDownload={download}
+            onPrint={printPdf}
+            onDelete={() => setDialog({ type: 'delete' })}
+          />
         )}
         onThemeChange={(nextTheme) => {
           setTheme(nextTheme);

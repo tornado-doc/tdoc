@@ -76,19 +76,61 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     await page.waitForSelector('.ui-dialog-popup', { state: 'detached' });
   });
 
-  await t('phone document actions stay named and at least 44px', async () => {
-    await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto(url, { waitUntil: 'networkidle' });
-    const controls = await page.evaluate(() => ['.tdoc-bar-mark', '#tdoc-theme-btn', '#tdoc-publish-btn', '#tdoc-more-btn'].map((selector) => {
-      const element = document.querySelector(selector);
-      const rect = element?.getBoundingClientRect();
-      return { selector, name: element?.getAttribute('aria-label') || element?.textContent.trim(), width: rect?.width || 0, height: rect?.height || 0 };
-    }));
-    for (const control of controls) {
-      if (!control.name) throw new Error(`${control.selector} has no accessible name`);
-      if (control.width < 44 || control.height < 44) throw new Error(`${control.selector} is ${control.width}x${control.height}`);
+  await t('phone top bar keeps primary tasks and moves the rest into More', async () => {
+    for (const width of [375, 320]) {
+      await page.setViewportSize({ width, height: 812 });
+      await page.goto(url, { waitUntil: 'networkidle' });
+      const layout = await page.evaluate(() => {
+        const measure = (selector) => {
+          const element = document.querySelector(selector);
+          const rect = element?.getBoundingClientRect();
+          return {
+            selector,
+            name: element?.getAttribute('aria-label') || element?.textContent.trim(),
+            display: element ? getComputedStyle(element).display : 'missing',
+            width: rect?.width || 0,
+            height: rect?.height || 0,
+          };
+        };
+        return {
+          scrollWidth: document.documentElement.scrollWidth,
+          innerWidth: window.innerWidth,
+          visible: ['.tdoc-bar-mark', '.tdoc-mode-trigger', '#tdoc-more-btn'].map(measure),
+          secondary: ['#tdoc-version-toggle', '#tdoc-star-btn', '#tdoc-publish-btn', '#tdoc-theme-btn', '.tdoc-account-trigger'].map(measure),
+          straySeparator: Boolean(document.querySelector('.crumb-sep-slug')?.getClientRects().length),
+        };
+      });
+      if (layout.scrollWidth > layout.innerWidth + 1) throw new Error(`top bar overflows at ${width}px: ${JSON.stringify(layout)}`);
+      for (const control of layout.visible) {
+        if (!control.name) throw new Error(`${control.selector} has no accessible name`);
+        if (control.display === 'none' || control.width < 44 || control.height < 44) {
+          throw new Error(`${control.selector} is not a 44px primary control: ${JSON.stringify(control)}`);
+        }
+      }
+      for (const control of layout.secondary) {
+        if (control.display !== 'none' && control.display !== 'missing') throw new Error(`${control.selector} leaked into the mobile primary bar`);
+      }
+      if (layout.straySeparator) throw new Error('slug separator remained after the slug moved off the primary bar');
     }
-    await page.click('#tdoc-publish-btn');
+
+    await page.setViewportSize({ width: 320, height: 480 });
+    await page.goto(url, { waitUntil: 'networkidle' });
+    await page.click('#tdoc-more-btn');
+    await page.waitForSelector('.ui-menu-popup');
+    const popupLayout = await page.$eval('.ui-menu-popup', (popup) => {
+      const rect = popup.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom, innerHeight: window.innerHeight, overflowY: getComputedStyle(popup).overflowY };
+    });
+    if (popupLayout.top < 0 || popupLayout.bottom > popupLayout.innerHeight + 1 || popupLayout.overflowY !== 'auto') {
+      throw new Error(`mobile More does not fit/scroll on a short screen: ${JSON.stringify(popupLayout)}`);
+    }
+    const menuLabels = await page.$$eval('.ui-menu-popup .ui-menu-item', (items) => items.map((item) => item.textContent.trim()));
+    for (const label of ['Publish', 'Copy as Markdown']) {
+      if (!menuLabels.includes(label)) throw new Error(`${label} missing from mobile More: ${menuLabels.join(', ')}`);
+    }
+    if (!menuLabels.some((label) => /^(Dark|Light) mode$/.test(label))) throw new Error(`theme missing from mobile More: ${menuLabels.join(', ')}`);
+    if (!menuLabels.some((label) => /^v\d+/.test(label))) throw new Error(`versions missing from mobile More: ${menuLabels.join(', ')}`);
+    await page.click('.ui-menu-popup [data-action="publish"]');
     const actionHeight = await page.$eval('.ui-dialog-popup .actions button', (button) => button.getBoundingClientRect().height);
     if (actionHeight < 44) throw new Error(`modal action is ${actionHeight}px high`);
     await page.keyboard.press('Escape');
