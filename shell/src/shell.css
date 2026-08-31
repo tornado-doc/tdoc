@@ -40,16 +40,11 @@ body,
   font: 600 12px system-ui, sans-serif;
 }
 
-.tdoc-bar button.tdoc-mode-trigger[data-mode="comment"] {
-  border-color: #e2cf90;
-  background: #fff9e5;
-  color: #735c16;
-}
-
+.tdoc-bar button.tdoc-mode-trigger[data-mode="comment"],
 .tdoc-bar button.tdoc-mode-trigger[data-mode="edit"] {
   border-color: #c6d4f5;
-  background: #eef3ff;
-  color: #244fa8;
+  background: var(--td-accent-tint);
+  color: var(--td-accent);
 }
 
 .tdoc-mode-chevron { color: #98989f; }

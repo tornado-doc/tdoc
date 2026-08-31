@@ -95,11 +95,20 @@ async function chooseMode(page, label) {
     assert(frame, 'author frame missing');
 
     await test('comment-capable docs default to compact Comment mode', async () => {
-      await page.getByRole('button', { name: 'Document mode: Comment' }).waitFor();
+      const trigger = page.getByRole('button', { name: 'Document mode: Comment' });
+      await trigger.waitFor();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
       const cursor = await frame.evaluate(() => getComputedStyle(document.body).cursor);
       assert(cursor.includes('data:image/svg+xml') && cursor.includes('crosshair'),
         `Comment mode did not expose its chat cursor: ${cursor}`);
+      const triggerPath = await trigger.locator('svg.lucide-message-circle path').getAttribute('d');
+      assert(triggerPath && decodeURIComponent(cursor).includes(triggerPath),
+        'Comment mode trigger and cursor use different icon geometry');
+      await frame.locator('#comment-artifact').hover();
+      const pill = frame.locator('.tdoc-comment-pill');
+      await pill.waitFor({ state: 'visible' });
+      assert(await pill.locator('svg path').getAttribute('d') === triggerPath,
+        'Comment artifact pill and mode trigger use different icon geometry');
     });
 
     await test('Read mode opens existing anchors but does not create a comment selection', async () => {

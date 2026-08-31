@@ -23,6 +23,8 @@
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
   var interactionMode = 'read';
+  var COMMENT_ICON_PATH = 'M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719';
+  var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
   function highlightCss(dark) {
     var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
@@ -44,13 +46,14 @@
   // overlay's .tdoc-hover-outline / .tdoc-comment-pill.
   (function () {
     var s = document.createElement('style');
-    var commentCursor = 'url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2724%27%20height%3D%2724%27%20viewBox%3D%270%200%2024%2024%27%3E%3Cpath%20d%3D%27M21%2015a2%202%200%200%201-2%202H7l-4%204V5a2%202%200%200%201%202-2h14a2%202%200%200%201%202%202z%27%20fill%3D%27white%27%20stroke%3D%27%234f46e5%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%2F%3E%3C%2Fsvg%3E") 3 3, crosshair';
+    var cursorSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="' + COMMENT_ACCENT + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
+    var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 3 3, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');
     s.textContent =
-      '.tdoc-hover-outline{position:absolute;pointer-events:none;z-index:2147483644;border:2px dashed #4f46e5;border-radius:4px;background:rgba(79,70,229,.08);box-sizing:border-box;}' +
-      '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:#4f46e5;border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
-      '.tdoc-comment-pill:hover{background:#4f46e5;color:#fff;border-color:#4f46e5;}' +
+      '.tdoc-hover-outline{position:absolute;pointer-events:none;z-index:2147483644;border:2px dashed ' + COMMENT_ACCENT + ';border-radius:4px;background:rgba(22,82,240,.06);box-sizing:border-box;}' +
+      '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
+      '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:currentColor;}' +
       'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
@@ -172,7 +175,7 @@
     hoverPill = document.createElement('button'); hoverPill.className = 'tdoc-comment-pill'; hoverPill.type = 'button'; hoverPill.style.display = 'none';
     hoverOutline.setAttribute('data-tdoc-provider', ''); hoverPill.setAttribute('data-tdoc-provider', '');
     hoverPill.setAttribute('aria-label', 'Comment on this');
-    hoverPill.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    hoverPill.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
     // Parent on <html>, NOT <body>: a transformed body (see the hostile fixture)
     // becomes the containing block for absolute descendants, so viewport-derived
     // coordinates written to a body child render shifted/scaled. <html> keeps
