@@ -290,6 +290,23 @@ button.tdoc-pin {
   font-weight: 650;
 }
 
+.tdoc-onboarding-link {
+  display: inline-flex;
+  align-items: center;
+}
+
+@media (max-width: 700px) {
+  .tdoc-modal button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .tdoc-onboarding-details summary,
+  .tdoc-onboarding-link {
+    min-height: 44px;
+  }
+}
+
 .tdoc-neutral-page {
   display: flex;
   min-height: 100vh;
@@ -384,4 +401,3 @@ button.tdoc-pin {
   margin-top: 8px;
   color: var(--td-accent);
 }
-

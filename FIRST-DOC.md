@@ -570,9 +570,10 @@ it local, or they are self-hosting and their own worker is not ready.
 A brand-new machine has nothing to scan. Do not produce an empty page and do
 not pad it. Tell them the truth, because it is a real answer to the question:
 
-> Almost nothing. You're clean.
+> Almost nothing — no AI history was found on this machine yet. You're starting clean.
 
-Then make the appointment: use it for a week and ask again. That gives the
+Always keep that scoped answer together with the next step: use it for a week
+and ask again. That gives the
 first doc something a static tutorial never has — a reason to come back.
 
 ## Do not

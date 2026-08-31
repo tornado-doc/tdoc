@@ -705,6 +705,18 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Match the hosted `/start` contract by reusing the existing tdoc-start
+  // document route. Resolve the current version from its metadata so the local
+  // onboarding handoff does not go stale when the tutorial is revised.
+  if (p === '/start' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const meta = readJson(path.join(ROOT, 'tdoc-start', 'meta.json'), {});
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions.map((item) => Number(item && item.n)).filter(Number.isFinite).sort((a, b) => b - a)[0];
+    if (!latest) return send(res, 404, 'Not found: tdoc-start');
+    res.writeHead(302, { Location: `/d/tdoc-start/v/${latest}`, 'Cache-Control': 'no-store' });
+    return res.end();
+  }
+
   const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
   if (widgetMatch) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {

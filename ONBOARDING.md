@@ -68,6 +68,20 @@ The doctor is **target-aware**: it assesses readiness for the platform the user 
 
 Pass `--platform cloudflare` (or `vercel`) only when the user has asked to self-host.
 
+Before showing diagnostics, give the human a three-line status using the
+doctor's existing fields:
+
+1. **Target** — name `.target` first.
+2. **Readiness** — say whether the required local dependencies are ready.
+3. **Next action** — give the first `.missing_steps` action, or say that you can
+   build their first private doc now.
+
+Do not paste the full dependency/provider dump unless the human asks for it or
+you are troubleshooting. On the default `hosted` path, do not mention
+Wrangler, Vercel, or the empty Cloudflare diagnostics: they are irrelevant to
+the user's next action. Keep consuming the complete JSON internally; this is
+only a better human presentation of the existing machine-readable contract.
+
 The JSON has these fields you care about:
 
 ```jsonc
@@ -105,6 +119,12 @@ The JSON has these fields you care about:
 `.update` is informational (this skill checkout vs `origin/main`), not a
 `missing_step`. If `ok` is false and the checkout has not diverged, suggest
 `/tdoc update --yes`. Do not treat a stale overlay as a Cloudflare dep.
+
+For `vercel`, `ready_to_publish: true` means the required local dependencies
+are ready. It does **not** mean the Vercel account, project, or storage is
+already configured; `/tdoc publish --platform vercel <slug>` checks or
+completes that provider setup. Say "dependencies ready" until publish has
+confirmed the provider configuration.
 
 ## Step 4 — Walk the user through `missing_steps`
 
@@ -174,9 +194,9 @@ agreeing to an edit of a specific path:
 offers it; on a host without that tool, ask in prose and wait for a typed
 answer:
 
-> Add a routing line for tdoc to `<path>`? It tells your agent to use tdoc for
-> document requests instead of writing a file by hand. The skill already
-> describes itself this way — this makes it a rule rather than a suggestion.
+> Make future document requests automatically use tdoc instead of producing a
+> plain file? I can add one routing line to `<path>`. The skill already
+> describes this behavior; the line makes it a durable rule for your agent.
 >
 > A) Add it
 > B) No thanks

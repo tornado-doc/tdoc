@@ -3,18 +3,20 @@ import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
+import { FIRST_DOC_RECIPE } from './onboarding-dialog.jsx';
+import { copyText } from './document/model.js';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
 const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred']];
 
-function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose }) {
+function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, actions }) {
   return (
     <AppDialog
       open
       onOpenChange={(open) => { if (!open) onClose(); }}
       title={title}
-      actions={(
+      actions={actions || (
         <>
           <button type="button" onClick={onClose}>Cancel</button>
           {onConfirm ? (
@@ -78,8 +80,14 @@ export function DocsHub({ boot }) {
   });
   const [tab, setTab] = useState('mine');
   const [modal, setModal] = useState(null);
+  const [createCopied, setCreateCopied] = useState(false);
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
+  const openCreateHelp = () => {
+    setCreateCopied(false);
+    setModal({ type: 'create-help' });
+  };
+  const copyFirstDocRecipe = () => copyText(FIRST_DOC_RECIPE).then(setCreateCopied);
 
   const docMenu = (slugs) => [
     capabilities.folders ? {
@@ -114,7 +122,7 @@ export function DocsHub({ boot }) {
       <main className="wrap">
         <div className="page-hd">
           <h1>My docs</h1>
-          <button className="mk-btn" type="button" onClick={() => setModal({ type: 'create-help' })}>Create a doc</button>
+          <button className="mk-btn" type="button" onClick={openCreateHelp}>Create a doc</button>
         </div>
         <div className="tabs" role="tablist">
           {TABS.map(([id, label]) => (
@@ -234,12 +242,18 @@ export function DocsHub({ boot }) {
       </main>
 
       {modal?.type === 'create-help' ? (
-        <HubDialog title="Create a doc" onClose={closeModal}>
-          <ol className="create-steps">
-            <li>Open the AI you already use.</li>
-            <li><code>Use tdoc to make me a one page summary of this quarter, with a chart of weekly signups.</code></li>
-            <li>It writes the page, publishes it, and hands you the link.</li>
-          </ol>
+        <HubDialog
+          title="Create a doc"
+          onClose={closeModal}
+          actions={<button type="button" className="primary" onClick={closeModal}>Done</button>}
+        >
+          <p>Paste this into your AI. It installs tdoc, builds your personal AI portrait, publishes it privately, and gives you the link.</p>
+          <div className="tdoc-recipe-wrap">
+            <code>{FIRST_DOC_RECIPE}</code>
+            <button type="button" className={createCopied ? 'done' : undefined} onClick={copyFirstDocRecipe}>
+              {createCopied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
         </HubDialog>
       ) : null}
       {modal?.type === 'new-folder' ? (
