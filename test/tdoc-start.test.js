@@ -58,7 +58,7 @@ t('the dialog is one reusable Base UI screen, not a paged state machine', () => 
 t('the short prompt points to FIRST-DOC and never embeds a credential', () => {
   assert(/FIRST-DOC\.md/.test(dialog), 'FIRST-DOC link missing');
   assert(!/token\s*(is|=)|Authorization|Bearer/.test(dialog), 'credential leaked into the prompt');
-  assert(/copyText\(RECIPE\)/.test(dialog), 'copy action is not wired to the recipe');
+  assert(/copyText\(FIRST_DOC_RECIPE\)/.test(dialog), 'copy action is not wired to the recipe');
 });
 
 t('the tutorial promises the same private personal AI portrait as FIRST-DOC', () => {
