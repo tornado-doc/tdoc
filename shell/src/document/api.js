@@ -63,6 +63,14 @@ export function duplicateDocument(slug, version) {
   });
 }
 
+// What the in-flight publish is waiting on, if anything. The CLI's device code
+// goes to stderr, which the modal never sees, so the local server reads it off
+// a file the CLI writes. Returns null whenever nothing is pending.
+export function getPublishSignin(slug) {
+  const query = new URLSearchParams({ slug });
+  return request(`/api/publish/signin?${query}`).then((body) => body?.signin || null);
+}
+
 export function publishDocument(slug) {
   return request('/api/publish', {
     method: 'POST',
