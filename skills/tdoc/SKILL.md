@@ -186,15 +186,33 @@ Server runs at `http://localhost:7878` (override with `TDOC_PORT`) and serves:
 
 ```bash
 TDOC_DIR="${TDOC_DIR:-$HOME/tdocs}"
-# Resolve the skill dir for whichever host installed it: Claude Code
-# (~/.claude/skills/tdoc) or Codex (~/.codex/skills/tdoc). Honor an explicit
-# TDOC_SKILL_DIR override if set. Claude's location is checked first, so its
-# behavior is unchanged.
-SKILL_DIR="${TDOC_SKILL_DIR:-}"
-[ -z "$SKILL_DIR" ] && for d in "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
-  [ -f "$d/SKILL.md" ] && SKILL_DIR="$d" && break
-done
-SKILL_DIR="${SKILL_DIR:-$HOME/.claude/skills/tdoc}"
+# Resolve the checkout for the agent that is running this skill. Multiple
+# agents can be installed on one machine, so a fixed cross-host order can
+# update Claude's checkout while Codex is using a different one (or vice
+# versa). An explicit override remains authoritative.
+tdoc_resolve_skill_dir() {
+  if [ -n "${TDOC_SKILL_DIR:-}" ]; then
+    printf '%s\n' "$TDOC_SKILL_DIR"
+    return
+  fi
+  if [ -n "${CLAUDE_CODE:-}${CLAUDE_SESSION_ID:-}${CLAUDECODE:-}${CLAUDE_CODE_ENTRYPOINT:-}${CLAUDE_CODE_SSE_PORT:-}" ]; then
+    for d in "$HOME/.claude/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
+      [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
+    done
+    printf '%s\n' "$HOME/.claude/skills/tdoc"
+  elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${OPENAI_CODEX:-}${CODEX_HOME:-}${CODEX_SHELL:-}" ]; then
+    for d in "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc"; do
+      [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
+    done
+    printf '%s\n' "$HOME/.codex/skills/tdoc"
+  else
+    for d in "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
+      [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
+    done
+    printf '%s\n' "$HOME/.agents/skills/tdoc"
+  fi
+}
+SKILL_DIR="$(tdoc_resolve_skill_dir)"
 mkdir -p "$TDOC_DIR"
 
 # Check server is running. Identity-check the body — 200 alone is not proof
@@ -234,7 +252,8 @@ Three files are required reading before you write doc HTML, on every
 | `$SKILL_DIR/authoring/style/<picked>.md` | what those parts look like | Yes — you pick the entry that fits the content. |
 
 `$SKILL_DIR` is the installed skill directory resolved in "Setup check"
-above (`~/.claude/skills/tdoc`, or `~/.codex/skills/tdoc` under Codex) —
+above (`~/.claude/skills/tdoc`, `~/.codex/skills/tdoc`, or the shared
+`~/.agents/skills/tdoc`) —
 **not** the current working directory, which is the user's project.
 
 `voice.md` carries tdoc's adaptation of the vendored `no-ai-slop` rule set
@@ -1245,12 +1264,29 @@ fi
 # A self-update that depends on an install step is a self-update that does not
 # exist. Note this is a different directory from the TDOC_DIR above, which is
 # the docs root (~/tdocs) — hence the distinct name.
-TDOC_SKILL_ROOT="${TDOC_SKILL_DIR:-}"
-if [ -z "$TDOC_SKILL_ROOT" ]; then
-  for _d in "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc"; do
-    [ -f "$_d/SKILL.md" ] && TDOC_SKILL_ROOT="$_d" && break
-  done
-fi
+tdoc_resolve_skill_dir() {
+  if [ -n "${TDOC_SKILL_DIR:-}" ]; then
+    printf '%s\n' "$TDOC_SKILL_DIR"
+    return
+  fi
+  if [ -n "${CLAUDE_CODE:-}${CLAUDE_SESSION_ID:-}${CLAUDECODE:-}${CLAUDE_CODE_ENTRYPOINT:-}${CLAUDE_CODE_SSE_PORT:-}" ]; then
+    for _d in "$HOME/.claude/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
+      [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
+    done
+    printf '%s\n' "$HOME/.claude/skills/tdoc"
+  elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${OPENAI_CODEX:-}${CODEX_HOME:-}${CODEX_SHELL:-}" ]; then
+    for _d in "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc"; do
+      [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
+    done
+    printf '%s\n' "$HOME/.codex/skills/tdoc"
+  else
+    for _d in "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
+      [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
+    done
+    printf '%s\n' "$HOME/.agents/skills/tdoc"
+  fi
+}
+TDOC_SKILL_ROOT="$(tdoc_resolve_skill_dir)"
 
 # Resolve installed version, trying multiple sources in order:
 #   1. VERSION file (if maintained, like gstack)
@@ -1280,7 +1316,9 @@ fi
 # the installed script actually knows.
 if [ -z "${TDOC_SKIP_UPDATE_CHECK:-}" ] && [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ] \
    && grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" 2>/dev/null; then
-  "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
+  # Pass the resolved checkout explicitly so versions older than #332, whose
+  # internal default was ~/.claude, can still bootstrap the correct install.
+  SKILL_DIR="$TDOC_SKILL_ROOT" "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
 fi
 
 if [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" ]; then
