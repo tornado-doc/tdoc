@@ -23,14 +23,16 @@
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
   var interactionMode = 'read';
-  var COMMENT_ICON_PATH = 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z';
+  var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
   function highlightCss(dark) {
     var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
     var pending = dark ? 'rgba(255,214,0,.88)' : 'rgba(255,214,0,.55)';
+    var selecting = dark ? 'rgba(76,137,255,.72)' : 'rgba(22,82,240,.32)';
     return '::highlight(tdoc-anchor){background:' + anchor + ';text-decoration:underline solid rgba(184,134,11,.7);text-decoration-thickness:2px;}' +
       '::highlight(tdoc-anchor-active){background:rgba(255,216,77,.94);text-decoration:underline solid #b8860b;text-decoration-thickness:3px;}' +
+      '::highlight(tdoc-selecting){background:' + selecting + ';}' +
       '::highlight(tdoc-pending){background:' + pending + ';}';
   }
   var st = null;
@@ -46,16 +48,18 @@
   // overlay's .tdoc-hover-outline / .tdoc-comment-pill.
   (function () {
     var s = document.createElement('style');
-    var cursorSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="' + COMMENT_ICON_PATH + '" fill="' + COMMENT_ACCENT + '" stroke="white" stroke-width="4"/><path d="' + COMMENT_ICON_PATH + '" fill="' + COMMENT_ACCENT + '" stroke="' + COMMENT_ACCENT + '" stroke-width="2"/></svg>';
-    var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 3 3, crosshair';
+    var cursorSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="' + COMMENT_ICON_PATH + '" fill="' + COMMENT_ACCENT + '"/></svg>';
+    var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 2 2, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');
     s.textContent =
       '.tdoc-hover-outline{position:absolute;pointer-events:none;z-index:2147483644;border:2px dashed ' + COMMENT_ACCENT + ';border-radius:4px;background:rgba(22,82,240,.06);box-sizing:border-box;}' +
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
-      '.tdoc-comment-pill svg{width:14px;height:14px;stroke:currentColor;}' +
+      '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
       'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
+      'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
+      'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]:focus{box-shadow:inset 0 0 0 1px rgba(22,82,240,.18);}';
@@ -81,6 +85,18 @@
       return { before: before, after: after };
     } catch (e) { return { before: '', after: '' }; }
   }
+  function postTextSelection(range, text) {
+    var ctx = context(range, 60);
+    // Paint the pending anchor so it stays visibly marked while the composer
+    // (in the shell document) has focus; cleared on cancel/close (#281 parity).
+    if (HL) {
+      try {
+        CSS.highlights.delete('tdoc-selecting');
+        CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange()));
+      } catch (e) {}
+    }
+    post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after, rect: selectionRect(range) });
+  }
   function reportSelection() {
     if (interactionMode !== 'comment') return;
     var sel = window.getSelection();
@@ -88,11 +104,61 @@
     var text = sel.toString().trim();
     if (!text) return;
     var range = sel.getRangeAt(0);
-    var ctx = context(range, 60);
-    // Paint the pending anchor so it stays visibly marked while the composer
-    // (in the shell document) has focus; cleared on cancel/close (#281 parity).
-    if (HL) { try { CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange())); } catch (e) {} }
-    post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after, rect: selectionRect(range) });
+    postTextSelection(range, text);
+  }
+  function caretAtPoint(x, y) {
+    if (document.caretPositionFromPoint) {
+      var pos = document.caretPositionFromPoint(x, y);
+      if (pos) return { node: pos.offsetNode, offset: pos.offset };
+    }
+    if (document.caretRangeFromPoint) {
+      var caret = document.caretRangeFromPoint(x, y);
+      if (caret) return { node: caret.startContainer, offset: caret.startOffset };
+    }
+    return null;
+  }
+  function wordBounds(value, offset) {
+    if (!value) return null;
+    var at = Math.max(0, Math.min(offset, value.length));
+    if (window.Intl && Intl.Segmenter) {
+      try {
+        var segments = Array.from(new Intl.Segmenter(undefined, { granularity: 'word' }).segment(value));
+        var nearest = null;
+        segments.forEach(function (part) {
+          if (!part.isWordLike) return;
+          var end = part.index + part.segment.length;
+          if (part.index <= at && at <= end) nearest = { start: part.index, end: end };
+          else if (!nearest && end === at) nearest = { start: part.index, end: end };
+        });
+        if (nearest) return nearest;
+      } catch (e) {}
+    }
+    var isWord = function (ch) { return !!ch && !/[\s.,;:!?()[\]{}<>"'`~@#$%^&*+=|\\/\-]/.test(ch); };
+    var i = at < value.length && isWord(value.charAt(at)) ? at : at - 1;
+    if (i < 0 || !isWord(value.charAt(i))) return null;
+    var start = i, end = i + 1;
+    while (start > 0 && isWord(value.charAt(start - 1))) start--;
+    while (end < value.length && isWord(value.charAt(end))) end++;
+    return { start: start, end: end };
+  }
+  function reportPointSelection(event) {
+    if (interactionMode !== 'comment' || event.button !== 0) return;
+    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return;
+    var current = window.getSelection();
+    if (current && !current.isCollapsed) return; // a drag selection owns this click
+    var point = caretAtPoint(event.clientX, event.clientY);
+    if (!point || !point.node || point.node.nodeType !== Node.TEXT_NODE) return;
+    var bounds = wordBounds(point.node.nodeValue || '', point.offset);
+    if (!bounds || bounds.end - bounds.start < 1) return;
+    try {
+      var range = document.createRange();
+      range.setStart(point.node, bounds.start); range.setEnd(point.node, bounds.end);
+      var text = range.toString().trim();
+      if (!text) return;
+      if (current) { current.removeAllRanges(); current.addRange(range); }
+      event.preventDefault(); event.stopPropagation();
+      postTextSelection(range, text);
+    } catch (e) {}
   }
   // Links: a click inside the sandboxed frame would navigate the FRAME (nested
   // shell / 404), not the page. Intercept and hand navigation to the shell,
@@ -106,7 +172,7 @@
       return;
     }
     var a = e.target && e.target.closest && e.target.closest('a[href]');
-    if (!a) return;
+    if (!a) { reportPointSelection(e); return; }
     if (interactionMode === 'edit') { e.preventDefault(); return; }
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#') return;                    // in-page anchors stay in the frame
@@ -115,8 +181,10 @@
     post({ type: 'tdoc:navigate', href: href, blank: a.getAttribute('target') === '_blank' });
   }, true);
 
-  document.addEventListener('mouseup', function () { setTimeout(reportSelection, 0); }, true);
+  function clearSelectingCursor() { document.documentElement.removeAttribute('data-tdoc-selecting'); }
+  document.addEventListener('mouseup', function () { clearSelectingCursor(); setTimeout(reportSelection, 0); }, true);
   document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
+  window.addEventListener('blur', clearSelectingCursor);
   document.addEventListener('copy', function (e) {
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount || !e.clipboardData) return;
@@ -136,6 +204,13 @@
     // composer) — everything else in the doc clears the shell's open UI.
     if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
     if (anchorIdAtPoint(e.clientX, e.clientY)) return;
+    if (interactionMode === 'comment' && e.button === 0
+      && !(e.target && e.target.closest && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
+      var point = caretAtPoint(e.clientX, e.clientY);
+      if (point && point.node && point.node.nodeType === Node.TEXT_NODE) {
+        document.documentElement.setAttribute('data-tdoc-selecting', '');
+      }
+    }
     if (HL) CSS.highlights.delete('tdoc-pending');
     setActiveAnchor(null, false);
     post({ type: 'tdoc:cleared' });
@@ -175,7 +250,7 @@
     hoverPill = document.createElement('button'); hoverPill.className = 'tdoc-comment-pill'; hoverPill.type = 'button'; hoverPill.style.display = 'none';
     hoverOutline.setAttribute('data-tdoc-provider', ''); hoverPill.setAttribute('data-tdoc-provider', '');
     hoverPill.setAttribute('aria-label', 'Comment on this');
-    hoverPill.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
+    hoverPill.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
     // Parent on <html>, NOT <body>: a transformed body (see the hostile fixture)
     // becomes the containing block for absolute descendants, so viewport-derived
     // coordinates written to a body child render shifted/scaled. <html> keeps
@@ -529,6 +604,17 @@
     return node === root || root.contains(node.nodeType === 1 ? node : node.parentNode);
   }
   document.addEventListener('selectionchange', function () {
+    if (interactionMode === 'comment' && HL) {
+      try {
+        var live = window.getSelection();
+        if (live && !live.isCollapsed && live.rangeCount) {
+          CSS.highlights.set('tdoc-selecting', new Highlight(live.getRangeAt(0).cloneRange()));
+        } else {
+          CSS.highlights.delete('tdoc-selecting');
+        }
+      } catch (e) {}
+      return;
+    }
     if (interactionMode !== 'edit' || !selectionInsideRoot()) return;
     try { savedRange = window.getSelection().getRangeAt(0).cloneRange(); } catch (e) {}
   });
@@ -631,6 +717,8 @@
     if (interactionMode === 'edit' && next !== 'edit') disableEditing();
     interactionMode = next;
     document.documentElement.setAttribute('data-tdoc-interaction-mode', next);
+    clearSelectingCursor();
+    if (HL && next !== 'comment') CSS.highlights.delete('tdoc-selecting');
     if (next === 'edit') { hideHover(); enableEditing(); }
     else if (next !== 'comment') hideHover();
   }

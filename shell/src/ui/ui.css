@@ -201,6 +201,21 @@ button.tdoc-pin {
   display: none !important;
 }
 
+.tdoc-version-submenu-current {
+  margin-left: auto;
+  color: #8a8a8a;
+  font: 12px ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.tdoc-submenu-chevron { color: #98989f; }
+
+.ui-menu-popup.tdoc-version-submenu {
+  min-width: 164px;
+  max-height: min(60vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .tdoc-mobile-menu-label {
   padding: 8px 10px 3px;
   color: #8a8a8a;

@@ -140,10 +140,34 @@ body,
 
 @media (max-width: 700px) {
   .tdoc-bar button.tdoc-mode-trigger {
+    position: relative;
     width: 44px;
     padding: 0;
+    border-color: transparent;
+    background: transparent;
     justify-content: center;
   }
+  .tdoc-bar button.tdoc-mode-trigger:hover { background: transparent; }
+  .tdoc-bar button.tdoc-mode-trigger::before {
+    position: absolute;
+    inset: 6px;
+    z-index: 0;
+    border: 1px solid #dedee3;
+    border-radius: 6px;
+    background: #fff;
+    content: '';
+  }
+  .tdoc-bar button.tdoc-mode-trigger[data-mode="comment"],
+  .tdoc-bar button.tdoc-mode-trigger[data-mode="edit"] {
+    border-color: transparent;
+    background: transparent;
+  }
+  .tdoc-bar button.tdoc-mode-trigger[data-mode="comment"]::before,
+  .tdoc-bar button.tdoc-mode-trigger[data-mode="edit"]::before {
+    border-color: #c6d4f5;
+    background: var(--td-accent-tint);
+  }
+  .tdoc-bar button.tdoc-mode-trigger > * { position: relative; z-index: 1; }
   .tdoc-mode-label,
   .tdoc-mode-chevron { display: none; }
   .tdoc-editor-toolbar { padding: 6px 8px; gap: 6px; }

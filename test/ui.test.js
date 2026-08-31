@@ -129,7 +129,26 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
       if (!menuLabels.includes(label)) throw new Error(`${label} missing from mobile More: ${menuLabels.join(', ')}`);
     }
     if (!menuLabels.some((label) => /^(Dark|Light) mode$/.test(label))) throw new Error(`theme missing from mobile More: ${menuLabels.join(', ')}`);
-    if (!menuLabels.some((label) => /^v\d+/.test(label))) throw new Error(`versions missing from mobile More: ${menuLabels.join(', ')}`);
+    if (!menuLabels.some((label) => /^Versionsv\d+$/.test(label))) throw new Error(`version submenu missing from mobile More: ${menuLabels.join(', ')}`);
+    await page.click('.tdoc-version-submenu-trigger');
+    await page.waitForSelector('.tdoc-version-submenu');
+    const versionLayout = await page.$eval('.tdoc-version-submenu', (popup) => {
+      const rect = popup.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        innerHeight: window.innerHeight,
+        maxHeight: getComputedStyle(popup).maxHeight,
+        overflowY: getComputedStyle(popup).overflowY,
+      };
+    });
+    if (versionLayout.top < 0 || versionLayout.bottom > versionLayout.innerHeight + 1 || versionLayout.overflowY !== 'auto') {
+      throw new Error(`mobile version submenu does not fit/scroll: ${JSON.stringify(versionLayout)}`);
+    }
+    if (!versionLayout.maxHeight || versionLayout.maxHeight === 'none') throw new Error('version submenu has no max height');
+    const currentVersion = await page.textContent('.tdoc-version-submenu .tdoc-version-item.current');
+    if (!/v2 · current/.test(currentVersion)) throw new Error(`current version missing from submenu: ${currentVersion}`);
+    await page.keyboard.press('Escape');
     await page.click('.ui-menu-popup [data-action="publish"]');
     const actionHeight = await page.$eval('.ui-dialog-popup .actions button', (button) => button.getBoundingClientRect().height);
     if (actionHeight < 44) throw new Error(`modal action is ${actionHeight}px high`);

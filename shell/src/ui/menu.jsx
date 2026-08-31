@@ -43,3 +43,33 @@ export function AppMenuItem({
     </Menu.Item>
   );
 }
+
+export function AppSubmenu({
+  trigger,
+  children,
+  className = '',
+  popupClassName = '',
+  side = 'right',
+  align = 'start',
+  sideOffset = 4,
+}) {
+  return (
+    <Menu.SubmenuRoot>
+      <Menu.SubmenuTrigger className={`ui-menu-item ${className}`.trim()}>
+        {trigger}
+      </Menu.SubmenuTrigger>
+      <Menu.Portal>
+        <Menu.Positioner
+          side={side}
+          align={align}
+          sideOffset={sideOffset}
+          className="ui-menu-positioner"
+        >
+          <Menu.Popup className={`ui-menu-popup ${popupClassName}`.trim()}>
+            {children}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.SubmenuRoot>
+  );
+}
