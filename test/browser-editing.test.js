@@ -105,13 +105,19 @@ async function chooseMode(page, label) {
       const decodedCursor = decodeURIComponent(cursor);
       assert(triggerPath && decodedCursor.includes(triggerPath),
         'Comment mode trigger and cursor use different icon geometry');
+      assert(cursor.includes(' 2 2, crosshair'),
+        `Comment cursor hotspot is not fixed to the droplet point: ${cursor}`);
       assert(decodedCursor.includes('fill="#1652f0"') && !decodedCursor.includes('fill="white"'),
         'Comment cursor is not rendered as a solid brand-blue mark');
+      assert(decodedCursor.includes('width="24" height="24"') && !decodedCursor.includes('stroke='),
+        'Comment cursor has fractional SVG scaling or a raster-like outline');
       await frame.locator('#comment-artifact').hover();
       const pill = frame.locator('.tdoc-comment-pill');
       await pill.waitFor({ state: 'visible' });
       assert(await pill.locator('svg path').getAttribute('d') === triggerPath,
         'Comment artifact pill and mode trigger use different icon geometry');
+      assert(await pill.locator('svg').evaluate((icon) => getComputedStyle(icon).stroke) === 'none',
+        'Comment artifact pill retained an outline around the solid icon');
     });
 
     await test('Read mode opens existing anchors but does not create a comment selection', async () => {
@@ -148,6 +154,48 @@ async function chooseMode(page, label) {
       await chooseMode(page, 'Comment');
       await selectParagraph(frame);
       await page.locator('.tdoc-popup').waitFor({ timeout: 2_000 });
+      await page.locator('.tdoc-popup button.x').click();
+    });
+
+    await test('Comment mode visibly paints a selection before mouseup', async () => {
+      const liveState = await frame.evaluate(() => {
+        const paragraph = document.getElementById('editable-paragraph');
+        const box = paragraph.getBoundingClientRect();
+        paragraph.dispatchEvent(new MouseEvent('mousedown', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: box.left + 28, clientY: box.top + 12,
+        }));
+        const draggingCursor = getComputedStyle(paragraph).cursor;
+        const text = paragraph.firstChild;
+        const range = document.createRange();
+        range.setStart(text, 0); range.setEnd(text, 9);
+        const selection = window.getSelection();
+        selection.removeAllRanges(); selection.addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+        return {
+          supported: Boolean(window.CSS?.highlights && window.Highlight),
+          painted: Boolean(window.CSS?.highlights?.has('tdoc-selecting')),
+          fallback: getComputedStyle(document.getElementById('editable-paragraph'), '::selection').backgroundColor,
+          draggingCursor,
+        };
+      });
+      assert(liveState.draggingCursor === 'text',
+        `drag selection did not switch to the precise I-beam cursor: ${JSON.stringify(liveState)}`);
+      assert(liveState.fallback !== 'rgba(0, 0, 0, 0)' && liveState.fallback !== 'transparent',
+        `native live-selection fallback is invisible: ${JSON.stringify(liveState)}`);
+      if (liveState.supported) assert(liveState.painted, 'CSS Highlight live selection was not painted');
+      await frame.evaluate(() => {
+        window.getSelection().removeAllRanges();
+        window.dispatchEvent(new Event('blur'));
+      });
+    });
+
+    await test('Comment mode turns a word click into a precise text anchor', async () => {
+      await frame.locator('#editable-paragraph').click({ position: { x: 28, y: 12 } });
+      const quote = page.locator('.tdoc-popup .head .h');
+      await quote.waitFor({ timeout: 2_000 });
+      const selected = await quote.textContent();
+      assert(/^"[^"\s]+"$/.test(selected), `word click did not create a compact text anchor: ${selected}`);
       await page.locator('.tdoc-popup button.x').click();
     });
 
@@ -304,9 +352,17 @@ async function chooseMode(page, label) {
       for (const label of ['Publish', 'Copy as Markdown', 'My docs', 'Sign out']) {
         assert(moreLabels.some((value) => value.trim() === label), `${label} missing from mobile More: ${moreLabels.join(', ')}`);
       }
-      assert(moreLabels.some((value) => /^v\d+/.test(value.trim())), `versions missing from mobile More: ${moreLabels.join(', ')}`);
+      assert(moreLabels.some((value) => /^Versionsv\d+$/.test(value.trim())), `version submenu missing from mobile More: ${moreLabels.join(', ')}`);
       assert(moreLabels.some((value) => /^(Dark|Light) mode$/.test(value.trim())), `theme missing from mobile More: ${moreLabels.join(', ')}`);
       await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-mobile-topbar.png'), fullPage: false });
+      await page.locator('.tdoc-version-submenu-trigger').click();
+      const versionPopup = page.locator('.tdoc-version-submenu');
+      await versionPopup.waitFor();
+      assert(/v2 · current/.test(await versionPopup.locator('.tdoc-version-item.current').textContent()),
+        'current version missing from mobile version submenu');
+      assert(await versionPopup.evaluate((popup) => getComputedStyle(popup).overflowY) === 'auto',
+        'mobile version submenu is not scrollable');
+      await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-mobile-version-submenu.png'), fullPage: false });
     });
   } finally {
     if (browser) await browser.close();

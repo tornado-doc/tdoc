@@ -1,16 +1,18 @@
 import React from 'react';
 import {
   ChevronDown,
+  ChevronRight,
   Copy,
   CopyPlus,
   Download,
   FileDown,
+  History,
   Share2,
   Star,
   Trash2,
   Upload,
 } from 'lucide-react';
-import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { AppMenu, AppMenuItem, AppSubmenu } from '../ui/menu.jsx';
 
 export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
   if (config.isLanding) return null;
@@ -96,16 +98,30 @@ export function DocumentOverflowActions({
           <Share2 size={15} /> Share
         </AppMenuItem>
       )}
-      {(config.versions || []).length > 1 ? <div className="tdoc-mobile-menu-label">Version</div> : null}
-      {(config.versions || []).map((version) => (
-        <AppMenuItem
-          key={version.n}
-          className={`tdoc-version-item tdoc-mobile-overflow-only${version.n === config.version ? ' current' : ''}`}
-          onClick={() => { location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`; }}
+      {(config.versions || []).length > 1 ? (
+        <AppSubmenu
+          className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-version-submenu-trigger"
+          popupClassName="tdoc-version-submenu"
+          trigger={(
+            <>
+              <History size={15} />
+              <span>Versions</span>
+              <span className="tdoc-version-submenu-current">v{config.version}</span>
+              <ChevronRight className="tdoc-submenu-chevron" size={14} />
+            </>
+          )}
         >
-          v{version.n}{version.n === config.version ? ' · current' : ''}
-        </AppMenuItem>
-      ))}
+          {[...(config.versions || [])].reverse().map((version) => (
+            <AppMenuItem
+              key={version.n}
+              className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
+              onClick={() => { location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`; }}
+            >
+              v{version.n}{version.n === config.version ? ' · current' : ''}
+            </AppMenuItem>
+          ))}
+        </AppSubmenu>
+      ) : null}
       {config.viewerStar ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="star" onClick={onToggleStar}>
           <Star size={15} fill={starred ? 'currentColor' : 'none'} />
