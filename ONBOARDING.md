@@ -1,6 +1,6 @@
 # Onboarding tdoc
 
-> **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. Execute every step in order, ask the user for confirmation on browser-side actions, and re-probe state with `bin/tdoc-doctor` after each step.
+> **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. Execute every step in order, ask the user for confirmation on browser-side actions, and re-probe state with `bin/tdoc-doctor --json` after each step.
 
 ## What you are installing
 
@@ -58,10 +58,11 @@ Both files must exist. If either is missing, the clone failed — re-run Step 1.
 
 ## Step 3 — Run the doctor
 
-`tdoc-doctor` is a non-destructive health probe. Run it and parse the JSON:
+`tdoc-doctor` is a non-destructive health probe. Agents should request its
+machine report explicitly:
 
 ```bash
-~/.claude/skills/tdoc/bin/tdoc-doctor
+~/.claude/skills/tdoc/bin/tdoc-doctor --json
 ```
 
 The doctor is **target-aware**: it assesses readiness for the platform the user will actually publish to, and reports which one that was under `.target`. Unless the user said otherwise, that is `hosted`, and the Cloudflare block will be empty because it is never probed.
@@ -138,7 +139,7 @@ Otherwise, iterate over `missing_steps` **in order**. Each step has a `kind`:
 | `login`    | The `cmd` is interactive (`wrangler login`). Run it; it opens the user's browser. Wait for it to finish.  |
 | `click`    | The `cmd` is a URL. **You cannot click for the user.** Print the URL and what to do, then ask them to say "done" when they've clicked. After they say done, re-run doctor — Cloudflare can take 5–10s to propagate. |
 
-Always re-run `bin/tdoc-doctor` between steps. State changes — what was missing in iteration N may be resolved in N+1.
+Always re-run `bin/tdoc-doctor --json` between steps. State changes — what was missing in iteration N may be resolved in N+1.
 
 `click` steps only ever appear on the self-host path. If you are seeing one on the hosted default, something is wrong — re-read `.target` before sending anyone to a dashboard.
 
@@ -248,7 +249,7 @@ Only do this when the user has explicitly said they want to host it themselves. 
 Re-probe with the target named, so the checklist is the right one:
 
 ```bash
-~/.claude/skills/tdoc/bin/tdoc-doctor --platform cloudflare
+~/.claude/skills/tdoc/bin/tdoc-doctor --json --platform cloudflare
 ```
 
 Then walk `missing_steps` as in Step 4. On Cloudflare the two `click` steps you'll hit are:

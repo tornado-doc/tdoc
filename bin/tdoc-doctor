@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # tdoc-doctor — non-destructive health probe.
 #
-# Prints JSON to stdout describing the current state of every dependency and
-# every Cloudflare resource tdoc needs to publish. Reads from `wrangler` CLI
-# and the Cloudflare API. NEVER creates or deletes anything.
+# Prints a concise human summary by default. Pass --json for the stable machine
+# report describing every dependency and Cloudflare resource tdoc needs to
+# publish. Reads from `wrangler` and the Cloudflare API. NEVER creates or
+# deletes anything.
 #
 # Mocking (for tests): set any of these env vars to override probes:
 #   TDOC_MOCK_NO_NODE=1
@@ -27,9 +28,9 @@
 # Cloudflare is only probed when the target is cloudflare, so the common path
 # also stops making two Cloudflare API round-trips it never needed.
 #
-# Exit code is 0 when the probe can emit its JSON report. A missing Node
-# runtime is the one exception: Node builds that report, so the doctor emits a
-# short shell-only recovery message and exits non-zero instead.
+# Exit code is 0 when the probe can emit its human or JSON report. A missing
+# Node runtime is the one exception: Node builds both views, so the doctor
+# emits a short shell-only recovery message and exits non-zero instead.
 
 set -uo pipefail
 
@@ -38,10 +39,12 @@ CONFIG_FILE="${TDOC_CONFIG_FILE:-$HOME/.tdoc/published.json}"
 
 # --- target platform ---
 PLATFORM_FLAG=""
+JSON_MODE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)   PLATFORM_FLAG="${2:-}"; shift 2 ;;
     --platform=*) PLATFORM_FLAG="${1#--platform=}"; shift ;;
+    --json)       JSON_MODE=1; shift ;;
     *) shift ;;
   esac
 done
@@ -264,11 +267,11 @@ missing_json="$(printf '%b' "$steps" | node -e '
   });
 ')"
 
-# --- emit JSON ---
+# --- build the stable JSON report ---
 # Built with node, not jq. The doctor used to fall back to a hardcoded
 # "not ready, install jq" blob when jq was absent — which is exactly the
 # machine it most needs to answer correctly, and it answered wrong.
-node -e '
+report_json="$(node -e '
   const [target, nodeVer, wranglerVer, cfAccount, cfSubdomain, pubSub, pubWorker,
          flags, missingRaw, updateRaw] = process.argv.slice(1);
   const f = JSON.parse(flags);
@@ -300,5 +303,50 @@ node -e '
 ' "$target" "$node_ver" "$wrangler_ver" "$cf_account_id" "$cf_subdomain" \
   "$publish_subdomain" "$publish_worker" \
   "{\"node\":$node_ok,\"curl\":$curl_ok,\"wrangler\":$wrangler_ok,\"vercel\":$vercel_ok,\"jq\":$jq_ok,\"gh\":$gh_ok,\"cf_logged_in\":$cf_logged_in,\"cf_token\":$cf_publish_token_ok,\"cf_subdomain\":$cf_subdomain_ok,\"cf_r2\":$cf_r2_enabled,\"published\":$published,\"ready\":$ready_to_publish}" \
-  "$missing_json" "$update_json"
-echo
+  "$missing_json" "$update_json")"
+
+if [ "$JSON_MODE" = "1" ]; then
+  printf '%s\n' "$report_json"
+  exit 0
+fi
+
+# Default UI: the same report, reduced to the decisions a person needs. Keep
+# this plain-text and alignment-only so it remains calm in every terminal and
+# copy/pastes cleanly without color or glyph support assumptions.
+printf '%s' "$report_json" | node -e '
+  let raw = "";
+  process.stdin.on("data", (d) => { raw += d; });
+  process.stdin.on("end", () => {
+    const r = JSON.parse(raw);
+    const targets = {
+      hosted: "Hosted · tdoc.dev",
+      cloudflare: "Cloudflare · self-hosted",
+      vercel: "Vercel · self-hosted",
+    };
+    const line = (label, value) => console.log(`${label.padEnd(12)}${value}`);
+
+    console.log("tdoc doctor\n");
+    line("Target", targets[r.target] || r.target);
+    line("Readiness", r.ready_to_publish
+      ? "Ready to publish"
+      : `${r.missing_steps.length} setup ${r.missing_steps.length === 1 ? "step" : "steps"} remaining`);
+    line("Setup", r.published.ok ? "Configured on this machine" : "No published document yet");
+    if (r.update && r.update.checked && !r.update.ok) {
+      line("Update", r.update.diverged
+        ? "Local checkout has diverged"
+        : `${r.update.behind || 0} newer ${(r.update.behind || 0) === 1 ? "commit" : "commits"} available`);
+    }
+
+    console.log("\nNext");
+    if (r.missing_steps.length) {
+      r.missing_steps.forEach((step, index) => {
+        console.log(`  ${index + 1}. ${step.label}`);
+        console.log(`     ${step.cmd}`);
+      });
+    } else if (r.published.ok) {
+      console.log("  /tdoc publish <slug>");
+    } else {
+      console.log("  /tdoc new <prompt>");
+    }
+  });
+'
