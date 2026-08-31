@@ -54,7 +54,7 @@ export function OnboardingDialog({ open, onOpenChange }) {
       <p className="muted">
         To self-host, add: <strong>Publish it to my own Cloudflare, not the hosted service.</strong>
       </p>
-      <a href="/start">Read the full tutorial</a>
+      <a className="tdoc-onboarding-link" href="/start">Read the full tutorial</a>
     </AppDialog>
   );
 }

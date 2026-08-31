@@ -17,6 +17,9 @@ const dialog = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-dialo
 const documentShell = fs.readFileSync(path.join(root, 'shell', 'src', 'document-shell.jsx'), 'utf8');
 const probe = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
 const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');
+const toolbar = fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'document-toolbar.jsx'), 'utf8');
+const chromeCss = fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8');
+const uiCss = fs.readFileSync(path.join(root, 'shell', 'src', 'ui', 'ui.css'), 'utf8');
 const stripTags = (source) => source.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ');
 const text = stripTags(html);
 
@@ -53,6 +56,13 @@ t('the dialog is one reusable Base UI screen, not a paged state machine', () => 
   assert(!/PAGES|stepSignIn|device\/start|device\/poll/.test(dialog), 'old paged or sign-in flow returned');
   assert(/What does it do\?/.test(dialog), 'collapsed detail missing');
   assert(/Read the full tutorial/.test(dialog), 'tutorial handoff missing');
+});
+
+t('mobile onboarding actions keep names and 44px touch targets', () => {
+  assert(/aria-label="Publish"/.test(toolbar) && /aria-label="Share"/.test(toolbar), 'icon-only document actions lost their names');
+  assert(/\.tdoc-bar button \{ min-width: 44px; min-height: 44px/.test(chromeCss), 'mobile toolbar targets are undersized');
+  assert(/\.tdoc-modal button[\s\S]*min-height: 44px/.test(uiCss), 'mobile dialog actions are undersized');
+  assert(/tdoc-onboarding-link[\s\S]*min-height: 44px/.test(uiCss), 'mobile tutorial link is undersized');
 });
 
 t('the short prompt points to FIRST-DOC and never embeds a credential', () => {

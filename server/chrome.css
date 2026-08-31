@@ -456,12 +456,14 @@
   }
   @media (max-width: 700px) {
     .tdoc-bar { padding: 0 8px; gap: 4px; }
+    .tdoc-bar button { min-width: 44px; min-height: 44px; justify-content: center; }
+    .tdoc-bar button.tdoc-bar-mark { width: 44px; height: 44px; }
     .tdoc-version-wrap { display: none; }
     .tdoc-bar .doc-title { font-size: 13px; }
     /* Small screens: the primary CTA collapses to just its icon (label is kept
        in title/aria-label). Keeps the phone bar to a compact icon + ⋯. */
     .tdoc-bar #tdoc-publish-btn span, .tdoc-bar #tdoc-share-btn span { display: none; }
-    .tdoc-bar #tdoc-publish-btn, .tdoc-bar #tdoc-share-btn { padding: 7px 9px; }
+    .tdoc-bar #tdoc-publish-btn, .tdoc-bar #tdoc-share-btn { min-width: 44px; min-height: 44px; padding: 7px 9px; }
   }
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so

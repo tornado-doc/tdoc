@@ -16,6 +16,7 @@ const hub = ['shell/src/docs-hub.jsx', 'shell/src/hooks/use-docs-hub.js', 'shell
 const shellApi = fs.readFileSync(path.join(root, 'shell/src/document/api.js'), 'utf8');
 const shell = fs.readFileSync(path.join(root, 'server/shell.js'), 'utf8');
 const docsHub = fs.readFileSync(path.join(root, 'shell/src/docs-hub.jsx'), 'utf8');
+const docsHubCss = fs.readFileSync(path.join(root, 'shell/src/docs-hub.css'), 'utf8');
 
 console.log('/me React Docs Hub');
 
@@ -53,6 +54,13 @@ t('Create a doc reuses the first-doc recipe, copy helper, and shared dialog acti
   assert(/className="tdoc-recipe-wrap"/.test(docsHub), 'shared recipe treatment missing');
   assert(/createCopied \? 'Copied' : 'Copy'/.test(docsHub), 'Copy feedback state missing');
   assert(/actions=\{<button[^>]+className="primary"[^>]*>Done/.test(docsHub), 'Create dialog does not use the shared action row');
+});
+
+t('mobile hub keeps 44px actions while quieting management controls', () => {
+  assert(/\.mk-btn,[\s\S]*\.tab,[\s\S]*min-height: 44px/.test(docsHubCss), 'Create or tabs have undersized mobile targets');
+  assert(/\.search-field[\s\S]*flex-basis: 100%/.test(docsHubCss), 'search is not dominant on narrow screens');
+  assert(/\.toolbar select,[\s\S]*\.new-folder-btn[\s\S]*border-color: transparent/.test(docsHubCss), 'narrow management controls remain visually loud');
+  assert(/\.select-all[\s\S]*font-size: 12px/.test(docsHubCss), 'narrow selection control remains visually dominant');
 });
 
 t('Docs Hub mutations use session cookies and never ask for an admin token', () => {
