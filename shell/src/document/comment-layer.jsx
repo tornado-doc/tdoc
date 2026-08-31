@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Check, MessageCircle } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { CommentIcon } from '../ui/comment-icon.jsx';
 import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { avatarFor, TOP_BAR_HEIGHT } from './model.js';
@@ -157,7 +158,7 @@ export function MobileCommentDrawer({
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
       <Drawer.Trigger className="tdoc-fab">
-        <MessageCircle size={16} />
+        <CommentIcon size={16} />
         <span id="tdoc-fab-count">{comments.length}</span>
       </Drawer.Trigger>
       <Drawer.Portal>

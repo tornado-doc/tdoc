@@ -23,7 +23,7 @@
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
   var interactionMode = 'read';
-  var COMMENT_ICON_PATH = 'M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719';
+  var COMMENT_ICON_PATH = 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
   function highlightCss(dark) {
@@ -46,7 +46,7 @@
   // overlay's .tdoc-hover-outline / .tdoc-comment-pill.
   (function () {
     var s = document.createElement('style');
-    var cursorSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="' + COMMENT_ACCENT + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
+    var cursorSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="' + COMMENT_ICON_PATH + '" fill="' + COMMENT_ACCENT + '" stroke="white" stroke-width="4"/><path d="' + COMMENT_ICON_PATH + '" fill="' + COMMENT_ACCENT + '" stroke="' + COMMENT_ACCENT + '" stroke-width="2"/></svg>';
     var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 3 3, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');

@@ -101,9 +101,12 @@ async function chooseMode(page, label) {
       const cursor = await frame.evaluate(() => getComputedStyle(document.body).cursor);
       assert(cursor.includes('data:image/svg+xml') && cursor.includes('crosshair'),
         `Comment mode did not expose its chat cursor: ${cursor}`);
-      const triggerPath = await trigger.locator('svg.lucide-message-circle path').getAttribute('d');
-      assert(triggerPath && decodeURIComponent(cursor).includes(triggerPath),
+      const triggerPath = await trigger.locator('svg.tdoc-comment-icon path').getAttribute('d');
+      const decodedCursor = decodeURIComponent(cursor);
+      assert(triggerPath && decodedCursor.includes(triggerPath),
         'Comment mode trigger and cursor use different icon geometry');
+      assert(decodedCursor.includes('fill="#1652f0"') && !decodedCursor.includes('fill="white"'),
+        'Comment cursor is not rendered as a solid brand-blue mark');
       await frame.locator('#comment-artifact').hover();
       const pill = frame.locator('.tdoc-comment-pill');
       await pill.waitFor({ state: 'visible' });

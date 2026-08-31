@@ -8,7 +8,6 @@ import {
   Heading2,
   Italic,
   Link,
-  MessageCircle,
   Pencil,
   Redo2,
   RotateCcw,
@@ -16,11 +15,12 @@ import {
   Undo2,
 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
+import { CommentIcon } from '../ui/comment-icon.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 
 const MODES = [
   { value: 'read', label: 'Read', Icon: Eye },
-  { value: 'comment', label: 'Comment', Icon: MessageCircle },
+  { value: 'comment', label: 'Comment', Icon: CommentIcon },
   { value: 'edit', label: 'Edit', Icon: Pencil },
 ];
 
