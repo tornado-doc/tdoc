@@ -127,7 +127,7 @@ t('the floating card renders and positions without a cluster', () => {
     'DesktopCommentLayer no longer marks an unanchored floating card');
   const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
   const pos = shell.slice(shell.indexOf('const cardPosition = {'), shell.indexOf('const cardPosition = {') + 500);
-  assert(/openCluster\s*\n?\s*\?/.test(pos) && /:\s*TOP_BAR_HEIGHT \+ 4/.test(pos),
+  assert(/openCluster\s*\n?\s*\?/.test(pos) && /:\s*(?:TOP_BAR_HEIGHT|frameTop) \+ 4/.test(pos),
     'cardPosition lost its no-cluster fallback, so an unanchored card can land off screen');
 });
 

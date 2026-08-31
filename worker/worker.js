@@ -1496,7 +1496,7 @@ function injectReaderCss(html, css) {
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
@@ -1509,6 +1509,8 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     version,
     identity: identity || null,
     isOwner: !!isOwner,
+    canEdit: !!versionWritesEnabled && !!isOwner && !isLanding,
+    canComment: !!commentWritesEnabled,
     canSeeMyDocs: !!canSeeMyDocsFlag,
     isLanding: !!isLanding,
     isCatalog: !!isCatalog,
@@ -1526,6 +1528,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
 
   let oldVersion = null;
   const latestVersion = vlist.length ? Math.max(...vlist.map(v => Number(v.n) || 0)) : version;
+  cfg.canEdit = cfg.canEdit && Number(version) === Number(latestVersion);
   if (!isLanding && vlist.length > 1 && typeof version === 'number' && version < latestVersion) {
     oldVersion = {
       current: version,
@@ -1647,7 +1650,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta)), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -2463,6 +2466,11 @@ function hostedMaxUploadBytes(env) {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2 * 1024 * 1024;
 }
 
+function latestVersionNumber(meta) {
+  const versions = Array.isArray(meta && meta.versions) ? meta.versions : [];
+  return versions.reduce((latest, item) => Math.max(latest, Number(item && item.n) || 0), 0);
+}
+
 function utf8ByteLength(s) {
   return new TextEncoder().encode(String(s || '')).byteLength;
 }
@@ -3098,6 +3106,40 @@ async function readComments(env, slug) {
   return safeParseList(raw);
 }
 
+async function createBrowserVersion(env, slug, payload) {
+  if (!env.COMMENTS) {
+    return { status: 503, body: { error: 'version_store_unavailable' } };
+  }
+  const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+  try {
+    const response = await stub.fetch('https://do/version', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, op: payload }),
+    });
+    const body = await response.json();
+    return { status: response.status, body };
+  } catch (error) {
+    return { status: 503, body: { error: 'version_store_unavailable', message: error.message || String(error) } };
+  }
+}
+
+async function versionReservationOp(env, slug, op) {
+  if (!env.COMMENTS) return { ok: false, status: 503, error: 'version_store_unavailable' };
+  try {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+    const response = await stub.fetch('https://do/version-lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, op }),
+    });
+    const body = await response.json();
+    return { ...body, status: response.status };
+  } catch (error) {
+    return { ok: false, status: 503, error: 'version_store_unavailable', message: error.message || String(error) };
+  }
+}
+
 // The Durable Object: single-threaded, input-gated owner of one slug's comment
 // list. The list lives in state.storage under key 'list'. On first touch it is
 // lazily migrated in from the legacy KV value (comments:<slug>) so existing
@@ -3128,11 +3170,158 @@ export class CommentsStore {
     return list;
   }
 
+  async _reserveVersion(baseVersion, metaLatest) {
+    let result;
+    const reservationId = rand(8);
+    const started = Date.now();
+    await this.state.storage.transaction(async (txn) => {
+      let cursor = await txn.get('versionCursor');
+      if (!cursor || typeof cursor !== 'object') cursor = { latest: metaLatest, pending: null };
+
+      if (cursor.pending) {
+        const committed = metaLatest >= Number(cursor.pending.next || 0);
+        const stale = started - Number(cursor.pending.started || 0) > 60_000;
+        if (committed || stale) cursor = { latest: Math.max(metaLatest, Number(cursor.latest) || 0), pending: null };
+        else {
+          result = { ok: false, status: 409, body: { error: 'save_in_progress', latestVersion: Number(cursor.latest) || metaLatest } };
+          return;
+        }
+      }
+
+      cursor.latest = Math.max(metaLatest, Number(cursor.latest) || 0);
+      if (cursor.latest !== baseVersion) {
+        result = { ok: false, status: 409, body: { error: 'version_conflict', baseVersion, latestVersion: cursor.latest } };
+        return;
+      }
+      const next = baseVersion + 1;
+      cursor.pending = { id: reservationId, base: baseVersion, next, started };
+      await txn.put('versionCursor', cursor);
+      result = { ok: true, id: reservationId, next };
+    });
+    return result;
+  }
+
+  async _finishVersion(reservation, committed) {
+    await this.state.storage.transaction(async (txn) => {
+      const cursor = await txn.get('versionCursor');
+      if (!cursor || !cursor.pending || cursor.pending.id !== reservation.id) return;
+      await txn.put('versionCursor', {
+        latest: committed ? reservation.next : reservation.next - 1,
+        pending: null,
+      });
+    });
+  }
+
+  async _copyVersionWidgets(slug, baseVersion, nextVersion) {
+    const fromPrefix = `docs/${slug}/v${baseVersion}/widgets/`;
+    let cursor;
+    do {
+      const page = await this.env.DOCS.list({ prefix: fromPrefix, cursor });
+      for (const item of page.objects || []) {
+        const source = await this.env.DOCS.get(item.key);
+        if (!source) continue;
+        const target = `docs/${slug}/v${nextVersion}/widgets/${item.key.slice(fromPrefix.length)}`;
+        await this.env.DOCS.put(target, await source.text(), {
+          httpMetadata: { contentType: 'text/html; charset=utf-8' },
+        });
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
+
+  async _saveVersion(slug, op) {
+    const meta = await loadDocMeta(this.env, slug);
+    if (!meta) return { status: 404, body: { error: 'not_found' } };
+    const metaLatest = latestVersionNumber(meta);
+    const reservation = await this._reserveVersion(op.baseVersion, metaLatest);
+    if (!reservation.ok) return { status: reservation.status, body: reservation.body };
+
+    let committed = false;
+    try {
+      const widgetFrom = `/d/${slug}/v/${op.baseVersion}/widget/`;
+      const widgetTo = `/d/${slug}/v/${reservation.next}/widget/`;
+      const rewritten = String(op.html).split(widgetFrom).join(widgetTo);
+      const stamped = stampAids(rewritten);
+      await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
+      const key = `docs/${slug}/v${reservation.next}/index.html`;
+      await this.env.DOCS.put(key, stamped.html, {
+        httpMetadata: { contentType: 'text/html; charset=utf-8' },
+      });
+      const verify = await this.env.DOCS.head(key);
+      if (!verify) throw new Error('version_write_lost');
+
+      const now = new Date().toISOString();
+      const versions = (Array.isArray(meta.versions) ? meta.versions : [])
+        .filter((item) => Number(item && item.n) !== reservation.next);
+      versions.push({
+        n: reservation.next,
+        created: now,
+        prompt: 'Browser edit',
+        source: 'browser',
+        ...(op.actorLogin ? { author: op.actorLogin } : {}),
+      });
+      versions.sort((a, b) => Number(a.n) - Number(b.n));
+      await this.env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, versions }));
+      committed = true;
+      // META is the commit point. Cursor cleanup is recoverable bookkeeping:
+      // reporting a failed save after META committed would make the browser
+      // retry a snapshot that already exists.
+      try {
+        await this._finishVersion(reservation, true);
+      } catch (error) {
+        console.error('[browser-save] version cursor finalize failed (recoverable):', error.message || String(error));
+      }
+
+      // Comments are an independent event log. Reconcile the authoritative
+      // list after the snapshot commits; a concurrent comment is included by
+      // the transaction rather than being overwritten by the save.
+      try {
+        await this.state.storage.transaction(async (txn) => {
+          const list = await this._loadInTxn(txn, slug);
+          const result = applyCommentOp(list, {
+            kind: 'publish_merge', localComments: [], aids: stamped.aids, version: reservation.next,
+          });
+          if (result.status === 200) await txn.put('list', list);
+        });
+      } catch (error) {
+        console.error('[browser-save] comment reconcile failed (non-fatal):', error.message || String(error));
+      }
+      return {
+        status: 200,
+        body: { ok: true, version: reservation.next, url: `/d/${slug}/v/${reservation.next}` },
+      };
+    } catch (error) {
+      if (!committed) {
+        try { await this._finishVersion(reservation, false); } catch {}
+      }
+      return { status: 500, body: { error: 'version_write_failed', message: error.message || String(error) } };
+    }
+  }
+
   async fetch(req) {
     const u = new URL(req.url);
     let payload;
     try { payload = await req.json(); } catch { return Response.json({ list: [] }); }
     const { slug, op } = payload;
+
+    if (u.pathname === '/version') {
+      const result = await this._saveVersion(slug, op || {});
+      return Response.json(result.body, { status: result.status });
+    }
+
+    if (u.pathname === '/version-lock') {
+      if (op && op.kind === 'reserve') {
+        const meta = await loadDocMeta(this.env, slug);
+        if (!meta) return Response.json({ error: 'not_found' }, { status: 404 });
+        const result = await this._reserveVersion(Number(op.baseVersion), latestVersionNumber(meta));
+        return Response.json(result.ok ? result : result.body, { status: result.ok ? 200 : result.status });
+      }
+      if (op && op.kind === 'finish' && op.reservation) {
+        await this._finishVersion(op.reservation, !!op.committed);
+        return Response.json({ ok: true });
+      }
+      return Response.json({ error: 'bad_version_lock_op' }, { status: 400 });
+    }
 
     // OWNER: atomic hosted slug ownership claim/verify/release. Lives in the
     // same per-slug Durable Object as comments so first-publish claim is
@@ -3487,7 +3676,7 @@ export default {
             body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
           }
         }
-        const tag = `<script nonce="${nonce}">${PROBE_JS}</script>`;
+        const tag = `<script id="tdoc-frame-probe" data-tdoc-provider nonce="${nonce}">${PROBE_JS}</script>`;
         body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
       }
       return html(body, {
@@ -4293,6 +4482,40 @@ export default {
       return json(res.body, { status: res.status });
     }
 
+    // ---- explicit browser save (owner/latest only in the shell) ----
+    if (p === '/api/doc/versions' && method === 'POST') {
+      if (!env.COMMENTS) return json({ error: 'version_store_unavailable' }, { status: 503 });
+      const maxBytes = hostedMaxUploadBytes(env);
+      const contentLength = Number(req.headers.get('content-length') || 0);
+      if (contentLength && (!Number.isFinite(contentLength) || contentLength > maxBytes + 64 * 1024)) {
+        return json({ error: 'payload_too_large', limit: maxBytes }, { status: 413 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body && body.slug;
+      const baseVersion = Number(body && body.baseVersion);
+      const doc = body && body.html;
+      if (!isValidSlug(slug) || !Number.isInteger(baseVersion) || baseVersion < 1 || typeof doc !== 'string') {
+        return json({ error: 'slug, baseVersion, html required' }, { status: 400 });
+      }
+      const size = utf8ByteLength(doc);
+      if (size > maxBytes) return json({ error: 'payload_too_large', limit: maxBytes, size }, { status: 413 });
+      if (!/<html[\s>]/i.test(doc) || !/<body[\s>]/i.test(doc)) {
+        return json({ error: 'invalid_document_html' }, { status: 400 });
+      }
+      if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(doc)) {
+        return json({ error: 'provider_markup_forbidden' }, { status: 400 });
+      }
+      const auth = await authorizeOwnerMutation(req, env, slug);
+      if (!auth.ok) return auth.response;
+      const result = await createBrowserVersion(env, slug, {
+        baseVersion,
+        html: doc,
+        actorLogin: sessionLogin(auth.session) || '',
+      });
+      return json(result.body, { status: result.status });
+    }
+
     // ---- admin upload (from `tdoc publish`) ----
     if (p === '/api/upload' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
@@ -4355,11 +4578,45 @@ export default {
       // and cannot drift onto a different artifact.
       const { html: stampedHtml, aids } = stampAids(doc);
       const r2Key = `docs/${slug}/v${verNum}/index.html`;
+      const incomingLatest = latestVersionNumber(incoming);
+      const writesLatestMeta = !!incoming && (incomingLatest === 0 || verNum === incomingLatest);
+      let versionReservation = null;
+      const remoteLatest = latestVersionNumber(writeGate.meta);
+      if (writeGate.meta && verNum <= remoteLatest) {
+        const existing = await env.DOCS.get(r2Key);
+        const existingHtml = existing ? await existing.text() : null;
+        // Old-version uploads are best-effort repairs, never rewrites. This is
+        // what prevents a stale local v8 from replacing a browser-created v8
+        // while the CLI walks its historical versions before uploading v9.
+        if (existingHtml != null && existingHtml !== stampedHtml) {
+          return json({ error: 'version_conflict', baseVersion: verNum - 1, latestVersion: remoteLatest }, { status: 409 });
+        }
+      }
+      if (writesLatestMeta && writeGate.meta && env.COMMENTS && verNum > remoteLatest) {
+          if (verNum !== remoteLatest + 1) {
+            return json({ error: 'version_conflict', baseVersion: verNum - 1, latestVersion: remoteLatest }, { status: 409 });
+          }
+          const lock = await versionReservationOp(env, slug, { kind: 'reserve', baseVersion: remoteLatest });
+          if (!lock.ok) return json({ error: lock.error || 'version_conflict', ...lock }, { status: lock.status || 409 });
+          versionReservation = { id: lock.id, next: lock.next };
+      }
+      const finishVersionReservation = async (committed) => {
+        if (!versionReservation) return;
+        const reservation = versionReservation;
+        versionReservation = null;
+        const result = await versionReservationOp(env, slug, { kind: 'finish', reservation, committed });
+        if (!result.ok) throw new Error(result.message || result.error || 'version_lock_finalize_failed');
+      };
+      const abortVersionWrite = async (body, status) => {
+        try { await finishVersionReservation(false); } catch {}
+        return json(body, { status });
+      };
       try {
         await env.DOCS.put(r2Key, stampedHtml, {
           httpMetadata: { contentType: 'text/html; charset=utf-8' },
         });
       } catch (e) {
+        try { await finishVersionReservation(false); } catch {}
         console.error('[upload] R2 put failed:', e.message);
         return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
       }
@@ -4368,38 +4625,70 @@ export default {
       // silently dropping writes — leaving us with KV meta but no R2 doc.
       const verify = await env.DOCS.head(r2Key);
       if (!verify) {
+        try { await finishVersionReservation(false); } catch {}
         console.error('[upload] R2 write did not persist:', r2Key);
         return json({ error: 'r2_write_lost', message: 'PUT succeeded but the key is not readable. Re-deploy the worker; the R2 binding may be stale.' }, { status: 500 });
       }
       const widgets = body.widgets;
       if (widgets != null) {
         if (typeof widgets !== 'object' || Array.isArray(widgets)) {
-          return json({ error: 'widgets must be an object of name → html' }, { status: 400 });
+          return abortVersionWrite({ error: 'widgets must be an object of name → html' }, 400);
         }
         const names = Object.keys(widgets);
-        if (names.length > 32) return json({ error: 'too many widgets' }, { status: 400 });
+        if (names.length > 32) return abortVersionWrite({ error: 'too many widgets' }, 400);
         for (const wname of names) {
-          if (!isValidWidgetName(wname)) return json({ error: 'invalid_widget_name', name: wname }, { status: 400 });
+          if (!isValidWidgetName(wname)) return abortVersionWrite({ error: 'invalid_widget_name', name: wname }, 400);
           const whtml = widgets[wname];
-          if (typeof whtml !== 'string') return json({ error: 'widget html must be a string', name: wname }, { status: 400 });
-          if (whtml.length > 512 * 1024) return json({ error: 'widget too large', name: wname }, { status: 400 });
+          if (typeof whtml !== 'string') return abortVersionWrite({ error: 'widget html must be a string', name: wname }, 400);
+          if (whtml.length > 512 * 1024) return abortVersionWrite({ error: 'widget too large', name: wname }, 400);
           const wKey = `docs/${slug}/v${verNum}/widgets/${wname}.html`;
           try {
             await env.DOCS.put(wKey, whtml, {
               httpMetadata: { contentType: 'text/html; charset=utf-8' },
             });
           } catch (e) {
+            try { await finishVersionReservation(false); } catch {}
             console.error('[upload] R2 widget put failed:', e.message);
             return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
           }
         }
       }
-      if (incoming) {
+      if (incoming && writesLatestMeta) {
         try {
-          await env.META.put(`meta:${slug}`, JSON.stringify(incoming));
+          // Remote storage is authoritative. Preserve versions that a browser
+          // editor may have created since this local checkout was last pulled.
+          const currentMeta = await loadDocMeta(env, slug);
+          const versionByNumber = new Map();
+          for (const item of (Array.isArray(currentMeta && currentMeta.versions) ? currentMeta.versions : [])) {
+            versionByNumber.set(Number(item.n), item);
+          }
+          for (const item of (Array.isArray(incoming.versions) ? incoming.versions : [])) {
+            const number = Number(item.n);
+            if (!versionByNumber.has(number) || number === verNum) versionByNumber.set(number, item);
+          }
+          if (!versionByNumber.has(verNum)) {
+            versionByNumber.set(verNum, { n: verNum, created: new Date().toISOString() });
+          }
+          const mergedVersions = [...versionByNumber.values()]
+            .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
+            .sort((a, b) => Number(a.n) - Number(b.n));
+          await env.META.put(`meta:${slug}`, JSON.stringify({
+            ...(currentMeta || {}),
+            ...incoming,
+            versions: mergedVersions,
+          }));
         } catch (e) {
+          try { await finishVersionReservation(false); } catch {}
           console.error('[upload] META put failed:', e.message);
           return json({ error: 'meta_put_failed', message: e.message || String(e) }, { status: 500 });
+        }
+        try {
+          await finishVersionReservation(true);
+        } catch (e) {
+          // META is the commit point, matching browser Save. A later request
+          // repairs the cursor from META; never report this committed version
+          // as failed and invite an unsafe retry.
+          console.error('[upload] version cursor finalize failed (recoverable):', e.message || String(e));
         }
       }
       // Reconcile existing open comments against the new artifact set:

@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-import { Check, MessageCircle } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { CommentIcon } from '../ui/comment-icon.jsx';
 import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { avatarFor, TOP_BAR_HEIGHT } from './model.js';
 
-function Pin({ cluster, top, left, onOpenComment, onOpenCluster }) {
+function Pin({ cluster, top, left, frameTop, onOpenComment, onOpenCluster }) {
   const single = cluster.items.length === 1 ? cluster.items[0].comment : null;
   const resolved = single?.resolved
     || (!single && cluster.items.every((item) => item.comment.resolved));
@@ -20,7 +21,7 @@ function Pin({ cluster, top, left, onOpenComment, onOpenCluster }) {
       ].filter(Boolean).join(' ')}
       data-id={single?.id}
       data-key={cluster.key}
-      style={{ top: Math.max(TOP_BAR_HEIGHT + 4, top), left }}
+      style={{ top: Math.max(frameTop + 4, top), left }}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={() => single ? onOpenComment(single.id) : onOpenCluster(cluster.key)}
     >
@@ -63,6 +64,7 @@ export function DesktopCommentLayer({
   clusters,
   commentsById,
   frameScrollY,
+  frameTop = TOP_BAR_HEIGHT,
   pinLeft,
   openComment,
   openClusterKey,
@@ -83,13 +85,14 @@ export function DesktopCommentLayer({
   return (
     <>
       {clusters.map((cluster) => {
-        const top = TOP_BAR_HEIGHT + cluster.y - frameScrollY;
-        if (top < TOP_BAR_HEIGHT - 20 || top > window.innerHeight - 8) return null;
+        const top = frameTop + cluster.y - frameScrollY;
+        if (top < frameTop - 20 || top > window.innerHeight - 8) return null;
         return (
           <Pin
             key={cluster.key}
             cluster={cluster}
             top={top}
+            frameTop={frameTop}
             left={pinLeft}
             onOpenComment={onOpenComment}
             onOpenCluster={onOpenCluster}
@@ -102,8 +105,8 @@ export function DesktopCommentLayer({
           cluster={openCluster}
           commentsById={commentsById}
           top={Math.max(
-            TOP_BAR_HEIGHT + 4,
-            Math.min(TOP_BAR_HEIGHT + openCluster.y - frameScrollY, window.innerHeight - 200),
+            frameTop + 4,
+            Math.min(frameTop + openCluster.y - frameScrollY, window.innerHeight - 200),
           )}
           left={Math.max(8, pinLeft - 268)}
           onSelect={onOpenComment}
@@ -158,7 +161,7 @@ export function MobileCommentDrawer({
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
       <Drawer.Trigger className="tdoc-fab">
-        <MessageCircle size={16} />
+        <CommentIcon size={16} />
         <span id="tdoc-fab-count">{comments.length}</span>
       </Drawer.Trigger>
       <Drawer.Portal>

@@ -179,7 +179,7 @@ jobs:
               --arg slug conway-life \
               --argjson version "$v" \
               --rawfile html "$html" \
-              --argjson meta '{"title":"Conway'\''s Game of Life","slug":"conway-life","versions":[{"n":1},{"n":2}]}' \
+              --argjson meta '{"title":"Conway'\''s Game of Life","slug":"conway-life","versions":[{"n":1},{"n":2}],"access":{"visibility":"public","commenting":"signed_in","history_visibility":"public","allowed_users":[]}}' \
               '{slug:$slug, version:$version, html:$html, meta:$meta}' \
               > /tmp/tdoc-preview-upload.json
             curl -sS --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \

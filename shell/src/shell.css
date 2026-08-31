@@ -29,6 +29,129 @@ body,
   display: block;
 }
 
+.tdoc-bar button.tdoc-mode-trigger {
+  box-sizing: border-box;
+  height: 32px;
+  flex: none;
+  padding: 0 9px;
+  border: 1px solid #dedee3;
+  background: #fff;
+  color: #555;
+  font: 600 12px system-ui, sans-serif;
+}
+
+.tdoc-bar button.tdoc-mode-trigger[data-mode="comment"],
+.tdoc-bar button.tdoc-mode-trigger[data-mode="edit"] {
+  border-color: #c6d4f5;
+  background: var(--td-accent-tint);
+  color: var(--td-accent);
+}
+
+.tdoc-mode-chevron { color: #98989f; }
+.tdoc-mode-item {
+  display: flex;
+  min-width: 148px;
+  align-items: center;
+  gap: 9px;
+}
+.tdoc-mode-item.current { font-weight: 650; }
+.tdoc-mode-check { margin-left: auto; color: var(--td-accent); }
+
+.tdoc-editor-toolbar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 46px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #e5e5e7;
+  background: #f7f7f8;
+  color: #333;
+  font: 13px system-ui, sans-serif;
+  gap: 12px;
+  z-index: 5;
+}
+
+.tdoc-editor-tools,
+.tdoc-editor-commit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tdoc-editor-tools {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tdoc-editor-tools::-webkit-scrollbar { display: none; }
+
+.tdoc-editor-toolbar button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: 600 12px system-ui, sans-serif;
+  cursor: pointer;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.tdoc-editor-toolbar button:hover:not(:disabled) {
+  border-color: #d9d9dc;
+  background: #fff;
+}
+
+.tdoc-editor-toolbar button.primary {
+  min-width: 72px;
+  background: var(--td-accent);
+  color: #fff;
+}
+
+.tdoc-editor-toolbar button:disabled { opacity: .45; cursor: default; }
+.tdoc-editor-divider { width: 1px; height: 20px; margin: 0 3px; background: #d9d9dc; flex: none; }
+.tdoc-editor-status { min-width: 112px; margin-right: 4px; color: #777; font-size: 12px; text-align: right; white-space: nowrap; }
+
+.tdoc-editor-link-field {
+  display: grid;
+  gap: 6px;
+  color: #555;
+  font: 600 12px system-ui, sans-serif;
+}
+
+.tdoc-editor-link-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  font: 14px system-ui, sans-serif;
+}
+
+@media (max-width: 700px) {
+  .tdoc-bar button.tdoc-mode-trigger {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+  .tdoc-mode-label,
+  .tdoc-mode-chevron { display: none; }
+  .tdoc-editor-toolbar { padding: 6px 8px; gap: 6px; }
+  .tdoc-editor-status { display: none; }
+  .tdoc-editor-toolbar button.primary { min-width: 32px; }
+  .tdoc-editor-toolbar button.primary span { display: none; }
+}
+
 .tdoc-footer {
   margin-top: 0;
   position: fixed;

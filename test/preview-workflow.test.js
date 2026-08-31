@@ -51,6 +51,8 @@ t('sticky comment matches the #148 template', () => {
   assert(wf.includes('**Open this:** https://${PREVIEW_HOST}/ '),
     'Open this must be the homepage now that the preview seeds it');
   assert(wf.includes('/d/conway-life/v/2'), 'the demo doc must still be linked');
+  assert(/"access":\{"visibility":"public","commenting":"signed_in","history_visibility":"public"/.test(wf),
+    'the linked demo doc must be anonymously readable without enabling anonymous writes');
   assert(/seed .*landing|seeded landing/.test(wf), 'the preview must seed the landing doc');
   assert(wf.includes('It is not [tdoc.dev](https://tdoc.dev)'),
     'must say the link is not tdoc.dev');
