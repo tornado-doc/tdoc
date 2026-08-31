@@ -351,10 +351,38 @@ hosted_github_signin() {
   [ "$interval" -lt 5 ] && interval=5
   case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
 
+  WAITING_SHOWN=0
+  WAITING_TTY=0
+  show_signin_wait() {
+    local remaining="$1"
+    [ "$remaining" -lt 0 ] && remaining=0
+    local minutes=$((remaining / 60)) seconds=$((remaining % 60))
+    if [ -t 2 ]; then
+      printf '\r\033[2K[tdoc] Waiting for GitHub approval · %d:%02d remaining' "$minutes" "$seconds" >&2
+      WAITING_TTY=1
+    elif [ "$WAITING_SHOWN" = "0" ]; then
+      printf '[tdoc] Waiting for GitHub approval · %d:%02d remaining\n' "$minutes" "$seconds" >&2
+    fi
+    WAITING_SHOWN=1
+  }
+  finish_signin_wait() {
+    if [ "$WAITING_TTY" = "1" ]; then printf '\n' >&2; fi
+    WAITING_TTY=0
+  }
+  stop_hosted_signin() {
+    local message="$1" status="$2"
+    finish_signin_wait
+    clear_pending_signin
+    rm -f "$cookiejar"
+    echo "[tdoc] $message No credential was saved." >&2
+    echo "[tdoc] Retry: $RETRY_COMMAND" >&2
+    exit "$status"
+  }
+
   # Install the human-cancel path before printing the device instructions.
   # A fast Ctrl-C on the first visible line must still clear #325's modal side
   # channel and must never be reported as a GitHub denial.
-  trap 'clear_pending_signin; rm -f "$cookiejar"; echo "[tdoc] GitHub sign-in canceled. No credential was saved." >&2; echo "[tdoc] Retry: $RETRY_COMMAND" >&2; exit 130' INT
+  trap 'stop_hosted_signin "GitHub sign-in canceled." 130' INT
 
   # No attempt to pre-fill the code in the URL. GitHub returns no
   # verification_uri_complete, and appending ?user_code= does NOT work in
@@ -415,18 +443,22 @@ hosted_github_signin() {
   # side channel before the first sleep, so a modal polling for it sees the
   # code on its next tick rather than after the whole flow resolves.
   write_pending_signin "$user_code" "$uri" "$expires" "${opened:-0}"
-  echo "[tdoc] Waiting for GitHub approval…" >&2
   local waited=0 err
+  show_signin_wait "$expires"
   while [ "$waited" -lt "$expires" ]; do
     sleep "$interval"
     waited=$((waited + interval))
-    resp="$(curl -sS --connect-timeout 10 --max-time 30 -c "$cookiejar" -b "$cookiejar" -w $'\n%{http_code}' \
+    if ! resp="$(curl -sS --connect-timeout 10 --max-time 30 -c "$cookiejar" -b "$cookiejar" -w $'\n%{http_code}' \
       -X POST "$base/api/auth/device/poll" -H "Content-Type: application/json" \
-      -d "{\"device_code\":\"$(printf '%s' "$device_code" | sed 's/"/\\"/g')\"}")" || continue
+      -d "{\"device_code\":\"$(printf '%s' "$device_code" | sed 's/"/\\"/g')\"}")"; then
+      show_signin_wait "$((expires - waited))"
+      continue
+    fi
     http="${resp##*$'\n'}"
     payload="${resp%$'\n'*}"
     if [ "$(printf '%s' "$payload" | json_get ok)" = "true" ]; then
       _who="$(printf '%s' "$payload" | json_get identity.login)"
+      finish_signin_wait
       echo "[tdoc] Signed in as ${_who:-github user}" >&2
       clear_pending_signin
       trap - INT
@@ -434,13 +466,12 @@ hosted_github_signin() {
     fi
     err="$(printf '%s' "$payload" | json_get error)"
     case "$err" in
-      authorization_pending|'') ;;
-      slow_down) interval=$((interval + 5)) ;;
-      expired_token|access_denied)
-        fail_with_agent_prompt "GitHub sign-in expired or was denied" \
-          "Retry '/tdoc publish $SLUG' and approve the GitHub device code shown in the terminal."
-        ;;
+      authorization_pending|'') show_signin_wait "$((expires - waited))" ;;
+      slow_down) interval=$((interval + 5)); show_signin_wait "$((expires - waited))" ;;
+      expired_token) stop_hosted_signin "GitHub sign-in expired." 1 ;;
+      access_denied) stop_hosted_signin "GitHub sign-in was not approved." 1 ;;
       *)
+        finish_signin_wait
         echo "[tdoc] GitHub sign-in error: ${err:-HTTP $http}" >&2
         printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
         # The one exit inside the poll loop that does not go through
@@ -450,8 +481,7 @@ hosted_github_signin() {
         ;;
     esac
   done
-  fail_with_agent_prompt "GitHub sign-in timed out" \
-    "Retry '/tdoc publish $SLUG' and approve the GitHub device code before it expires. To self-host instead, run '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+  stop_hosted_signin "GitHub sign-in expired." 1
 }
 
 first_time_setup_hosted() {
@@ -553,8 +583,13 @@ if [ "$SIGNIN_ONLY" = "1" ]; then
 fi
 
 if [ ! -d "$DOC_DIR" ]; then
-  fail_with_agent_prompt "no local doc at $DOC_DIR" \
-    "There is no tdoc document called '$SLUG' yet at $DOC_DIR. Either (a) create it now with '/tdoc new <prompt>' using the slug '$SLUG', or (b) ask the user which slug they meant and run '/tdoc list' to see what exists. Then run '/tdoc publish <correct-slug>'."
+  cat >&2 <<EOF
+[tdoc] Can't publish '$SLUG' yet
+[tdoc] No local document has that name.
+[tdoc] Next: create it with /tdoc new <prompt>, then retry:
+[tdoc]   $RETRY_COMMAND
+EOF
+  exit 1
 fi
 
 # --- bundle overlay.js into worker source ---

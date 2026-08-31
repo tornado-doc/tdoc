@@ -47,6 +47,7 @@ function freePort() {
 }
 
 function startDeviceServer(port) {
+  let pollError = 'authorization_pending';
   const server = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     if (req.url === '/api/auth/device/start') {
@@ -59,13 +60,16 @@ function startDeviceServer(port) {
       }));
     }
     if (req.url === '/api/auth/device/poll') {
-      return res.end(JSON.stringify({ error: 'authorization_pending' }));
+      return res.end(JSON.stringify({ error: pollError }));
     }
     res.statusCode = 404;
     res.end('{}');
   });
   return new Promise((resolve, reject) => {
-    server.listen(port, '127.0.0.1', () => resolve(server));
+    server.listen(port, '127.0.0.1', () => resolve({
+      server,
+      setPollError(value) { pollError = value; },
+    }));
     server.on('error', reject);
   });
 }
@@ -111,9 +115,58 @@ function cancelPublish(args, expectedRetry, port, slug = 'recovery-doc') {
           `cancel state was not explicit:\n${stderr}`);
         assert(stderr.includes(`[tdoc] Retry: ${expectedRetry}`),
           `retry command did not preserve the invocation:\n${stderr}`);
+        assert((stderr.match(/remaining/g) || []).length === 1,
+          `piped countdown should print once, not spam:\n${stderr}`);
         assert(!/denied/i.test(stderr), `SIGINT was mislabeled as denied:\n${stderr}`);
         assert(!fs.existsSync(pending), 'pending-signin.json survived cancellation');
         assert(!fs.existsSync(config), 'a publish credential was saved after cancellation');
+        resolve();
+      } catch (error) {
+        reject(error);
+      } finally {
+        fs.rmSync(fixture.home, { recursive: true, force: true });
+      }
+    });
+  });
+}
+
+function expirePublish(expectedRetry, port) {
+  return new Promise((resolve, reject) => {
+    const fixture = isolatedHome('signin');
+    const pending = path.join(fixture.home, '.tdoc', 'pending-signin.json');
+    const config = path.join(fixture.home, '.tdoc', 'published.json');
+    let stderr = '';
+    const child = spawn(PUBLISH, ['--signin-only'], {
+      env: {
+        ...process.env,
+        HOME: fixture.home,
+        TDOC_DIR: fixture.docs,
+        TDOC_HOSTED_BASE: `http://127.0.0.1:${port}`,
+        TDOC_NO_BROWSER: '1',
+        TDOC_SKIP_UPDATE_CHECK: '1',
+        TDOC_PLATFORM: '',
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`publish did not expire; stderr:\n${stderr}`));
+    }, 15000);
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      try {
+        assert(code === 1 && signal === null,
+          `expiration should exit 1, got code=${code} signal=${signal}\n${stderr}`);
+        assert(stderr.includes('GitHub sign-in expired. No credential was saved.'),
+          `expiration state was not explicit:\n${stderr}`);
+        assert(stderr.includes(`[tdoc] Retry: ${expectedRetry}`),
+          `expiration retry was not exact:\n${stderr}`);
+        assert((stderr.match(/remaining/g) || []).length === 1,
+          `piped countdown should print once, not spam:\n${stderr}`);
+        assert(!fs.existsSync(pending), 'pending-signin.json survived expiration');
+        assert(!fs.existsSync(config), 'a publish credential was saved after expiration');
         resolve();
       } catch (error) {
         reject(error);
@@ -152,8 +205,37 @@ function cancelPublish(args, expectedRetry, port, slug = 'recovery-doc') {
     });
   }
 
+  await t('missing document is concise and preserves the exact retry', () => {
+    const fixture = isolatedHome();
+    try {
+      fs.rmSync(path.join(fixture.docs, fixture.slug), { recursive: true, force: true });
+      const args = ['--platform', 'hosted', '--visibility', 'private', fixture.slug];
+      const result = spawnSync(PUBLISH, args, {
+        env: {
+          ...process.env,
+          HOME: fixture.home,
+          TDOC_DIR: fixture.docs,
+          TDOC_SKIP_UPDATE_CHECK: '1',
+          TDOC_PLATFORM: '',
+        },
+        encoding: 'utf8',
+        timeout: 20000,
+      });
+      const retry = `/tdoc publish --platform hosted --visibility private ${fixture.slug}`;
+      const lines = result.stderr.trim().split('\n');
+      assert(result.status === 1, `expected exit 1, got ${result.status}: ${result.stderr}`);
+      assert(lines.length === 4, `missing-doc message should be four lines, got ${lines.length}:\n${result.stderr}`);
+      assert(/Can't publish/.test(lines[0]) && /No local document/.test(lines[1]), result.stderr);
+      assert(/^\[tdoc\] Next:/.test(lines[2]) && lines[3].includes(retry), result.stderr);
+      assert(!result.stderr.includes(fixture.home), `internal path leaked:\n${result.stderr}`);
+      assert(!/paste the prompt|─/.test(result.stderr), `generic failure block leaked:\n${result.stderr}`);
+    } finally {
+      fs.rmSync(fixture.home, { recursive: true, force: true });
+    }
+  });
+
   const port = await freePort();
-  const server = await startDeviceServer(port);
+  const device = await startDeviceServer(port);
   try {
     await t('SIGINT during sign-in-only clears state and prints its exact retry', () =>
       cancelPublish(['--signin-only'], '/tdoc publish --signin-only', port, 'signin'));
@@ -168,8 +250,12 @@ function cancelPublish(args, expectedRetry, port, slug = 'recovery-doc') {
         '/tdoc publish --platform hosted --visibility private --history owner --commenting owner --allow-user octocat recovery-doc',
         port,
       ));
+
+    device.setPollError('expired_token');
+    await t('expired device flow clears state and keeps a low-noise retry', () =>
+      expirePublish('/tdoc publish --signin-only', port));
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => device.server.close(resolve));
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);
