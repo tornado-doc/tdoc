@@ -27,7 +27,9 @@
 # Cloudflare is only probed when the target is cloudflare, so the common path
 # also stops making two Cloudflare API round-trips it never needed.
 #
-# Exit code is always 0; consumers read the JSON.
+# Exit code is 0 when the probe can emit its JSON report. A missing Node
+# runtime is the one exception: Node builds that report, so the doctor emits a
+# short shell-only recovery message and exits non-zero instead.
 
 set -uo pipefail
 
@@ -52,8 +54,23 @@ if [ -z "$target" ] && [ -z "${TDOC_MOCK_NOT_PUBLISHED:-}" ] && [ -f "$CONFIG_FI
 fi
 case "$target" in
   hosted|cloudflare|vercel) ;;
-  *) target="hosted" ;;
+  "") target="hosted" ;;
+  *) echo "[tdoc] unknown platform '${target}' — use 'hosted', 'cloudflare', or 'vercel'." >&2; exit 1 ;;
 esac
+
+# The rest of the doctor deliberately uses Node to preserve one stable JSON
+# contract with or without jq. When Node itself is genuinely unavailable, do
+# not let that implementation detail turn into two shell errors and exit 0.
+# Keep TDOC_MOCK_NO_NODE below as a report-level mock: tests and consumers can
+# still inspect the ordinary JSON shape on a machine where Node is installed.
+if ! command -v node >/dev/null 2>&1; then
+  printf '%s\n' \
+    '[tdoc] Node 18+ is required.' \
+    'Detected: Node is not installed or is not available on PATH.' \
+    'Install: brew install node' \
+    'Next: re-run tdoc-doctor.' >&2
+  exit 1
+fi
 
 # --- helpers ---
 # (Removed unused have() helper — dead code from an abandoned rewrite.)

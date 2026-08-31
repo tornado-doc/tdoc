@@ -76,6 +76,24 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     await page.waitForSelector('.ui-dialog-popup', { state: 'detached' });
   });
 
+  await t('phone document actions stay named and at least 44px', async () => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(url, { waitUntil: 'networkidle' });
+    const controls = await page.evaluate(() => ['.tdoc-bar-mark', '#tdoc-theme-btn', '#tdoc-publish-btn', '#tdoc-more-btn'].map((selector) => {
+      const element = document.querySelector(selector);
+      const rect = element?.getBoundingClientRect();
+      return { selector, name: element?.getAttribute('aria-label') || element?.textContent.trim(), width: rect?.width || 0, height: rect?.height || 0 };
+    }));
+    for (const control of controls) {
+      if (!control.name) throw new Error(`${control.selector} has no accessible name`);
+      if (control.width < 44 || control.height < 44) throw new Error(`${control.selector} is ${control.width}x${control.height}`);
+    }
+    await page.click('#tdoc-publish-btn');
+    const actionHeight = await page.$eval('.ui-dialog-popup .actions button', (button) => button.getBoundingClientRect().height);
+    if (actionHeight < 44) throw new Error(`modal action is ${actionHeight}px high`);
+    await page.keyboard.press('Escape');
+  });
+
   await t('author copy controls remain inside the framework-free frame', async () => {
     const copyUrl = `${origin}/d/copy-doc/v/1`;
     await page.goto(copyUrl, { waitUntil: 'networkidle' });
@@ -92,12 +110,17 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     }
   });
 
-  await t('Docs Hub dialogs also use the shared Base UI facade', async () => {
+  await t('Docs Hub Create dialog copies the shared first-doc recipe', async () => {
     await page.click('.mk-btn');
     await page.waitForSelector('.ui-dialog-popup');
     const title = await page.textContent('.ui-dialog-title');
     if (title !== 'Create a doc') throw new Error(`unexpected dialog title: ${title}`);
-    await page.keyboard.press('Escape');
+    await page.click('.tdoc-recipe-wrap button');
+    await page.waitForFunction(() => document.querySelector('.tdoc-recipe-wrap button')?.textContent.trim() === 'Copied');
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    if (!clipboard.includes('/FIRST-DOC.md')) throw new Error(`unexpected recipe: ${clipboard}`);
+    await page.click('.ui-dialog-popup .actions .primary');
+    await page.waitForSelector('.ui-dialog-popup', { state: 'detached' });
   });
 
   await t('Docs Hub search filters rows without shifting page chrome', async () => {
@@ -121,6 +144,17 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     });
     if (layout.scrollWidth > layout.innerWidth + 1) throw new Error(`horizontal overflow ${layout.scrollWidth}/${layout.innerWidth}`);
     if (layout.clipped) throw new Error('a control is clipped outside the viewport');
+  });
+
+  await t('Docs Hub phone tabs and Create action are at least 44px', async () => {
+    const controls = await page.$$eval('.tab, .mk-btn', (elements) => elements.map((element) => ({
+      text: element.textContent.trim(),
+      width: element.getBoundingClientRect().width,
+      height: element.getBoundingClientRect().height,
+    })));
+    for (const control of controls) {
+      if (control.height < 44) throw new Error(`${control.text} is ${control.width}x${control.height}`);
+    }
   });
 
   await context.close();

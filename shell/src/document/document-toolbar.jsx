@@ -43,6 +43,7 @@ export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
           type="button"
           className={`tdoc-star-btn${starred ? ' is-starred' : ''}`}
           aria-pressed={starred}
+          aria-label={starred ? 'Remove from starred' : 'Add to starred'}
           onClick={onToggleStar}
         >
           <Star size={15} fill={starred ? 'currentColor' : 'none'} />
@@ -65,11 +66,11 @@ export function DocumentActions({
   return (
     <>
       {config.mode === 'local' ? (
-        <button id="tdoc-publish-btn" type="button" className="primary" onClick={onPublish}>
+        <button id="tdoc-publish-btn" type="button" className="primary" aria-label="Publish" onClick={onPublish}>
           <Upload size={14} /> <span>Publish</span>
         </button>
       ) : (
-        <button id="tdoc-share-btn" type="button" className="primary" onClick={onShare}>
+        <button id="tdoc-share-btn" type="button" className="primary" aria-label="Share" onClick={onShare}>
           <Share2 size={14} /> <span>Share</span>
         </button>
       )}
