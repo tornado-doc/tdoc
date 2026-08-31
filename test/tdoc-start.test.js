@@ -12,6 +12,7 @@ const meta = JSON.parse(fs.readFileSync(path.join(root, 'landing', 'tdoc-start',
 const latest = meta.versions[meta.versions.length - 1].n;
 const html = fs.readFileSync(path.join(root, 'landing', 'tdoc-start', `v${latest}`, 'index.html'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
+const server = fs.readFileSync(path.join(root, 'server', 'server.js'), 'utf8');
 const dialog = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-dialog.jsx'), 'utf8');
 const documentShell = fs.readFileSync(path.join(root, 'shell', 'src', 'document-shell.jsx'), 'utf8');
 const probe = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
@@ -31,6 +32,13 @@ t('/start uses the shared published-doc path and neutral fallback', () => {
   const route = worker.match(/if \(p === '\/start'[\s\S]*?landingResponse\(env, req, START_SLUG\)/);
   assert(route, '/start does not use landingResponse');
   assert(/if \(!latest\) return neutralLandingResponse\(env\)/.test(worker), 'neutral fallback missing');
+});
+
+t('the local /start alias reuses the latest tdoc-start document route', () => {
+  const route = server.match(/if \(p === '\/start'[\s\S]*?Location: `\/d\/tdoc-start\/v\/\$\{latest\}`/);
+  assert(route, 'local /start does not redirect to the existing tutorial route');
+  assert(/Array\.isArray\(meta\.versions\)/.test(route[0]), 'local /start does not resolve the latest tutorial version');
+  assert(/req\.method === 'GET' \|\| req\.method === 'HEAD'/.test(route[0]), 'local /start is not GET/HEAD safe');
 });
 
 t('the tutorial can open the provider-owned onboarding dialog', () => {
