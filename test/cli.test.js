@@ -1187,6 +1187,8 @@ t('SKILL.md resolves its own directory at runtime, not at install time', () => {
   assert(/TDOC_SKILL_ROOT=/.test(skill), 'no runtime resolution of the skill directory');
   assert(/tdoc-update" --auto/.test(skill) || /tdoc-update" --auto/.test(skill.replace(/\n\s*/g, ' ')),
     'the automatic update call is gone');
+  assert(/SKILL_DIR="\$TDOC_SKILL_ROOT"\s+"\$TDOC_SKILL_ROOT\/bin\/tdoc-update" --auto/.test(skill),
+    'the preamble does not pin old updaters to the resolved active checkout');
 
   // And the guard must actually pass against a real checkout.
   const root = path.join(__dirname, '..');
@@ -1196,6 +1198,58 @@ t('SKILL.md resolves its own directory at runtime, not at install time', () => {
     { encoding: 'utf8', timeout: 10000 });
   assert(probe.stdout.trim() === 'ok',
     'the resolved directory does not satisfy the update guard');
+});
+
+t('SKILL.md resolves the checkout for the active agent host', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
+  const resolvers = skill.match(/tdoc_resolve_skill_dir\(\) \{[\s\S]*?\n\}/g) || [];
+  assert(resolvers.length === 2,
+    `expected setup + telemetry resolvers, found ${resolvers.length}`);
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-agent-roots-'));
+  const roots = {
+    claude: path.join(home, '.claude', 'skills', 'tdoc'),
+    codex: path.join(home, '.codex', 'skills', 'tdoc'),
+    agents: path.join(home, '.agents', 'skills', 'tdoc'),
+  };
+  for (const root of Object.values(roots)) {
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'SKILL.md'), 'fixture\n');
+  }
+
+  const resolve = (source, extraEnv = {}) => {
+    const r = spawnSync('bash', ['-c', `${source}\ntdoc_resolve_skill_dir`], {
+      env: { HOME: home, PATH: process.env.PATH || '/usr/bin:/bin', ...extraEnv },
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    assert(r.status === 0, `resolver failed: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+
+  try {
+    for (const resolver of resolvers) {
+      assert(resolve(resolver, { CODEX_SESSION_ID: 'codex-test' }) === roots.codex,
+        'Codex did not prefer its Codex-specific installation');
+      assert(resolve(resolver, { CLAUDECODE: '1' }) === roots.claude,
+        'Claude did not prefer its Claude-specific installation');
+      assert(resolve(resolver) === roots.agents,
+        'an unknown/shared host did not prefer the shared .agents installation');
+
+      fs.unlinkSync(path.join(roots.codex, 'SKILL.md'));
+      assert(resolve(resolver, { CODEX_SESSION_ID: 'codex-test' }) === roots.agents,
+        'Codex did not fall back to the shared .agents installation');
+      fs.writeFileSync(path.join(roots.codex, 'SKILL.md'), 'fixture\n');
+
+      const override = path.join(home, 'explicit-tdoc');
+      assert(resolve(resolver, {
+        CODEX_SESSION_ID: 'codex-test',
+        TDOC_SKILL_DIR: override,
+      }) === override, 'TDOC_SKILL_DIR no longer overrides host detection');
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 

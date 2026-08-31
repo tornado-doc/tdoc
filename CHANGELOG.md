@@ -203,6 +203,14 @@ file and `.claude-plugin/plugin.json`.
   different agent's installation and leave the active one stale. The default
   now comes from the updater script's own directory while an explicit
   `SKILL_DIR` override continues to work. [#332](https://github.com/tornado-doc/tdoc/pull/332).
+- **Automatic updates select the active agent's installation.** The skill's
+  preamble still searched Claude, Codex, and shared installations in one fixed
+  order before it invoked the updater. On a machine with multiple agents,
+  Codex could therefore invoke Claude's updater even though each updater now
+  correctly modifies itself. Resolution is host-aware, falls back to the
+  shared `~/.agents` checkout, and still honors `TDOC_SKILL_DIR` first. The
+  resolved checkout is also passed explicitly to the updater so installations
+  old enough to predate #332 can bootstrap onto the fixed behavior.
 - **The first doc goes to tdoc.dev, privately, instead of ending at
   localhost.** The recipe told the agent to build the page, open it locally and
   ask before publishing — which recreated exactly the failure the localhost
