@@ -3,7 +3,7 @@ import { AppDialog } from './ui/dialog.jsx';
 import { copyText } from './document/model.js';
 
 const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
-const RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
+export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
 
 export function OnboardingDialog({ open, onOpenChange }) {
   const [copied, setCopied] = useState(false);
@@ -25,7 +25,7 @@ export function OnboardingDialog({ open, onOpenChange }) {
       .catch(() => {});
   }, [open]);
 
-  const copy = () => copyText(RECIPE).then(setCopied);
+  const copy = () => copyText(FIRST_DOC_RECIPE).then(setCopied);
 
   return (
     <AppDialog
@@ -36,7 +36,7 @@ export function OnboardingDialog({ open, onOpenChange }) {
       actions={<button type="button" className="primary" onClick={() => onOpenChange(false)}>Done</button>}
     >
       <div className="tdoc-recipe-wrap">
-        <code>{RECIPE}</code>
+        <code>{FIRST_DOC_RECIPE}</code>
         <button type="button" className={copied ? 'done' : undefined} onClick={copy}>
           {copied ? 'Copied' : 'Copy'}
         </button>
@@ -54,7 +54,7 @@ export function OnboardingDialog({ open, onOpenChange }) {
       <p className="muted">
         To self-host, add: <strong>Publish it to my own Cloudflare, not the hosted service.</strong>
       </p>
-      <a href="/start">Read the full tutorial</a>
+      <a className="tdoc-onboarding-link" href="/start">Read the full tutorial</a>
     </AppDialog>
   );
 }

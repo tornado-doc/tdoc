@@ -51,6 +51,34 @@ function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
 }
 function writeJson(p, obj) { fs.writeFileSync(p, JSON.stringify(obj, null, 2)); }
+
+// The device code a running `tdoc-publish` is waiting on, or null. The CLI
+// prints the code to stderr and blocks; we buffer the child's output until it
+// exits, so stderr cannot reach the publish modal while it still matters. The
+// CLI drops the code in this file instead.
+//
+// Three ways a file here can be lying, all checked: it outlived its own
+// expiry, the process that wrote it is gone (SIGKILL beats the cleanup), or it
+// belongs to a different slug than the one being published.
+const PENDING_SIGNIN_FILE = path.join(os.homedir(), '.tdoc', 'pending-signin.json');
+function pendingSignin(slug) {
+  const p = readJson(PENDING_SIGNIN_FILE, null);
+  if (!p || !p.user_code || !p.verification_uri) return null;
+  if (!(Number(p.expires_at) > Date.now())) return null;
+  if (!slug || (p.slug && p.slug !== slug)) return null;
+  if (Number.isInteger(p.pid) && p.pid > 0) {
+    // Signal 0 tests for existence without delivering anything. EPERM means it
+    // exists and is not ours, which still counts as alive.
+    try { process.kill(p.pid, 0); } catch (e) { if (e.code !== 'EPERM') return null; }
+  }
+  return {
+    user_code: String(p.user_code),
+    verification_uri: String(p.verification_uri),
+    expires_at: Number(p.expires_at),
+    opened: Boolean(p.opened),
+    slug: p.slug || null,
+  };
+}
 function e2eIdentity() {
   if (!E2E_USER) return null;
   return { login: E2E_USER, name: E2E_USER, avatar_url: '' };
@@ -695,6 +723,18 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Match the hosted `/start` contract by reusing the existing tdoc-start
+  // document route. Resolve the current version from its metadata so the local
+  // onboarding handoff does not go stale when the tutorial is revised.
+  if (p === '/start' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const meta = readJson(path.join(ROOT, 'tdoc-start', 'meta.json'), {});
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions.map((item) => Number(item && item.n)).filter(Number.isFinite).sort((a, b) => b - a)[0];
+    if (!latest) return send(res, 404, 'Not found: tdoc-start');
+    res.writeHead(302, { Location: `/d/tdoc-start/v/${latest}`, 'Cache-Control': 'no-store' });
+    return res.end();
+  }
+
   const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
   if (widgetMatch) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -1099,6 +1139,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Read-only companion to POST /api/publish: what is the pending publish
+  // blocked on? Answers with the device code so the modal can show it while
+  // the POST is still in flight. GET, so no isLocalMutation gate — the server
+  // is loopback-only by design (TDOC_HOST) and this reveals nothing a reader
+  // of the terminal it was printed to does not already have.
+  if (p === '/api/publish/signin' && req.method === 'GET') {
+    const slug = safeSlug(url.searchParams.get('slug') || '');
+    return json(res, 200, { signin: pendingSignin(slug) });
+  }
+
   if (p === '/api/publish' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
@@ -1124,8 +1174,37 @@ const server = http.createServer(async (req, res) => {
     let out = '', err = '', settled = false, killed = false;
     const CAP = 256 * 1024; // 256 KiB of captured output is plenty
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
-    const settle = (status, obj) => { if (settled) return; settled = true; clearTimeout(timer); json(res, status, obj); };
-    const timer = setTimeout(() => { killed = true; proc.kill('SIGTERM'); setTimeout(() => proc.kill('SIGKILL'), 3000); }, 180000);
+    const settle = (status, obj) => { if (settled) return; settled = true; clearInterval(timer); json(res, status, obj); };
+    // A deadline that a live sign-in can push back, rather than a single
+    // setTimeout. 180s is right for a publish that only has to upload, and
+    // wrong for a first publish: the GitHub device code lives up to 15
+    // minutes, and killing the child at 180s used to abort the sign-in the
+    // human was still walking through. So: while a device code for this slug
+    // is pending, the deadline sits just past its expiry, and the moment the
+    // code is approved or dies the normal 180s budget applies again from now.
+    const GRACE = 180000;
+    let deadline = Date.now() + GRACE;
+    let signingIn = false;
+    const timer = setInterval(() => {
+      const pending = pendingSignin(slug);
+      if (pending) {
+        signingIn = true;
+        deadline = Math.max(deadline, pending.expires_at + 15000);
+      } else if (signingIn) {
+        // The sign-in just resolved — approved, denied, or expired. Whatever
+        // is left is an ordinary upload, so it gets an ordinary budget from
+        // here. Without this the pushed-out deadline would stand, and a
+        // wrangler that hangs after a successful sign-in would spin the modal
+        // for the rest of the code's 15 minutes instead of failing at 180s.
+        signingIn = false;
+        deadline = Date.now() + GRACE;
+      }
+      if (Date.now() < deadline) return;
+      killed = true;
+      clearInterval(timer);
+      proc.kill('SIGTERM');
+      setTimeout(() => proc.kill('SIGKILL'), 3000);
+    }, 1000);
     proc.on('error', (e) => settle(500, { error: 'publish_spawn_failed', detail: String(e && e.message || e) }));
     proc.stdout.on('data', d => { out = append(out, d); });
     proc.stderr.on('data', d => { err = append(err, d); });

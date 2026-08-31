@@ -63,7 +63,7 @@ export function TopBar({
       </div>
       <div className="tdoc-bar-right">
         {actions}
-        <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
+        <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
           {dark ? <Sun size={14} /> : <Moon size={14} />}
         </button>
         {identity ? (

@@ -140,7 +140,7 @@ body,
 
 @media (max-width: 700px) {
   .tdoc-bar button.tdoc-mode-trigger {
-    width: 32px;
+    width: 44px;
     padding: 0;
     justify-content: center;
   }

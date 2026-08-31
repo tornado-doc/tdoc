@@ -662,7 +662,9 @@ hosted (`tdoc.dev`) and BYOK remote (your Cloudflare/Vercel worker) — use
 GitHub Device Flow for commenter sign-in via the org-owned OAuth App in
 `shared/github-oauth.js` (scope `read:user`). Viewers authorize that shared
 app; they do not register their own. Set the OAuth App callback URL to
-`https://<host>/auth/done` so GitHub's post-approve redirect is not a 404.
+`https://<host>/auth/github/callback` — that is what the web redirect flow
+needs; a device approve may still bounce to `/auth/done`, which stays a
+friendly static page. `shared/github-oauth.js` is the source of truth.
 
 Hosted needs no extra CLI beyond Node 18+ and curl. Self-hosting needs `jq`. Cloudflare needs `wrangler`
 (`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
@@ -780,7 +782,7 @@ When the user reports a problem, check these first:
 
 - **`/api/publish` 404, or "string did not match the expected pattern" in the Publish modal** → the running server is stale (old process, doesn't have current routes). Restart it: `pkill -f "$SKILL_DIR/server/server.js" && nohup node "$SKILL_DIR/server/server.js" > "$TDOC_DIR/.server.log" 2>&1 &`. `/tdoc update` now auto-restarts, but a server that was started before the update is still running stale code until restarted.
 - **Comment popup doesn't appear when selecting text** → ensure overlay.js has the fix where a drag-without-artifact-intersection falls through to the text-selection branch (regression test: `ui.test.js` "Drag-to-select TEXT in a `<p>` opens the comment popup"). If the test fails, check `overlay.js` mouseup handler: the `if (dragged) { ... return; }` block must only `return` when an artifact was actually hit.
-- **Publish modal hangs forever** → check `~/tdocs/.server.log`; usually `wrangler login` is waiting for browser auth or R2 isn't enabled.
+- **Publish modal hangs forever** → check `~/tdocs/.server.log`. On the BYOK path it is usually `wrangler login` waiting for browser auth, or R2 not enabled. On a first hosted publish the modal now shows the GitHub device code itself and waits for it, so a hang there means the sign-in was never approved — the code expires and the publish fails on its own.
 - **Local doc URLs show the wrong content / weird JSON, or the server "is up" but docs 404** → another local service may be squatting the tdoc port (seen in the wild: a daemon from another product bound 7878). Run `curl -s http://localhost:7878/api/ping` — if the body lacks `"service":"tdoc"`, the answerer is not tdoc. Identify the squatter with `lsof -i :7878`, then free the port or run tdoc on another port via `TDOC_PORT=<port>` (the bin scripts and server all honor it).
 
 ## HTML generation rules

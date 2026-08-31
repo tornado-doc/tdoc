@@ -286,7 +286,7 @@ async function chooseMode(page, label) {
       }));
       assert(dimensions.scrollWidth <= dimensions.innerWidth + 1,
         `mobile shell overflows: ${JSON.stringify(dimensions)}`);
-      assert(dimensions.modeWidth <= 34 && dimensions.modeLabelDisplay === 'none',
+      assert(dimensions.modeWidth === 44 && dimensions.modeLabelDisplay === 'none',
         `mobile mode control did not collapse to one icon: ${JSON.stringify(dimensions)}`);
       await page.getByRole('button', { name: /Document mode:/ }).click();
       await page.getByRole('menuitemradio', { name: 'Comment' }).waitFor();

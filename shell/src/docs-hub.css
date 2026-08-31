@@ -130,6 +130,50 @@
 .tdoc-toast.error { background: var(--td-danger); }
 .tdoc-avatar-fallback { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--td-accent); color: #fff; font-weight: 700; }
 
+@media (max-width: 700px) {
+  .mk-btn,
+  .tab,
+  .toolbar input[type="search"],
+  .toolbar select,
+  .new-folder-btn,
+  .select-all,
+  .row-menu-btn,
+  .star-btn,
+  .batch-move,
+  .batch-delete,
+  .crumb-root,
+  .move-list button {
+    min-height: 44px;
+  }
+
+  .mk-btn,
+  .row-menu-btn,
+  .star-btn {
+    min-width: 44px;
+  }
+
+  .search-field {
+    flex-basis: 100%;
+  }
+
+  .toolbar select,
+  .new-folder-btn {
+    border-color: transparent;
+    background-color: var(--td-surface);
+    color: var(--td-muted);
+    font-size: 13px;
+  }
+
+  .batch-bar {
+    min-height: 44px;
+  }
+
+  .select-all {
+    color: #818181;
+    font-size: 12px;
+  }
+}
+
 /* Dark mode is the page-level invert in chrome.css — the Docs Hub inherits it
    like every other surface. It used to invert `.docs-hub` a second time, which
    was right when /me was its own server-rendered page outside that rule, but

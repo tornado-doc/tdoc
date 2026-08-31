@@ -197,6 +197,12 @@ file and `.claude-plugin/plugin.json`.
   directory is now resolved at runtime the same way the setup check resolves
   it, `~/.agents/skills/tdoc` is included in the candidates, and the two
   meanings of `TDOC_DIR` in one file are no longer the same variable.
+- **Automatic updates modify the checkout that invoked them.** A tdoc updater
+  launched from `~/.agents/skills/tdoc` or `~/.codex/skills/tdoc` still
+  defaulted internally to `~/.claude/skills/tdoc`, so it could update a
+  different agent's installation and leave the active one stale. The default
+  now comes from the updater script's own directory while an explicit
+  `SKILL_DIR` override continues to work. [#332](https://github.com/tornado-doc/tdoc/pull/332).
 - **The first doc goes to tdoc.dev, privately, instead of ending at
   localhost.** The recipe told the agent to build the page, open it locally and
   ask before publishing — which recreated exactly the failure the localhost
