@@ -140,6 +140,10 @@ const SLUG = 'hostile-body-css';
       await page.waitForTimeout(300);
       const pins = await page.evaluate(() => document.querySelectorAll('.tdoc-pin').length);
       if (pins < 2) throw new Error(`expected 2 pins (single-node + cross-block), got ${pins} — normalized anchor matching regressed`);
+      const crossBlockFound = await page.evaluate(() =>
+        [...document.querySelectorAll('.tdoc-pin')].some((pin) =>
+          String(pin.dataset.key || '').includes('c_fixture_2')));
+      if (!crossBlockFound) throw new Error('saved h1-to-p anchor did not resolve across a block boundary');
       // Pins sit at the article's right edge, not pinned to the far viewport edge
       // (the fixture body is max-width:900 centered in 1400 → edge ~1100).
       const pinLeft = await page.evaluate(() => Math.round(document.querySelector('.tdoc-pin').getBoundingClientRect().left));
