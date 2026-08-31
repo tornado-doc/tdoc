@@ -98,5 +98,38 @@ t('all comment mutations share the sign-in fallback', () => {
   }
 });
 
+// A notification links to a comment, not to a position. When the anchor no
+// longer resolves — the landing page republishes new content under the same
+// version, so its thread orphans wholesale — there is no pin to scroll to, and
+// bailing there left the link doing nothing at all: no card, no scroll, and
+// `?comment=` still sitting in the URL. The floating card already knows how to
+// render unanchored, so open it.
+t('a deep link to an unanchored comment still opens its card', () => {
+  const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
+  const start = shell.indexOf('const cluster = clusters.find(');
+  assert(start > 0, 'deep-link cluster lookup missing');
+  const branch = shell.slice(start, start + 900);
+  assert(!/if \(!cluster\) return;/.test(branch),
+    'a missing cluster still aborts the deep link, so an unanchored comment is unreachable');
+  const guard = branch.slice(branch.indexOf('if (!cluster)'));
+  assert(/setOpenCommentId\(root\.id\)/.test(guard.slice(0, 700)),
+    'an unanchored deep link must open the comment card');
+  assert(/setDeepTarget\(null\)/.test(guard.slice(0, 700)),
+    'an unanchored deep link must clear the pending target');
+});
+
+// The floating card is what shows an unanchored comment on desktop, and it is
+// positioned without a cluster, so the card lands on screen rather than at the
+// scroll offset of a pin that does not exist.
+t('the floating card renders and positions without a cluster', () => {
+  const layer = fs.readFileSync(path.join(root, 'shell/src/document/comment-layer.jsx'), 'utf8');
+  assert(/unanchored=\{!pinIds\.has\(openComment\.id\)\}/.test(layer),
+    'DesktopCommentLayer no longer marks an unanchored floating card');
+  const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
+  const pos = shell.slice(shell.indexOf('const cardPosition = {'), shell.indexOf('const cardPosition = {') + 500);
+  assert(/openCluster\s*\n?\s*\?/.test(pos) && /:\s*TOP_BAR_HEIGHT \+ 4/.test(pos),
+    'cardPosition lost its no-cluster fallback, so an unanchored card can land off screen');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

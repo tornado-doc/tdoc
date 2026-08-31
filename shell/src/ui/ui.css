@@ -222,6 +222,11 @@ button.tdoc-pin {
 
 .tdoc-notification-list .tdoc-cluster-row {
   width: 100%;
+  /* The row is a grid item, so its automatic minimum size is its content: the
+     track grows to the longest notification and the dialog scrolls sideways
+     instead of the text truncating. min-width:0 lets the track hold the
+     column, which is what makes the snip's ellipsis reachable. */
+  min-width: 0;
 }
 
 .tdoc-notification-list .tdoc-cluster-row.unread {
