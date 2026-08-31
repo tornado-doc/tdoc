@@ -17,12 +17,19 @@ import {
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
+  DocumentModeControl,
+  EditorToolbar,
+  LinkDialog,
+  SaveConflictDialog,
+} from './document/editor-toolbar.jsx';
+import {
   DeleteDocumentDialog,
   OwnerAccessDialog,
 } from './document/owner-access-dialog.jsx';
 import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { useComments } from './hooks/use-comments.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
+import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { OnboardingDialog } from './onboarding-dialog.jsx';
 
@@ -92,6 +99,7 @@ export function DocumentShell({ boot, config }) {
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
+  const editorRef = useRef(null);
   const [composer, setComposer] = useState(null);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
@@ -164,8 +172,12 @@ export function DocumentShell({ boot, config }) {
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       bridge.send({ type: 'tdoc:theme', theme: nextTheme });
+      bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read' });
       comments.refresh();
     },
+    'tdoc:editState': (message) => editorRef.current?.frameHandlers.editState(message),
+    'tdoc:editSnapshot': (message) => editorRef.current?.frameHandlers.editSnapshot(message),
+    'tdoc:editDocument': (message) => editorRef.current?.frameHandlers.editDocument(message),
     'tdoc:copyText': (message) => copyText(message.text || ''),
     'tdoc:docMarkdown': (message) => {
       copyText(message.markdown || '').then((copied) => {
@@ -189,6 +201,21 @@ export function DocumentShell({ boot, config }) {
       else location.href = href;
     },
   });
+
+  const disableCommentSelection = useCallback(() => {
+    setComposer(null);
+    bridge.send({ type: 'tdoc:clearPending' });
+  }, [bridge.send]);
+
+  const editor = useDocumentEditor({
+    boot,
+    config,
+    frameRef: bridge.frameRef,
+    send: bridge.send,
+    showToast,
+    onDisableCommentSelection: disableCommentSelection,
+  });
+  editorRef.current = editor;
 
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
@@ -359,6 +386,7 @@ export function DocumentShell({ boot, config }) {
   const shareUrl = config.isLanding
     ? `${location.origin}/`
     : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
+  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (editor.mode === 'edit' ? 46 : 0);
   const pinLeft = Math.min(
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
     window.innerWidth - 34,
@@ -370,13 +398,13 @@ export function DocumentShell({ boot, config }) {
   const cardPosition = {
     top: openCluster
       ? Math.max(
-        TOP_BAR_HEIGHT + 4,
+        frameTop + 4,
         Math.min(
-          TOP_BAR_HEIGHT + openCluster.y - bridge.layout.scrollY,
+          frameTop + openCluster.y - bridge.layout.scrollY,
           window.innerHeight - 220,
         ),
       )
-      : TOP_BAR_HEIGHT + 4,
+      : frameTop + 4,
     // 280px card + 12px padding each side + 1px borders, kept 8px off the edge.
     left: Math.max(8, Math.min(pinLeft + 34, window.innerWidth - 306 - 8)),
   };
@@ -402,16 +430,24 @@ export function DocumentShell({ boot, config }) {
         identity={config.identity}
         theme={theme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
-          <DocumentActions
-            config={config}
-            onPublish={() => setDialog({ type: 'publish' })}
-            onShare={() => setDialog({ type: 'share' })}
-            onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
-            onDuplicate={duplicate}
-            onDownload={download}
-            onPrint={printPdf}
-            onDelete={() => setDialog({ type: 'delete' })}
-          />
+          <>
+            <DocumentModeControl
+              mode={editor.mode}
+              canComment={config.canComment}
+              canEdit={config.canEdit}
+              onChange={editor.changeMode}
+            />
+            <DocumentActions
+              config={config}
+              onPublish={() => setDialog({ type: 'publish' })}
+              onShare={() => setDialog({ type: 'share' })}
+              onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
+              onDuplicate={duplicate}
+              onDownload={download}
+              onPrint={printPdf}
+              onDelete={() => setDialog({ type: 'delete' })}
+            />
+          </>
         )}
         onThemeChange={(nextTheme) => {
           setTheme(nextTheme);
@@ -435,6 +471,20 @@ export function DocumentShell({ boot, config }) {
       </TopBar>
 
       <OldVersionNotice value={boot.oldVersion} />
+
+      {editor.mode === 'edit' ? (
+        <EditorToolbar
+          dirty={editor.dirty}
+          checking={editor.checking}
+          saving={editor.saving}
+          onFormat={(command, value) => {
+            if (command === 'createLink') setDialog({ type: 'link' });
+            else editor.format(command, value);
+          }}
+          onDiscard={editor.discard}
+          onSave={editor.save}
+        />
+      ) : null}
 
       <ReanchorBanner
         commentId={reanchorId}
@@ -473,6 +523,7 @@ export function DocumentShell({ boot, config }) {
           clusters={clusters}
           commentsById={commentsById}
           frameScrollY={bridge.layout.scrollY}
+          frameTop={frameTop}
           pinLeft={pinLeft}
           openComment={openComment}
           openClusterKey={openClusterKey}
@@ -527,6 +578,12 @@ export function DocumentShell({ boot, config }) {
       <MessageDialog
         message={dialog?.type === 'message' ? dialog : null}
         onOpenChange={(open) => !open && setDialog(null)}
+      />
+      <SaveConflictDialog conflict={editor.conflict} onClose={editor.closeConflict} />
+      <LinkDialog
+        open={dialog?.type === 'link'}
+        onOpenChange={(open) => !open && setDialog(null)}
+        onSubmit={(url) => editor.format('createLink', url)}
       />
       <SignInDialog
         open={signInOpen}
