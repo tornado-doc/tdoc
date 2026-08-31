@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Moon, Sun } from 'lucide-react';
+import {
+  Bell,
+  Library,
+  LogIn,
+  LogOut,
+  MoreHorizontal,
+  Moon,
+  Sun,
+} from 'lucide-react';
 import { AppMenu, AppMenuItem } from './ui/menu.jsx';
 import { useNotifications } from './hooks/use-notifications.js';
 import { NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
@@ -8,6 +16,7 @@ export function TopBar({
   identity,
   children,
   actions,
+  overflowActions,
   theme,
   onThemeChange,
   onNotificationNavigate,
@@ -62,13 +71,48 @@ export function TopBar({
         {children}
       </div>
       <div className="tdoc-bar-right">
-        {actions}
+        <div className="tdoc-bar-actions">{actions}</div>
+        <AppMenu trigger={(
+          <button
+            id="tdoc-more-btn"
+            type="button"
+            className={`tdoc-secondary-toggle${overflowActions ? '' : ' tdoc-mobile-overflow-trigger'}`}
+            aria-label="More actions"
+          >
+            <MoreHorizontal size={18} />
+            {notifications.unread ? <span className="tdoc-unread-dot tdoc-mobile-overflow-only" /> : null}
+          </button>
+        )}>
+          {overflowActions}
+          <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={toggleTheme}>
+            {dark ? <Sun size={15} /> : <Moon size={15} />}
+            {dark ? 'Light mode' : 'Dark mode'}
+          </AppMenuItem>
+          {identity ? (
+            <>
+              <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={openNotifications}>
+                <Bell size={15} />
+                Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
+              </AppMenuItem>
+              <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={() => { location.href = '/me'; }}>
+                <Library size={15} /> My docs
+              </AppMenuItem>
+              <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={signOut}>
+                <LogOut size={15} /> Sign out
+              </AppMenuItem>
+            </>
+          ) : authConfigured ? (
+            <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={onSignIn}>
+              <LogIn size={15} /> Sign in with GitHub
+            </AppMenuItem>
+          ) : null}
+        </AppMenu>
         <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
           {dark ? <Sun size={14} /> : <Moon size={14} />}
         </button>
         {identity ? (
           <AppMenu trigger={(
-            <button className="tdoc-chip" type="button">
+            <button className="tdoc-chip tdoc-account-trigger" type="button">
               {identity.avatar_url ? <img src={identity.avatar_url} alt="" /> : <span className="tdoc-avatar-fallback">{identity.login.slice(0, 1).toUpperCase()}</span>}
               <span className="name">{identity.name || identity.login}</span>
               {notifications.unread ? <span className="tdoc-unread-dot" /> : null}
@@ -81,7 +125,7 @@ export function TopBar({
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
         ) : authConfigured ? (
-          <button type="button" className="tdoc-chip signin" onClick={onSignIn}>
+          <button type="button" className="tdoc-chip signin tdoc-account-trigger" onClick={onSignIn}>
             Sign in with GitHub
           </button>
         ) : null}

@@ -1,9 +1,13 @@
 import React from 'react';
 import {
   ChevronDown,
-  MoreHorizontal,
+  Copy,
+  CopyPlus,
+  Download,
+  FileDown,
   Share2,
   Star,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
@@ -14,7 +18,7 @@ export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
   return (
     <>
       <span className="crumb crumb-slug">{config.slug}</span>
-      <span className="crumb-sep">/</span>
+      <span className="crumb-sep crumb-sep-slug">/</span>
       <AppMenu
         align="start"
         trigger={(
@@ -53,8 +57,26 @@ export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
   );
 }
 
-export function DocumentActions({
+export function DocumentPrimaryAction({
   config,
+  onPublish,
+  onShare,
+}) {
+  return config.mode === 'local' ? (
+    <button id="tdoc-publish-btn" type="button" className="primary tdoc-document-primary" aria-label="Publish" onClick={onPublish}>
+      <Upload size={14} /> <span>Publish</span>
+    </button>
+  ) : (
+    <button id="tdoc-share-btn" type="button" className="primary tdoc-document-primary" aria-label="Share" onClick={onShare}>
+      <Share2 size={14} /> <span>Share</span>
+    </button>
+  );
+}
+
+export function DocumentOverflowActions({
+  config,
+  starred,
+  onToggleStar,
   onPublish,
   onShare,
   onCopyMarkdown,
@@ -66,31 +88,49 @@ export function DocumentActions({
   return (
     <>
       {config.mode === 'local' ? (
-        <button id="tdoc-publish-btn" type="button" className="primary" aria-label="Publish" onClick={onPublish}>
-          <Upload size={14} /> <span>Publish</span>
-        </button>
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
+          <Upload size={15} /> Publish
+        </AppMenuItem>
       ) : (
-        <button id="tdoc-share-btn" type="button" className="primary" aria-label="Share" onClick={onShare}>
-          <Share2 size={14} /> <span>Share</span>
-        </button>
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="share" onClick={onShare}>
+          <Share2 size={15} /> Share
+        </AppMenuItem>
       )}
-      <AppMenu
-        trigger={(
-          <button id="tdoc-more-btn" type="button" className="tdoc-secondary-toggle" aria-label="More actions">
-            <MoreHorizontal size={17} />
-          </button>
-        )}
-      >
-        <AppMenuItem data-action="copy" onClick={onCopyMarkdown}>Copy as Markdown</AppMenuItem>
-        {config.mode === 'published' ? (
-          <AppMenuItem data-action="duplicate" onClick={onDuplicate}>Duplicate</AppMenuItem>
-        ) : null}
-        <AppMenuItem data-action="download" onClick={onDownload}>Download HTML</AppMenuItem>
-        <AppMenuItem data-action="download-pdf" onClick={onPrint}>Download PDF</AppMenuItem>
-        {config.ownerManage ? (
-          <AppMenuItem data-action="delete" tone="danger" onClick={onDelete}>Delete doc…</AppMenuItem>
-        ) : null}
-      </AppMenu>
+      {(config.versions || []).length > 1 ? <div className="tdoc-mobile-menu-label">Version</div> : null}
+      {(config.versions || []).map((version) => (
+        <AppMenuItem
+          key={version.n}
+          className={`tdoc-version-item tdoc-mobile-overflow-only${version.n === config.version ? ' current' : ''}`}
+          onClick={() => { location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`; }}
+        >
+          v{version.n}{version.n === config.version ? ' · current' : ''}
+        </AppMenuItem>
+      ))}
+      {config.viewerStar ? (
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="star" onClick={onToggleStar}>
+          <Star size={15} fill={starred ? 'currentColor' : 'none'} />
+          {starred ? 'Remove from starred' : 'Add to starred'}
+        </AppMenuItem>
+      ) : null}
+      <AppMenuItem className="tdoc-action-menu-item" data-action="copy" onClick={onCopyMarkdown}>
+        <Copy size={15} /> Copy as Markdown
+      </AppMenuItem>
+      {config.mode === 'published' ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="duplicate" onClick={onDuplicate}>
+          <CopyPlus size={15} /> Duplicate
+        </AppMenuItem>
+      ) : null}
+      <AppMenuItem className="tdoc-action-menu-item" data-action="download" onClick={onDownload}>
+        <Download size={15} /> Download HTML
+      </AppMenuItem>
+      <AppMenuItem className="tdoc-action-menu-item" data-action="download-pdf" onClick={onPrint}>
+        <FileDown size={15} /> Download PDF
+      </AppMenuItem>
+      {config.ownerManage ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="delete" tone="danger" onClick={onDelete}>
+          <Trash2 size={15} /> Delete doc…
+        </AppMenuItem>
+      ) : null}
     </>
   );
 }

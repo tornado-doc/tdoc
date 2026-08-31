@@ -39,6 +39,8 @@
   .tdoc-bar { position: relative; width: 100%; height: 48px; box-sizing: border-box; background: #fff; color: #1a1a1a; display: flex; align-items: center; padding: 0 12px; font: 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; z-index: 999999; gap: 8px; border-bottom: 1px solid #e5e5e7; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
   .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
   .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
+  .tdoc-bar-actions { display: flex; align-items: center; gap: 4px; }
+  .tdoc-bar .tdoc-mobile-overflow-trigger { display: none; }
 
   /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
   /* justify-content is required: the generic .tdoc-bar button rule supplies
@@ -458,12 +460,14 @@
     .tdoc-bar { padding: 0 8px; gap: 4px; }
     .tdoc-bar button { min-width: 44px; min-height: 44px; justify-content: center; }
     .tdoc-bar button.tdoc-bar-mark { width: 44px; height: 44px; }
-    .tdoc-version-wrap { display: none; }
-    .tdoc-bar .doc-title { font-size: 13px; }
-    /* Small screens: the primary CTA collapses to just its icon (label is kept
-       in title/aria-label). Keeps the phone bar to a compact icon + ⋯. */
-    .tdoc-bar #tdoc-publish-btn span, .tdoc-bar #tdoc-share-btn span { display: none; }
-    .tdoc-bar #tdoc-publish-btn, .tdoc-bar #tdoc-share-btn { min-width: 44px; min-height: 44px; padding: 7px 9px; }
+    .tdoc-version-wrap, .tdoc-bar #tdoc-version-toggle { display: none; }
+    .tdoc-bar .doc-title { flex: 1 1 auto; font-size: 13px; }
+    .tdoc-bar #tdoc-star-btn,
+    .tdoc-bar .tdoc-document-primary,
+    .tdoc-bar #tdoc-theme-btn,
+    .tdoc-bar .tdoc-account-trigger { display: none; }
+    .tdoc-bar .tdoc-mobile-overflow-trigger { display: inline-flex; }
+    .tdoc-bar-right, .tdoc-bar-actions { gap: 0; }
   }
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
