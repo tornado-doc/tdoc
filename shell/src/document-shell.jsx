@@ -251,7 +251,16 @@ export function DocumentShell({ boot, config }) {
     const cluster = clusters.find((item) => (
       item.items.some(({ comment }) => comment.id === root.id)
     ));
-    if (!cluster) return;
+    if (!cluster) {
+      // The comment exists but its anchor no longer resolves, so there is no
+      // pin in the document to scroll to. Open it as a floating card anyway —
+      // DesktopCommentLayer already renders an unanchored card, and it offers
+      // re-anchoring from there. Returning instead leaves the link doing
+      // nothing at all: no card, no scroll, and `?comment=` still in the URL.
+      setOpenCommentId(root.id);
+      setDeepTarget(null);
+      return;
+    }
     const top = TOP_BAR_HEIGHT + cluster.y - bridge.layout.scrollY;
     if (top < TOP_BAR_HEIGHT + 20 || top > window.innerHeight - 60) {
       bridge.send({
