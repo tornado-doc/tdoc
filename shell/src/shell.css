@@ -118,7 +118,7 @@ body,
 
 .tdoc-editor-toolbar button:disabled { opacity: .45; cursor: default; }
 .tdoc-editor-divider { width: 1px; height: 20px; margin: 0 3px; background: #d9d9dc; flex: none; }
-.tdoc-editor-status { margin-right: 4px; color: #777; font-size: 12px; white-space: nowrap; }
+.tdoc-editor-status { min-width: 112px; margin-right: 4px; color: #777; font-size: 12px; text-align: right; white-space: nowrap; }
 
 .tdoc-editor-link-field {
   display: grid;

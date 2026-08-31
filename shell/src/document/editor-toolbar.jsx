@@ -79,7 +79,7 @@ function ToolButton({ label, icon, command, value, onFormat }) {
   );
 }
 
-export function EditorToolbar({ dirty, saving, onFormat, onDiscard, onSave }) {
+export function EditorToolbar({ dirty, checking, saving, onFormat, onDiscard, onSave }) {
   return (
     <div className="tdoc-editor-toolbar" role="toolbar" aria-label="Text formatting">
       <div className="tdoc-editor-tools">
@@ -94,11 +94,11 @@ export function EditorToolbar({ dirty, saving, onFormat, onDiscard, onSave }) {
         <ToolButton label="Redo" icon={<Redo2 size={16} />} command="redo" onFormat={onFormat} />
       </div>
       <div className="tdoc-editor-commit">
-        <span className="tdoc-editor-status">{dirty ? 'Unsaved draft' : 'No changes'}</span>
+        <span className="tdoc-editor-status">{checking ? 'Checking changes...' : (dirty ? 'Unsaved draft' : 'No changes')}</span>
         <button type="button" title="Discard draft" aria-label="Discard draft" disabled={!dirty || saving} onClick={onDiscard}>
           <RotateCcw size={15} />
         </button>
-        <button type="button" className="primary" disabled={!dirty || saving} onClick={onSave}>
+        <button type="button" className="primary" disabled={!dirty || checking || saving} onClick={onSave}>
           <Save size={15} /> <span>{saving ? 'Saving...' : 'Save'}</span>
         </button>
       </div>

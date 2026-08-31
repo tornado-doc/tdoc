@@ -466,6 +466,7 @@ export function DocumentShell({ boot, config }) {
       {editor.mode === 'edit' ? (
         <EditorToolbar
           dirty={editor.dirty}
+          checking={editor.checking}
           saving={editor.saving}
           onFormat={(command, value) => {
             if (command === 'createLink') setDialog({ type: 'link' });

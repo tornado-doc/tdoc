@@ -19,6 +19,7 @@ export function useDocumentEditor({
   const storeKey = useMemo(() => draftKey(config), [config]);
   const [mode, setMode] = useState(() => (config.canComment ? 'comment' : 'read'));
   const [dirty, setDirty] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(null);
 
@@ -65,7 +66,7 @@ export function useDocumentEditor({
   }), [send]);
 
   const save = useCallback(async () => {
-    if (!dirty || saving) return;
+    if (!dirty || checking || saving) return;
     setSaving(true);
     try {
       const html = await requestDocument();
@@ -85,21 +86,24 @@ export function useDocumentEditor({
     } finally {
       setSaving(false);
     }
-  }, [config.slug, config.version, dirty, requestDocument, saving, showToast, storeKey]);
+  }, [checking, config.slug, config.version, dirty, requestDocument, saving, showToast, storeKey]);
 
   const discard = useCallback(async () => {
     await clearDraft(storeKey);
     setDirty(false);
+    setChecking(false);
     if (frameRef.current) frameRef.current.src = boot.frameSrc;
   }, [boot.frameSrc, frameRef, storeKey]);
 
   const frameHandlers = {
     editState(message) {
       setDirty(Boolean(message.dirty));
+      setChecking(Boolean(message.checking));
     },
     editSnapshot(message) {
       if (typeof message.bodyHtml !== 'string') return;
       const nextDirty = Boolean(message.dirty);
+      setChecking(false);
       if (nextDirty) saveDraft(storeKey, message.bodyHtml).catch(() => {});
       else clearDraft(storeKey).catch(() => {});
     },
@@ -114,6 +118,7 @@ export function useDocumentEditor({
   return {
     mode,
     dirty,
+    checking,
     saving,
     conflict,
     changeMode,

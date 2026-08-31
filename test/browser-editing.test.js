@@ -181,6 +181,9 @@ async function chooseMode(page, label) {
       const paragraph = frame.locator('#editable-paragraph');
       const original = await paragraph.textContent();
       await paragraph.fill('Temporary edit.');
+      await page.getByText('Checking changes...').waitFor({ timeout: 1_000 });
+      assert(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(),
+        'Save was enabled before the debounced document diff settled');
       await page.getByText('Unsaved draft').waitFor({ timeout: 2_000 });
       await paragraph.fill(original);
       await page.getByText('No changes').waitFor({ timeout: 2_000 });

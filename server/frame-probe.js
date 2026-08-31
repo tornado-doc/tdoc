@@ -564,22 +564,25 @@
     Array.prototype.forEach.call(clone.querySelectorAll('[data-tdoc-provider]'), function (node) { node.remove(); });
     return clone.innerHTML;
   }
-  function setDirty(next) {
+  function setDirty(next, checking) {
     editDirty = !!next;
-    post({ type: 'tdoc:editState', dirty: editDirty });
+    post({ type: 'tdoc:editState', dirty: editDirty, checking: !!checking });
   }
-  function reportDraft(bodyHtml, dirty) {
+  function reportDraft() {
     clearTimeout(editTimer);
     editTimer = setTimeout(function () {
+      var bodyHtml = draftBodyHtml();
+      var dirty = bodyHtml !== editBaselineHtml;
+      setDirty(dirty, false);
       post({ type: 'tdoc:editSnapshot', bodyHtml: bodyHtml, dirty: dirty });
       rereportPins();
     }, 350);
   }
   function onEditInput() {
-    var bodyHtml = draftBodyHtml();
-    var dirty = bodyHtml !== editBaselineHtml;
-    setDirty(dirty);
-    reportDraft(bodyHtml, dirty);
+    // Cloning and normalizing the whole author DOM is O(document size). Mark
+    // the draft immediately, then do that work once after the input burst.
+    setDirty(true, true);
+    reportDraft();
   }
   function onEditKeydown(event) {
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
@@ -681,7 +684,7 @@
         if (interactionMode === 'edit') { disableEditing(); enableEditing(); }
         var restoredHtml = draftBodyHtml();
         var restoredDirty = restoredHtml !== editBaselineHtml;
-        setDirty(restoredDirty);
+        setDirty(restoredDirty, false);
         post({ type: 'tdoc:editSnapshot', bodyHtml: restoredHtml, dirty: restoredDirty });
         rereportPins();
       }
