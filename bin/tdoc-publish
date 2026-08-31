@@ -130,6 +130,24 @@ if [ "$SIGNIN_ONLY" = "1" ]; then
 elif [ -z "$SLUG" ]; then
   usage
 fi
+
+# Keep one canonical retry command for interruptions during hosted sign-in.
+# The sign-in-only flow has no document yet; a normal publish must preserve
+# every access flag the user chose instead of silently retrying a different
+# publish.
+if [ "$SIGNIN_ONLY" = "1" ]; then
+  RETRY_COMMAND="/tdoc publish --signin-only"
+else
+  RETRY_COMMAND="/tdoc publish"
+  [ -n "$PLATFORM_FLAG" ] && RETRY_COMMAND+=" --platform $PLATFORM_FLAG"
+  [ -n "$VISIBILITY_FLAG" ] && RETRY_COMMAND+=" --visibility $VISIBILITY_FLAG"
+  [ -n "$HISTORY_FLAG" ] && RETRY_COMMAND+=" --history $HISTORY_FLAG"
+  [ -n "$COMMENTING_FLAG" ] && RETRY_COMMAND+=" --commenting $COMMENTING_FLAG"
+  for _allow_user in ${ALLOW_USERS[@]+"${ALLOW_USERS[@]}"}; do
+    RETRY_COMMAND+=" --allow-user $_allow_user"
+  done
+  RETRY_COMMAND+=" $SLUG"
+fi
 # Validate the slug BEFORE it becomes a filesystem path or a URL query value.
 
 # Same kebab-case rule tdoc-new enforces. Without this a `..` slug escapes
@@ -266,13 +284,13 @@ EOF
 require_wrangler() {
   if ! command -v wrangler >/dev/null 2>&1; then
     fail_with_agent_prompt "wrangler is not installed" \
-      "Install Cloudflare wrangler globally so tdoc can publish: run 'npm i -g wrangler' (or 'pnpm add -g wrangler'). After it's installed, run '/tdoc publish $SLUG' again."
+      "Install Cloudflare wrangler globally so tdoc can publish: run 'npm i -g wrangler' (or 'pnpm add -g wrangler'). After it's installed, run '/tdoc publish --platform cloudflare $SLUG' again."
   fi
 }
 require_vercel() {
   if ! command -v vercel >/dev/null 2>&1; then
     fail_with_agent_prompt "the vercel CLI is not installed" \
-      "Install the Vercel CLI globally so tdoc can publish: run 'npm i -g vercel' (or 'pnpm add -g vercel'). After it's installed, run '/tdoc publish $SLUG' again."
+      "Install the Vercel CLI globally so tdoc can publish: run 'npm i -g vercel' (or 'pnpm add -g vercel'). After it's installed, run '/tdoc publish --platform vercel $SLUG' again."
   fi
 }
 
@@ -333,6 +351,11 @@ hosted_github_signin() {
   [ "$interval" -lt 5 ] && interval=5
   case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
 
+  # Install the human-cancel path before printing the device instructions.
+  # A fast Ctrl-C on the first visible line must still clear #325's modal side
+  # channel and must never be reported as a GitHub denial.
+  trap 'clear_pending_signin; rm -f "$cookiejar"; echo "[tdoc] GitHub sign-in canceled. No credential was saved." >&2; echo "[tdoc] Retry: $RETRY_COMMAND" >&2; exit 130' INT
+
   # No attempt to pre-fill the code in the URL. GitHub returns no
   # verification_uri_complete, and appending ?user_code= does NOT work in
   # practice: a signed-out visitor is sent to the account chooser first and the
@@ -387,12 +410,12 @@ hosted_github_signin() {
   echo "        $user_code" >&2
   echo "" >&2
   [ "${opened:-0}" = "1" ] && echo "[tdoc] (If nothing opened: $uri )" >&2
-  echo "[tdoc] Then click Authorize. I'll carry on by myself — nothing to do here." >&2
-  echo "[tdoc] Waiting for GitHub approval…" >&2
+  echo "[tdoc] After you click Authorize, I'll continue here." >&2
   # From here the code exists and nothing else will print it. Hand it to the
   # side channel before the first sleep, so a modal polling for it sees the
   # code on its next tick rather than after the whole flow resolves.
   write_pending_signin "$user_code" "$uri" "$expires" "${opened:-0}"
+  echo "[tdoc] Waiting for GitHub approval…" >&2
   local waited=0 err
   while [ "$waited" -lt "$expires" ]; do
     sleep "$interval"
@@ -406,6 +429,7 @@ hosted_github_signin() {
       _who="$(printf '%s' "$payload" | json_get identity.login)"
       echo "[tdoc] Signed in as ${_who:-github user}" >&2
       clear_pending_signin
+      trap - INT
       return 0
     fi
     err="$(printf '%s' "$payload" | json_get error)"
