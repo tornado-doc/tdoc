@@ -34,7 +34,7 @@ function runDoctor(envOverrides = {}) {
   // TDOC_PLATFORM is inherited from the caller's shell otherwise, which would
   // silently retarget every scenario.
   const env = { ...process.env, TDOC_PLATFORM: '', ...envOverrides };
-  const out = execFileSync(DOCTOR, [], { env, encoding: 'utf8' });
+  const out = execFileSync(DOCTOR, ['--json'], { env, encoding: 'utf8' });
   return JSON.parse(out);
 }
 
@@ -204,7 +204,7 @@ function getStep(report, id) {
       const fromEnv = runDoctor({ TDOC_CONFIG_FILE: cfg, TDOC_PLATFORM: 'hosted' });
       if (fromEnv.target !== 'hosted') throw new Error(`env should beat config, got ${fromEnv.target}`);
 
-      const out = execFileSync(DOCTOR, ['--platform', 'vercel'], {
+      const out = execFileSync(DOCTOR, ['--json', '--platform', 'vercel'], {
         env: { ...process.env, TDOC_CONFIG_FILE: cfg, TDOC_PLATFORM: 'hosted' }, encoding: 'utf8',
       });
       const fromFlag = JSON.parse(out);

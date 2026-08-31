@@ -527,9 +527,9 @@ t('tdoc-update-nag --json is parseable', () => {
   assert(/tdoc-update --yes/.test(j.cmd), `cmd should be tdoc-update --yes: ${j.cmd}`);
 });
 
-t('tdoc-doctor surfaces .update from nag --json (stdout stays parseable)', () => {
+t('tdoc-doctor --json preserves the machine report contract', () => {
   const doctor = path.join(BIN, 'tdoc-doctor');
-  const r = spawnSync(doctor, [], {
+  const r = spawnSync(doctor, ['--json'], {
     env: {
       ...process.env,
       TDOC_MOCK_UPDATE_BEHIND: '2',
@@ -545,6 +545,27 @@ t('tdoc-doctor surfaces .update from nag --json (stdout stays parseable)', () =>
   assert(j.update && j.update.ok === false && j.update.behind === 2, `update: ${JSON.stringify(j.update)}`);
   assert(Array.isArray(j.missing_steps), 'rest of doctor JSON must still be valid');
   assert(!j.missing_steps.some((s) => s.id === 'update'), '.update is not a missing_step');
+});
+
+t('tdoc-doctor defaults to a concise target, readiness, and next-action summary', () => {
+  const doctor = path.join(BIN, 'tdoc-doctor');
+  const r = spawnSync(doctor, [], {
+    env: {
+      ...process.env,
+      TDOC_SKIP_UPDATE_CHECK: '1',
+      TDOC_MOCK_NOT_PUBLISHED: '1',
+      TDOC_PLATFORM: 'hosted',
+    },
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert(r.status === 0, `doctor must exit 0, got ${r.status}: ${r.stderr}`);
+  assert(/^tdoc doctor$/m.test(r.stdout), `summary title missing: ${r.stdout}`);
+  assert(/^Target\s+Hosted · tdoc\.dev$/m.test(r.stdout), `target missing: ${r.stdout}`);
+  assert(/^Readiness\s+Ready to publish$/m.test(r.stdout), `readiness missing: ${r.stdout}`);
+  assert(/^Next$/m.test(r.stdout) && /\/tdoc new <prompt>/.test(r.stdout),
+    `next action missing: ${r.stdout}`);
+  assert(!/"deps"|"cloudflare"|\{\s*$/.test(r.stdout), `default still looks like a JSON dump: ${r.stdout}`);
 });
 
 t('tdoc-update-nag diverged mock does not tell the user to --yes', () => {
@@ -881,7 +902,8 @@ t('the GitHub sign-in opens the browser and is NOT gated on a tty', () => {
   assert(/should_open_browser\(\)/.test(src), 'no browser-open helper');
   // An agent runs this with stderr piped. A tty check would mean the auto-open
   // never fires in the exact situation it exists for.
-  const helper = src.slice(src.indexOf('should_open_browser()'), src.indexOf('Waiting for GitHub approval'));
+  const helperStart = src.indexOf('should_open_browser()');
+  const helper = src.slice(helperStart, src.indexOf('write_pending_signin "$user_code"', helperStart));
   assert(!/-t\s+2|-t\s+1/.test(helper), 'browser-open must not be gated on a tty');
   for (const guard of ['TDOC_NO_BROWSER', 'CI', 'SSH_CONNECTION']) {
     assert(helper.includes(guard), `browser-open should respect ${guard}`);

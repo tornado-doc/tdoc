@@ -718,11 +718,11 @@ are untouched.
 
 You are walking a user through tdoc onboarding. The user might have nothing
 installed, or might be partway through. You **must** drive the flow from
-`bin/tdoc-doctor` JSON output, not assume state.
+`bin/tdoc-doctor --json` output, not assume state.
 
 **Algorithm:**
 
-1. Run `"$SKILL_DIR/bin/tdoc-doctor"` and parse the JSON. This is non-destructive.
+1. Run `"$SKILL_DIR/bin/tdoc-doctor" --json` and parse the JSON. This is non-destructive.
    The doctor is target-aware and reports what it assessed under `.target`.
    The default is `hosted` (tdoc.dev), which needs only Node 18+ and curl —
    **no Cloudflare account, no wrangler, nothing to click in a dashboard.**
@@ -737,16 +737,16 @@ installed, or might be partway through. You **must** drive the flow from
 4. Otherwise, walk through `.missing_steps` in order. On the hosted default
    this list is usually empty. For each step:
    - **kind == "install"**: run the `cmd` for them via Bash (e.g. `brew install jq`).
-     After install, re-run `tdoc-doctor` to confirm.
+     After install, re-run `tdoc-doctor --json` to confirm.
    - **kind == "login"**: explain that this opens a browser, then run the `cmd`.
      `wrangler login` is interactive — print clear instructions and wait.
    - **kind == "click"**: you cannot click for the user. Print the URL clearly
      and tell them what to do ("Open this and click 'Enable R2'"). Then wait
-     for the user to say "done", then re-run `tdoc-doctor` to verify.
+     for the user to say "done", then re-run `tdoc-doctor --json` to verify.
      `login` and `click` steps are **self-host only**. If one appears for a
      user who never asked to self-host, re-read `.target` before sending them
      to a dashboard.
-5. After every step, re-run `tdoc-doctor` and continue from the new state.
+5. After every step, re-run `tdoc-doctor --json` and continue from the new state.
 6. When `.ready_to_publish == true`, congratulate and offer to create + publish
    a sample doc.
 
@@ -787,12 +787,12 @@ the script prints a clean instruction to re-clone.
 
 ### `/tdoc doctor` — health check, no changes
 
-Prints the doctor JSON. Use this when the user reports a problem to localize
-which dep / Cloudflare resource is missing.
+Prints a concise human health summary. Use this when the user reports a
+problem; pass `--json` when an agent needs the full machine report.
 
 ```bash
-# jq is a self-host-only dependency, so read the report with node.
-"$SKILL_DIR/bin/tdoc-doctor" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.stringify(JSON.parse(s),null,2)))'
+"$SKILL_DIR/bin/tdoc-doctor"
+"$SKILL_DIR/bin/tdoc-doctor" --json
 ```
 
 ## Troubleshooting
