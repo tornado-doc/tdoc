@@ -214,9 +214,37 @@ function getStep(report, id) {
     }
   });
 
-  await t('H5: an unknown platform falls back to hosted rather than guessing', () => {
-    const r = runDoctor({ TDOC_MOCK_NOT_PUBLISHED: '1', TDOC_PLATFORM: 'nonsense' });
-    if (r.target !== 'hosted') throw new Error(`expected fallback to hosted, got ${r.target}`);
+  await t('H5: an unknown --platform is rejected with the accepted choices', () => {
+    const r = spawnSync(DOCTOR, ['--platform', 'nonsense'], {
+      env: { ...process.env, TDOC_PLATFORM: '', TDOC_MOCK_NOT_PUBLISHED: '1' },
+      encoding: 'utf8',
+    });
+    if (r.status === 0) throw new Error('unknown platform must exit non-zero');
+    const message = `${r.stdout}${r.stderr}`;
+    const expected = "unknown platform 'nonsense' — use 'hosted', 'cloudflare', or 'vercel'.";
+    if (!message.includes(expected)) throw new Error(`missing accepted choices in: ${message}`);
+  });
+
+  await t('H6: a genuinely missing Node gets one actionable error and exits non-zero', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-doctor-no-node-'));
+    try {
+      // /usr/bin/env from the shebang must still be able to find bash, while
+      // Node and every optional dependency remain absent from PATH.
+      const bash = execFileSync('sh', ['-c', 'command -v bash'], { encoding: 'utf8' }).trim();
+      fs.symlinkSync(bash, path.join(dir, 'bash'));
+      const r = spawnSync(DOCTOR, [], {
+        env: { ...process.env, PATH: dir, TDOC_PLATFORM: '', TDOC_MOCK_NOT_PUBLISHED: '1' },
+        encoding: 'utf8',
+      });
+      if (r.status === 0) throw new Error('missing Node must exit non-zero');
+      const message = `${r.stdout}${r.stderr}`;
+      for (const text of ['Node 18+ is required', 'brew install node', 're-run tdoc-doctor']) {
+        if (!message.includes(text)) throw new Error(`missing "${text}" in: ${message}`);
+      }
+      if (/command not found/.test(message)) throw new Error(`leaked shell failure: ${message}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   console.log('\n--- Help text on tdoc-update ---');

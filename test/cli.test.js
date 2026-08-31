@@ -1117,6 +1117,8 @@ t('onboarding offers the CLAUDE.md routing line and never writes it silently', (
   // It is an offer: the user is asked, and the path is named in the question.
   assert(/AskUserQuestion/.test(step), 'step does not ask — writing CLAUDE.md unasked is the failure this guards');
   assert(/`<path>`/.test(step), 'the question does not name the file being edited');
+  assert(step.indexOf('future document requests automatically use tdoc') < step.indexOf('durable rule'),
+    'routing question must lead with the user outcome before agent internals');
   // And it must not quietly commit on the user's behalf.
   assert(/Do not commit/i.test(step), 'step does not forbid committing the edit');
 
@@ -1125,6 +1127,33 @@ t('onboarding offers the CLAUDE.md routing line and never writes it silently', (
   for (const m of ['.routing-prompted', '.routing-declined', 'tdoc:routing']) {
     assert(idem.includes(m), `${m} not listed under Idempotency`);
   }
+});
+
+t('onboarding presents doctor status target-first without changing its JSON contract', () => {
+  const ob = fs.readFileSync(path.join(__dirname, '..', 'ONBOARDING.md'), 'utf8');
+  const doctor = ob.slice(ob.indexOf('## Step 3 — Run the doctor'),
+                          ob.indexOf('## Step 4'));
+  for (const text of ['**Target**', '**Readiness**', '**Next action**']) {
+    assert(doctor.includes(text), `doctor presentation is missing ${text}`);
+  }
+  assert(doctor.indexOf('**Target**') < doctor.indexOf('**Readiness**'),
+    'doctor status does not put target before readiness');
+  assert(/Do not paste the full dependency\/provider dump/.test(doctor),
+    'hosted onboarding still foregrounds irrelevant provider diagnostics');
+  assert(/For `vercel`, `ready_to_publish: true` means the required local dependencies/.test(doctor),
+    'Vercel readiness does not distinguish dependencies from provider configuration');
+  assert(/existing machine-readable contract/.test(doctor),
+    'human presentation guidance does not preserve the machine JSON contract');
+});
+
+t('first-doc no-history result stays scoped and carries its next action', () => {
+  const first = fs.readFileSync(path.join(__dirname, '..', 'FIRST-DOC.md'), 'utf8');
+  const noHistory = first.slice(first.indexOf('## If there is no history'),
+                                first.indexOf('## Do not'));
+  assert(/no AI history was found on this machine yet/.test(noHistory),
+    'no-history result still reads like an absolute privacy or security judgment');
+  assert(/use it for a week\s+and ask again/.test(noHistory),
+    'no-history result lost its concrete next action');
 });
 
 // ---- the skill's self-update must be able to run at all ----
