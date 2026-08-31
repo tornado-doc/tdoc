@@ -20,7 +20,11 @@
 
 set -uo pipefail
 
-SKILL_DIR="${SKILL_DIR:-$HOME/.claude/skills/tdoc}"
+# Default to the checkout that owns this script. tdoc can be installed under
+# ~/.claude, ~/.codex, or ~/.agents; defaulting to one host's directory can
+# silently update a different checkout from the one that invoked us.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKILL_DIR="${SKILL_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 cd "$SKILL_DIR" || { echo "tdoc-update: cannot cd into $SKILL_DIR" >&2; exit 1; }
 
 YES=0

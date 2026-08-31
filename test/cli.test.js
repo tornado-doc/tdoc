@@ -938,6 +938,24 @@ t('SKILL.md and skills/tdoc/SKILL.md stay identical', () => {
 
 // ---- tdoc-update --auto: keep current without ever destroying work ----
 
+t('tdoc-update defaults to the checkout that contains the invoked script', () => {
+  const root = path.join(__dirname, '..');
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-update-home-'));
+  try {
+    // A host-specific default such as ~/.claude/skills/tdoc would fail here:
+    // fakeHome intentionally contains no parallel skill installation.
+    const r = spawnSync(path.join(root, 'bin', 'tdoc-update'), ['--help'], {
+      env: { ...process.env, HOME: fakeHome, SKILL_DIR: '' },
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    assert(r.status === 0, `updater did not use its own checkout: ${r.stderr}`);
+    assert(/usage: tdoc-update/.test(r.stdout), `unexpected updater output: ${r.stdout}`);
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
 t('tdoc-update --auto never stashes and never redeploys', () => {
   const src = readBin('tdoc-update');
   assert(/--auto\)\s*AUTO=1/.test(src), '--auto flag missing');
