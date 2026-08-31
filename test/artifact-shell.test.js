@@ -146,6 +146,13 @@ const SLUG = 'hostile-body-css';
       if (pinLeft > 1300) throw new Error(`pin is pinned to the viewport edge (${pinLeft}), not the article gutter`);
     });
 
+    await t('a table-cell selection spanning <span> + <br> resolves to a pin', async () => {
+      const found = await page.evaluate(() =>
+        [...document.querySelectorAll('.tdoc-pin')].some((pin) =>
+          String(pin.dataset.key || '').includes('c_fixture_6')));
+      if (!found) throw new Error('saved anchor "有\\n可做到低频轮询 / 单连接" did not resolve across <br>');
+    });
+
     await t('clicking a pin opens the card by its pin, without scrolling the doc', async () => {
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
       const before = await frame.evaluate(() => window.scrollY);

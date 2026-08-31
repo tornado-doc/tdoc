@@ -80,8 +80,19 @@
   }
   function context(range, chars) {
     try {
-      var before = (range.startContainer.textContent || '').slice(Math.max(0, range.startOffset - chars), range.startOffset);
-      var after = (range.endContainer.textContent || '').slice(range.endOffset, range.endOffset + chars);
+      // Context must cross text-node boundaries. Reading only startContainer
+      // and endContainer leaves both sides empty when a user selects a whole
+      // table cell, heading, or inline run. That makes repeated labels
+      // impossible to disambiguate after reload.
+      var beforeRange = document.createRange();
+      beforeRange.selectNodeContents(document.body);
+      beforeRange.setEnd(range.startContainer, range.startOffset);
+      var afterRange = document.createRange();
+      afterRange.selectNodeContents(document.body);
+      afterRange.setStart(range.endContainer, range.endOffset);
+      var beforeText = beforeRange.toString(), afterText = afterRange.toString();
+      var before = beforeText.slice(Math.max(0, beforeText.length - chars));
+      var after = afterText.slice(0, chars);
       return { before: before, after: after };
     } catch (e) { return { before: '', after: '' }; }
   }
@@ -364,9 +375,27 @@
         return NodeFilter.FILTER_ACCEPT;
       }
     });
-    var nodes = [], total = '', norm = '', normToRaw = [], prevWasSpace = false;
+    var nodes = [], total = '', norm = '', normToRaw = [], prevWasSpace = false, previousNode = null;
+    function hasLineBreakBetween(left, right) {
+      if (!left || !right) return false;
+      try {
+        var gap = document.createRange();
+        gap.setStartAfter(left);
+        gap.setEndBefore(right);
+        var fragment = gap.cloneContents();
+        return !!(fragment.querySelector && fragment.querySelector('br'));
+      } catch (e) { return false; }
+    }
     while (walker.nextNode()) {
       var n = walker.currentNode, start = total.length, v = n.nodeValue;
+      // Selection.toString() represents <br> as a newline. Text-node walking
+      // used to erase it completely, so an anchor saved as "有\n可做到…"
+      // could never match the reconstructed "有可做到…" after submission.
+      // Add one normalized virtual space and map it to the next node boundary;
+      // Range creation can then still use real DOM offsets.
+      if (norm.length && !prevWasSpace && hasLineBreakBetween(previousNode, n)) {
+        norm += ' '; normToRaw.push(start); prevWasSpace = true;
+      }
       nodes.push({ node: n, start: start, end: start + v.length });
       total += v;
       for (var i = 0; i < v.length; i++) {
@@ -375,6 +404,7 @@
         if (isWs) { if (!prevWasSpace && norm.length) { norm += ' '; normToRaw.push(start + i); prevWasSpace = true; } }
         else { norm += v[i]; normToRaw.push(start + i); prevWasSpace = false; }
       }
+      previousNode = n;
     }
     normToRaw.push(total.length);
     return { nodes: nodes, total: total, norm: norm, normToRaw: normToRaw };
