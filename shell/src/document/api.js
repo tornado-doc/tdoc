@@ -33,6 +33,16 @@ export function createComment(payload) {
   });
 }
 
+// Same PATCH as the re-anchor below; a `text` in the body is what makes it an
+// edit. The worker allows it for the record's author only.
+export function updateCommentText(payload) {
+  return request('/api/comments', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function updateCommentAnchor(payload) {
   return request('/api/comments', {
     method: 'PATCH',

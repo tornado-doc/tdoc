@@ -42,6 +42,7 @@
    spans): keep the semantics, drop the UA button box. */
 .tdoc-margin-comment button.del,
 .tdoc-margin-comment button.tdoc-reply-toggle,
+.tdoc-margin-comment button.tdoc-edit-toggle,
 .tdoc-margin-comment button.tdoc-replies-toggle,
 .tdoc-margin-comment button.tdoc-reanchor-btn,
 button.tdoc-cluster-row,
@@ -69,7 +70,10 @@ button.tdoc-cluster-row {
 
 /* Re-apply the legacy per-control colours the reset above would swallow. */
 .tdoc-margin-comment button.del { color: #c33; }
-.tdoc-margin-comment button.tdoc-reply-toggle { color: var(--td-accent); }
+/* edit sits next to Reply and is the same kind of thing — a control on your
+   own comment — so it reads the same, not as a second colour. */
+.tdoc-margin-comment button.tdoc-reply-toggle,
+.tdoc-margin-comment button.tdoc-edit-toggle { color: var(--td-accent); }
 .tdoc-margin-comment button.tdoc-replies-toggle {
   margin-top: 10px;
   padding-top: 10px;

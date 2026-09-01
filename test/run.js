@@ -56,6 +56,7 @@ const OFFLINE = [
   'write-invariants.test.js',  // every server write path bakes, stamps aids, records sha
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
+  'agent-reply-once.test.js', // #349 the agent answers once per human turn
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
   'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link

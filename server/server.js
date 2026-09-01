@@ -1279,6 +1279,13 @@ const server = http.createServer(async (req, res) => {
   //   question -> ❓
   // The agent always clears its previous emoji on this comment first, so a
   // stale "applied" emoji can't outlive a later "question" outcome.
+  // NOTE: local preview does NOT gate a repeated agent reply the way the
+  // published Worker does (#349). It cannot: a delete here removes the reply
+  // from the array outright, so there is no record that the agent ever
+  // answered — the Worker's event log is what makes "already answered, and
+  // deleted since" a knowable thing. Local preview is one person on one
+  // machine; the loop this protects against is a published doc being pulled
+  // and regenerated.
   if (p === '/api/agent/reply' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
@@ -1327,6 +1334,35 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const slug = safeSlug(body.slug);
     const { id, anchor } = body;
+    // Editing a comment's text. Local preview is anonymous — there is no
+    // session to check the author against, the way the worker does — so the
+    // affordance the shell shows is the gate. `edited` is what the card reads
+    // to mark it, and legacyToEvents replays it as a text_edited event when
+    // this comment is published.
+    if (typeof body.text === 'string') {
+      const text = body.text.trim();
+      if (!slug || !id || !text) return json(res, 400, { error: 'invalid slug or missing id/text' });
+      const file = path.join(ROOT, slug, 'comments.json');
+      const all = readCommentFile(file);
+      const edited = new Date().toISOString();
+      const top = all.find(c => c.id === id);
+      if (top) {
+        top.text = text;
+        top.edited = edited;
+        writeJson(file, all);
+        return json(res, 200, top);
+      }
+      for (const c of all) {
+        const reply = (c.replies || []).find(r => r.id === id);
+        if (reply) {
+          reply.text = text;
+          reply.edited = edited;
+          writeJson(file, all);
+          return json(res, 200, reply);
+        }
+      }
+      return json(res, 404, { error: 'not_found' });
+    }
     if (!slug || !id || !anchor) return json(res, 400, { error: 'invalid slug or missing id/anchor' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
