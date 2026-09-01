@@ -16,6 +16,9 @@ export function useDocumentEditor({
   onDisableCommentSelection,
 }) {
   const requests = useRef(new Map());
+  // Set for the save's own navigation, so the unload warning below can tell a
+  // deliberate hop to the new version from a tab closing mid-edit.
+  const leavingForSave = useRef(false);
   const storeKey = useMemo(() => draftKey(config), [config]);
   // A doc created from scratch arrives at ?edit=1: it is blank, so dropping the
   // author in read mode would show an empty page and hide the one control they
@@ -45,7 +48,14 @@ export function useDocumentEditor({
 
   useEffect(() => {
     if (!dirty) return undefined;
-    const warn = (event) => { event.preventDefault(); event.returnValue = ''; };
+    const warn = (event) => {
+      // A save commits the draft server-side and then navigates to the version
+      // it just created. Warning about unsaved work there is a lie, and it put
+      // a browser confirm in front of the author every single time they saved.
+      if (leavingForSave.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
@@ -80,6 +90,7 @@ export function useDocumentEditor({
       const html = await requestDocument();
       const result = await saveDocumentVersion(config.slug, config.version, html);
       await clearDraft(storeKey);
+      leavingForSave.current = true;
       location.href = result.url;
     } catch (error) {
       if (error.status === 409 && error.body?.error === 'version_conflict') {

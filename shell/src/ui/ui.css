@@ -306,6 +306,24 @@ button.tdoc-pin {
   position: relative;
 }
 
+/* The "don't show this again" line in the save notice. */
+.tdoc-save-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--td-ink-soft, #6b6b73);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tdoc-save-remember input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--td-accent);
+  cursor: pointer;
+}
+
 /* "Create a doc" is a fork: two cards, one per answer. They stack below the
    narrow breakpoint rather than shrinking into unreadable columns. */
 .mk-cards {
