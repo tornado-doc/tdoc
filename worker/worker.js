@@ -2299,6 +2299,82 @@ function historyList(list) {
   return out;
 }
 
+// Has this agent already answered here, and has a human said anything since?
+//
+// A folded comment is not enough to answer that. When a human deletes the
+// agent's reply — or rewrites it — every folded view loses it, so the next
+// generation round reads a thread it has never answered and answers it again,
+// in the same place, with the same words. The event log still holds the
+// reply_added, so the gate reads the log rather than the snapshot: what a
+// human removed is exactly what has to be remembered.
+//
+// Open again only when a HUMAN REPLIES after the agent's last word on this
+// thread. Nothing else counts, and in particular EDITING THE COMMENT DOES NOT:
+// a person fixing their own typo has not asked a second time, and an answered
+// comment that changes shape is not a new comment. Deleting or editing the
+// agent's own answer does not count either — that is the clearest "I have
+// dealt with this" there is, not an invitation to repeat it.
+//
+// The one exception is a re-anchor, which the product already treats as
+// reopening (patch_anchor resets status to open, and SKILL.md says /tdoc edit
+// picks it up again): the comment now points at different text, so it is no
+// longer the same place.
+//
+// Returns { allowed, reason }. Reasons are stable strings the CLI prints.
+function agentReplyGate(record, agentLogin) {
+  if (!record) return { allowed: false, reason: 'parent_not_found' };
+  ensureEventLog(record);
+  // Same ordering the fold uses — by version, ties broken by append order —
+  // so "who spoke last" means the same thing here as it does on the card.
+  // Timestamps are not the tiebreak: two events in one round land in the same
+  // millisecond, and a tie must not read as "nobody has answered since".
+  const ordered = dedupEvents(record.events)
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => ((a.e.at_version || 0) - (b.e.at_version || 0)) || (a.i - b.i))
+    .map((x) => x.e);
+  const isAgentAuthor = (author) => !!(author && author.kind === 'agent');
+  let answered = false;   // this agent has spoken at least once
+  let theirTurn = true;   // a human has moved since it last did
+  let deleted = false;
+  for (const e of ordered) {
+    if (!e) continue;
+    switch (e.kind) {
+      case 'deleted':
+        deleted = true;
+        break;
+      case 'reply_added':
+        if (!e.reply) break;
+        if (isAgentAuthor(e.reply.author) && e.reply.author.login === agentLogin) {
+          answered = true;
+          theirTurn = false;
+        } else if (!isAgentAuthor(e.reply.author)) {
+          theirTurn = true;
+        }
+        break;
+      case 'text_edited':
+        // Rewriting the comment is not asking again. Whoever edited it, the
+        // question the agent already answered is still the question.
+        break;
+      case 'anchor_changed':
+        // The agent's own re-anchor (bind_anchor_aid) is not a human turn.
+        if (e.by !== agentLogin) theirTurn = true;
+        break;
+      case 'reply_deleted':
+      case 'reply_text_edited':
+        // A human removing or rewriting the agent's answer keeps the gate SHUT.
+        // It is the clearest "I have dealt with this" there is, not a request
+        // to hear the same thing again.
+        break;
+      default:
+        break;
+    }
+  }
+  if (deleted) return { allowed: false, reason: 'comment_deleted' };
+  if (!answered) return { allowed: true, reason: 'first_reply' };
+  if (theirTurn) return { allowed: true, reason: 'human_replied_since' };
+  return { allowed: false, reason: 'already_answered' };
+}
+
 // Helper used by all mutating endpoints: ensure the list is migrated to the
 // event-log shape before we touch it. Returns the (possibly mutated) list.
 function ensureMigrated(list) {
@@ -4877,6 +4953,17 @@ export default {
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
+      // One answer per human turn. A round that re-reads comments.json after
+      // somebody deleted the agent's reply would otherwise post the same words
+      // in the same place; the log remembers what the fold forgot. `force`
+      // exists for the caller that means it — nothing in /tdoc edit sets it.
+      const gate = agentReplyGate(parent, agent.login);
+      if (!gate.allowed && body.force !== true) {
+        return json({
+          ok: true, skipped: true, reason: gate.reason,
+          parent_id, thread_id: parent.id,
+        });
+      }
       const V = coerceBodyVersion(applied_in, parent.created_in || 1);
       const now = new Date().toISOString();
       const replyId = `r_${Date.now()}_${rand(4)}`;

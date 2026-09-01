@@ -531,7 +531,16 @@ This is a hard requirement, not a suggestion. The user can't tell which
 comments you handled unless you reply on each one. Skipping comments
 silently is the #1 source of regression complaints.
 
-1. Read `~/tdocs/<slug>/comments.json` — filter to `status: "open"`.
+1. **Pull the comments first, then read them.** `~/tdocs/<slug>/comments.json`
+   is a cache of a file other people are writing: everything said since your
+   last round — including a comment someone deleted — is only in the published
+   doc. Skip for a doc that was never published.
+
+   ```bash
+   "$SKILL_DIR/bin/tdoc-pull" <slug>
+   ```
+
+   Then read `~/tdocs/<slug>/comments.json` and filter to `status: "open"`.
 2. **Get the current document — remote is the source of truth, local is a
    cache.** The local `v<n>/index.html` can be stale: a browser edit or a
    publish from another machine creates versions your checkout never saw, and
@@ -612,6 +621,15 @@ silently is the #1 source of regression complaints.
    otherwise to `http://localhost:${TDOC_PORT:-7878}`. Users can also reply
    to any reply (HN/Reddit-style nesting); `parent` is the comment or reply
    you are answering.
+
+   **A skip is a normal outcome, not an error.** The published Worker answers
+   a comment once per human turn: if your answer is already the last word on
+   that thread it prints `not posted: this comment already has your answer`
+   and exits 0. That is the server protecting the reader from hearing the same
+   thing twice — most often because they deleted your last answer, which
+   removes it from the comments.json you just read but not from the log the
+   server keeps. Do not retry it, and do not reach for `--force`: pass that
+   only when a person has asked you to say it again.
 
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading

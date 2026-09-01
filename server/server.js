@@ -1115,6 +1115,13 @@ const server = http.createServer(async (req, res) => {
   //   question -> ❓
   // The agent always clears its previous emoji on this comment first, so a
   // stale "applied" emoji can't outlive a later "question" outcome.
+  // NOTE: local preview does NOT gate a repeated agent reply the way the
+  // published Worker does (#349). It cannot: a delete here removes the reply
+  // from the array outright, so there is no record that the agent ever
+  // answered — the Worker's event log is what makes "already answered, and
+  // deleted since" a knowable thing. Local preview is one person on one
+  // machine; the loop this protects against is a published doc being pulled
+  // and regenerated.
   if (p === '/api/agent/reply' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);

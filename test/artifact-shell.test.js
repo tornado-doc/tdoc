@@ -278,6 +278,44 @@ const SLUG = 'hostile-body-css';
       if (!hasDelete) throw new Error('card missing delete control');
     });
 
+    await t('a submitted reply closes its composer and lands visibly in the thread (#349)', async () => {
+      // The reply posted, but the composer stayed on screen with the thread
+      // still folded shut — nothing looked like it happened, and only a page
+      // refresh cleared the box.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 3000 });
+        await page.click('.tdoc-pin[data-id="c_fixture_1"]');
+        await page.waitForSelector(`${card} .tdoc-reply-toggle`, { timeout: 2000 });
+        await page.click(`${card} > .meta .tdoc-reply-toggle`);
+        await page.waitForSelector(`${card} .tdoc-reply-form.open textarea`, { timeout: 2000 });
+        // the caret is already in it — you asked for this box by clicking Reply
+        const focused = await page.evaluate((sel) => {
+          const box = document.querySelector(`${sel} .tdoc-reply-form.open textarea`);
+          return document.activeElement === box;
+        }, card);
+        if (!focused) throw new Error('the reply box opened without the caret in it');
+        await page.fill(`${card} .tdoc-reply-form.open textarea`, 'submitted reply #349');
+        await page.click(`${card} .tdoc-reply-submit`);
+        // the composer goes away on its own — no reload
+        await page.waitForSelector(`${card} .tdoc-reply-form`, { state: 'detached', timeout: 4000 });
+        // and the new reply is on screen, in the thread, without a refresh
+        await page.waitForSelector(`${card} .tdoc-replies.open`, { timeout: 2000 });
+        const texts = await page.$$eval(
+          `${card} .tdoc-replies.open .tdoc-reply .text`,
+          (nodes) => nodes.map((n) => n.textContent),
+        );
+        if (!texts.includes('submitted reply #349')) {
+          throw new Error(`new reply not visible in the thread: ${JSON.stringify(texts)}`);
+        }
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
     await t('agent comment: pin shows the agent mark, card shows a resolved chip', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
