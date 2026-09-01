@@ -2948,15 +2948,29 @@ function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targ
 // ─────────────────────────────────────────────────────────────────────────
 // @mentions
 //
-// A comment reaches people by NAME, not only by position in the thread. What
-// a name resolves to is the doc's own people — never all of GitHub: an
-// arbitrary login would make every signed-in commenter a spam vector, and
-// would push a private doc's comment preview into an inbox that cannot open
-// the doc. Anything else typed after `@` stays plain text.
+// A comment reaches people by NAME, not only by position in the thread. Any
+// GitHub login can be named — the composer searches GitHub itself — but the
+// gate on DELIVERY is whether that person can actually open the doc:
 //
-// The set is resolved on the SERVER from the posted text. A client-supplied
-// mention list would let a crafted request notify anyone.
+//   public / unlisted   anyone can read it, so anyone named is notified
+//   private, invited    already on the allowlist, notified
+//   private, stranger   the OWNER naming them is an invite (they go on the
+//                       allowlist, then get notified); anyone else naming
+//                       them changes nothing — plain text, no notification
+//
+// The last row is the one that matters: an inbox row carries the doc title
+// and a line of the comment, so notifying a stranger about a private doc
+// would hand them content they are not allowed to open.
+//
+// Mentions are resolved on the SERVER from the posted text. A client-supplied
+// list would let a crafted request notify anyone.
 // ─────────────────────────────────────────────────────────────────────────
+
+// One comment cannot notify an unbounded crowd.
+const MENTION_MAX_PER_COMMENT = 10;
+// Ceiling for the allowlist growing by @mention. Not applied retroactively to
+// a list an owner built by hand in the Share panel.
+const MENTION_INVITE_ALLOWLIST_MAX = 100;
 
 // GitHub login shape: alphanumeric plus inner hyphens, 39 max. The leading
 // group swallows the preceding character so `a@b` (an email) and `@@x` don't
@@ -2977,6 +2991,12 @@ function parseMentionLogins(text) {
     out.push(login);
   }
   return out;
+}
+
+// The logins a single comment may act on: parsed in the order they were
+// typed, deduped, and capped.
+function mentionCandidates(text) {
+  return parseMentionLogins(text).slice(0, MENTION_MAX_PER_COMMENT);
 }
 
 // Everyone who has written on this doc, newest record last. Reads the raw
@@ -3036,12 +3056,26 @@ function positionalRecipient(login, mentions) {
   return login;
 }
 
-// The mentions in `text` that actually resolve, in the order they were typed.
-function resolveMentions(text, mentionable) {
-  const known = new Set((Array.isArray(mentionable) ? mentionable : [])
-    .map((u) => normalizeGithubLogin(u && u.login))
-    .filter(Boolean));
-  return parseMentionLogins(text).filter((login) => known.has(login));
+// Split the named logins by what can actually happen to them.
+//   canRead(login)  — can that person open this doc as it stands
+//   canInvite       — may THIS commenter widen the allowlist (owner only)
+//   inviteBudget    — how many more the allowlist may take
+// `notified` includes `invited`: an invite is only worth anything if the
+// mention that triggered it also lands.
+function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0 } = {}) {
+  const notified = [];
+  const invited = [];
+  const blocked = [];
+  for (const login of (Array.isArray(logins) ? logins : [])) {
+    if (canRead(login)) { notified.push(login); continue; }
+    if (canInvite && invited.length < inviteBudget) {
+      invited.push(login);
+      notified.push(login);
+      continue;
+    }
+    blocked.push(login);
+  }
+  return { notified, invited, blocked };
 }
 
 // Apply one comment operation to the in-memory list. PURE w.r.t. I/O: it only
@@ -4492,16 +4526,29 @@ export default {
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
       const ownerLogin = hostedGithubLogin(meta) || env.TDOC_OWNER;
-      // Resolve @mentions BEFORE the write: they are stamped onto the event so
-      // the card can chip exactly the names that were notified, and the list
-      // comes from the doc's people rather than from the request body.
+      // Resolve @mentions BEFORE the write: the delivered list is stamped onto
+      // the event, so a chip on the card is exactly the set that was notified.
+      // Named logins come from the text, never from the request body.
       const priorList = await readComments(env, slug);
-      const mentions = resolveMentions(commentText, mentionableUsers({
-        ownerLogin,
-        allowedUsers: access.allowed_users,
-        participants: commentParticipants(priorList),
-        includeAllowed: isAllowlisted(access, s, env, meta),
-      }));
+      const isDocOwner = isDocOwnerSession(env, s, meta);
+      const outcome = classifyMentions(
+        mentionCandidates(commentText).filter((login) => login !== sessionLogin(s)),
+        {
+          canRead: (login) => canReadDoc(access, { login }, env, meta),
+          canInvite: isDocOwner,
+          inviteBudget: Math.max(0, MENTION_INVITE_ALLOWLIST_MAX - access.allowed_users.length),
+        },
+      );
+      const mentions = outcome.notified;
+      // An invite is a meta write, so it happens before the comment lands: a
+      // notification whose link 403s is worse than no notification.
+      if (outcome.invited.length) {
+        const patched = applyAccessPatch(meta, {
+          allowed_users: access.allowed_users.concat(outcome.invited),
+        });
+        if (patched.error) return json(patched, { status: 400 });
+        await env.META.put(`meta:${slug}`, JSON.stringify(patched.meta));
+      }
       // Serialized through the per-slug DO (mutation logic lives once in
       // applyCommentOp). create + reply are both id-stamped here so the
       // response is deterministic regardless of where the write runs.
@@ -4540,7 +4587,13 @@ export default {
           }
         }
       }
-      return json(res.body, { status: res.status });
+      // The composer needs to know what became of each name: an invite is
+      // worth telling the owner about (they still have to send the link), and
+      // a blocked name would otherwise fail silently.
+      const body_out = res.status === 200 && res.body && typeof res.body === 'object'
+        ? { ...res.body, mention_outcome: outcome }
+        : res.body;
+      return json(body_out, { status: res.status });
     }
 
     // Re-anchor a comment. Only the original author can re-anchor their own

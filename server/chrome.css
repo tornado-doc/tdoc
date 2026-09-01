@@ -390,6 +390,9 @@
   .tdoc-mention-login { font-weight: 600; }
   .tdoc-mention-name { color: var(--td-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-mention-chip { color: var(--td-accent); background: var(--td-accent-wash); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+  /* Marks a row that came from GitHub's search rather than from this doc — the
+     difference between answering someone here and pulling in a newcomer. */
+  .tdoc-mention-source { margin-left: auto; flex: none; color: var(--td-muted); font-size: 11px; border: 1px solid var(--td-line); border-radius: 4px; padding: 0 4px; }
 
   /* Modal (sign-in) */
   .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }

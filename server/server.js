@@ -128,9 +128,11 @@ function localDeliver(recipient, ev) {
   writeJson(file, { items: items.slice(0, 200) });
 }
 // ── @mentions (mirror of worker.js — kept identical by test/no-drift) ──────
-// A comment reaches people by NAME, not only by position in the thread. The
-// names that resolve are the doc's own people: the owner and everyone who has
-// already written here. Anything else after `@` stays plain text.
+// A comment reaches people by NAME, not only by position in the thread. Any
+// GitHub login can be named. The hosted worker gates delivery on whether that
+// person can open the doc; a local doc has no access policy — it is served to
+// whoever is at the keyboard — so every name here is simply delivered.
+const MENTION_MAX_PER_COMMENT = 10;
 const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
 
 function normalizeGithubLogin(v) {
@@ -169,12 +171,10 @@ function positionalRecipient(login, mentions) {
   return login;
 }
 
-// The mentions in `text` that actually resolve, in the order they were typed.
-function resolveMentions(text, mentionable) {
-  const known = new Set((Array.isArray(mentionable) ? mentionable : [])
-    .map((u) => normalizeGithubLogin(u && u.login))
-    .filter(Boolean));
-  return parseMentionLogins(text).filter((login) => known.has(login));
+// The logins a single comment may act on: parsed in the order they were
+// typed, deduped, and capped.
+function mentionCandidates(text) {
+  return parseMentionLogins(text).slice(0, MENTION_MAX_PER_COMMENT);
 }
 
 // Local comments.json is already folded (no event log), so participants come
@@ -985,8 +985,8 @@ const server = http.createServer(async (req, res) => {
     const slug = safeSlug(url.searchParams.get('slug'));
     if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
     const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
-    const me = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
-    return json(res, 200, { users: localMentionable(comments).filter((u) => u.login !== me) });
+    const viewer = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
+    return json(res, 200, { users: localMentionable(comments).filter((u) => u.login !== viewer) });
   }
 
   // --- COMMENTS (anonymous) ---
@@ -1011,7 +1011,8 @@ const server = http.createServer(async (req, res) => {
     const created = new Date().toISOString();
     // Resolved server-side, before the write, so the card chips exactly the
     // names that were notified.
-    const mentions = resolveMentions(text, localMentionable(comments));
+    const me = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
+    const mentions = mentionCandidates(text).filter((login) => login !== me);
     if (parent_id) {
       const thread = comments.find(c => c.id === parent_id)
         || comments.find(c => (c.replies || []).some(r => r.id === parent_id));
@@ -1037,7 +1038,9 @@ const server = http.createServer(async (req, res) => {
         const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
         if (parentLogin) localDeliver(parentLogin, { ...ev, kind: 'reply', target_id: parent_id });
       }
-      return json(res, 200, reply);
+      // Same shape the worker returns. A local doc has no access policy, so
+      // nothing is ever invited or blocked here.
+      return json(res, 200, { ...reply, mention_outcome: { notified: mentions, invited: [], blocked: [] } });
     }
     const entry = {
       id: `c_${Date.now()}`,
@@ -1064,7 +1067,7 @@ const server = http.createServer(async (req, res) => {
       const owner = positionalRecipient(E2E_OWNER, mentions);
       if (owner) localDeliver(owner, { ...ev, kind: 'comment' });
     }
-    return json(res, 200, entry);
+    return json(res, 200, { ...entry, mention_outcome: { notified: mentions, invited: [], blocked: [] } });
   }
 
   // Agent reply: posts a reply attributed to the acting agent, updates the

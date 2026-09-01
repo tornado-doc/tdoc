@@ -27,6 +27,36 @@ export function ShareDialog({ open, url, onOpenChange, onCopied }) {
   );
 }
 
+// An @mention on a private doc puts the named person on the allowlist, but
+// nothing tells them that happened — tdoc has no channel off the site. So the
+// one thing the owner still has to do is handed to them here, with the link
+// ready to paste.
+export function MentionInviteDialog({ open, invited, url, onOpenChange, onCopied }) {
+  const names = (invited || []).map((login) => `@${login}`).join(', ');
+  return (
+    <AppDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={(invited || []).length > 1 ? 'Invited to this doc' : 'Invited to this doc'}
+      description={`${names} can now open this document, and the mention is in their tdoc inbox. tdoc cannot email them — send the link so they know it is there.`}
+      actions={(
+        <>
+          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
+          <button
+            type="button"
+            className="primary"
+            onClick={async () => { await copyText(url); onCopied(); }}
+          >
+            Copy link
+          </button>
+        </>
+      )}
+    >
+      <div className="code">{url}</div>
+    </AppDialog>
+  );
+}
+
 // The publish endpoint answers once, at the end. Everything the user needs
 // mid-flight — above all the GitHub device code — has to be fetched alongside
 // it. Codes are opaque otherwise: "Failed: publish_timeout" was the entire

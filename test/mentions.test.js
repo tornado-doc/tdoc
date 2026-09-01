@@ -43,12 +43,14 @@ const box = {};
 vm.createContext(box);
 vm.runInContext([
   constLine(src, 'MENTION_RE'),
+  constLine(src, 'MENTION_MAX_PER_COMMENT'),
   fn(src, 'sessionLogin'),
   fn(src, 'normalizeGithubLogin'),
   fn(src, 'parseMentionLogins'),
   fn(src, 'commentParticipants'),
   fn(src, 'mentionableUsers'),
-  fn(src, 'resolveMentions'),
+  fn(src, 'mentionCandidates'),
+  fn(src, 'classifyMentions'),
   fn(src, 'positionalRecipient'),
   fn(src, 'inboxRecipients'),
   fn(src, 'inboxGroupKey'),
@@ -131,9 +133,45 @@ t('an outsider is not shown the private-doc allowlist', () => {
   assert(JSON.stringify(users.map(u => u.login)) === '["ana"]', JSON.stringify(users));
 });
 
-t('only names on the doc resolve — the rest stay plain text', () => {
-  const users = box.mentionableUsers({ ownerLogin: 'ana', allowedUsers: [], participants: [] });
-  assert(JSON.stringify(box.resolveMentions('@ana and @torvalds', users)) === '["ana"]');
+t('one comment cannot name an unbounded crowd', () => {
+  const many = Array.from({ length: 25 }, (_, i) => `@dev${i}`).join(' ');
+  assert(box.mentionCandidates(many).length === 10, box.mentionCandidates(many).length);
+});
+
+// ── who a mention may actually reach ─────────────────────────────────────
+const anyoneCanRead = () => true;
+const onlyInvited = (allowed) => (login) => allowed.includes(login);
+
+t('on a readable doc every name is delivered, GitHub strangers included', () => {
+  const out = box.classifyMentions(['torvalds', 'ana'], { canRead: anyoneCanRead });
+  assert(JSON.stringify(out.notified) === '["torvalds","ana"]', JSON.stringify(out));
+  assert(out.invited.length === 0 && out.blocked.length === 0);
+});
+
+t('a private doc does not leak its preview to a stranger', () => {
+  const out = box.classifyMentions(['dee', 'torvalds'], {
+    canRead: onlyInvited(['dee']), canInvite: false,
+  });
+  assert(JSON.stringify(out.notified) === '["dee"]', JSON.stringify(out));
+  assert(JSON.stringify(out.blocked) === '["torvalds"]', JSON.stringify(out));
+});
+
+t('the owner naming a stranger on a private doc invites them', () => {
+  const out = box.classifyMentions(['torvalds'], {
+    canRead: onlyInvited([]), canInvite: true, inviteBudget: 5,
+  });
+  assert(JSON.stringify(out.invited) === '["torvalds"]', JSON.stringify(out));
+  // An invite is worthless if the mention that caused it does not land.
+  assert(JSON.stringify(out.notified) === '["torvalds"]', JSON.stringify(out));
+  assert(out.blocked.length === 0);
+});
+
+t('the invite budget is a hard stop, the rest are blocked not silently dropped', () => {
+  const out = box.classifyMentions(['a', 'b', 'c'], {
+    canRead: onlyInvited([]), canInvite: true, inviteBudget: 2,
+  });
+  assert(JSON.stringify(out.invited) === '["a","b"]', JSON.stringify(out));
+  assert(JSON.stringify(out.blocked) === '["c"]', JSON.stringify(out));
 });
 
 // ── delivery ─────────────────────────────────────────────────────────────
@@ -206,7 +244,7 @@ t('the chip shows the token as typed, including a trailing hyphen', () => {
 // ── the two implementations must agree ───────────────────────────────────
 t('the local server parses mentions the same way as the worker', () => {
   const norm = (s) => s.replace(/\s+/g, ' ').trim();
-  for (const name of ['parseMentionLogins', 'resolveMentions', 'positionalRecipient']) {
+  for (const name of ['parseMentionLogins', 'mentionCandidates', 'positionalRecipient']) {
     assert(norm(fn(src, name)) === norm(fn(serverSrc, name)),
       `${name} has DRIFTED between worker.js and server.js`);
   }

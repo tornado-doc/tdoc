@@ -1,8 +1,13 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useGithubUserSearch } from './github-user-search.js';
 import { insertMention, matchMentionable, mentionQueryAt, splitMentions } from './mentions.js';
 
-// A textarea that offers the doc's people after `@`. Both composers use it, so
-// mentioning works the same whether you are starting a thread or answering one.
+// A textarea that offers people after `@`. Both composers use it, so mentioning
+// works the same whether you are starting a thread or answering one.
+//
+// The doc's own people answer first and instantly. GitHub's search is only
+// reached when they do not match — its unauthenticated limit is 10/min per
+// visitor and the Share panel's invite field spends from the same budget.
 export function MentionField({
   value,
   onChange,
@@ -17,7 +22,19 @@ export function MentionField({
   const [query, setQuery] = useState(null);
   const [active, setActive] = useState(0);
 
-  const matches = query ? matchMentionable(people, query.query) : [];
+  const localMatches = query ? matchMentionable(people, query.query) : [];
+  const remote = useGithubUserSearch(query ? query.query : '', {
+    enabled: Boolean(query) && localMatches.length === 0,
+  });
+  const matches = useMemo(() => {
+    const seen = new Set(localMatches.map((person) => String(person.login).toLowerCase()));
+    return localMatches.concat(remote
+      .filter((user) => user.login && !seen.has(String(user.login).toLowerCase()))
+      .map((user) => ({ login: user.login, name: '', avatar_url: user.avatar_url, remote: true })))
+      .slice(0, 6);
+    // localMatches/remote are derived arrays; identity churn only costs a cheap
+    // concat, and recomputing keeps the highlighted row in step with the query.
+  }, [JSON.stringify(localMatches), remote]);
   const open = Boolean(query) && matches.length > 0;
 
   // Restore the caret after an insertion: React re-renders with the new value
@@ -108,6 +125,7 @@ export function MentionField({
               {person.name && person.name.toLowerCase() !== person.login ? (
                 <span className="tdoc-mention-name">{person.name}</span>
               ) : null}
+              {person.remote ? <span className="tdoc-mention-source">GitHub</span> : null}
             </button>
           ))}
         </div>
