@@ -789,7 +789,10 @@ const server = http.createServer(async (req, res) => {
       // Roman. The proxy is unnecessary: the template is :where()
       // zero-specificity throughout, so a document that does style itself
       // wins every property it declares and is unaffected by the injection.
-      if (!body.includes('id="tdoc-reader"')) {
+      // Tag match, not substring: a doc whose PROSE quotes id="tdoc-reader"
+      // (tdoc's own design docs do) must still receive the template. Mirrors
+      // hasReaderBlock() in worker.js.
+      if (!/<style[^>]*\bid="tdoc-reader"/i.test(body)) {
         const rcss = readerCss();
         if (rcss) {
           const rtag = `<style id="tdoc-reader">${rcss}</style>`;

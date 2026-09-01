@@ -1198,8 +1198,13 @@ upload_version() {
   payload_file="$(mktemp -t tdoc-upload.XXXXXX)"
   printf '%s' "$payload" > "$payload_file"
   local resp
+  # Tier-1 client visibility: the server records which client produced each
+  # version. This is the observability that does not depend on the client's
+  # own (repeatedly silently-broken) self-update machinery.
+  TDOC_CLIENT_VERSION="$(cat "$SKILL_DIR/VERSION" 2>/dev/null || echo unknown)"
   resp="$(curl -sS --connect-timeout 10 --max-time 120 -X POST "$UPLOAD_BASE/api/upload" \
     -H "Authorization: Bearer $TOKEN" \
+    -H "X-Tdoc-Client: $TDOC_CLIENT_VERSION" \
     -H "Content-Type: application/json" \
     --data-binary @"$payload_file")" || { rm -f "$payload_file"; echo "[tdoc] v$v upload: network error/timeout" >&2; return 1; }
   rm -f "$payload_file"

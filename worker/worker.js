@@ -1486,12 +1486,54 @@ function forceWidgetSandbox(html) {
 function readerCssSource() {
   return (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
 }
+// Whether the document CARRIES the baked reading template — as an actual
+// <style> tag, not as prose. A substring check false-positives on any document
+// whose text discusses the mechanism (tdoc's own design docs quote
+// id="tdoc-reader" in code samples), and a false positive here means an
+// unbaked document is skipped. Every bake/skip decision uses this one test so
+// the write side and the read side cannot disagree.
+const READER_BLOCK_RE = /<style[^>]*\bid="tdoc-reader"/i;
+function hasReaderBlock(html) {
+  return READER_BLOCK_RE.test(html);
+}
+
+// The document-content invariants, in ONE place. Every path that stores a
+// version of a document — /api/upload, the browser Save inside the Durable
+// Object, and duplicate — goes through this. It exists because there used to
+// be no function named "store a version": each writer assembled the invariants
+// itself, which is how the browser Save path shipped without baking and how
+// nobody ever recorded a content hash (there was nowhere to put it).
+//
+// What it guarantees about the stored bytes:
+//   1. The reading template is baked in, stamped with its generation
+//      (data-tdoc-template), so the file is self-contained however old the
+//      client that produced it. No-op when the document already carries the
+//      block, and when this worker is unbundled (tests on raw worker.js).
+//   2. Artifact aids are stamped (comment anchor identity).
+//   3. `sha` is the hash of the EXACT bytes stored — what a client compares
+//      against to know whether its local copy is current.
+// Widget HTML must NOT come through here: widgets are sandboxed islands with
+// their own CSP, and the reading template does not belong in them.
+async function prepareDocVersion(rawHtml) {
+  let html = String(rawHtml);
+  const css = readerCssSource();
+  if (css && !hasReaderBlock(html)) {
+    const stamp = (await sha256Hex(css)).slice(0, 8);
+    const tag = `<style id="tdoc-reader" data-tdoc-template="${stamp}">${css}</style>\n`;
+    // Callback so a `$` in the template stays literal.
+    html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, () => `${tag}</head>`) : tag + html;
+  }
+  const stamped = stampAids(html);
+  const sha = (await sha256Hex(stamped.html)).slice(0, 16);
+  return { html: stamped.html, aids: stamped.aids, sha };
+}
+
 function injectReaderCss(html, css) {
   if (!css) return html;
   // Documents have been self-contained since creation-time baking landed, so
   // most already carry the block. Stamping a second copy is 8KB of duplicate
   // CSS and a duplicate id in every downloaded file.
-  if (html.includes('id="tdoc-reader"')) return html;
+  if (hasReaderBlock(html)) return html;
   const tag = `<style id="tdoc-reader">${css}</style>\n`;
   if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, () => `${tag}</head>`);
   return tag + html;
@@ -3245,7 +3287,7 @@ export class CommentsStore {
       const widgetFrom = `/d/${slug}/v/${op.baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${reservation.next}/widget/`;
       const rewritten = String(op.html).split(widgetFrom).join(widgetTo);
-      const stamped = stampAids(rewritten);
+      const stamped = await prepareDocVersion(rewritten);
       await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
       const key = `docs/${slug}/v${reservation.next}/index.html`;
       await this.env.DOCS.put(key, stamped.html, {
@@ -3262,6 +3304,7 @@ export class CommentsStore {
         created: now,
         prompt: 'Browser edit',
         source: 'browser',
+        sha: stamped.sha,
         ...(op.actorLogin ? { author: op.actorLogin } : {}),
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
@@ -3675,7 +3718,7 @@ export default {
         // max-width" proxy starved the documents that followed the contract,
         // and :where() zero-specificity makes the injection harmless to a
         // document that styles itself.
-        if (!body.includes('id="tdoc-reader"')) {
+        if (!hasReaderBlock(body)) {
           const rcss = (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
           if (rcss) {
             const rtag = `<style id="tdoc-reader">${rcss}</style>`;
@@ -3917,7 +3960,8 @@ export default {
       };
       incoming = stampHostedOwnership(incoming, actor);
 
-      const { html: stampedHtml } = stampAids(rawHtml);
+      const { html: stampedHtml, sha: dupSha } = await prepareDocVersion(rawHtml);
+      incoming.versions[0].sha = dupSha;
       const r2Key = `docs/${newSlug}/v1/index.html`;
       try {
         await env.DOCS.put(r2Key, stampedHtml, {
@@ -4583,7 +4627,12 @@ export default {
       // data-tdoc-aid. The SAME artifact in a different version has the
       // SAME aid — so a comment anchored by aid resolves identity-first
       // and cannot drift onto a different artifact.
-      const { html: stampedHtml, aids } = stampAids(doc);
+      const { html: stampedHtml, aids, sha: uploadSha } = await prepareDocVersion(doc);
+      // Tier-1 client visibility: the server is the only place guaranteed to
+      // see every publish, so the version entry records which client produced
+      // it. The self-update machinery has failed silently in seven distinct
+      // ways; this is the observability that does not depend on it.
+      const clientVersion = (req.headers.get('x-tdoc-client') || '').slice(0, 64) || null;
       const r2Key = `docs/${slug}/v${verNum}/index.html`;
       const incomingLatest = latestVersionNumber(incoming);
       const writesLatestMeta = !!incoming && (incomingLatest === 0 || verNum === incomingLatest);
@@ -4676,6 +4725,11 @@ export default {
           if (!versionByNumber.has(verNum)) {
             versionByNumber.set(verNum, { n: verNum, created: new Date().toISOString() });
           }
+          // The entry for the version whose bytes this request just stored
+          // records the hash of those bytes and the client that sent them.
+          const storedEntry = { ...versionByNumber.get(verNum), sha: uploadSha };
+          if (clientVersion) storedEntry.client = clientVersion;
+          versionByNumber.set(verNum, storedEntry);
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
             .sort((a, b) => Number(a.n) - Number(b.n));
@@ -4696,6 +4750,26 @@ export default {
           // repairs the cursor from META; never report this committed version
           // as failed and invite an unsafe retry.
           console.error('[upload] version cursor finalize failed (recoverable):', e.message || String(e));
+        }
+      } else {
+        // History backfill (re-uploading v1..vN-1) stores freshly-prepared
+        // bytes but skips the latest-meta merge above — without this, the
+        // entry keeps a sha for bytes that no longer exist, and /raw serves a
+        // stale ETag after a reader-template generation change. Refresh just
+        // this entry; touch nothing else in meta.
+        try {
+          const currentMeta = await loadDocMeta(env, slug);
+          const entry = (Array.isArray(currentMeta && currentMeta.versions) ? currentMeta.versions : [])
+            .find((v) => Number(v.n) === verNum);
+          if (entry && (entry.sha !== uploadSha || (clientVersion && entry.client !== clientVersion))) {
+            entry.sha = uploadSha;
+            if (clientVersion) entry.client = clientVersion;
+            await env.META.put(`meta:${slug}`, JSON.stringify(currentMeta));
+          }
+        } catch (e) {
+          // The bytes are stored and correct; a stale recorded sha costs at
+          // worst one spurious /raw re-download. Never fail the upload for it.
+          console.error('[upload] backfill sha refresh failed (recoverable):', e.message || String(e));
         }
       }
       // Reconcile existing open comments against the new artifact set:
@@ -4729,7 +4803,10 @@ export default {
       } catch (e) {
         console.error('[upload] comment merge/reconcile failed (non-fatal):', e.message);
       }
-      return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, mergedComments: mergedLocal });
+      // `sha` is the hash of the exact stored bytes (post-bake, post-stamp). The
+      // client records it so a later edit can ask "has remote moved since I
+      // published?" with one HEAD request instead of re-downloading the doc.
+      return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal });
     }
 
     // ---- admin access mutation ----
