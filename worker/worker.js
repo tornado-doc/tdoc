@@ -3049,10 +3049,27 @@ function recordAuthor(list, id) {
 
 // Editing is the author's ALONE — deliberately not canMutate(), which also
 // grants the doc owner. Rewriting somebody else's words under their name is
-// not a power owning the document confers.
+// not a power owning the document confers. That holds for an agent's words
+// too: nobody rewrites what the agent said, including the person it ran for.
 function isRecordAuthor(record, session) {
   const who = record && record.author && record.author.login;
   return !!(who && session && session.login && who === session.login);
+}
+
+function isAgentRecord(record) {
+  return !!(record && record.author && record.author.kind === 'agent');
+}
+
+// Deleting is the author's — and an agent's words belong to the person whose
+// token it ran on. /api/agent/reply is authed with the doc's upload token, so
+// an agent is not a third party with speech of its own; it is the owner
+// writing through a tool. Reading it that way answers "whose words are these"
+// rather than punching a hole in "deletion belongs to whoever wrote it", and
+// it keeps the flow #349 describes possible: a person clearing an AI comment
+// they did not want.
+function mayDelete(record, session, env, meta) {
+  if (isRecordAuthor(record, session)) return true;
+  return isAgentRecord(record) && isDocOwnerSession(env, session, meta);
 }
 
 // Per-user inbox (same host, cross-doc). KV key inbox:<github-login>.
@@ -5052,9 +5069,17 @@ export default {
     }
     // Soft-delete: append a `deleted` event at the current version. The
     // record is preserved; older versions still see the comment as it was.
-    // Author-only. ?version=N to stamp the delete at a specific version
-    // (defaults to Infinity, meaning "delete forward from now" which the
-    // overlay supplies as the current view's version).
+    //
+    // The author's — mayDelete, not canMutate. A doc owner used to be able to
+    // delete anybody's comment here, which is the wrong power to hand the
+    // person being reviewed: taking someone's words off the page is theirs to
+    // do. The one thing an owner still reaches is an AGENT's comment, because
+    // the agent wrote it with the owner's own upload token. What is gone is
+    // silencing a reader; what is kept is clearing what your tools said.
+    //
+    // ?version=N to stamp the delete at a specific version (defaults to
+    // Infinity, meaning "delete forward from now" which the overlay supplies
+    // as the current view's version).
     if (p === '/api/comments' && method === 'DELETE') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -5069,24 +5094,10 @@ export default {
       // is harmless (applyCommentOp returns 404).
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
+      const target = findRecord(authList, id);
+      if (!target) return json({ error: 'not_found' }, { status: 404 });
       const meta = await loadDocMeta(env, slug);
-      let authorized = false;
-      const top = authList.find(c => c.id === id);
-      if (top) {
-        if (!canMutate(top, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
-        authorized = true;
-      } else {
-        for (const c of authList) {
-          ensureEventLog(c);
-          const reply = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
-          if (reply) {
-            if (!canMutate(reply.reply, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
-            authorized = true;
-            break;
-          }
-        }
-      }
-      if (!authorized) return json({ error: 'not_found' }, { status: 404 });
+      if (!mayDelete(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const res = await mutateComments(env, slug, {
         kind: 'delete', slug, id, version: stampVersion, actor: { login: s.login },
       });
