@@ -78,7 +78,7 @@ function Reactions({ item, me, onReact }) {
   );
 }
 
-function ReplyForm({ commentId, onReply }) {
+function ReplyForm({ commentId, onReply, replyingTo }) {
   const [text, setText] = useState('');
 
   const submit = async () => {
@@ -89,6 +89,7 @@ function ReplyForm({ commentId, onReply }) {
 
   return (
     <div className="tdoc-reply-form open" data-parent-id={commentId}>
+      {replyingTo ? <div className="tdoc-reply-to">Replying to @{replyingTo}</div> : null}
       <textarea
         placeholder="Reply…"
         value={text}
@@ -103,6 +104,118 @@ function ReplyForm({ commentId, onReply }) {
           Reply
         </button>
       </div>
+    </div>
+  );
+}
+
+// Mirrors the worker's canMutate(): delete and re-anchor are the author's or
+// the doc owner's, nobody else's. Without this the buttons rendered for every
+// reader and the server's 403 (`not_author`) was the only thing stopping them
+// — a toast where there should have been no affordance at all.
+function mayMutate(item, currentUser, isOwner) {
+  return Boolean(
+    isOwner
+    || (currentUser
+      && currentUser !== 'anon'
+      && item.author?.login
+      && item.author.login === currentUser),
+  );
+}
+
+function hasReactions(item) {
+  return Object.values(item.reactions || {}).some((users) => users?.length);
+}
+
+function formatCreated(created) {
+  return created
+    ? new Date(created).toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+    : '';
+}
+
+// A reply's parent is another comment id: the thread root when parent_id is
+// absent (every reply written before threads nested) or another reply when the
+// conversation went deeper. The server has always stored the chain — see the
+// `reply_added` fold, which defaults parent_id to the root comment.
+function childrenOf(replies, parentId, rootId) {
+  return replies.filter((reply) => (reply.parent_id || rootId) === parentId);
+}
+
+// A reply carries the same affordances as the comment it hangs under: react,
+// reply, and delete-your-own. Between the overlay rewrite and the React port
+// these were "deferred", which left every answer in a thread a dead end.
+function ReplyCard({
+  reply,
+  replies,
+  rootId,
+  depth,
+  currentUser,
+  isOwner,
+  replyTarget,
+  onReplyTarget,
+  onReply,
+  onReact,
+  onDelete,
+}) {
+  const kids = childrenOf(replies, reply.id, rootId);
+  const reacted = hasReactions(reply);
+  const author = reply.author?.login || reply.author?.name || '';
+
+  return (
+    <div className="tdoc-reply" data-comment-id={reply.id} data-depth={depth}>
+      <Author author={reply.author} />
+      <div className="text">{reply.text}</div>
+      {reacted ? <Reactions item={reply} me={currentUser} onReact={onReact} /> : null}
+
+      <div className="meta">
+        <span>{formatCreated(reply.created)}</span>
+        <span className="actions">
+          {reacted ? null : (
+            <ReactionPicker onPick={(emoji) => onReact(reply.id, emoji)} />
+          )}
+          <button
+            type="button"
+            className="tdoc-reply-toggle"
+            onClick={() => onReplyTarget(replyTarget === reply.id ? null : reply.id)}
+          >
+            Reply
+          </button>
+          {mayMutate(reply, currentUser, isOwner) ? (
+            <button type="button" className="del" onClick={() => onDelete(reply.id)}>
+              delete
+            </button>
+          ) : null}
+        </span>
+      </div>
+
+      {replyTarget === reply.id ? (
+        <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} />
+      ) : null}
+
+      {kids.length ? (
+        <div className="tdoc-reply-kids">
+          {kids.map((kid) => (
+            <ReplyCard
+              key={kid.id}
+              reply={kid}
+              replies={replies}
+              rootId={rootId}
+              depth={depth + 1}
+              currentUser={currentUser}
+              isOwner={isOwner}
+              replyTarget={replyTarget}
+              onReplyTarget={onReplyTarget}
+              onReply={onReply}
+              onReact={onReact}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -123,7 +236,7 @@ export function CommentCard({
   onReanchor,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
-  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyTarget, setReplyTarget] = useState(null);
   const cardRef = useRef(null);
   const [clampedTop, setClampedTop] = useState(null);
 
@@ -135,29 +248,16 @@ export function CommentCard({
     const limit = window.innerHeight - cardRef.current.offsetHeight - 8;
     const next = Math.max(52, Math.min(position.top, limit));
     setClampedTop(next === position.top ? null : next);
-  }, [floating, position, repliesOpen, replyOpen, comment]);
-  const reactionCount = Object.values(comment.reactions || {})
-    .some((users) => users?.length);
-  // Mirrors the worker's canMutate(): delete and re-anchor are the comment
-  // author's or the doc owner's, nobody else's. Without this the buttons
-  // rendered for every reader and the server's 403 (`not_author`) was the
-  // only thing stopping them — a toast where there should have been no
-  // affordance at all.
-  const canMutate = Boolean(
-    isOwner
-    || (currentUser
-      && currentUser !== 'anon'
-      && comment.author?.login
-      && comment.author.login === currentUser),
-  );
-  const createdAt = comment.created
-    ? new Date(comment.created).toLocaleString([], {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    })
-    : '';
+  }, [floating, position, repliesOpen, replyTarget, comment]);
+  const reactionCount = hasReactions(comment);
+  const canMutate = mayMutate(comment, currentUser, isOwner);
+  const createdAt = formatCreated(comment.created);
+  const replies = comment.replies || [];
+  // Orphans — their parent reply was deleted — still show under the root
+  // rather than vanishing with it.
+  const known = new Set(replies.map((reply) => reply.id).concat([comment.id]));
+  const rootReplies = childrenOf(replies, comment.id, comment.id)
+    .concat(replies.filter((reply) => reply.parent_id && !known.has(reply.parent_id)));
 
   const className = [
     'tdoc-margin-comment',
@@ -213,7 +313,7 @@ export function CommentCard({
           <button
             type="button"
             className="tdoc-reply-toggle"
-            onClick={() => setReplyOpen((open) => !open)}
+            onClick={() => setReplyTarget((open) => (open === comment.id ? null : comment.id))}
           >
             Reply
           </button>
@@ -225,7 +325,7 @@ export function CommentCard({
         </span>
       </div>
 
-      {comment.replies?.length ? (
+      {replies.length ? (
         <>
           <button
             type="button"
@@ -233,20 +333,32 @@ export function CommentCard({
             onClick={() => setRepliesOpen((open) => !open)}
           >
             <ChevronRight className="chev" size={10} />
-            {comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}
+            {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
           </button>
           <div className={`tdoc-replies${repliesOpen ? ' open' : ''}`}>
-            {comment.replies.map((reply) => (
-              <div key={reply.id} className="tdoc-reply" data-comment-id={reply.id}>
-                <Author author={reply.author} />
-                <div className="text">{reply.text}</div>
-              </div>
+            {rootReplies.map((reply) => (
+              <ReplyCard
+                key={reply.id}
+                reply={reply}
+                replies={replies}
+                rootId={comment.id}
+                depth={1}
+                currentUser={currentUser}
+                isOwner={isOwner}
+                replyTarget={replyTarget}
+                onReplyTarget={setReplyTarget}
+                onReply={onReply}
+                onReact={onReact}
+                onDelete={onDelete}
+              />
             ))}
           </div>
         </>
       ) : null}
 
-      {replyOpen ? <ReplyForm commentId={comment.id} onReply={onReply} /> : null}
+      {replyTarget === comment.id ? (
+        <ReplyForm commentId={comment.id} onReply={onReply} />
+      ) : null}
     </article>
   );
 }
