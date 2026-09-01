@@ -633,19 +633,26 @@ const SLUG = 'hostile-body-css';
       const authedUrl = `${authed.url.replace(/\/d\/.*/, '')}/d/${SLUG}/v/1?shell=1`;
       const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
       try {
-        await t('a comment offers edit to its author and to nobody else', async () => {
+        await t('a comment offers edit and delete to its author and to nobody else', async () => {
           const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
           try {
             await page.setViewportSize({ width: 1400, height: 900 });
             await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
             await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
-            // …and c_fixture_4 belongs to reviewer-a. The viewer owns this doc,
-            // so it still carries a delete — but never an edit.
+            await page.waitForSelector(`${card} .del`, { timeout: 2000 });
+            // …and c_fixture_4 belongs to reviewer-a. The viewer owns this
+            // doc, and still gets neither of them on somebody else's comment —
+            // only the re-anchor, which is about where a comment points, not
+            // about what it says.
             await page.goto(`${authedUrl}&comment=c_fixture_4`, { waitUntil: 'networkidle' });
             const other = '.tdoc-margin-comment[data-comment-id="c_fixture_4"]';
-            await page.waitForSelector(`${other} .del`, { timeout: 4000 });
-            const strangerEdit = await page.$(`${other} .tdoc-edit-toggle`);
-            if (strangerEdit) throw new Error('the doc owner was offered an edit on someone else\'s comment');
+            await page.waitForSelector(`${other} .tdoc-reanchor-btn`, { timeout: 4000 });
+            if (await page.$(`${other} .tdoc-edit-toggle`)) {
+              throw new Error('the doc owner was offered an edit on someone else\'s comment');
+            }
+            if (await page.$(`${other} .del`)) {
+              throw new Error('the doc owner was offered a delete on someone else\'s comment');
+            }
           } finally {
             fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
           }
