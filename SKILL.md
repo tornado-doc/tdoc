@@ -532,7 +532,24 @@ comments you handled unless you reply on each one. Skipping comments
 silently is the #1 source of regression complaints.
 
 1. Read `~/tdocs/<slug>/comments.json` — filter to `status: "open"`.
-2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
+2. **Get the current document — remote is the source of truth, local is a
+   cache.** The local `v<n>/index.html` can be stale: a browser edit or a
+   publish from another machine creates versions your checkout never saw, and
+   an edit based on a stale copy silently discards them. One conditional
+   request settles it (`published.json` holds the base URL; skip this entirely
+   for a doc that was never published):
+
+   ```bash
+   REMOTE_SHA="$(curl -sfI "$BASE/d/<slug>/v/<n>/raw" | tr -d '\r' | sed -n 's/^etag: "\(.*\)"$/\1/Ip')"
+   LOCAL_SHA="$(node -e 'const m=require(process.argv[1]);const e=(m.versions||[]).find(v=>v.n===Number(process.argv[2]));console.log(e&&e.sha||"")' "$TDOC_DIR/<slug>/meta.json" <n>)"
+   ```
+
+   - **Match** → your local copy produced what remote holds; use it as the base.
+   - **Differ (or no local sha)** → pull the truth: `curl -sf "$BASE/d/<slug>/v/<n>/raw" -o "$TDOC_DIR/<slug>/v<n>/index.html"` and base the edit on that.
+   - **Unreachable** → use the local copy, and say so in your reply: the edit
+     is based on a possibly-stale cache.
+
+   Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice, and

@@ -259,6 +259,66 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     assert(meta.versions.find((v) => v.n === 2), 'backfill must not drop other version entries');
   });
 
+  await t('/raw returns stored bytes as text/plain with the sha as ETag', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env);
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'r1', version: 1, html: DOC, meta: { title: 'r1', slug: 'r1', versions: [{ n: 1 }] } },
+    }), env, {});
+    const r = await worker.fetch(req('/d/r1/v/1/raw'), env, {});
+    assert(r.status === 200, `raw ${r.status}`);
+    // NEVER text/html: author HTML on the shared origin outside the sandboxed
+    // /frame would be stored XSS.
+    assert((r.headers.get('content-type') || '').startsWith('text/plain'), `raw content-type: ${r.headers.get('content-type')}`);
+    assert(r.headers.get('x-content-type-options') === 'nosniff', 'raw lacks nosniff');
+    const body = await r.text();
+    const stored = await (await env.DOCS.get('docs/r1/v1/index.html')).text();
+    assert(body === stored, 'raw body is not the exact stored bytes');
+    const meta = JSON.parse(await env.META.get('meta:r1'));
+    const sha = meta.versions.find((v) => v.n === 1).sha;
+    assert(r.headers.get('etag') === `"${sha}"`, `etag ${r.headers.get('etag')} != version sha ${sha}`);
+  });
+
+  await t('/raw honors If-None-Match with 304 and no body', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env);
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'r2', version: 1, html: DOC, meta: { title: 'r2', slug: 'r2', versions: [{ n: 1 }] } },
+    }), env, {});
+    const first = await worker.fetch(req('/d/r2/v/1/raw'), env, {});
+    const etag = first.headers.get('etag');
+    const second = await worker.fetch(req('/d/r2/v/1/raw', { headers: { 'If-None-Match': etag } }), env, {});
+    assert(second.status === 304, `expected 304, got ${second.status}`);
+    assert((await second.text()) === '', '304 must carry no body');
+  });
+
+  await t('/raw computes an ETag for pre-existing storage with no recorded sha', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    // Seed unbaked legacy bytes directly, meta without sha — the population
+    // written before prepareDocVersion existed.
+    await env.DOCS.put('docs/r3/v1/index.html', DOC);
+    await env.META.put('meta:r3', JSON.stringify({ title: 'r3', slug: 'r3', versions: [{ n: 1 }] }));
+    const r = await worker.fetch(req('/d/r3/v/1/raw'), env, {});
+    assert(r.status === 200, `raw ${r.status}`);
+    assert(/^"[0-9a-f]{16}"$/.test(r.headers.get('etag') || ''), `legacy etag: ${r.headers.get('etag')}`);
+    assert((await r.text()) === DOC, 'legacy raw must return the stored bytes untouched — /raw never bakes');
+  });
+
+  await t('/raw is access-gated like every other doc read', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env);
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'r4', version: 1, html: DOC, meta: { title: 'r4', slug: 'r4', versions: [{ n: 1 }], access: { visibility: 'private' } } },
+    }), env, {});
+    const anon = await worker.fetch(req('/d/r4/v/1/raw'), env, {});
+    assert(anon.status === 401 || anon.status === 403, `anonymous read of a private doc must be denied, got ${anon.status}`);
+    const owner = await worker.fetch(req('/d/r4/v/1/raw', { token: a.token }), env, {});
+    assert(owner.status === 200, `owner token read failed: ${owner.status}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
