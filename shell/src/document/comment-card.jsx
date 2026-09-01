@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { ChevronRight, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
+import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 
 function Author({ author }) {
@@ -78,7 +79,7 @@ function Reactions({ item, me, onReact }) {
   );
 }
 
-function ReplyForm({ commentId, onReply, replyingTo }) {
+function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
   const [text, setText] = useState('');
 
   const submit = async () => {
@@ -90,13 +91,12 @@ function ReplyForm({ commentId, onReply, replyingTo }) {
   return (
     <div className="tdoc-reply-form open" data-parent-id={commentId}>
       {replyingTo ? <div className="tdoc-reply-to">Replying to @{replyingTo}</div> : null}
-      <textarea
-        placeholder="Reply…"
+      <MentionField
+        placeholder="Reply… (@ to notify someone)"
         value={text}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') submit();
-        }}
+        people={mentionable}
+        onChange={setText}
+        onSubmit={submit}
       />
       <div className="tdoc-reply-form-foot">
         <span className="hint" />
@@ -155,6 +155,7 @@ function ReplyCard({
   depth,
   currentUser,
   isOwner,
+  mentionable,
   replyTarget,
   onReplyTarget,
   onReply,
@@ -168,7 +169,7 @@ function ReplyCard({
   return (
     <div className="tdoc-reply" data-comment-id={reply.id} data-depth={depth}>
       <Author author={reply.author} />
-      <div className="text">{reply.text}</div>
+      <div className="text"><MentionText text={reply.text} mentions={reply.mentions} /></div>
       {reacted ? <Reactions item={reply} me={currentUser} onReact={onReact} /> : null}
 
       <div className="meta">
@@ -193,7 +194,7 @@ function ReplyCard({
       </div>
 
       {replyTarget === reply.id ? (
-        <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} />
+        <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} mentionable={mentionable} />
       ) : null}
 
       {kids.length ? (
@@ -207,6 +208,7 @@ function ReplyCard({
               depth={depth + 1}
               currentUser={currentUser}
               isOwner={isOwner}
+              mentionable={mentionable}
               replyTarget={replyTarget}
               onReplyTarget={onReplyTarget}
               onReply={onReply}
@@ -224,6 +226,7 @@ export function CommentCard({
   comment,
   currentUser,
   isOwner = false,
+  mentionable = [],
   unanchored,
   floating = false,
   position,
@@ -299,7 +302,7 @@ export function CommentCard({
       ) : null}
 
       <Author author={comment.author} />
-      <div className="text">{comment.text}</div>
+      <div className="text"><MentionText text={comment.text} mentions={comment.mentions} /></div>
       {reactionCount ? (
         <Reactions item={comment} me={currentUser} onReact={onReact} />
       ) : null}
@@ -345,6 +348,7 @@ export function CommentCard({
                 depth={1}
                 currentUser={currentUser}
                 isOwner={isOwner}
+                mentionable={mentionable}
                 replyTarget={replyTarget}
                 onReplyTarget={setReplyTarget}
                 onReply={onReply}
@@ -357,7 +361,7 @@ export function CommentCard({
       ) : null}
 
       {replyTarget === comment.id ? (
-        <ReplyForm commentId={comment.id} onReply={onReply} />
+        <ReplyForm commentId={comment.id} onReply={onReply} mentionable={mentionable} />
       ) : null}
     </article>
   );

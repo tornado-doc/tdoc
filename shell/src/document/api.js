@@ -19,6 +19,12 @@ export function listComments(slug, version) {
   return request(`/api/comments?${query}`);
 }
 
+// The people this session may name after `@` on this doc.
+export function listMentionableUsers(slug) {
+  const query = new URLSearchParams({ slug });
+  return request(`/api/mentions?${query}`);
+}
+
 export function createComment(payload) {
   return request('/api/comments', {
     method: 'POST',

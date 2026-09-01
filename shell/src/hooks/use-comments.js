@@ -28,10 +28,13 @@ export function useComments({ slug, version, onChange, onUnauthorized }) {
     refresh().catch(() => {});
   }, [refresh]);
 
+  // Returns the server's response for the mutation itself — the caller needs
+  // it for POST /api/comments, which reports what became of each @mention.
   const mutate = useCallback(async (operation) => {
     try {
-      await operation();
-      return refresh();
+      const result = await operation();
+      await refresh();
+      return result;
     } catch (error) {
       if (error.status === 401 && onUnauthorized) return onUnauthorized();
       throw error;

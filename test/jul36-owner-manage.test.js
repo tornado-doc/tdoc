@@ -11,6 +11,9 @@ const worker = fs.readFileSync(path.join(root, 'worker/worker.js'), 'utf8');
 const dialog = fs.readFileSync(path.join(root, 'shell/src/document/owner-access-dialog.jsx'), 'utf8');
 const toolbar = fs.readFileSync(path.join(root, 'shell/src/document/document-toolbar.jsx'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'shell/src/document/api.js'), 'utf8');
+// The lookup moved out of the dialog when the @mention picker started sharing
+// it; the guarantee it carries did not move.
+const userSearch = fs.readFileSync(path.join(root, 'shell/src/document/github-user-search.js'), 'utf8');
 
 console.log('owner access management');
 
@@ -66,9 +69,16 @@ t('delete uses a styled React confirmation and never native confirm()', () => {
 });
 
 t('GitHub invite autocomplete remains client-side and token-free', () => {
-  assert(/fetch\(`https:\/\/api\.github\.com\/search\/users\?/.test(dialog), 'GitHub user lookup missing');
-  assert(dialog.includes('AbortController'), 'stale autocomplete request cancellation missing');
-  assert(!/Authorization|Bearer|access_token/i.test(dialog.slice(dialog.indexOf('function InviteField'), dialog.indexOf('export function OwnerAccessDialog'))), 'autocomplete sends a credential');
+  assert(/fetch\(`https:\/\/api\.github\.com\/search\/users\?/.test(userSearch), 'GitHub user lookup missing');
+  assert(userSearch.includes('AbortController'), 'stale autocomplete request cancellation missing');
+  assert(!/Authorization|Bearer|access_token/i.test(userSearch), 'autocomplete sends a credential');
+  assert(dialog.includes('useGithubUserSearch'), 'the invite field no longer uses the shared lookup');
+  // One implementation, not two: a second copy would drift and would double
+  // the unauthenticated rate-limit spend.
+  assert(!/api\.github\.com/.test(dialog), 'the dialog has its own copy of the lookup again');
+  const field = fs.readFileSync(path.join(root, 'shell/src/document/mention-field.jsx'), 'utf8');
+  assert(field.includes('useGithubUserSearch'), 'the @ picker does not share the lookup');
+  assert(!/api\.github\.com/.test(field), 'the @ picker has its own copy of the lookup');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

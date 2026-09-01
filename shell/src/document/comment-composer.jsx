@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import { MentionField } from './mention-field.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
 
-export function CommentComposer({ selection, onSubmit, onClose }) {
+export function CommentComposer({ selection, onSubmit, onClose, mentionable = [] }) {
   const [text, setText] = useState('');
   const rect = selection.rect || {};
   const width = 320;
@@ -35,14 +36,13 @@ export function CommentComposer({ selection, onSubmit, onClose }) {
         <span className="h">{preview}</span>
         <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
       </div>
-      <textarea
+      <MentionField
         autoFocus
-        placeholder="What should change?"
+        placeholder="What should change? Type @ to notify someone"
         value={text}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') submit();
-        }}
+        people={mentionable}
+        onChange={setText}
+        onSubmit={submit}
       />
       <div className="foot">
         <span className="hint">⌘+Enter to submit</span>

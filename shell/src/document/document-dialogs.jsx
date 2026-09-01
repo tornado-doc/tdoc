@@ -22,7 +22,58 @@ export function ShareDialog({ open, url, onOpenChange, onCopied }) {
         </>
       )}
     >
-      <div className="code" id="tdoc-share-url">{url}</div>
+      <div className="code url" id="tdoc-share-url">{url}</div>
+    </AppDialog>
+  );
+}
+
+// Being named on a doc you are not part of has two very different endings,
+// and the author's job differs by which one it is. Someone who already uses
+// tdoc will find the mention on their own — the link only makes it sooner.
+// Someone who never has will not, ever: tdoc has no channel off the site, so
+// the inbox row sits in an inbox they have no reason to open. Telling both
+// groups "send them the link" is exactly how the second person quietly never
+// hears about it, so each name says which case it is.
+function reachLine({ login, known, invited }) {
+  const who = `@${login}`;
+  const tail = known
+    ? 'the mention is waiting in their tdoc inbox'
+    : 'has never used tdoc, so only this link will reach them';
+  return invited ? `${who} · invited — ${tail}` : `${who} — ${tail}`;
+}
+
+export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopied }) {
+  const people = newcomers || [];
+  const strangers = people.filter((person) => !person.known);
+  return (
+    <AppDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={strangers.length ? 'Send them the link' : 'Named on this doc'}
+      description={strangers.length
+        ? 'tdoc cannot email anyone. For the people below who have never used tdoc, this link is the only way the mention reaches them.'
+        : 'They are not on this doc yet, but they use tdoc — the mention is in their inbox. Send the link if you want them to see it sooner.'}
+      actions={(
+        <>
+          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
+          <button
+            type="button"
+            className="primary"
+            onClick={async () => { await copyText(url); onCopied(); }}
+          >
+            Copy link
+          </button>
+        </>
+      )}
+    >
+      <div className="status" id="tdoc-mention-reach">
+        {people.map((person) => (
+          <div key={person.login} className={person.known ? 'reach' : 'reach new'}>
+            {reachLine(person)}
+          </div>
+        ))}
+      </div>
+      <div className="code url" style={{ marginTop: 10 }}>{url}</div>
     </AppDialog>
   );
 }
@@ -116,7 +167,7 @@ export function PublishDialog({ open, slug, onOpenChange }) {
       {signin ? <PublishSignin signin={signin} /> : null}
       {url ? (
         <div style={{ marginTop: 10 }}>
-          <div className="code" id="tdoc-pub-url" style={{ fontSize: 14, letterSpacing: 0, textAlign: 'left' }}>{url}</div>
+          <div className="code url" id="tdoc-pub-url">{url}</div>
           <div className="actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
             <button type="button" className="primary" onClick={() => copyText(url)}>Copy link</button>
             <button type="button" onClick={() => window.open(url, '_blank', 'noopener')}>View live →</button>
