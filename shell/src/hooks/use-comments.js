@@ -5,6 +5,7 @@ import {
   removeComment,
   toggleReaction,
   updateCommentAnchor,
+  updateCommentText,
 } from '../document/api.js';
 import { anchorFromSelection } from '../document/model.js';
 
@@ -60,6 +61,10 @@ export function useComments({ slug, version, onChange, onUnauthorized }) {
     return mutate(() => createComment({ slug, version, text: text.trim(), parent_id: parentId }));
   }, [mutate, slug, version]);
 
+  const edit = useCallback(async (id, text) => {
+    return mutate(() => updateCommentText({ slug, version, id, text: text.trim() }));
+  }, [mutate, slug, version]);
+
   const react = useCallback(async (commentId, emoji) => {
     return mutate(() => toggleReaction({ slug, version, comment_id: commentId, emoji }));
   }, [mutate, slug, version]);
@@ -82,6 +87,7 @@ export function useComments({ slug, version, onChange, onUnauthorized }) {
     refresh,
     addComment,
     addReply,
+    edit,
     react,
     remove,
     moveAnchor,

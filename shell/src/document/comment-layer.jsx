@@ -83,6 +83,7 @@ export function DesktopCommentLayer({
   onReply,
   onReact,
   onDelete,
+  onEdit,
   onReanchor,
 }) {
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
@@ -131,6 +132,7 @@ export function DesktopCommentLayer({
           onReply={onReply}
           onReact={onReact}
           onDelete={onDelete}
+          onEdit={onEdit}
           onReanchor={onReanchor}
         />
       ) : null}
@@ -151,6 +153,7 @@ export function MobileCommentDrawer({
   onReply,
   onReact,
   onDelete,
+  onEdit,
   onReanchor,
   onNavigate,
 }) {
@@ -192,6 +195,7 @@ export function MobileCommentDrawer({
                   onReply={onReply}
                   onReact={onReact}
                   onDelete={onDelete}
+                  onEdit={onEdit}
                   onReanchor={onReanchor}
                 />
               ))}

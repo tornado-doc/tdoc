@@ -278,6 +278,44 @@ const SLUG = 'hostile-body-css';
       if (!hasDelete) throw new Error('card missing delete control');
     });
 
+    await t('a submitted reply closes its composer and lands visibly in the thread (#349)', async () => {
+      // The reply posted, but the composer stayed on screen with the thread
+      // still folded shut — nothing looked like it happened, and only a page
+      // refresh cleared the box.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 3000 });
+        await page.click('.tdoc-pin[data-id="c_fixture_1"]');
+        await page.waitForSelector(`${card} .tdoc-reply-toggle`, { timeout: 2000 });
+        await page.click(`${card} > .meta .tdoc-reply-toggle`);
+        await page.waitForSelector(`${card} .tdoc-reply-form.open textarea`, { timeout: 2000 });
+        // the caret is already in it — you asked for this box by clicking Reply
+        const focused = await page.evaluate((sel) => {
+          const box = document.querySelector(`${sel} .tdoc-reply-form.open textarea`);
+          return document.activeElement === box;
+        }, card);
+        if (!focused) throw new Error('the reply box opened without the caret in it');
+        await page.fill(`${card} .tdoc-reply-form.open textarea`, 'submitted reply #349');
+        await page.click(`${card} .tdoc-reply-submit`);
+        // the composer goes away on its own — no reload
+        await page.waitForSelector(`${card} .tdoc-reply-form`, { state: 'detached', timeout: 4000 });
+        // and the new reply is on screen, in the thread, without a refresh
+        await page.waitForSelector(`${card} .tdoc-replies.open`, { timeout: 2000 });
+        const texts = await page.$$eval(
+          `${card} .tdoc-replies.open .tdoc-reply .text`,
+          (nodes) => nodes.map((n) => n.textContent),
+        );
+        if (!texts.includes('submitted reply #349')) {
+          throw new Error(`new reply not visible in the thread: ${JSON.stringify(texts)}`);
+        }
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
     await t('a deleted comment keeps its slot, its name, and its replies (#354)', async () => {
       // Deleting the comment used to take the whole thread with it: every
       // reply under it, other people's included, simply stopped being served.
@@ -673,19 +711,116 @@ const SLUG = 'hostile-body-css';
       if (fabVisible) throw new Error('fab still visible after widening');
     });
 
-    // --- pressing delete, as a person with an identity (#354) ---------------
-    // The tombstone is only worth anything if you can see it happen. Needs a
-    // signed-in viewer: the delete control is gated on identity and the shared
-    // rig browses anonymously. resolveTarget passes its own env down to the
-    // server it spawns, so setting it around this one call is enough — the
-    // suite's main target keeps browsing as nobody.
+    // --- EDIT YOUR OWN COMMENT (#349) -----------------------------------------
+    // Needs an identity: every assertion here is about chrome that only exists
+    // for a signed-in viewer, and the default rig browses anonymously. The
+    // local server makes that same login the doc owner, which is exactly what
+    // proves the owner is NOT handed an edit on other people's comments.
     if (!isPublishedTarget()) {
-      process.env.TDOC_E2E_USER = 'tester';
-      const authed = await resolveTarget({ port: 7995 });
-      delete process.env.TDOC_E2E_USER;
+      const authed = await resolveTarget({ port: 7994, e2eUser: 'tester' });
       const authedUrl = `${authed.url.replace(/\/d\/.*/, '')}/d/${SLUG}/v/1?shell=1`;
       const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
       try {
+        await t('edit is the author\'s alone; delete adds the owner on an agent comment', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
+            await page.waitForSelector(`${card} .del`, { timeout: 2000 });
+            // …and c_fixture_4 belongs to reviewer-a. The viewer owns this
+            // doc, and still gets neither of them on somebody else's comment —
+            // only the re-anchor, which is about where a comment points, not
+            // about what it says.
+            await page.goto(`${authedUrl}&comment=c_fixture_4`, { waitUntil: 'networkidle' });
+            const other = '.tdoc-margin-comment[data-comment-id="c_fixture_4"]';
+            await page.waitForSelector(`${other} .tdoc-reanchor-btn`, { timeout: 4000 });
+            if (await page.$(`${other} .tdoc-edit-toggle`)) {
+              throw new Error('the doc owner was offered an edit on someone else\'s comment');
+            }
+            if (await page.$(`${other} .del`)) {
+              throw new Error('the doc owner was offered a delete on someone else\'s comment');
+            }
+            // …but c_fixture_3 is Claude's, and an agent writes with the doc's
+            // own upload token. The owner reaches that one, and only that one.
+            await page.goto(`${authedUrl}&comment=c_fixture_3`, { waitUntil: 'networkidle' });
+            const agentCard = '.tdoc-margin-comment[data-comment-id="c_fixture_3"]';
+            await page.waitForSelector(`${agentCard} .del`, { timeout: 4000 });
+            if (await page.$(`${agentCard} .tdoc-edit-toggle`)) {
+              throw new Error('nobody rewrites what the agent said — not even the owner');
+            }
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+
+        await t('edit reads as a text control, exactly like the reply beside it', async () => {
+          // It shipped as a raw <button>: ui.css lists the chrome buttons that
+          // "read as text" by class, and a class missing from that list keeps
+          // the UA button box — a grey chip sitting between two text links.
+          await page.setViewportSize({ width: 1400, height: 900 });
+          await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+          await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
+          const [reply, edit] = await page.evaluate((sel) => {
+            const read = (el) => {
+              const c = getComputedStyle(el);
+              return [c.color, c.font, c.padding, c.backgroundColor, c.borderStyle, c.borderWidth].join('|');
+            };
+            return [
+              read(document.querySelector(`${sel} .tdoc-reply-toggle`)),
+              read(document.querySelector(`${sel} .tdoc-edit-toggle`)),
+            ];
+          }, card);
+          if (reply !== edit) {
+            throw new Error(`edit does not read like reply:\n  reply: ${reply}\n  edit:  ${edit}`);
+          }
+          // …and they are one row of controls, so they are written one way.
+          const labels = await page.evaluate((sel) => [...document.querySelectorAll(`${sel} > .meta .actions button`)]
+            .map((b) => b.textContent.trim()).filter(Boolean), card);
+          const shouty = labels.filter((label) => label !== label.toLowerCase());
+          if (shouty.length) throw new Error(`the action row is not written one way: ${JSON.stringify(labels)}`);
+        });
+
+        await t('editing rewrites the comment in place and marks it edited (#349)', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.click(`${card} .tdoc-edit-toggle`);
+            await page.waitForSelector(`${card} .tdoc-edit-form textarea`, { timeout: 2000 });
+            // the box opens on the current text — an edit is a correction
+            const seeded = await page.$eval(`${card} .tdoc-edit-form textarea`, (el) => el.value);
+            if (seeded !== 'a pin should appear for this') {
+              throw new Error(`edit box did not open on the current text: ${JSON.stringify(seeded)}`);
+            }
+            // …with the caret after the last word, not in front of the first
+            const caret = await page.evaluate((sel) => {
+              const box = document.querySelector(`${sel} .tdoc-edit-form textarea`);
+              return { focused: document.activeElement === box, start: box.selectionStart, end: box.selectionEnd, len: box.value.length };
+            }, card);
+            if (!caret.focused) throw new Error('the edit box opened without the caret in it');
+            if (caret.start !== caret.len || caret.end !== caret.len) {
+              throw new Error(`the caret opened at ${caret.start}-${caret.end}, expected ${caret.len} (the end)`);
+            }
+            await page.fill(`${card} .tdoc-edit-form textarea`, 'rewritten by its author');
+            await page.click(`${card} .tdoc-edit-save`);
+            await page.waitForSelector(`${card} .tdoc-edit-form`, { state: 'detached', timeout: 4000 });
+            await page.waitForFunction(
+              (sel) => document.querySelector(`${sel} .text`)?.textContent === 'rewritten by its author',
+              card,
+              { timeout: 4000 },
+            );
+            const meta = await page.$eval(`${card} .meta > span`, (el) => el.textContent);
+            if (!/edited/.test(meta)) throw new Error(`edited comment is not marked: "${meta}"`);
+            const stored = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'))
+              .find((c) => c.id === 'c_fixture_1');
+            if (stored.text !== 'rewritten by its author' || !stored.edited) {
+              throw new Error(`edit did not persist: ${JSON.stringify(stored.text)} / ${stored.edited}`);
+            }
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
         await t('deleting a comment leaves its tombstone on screen, not an empty gutter', async () => {
           const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
           try {
@@ -699,9 +834,17 @@ const SLUG = 'hostile-body-css';
             await page.click(`${card} .tdoc-replies-toggle`);
             await page.waitForSelector(`${card} .tdoc-replies.open .tdoc-reply`, { timeout: 2000 });
 
-            // deleting the last thing under it takes the whole thread away
-            await page.click(`${card} .tdoc-reply .del`);
-            await page.waitForSelector('.tdoc-margin-comment', { state: 'detached', timeout: 4000 });
+            // Deleting the last thing under it takes the whole thread away.
+            // That reply is tester2's, and delete is the author's now (#349
+            // point 3), so it goes through the API — the collapse is the
+            // subject here, not who may press the button.
+            const gone = await page.evaluate(async () => {
+              const r = await fetch('/api/comments?slug=hostile-body-css&id=r_fixture_1a&version=1', { method: 'DELETE' });
+              return r.status;
+            });
+            if (gone !== 200) throw new Error(`deleting the reply failed: ${gone}`);
+            await page.goto(authedUrl, { waitUntil: 'networkidle' });
+            await page.waitForTimeout(500);
             const left = await page.evaluate(async () => {
               const r = await fetch('/api/comments?slug=hostile-body-css&version=1');
               return (await r.json()).map((c) => c.id);

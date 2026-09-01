@@ -362,6 +362,11 @@ export function DocumentShell({ boot, config }) {
     return ok;
   };
 
+  // An edit does not re-resolve @mentions: the notified set is stamped on the
+  // event that first carried the text, and nobody is notified twice for a
+  // rewrite of words they were already told about.
+  const editComment = async (id, text) => (await attempt(() => comments.edit(id, text))).ok;
+
   const reactTo = (commentId, emoji) => attempt(() => comments.react(commentId, emoji));
 
   // Closing the card was unconditional, which hid the two cases where there is
@@ -573,6 +578,7 @@ export function DocumentShell({ boot, config }) {
           expandReplies={deepReply}
           onOpenChange={setDrawerOpen}
           onReply={replyTo}
+          onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
           onReanchor={setReanchorId}
@@ -600,6 +606,7 @@ export function DocumentShell({ boot, config }) {
             openClusterKey === key ? null : key
           )}
           onReply={replyTo}
+          onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
           onReanchor={setReanchorId}

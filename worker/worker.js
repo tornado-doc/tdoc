@@ -2020,6 +2020,12 @@ function legacyToEvents(c) {
     anchor: c.anchor || null,
     text: c.text || '',
   });
+  // A comment the local server edited carries `edited` and the NEW text on one
+  // flat record. Replay it as an edit of the same text so the marker survives
+  // the publish merge instead of arriving as an original that was never touched.
+  if (c.edited) {
+    events.push({ kind: 'text_edited', at_version: v, at: c.edited, text: c.text || '' });
+  }
   if (c.status === 'applied') {
     events.push({
       kind: 'marked_applied', at_version: Number(c.applied_in) || v, at,
@@ -2048,6 +2054,12 @@ function legacyToEvents(c) {
           agent_status: r.agent_status || null,
         },
       });
+      if (r.edited) {
+        events.push({
+          kind: 'reply_text_edited', at_version: Number(r.version) || v,
+          at: r.edited, reply_id: r.id, text: r.text || '',
+        });
+      }
       if (r.reactions && typeof r.reactions === 'object') {
         for (const emoji of Object.keys(r.reactions)) {
           for (const login of (r.reactions[emoji] || [])) {
@@ -2129,6 +2141,7 @@ function snapshotAt(c, V) {
     anchor: null,
     text: '',
     mentions: [],
+    edited: null,
     status: 'open',
     applied_in: undefined,
     replies: [],
@@ -2160,6 +2173,7 @@ function snapshotAt(c, V) {
         break;
       case 'text_edited':
         snap.text = e.text || '';
+        snap.edited = e.at || snap.edited;
         break;
       case 'anchor_changed':
         snap.anchor = e.anchor || null;
@@ -2203,6 +2217,7 @@ function snapshotAt(c, V) {
           author: e.reply.author || null,
           text: e.reply.text || '',
           mentions: Array.isArray(e.reply.mentions) ? e.reply.mentions : [],
+          edited: null,
           agent_status: e.reply.agent_status || null,
           created: e.at,
           reactions: {},
@@ -2214,7 +2229,7 @@ function snapshotAt(c, V) {
       }
       case 'reply_text_edited': {
         const r = replyById.get(e.reply_id);
-        if (r) r.text = e.text || '';
+        if (r) { r.text = e.text || ''; r.edited = e.at || r.edited; }
         break;
       }
       case 'reply_deleted': {
@@ -2328,6 +2343,82 @@ function historyList(list) {
     if (s && !s.deleted) out.push(s);
   }
   return out;
+}
+
+// Has this agent already answered here, and has a human said anything since?
+//
+// A folded comment is not enough to answer that. When a human deletes the
+// agent's reply — or rewrites it — every folded view loses it, so the next
+// generation round reads a thread it has never answered and answers it again,
+// in the same place, with the same words. The event log still holds the
+// reply_added, so the gate reads the log rather than the snapshot: what a
+// human removed is exactly what has to be remembered.
+//
+// Open again only when a HUMAN REPLIES after the agent's last word on this
+// thread. Nothing else counts, and in particular EDITING THE COMMENT DOES NOT:
+// a person fixing their own typo has not asked a second time, and an answered
+// comment that changes shape is not a new comment. Deleting or editing the
+// agent's own answer does not count either — that is the clearest "I have
+// dealt with this" there is, not an invitation to repeat it.
+//
+// The one exception is a re-anchor, which the product already treats as
+// reopening (patch_anchor resets status to open, and SKILL.md says /tdoc edit
+// picks it up again): the comment now points at different text, so it is no
+// longer the same place.
+//
+// Returns { allowed, reason }. Reasons are stable strings the CLI prints.
+function agentReplyGate(record, agentLogin) {
+  if (!record) return { allowed: false, reason: 'parent_not_found' };
+  ensureEventLog(record);
+  // Same ordering the fold uses — by version, ties broken by append order —
+  // so "who spoke last" means the same thing here as it does on the card.
+  // Timestamps are not the tiebreak: two events in one round land in the same
+  // millisecond, and a tie must not read as "nobody has answered since".
+  const ordered = dedupEvents(record.events)
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => ((a.e.at_version || 0) - (b.e.at_version || 0)) || (a.i - b.i))
+    .map((x) => x.e);
+  const isAgentAuthor = (author) => !!(author && author.kind === 'agent');
+  let answered = false;   // this agent has spoken at least once
+  let theirTurn = true;   // a human has moved since it last did
+  let deleted = false;
+  for (const e of ordered) {
+    if (!e) continue;
+    switch (e.kind) {
+      case 'deleted':
+        deleted = true;
+        break;
+      case 'reply_added':
+        if (!e.reply) break;
+        if (isAgentAuthor(e.reply.author) && e.reply.author.login === agentLogin) {
+          answered = true;
+          theirTurn = false;
+        } else if (!isAgentAuthor(e.reply.author)) {
+          theirTurn = true;
+        }
+        break;
+      case 'text_edited':
+        // Rewriting the comment is not asking again. Whoever edited it, the
+        // question the agent already answered is still the question.
+        break;
+      case 'anchor_changed':
+        // The agent's own re-anchor (bind_anchor_aid) is not a human turn.
+        if (e.by !== agentLogin) theirTurn = true;
+        break;
+      case 'reply_deleted':
+      case 'reply_text_edited':
+        // A human removing or rewriting the agent's answer keeps the gate SHUT.
+        // It is the clearest "I have dealt with this" there is, not a request
+        // to hear the same thing again.
+        break;
+      default:
+        break;
+    }
+  }
+  if (deleted) return { allowed: false, reason: 'comment_deleted' };
+  if (!answered) return { allowed: true, reason: 'first_reply' };
+  if (theirTurn) return { allowed: true, reason: 'human_replied_since' };
+  return { allowed: false, reason: 'already_answered' };
 }
 
 // Helper used by all mutating endpoints: ensure the list is migrated to the
@@ -2875,15 +2966,49 @@ function findCommentThread(list, id) {
   return null;
 }
 
-function recordAuthor(list, id) {
+// Resolve a comment id to the record that carries its author — the top-level
+// comment, or the reply object stored on its thread's reply_added event.
+// Returns null only when the id exists nowhere, which callers must tell apart
+// from a record whose author is missing (legacy; mutable by nobody).
+function findRecord(list, id) {
   if (!id || !Array.isArray(list)) return null;
   const top = list.find(c => c && c.id === id);
-  if (top) return top.author || null;
+  if (top) return top;
   for (const c of list) {
     const ev = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
-    if (ev) return ev.reply.author || null;
+    if (ev) return ev.reply;
   }
   return null;
+}
+
+function recordAuthor(list, id) {
+  const record = findRecord(list, id);
+  return (record && record.author) || null;
+}
+
+// Editing is the author's ALONE — deliberately not canMutate(), which also
+// grants the doc owner. Rewriting somebody else's words under their name is
+// not a power owning the document confers. That holds for an agent's words
+// too: nobody rewrites what the agent said, including the person it ran for.
+function isRecordAuthor(record, session) {
+  const who = record && record.author && record.author.login;
+  return !!(who && session && session.login && who === session.login);
+}
+
+function isAgentRecord(record) {
+  return !!(record && record.author && record.author.kind === 'agent');
+}
+
+// Deleting is the author's — and an agent's words belong to the person whose
+// token it ran on. /api/agent/reply is authed with the doc's upload token, so
+// an agent is not a third party with speech of its own; it is the owner
+// writing through a tool. Reading it that way answers "whose words are these"
+// rather than punching a hole in "deletion belongs to whoever wrote it", and
+// it keeps the flow #349 describes possible: a person clearing an AI comment
+// they did not want.
+function mayDelete(record, session, env, meta) {
+  if (isRecordAuthor(record, session)) return true;
+  return isAgentRecord(record) && isDocOwnerSession(env, session, meta);
 }
 
 // Per-user inbox (same host, cross-doc). KV key inbox:<github-login>.
@@ -3218,6 +3343,27 @@ function applyCommentOp(list, op) {
       const fresh = snapshotAt(host, op.version);
       const reactions = isReply ? (fresh.replies.find(r => r.id === replyId)?.reactions || {}) : fresh.reactions;
       return { status: 200, body: { ok: true, reactions, added: !had } };
+    }
+    case 'edit_text': {
+      // Authorization enforced upstream (the worker resolves the target and
+      // checks it is the author's own record). The DO only serializes the
+      // write. Stamped at the viewed version like every other event, so an
+      // older version keeps the words it was published with.
+      const top = list.find(c => c.id === op.id);
+      if (top) {
+        appendEvent(top, { kind: 'text_edited', at_version: op.version, at: now, text: op.text, by: op.actor.login });
+        return { status: 200, body: snapshotAt(top, op.version) };
+      }
+      for (const c of list) {
+        ensureEventLog(c);
+        const re = (c.events || []).find(e => e.kind === 'reply_added' && e.reply?.id === op.id);
+        if (re) {
+          appendEvent(c, { kind: 'reply_text_edited', at_version: op.version, at: now, reply_id: op.id, text: op.text, by: op.actor.login });
+          const snap = snapshotAt(c, op.version);
+          return { status: 200, body: (snap && snap.replies.find(r => r.id === op.id)) || { ok: true } };
+        }
+      }
+      return { status: 404, body: { error: 'not_found' } };
     }
     case 'delete': {
       // Authorization enforced upstream (worker resolves target + canMutate
@@ -4689,15 +4835,39 @@ export default {
       return json(body_out, { status: res.status });
     }
 
-    // Re-anchor a comment. Only the original author can re-anchor their own
-    // comment. Appends an `anchor_changed` event stamped at the current
-    // version, so OLDER versions still resolve to the previous anchor.
+    // Re-anchor a comment, or edit its text. Appends an `anchor_changed` /
+    // `text_edited` event stamped at the current version, so OLDER versions
+    // still resolve to the anchor and the words they were published with.
+    //
+    // The two differ in who may do them: re-anchor is the author's or the doc
+    // owner's (canMutate), but an EDIT is the author's alone — rewriting
+    // somebody else's words under their name is not a power a doc owner gets.
     if (p === '/api/comments' && method === 'PATCH') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, id, anchor, version } = body;
+      if (typeof body.text === 'string') {
+        const text = body.text.trim();
+        if (!slug || !id || !text) return json({ error: 'slug, id, text required' }, { status: 400 });
+        if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+        const list = await readComments(env, slug);
+        ensureMigrated(list);
+        const meta = await loadDocMeta(env, slug);
+        const access = accessFromMeta(meta || {});
+        if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+        // The target is a top-level comment or a reply; either way the record
+        // that carries the author is the one that has to match the session.
+        const target = findRecord(list, id);
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        if (!isRecordAuthor(target, s)) return json({ error: 'not_author' }, { status: 403 });
+        const V = coerceBodyVersion(version);
+        const res = await mutateComments(env, slug, {
+          kind: 'edit_text', slug, id, text, version: V, actor: { login: s.login },
+        });
+        return json(res.body, { status: res.status });
+      }
       if (!slug || !id || !anchor) return json({ error: 'slug, id, anchor required' }, { status: 400 });
       // Auth read (canMutate needs session+env): resolve the target up front.
       // The serialized write then runs through the DO. A target deleted between
@@ -4735,9 +4905,17 @@ export default {
     }
     // Soft-delete: append a `deleted` event at the current version. The
     // record is preserved; older versions still see the comment as it was.
-    // Author-only. ?version=N to stamp the delete at a specific version
-    // (defaults to Infinity, meaning "delete forward from now" which the
-    // overlay supplies as the current view's version).
+    //
+    // The author's — mayDelete, not canMutate. A doc owner used to be able to
+    // delete anybody's comment here, which is the wrong power to hand the
+    // person being reviewed: taking someone's words off the page is theirs to
+    // do. The one thing an owner still reaches is an AGENT's comment, because
+    // the agent wrote it with the owner's own upload token. What is gone is
+    // silencing a reader; what is kept is clearing what your tools said.
+    //
+    // ?version=N to stamp the delete at a specific version (defaults to
+    // Infinity, meaning "delete forward from now" which the overlay supplies
+    // as the current view's version).
     if (p === '/api/comments' && method === 'DELETE') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -4752,24 +4930,10 @@ export default {
       // is harmless (applyCommentOp returns 404).
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
+      const target = findRecord(authList, id);
+      if (!target) return json({ error: 'not_found' }, { status: 404 });
       const meta = await loadDocMeta(env, slug);
-      let authorized = false;
-      const top = authList.find(c => c.id === id);
-      if (top) {
-        if (!canMutate(top, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
-        authorized = true;
-      } else {
-        for (const c of authList) {
-          ensureEventLog(c);
-          const reply = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
-          if (reply) {
-            if (!canMutate(reply.reply, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
-            authorized = true;
-            break;
-          }
-        }
-      }
-      if (!authorized) return json({ error: 'not_found' }, { status: 404 });
+      if (!mayDelete(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const res = await mutateComments(env, slug, {
         kind: 'delete', slug, id, version: stampVersion, actor: { login: s.login },
       });
@@ -4846,6 +5010,17 @@ export default {
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
+      // One answer per human turn. A round that re-reads comments.json after
+      // somebody deleted the agent's reply would otherwise post the same words
+      // in the same place; the log remembers what the fold forgot. `force`
+      // exists for the caller that means it — nothing in /tdoc edit sets it.
+      const gate = agentReplyGate(parent, agent.login);
+      if (!gate.allowed && body.force !== true) {
+        return json({
+          ok: true, skipped: true, reason: gate.reason,
+          parent_id, thread_id: parent.id,
+        });
+      }
       const V = coerceBodyVersion(applied_in, parent.created_in || 1);
       const now = new Date().toISOString();
       const replyId = `r_${Date.now()}_${rand(4)}`;
