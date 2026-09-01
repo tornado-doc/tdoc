@@ -17,6 +17,9 @@ function notificationLabel(item) {
   if (item.kind === 'reaction') {
     return `${actor} reacted ${item.emoji || ''}${count > 1 ? ` and ${count - 1} more` : ''}`;
   }
+  if (item.kind === 'mention') {
+    return `${actor} mentioned you`;
+  }
   if (item.kind === 'reply') {
     return `${actor} replied${count > 1 ? ` and ${count - 1} more replied` : ''}`;
   }

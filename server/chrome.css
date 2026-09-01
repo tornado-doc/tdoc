@@ -377,6 +377,20 @@
   .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
   .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
 
+  /* @mention picker + chips. The field wrapper is the positioning context for
+     the menu, which hangs under the textarea rather than at the caret: a
+     textarea gives no caret coordinates, and the field is narrow enough that
+     under-the-box reads as attached. */
+  .tdoc-mention-field { position: relative; }
+  .tdoc-mention-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 1000002; max-height: 184px; overflow-y: auto; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); padding: 4px; }
+  .tdoc-mention-option { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; appearance: none; border: 0; background: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; font: 13px system-ui, sans-serif; color: var(--td-ink); text-align: left; }
+  .tdoc-mention-option.active { background: var(--td-accent-tint); }
+  .tdoc-mention-option img { width: 18px; height: 18px; border-radius: 50%; flex: none; }
+  .tdoc-mention-anon { width: 18px; height: 18px; border-radius: 50%; background: var(--td-surface); flex: none; }
+  .tdoc-mention-login { font-weight: 600; }
+  .tdoc-mention-name { color: var(--td-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-mention-chip { color: var(--td-accent); background: var(--td-accent-wash); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+
   /* Modal (sign-in) */
   .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
   .tdoc-modal { background: #fff; color: #111; border-radius: 12px; padding: 28px; width: min(460px, calc(100vw - 48px)); box-shadow: 0 20px 60px rgba(0,0,0,0.3); }

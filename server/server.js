@@ -100,7 +100,8 @@ function localDeliver(recipient, ev) {
   const file = inboxFile(who);
   const inbox = readJson(file, { items: [] });
   const items = Array.isArray(inbox.items) ? inbox.items : [];
-  const gk = ev.kind === 'comment' ? `comment:${ev.slug}`
+  const gk = ev.kind === 'mention' ? `mention:${ev.target_id || ev.slug}`
+    : ev.kind === 'comment' ? `comment:${ev.slug}`
     : ev.kind === 'reply' ? `reply:${ev.target_id}`
     : ev.kind === 'reaction' ? `reaction:${ev.target_id}`
     : `other:${ev.slug}`;
@@ -126,6 +127,79 @@ function localDeliver(recipient, ev) {
   });
   writeJson(file, { items: items.slice(0, 200) });
 }
+// ── @mentions (mirror of worker.js — kept identical by test/no-drift) ──────
+// A comment reaches people by NAME, not only by position in the thread. The
+// names that resolve are the doc's own people: the owner and everyone who has
+// already written here. Anything else after `@` stays plain text.
+const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+
+function normalizeGithubLogin(v) {
+  if (typeof v !== 'string') return null;
+  let s = v.trim().toLowerCase();
+  if (!s) return null;
+  if (s.startsWith('github:')) s = s.slice('github:'.length);
+  if (s.startsWith('@')) s = s.slice(1);
+  // GitHub logins: alphanumeric + hyphen
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(s)) return null;
+  return s;
+}
+
+function parseMentionLogins(text) {
+  if (typeof text !== 'string' || !text) return [];
+  const out = [];
+  const seen = new Set();
+  const re = new RegExp(MENTION_RE.source, 'g');
+  let m;
+  while ((m = re.exec(text))) {
+    // A GitHub login never ends in a hyphen, so `@dana-` names dana.
+    const login = String(m[2]).replace(/-+$/, '').toLowerCase();
+    if (!login || seen.has(login)) continue;
+    seen.add(login);
+    out.push(login);
+  }
+  return out;
+}
+
+// Being named outranks sitting in the thread. Returns the login that should
+// still get the positional notification (owner of the doc, author of the
+// parent), or null when the mention already reached them — one row, not two.
+function positionalRecipient(login, mentions) {
+  const n = normalizeGithubLogin(login);
+  if (n && (Array.isArray(mentions) ? mentions : []).includes(n)) return null;
+  return login;
+}
+
+// The mentions in `text` that actually resolve, in the order they were typed.
+function resolveMentions(text, mentionable) {
+  const known = new Set((Array.isArray(mentionable) ? mentionable : [])
+    .map((u) => normalizeGithubLogin(u && u.login))
+    .filter(Boolean));
+  return parseMentionLogins(text).filter((login) => known.has(login));
+}
+
+// Local comments.json is already folded (no event log), so participants come
+// straight off the records and their replies.
+function localMentionable(comments) {
+  const byLogin = new Map();
+  const push = (author) => {
+    const login = normalizeGithubLogin(author && author.login);
+    if (!login) return;
+    const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
+    byLogin.set(login, {
+      login,
+      name: prev.name || (author && author.name) || '',
+      avatar_url: prev.avatar_url || (author && author.avatar_url) || '',
+    });
+  };
+  if (E2E_OWNER) push({ login: E2E_OWNER, name: E2E_OWNER });
+  for (const c of (Array.isArray(comments) ? comments : [])) {
+    if (!c) continue;
+    push(c.author);
+    for (const r of (c.replies || [])) push(r && r.author);
+  }
+  return [...byLogin.values()];
+}
+
 // Cap request bodies so a hostile/buggy client can't OOM the local server.
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — comments are small
 const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
@@ -906,6 +980,15 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Who the composer offers after `@` — the doc's own people, same as hosted.
+  if (p === '/api/mentions' && req.method === 'GET') {
+    const slug = safeSlug(url.searchParams.get('slug'));
+    if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
+    const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
+    const me = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
+    return json(res, 200, { users: localMentionable(comments).filter((u) => u.login !== me) });
+  }
+
   // --- COMMENTS (anonymous) ---
   if (p === '/api/comments' && req.method === 'GET') {
     const slug = safeSlug(url.searchParams.get('slug'));
@@ -926,6 +1009,9 @@ const server = http.createServer(async (req, res) => {
     const file = path.join(ROOT, slug, 'comments.json');
     const comments = readCommentFile(file);
     const created = new Date().toISOString();
+    // Resolved server-side, before the write, so the card chips exactly the
+    // names that were notified.
+    const mentions = resolveMentions(text, localMentionable(comments));
     if (parent_id) {
       const thread = comments.find(c => c.id === parent_id)
         || comments.find(c => (c.replies || []).some(r => r.id === parent_id));
@@ -936,17 +1022,20 @@ const server = http.createServer(async (req, res) => {
       // `r.version` check falls back to the parent's created_in, so replies were
       // never hidden on older versions (diverging from the worker).
       // parent_id is the immediate parent (top-level or another reply).
-      const reply = { id: `r_${Date.now()}`, parent_id, text, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
+      const reply = { id: `r_${Date.now()}`, parent_id, text, mentions, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
       thread.replies.push(reply);
       writeJson(file, comments);
       if (E2E_USER) {
         const parentA = localRecordAuthor(comments, parent_id);
         let title = slug;
         try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
-        localDeliver(parentA && parentA.login, {
-          kind: 'reply', slug, version: Number(version) || 1, comment_id: reply.id,
-          thread_id: thread.id, target_id: parent_id, actor: reply.author, preview: text, title, at: created,
-        });
+        const ev = {
+          slug, version: Number(version) || 1, comment_id: reply.id,
+          thread_id: thread.id, target_id: reply.id, actor: reply.author, preview: text, title, at: created,
+        };
+        for (const who of mentions) localDeliver(who, { ...ev, kind: 'mention' });
+        const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
+        if (parentLogin) localDeliver(parentLogin, { ...ev, kind: 'reply', target_id: parent_id });
       }
       return json(res, 200, reply);
     }
@@ -955,6 +1044,7 @@ const server = http.createServer(async (req, res) => {
       version: version || 1,
       anchor: anchor || null,
       text,
+      mentions,
       author: e2eIdentity(),
       status: 'open',
       created,
@@ -966,10 +1056,13 @@ const server = http.createServer(async (req, res) => {
     if (E2E_USER && E2E_OWNER) {
       let title = slug;
       try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
-      localDeliver(E2E_OWNER, {
-        kind: 'comment', slug, version: Number(version) || 1, comment_id: entry.id,
-        thread_id: entry.id, actor: entry.author, preview: text, title, at: created,
-      });
+      const ev = {
+        slug, version: Number(version) || 1, comment_id: entry.id,
+        thread_id: entry.id, target_id: entry.id, actor: entry.author, preview: text, title, at: created,
+      };
+      for (const who of mentions) localDeliver(who, { ...ev, kind: 'mention' });
+      const owner = positionalRecipient(E2E_OWNER, mentions);
+      if (owner) localDeliver(owner, { ...ev, kind: 'comment' });
     }
     return json(res, 200, entry);
   }

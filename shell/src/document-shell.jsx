@@ -29,6 +29,7 @@ import {
 } from './document/owner-access-dialog.jsx';
 import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { useComments } from './hooks/use-comments.js';
+import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
@@ -140,6 +141,12 @@ export function DocumentShell({ boot, config }) {
     version: config.version,
     onUnauthorized: signIn,
   });
+
+  const mentionable = useMentionable(
+    config.slug,
+    Boolean(config.identity?.login),
+    comments.comments.length,
+  );
 
   const selectFromFrame = useCallback((selection) => {
     const reanchoring = reanchorRef.current;
@@ -519,6 +526,7 @@ export function DocumentShell({ boot, config }) {
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
           isOwner={Boolean(config.isOwner)}
+          mentionable={mentionable}
           openCommentId={openCommentId}
           expandReplies={deepReply}
           onOpenChange={setDrawerOpen}
@@ -540,6 +548,7 @@ export function DocumentShell({ boot, config }) {
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
           isOwner={Boolean(config.isOwner)}
+          mentionable={mentionable}
           cardPosition={cardPosition}
           expandReplies={deepReply}
           onOpenComment={(id) => {
@@ -556,7 +565,12 @@ export function DocumentShell({ boot, config }) {
       )}
 
       {composer ? (
-        <CommentComposer selection={composer} onSubmit={postComment} onClose={closeComposer} />
+        <CommentComposer
+          selection={composer}
+          mentionable={mentionable}
+          onSubmit={postComment}
+          onClose={closeComposer}
+        />
       ) : null}
 
       <PublishDialog
