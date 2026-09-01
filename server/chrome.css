@@ -40,7 +40,13 @@
   .tdoc-bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
   .tdoc-bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
   .tdoc-bar-actions { display: flex; align-items: center; gap: 4px; }
-  .tdoc-bar .tdoc-mobile-overflow-trigger { display: none; }
+  /* The compound selector is load-bearing: `.tdoc-bar .tdoc-secondary-toggle`
+     below shows the same button unconditionally, and at equal specificity the
+     later rule wins. Without the extra class this hide lost, so pages with no
+     desktop overflow actions (the Docs Hub, the landing) opened an EMPTY ⋯
+     menu — every item in it is .tdoc-mobile-overflow-only. Keep this selector
+     and the ≤700px one that re-shows it in lockstep. */
+  .tdoc-bar .tdoc-secondary-toggle.tdoc-mobile-overflow-trigger { display: none; }
 
   /* Site mark — the tdoc logo (same asset as the favicon), not a text pill. */
   /* justify-content is required: the generic .tdoc-bar button rule supplies
@@ -466,7 +472,7 @@
     .tdoc-bar .tdoc-document-primary,
     .tdoc-bar #tdoc-theme-btn,
     .tdoc-bar .tdoc-account-trigger { display: none; }
-    .tdoc-bar .tdoc-mobile-overflow-trigger { display: inline-flex; }
+    .tdoc-bar .tdoc-secondary-toggle.tdoc-mobile-overflow-trigger { display: inline-flex; }
     .tdoc-bar-right, .tdoc-bar-actions { gap: 0; }
   }
 
