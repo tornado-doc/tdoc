@@ -206,6 +206,20 @@ t('entering edit mode puts the caret in the document', () => {
   assert(block.includes('root.focus({ preventScroll: true })'), 'the editor must actually take focus');
 });
 
+t('the bar names a document by its title, never by its slug', () => {
+  const toolbar = read('shell/src/document/document-toolbar.jsx');
+  const start = toolbar.indexOf('export function DocumentBreadcrumbs(');
+  const block = toolbar.slice(start, toolbar.indexOf('\nexport function', start + 20));
+  assert(block.includes('<span className="doc-title">{config.title'), 'the title must still lead the bar');
+  assert(!toolbar.includes('crumb-slug'), 'the slug crumb is back in the bar');
+  // The version menu still needs the slug to build hrefs — that is a URL, not
+  // a label; what must not return is the slug rendered as the document's name.
+  assert(!/>\{config\.slug\}</.test(toolbar), 'the slug is being rendered as text again');
+  const css = read('server/chrome.css');
+  assert(!css.includes('crumb-slug'), 'dead slug-crumb styling left behind');
+  assert(!/\.tdoc-bar \.crumb \{/.test(css), 'dead .crumb styling left behind');
+});
+
 t('a doc created from scratch opens in edit mode, not read mode', () => {
   assert(editorHook.includes("get('edit') === '1'"), 'the editor never looks at ?edit=1');
   assert(/wantsEdit && config\.canEdit/.test(editorHook),
