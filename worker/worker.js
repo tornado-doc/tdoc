@@ -2293,10 +2293,17 @@ function historyList(list) {
 // reply_added, so the gate reads the log rather than the snapshot: what a
 // human removed is exactly what has to be remembered.
 //
-// Open again only when a HUMAN moved after the agent's last word on this
-// thread — they rewrote the comment, re-anchored it, or replied. Deleting or
-// editing the agent's answer is deliberately NOT one of those: it is the
-// clearest "I have dealt with this" there is, not an invitation to repeat it.
+// Open again only when a HUMAN REPLIES after the agent's last word on this
+// thread. Nothing else counts, and in particular EDITING THE COMMENT DOES NOT:
+// a person fixing their own typo has not asked a second time, and an answered
+// comment that changes shape is not a new comment. Deleting or editing the
+// agent's own answer does not count either — that is the clearest "I have
+// dealt with this" there is, not an invitation to repeat it.
+//
+// The one exception is a re-anchor, which the product already treats as
+// reopening (patch_anchor resets status to open, and SKILL.md says /tdoc edit
+// picks it up again): the comment now points at different text, so it is no
+// longer the same place.
 //
 // Returns { allowed, reason }. Reasons are stable strings the CLI prints.
 function agentReplyGate(record, agentLogin) {
@@ -2330,6 +2337,9 @@ function agentReplyGate(record, agentLogin) {
         }
         break;
       case 'text_edited':
+        // Rewriting the comment is not asking again. Whoever edited it, the
+        // question the agent already answered is still the question.
+        break;
       case 'anchor_changed':
         // The agent's own re-anchor (bind_anchor_aid) is not a human turn.
         if (e.by !== agentLogin) theirTurn = true;

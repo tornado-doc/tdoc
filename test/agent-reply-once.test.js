@@ -12,6 +12,9 @@
 //
 // Run with: node test/agent-reply-once.test.js
 
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
 const { loadWorker, makeEnv, req, putSession, issue } = require('./helpers/worker-harness');
 
 let pass = 0, fail = 0;
@@ -130,6 +133,83 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(forced.id && !forced.skipped, `force should post: ${JSON.stringify(forced)}`);
     const [c] = await listComments(env, slug);
     assert(c.replies.length === 2, `expected both replies, got ${c.replies.length}`);
+  });
+
+  // ---- the gate itself, on hand-built logs -------------------------------
+  // An EDIT of the comment cannot be driven through the routes on this branch
+  // (PATCH with `text` arrives with the edit feature), and the whole point of
+  // the gate is that it reads the log rather than any folded view — so these
+  // build the log directly. They are the rule, stated once:
+  //   only a human REPLY re-opens a thread the agent has already answered.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+  function fn(name) {
+    const start = src.indexOf(`function ${name}(`);
+    if (start === -1) throw new Error(`fn ${name} not found`);
+    let i = src.indexOf('{', start), d = 0;
+    for (; i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}') { d--; if (d === 0) { i++; break; } } }
+    return src.slice(start, i);
+  }
+  const box = { crypto: globalThis.crypto };
+  vm.createContext(box);
+  vm.runInContext([
+    fn('isFiniteVersion'), fn('legacyToEvents'), fn('ensureEventLog'),
+    fn('eventEid'), fn('backfillEids'), fn('dedupEvents'), fn('agentReplyGate'),
+  ].join('\n\n'), box);
+  const gate = box.agentReplyGate;
+
+  const human = { login: 'reader' };
+  const bot = { kind: 'agent', login: 'claude', name: 'Claude' };
+  const thread = (...events) => ({
+    id: 'c1', author: human, created: '2026-01-01T00:00:00Z', created_in: 1,
+    events: [{ kind: 'created', at_version: 1, at: '2026-01-01T00:00:00Z', text: 'fix this', anchor: null }, ...events],
+  });
+  const answered = { kind: 'reply_added', at_version: 1, at: '2026-01-02T00:00:00Z', reply: { id: 'r1', author: bot, text: 'Done.' } };
+
+  await t('a human editing their own comment does NOT re-open it', async () => {
+    const g = gate(thread(answered, {
+      kind: 'text_edited', at_version: 1, at: '2026-01-03T00:00:00Z', text: 'fix this, please', by: 'reader',
+    }), 'claude');
+    assert(g.allowed === false && g.reason === 'already_answered',
+      `an edited comment is not a new comment: ${JSON.stringify(g)}`);
+  });
+
+  await t('a human editing the agent’s answer does NOT re-open it either', async () => {
+    const g = gate(thread(answered, {
+      kind: 'reply_text_edited', at_version: 1, at: '2026-01-03T00:00:00Z', reply_id: 'r1', text: 'trimmed', by: 'reader',
+    }), 'claude');
+    assert(g.allowed === false && g.reason === 'already_answered', JSON.stringify(g));
+  });
+
+  await t('a reply is the only thing that re-opens it', async () => {
+    const g = gate(thread(answered, {
+      kind: 'reply_added', at_version: 1, at: '2026-01-03T00:00:00Z', reply: { id: 'r2', author: human, text: 'still wrong' },
+    }), 'claude');
+    assert(g.allowed === true && g.reason === 'human_replied_since', JSON.stringify(g));
+  });
+
+  await t('an edit AFTER a human reply still leaves the thread open', async () => {
+    // The reply is the turn; a later edit must not swallow it.
+    const g = gate(thread(
+      answered,
+      { kind: 'reply_added', at_version: 1, at: '2026-01-03T00:00:00Z', reply: { id: 'r2', author: human, text: 'still wrong' } },
+      { kind: 'text_edited', at_version: 1, at: '2026-01-04T00:00:00Z', text: 'fix this, clearer now', by: 'reader' },
+    ), 'claude');
+    assert(g.allowed === true, `the edit swallowed a real reply: ${JSON.stringify(g)}`);
+  });
+
+  await t('re-anchoring a comment does re-open it — it is a different place now', async () => {
+    // patch_anchor already resets status to open and SKILL.md says /tdoc edit
+    // picks it up again; the gate must not silently contradict that.
+    const g = gate(thread(answered, {
+      kind: 'anchor_changed', at_version: 1, at: '2026-01-03T00:00:00Z', by: 'reader',
+      anchor: { kind: 'text', text: 'somewhere else' }, reset_status: true,
+    }), 'claude');
+    assert(g.allowed === true && g.reason === 'human_replied_since', JSON.stringify(g));
+  });
+
+  await t('an unanswered comment is always open, edited or not', async () => {
+    const g = gate(thread({ kind: 'text_edited', at_version: 1, at: '2026-01-03T00:00:00Z', text: 'clearer', by: 'reader' }), 'claude');
+    assert(g.allowed === true && g.reason === 'first_reply', JSON.stringify(g));
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
