@@ -207,8 +207,10 @@
   .tdoc-margin-comment .copy-md { cursor: pointer; color: #888; display: inline-flex; align-items: center; }
   .tdoc-margin-comment .copy-md:hover { color: var(--td-accent); }
   .tdoc-margin-comment .copy-md svg { width: 14px; height: 14px; display: block; }
-  .tdoc-margin-comment .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); }
-  .tdoc-margin-comment .tdoc-reply-toggle:hover { text-decoration: underline; }
+  .tdoc-margin-comment .tdoc-reply-toggle,
+  .tdoc-margin-comment .tdoc-edit-toggle { cursor: pointer; color: var(--td-accent); }
+  .tdoc-margin-comment .tdoc-reply-toggle:hover,
+  .tdoc-margin-comment .tdoc-edit-toggle:hover { text-decoration: underline; }
 
   /* ===== Pins model (wide mode only) =====
      In wide mode the right gutter shows one PIN per comment (or a count badge
@@ -302,8 +304,10 @@
   .tdoc-replies.open { display: flex; }
   .tdoc-reply { padding-left: 12px; border-left: 2px solid #e5e5e5; }
   .tdoc-reply-kids { margin: 8px 0 0 10px; display: flex; flex-direction: column; gap: 10px; }
-  .tdoc-reply .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
-  .tdoc-reply .tdoc-reply-toggle:hover { text-decoration: underline; }
+  .tdoc-reply .tdoc-reply-toggle,
+  .tdoc-reply .tdoc-edit-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
+  .tdoc-reply .tdoc-reply-toggle:hover,
+  .tdoc-reply .tdoc-edit-toggle:hover { text-decoration: underline; }
   .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
   .tdoc-reply .author { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
@@ -315,12 +319,24 @@
   .tdoc-reply .del:hover { text-decoration: underline; }
   .tdoc-reply-form { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; }
   .tdoc-reply-form.open { display: block; }
-  .tdoc-reply-form textarea { width: 100%; min-height: 48px; box-sizing: border-box; padding: 6px 8px; font: 13px system-ui; border: 1px solid #ccc; border-radius: 6px; resize: vertical; outline: none; }
-  .tdoc-reply-form textarea:focus { border-color: var(--td-accent); }
+  .tdoc-reply-form textarea,
+  .tdoc-edit-form textarea { width: 100%; min-height: 48px; box-sizing: border-box; padding: 6px 8px; font: 13px system-ui; border: 1px solid #ccc; border-radius: 6px; resize: vertical; outline: none; }
+  .tdoc-reply-form textarea:focus,
+  .tdoc-edit-form textarea:focus { border-color: var(--td-accent); }
   .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
   .tdoc-reply-form-foot .hint { color: #888; font-size: 11px; }
   .tdoc-reply-form-foot .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
   .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: var(--td-accent-hover); }
+
+  /* Editing a comment in place: the reply form's textarea, with Cancel/Save
+     where the composer has its hint and submit. */
+  .tdoc-edit-form { display: none; margin: 2px 0 0; }
+  .tdoc-edit-form.open { display: block; }
+  .tdoc-edit-form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 6px; }
+  .tdoc-edit-form-foot .tdoc-edit-cancel { background: none; border: none; color: #888; font: 12px system-ui; cursor: pointer; padding: 5px 4px; }
+  .tdoc-edit-form-foot .tdoc-edit-cancel:hover { color: #111; text-decoration: underline; }
+  .tdoc-edit-form-foot .tdoc-edit-save { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
+  .tdoc-edit-form-foot .tdoc-edit-save:hover { background: var(--td-accent-hover); }
 
   /* Anchor highlights (Custom Highlight API + fallback span) */
   ::highlight(tdoc-pending) { background-color: #fff3a8; }

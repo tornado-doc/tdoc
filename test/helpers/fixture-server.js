@@ -41,7 +41,13 @@ function waitForServer(port, timeoutMs = 5000) {
 
 // Resolve the target URL + (if local) a started server handle.
 // Returns { url, stop } — stop() is a no-op when an external/live URL is used.
-async function resolveTarget({ port = 7991 } = {}) {
+//
+// `e2eUser` boots the local server with an identity instead of anonymously, so
+// author-only chrome (edit, delete, re-anchor) renders at all. The local server
+// treats that same login as the doc owner unless TDOC_E2E_OWNER says otherwise,
+// which is what makes "the owner still gets no edit on someone else's comment"
+// testable against it.
+async function resolveTarget({ port = 7991, e2eUser } = {}) {
   // Explicit override (live deploy or a custom server) — don't boot anything.
   if (process.env.TDOC_TEST_URL) {
     return { url: process.env.TDOC_TEST_URL, stop: async () => {} };
@@ -49,7 +55,12 @@ async function resolveTarget({ port = 7991 } = {}) {
   // Default: boot the local server against the committed fixture.
   const serverPath = path.join(__dirname, '..', '..', 'server', 'server.js');
   const child = spawn('node', [serverPath], {
-    env: { ...process.env, TDOC_DIR: FIXTURE_ROOT, TDOC_PORT: String(port) },
+    env: {
+      ...process.env,
+      TDOC_DIR: FIXTURE_ROOT,
+      TDOC_PORT: String(port),
+      ...(e2eUser ? { TDOC_E2E_USER: e2eUser } : {}),
+    },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   await waitForServer(port);

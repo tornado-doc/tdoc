@@ -48,6 +48,7 @@ vm.runInContext([
   fn('markInboxRead'),
   fn('pageInbox'),
   fn('inboxRecipients'),
+  fn('findRecord'),
   fn('recordAuthor'),
   fn('findCommentThread'),
 ].join('\n\n'), box);
