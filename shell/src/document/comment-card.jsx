@@ -92,6 +92,10 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
     <div className="tdoc-reply-form open" data-parent-id={commentId}>
       {replyingTo ? <div className="tdoc-reply-to">Replying to @{replyingTo}</div> : null}
       <MentionField
+        // The box you asked for is the box you want to type in. Without this,
+        // clicking Reply put a composer on screen and left the caret wherever
+        // it was, so the first thing you do is click the thing you just opened.
+        autoFocus
         placeholder="Reply… (@ to notify someone)"
         value={text}
         people={mentionable}
@@ -252,6 +256,20 @@ export function CommentCard({
     const next = Math.max(52, Math.min(position.top, limit));
     setClampedTop(next === position.top ? null : next);
   }, [floating, position, repliesOpen, replyTarget, comment]);
+
+  // A posted reply closes the composer it came from and opens the thread it
+  // landed in. Before, the form stayed on screen under a collapsed "N replies"
+  // fold: the reply was saved, nothing visibly changed, and only a page
+  // refresh cleared the box. A failure (onReply === false) keeps the composer
+  // and its draft so the text isn't lost.
+  const submitReply = async (parentId, text) => {
+    const result = await onReply(parentId, text);
+    if (result === false) return false;
+    setReplyTarget(null);
+    setRepliesOpen(true);
+    return result;
+  };
+
   const reactionCount = hasReactions(comment);
   const canMutate = mayMutate(comment, currentUser, isOwner);
   const createdAt = formatCreated(comment.created);
@@ -351,7 +369,7 @@ export function CommentCard({
                 mentionable={mentionable}
                 replyTarget={replyTarget}
                 onReplyTarget={setReplyTarget}
-                onReply={onReply}
+                onReply={submitReply}
                 onReact={onReact}
                 onDelete={onDelete}
               />
@@ -361,7 +379,7 @@ export function CommentCard({
       ) : null}
 
       {replyTarget === comment.id ? (
-        <ReplyForm commentId={comment.id} onReply={onReply} mentionable={mentionable} />
+        <ReplyForm commentId={comment.id} onReply={submitReply} mentionable={mentionable} />
       ) : null}
     </article>
   );
