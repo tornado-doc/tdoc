@@ -242,7 +242,7 @@ function ReplyCard({
             className="tdoc-reply-toggle"
             onClick={() => onReplyTarget(replyTarget === reply.id ? null : reply.id)}
           >
-            Reply
+            reply
           </button>
           {mayEdit(reply, currentUser) ? (
             <button
@@ -405,7 +405,7 @@ export function CommentCard({
             className="tdoc-reply-toggle"
             onClick={() => setReplyTarget((open) => (open === comment.id ? null : comment.id))}
           >
-            Reply
+            reply
           </button>
           {canEdit ? (
             <button
