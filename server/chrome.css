@@ -199,6 +199,12 @@
   .tdoc-agent-status-partial { background: #fff4dc; color: #8a5a00; }
   .tdoc-agent-status-question { background: #ffe7e7; color: #a52323; }
   .tdoc-margin-comment .text { color: #111; line-height: 1.45; word-wrap: break-word; }
+  /* A tombstone (#354): the words are gone, the name and the slot are not.
+     Muted and italic so it reads as an absence, not as something said. */
+  .tdoc-margin-comment .tdoc-deleted-text,
+  .tdoc-reply .tdoc-deleted-text { color: #999; font-style: italic; }
+  .tdoc-margin-comment.tdoc-deleted .author .login,
+  .tdoc-reply.tdoc-deleted .author .login { color: #777; font-weight: 500; }
   .tdoc-margin-comment .meta { font-size: 11px; color: #888; margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .tdoc-margin-comment .meta > span:first-child { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tdoc-margin-comment .del { cursor: pointer; color: #c33; }
@@ -232,6 +238,15 @@
   /* Resolved pins get a green ring + a small ✓ overlay badge. */
   .tdoc-pin.tdoc-pin-resolved { border-color: #1a7340; }
   .tdoc-pin.tdoc-pin-resolved::after { content: "✓"; position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; background: #1a7340; color: #fff; font-size: 9px; line-height: 14px; text-align: center; font-weight: 700; }
+  /* A tombstone's pin (#354): the thread under it is still worth opening, so
+     the pin stays, but it is faded and dashed and does not show whose face it
+     was — otherwise a deleted comment reads, at a glance, exactly like one
+     still waiting for an answer. */
+  .tdoc-pin.tdoc-pin-deleted { border-style: dashed; border-color: #c9ccd1; opacity: 0.55; }
+  .tdoc-pin.tdoc-pin-deleted img,
+  .tdoc-pin.tdoc-pin-deleted .tdoc-pin-anon { display: none; }
+  .tdoc-pin.tdoc-pin-deleted::before { content: ""; width: 10px; height: 2px; border-radius: 1px; background: #8a93a2; }
+  .tdoc-pin.tdoc-pin-deleted:hover { opacity: 1; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
   .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }

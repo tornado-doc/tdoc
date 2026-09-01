@@ -46,7 +46,7 @@ t('worker.js defines AGENT_STATUS_EMOJI (snapshotAt references it)', () => {
 
 const deps = [
   'isFiniteVersion', 'eventEid', 'backfillEids', 'dedupEvents',
-  'ensureEventLog', 'legacyToEvents', 'snapshotAt', 'snapshotList',
+  'ensureEventLog', 'legacyToEvents', 'snapshotAt', 'keepThread', 'asTombstone', 'snapshotList',
 ].map(sliceFn).join('\n\n');
 
 const sandbox = {};

@@ -369,8 +369,20 @@ export function DocumentShell({ boot, config }) {
 
   const reactTo = (commentId, emoji) => attempt(() => comments.react(commentId, emoji));
 
+  // Closing the card was unconditional, which hid the two cases where there is
+  // still something to look at: deleting a comment that holds replies leaves a
+  // tombstone with the thread under it (#354), and deleting a reply never
+  // touched the comment it hung from at all. Either way the card vanished and
+  // took the surviving conversation off screen — a delete that looked like it
+  // had removed far more than it did. It closes only when the comment the card
+  // is showing is really gone.
   const removeComment = async (id) => {
-    if ((await attempt(() => comments.remove(id))).ok) setOpenCommentId(null);
+    const { ok } = await attempt(() => comments.remove(id));
+    if (!ok) return;
+    // Not the mutation's own response — that is `{ ok: true }` either way.
+    // The refreshed list is what says whether this card still has anything on
+    // it. (comments.comments is the pre-refresh render's state here.)
+    if (!comments.latest.current.some((c) => c.id === openCommentId)) setOpenCommentId(null);
   };
 
   const removeAnchor = async () => {

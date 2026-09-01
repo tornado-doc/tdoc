@@ -34,7 +34,7 @@ vm.createContext(box);
 vm.runInContext([
   'isFiniteVersion', 'eventEid', 'backfillEids', 'dedupEvents', 'compactComments',
   'appendEvent', 'ensureEventLog', 'ensureMigrated', 'legacyToEvents', 'snapshotAt',
-  'snapshotList', 'reconcileAnchors',
+  'keepThread', 'asTombstone', 'snapshotList', 'reconcileAnchors',
 ].map(sliceFn).join('\n\n'), box);
 const { reconcileAnchors, snapshotAt, compactComments, backfillEids } = box;
 

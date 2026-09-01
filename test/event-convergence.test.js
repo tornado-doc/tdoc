@@ -36,7 +36,7 @@ const box = { AGENT_STATUS_EMOJI: { applied: '✅', partial: '🟡', question: '
 vm.createContext(box);
 vm.runInContext([
   'isFiniteVersion', 'eventEid', 'backfillEids', 'dedupEvents', 'appendEvent',
-  'ensureEventLog', 'legacyToEvents', 'snapshotAt',
+  'ensureEventLog', 'legacyToEvents', 'keepThread', 'asTombstone', 'snapshotAt',
 ].map(sliceFn).join('\n\n'), box);
 
 const { eventEid, dedupEvents, backfillEids, appendEvent, snapshotAt } = box;

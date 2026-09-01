@@ -157,19 +157,55 @@ function waitReady(port, ms = 5000) {
     if (!c.reactions['✅']?.includes('codex-pm')) throw new Error('agent verdict reaction did not use agent login');
   });
 
-  await t('DELETE /api/comments?id=<reply-id> removes the reply, leaves top', async () => {
+  // #354: a delete leaves a tombstone wherever something still hangs off the
+  // record, and takes it away when nothing does. `replyId` is answered by the
+  // nested reply above, so it is the first case.
+  let nestedId;
+  await t('DELETE a reply that is answered leaves a tombstone, keeping the answer', async () => {
+    const before = await req('GET', `/api/comments?slug=${SLUG}`);
+    nestedId = before.body[0].replies.find(x => x.parent_id === replyId).id;
+    // Local preview is anonymous unless TDOC_E2E_USER is set, so "the name
+    // stays" here means whatever author the record had is the author it keeps.
+    const wasBy = JSON.stringify(before.body[0].replies.find(x => x.id === replyId).author ?? null);
     const r = await req('DELETE', `/api/comments?slug=${SLUG}&id=${replyId}`);
     if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
     if (after.body.length !== 1) throw new Error('top comment was removed');
-    if (after.body[0].replies.some(r => r.id === replyId)) throw new Error('reply not removed');
+    const stone = after.body[0].replies.find(x => x.id === replyId);
+    if (!stone) throw new Error('the deleted reply took its answer with it');
+    if (stone.text !== '' || stone.deleted !== true) throw new Error(`not a tombstone: ${JSON.stringify(stone)}`);
+    if (JSON.stringify(stone.author ?? null) !== wasBy) {
+      throw new Error(`the tombstone lost its author: ${JSON.stringify(stone.author)} was ${wasBy}`);
+    }
+    if (!after.body[0].replies.some(x => x.id === nestedId)) throw new Error('the nested answer did not survive');
   });
 
-  await t('DELETE /api/comments?id=<top-id> removes the top comment', async () => {
+  await t('DELETE the answer as well collapses the tombstone that held it', async () => {
+    const r = await req('DELETE', `/api/comments?slug=${SLUG}&id=${nestedId}`);
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    const after = await req('GET', `/api/comments?slug=${SLUG}`);
+    const left = (after.body[0].replies || []).map(x => x.id);
+    if (left.includes(nestedId)) throw new Error('the answer was not removed');
+    if (left.includes(replyId)) throw new Error('a tombstone holding nothing stayed behind');
+  });
+
+  await t('DELETE the top comment leaves a tombstone while a reply remains', async () => {
     const r = await req('DELETE', `/api/comments?slug=${SLUG}&id=${topId}`);
     if (r.status !== 200) throw new Error(`status ${r.status}`);
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
-    if (after.body.length !== 0) throw new Error('top comment not removed');
+    if (after.body.length !== 1) throw new Error('the agent reply went with the comment above it');
+    if (after.body[0].text !== '' || after.body[0].deleted !== true) {
+      throw new Error(`not a tombstone: ${JSON.stringify(after.body[0])}`);
+    }
+  });
+
+  await t('DELETE its last reply takes the whole tombstoned thread away', async () => {
+    const before = await req('GET', `/api/comments?slug=${SLUG}`);
+    for (const reply of before.body[0].replies || []) {
+      await req('DELETE', `/api/comments?slug=${SLUG}&id=${reply.id}`);
+    }
+    const after = await req('GET', `/api/comments?slug=${SLUG}`);
+    if (after.body.length !== 0) throw new Error(`an empty tombstone stayed: ${JSON.stringify(after.body)}`);
   });
 
   function rawGet(p) {
