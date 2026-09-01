@@ -406,6 +406,9 @@
   .tdoc-modal h3 { margin: 0 0 8px; font-size: 20px; }
   .tdoc-modal p { margin: 0 0 14px; color: #444; line-height: 1.5; }
   .tdoc-modal .code { background: #0a0a0a; color: #fff; padding: 18px; border-radius: 8px; font: 24px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.15em; text-align: center; margin: 0 0 14px; user-select: all; cursor: copy; }
+  /* A link, not a code to read aloud: small, left-aligned, and it wraps rather
+     than running off the sheet. */
+  .tdoc-modal .code.url { padding: 12px 14px; font-size: 14px; letter-spacing: 0; text-align: left; overflow-wrap: anywhere; }
   .tdoc-modal .step { display: flex; gap: 10px; margin-bottom: 8px; color: #444; }
   .tdoc-modal .step .n { width: 22px; height: 22px; border-radius: 50%; background: var(--td-accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
   .tdoc-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }

@@ -22,7 +22,7 @@ export function ShareDialog({ open, url, onOpenChange, onCopied }) {
         </>
       )}
     >
-      <div className="code" id="tdoc-share-url">{url}</div>
+      <div className="code url" id="tdoc-share-url">{url}</div>
     </AppDialog>
   );
 }
@@ -37,7 +37,7 @@ export function MentionInviteDialog({ open, invited, url, onOpenChange, onCopied
     <AppDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={(invited || []).length > 1 ? 'Invited to this doc' : 'Invited to this doc'}
+      title="Invited to this doc"
       description={`${names} can now open this document, and the mention is in their tdoc inbox. tdoc cannot email them — send the link so they know it is there.`}
       actions={(
         <>
@@ -52,7 +52,7 @@ export function MentionInviteDialog({ open, invited, url, onOpenChange, onCopied
         </>
       )}
     >
-      <div className="code">{url}</div>
+      <div className="code url">{url}</div>
     </AppDialog>
   );
 }
@@ -146,7 +146,7 @@ export function PublishDialog({ open, slug, onOpenChange }) {
       {signin ? <PublishSignin signin={signin} /> : null}
       {url ? (
         <div style={{ marginTop: 10 }}>
-          <div className="code" id="tdoc-pub-url" style={{ fontSize: 14, letterSpacing: 0, textAlign: 'left' }}>{url}</div>
+          <div className="code url" id="tdoc-pub-url">{url}</div>
           <div className="actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
             <button type="button" className="primary" onClick={() => copyText(url)}>Copy link</button>
             <button type="button" onClick={() => window.open(url, '_blank', 'noopener')}>View live →</button>

@@ -131,9 +131,8 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
       actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
     >
       <div
-        className="code"
+        className="code url"
         id="tdoc-share-url"
-        style={{ fontSize: 14, letterSpacing: 0, textAlign: 'left', cursor: 'copy' }}
         onClick={() => copyText(url).then(onCopied)}
       >
         {url}
