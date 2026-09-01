@@ -19,7 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { requirePlaywrightOrSkip, resolveTarget } = require('./helpers/fixture-server');
+const { requirePlaywrightOrSkip, resolveTarget, isPublishedTarget } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('artifact-shell.test.js');
 
 const COMMENTS_FIXTURE = path.join(__dirname, 'fixtures/tdocs/hostile-body-css/comments.json');
@@ -622,6 +622,70 @@ const SLUG = 'hostile-body-css';
       const fabVisible = await page.evaluate(() => { const f = document.querySelector('.tdoc-fab'); return !!f && getComputedStyle(f).display !== 'none'; });
       if (fabVisible) throw new Error('fab still visible after widening');
     });
+
+    // --- EDIT YOUR OWN COMMENT (#349) -----------------------------------------
+    // Needs an identity: every assertion here is about chrome that only exists
+    // for a signed-in viewer, and the default rig browses anonymously. The
+    // local server makes that same login the doc owner, which is exactly what
+    // proves the owner is NOT handed an edit on other people's comments.
+    if (!isPublishedTarget()) {
+      const authed = await resolveTarget({ port: 7994, e2eUser: 'tester' });
+      const authedUrl = `${authed.url.replace(/\/d\/.*/, '')}/d/${SLUG}/v/1?shell=1`;
+      const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+      try {
+        await t('a comment offers edit to its author and to nobody else', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
+            // …and c_fixture_4 belongs to reviewer-a. The viewer owns this doc,
+            // so it still carries a delete — but never an edit.
+            await page.goto(`${authedUrl}&comment=c_fixture_4`, { waitUntil: 'networkidle' });
+            const other = '.tdoc-margin-comment[data-comment-id="c_fixture_4"]';
+            await page.waitForSelector(`${other} .del`, { timeout: 4000 });
+            const strangerEdit = await page.$(`${other} .tdoc-edit-toggle`);
+            if (strangerEdit) throw new Error('the doc owner was offered an edit on someone else\'s comment');
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+
+        await t('editing rewrites the comment in place and marks it edited (#349)', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.click(`${card} .tdoc-edit-toggle`);
+            await page.waitForSelector(`${card} .tdoc-edit-form textarea`, { timeout: 2000 });
+            // the box opens on the current text — an edit is a correction
+            const seeded = await page.$eval(`${card} .tdoc-edit-form textarea`, (el) => el.value);
+            if (seeded !== 'a pin should appear for this') {
+              throw new Error(`edit box did not open on the current text: ${JSON.stringify(seeded)}`);
+            }
+            await page.fill(`${card} .tdoc-edit-form textarea`, 'rewritten by its author');
+            await page.click(`${card} .tdoc-edit-save`);
+            await page.waitForSelector(`${card} .tdoc-edit-form`, { state: 'detached', timeout: 4000 });
+            await page.waitForFunction(
+              (sel) => document.querySelector(`${sel} .text`)?.textContent === 'rewritten by its author',
+              card,
+              { timeout: 4000 },
+            );
+            const meta = await page.$eval(`${card} .meta > span`, (el) => el.textContent);
+            if (!/edited/.test(meta)) throw new Error(`edited comment is not marked: "${meta}"`);
+            const stored = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'))
+              .find((c) => c.id === 'c_fixture_1');
+            if (stored.text !== 'rewritten by its author' || !stored.edited) {
+              throw new Error(`edit did not persist: ${JSON.stringify(stored.text)} / ${stored.edited}`);
+            }
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+      } finally {
+        await authed.stop();
+      }
+    }
 
   } finally {
     await browser.close();

@@ -108,6 +108,52 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
   );
 }
 
+// An inline rewrite of a comment or reply that is already on screen. Opens
+// seeded with the current text — an edit is a correction, not a re-draft — and
+// leaves the card untouched when the text comes back unchanged.
+function EditForm({ item, onSave, onCancel }) {
+  const [text, setText] = useState(item.text || '');
+
+  const submit = async () => {
+    const next = text.trim();
+    if (!next || next === item.text) return onCancel();
+    // onSave resolves false when the shell reported a failure; keep the draft.
+    if (await onSave(item.id, next) !== false) onCancel();
+    return undefined;
+  };
+
+  return (
+    <div className="tdoc-edit-form open" data-comment-id={item.id}>
+      <textarea
+        autoFocus
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') submit();
+          if (event.key === 'Escape') onCancel();
+        }}
+      />
+      <div className="tdoc-edit-form-foot">
+        <button className="tdoc-edit-cancel" type="button" onClick={onCancel}>Cancel</button>
+        <button className="tdoc-edit-save" type="button" onClick={submit}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+// Editing is the author's ALONE — deliberately narrower than mayMutate below,
+// which also grants the doc owner. Rewriting somebody else's words under their
+// name is not a power owning the document confers; the worker's PATCH enforces
+// the same rule, and this keeps the button from rendering where it would 403.
+function mayEdit(item, currentUser) {
+  return Boolean(
+    currentUser
+    && currentUser !== 'anon'
+    && item.author?.login
+    && item.author.login === currentUser,
+  );
+}
+
 // Mirrors the worker's canMutate(): delete and re-anchor are the author's or
 // the doc owner's, nobody else's. Without this the buttons rendered for every
 // reader and the server's 403 (`not_author`) was the only thing stopping them
@@ -124,6 +170,12 @@ function mayMutate(item, currentUser, isOwner) {
 
 function hasReactions(item) {
   return Object.values(item.reactions || {}).some((users) => users?.length);
+}
+
+// "· edited" rather than a second timestamp: which words changed matters, the
+// minute they changed at does not.
+function editedSuffix(item) {
+  return item.edited ? ' · edited' : '';
 }
 
 function formatCreated(created) {
@@ -158,9 +210,12 @@ function ReplyCard({
   mentionable,
   replyTarget,
   onReplyTarget,
+  editTarget,
+  onEditTarget,
   onReply,
   onReact,
   onDelete,
+  onEdit,
 }) {
   const kids = childrenOf(replies, reply.id, rootId);
   const reacted = hasReactions(reply);
@@ -169,11 +224,15 @@ function ReplyCard({
   return (
     <div className="tdoc-reply" data-comment-id={reply.id} data-depth={depth}>
       <Author author={reply.author} />
-      <div className="text"><MentionText text={reply.text} mentions={reply.mentions} /></div>
+      {editTarget === reply.id ? (
+        <EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} />
+      ) : (
+        <div className="text"><MentionText text={reply.text} mentions={reply.mentions} /></div>
+      )}
       {reacted ? <Reactions item={reply} me={currentUser} onReact={onReact} /> : null}
 
       <div className="meta">
-        <span>{formatCreated(reply.created)}</span>
+        <span>{formatCreated(reply.created)}{editedSuffix(reply)}</span>
         <span className="actions">
           {reacted ? null : (
             <ReactionPicker onPick={(emoji) => onReact(reply.id, emoji)} />
@@ -185,6 +244,15 @@ function ReplyCard({
           >
             Reply
           </button>
+          {mayEdit(reply, currentUser) ? (
+            <button
+              type="button"
+              className="tdoc-edit-toggle"
+              onClick={() => onEditTarget(editTarget === reply.id ? null : reply.id)}
+            >
+              edit
+            </button>
+          ) : null}
           {mayMutate(reply, currentUser, isOwner) ? (
             <button type="button" className="del" onClick={() => onDelete(reply.id)}>
               delete
@@ -211,9 +279,12 @@ function ReplyCard({
               mentionable={mentionable}
               replyTarget={replyTarget}
               onReplyTarget={onReplyTarget}
+              editTarget={editTarget}
+              onEditTarget={onEditTarget}
               onReply={onReply}
               onReact={onReact}
               onDelete={onDelete}
+              onEdit={onEdit}
             />
           ))}
         </div>
@@ -236,10 +307,14 @@ export function CommentCard({
   onReply,
   onReact,
   onDelete,
+  onEdit,
   onReanchor,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
   const [replyTarget, setReplyTarget] = useState(null);
+  // One record at a time is being rewritten — this card's comment or any reply
+  // under it — the same way one reply form is open at a time.
+  const [editTarget, setEditTarget] = useState(null);
   const cardRef = useRef(null);
   const [clampedTop, setClampedTop] = useState(null);
 
@@ -251,8 +326,16 @@ export function CommentCard({
     const limit = window.innerHeight - cardRef.current.offsetHeight - 8;
     const next = Math.max(52, Math.min(position.top, limit));
     setClampedTop(next === position.top ? null : next);
-  }, [floating, position, repliesOpen, replyTarget, comment]);
+  }, [floating, position, repliesOpen, replyTarget, editTarget, comment]);
+  const saveEdit = async (id, text) => {
+    const result = await onEdit(id, text);
+    if (result === false) return false;
+    setEditTarget(null);
+    return result;
+  };
+
   const reactionCount = hasReactions(comment);
+  const canEdit = mayEdit(comment, currentUser);
   const canMutate = mayMutate(comment, currentUser, isOwner);
   const createdAt = formatCreated(comment.created);
   const replies = comment.replies || [];
@@ -302,13 +385,17 @@ export function CommentCard({
       ) : null}
 
       <Author author={comment.author} />
-      <div className="text"><MentionText text={comment.text} mentions={comment.mentions} /></div>
+      {editTarget === comment.id ? (
+        <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
+      ) : (
+        <div className="text"><MentionText text={comment.text} mentions={comment.mentions} /></div>
+      )}
       {reactionCount ? (
         <Reactions item={comment} me={currentUser} onReact={onReact} />
       ) : null}
 
       <div className="meta">
-        <span>v{comment.version || 1}{createdAt ? ` · ${createdAt}` : ''}</span>
+        <span>v{comment.version || 1}{createdAt ? ` · ${createdAt}` : ''}{editedSuffix(comment)}</span>
         <span className="actions">
           {!reactionCount ? (
             <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
@@ -320,6 +407,15 @@ export function CommentCard({
           >
             Reply
           </button>
+          {canEdit ? (
+            <button
+              type="button"
+              className="tdoc-edit-toggle"
+              onClick={() => setEditTarget(editTarget === comment.id ? null : comment.id)}
+            >
+              edit
+            </button>
+          ) : null}
           {canMutate ? (
             <button type="button" className="del" onClick={() => onDelete(comment.id)}>
               delete
@@ -351,9 +447,12 @@ export function CommentCard({
                 mentionable={mentionable}
                 replyTarget={replyTarget}
                 onReplyTarget={setReplyTarget}
+                editTarget={editTarget}
+                onEditTarget={setEditTarget}
                 onReply={onReply}
                 onReact={onReact}
                 onDelete={onDelete}
+                onEdit={saveEdit}
               />
             ))}
           </div>

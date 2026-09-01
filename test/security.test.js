@@ -46,6 +46,7 @@ vm.runInContext([
   sliceFn(workerSrc, 'isOwnerSession'),
   sliceFn(workerSrc, 'isDocOwnerSession'),
   sliceFn(workerSrc, 'canMutate'),
+  sliceFn(workerSrc, 'isRecordAuthor'),
   sliceFn(serverSrc, 'safeSlug'),
   sliceFn(serverSrc, 'isLocalMutation'),
 ].join('\n\n'), box);
@@ -92,6 +93,28 @@ t('canMutate ALLOWS the hosted publisher, not TDOC_OWNER, on a hosted doc', () =
 });
 t('canMutate DENIES when session is null/anonymous', () => {
   assert(box.canMutate({ author: { login: 'alice' } }, null, ENV) === false);
+});
+
+// --- isRecordAuthor: editing is the author's alone, owner NOT included ---
+// canMutate deliberately grants the doc owner (delete/re-anchor). Rewriting
+// someone else's words under their name is not one of those powers, so the
+// edit path must not fall back to it.
+t('isRecordAuthor ALLOWS the author of the record', () => {
+  assert(box.isRecordAuthor({ author: { login: 'alice' } }, { login: 'alice' }) === true);
+});
+t('isRecordAuthor DENIES the doc owner on someone else’s record [the whole point]', () => {
+  assert(box.isRecordAuthor({ author: { login: 'alice' } }, { login: 'owner' }) === false);
+});
+t('isRecordAuthor DENIES a null-author (legacy) record and an anonymous session', () => {
+  assert(box.isRecordAuthor({ author: null }, { login: 'owner' }) === false);
+  assert(box.isRecordAuthor({ author: { login: 'alice' } }, null) === false);
+});
+t('the worker edit path checks isRecordAuthor, never canMutate', () => {
+  const at = workerSrc.indexOf("if (typeof body.text === 'string') {");
+  assert(at !== -1, 'the PATCH edit branch is gone');
+  const branch = workerSrc.slice(at, workerSrc.indexOf("if (!slug || !id || !anchor)", at));
+  assert(branch.includes('isRecordAuthor(target, s)'), 'the edit branch does not check the author');
+  assert(!branch.includes('canMutate'), 'the edit branch fell back to the owner-granting gate');
 });
 
 // --- safeSlug: path traversal ---
@@ -175,6 +198,20 @@ t('comment card renders delete only for the author or the doc owner [the bug]', 
   assert(gates.includes('canMutate'), "the comment's delete is not gated by canMutate");
   assert(gates.includes('mayMutate(reply, currentUser, isOwner)'),
     "a reply's delete is not gated by mayMutate");
+});
+t('comment card derives the edit gate from the author alone, never the owner', () => {
+  const decl = cardSrc.slice(cardSrc.indexOf('function mayEdit'), cardSrc.indexOf('function mayEdit') + 400);
+  assert(decl.includes('item.author?.login') && decl.includes('currentUser'),
+    'mayEdit does not compare the author to the signed-in viewer');
+  assert(!decl.includes('isOwner'), 'mayEdit grants the doc owner — it must not');
+});
+t('comment card renders edit only for the author, on the comment and on replies', () => {
+  const gates = gatesAround(cardSrc, 'className="tdoc-edit-toggle"');
+  assert(gates.length === 2, `expected an edit on the comment and on replies, found ${gates.length}`);
+  assert(gates.includes('canEdit'), "the comment's edit is not gated by canEdit");
+  assert(gates.includes('mayEdit(reply, currentUser)'), "a reply's edit is not gated by mayEdit");
+  assert(cardSrc.includes('const canEdit = mayEdit(comment, currentUser);'),
+    'the root comment no longer runs through mayEdit');
 });
 t('comment card renders the re-anchor button only for the author or the doc owner', () => {
   assert(gatedByCanMutate(cardSrc, 'tdoc-anchor-actions'), 're-anchor action is not gated by canMutate');

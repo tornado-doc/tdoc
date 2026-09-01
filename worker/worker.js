@@ -2020,6 +2020,12 @@ function legacyToEvents(c) {
     anchor: c.anchor || null,
     text: c.text || '',
   });
+  // A comment the local server edited carries `edited` and the NEW text on one
+  // flat record. Replay it as an edit of the same text so the marker survives
+  // the publish merge instead of arriving as an original that was never touched.
+  if (c.edited) {
+    events.push({ kind: 'text_edited', at_version: v, at: c.edited, text: c.text || '' });
+  }
   if (c.status === 'applied') {
     events.push({
       kind: 'marked_applied', at_version: Number(c.applied_in) || v, at,
@@ -2048,6 +2054,12 @@ function legacyToEvents(c) {
           agent_status: r.agent_status || null,
         },
       });
+      if (r.edited) {
+        events.push({
+          kind: 'reply_text_edited', at_version: Number(r.version) || v,
+          at: r.edited, reply_id: r.id, text: r.text || '',
+        });
+      }
       if (r.reactions && typeof r.reactions === 'object') {
         for (const emoji of Object.keys(r.reactions)) {
           for (const login of (r.reactions[emoji] || [])) {
@@ -2129,6 +2141,7 @@ function snapshotAt(c, V) {
     anchor: null,
     text: '',
     mentions: [],
+    edited: null,
     status: 'open',
     applied_in: undefined,
     replies: [],
@@ -2160,6 +2173,7 @@ function snapshotAt(c, V) {
         break;
       case 'text_edited':
         snap.text = e.text || '';
+        snap.edited = e.at || snap.edited;
         break;
       case 'anchor_changed':
         snap.anchor = e.anchor || null;
@@ -2203,6 +2217,7 @@ function snapshotAt(c, V) {
           author: e.reply.author || null,
           text: e.reply.text || '',
           mentions: Array.isArray(e.reply.mentions) ? e.reply.mentions : [],
+          edited: null,
           agent_status: e.reply.agent_status || null,
           created: e.at,
           reactions: {},
@@ -2214,7 +2229,7 @@ function snapshotAt(c, V) {
       }
       case 'reply_text_edited': {
         const r = replyById.get(e.reply_id);
-        if (r) r.text = e.text || '';
+        if (r) { r.text = e.text || ''; r.edited = e.at || r.edited; }
         break;
       }
       case 'reply_deleted': {
@@ -2829,15 +2844,32 @@ function findCommentThread(list, id) {
   return null;
 }
 
-function recordAuthor(list, id) {
+// Resolve a comment id to the record that carries its author — the top-level
+// comment, or the reply object stored on its thread's reply_added event.
+// Returns null only when the id exists nowhere, which callers must tell apart
+// from a record whose author is missing (legacy; mutable by nobody).
+function findRecord(list, id) {
   if (!id || !Array.isArray(list)) return null;
   const top = list.find(c => c && c.id === id);
-  if (top) return top.author || null;
+  if (top) return top;
   for (const c of list) {
     const ev = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
-    if (ev) return ev.reply.author || null;
+    if (ev) return ev.reply;
   }
   return null;
+}
+
+function recordAuthor(list, id) {
+  const record = findRecord(list, id);
+  return (record && record.author) || null;
+}
+
+// Editing is the author's ALONE — deliberately not canMutate(), which also
+// grants the doc owner. Rewriting somebody else's words under their name is
+// not a power owning the document confers.
+function isRecordAuthor(record, session) {
+  const who = record && record.author && record.author.login;
+  return !!(who && session && session.login && who === session.login);
 }
 
 // Per-user inbox (same host, cross-doc). KV key inbox:<github-login>.
@@ -3172,6 +3204,27 @@ function applyCommentOp(list, op) {
       const fresh = snapshotAt(host, op.version);
       const reactions = isReply ? (fresh.replies.find(r => r.id === replyId)?.reactions || {}) : fresh.reactions;
       return { status: 200, body: { ok: true, reactions, added: !had } };
+    }
+    case 'edit_text': {
+      // Authorization enforced upstream (the worker resolves the target and
+      // checks it is the author's own record). The DO only serializes the
+      // write. Stamped at the viewed version like every other event, so an
+      // older version keeps the words it was published with.
+      const top = list.find(c => c.id === op.id);
+      if (top) {
+        appendEvent(top, { kind: 'text_edited', at_version: op.version, at: now, text: op.text, by: op.actor.login });
+        return { status: 200, body: snapshotAt(top, op.version) };
+      }
+      for (const c of list) {
+        ensureEventLog(c);
+        const re = (c.events || []).find(e => e.kind === 'reply_added' && e.reply?.id === op.id);
+        if (re) {
+          appendEvent(c, { kind: 'reply_text_edited', at_version: op.version, at: now, reply_id: op.id, text: op.text, by: op.actor.login });
+          const snap = snapshotAt(c, op.version);
+          return { status: 200, body: (snap && snap.replies.find(r => r.id === op.id)) || { ok: true } };
+        }
+      }
+      return { status: 404, body: { error: 'not_found' } };
     }
     case 'delete': {
       // Authorization enforced upstream (worker resolves target + canMutate
@@ -4643,15 +4696,39 @@ export default {
       return json(body_out, { status: res.status });
     }
 
-    // Re-anchor a comment. Only the original author can re-anchor their own
-    // comment. Appends an `anchor_changed` event stamped at the current
-    // version, so OLDER versions still resolve to the previous anchor.
+    // Re-anchor a comment, or edit its text. Appends an `anchor_changed` /
+    // `text_edited` event stamped at the current version, so OLDER versions
+    // still resolve to the anchor and the words they were published with.
+    //
+    // The two differ in who may do them: re-anchor is the author's or the doc
+    // owner's (canMutate), but an EDIT is the author's alone — rewriting
+    // somebody else's words under their name is not a power a doc owner gets.
     if (p === '/api/comments' && method === 'PATCH') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, id, anchor, version } = body;
+      if (typeof body.text === 'string') {
+        const text = body.text.trim();
+        if (!slug || !id || !text) return json({ error: 'slug, id, text required' }, { status: 400 });
+        if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+        const list = await readComments(env, slug);
+        ensureMigrated(list);
+        const meta = await loadDocMeta(env, slug);
+        const access = accessFromMeta(meta || {});
+        if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+        // The target is a top-level comment or a reply; either way the record
+        // that carries the author is the one that has to match the session.
+        const target = findRecord(list, id);
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        if (!isRecordAuthor(target, s)) return json({ error: 'not_author' }, { status: 403 });
+        const V = coerceBodyVersion(version);
+        const res = await mutateComments(env, slug, {
+          kind: 'edit_text', slug, id, text, version: V, actor: { login: s.login },
+        });
+        return json(res.body, { status: res.status });
+      }
       if (!slug || !id || !anchor) return json({ error: 'slug, id, anchor required' }, { status: 400 });
       // Auth read (canMutate needs session+env): resolve the target up front.
       // The serialized write then runs through the DO. A target deleted between

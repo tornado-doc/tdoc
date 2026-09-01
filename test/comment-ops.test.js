@@ -110,6 +110,53 @@ t('delete: soft-deletes a top-level comment (hidden from snapshot)', () => {
   assert(box.snapshotAt(list[0], Infinity).deleted === true, 'comment not marked deleted');
 });
 
+// ---- edit_text ----
+t('edit_text: rewrites a comment and stamps it edited; older versions keep the original', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('a'), text: 'first draft', version: 1, at: '2026-01-01' });
+  const r = apply(list, { kind: 'edit_text', id: 'c1', text: 'second draft', version: 2, actor: mkAuthor('a'), at: '2026-01-02' });
+  assert(r.status === 200, `edit failed: ${r.status}`);
+  assert(r.body.text === 'second draft', `snapshot text is ${r.body.text}`);
+  assert(r.body.edited === '2026-01-02', `edited stamp is ${r.body.edited}`);
+  const before = box.snapshotAt(list[0], 1);
+  assert(before.text === 'first draft', `v1 should keep the original, got ${before.text}`);
+  assert(!before.edited, 'v1 was never edited, so it must not say it was');
+});
+
+t('edit_text: rewrites a reply, and only that reply', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('a'), text: 'p', version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('b'), text: 'typo', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r2', author: mkAuthor('b'), text: 'untouched', version: 1, at: '2026-01-02' });
+  const r = apply(list, { kind: 'edit_text', id: 'r1', text: 'fixed', version: 1, actor: mkAuthor('b'), at: '2026-01-03' });
+  assert(r.status === 200 && r.body.id === 'r1', 'reply edit did not return the reply');
+  const replies = box.snapshotAt(list[0], Infinity).replies;
+  assert(replies.find(x => x.id === 'r1').text === 'fixed', 'reply text not updated');
+  assert(replies.find(x => x.id === 'r1').edited === '2026-01-03', 'reply not stamped edited');
+  assert(replies.find(x => x.id === 'r2').text === 'untouched', 'sibling reply was touched');
+  assert(!replies.find(x => x.id === 'r2').edited, 'sibling reply wrongly marked edited');
+});
+
+t('edit_text: 404 for an id that is neither a comment nor a reply', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('a'), text: 'p', version: 1, at: '2026-01-01' });
+  assert(apply(list, { kind: 'edit_text', id: 'zzz', text: 'x', version: 1, actor: mkAuthor('a') }).status === 404, 'missing target should 404');
+});
+
+t('edit_text: the last edit at a version wins, and a legacy `edited` record replays as one', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('a'), text: 'one', version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'edit_text', id: 'c1', text: 'two', version: 1, actor: mkAuthor('a'), at: '2026-01-02' });
+  apply(list, { kind: 'edit_text', id: 'c1', text: 'three', version: 1, actor: mkAuthor('a'), at: '2026-01-03' });
+  assert(box.snapshotAt(list[0], 1).text === 'three', 'last edit should win');
+  // What tdoc-publish merges up from the local server: one flat record whose
+  // text is already the edit, plus the stamp.
+  const legacy = { id: 'c2', version: 1, text: 'edited locally', edited: '2026-02-01', author: mkAuthor('a'), status: 'open', created: '2026-01-01', anchor: null, replies: [{ id: 'r9', text: 'reply edited locally', edited: '2026-02-02', author: mkAuthor('b'), version: 1, created: '2026-01-02', reactions: {} }], reactions: {} };
+  const snap = box.snapshotAt(legacy, Infinity);
+  assert(snap.text === 'edited locally' && snap.edited === '2026-02-01', `legacy edit lost: ${JSON.stringify({ t: snap.text, e: snap.edited })}`);
+  assert(snap.replies[0].edited === '2026-02-02', 'legacy reply edit lost');
+});
+
 // ---- patch_anchor ----
 t('patch_anchor: re-anchors; 404 if target missing', () => {
   const list = [];
