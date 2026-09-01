@@ -7,7 +7,7 @@
 # Usage:
 #   tdoc-agent-reply --slug <slug> --parent <id> --text "..." \
 #     [--status applied|partial|question] [--applied-in N] \
-#     [--login grok] [--name Grok] [--avatar-url https://...]
+#     [--login grok] [--name Grok] [--avatar-url https://...] [--force]
 #   tdoc-agent-reply --print-identity   # login/name JSON, no network
 #
 # Posts to the published worker when ~/.tdoc/published.json exists,
@@ -25,6 +25,7 @@ APPLIED_IN=""
 LOGIN=""
 NAME=""
 AVATAR=""
+FORCE=0
 PRINT_IDENTITY=0
 
 while [ $# -gt 0 ]; do
@@ -37,6 +38,7 @@ while [ $# -gt 0 ]; do
     --login) LOGIN="${2:-}"; shift 2 ;;
     --name) NAME="${2:-}"; shift 2 ;;
     --avatar-url) AVATAR="${2:-}"; shift 2 ;;
+    --force) FORCE=1; shift ;;
     --print-identity) PRINT_IDENTITY=1; shift ;;
     -h|--help)
       sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
@@ -88,13 +90,14 @@ fi
 # of /tdoc edit, and macOS ships no jq, so a jq dependency here takes the whole
 # comment loop down on a stock machine. See #276.
 PAYLOAD="$(node -e '
-  const [slug, parent, text, status, applied, login, name, avatar] = process.argv.slice(1);
+  const [slug, parent, text, status, applied, login, name, avatar, force] = process.argv.slice(1);
   const o = { slug, parent_id: parent, text, agent_login: login, agent_name: name };
   if (status !== "") o.status = status;
   if (applied !== "") o.applied_in = Number(applied);
   if (avatar !== "") o.agent_avatar_url = avatar;
+  if (force === "1") o.force = true;
   process.stdout.write(JSON.stringify(o));
-' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR")"
+' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR" "$FORCE")"
 
 # Post the reply and gate on the outcome.
 #
@@ -126,6 +129,21 @@ post_reply() {
   if err="$(printf '%s' "$body" | json_error)"; then
     echo "[tdoc] agent reply NOT posted: $err" >&2
     return 1
+  fi
+  # A skip is a success, not a failure — and not silence either. The server
+  # refuses a second answer on a thread nobody has touched since the last one,
+  # so a round that re-reads a stale comments.json cannot repeat itself. Say
+  # which, so "posted" and "skipped" never look the same in a transcript.
+  local skipped
+  skipped="$(printf '%s' "$body" | json_get skipped)"
+  if [ "$skipped" = "true" ]; then
+    local reason
+    reason="$(printf '%s' "$body" | json_get reason)"
+    case "$reason" in
+      already_answered) echo "[tdoc] not posted: this comment already has your answer, and nobody has replied to it since. Pass force to say it again." >&2 ;;
+      comment_deleted)  echo "[tdoc] not posted: that comment was deleted." >&2 ;;
+      *)                echo "[tdoc] not posted: ${reason:-skipped}" >&2 ;;
+    esac
   fi
   return 0
 }
