@@ -47,6 +47,8 @@ vm.runInContext([
   sliceFn(workerSrc, 'isDocOwnerSession'),
   sliceFn(workerSrc, 'canMutate'),
   sliceFn(workerSrc, 'isRecordAuthor'),
+  sliceFn(workerSrc, 'isAgentRecord'),
+  sliceFn(workerSrc, 'mayDelete'),
   sliceFn(serverSrc, 'safeSlug'),
   sliceFn(serverSrc, 'isLocalMutation'),
 ].join('\n\n'), box);
@@ -114,7 +116,45 @@ t('the worker edit path checks isRecordAuthor, never canMutate', () => {
   assert(at !== -1, 'the PATCH edit branch is gone');
   const branch = workerSrc.slice(at, workerSrc.indexOf("if (!slug || !id || !anchor)", at));
   assert(branch.includes('isRecordAuthor(target, s)'), 'the edit branch does not check the author');
-  assert(!branch.includes('canMutate'), 'the edit branch fell back to the owner-granting gate');
+  assert(!/canMutate\(/.test(branch), 'the edit branch fell back to the owner-granting gate');
+});
+t('the worker delete path checks mayDelete, never canMutate', () => {
+  // The doc owner used to be able to delete anybody's comment here. Taking
+  // someone's words off the page belongs to whoever wrote them.
+  const at = workerSrc.indexOf("if (p === '/api/comments' && method === 'DELETE') {");
+  assert(at !== -1, 'the DELETE route is gone');
+  const branch = workerSrc.slice(at, workerSrc.indexOf("kind: 'delete'", at));
+  assert(branch.includes('mayDelete(target, s, env, meta)'), 'the delete branch does not check mayDelete');
+  // The call, not the word: the comment above the route explains why canMutate
+  // is deliberately not used here.
+  assert(!/canMutate\(/.test(branch), 'the delete branch still grants the doc owner');
+});
+
+// --- mayDelete: your own words, and an agent's if the doc is yours ---
+// /api/agent/reply is authed with the doc's upload token, so an agent is the
+// owner writing through a tool, not a third party with speech of its own.
+t('mayDelete ALLOWS the author of a human comment', () => {
+  assert(box.mayDelete({ author: { login: 'alice' } }, { login: 'alice' }, ENV) === true);
+});
+t('mayDelete DENIES the doc owner on a human comment [#349 point 3]', () => {
+  assert(box.mayDelete({ author: { login: 'alice' } }, { login: 'owner' }, ENV) === false);
+});
+t('mayDelete ALLOWS the doc owner on an AGENT comment', () => {
+  assert(box.mayDelete({ author: { kind: 'agent', login: 'claude' } }, { login: 'owner' }, ENV) === true);
+});
+t('mayDelete DENIES a stranger on an agent comment', () => {
+  assert(box.mayDelete({ author: { kind: 'agent', login: 'claude' } }, { login: 'mallory' }, ENV) === false);
+});
+t('mayDelete DENIES everyone on a null-author legacy record except by ownership of an agent', () => {
+  assert(box.mayDelete({ author: null }, { login: 'owner' }, ENV) === false,
+    'a record with no author is not an agent record');
+  assert(box.mayDelete({ author: null }, { login: 'alice' }, ENV) === false);
+});
+t('mayDelete on a hosted doc follows the publisher, not TDOC_OWNER', () => {
+  const meta = { hosted: { github_login: 'alice' } };
+  const agent = { author: { kind: 'agent', login: 'claude' } };
+  assert(box.mayDelete(agent, { login: 'alice' }, ENV, meta) === true, 'the publisher owns what its agent said');
+  assert(box.mayDelete(agent, { login: 'owner' }, ENV, meta) === false, 'TDOC_OWNER does not own someone else’s hosted doc');
 });
 
 // --- safeSlug: path traversal ---
@@ -190,28 +230,39 @@ t('comment card derives the mutate gate from the author login or doc owner', () 
   assert(cardSrc.includes('const canMutate = mayMutate(comment, currentUser, isOwner);'),
     'the root comment no longer runs through mayMutate');
 });
-t('comment card renders delete only for the author or the doc owner [the bug]', () => {
-  // Two deletes now: the comment's and — since replies stopped being dead
-  // ends (#343) — every reply's. Both are the author's or the owner's.
+t('comment card renders delete for the author, and for the owner only on an agent record', () => {
+  // Two deletes: the comment's and — since replies stopped being dead ends
+  // (#343) — every reply's. Both were the author's OR the doc owner's until
+  // #349; deleting someone else's words is not an owner's power. An agent's
+  // words are the exception, because they are the owner's own token speaking.
   const gates = gatesAround(cardSrc, 'className="del"');
   assert(gates.length === 2, `expected a delete on the comment and on replies, found ${gates.length}`);
-  assert(gates.includes('canMutate'), "the comment's delete is not gated by canMutate");
-  assert(gates.includes('mayMutate(reply, currentUser, isOwner)'),
-    "a reply's delete is not gated by mayMutate");
+  assert(gates.includes('canDelete'), "the comment's delete is not gated by mayDelete");
+  assert(gates.includes('mayDelete(reply, currentUser, isOwner)'),
+    "a reply's delete is not gated by mayDelete");
+  assert(!gates.some((g) => g && /canMutate|mayMutate/.test(g)),
+    'a delete is still gated by the re-anchor gate');
+  const decl = cardSrc.slice(cardSrc.indexOf('function mayDelete'), cardSrc.indexOf('function mayDelete') + 300);
+  assert(/kind === 'agent'/.test(decl), 'the owner’s reach must be limited to agent-authored records');
 });
-t('comment card derives the edit gate from the author alone, never the owner', () => {
-  const decl = cardSrc.slice(cardSrc.indexOf('function mayEdit'), cardSrc.indexOf('function mayEdit') + 400);
+t('comment card derives the your-own gate from the author alone, never the owner', () => {
+  const decl = cardSrc.slice(cardSrc.indexOf('function authoredBy'), cardSrc.indexOf('function authoredBy') + 400);
   assert(decl.includes('item.author?.login') && decl.includes('currentUser'),
-    'mayEdit does not compare the author to the signed-in viewer');
-  assert(!decl.includes('isOwner'), 'mayEdit grants the doc owner — it must not');
+    'authoredBy does not compare the author to the signed-in viewer');
+  assert(!decl.includes('isOwner'), 'authoredBy grants the doc owner — it must not');
 });
 t('comment card renders edit only for the author, on the comment and on replies', () => {
   const gates = gatesAround(cardSrc, 'className="tdoc-edit-toggle"');
   assert(gates.length === 2, `expected an edit on the comment and on replies, found ${gates.length}`);
-  assert(gates.includes('canEdit'), "the comment's edit is not gated by canEdit");
-  assert(gates.includes('mayEdit(reply, currentUser)'), "a reply's edit is not gated by mayEdit");
-  assert(cardSrc.includes('const canEdit = mayEdit(comment, currentUser);'),
-    'the root comment no longer runs through mayEdit');
+  assert(gates.includes('isMine'), "the comment's edit is not gated by authoredBy");
+  assert(gates.includes('authoredBy(reply, currentUser)'), "a reply's edit is not gated by authoredBy");
+  assert(cardSrc.includes('const isMine = authoredBy(comment, currentUser);'),
+    'the root comment no longer runs through authoredBy');
+});
+t('the re-anchor gate is the only thing left that the doc owner unlocks', () => {
+  assert(gatedByCanMutate(cardSrc, 'tdoc-anchor-actions'), 're-anchor action is not gated by canMutate');
+  assert(cardSrc.split('mayMutate(').length === 3,
+    'mayMutate should be declared once and called once — for the re-anchor only');
 });
 t('comment card renders the re-anchor button only for the author or the doc owner', () => {
   assert(gatedByCanMutate(cardSrc, 'tdoc-anchor-actions'), 're-anchor action is not gated by canMutate');
