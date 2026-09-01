@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createComment,
   listComments,
@@ -11,11 +11,17 @@ import { anchorFromSelection } from '../document/model.js';
 export function useComments({ slug, version, onChange, onUnauthorized }) {
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
+  // The list as of the last refresh, readable the moment an await resolves.
+  // `comments` is state: it has not re-rendered yet at that point, and a
+  // delete needs to know what it left behind — a comment that still holds
+  // replies survives as a tombstone, one that holds nothing is gone.
+  const latest = useRef([]);
 
   const refresh = useCallback(async () => {
     try {
       const next = await listComments(slug, version);
       const safeComments = Array.isArray(next) ? next : [];
+      latest.current = safeComments;
       setComments(safeComments);
       onChange?.(safeComments);
       return safeComments;
@@ -71,6 +77,7 @@ export function useComments({ slug, version, onChange, onUnauthorized }) {
 
   return {
     comments,
+    latest,
     loading,
     refresh,
     addComment,

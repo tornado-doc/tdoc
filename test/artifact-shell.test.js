@@ -19,7 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { requirePlaywrightOrSkip, resolveTarget } = require('./helpers/fixture-server');
+const { requirePlaywrightOrSkip, resolveTarget, isPublishedTarget } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('artifact-shell.test.js');
 
 const COMMENTS_FIXTURE = path.join(__dirname, 'fixtures/tdocs/hostile-body-css/comments.json');
@@ -662,6 +662,49 @@ const SLUG = 'hostile-body-css';
       const fabVisible = await page.evaluate(() => { const f = document.querySelector('.tdoc-fab'); return !!f && getComputedStyle(f).display !== 'none'; });
       if (fabVisible) throw new Error('fab still visible after widening');
     });
+
+    // --- pressing delete, as a person with an identity (#354) ---------------
+    // The tombstone is only worth anything if you can see it happen. Needs a
+    // signed-in viewer: the delete control is gated on identity and the shared
+    // rig browses anonymously. resolveTarget passes its own env down to the
+    // server it spawns, so setting it around this one call is enough — the
+    // suite's main target keeps browsing as nobody.
+    if (!isPublishedTarget()) {
+      process.env.TDOC_E2E_USER = 'tester';
+      const authed = await resolveTarget({ port: 7995 });
+      delete process.env.TDOC_E2E_USER;
+      const authedUrl = `${authed.url.replace(/\/d\/.*/, '')}/d/${SLUG}/v/1?shell=1`;
+      const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+      try {
+        await t('deleting a comment leaves its tombstone on screen, not an empty gutter', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.waitForSelector(`${card} > .meta .del`, { timeout: 4000 });
+            await page.click(`${card} > .meta .del`);
+            // The card used to close on any delete, so the tombstone you just
+            // made — and the reply still under it — went off screen with it.
+            await page.waitForSelector(`${card}.tdoc-deleted`, { timeout: 4000 });
+            await page.click(`${card} .tdoc-replies-toggle`);
+            await page.waitForSelector(`${card} .tdoc-replies.open .tdoc-reply`, { timeout: 2000 });
+
+            // deleting the last thing under it takes the whole thread away
+            await page.click(`${card} .tdoc-reply .del`);
+            await page.waitForSelector('.tdoc-margin-comment', { state: 'detached', timeout: 4000 });
+            const left = await page.evaluate(async () => {
+              const r = await fetch('/api/comments?slug=hostile-body-css&version=1');
+              return (await r.json()).map((c) => c.id);
+            });
+            if (left.includes('c_fixture_1')) throw new Error('an empty tombstone stayed behind');
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+      } finally {
+        await authed.stop();
+      }
+    }
 
   } finally {
     await browser.close();
