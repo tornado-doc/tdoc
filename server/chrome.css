@@ -228,8 +228,11 @@
   body.tdoc-narrow #tdoc-pin-layer { display: none; }
   /* When the pins model is active, hide every card by default; only the
      hovered/pinned card is shown (it gets .tdoc-floating-open). */
-  body.tdoc-pins:not(.tdoc-narrow) .tdoc-margin-comment { display: none; }
-  body.tdoc-pins:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { display: block; }
+  /* (The pair that hid every card but the open one lived here, behind
+     `body.tdoc-pins`. React renders exactly one floating card in wide mode, so
+     they had nothing left to do — and the class they waited on has never been
+     set by the shell. Deleted rather than revived: two owners of what shows is
+     how they would drift.) */
 
   .tdoc-pin { position: absolute; pointer-events: auto; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #cdd3dc; box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; transition: transform .12s, border-color .12s, box-shadow .12s; box-sizing: border-box; }
   .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active { transform: scale(1.12); border-color: var(--td-accent); box-shadow: 0 2px 8px var(--td-accent-ring-soft); z-index: 1; }
@@ -254,7 +257,18 @@
 
   /* Floating card: when open via a pin, it sits to the left of the gutter and
      is allowed to scroll internally so even a long thread can't overflow. */
-  body.tdoc-pins:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { max-height: 70vh; overflow-y: auto; box-shadow: 0 6px 24px rgba(0,0,0,0.16); }
+  /* A tall thread has to be reachable inside the card. The height is the
+     clamp's own arithmetic (comment-card.jsx): it floors the card's top at
+     52px and keeps 8px under it, so 60px of the viewport is spoken for. The
+     card is a content-box, so its 12px padding and 1px border (26px of the
+     two together) come off as well — measure the card, not the text, or it
+     still hangs off the bottom by exactly that much. A card that fits does
+     not scroll: the cap only bites when the thread is genuinely taller than
+     the screen. overscroll-behavior stops the document from scrolling
+     underneath once you reach the end of the card. This rule waited on
+     `body.tdoc-pins`, which the React shell never sets, so it has been inert
+     since the port. */
+  body:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { max-height: calc(100vh - 86px); overflow-y: auto; overscroll-behavior: contain; box-shadow: 0 6px 24px rgba(0,0,0,0.16); }
 
   /* Cluster popover: a compact list of the comments under a badge. Click one
      to open its full card. */
@@ -419,7 +433,9 @@
      textarea gives no caret coordinates, and the field is narrow enough that
      under-the-box reads as attached. */
   .tdoc-mention-field { position: relative; }
-  .tdoc-mention-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 1000002; max-height: 184px; overflow-y: auto; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); padding: 4px; }
+  /* Positioned in viewport coordinates by MentionField and portalled to the
+     body, so a scrolling comment card cannot clip it (#363). */
+  .tdoc-mention-menu { position: fixed; z-index: 1000002; max-height: 184px; overflow-y: auto; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); padding: 4px; }
   .tdoc-mention-option { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; appearance: none; border: 0; background: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; font: 13px system-ui, sans-serif; color: var(--td-ink); text-align: left; }
   .tdoc-mention-option.active { background: var(--td-accent-tint); }
   .tdoc-mention-option img { width: 18px; height: 18px; border-radius: 50%; flex: none; }
