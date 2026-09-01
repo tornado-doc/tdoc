@@ -1488,8 +1488,12 @@ function readerCssSource() {
 }
 function injectReaderCss(html, css) {
   if (!css) return html;
+  // Documents have been self-contained since creation-time baking landed, so
+  // most already carry the block. Stamping a second copy is 8KB of duplicate
+  // CSS and a duplicate id in every downloaded file.
+  if (html.includes('id="tdoc-reader"')) return html;
   const tag = `<style id="tdoc-reader">${css}</style>\n`;
-  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${tag}</head>`);
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, () => `${tag}</head>`);
   return tag + html;
 }
 
@@ -3664,16 +3668,19 @@ export default {
       let body = '';
       if (method !== 'HEAD') {
         body = forceWidgetSandbox(await obj.text());
-        // Legacy template-reliant docs (published before creation-time baking):
-        // no #tdoc-reader block AND no styling of their own reading column →
-        // inject the reader CSS into the FRAME RESPONSE (never into storage).
-        // Self-contained docs are excluded by the max-width check; the template
-        // is :where() zero-specificity, so author CSS always wins.
-        if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+        // Documents created before creation-time baking carry no #tdoc-reader
+        // block, so the reading template is supplied in the FRAME RESPONSE
+        // (never written back to storage). No second condition: see the
+        // matching comment in server/server.js — the old "and contains no
+        // max-width" proxy starved the documents that followed the contract,
+        // and :where() zero-specificity makes the injection harmless to a
+        // document that styles itself.
+        if (!body.includes('id="tdoc-reader"')) {
           const rcss = (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
           if (rcss) {
             const rtag = `<style id="tdoc-reader">${rcss}</style>`;
-            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+            // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
+            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
           }
         }
         const tag = `<script id="tdoc-frame-probe" data-tdoc-provider nonce="${nonce}">${PROBE_JS}</script>`;

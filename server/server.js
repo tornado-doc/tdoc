@@ -775,16 +775,26 @@ const server = http.createServer(async (req, res) => {
     let body = '';
     if (req.method !== 'HEAD') {
       body = forceWidgetSandbox(fs.readFileSync(file, 'utf8'));
-      // Legacy template-reliant docs (published before creation-time baking):
-      // no #tdoc-reader block AND no styling of their own reading column →
-      // inject the reader CSS into the FRAME RESPONSE (never into storage).
-      // Self-contained docs are excluded by the max-width check, and the
-      // template is :where() zero-specificity, so author CSS always wins.
-      if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+      // Documents created before creation-time baking carry no #tdoc-reader
+      // block, so the reading template is supplied in the FRAME RESPONSE
+      // (never written back to storage).
+      //
+      // There is deliberately no second condition. This used to also require
+      // that the document not contain the string "max-width" anywhere, as a
+      // proxy for "this document styles itself" — and it punished exactly the
+      // documents that followed the authoring contract: one `@media
+      // (max-width: 520px)` breakpoint, which the contract asks for, and a
+      // document that wrote no font-family (because the contract says the
+      // template owns typography) lost the template and rendered in Times New
+      // Roman. The proxy is unnecessary: the template is :where()
+      // zero-specificity throughout, so a document that does style itself
+      // wins every property it declares and is unaffected by the injection.
+      if (!body.includes('id="tdoc-reader"')) {
         const rcss = readerCss();
         if (rcss) {
           const rtag = `<style id="tdoc-reader">${rcss}</style>`;
-          body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+          // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
+          body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
         }
       }
       // Inject the anchoring probe — the only tdoc code allowed into the author
