@@ -4842,9 +4842,16 @@ export default {
     }
     // Soft-delete: append a `deleted` event at the current version. The
     // record is preserved; older versions still see the comment as it was.
-    // Author-only. ?version=N to stamp the delete at a specific version
-    // (defaults to Infinity, meaning "delete forward from now" which the
-    // overlay supplies as the current view's version).
+    //
+    // The author's ALONE — isRecordAuthor, not canMutate. A doc owner used to
+    // be able to delete anybody's comment here, which is the wrong power to
+    // hand the person being reviewed: taking someone's words off the page is
+    // theirs to do. What remains for an owner is the whole-document escape
+    // hatch (?all=1 below, and deleting the doc), not silencing one reader.
+    //
+    // ?version=N to stamp the delete at a specific version (defaults to
+    // Infinity, meaning "delete forward from now" which the overlay supplies
+    // as the current view's version).
     if (p === '/api/comments' && method === 'DELETE') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -4859,24 +4866,9 @@ export default {
       // is harmless (applyCommentOp returns 404).
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
-      const meta = await loadDocMeta(env, slug);
-      let authorized = false;
-      const top = authList.find(c => c.id === id);
-      if (top) {
-        if (!canMutate(top, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
-        authorized = true;
-      } else {
-        for (const c of authList) {
-          ensureEventLog(c);
-          const reply = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
-          if (reply) {
-            if (!canMutate(reply.reply, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
-            authorized = true;
-            break;
-          }
-        }
-      }
-      if (!authorized) return json({ error: 'not_found' }, { status: 404 });
+      const target = findRecord(authList, id);
+      if (!target) return json({ error: 'not_found' }, { status: 404 });
+      if (!isRecordAuthor(target, s)) return json({ error: 'not_author' }, { status: 403 });
       const res = await mutateComments(env, slug, {
         kind: 'delete', slug, id, version: stampVersion, actor: { login: s.login },
       });

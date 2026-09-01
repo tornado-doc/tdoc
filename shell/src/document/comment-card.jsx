@@ -157,11 +157,12 @@ function EditForm({ item, onSave, onCancel }) {
   );
 }
 
-// Editing is the author's ALONE — deliberately narrower than mayMutate below,
-// which also grants the doc owner. Rewriting somebody else's words under their
-// name is not a power owning the document confers; the worker's PATCH enforces
-// the same rule, and this keeps the button from rendering where it would 403.
-function mayEdit(item, currentUser) {
+// Your own words: what you may edit, and what you may delete. Deliberately
+// narrower than mayMutate below, which also grants the doc owner — neither
+// rewriting nor removing somebody else's comment is a power owning the
+// document confers. The worker enforces the same rule on PATCH and DELETE,
+// and this keeps the buttons from rendering where they would 403.
+function authoredBy(item, currentUser) {
   return Boolean(
     currentUser
     && currentUser !== 'anon'
@@ -170,10 +171,11 @@ function mayEdit(item, currentUser) {
   );
 }
 
-// Mirrors the worker's canMutate(): delete and re-anchor are the author's or
-// the doc owner's, nobody else's. Without this the buttons rendered for every
-// reader and the server's 403 (`not_author`) was the only thing stopping them
-// — a toast where there should have been no affordance at all.
+// Mirrors the worker's canMutate(): re-anchoring is the author's or the doc
+// owner's, nobody else's. Without this the button rendered for every reader
+// and the server's 403 (`not_author`) was the only thing stopping them — a
+// toast where there should have been no affordance at all. Delete used to
+// share this gate; it is authoredBy's now.
 function mayMutate(item, currentUser, isOwner) {
   return Boolean(
     isOwner
@@ -222,7 +224,6 @@ function ReplyCard({
   rootId,
   depth,
   currentUser,
-  isOwner,
   mentionable,
   replyTarget,
   onReplyTarget,
@@ -260,7 +261,7 @@ function ReplyCard({
           >
             reply
           </button>
-          {mayEdit(reply, currentUser) ? (
+          {authoredBy(reply, currentUser) ? (
             <button
               type="button"
               className="tdoc-edit-toggle"
@@ -269,7 +270,7 @@ function ReplyCard({
               edit
             </button>
           ) : null}
-          {mayMutate(reply, currentUser, isOwner) ? (
+          {authoredBy(reply, currentUser) ? (
             <button type="button" className="del" onClick={() => onDelete(reply.id)}>
               delete
             </button>
@@ -291,7 +292,6 @@ function ReplyCard({
               rootId={rootId}
               depth={depth + 1}
               currentUser={currentUser}
-              isOwner={isOwner}
               mentionable={mentionable}
               replyTarget={replyTarget}
               onReplyTarget={onReplyTarget}
@@ -365,7 +365,7 @@ export function CommentCard({
   };
 
   const reactionCount = hasReactions(comment);
-  const canEdit = mayEdit(comment, currentUser);
+  const isMine = authoredBy(comment, currentUser);
   const canMutate = mayMutate(comment, currentUser, isOwner);
   const createdAt = formatCreated(comment.created);
   const replies = comment.replies || [];
@@ -437,7 +437,7 @@ export function CommentCard({
           >
             reply
           </button>
-          {canEdit ? (
+          {isMine ? (
             <button
               type="button"
               className="tdoc-edit-toggle"
@@ -446,7 +446,7 @@ export function CommentCard({
               edit
             </button>
           ) : null}
-          {canMutate ? (
+          {isMine ? (
             <button type="button" className="del" onClick={() => onDelete(comment.id)}>
               delete
             </button>
@@ -473,7 +473,6 @@ export function CommentCard({
                 rootId={comment.id}
                 depth={1}
                 currentUser={currentUser}
-                isOwner={isOwner}
                 mentionable={mentionable}
                 replyTarget={replyTarget}
                 onReplyTarget={setReplyTarget}
