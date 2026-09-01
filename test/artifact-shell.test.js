@@ -658,6 +658,28 @@ const SLUG = 'hostile-body-css';
           }
         });
 
+        await t('edit reads as a text control, exactly like Reply beside it', async () => {
+          // It shipped as a raw <button>: ui.css lists the chrome buttons that
+          // "read as text" by class, and a class missing from that list keeps
+          // the UA button box — a grey chip sitting between two text links.
+          await page.setViewportSize({ width: 1400, height: 900 });
+          await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+          await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
+          const [reply, edit] = await page.evaluate((sel) => {
+            const read = (el) => {
+              const c = getComputedStyle(el);
+              return [c.color, c.font, c.padding, c.backgroundColor, c.borderStyle, c.borderWidth].join('|');
+            };
+            return [
+              read(document.querySelector(`${sel} .tdoc-reply-toggle`)),
+              read(document.querySelector(`${sel} .tdoc-edit-toggle`)),
+            ];
+          }, card);
+          if (reply !== edit) {
+            throw new Error(`edit does not read like Reply:\n  Reply: ${reply}\n  edit:  ${edit}`);
+          }
+        });
+
         await t('editing rewrites the comment in place and marks it edited (#349)', async () => {
           const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
           try {

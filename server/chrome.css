@@ -207,12 +207,10 @@
   .tdoc-margin-comment .copy-md { cursor: pointer; color: #888; display: inline-flex; align-items: center; }
   .tdoc-margin-comment .copy-md:hover { color: var(--td-accent); }
   .tdoc-margin-comment .copy-md svg { width: 14px; height: 14px; display: block; }
-  .tdoc-margin-comment .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); }
-  .tdoc-margin-comment .tdoc-reply-toggle:hover { text-decoration: underline; }
-  .tdoc-margin-comment .tdoc-edit-toggle,
-  .tdoc-reply .tdoc-edit-toggle { cursor: pointer; color: #888; }
-  .tdoc-margin-comment .tdoc-edit-toggle:hover,
-  .tdoc-reply .tdoc-edit-toggle:hover { color: var(--td-accent); text-decoration: underline; }
+  .tdoc-margin-comment .tdoc-reply-toggle,
+  .tdoc-margin-comment .tdoc-edit-toggle { cursor: pointer; color: var(--td-accent); }
+  .tdoc-margin-comment .tdoc-reply-toggle:hover,
+  .tdoc-margin-comment .tdoc-edit-toggle:hover { text-decoration: underline; }
 
   /* ===== Pins model (wide mode only) =====
      In wide mode the right gutter shows one PIN per comment (or a count badge
@@ -306,8 +304,10 @@
   .tdoc-replies.open { display: flex; }
   .tdoc-reply { padding-left: 12px; border-left: 2px solid #e5e5e5; }
   .tdoc-reply-kids { margin: 8px 0 0 10px; display: flex; flex-direction: column; gap: 10px; }
-  .tdoc-reply .tdoc-reply-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
-  .tdoc-reply .tdoc-reply-toggle:hover { text-decoration: underline; }
+  .tdoc-reply .tdoc-reply-toggle,
+  .tdoc-reply .tdoc-edit-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
+  .tdoc-reply .tdoc-reply-toggle:hover,
+  .tdoc-reply .tdoc-edit-toggle:hover { text-decoration: underline; }
   .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
   .tdoc-reply .author { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
