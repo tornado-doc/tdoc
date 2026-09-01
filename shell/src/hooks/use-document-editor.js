@@ -17,7 +17,15 @@ export function useDocumentEditor({
 }) {
   const requests = useRef(new Map());
   const storeKey = useMemo(() => draftKey(config), [config]);
-  const [mode, setMode] = useState(() => (config.canComment ? 'comment' : 'read'));
+  // A doc created from scratch arrives at ?edit=1: it is blank, so dropping the
+  // author in read mode would show an empty page and hide the one control they
+  // need. `tdoc:ready` re-sends whatever mode is current, so the frame picks
+  // this up even though it is set before the iframe has loaded.
+  const [mode, setMode] = useState(() => {
+    const wantsEdit = new URLSearchParams(location.search).get('edit') === '1';
+    if (wantsEdit && config.canEdit) return 'edit';
+    return config.canComment ? 'comment' : 'read';
+  });
   const [dirty, setDirty] = useState(false);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);

@@ -14,13 +14,16 @@ import {
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppSubmenu } from '../ui/menu.jsx';
 
+// The bar names the document, and the document's name is its title. The slug
+// used to sit here because an agent-picked one reads like a name, but it is a
+// URL detail — already in the address bar — and a browser-created doc's slug
+// is an opaque id that made a titled document read as untitled. Version and
+// title carry the bar now, which is what the narrow layout already did.
 export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
   if (config.isLanding) return null;
 
   return (
     <>
-      <span className="crumb crumb-slug">{config.slug}</span>
-      <span className="crumb-sep crumb-sep-slug">/</span>
       <AppMenu
         align="start"
         trigger={(

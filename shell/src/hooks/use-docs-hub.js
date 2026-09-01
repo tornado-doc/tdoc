@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  createDocument,
   createFolder,
   deleteDocument,
   deleteFolder as deleteFolderRequest,
@@ -115,6 +116,17 @@ export function useDocsHub({ boot, onUnauthorized }) {
     });
   }, [docs, recent]);
 
+  // Start from scratch. On success the browser leaves for the new document, so
+  // there is no success toast to raise — only a failure keeps us on /me, and
+  // `run` has already turned that into one.
+  const createDoc = useCallback(async () => {
+    let created = null;
+    const ok = await run(async () => { created = await createDocument(); });
+    if (!ok || !created || !created.url) return false;
+    location.href = created.url;
+    return true;
+  }, [run]);
+
   const toggleStar = useCallback(async (slug, on) => {
     paintStar(slug, on);
     const ok = await run(() => setDocumentStar(slug, on));
@@ -202,6 +214,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     toggleSelected,
     selectAll,
     toast,
+    createDoc,
     toggleStar,
     moveDocs,
     deleteDocs,
