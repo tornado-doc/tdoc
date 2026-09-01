@@ -97,6 +97,39 @@ const SLUG = 'hostile-body-css';
       if (missing.length) throw new Error('shell missing real chrome: ' + missing.join(', '));
     });
 
+    await t('portal menus paint above the old-version banner', async () => {
+      await page.evaluate(() => {
+        const slot = document.createElement('div');
+        slot.id = 'test-old-version-slot';
+        slot.className = 'tdoc-oldver-slot';
+        slot.innerHTML = '<div class="tdoc-oldver-strip tdoc-oldver-visible">Old version</div>';
+        document.querySelector('.tdoc-bar').after(slot);
+      });
+      await page.click('#tdoc-version-toggle');
+      await page.waitForSelector('.ui-menu-positioner');
+      const layers = await page.evaluate(() => {
+        const menu = document.querySelector('.ui-menu-positioner');
+        const banner = document.querySelector('#test-old-version-slot .tdoc-oldver-strip');
+        const menuRect = menu.getBoundingClientRect();
+        const bannerRect = banner.getBoundingClientRect();
+        const x = menuRect.left + Math.min(20, menuRect.width / 2);
+        const y = bannerRect.top + bannerRect.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return {
+          menuZ: getComputedStyle(menu).zIndex,
+          bannerZ: getComputedStyle(banner).zIndex,
+          overlap: menuRect.top < bannerRect.bottom && menuRect.bottom > bannerRect.top,
+          hitInsideMenu: !!hit?.closest('.ui-menu-positioner'),
+        };
+      });
+      await page.keyboard.press('Escape');
+      await page.evaluate(() => document.getElementById('test-old-version-slot')?.remove());
+      if (!layers.overlap) throw new Error('fixture did not reproduce a menu/banner overlap');
+      if (!layers.hitInsideMenu) {
+        throw new Error(`banner painted over portal menu (menu z=${layers.menuZ}, banner z=${layers.bannerZ})`);
+      }
+    });
+
     await t('the author document actually renders inside the frame', async () => {
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
       if (!frame) throw new Error('author-content frame not found');
