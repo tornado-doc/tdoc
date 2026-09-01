@@ -1201,7 +1201,11 @@ upload_version() {
   # Tier-1 client visibility: the server records which client produced each
   # version. This is the observability that does not depend on the client's
   # own (repeatedly silently-broken) self-update machinery.
-  TDOC_CLIENT_VERSION="$(cat "$SKILL_DIR/VERSION" 2>/dev/null || echo unknown)"
+  # The checkout sha, not the VERSION file: VERSION has said 0.9.0 since the
+  # beginning, so it cannot distinguish any two clients in the wild. The sha
+  # answers the question observability exists for — "which exact skill code
+  # produced this version?"
+  TDOC_CLIENT_VERSION="$(git -C "$SKILL_DIR" rev-parse --short=12 HEAD 2>/dev/null || cat "$SKILL_DIR/VERSION" 2>/dev/null || echo unknown)"
   resp="$(curl -sS --connect-timeout 10 --max-time 120 -X POST "$UPLOAD_BASE/api/upload" \
     -H "Authorization: Bearer $TOKEN" \
     -H "X-Tdoc-Client: $TDOC_CLIENT_VERSION" \
@@ -1213,6 +1217,24 @@ upload_version() {
   _sz="$(printf '%s' "$resp" | json_get size)"
   if [ "$ok" = "true" ]; then
     local merged
+    # The server returns the sha of the EXACT stored bytes (post-bake,
+    # post-aid-stamp). Recording it on the local version entry gives a later
+    # edit a one-request answer to "has remote moved since I published?" —
+    # the local FILE hashes differently (it is the pre-stamp form), so the
+    # recorded sha, not a recomputed one, is the comparison key.
+    local up_sha
+    up_sha="$(printf '%s' "$resp" | json_get sha)"
+    if [ -n "$up_sha" ] && [ "$up_sha" != "null" ]; then
+      node -e '
+        const fs = require("fs");
+        const [metaPath, n, sha] = process.argv.slice(1);
+        try {
+          const m = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+          const entry = (m.versions || []).find((v) => Number(v.n) === Number(n));
+          if (entry) { entry.sha = sha; fs.writeFileSync(metaPath, JSON.stringify(m, null, 2) + "\n"); }
+        } catch {}
+      ' "$META_FILE" "$v" "$up_sha" 2>/dev/null || true
+    fi
     merged="$(printf '%s' "$resp" | json_get mergedComments)"; merged="${merged:-0}"
     if [ "$merged" != "0" ] && [ "$merged" != "null" ]; then
       echo "[tdoc] v$v uploaded (${_sz:-?} bytes, +$merged local comment(s) merged)"

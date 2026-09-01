@@ -3696,6 +3696,46 @@ export default {
     // shell embeds. Gated on Sec-Fetch-Dest: iframe like widgets, so it can never
     // be loaded top-level — only inside the shell. Access-gated identically to
     // the doc view. Only our nonced probe runs inside; author JS stays inert.
+    // ---- raw stored bytes (agent read path) ----
+    // The document's stored bytes, exactly as R2 holds them. This is how an
+    // agent reads the source of truth before an edit, instead of trusting a
+    // possibly-stale local copy (AGENTS.md line one vs the old /tdoc edit
+    // step 2, which read local and faithfully imitated a 26-byte stale file).
+    //
+    // Served as text/plain with nosniff, NEVER text/html: author HTML on this
+    // shared origin outside the sandboxed /frame would be stored XSS. Access
+    // is the same gate as every other doc read. ETag is the sha of the stored
+    // bytes (recorded at write by prepareDocVersion; computed here for
+    // pre-existing storage), so a client that already holds the current copy
+    // pays one conditional request and gets 304, no body.
+    const rawMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/raw\/?$/);
+    if (rawMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr] = rawMatch;
+      if (!isValidSlug(slug)) return text('invalid slug', { status: 400 });
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
+      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
+      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+      const body = await obj.text();
+      const meta = gate.meta || await loadDocMeta(env, slug);
+      const entry = (Array.isArray(meta && meta.versions) ? meta.versions : []).find((v) => Number(v.n) === Number(vStr));
+      const sha = (entry && typeof entry.sha === 'string' && /^[0-9a-f]{16}$/.test(entry.sha))
+        ? entry.sha
+        : (await sha256Hex(body)).slice(0, 16);
+      const etag = `"${sha}"`;
+      const headers = {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-cache',
+        'ETag': etag,
+      };
+      const inm = req.headers.get('if-none-match');
+      if (inm && inm.split(',').map((s2) => s2.trim()).includes(etag)) {
+        return new Response(null, { status: 304, headers });
+      }
+      return new Response(method === 'HEAD' ? null : body, { status: 200, headers });
+    }
+
     const frameMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/frame\/?$/);
     if (frameMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr] = frameMatch;
