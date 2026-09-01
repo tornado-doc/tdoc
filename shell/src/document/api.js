@@ -62,6 +62,16 @@ export function setDocumentStar(slug, starred) {
   });
 }
 
+// Start from scratch: the server derives a unique slug from the title and
+// returns the new doc's URL, already carrying ?edit=1.
+export function createDocument(title) {
+  return request('/api/doc/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+}
+
 export function duplicateDocument(slug, version) {
   return request('/api/doc/duplicate', {
     method: 'POST',

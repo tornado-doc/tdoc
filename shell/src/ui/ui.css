@@ -302,6 +302,57 @@ button.tdoc-pin {
   position: relative;
 }
 
+/* "Start from scratch" — the direct half of the Create a doc modal, above the
+   paste-into-your-AI recipe. */
+.mk-scratch strong {
+  display: block;
+  font-size: 14px;
+}
+
+.mk-scratch-hint {
+  margin: 4px 0 10px;
+  color: var(--td-ink-soft, #6b6b73);
+}
+
+.mk-scratch-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.mk-scratch-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tdoc-modal .mk-scratch-row button.mk-scratch-go {
+  flex: 0 0 auto;
+}
+
+.mk-scratch-error {
+  margin: 8px 0 0;
+  color: #c0392b;
+  font-size: 13px;
+}
+
+/* A labelled rule between the two paths, so neither reads as a footnote of the
+   other. */
+.mk-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 14px;
+  color: #98989f;
+  font-size: 12px;
+}
+
+.mk-or::before,
+.mk-or::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--td-line);
+}
+
 .tdoc-recipe-wrap code {
   display: block;
   min-height: 72px;

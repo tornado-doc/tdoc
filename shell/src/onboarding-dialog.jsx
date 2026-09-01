@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
+import { CreateFromScratch } from './create-from-scratch.jsx';
+import { createDocument } from './document/api.js';
 import { copyText } from './document/model.js';
 
 const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
 export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
 
-export function OnboardingDialog({ open, onOpenChange }) {
+export function OnboardingDialog({ open, onOpenChange, identity }) {
   const [copied, setCopied] = useState(false);
   const [hosted, setHosted] = useState(false);
+  const [createError, setCreateError] = useState(null);
 
   useEffect(() => {
     if (!open) return;
@@ -27,6 +30,23 @@ export function OnboardingDialog({ open, onOpenChange }) {
 
   const copy = () => copyText(FIRST_DOC_RECIPE).then(setCopied);
 
+  // This dialog has no toast, so a refusal is reported in place. Only signed-in
+  // readers are offered the form at all — creating always needs a session.
+  const createHere = async (title) => {
+    setCreateError(null);
+    try {
+      const made = await createDocument(title);
+      if (!made || !made.url) throw new Error('The server did not return a document');
+      location.href = made.url;
+      return true;
+    } catch (error) {
+      setCreateError(error.status === 401
+        ? 'Your session expired — sign in again, then create.'
+        : (error.message || 'Could not create the doc'));
+      return false;
+    }
+  };
+
   return (
     <AppDialog
       open={open}
@@ -35,6 +55,13 @@ export function OnboardingDialog({ open, onOpenChange }) {
       description="Paste this into your AI. It installs tdoc, writes and publishes a live commentable page, then gives you a link."
       actions={<button type="button" className="primary" onClick={() => onOpenChange(false)}>Done</button>}
     >
+      {identity ? (
+        <>
+          <CreateFromScratch create={createHere} />
+          {createError ? <p className="mk-scratch-error">{createError}</p> : null}
+          <div className="mk-or"><span>or</span></div>
+        </>
+      ) : null}
       <div className="tdoc-recipe-wrap">
         <code>{FIRST_DOC_RECIPE}</code>
         <button type="button" className={copied ? 'done' : undefined} onClick={copy}>

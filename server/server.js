@@ -262,6 +262,84 @@ function safeSlug(slug) {
   return (typeof slug === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(slug)) ? slug : null;
 }
 
+// A blank doc's slug is derived from the title the author typed, so nobody has
+// to invent a unique one. A title with no ASCII word characters at all — CJK,
+// emoji, pure punctuation — still has to produce a valid slug, so the fallback
+// is the literal 'doc' rather than an error; de-duplication makes it unique.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function slugifyTitle(title) {
+  const base = String(title == null ? '' : title)
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    .replace(/-+$/g, '');
+  return base || 'doc';
+}
+
+// nth candidate for a derived slug: the bare base first, then -2, -3, … The
+// slug rule is inlined rather than delegated so the worker and server copies
+// stay byte-identical for the drift guard.
+function nextCreateSlug(base, n) {
+  if (typeof base !== 'string' || !base) return null;
+  if (!Number.isInteger(n) || n < 1) return null;
+  const suffix = n === 1 ? '' : `-${n}`;
+  const trimmed = base.slice(0, 64 - suffix.length).replace(/-+$/g, '');
+  if (!trimmed) return null;
+  const candidate = `${trimmed}${suffix}`;
+  return /^[a-z0-9][a-z0-9-]{0,63}$/.test(candidate) ? candidate : null;
+}
+
+// The document a "start from scratch" create writes as v1. Deliberately empty:
+// a title, and one paragraph carrying a placeholder that only paints while the
+// editor is live (`html[data-tdoc-editing]`), so a reader of a still-empty doc
+// never sees "Start writing…". The hint returns whenever the paragraph is
+// emptied again, because it is an :empty rule and not seeded text.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocHtml(title) {
+  const safe = String(title == null ? '' : title)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${safe}</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #fff; color: #17171a;
+    font: 17px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 46rem; margin: 0 auto; padding: 4.5rem 1.5rem 8rem; }
+  h1 { font-size: 2.1rem; line-height: 1.25; margin: 0 0 1.5rem; letter-spacing: -0.02em; }
+  h2 { font-size: 1.35rem; margin: 2.5rem 0 .75rem; letter-spacing: -0.01em; }
+  p { margin: 0 0 1.15rem; }
+  a { color: #2f5bea; }
+  blockquote { margin: 0 0 1.15rem; padding-left: 1rem; border-left: 3px solid #e4e4e9; color: #55555f; }
+  code { background: #f3f3f6; padding: .12em .35em; border-radius: 4px;
+    font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
+  /* The placeholder paints only while the editor is live, so a reader of a
+     still-empty document never sees it. */
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty::before {
+    content: attr(data-tdoc-placeholder);
+    color: #b0b0ba;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<main>
+<h1>${safe}</h1>
+<p data-tdoc-placeholder="Start writing…"></p>
+</main>
+</body>
+</html>
+`;
+}
+
 function latestLocalVersion(slug, meta) {
   const declared = Array.isArray(meta && meta.versions)
     ? meta.versions.map((item) => Number(item && item.n) || 0)
@@ -554,7 +632,7 @@ function localHubDocument(nonce) {
     bootJson: safeJsonForScript({
       page: 'docs-hub',
       identity: e2eIdentity(),
-      capabilities: { folders: false, delete: false, star: false },
+      capabilities: { folders: false, delete: false, star: false, create: true },
       ...localDocsData(),
     }),
   });
@@ -944,6 +1022,59 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, shellDocument(slug, Number(vStr), nonce), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': cspHeader(nonce),
+    });
+  }
+
+  // Start from scratch: the local twin of the worker's /api/doc/create. The
+  // document is staged under a dot-prefixed directory (which the hub listing
+  // skips, since safeSlug rejects a dot) and renamed into place, so a half
+  // written doc never appears in My docs.
+  if (p === '/api/doc/create' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const rawTitle = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!rawTitle) return json(res, 400, { error: 'title_required' });
+    if (rawTitle.length > 120) return json(res, 400, { error: 'title_too_long', limit: 120 });
+
+    const base = slugifyTitle(rawTitle);
+    let slug = null;
+    for (let n = 1; n <= 99; n++) {
+      const candidate = nextCreateSlug(base, n);
+      if (!candidate) continue;
+      if (fs.existsSync(path.join(ROOT, candidate))) continue;
+      slug = candidate;
+      break;
+    }
+    if (!slug) return json(res, 409, { error: 'slug_exhausted' });
+
+    const now = new Date().toISOString();
+    const docRoot = path.join(ROOT, slug);
+    const stageDir = path.join(ROOT, `.create-${crypto.randomBytes(6).toString('hex')}`);
+    try {
+      fs.mkdirSync(path.join(stageDir, 'v1'), { recursive: true });
+      fs.writeFileSync(path.join(stageDir, 'v1', 'index.html'), blankDocHtml(rawTitle));
+      fs.writeFileSync(path.join(stageDir, 'meta.json'), JSON.stringify({
+        title: rawTitle,
+        slug,
+        created: now,
+        versions: [{
+          n: 1,
+          created: now,
+          prompt: 'Created from scratch in the browser',
+          source: 'browser',
+          ...(E2E_USER ? { author: E2E_USER } : {}),
+        }],
+      }, null, 2) + '\n');
+      fs.renameSync(stageDir, docRoot);
+    } catch (error) {
+      try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch {}
+      return json(res, 500, { error: 'create_failed', message: error.message || String(error) });
+    }
+    return json(res, 200, {
+      ok: true,
+      slug,
+      version: 1,
+      url: `/d/${encodeURIComponent(slug)}/v/1?edit=1`,
     });
   }
 

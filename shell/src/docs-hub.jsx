@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
+import { CreateFromScratch } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { FIRST_DOC_RECIPE } from './onboarding-dialog.jsx';
 import { copyText } from './document/model.js';
@@ -70,7 +71,7 @@ function FlatList({ docs, label, viewer, empty, onToggleStar }) {
 // rows and menus are the shared docs-hub/rows.jsx components; every modal is
 // the AppDialog facade. This component only decides what is on screen.
 export function DocsHub({ boot }) {
-  const capabilities = { folders: true, delete: true, star: true, ...(boot.capabilities || {}) };
+  const capabilities = { folders: true, delete: true, star: true, create: true, ...(boot.capabilities || {}) };
   const viewer = boot.identity?.login || '';
   const hub = useDocsHub({
     boot,
@@ -245,8 +246,10 @@ export function DocsHub({ boot }) {
         <HubDialog
           title="Create a doc"
           onClose={closeModal}
-          actions={<button type="button" className="primary" onClick={closeModal}>Done</button>}
+          actions={<button type="button" onClick={closeModal}>Close</button>}
         >
+          {capabilities.create ? <CreateFromScratch create={hub.createDoc} /> : null}
+          {capabilities.create ? <div className="mk-or"><span>or</span></div> : null}
           <p>Paste this into your AI. It installs tdoc, builds your personal AI portrait, publishes it privately, and gives you the link.</p>
           <div className="tdoc-recipe-wrap">
             <code>{FIRST_DOC_RECIPE}</code>

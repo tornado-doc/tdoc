@@ -53,7 +53,13 @@ t('Create a doc reuses the first-doc recipe, copy helper, and shared dialog acti
   assert(/copyText\(FIRST_DOC_RECIPE\)\.then\(setCreateCopied\)/.test(docsHub), 'Create recipe is not copyable');
   assert(/className="tdoc-recipe-wrap"/.test(docsHub), 'shared recipe treatment missing');
   assert(/createCopied \? 'Copied' : 'Copy'/.test(docsHub), 'Copy feedback state missing');
-  assert(/actions=\{<button[^>]+className="primary"[^>]*>Done/.test(docsHub), 'Create dialog does not use the shared action row');
+  // The dialog now carries its own primary action — the Create button in the
+  // from-scratch form (#356) — so the footer is a plain dismiss. Two primaries
+  // in one dialog is the thing to guard against, not the missing "Done".
+  assert(/actions=\{<button type="button" onClick=\{closeModal\}>Close<\/button>\}/.test(docsHub),
+    'Create dialog should close through the shared action row');
+  assert(!/actions=\{<button[^>]+className="primary"/.test(docsHub),
+    'the footer must not compete with the form\'s own primary button');
 });
 
 t('mobile hub keeps 44px actions while quieting management controls', () => {
