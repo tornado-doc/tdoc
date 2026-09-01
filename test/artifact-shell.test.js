@@ -690,6 +690,15 @@ const SLUG = 'hostile-body-css';
             if (seeded !== 'a pin should appear for this') {
               throw new Error(`edit box did not open on the current text: ${JSON.stringify(seeded)}`);
             }
+            // …with the caret after the last word, not in front of the first
+            const caret = await page.evaluate((sel) => {
+              const box = document.querySelector(`${sel} .tdoc-edit-form textarea`);
+              return { focused: document.activeElement === box, start: box.selectionStart, end: box.selectionEnd, len: box.value.length };
+            }, card);
+            if (!caret.focused) throw new Error('the edit box opened without the caret in it');
+            if (caret.start !== caret.len || caret.end !== caret.len) {
+              throw new Error(`the caret opened at ${caret.start}-${caret.end}, expected ${caret.len} (the end)`);
+            }
             await page.fill(`${card} .tdoc-edit-form textarea`, 'rewritten by its author');
             await page.click(`${card} .tdoc-edit-save`);
             await page.waitForSelector(`${card} .tdoc-edit-form`, { state: 'detached', timeout: 4000 });
