@@ -2251,8 +2251,49 @@ function snapshotAt(c, V) {
     snap.reactions[emoji] = u;
   }
   delete snap._agentVerdict;
-  snap.replies = replyOrder.map(id => replyById.get(id)).filter(r => r && !r.deleted);
+  snap.replies = keepThread(replyOrder, replyById).map(r => (r.deleted ? asTombstone(r) : r));
   return snap;
+}
+
+// Which replies survive the fold. An alive reply always does. A DELETED one
+// does too when something that survives still hangs off it — otherwise the
+// answers to it would vanish with it, and a conversation would lose its middle.
+// Resolved to a fixpoint, so a deleted reply whose only child was itself
+// deleted-and-dropped goes as well.
+function keepThread(order, byId) {
+  const keep = new Set(order.filter(id => byId.get(id) && !byId.get(id).deleted));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const id of order) {
+      if (keep.has(id)) continue;
+      if (order.some(k => keep.has(k) && byId.get(k).parent_id === id)) {
+        keep.add(id);
+        changed = true;
+      }
+    }
+  }
+  return order.filter(id => keep.has(id)).map(id => byId.get(id));
+}
+
+// What is left of a comment or reply whose text was taken down but whose slot
+// is still holding a thread together. The name stays — this is GitHub's "user
+// deleted this", not an anonymous [deleted]: a thread reads as a conversation
+// between people, and blanking who spoke rewrites the other replies' meaning.
+// Everything the words earned goes with the words: reactions, the agent
+// verdict, mentions, the edited marker. The anchor stays so the surviving
+// replies are still reachable where the conversation happened.
+function asTombstone(record) {
+  return {
+    ...record,
+    text: '',
+    deleted: true,
+    reactions: {},
+    mentions: [],
+    edited: null,
+    agent_status: null,
+    status: 'open',
+    applied_in: undefined,
+  };
 }
 
 // Fold the full list at version V, filter out alive comments only.
@@ -2262,7 +2303,12 @@ function snapshotList(list, V) {
   const out = [];
   for (const c of list) {
     const s = snapshotAt(c, V);
-    if (s && !s.deleted) out.push(s);
+    if (!s) continue;
+    // A deleted comment that still holds replies stays as a tombstone; deleting
+    // your own words must not be a way to take everyone else's off the page.
+    // One with nothing under it disappears, as it always has.
+    if (s.deleted && !s.replies.length) continue;
+    out.push(s.deleted ? asTombstone(s) : s);
   }
   return out;
 }

@@ -199,6 +199,12 @@
   .tdoc-agent-status-partial { background: #fff4dc; color: #8a5a00; }
   .tdoc-agent-status-question { background: #ffe7e7; color: #a52323; }
   .tdoc-margin-comment .text { color: #111; line-height: 1.45; word-wrap: break-word; }
+  /* A tombstone (#354): the words are gone, the name and the slot are not.
+     Muted and italic so it reads as an absence, not as something said. */
+  .tdoc-margin-comment .tdoc-deleted-text,
+  .tdoc-reply .tdoc-deleted-text { color: #999; font-style: italic; }
+  .tdoc-margin-comment.tdoc-deleted .author .login,
+  .tdoc-reply.tdoc-deleted .author .login { color: #777; font-weight: 500; }
   .tdoc-margin-comment .meta { font-size: 11px; color: #888; margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .tdoc-margin-comment .meta > span:first-child { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tdoc-margin-comment .del { cursor: pointer; color: #c33; }

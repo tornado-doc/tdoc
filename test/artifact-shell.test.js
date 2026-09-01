@@ -278,6 +278,46 @@ const SLUG = 'hostile-body-css';
       if (!hasDelete) throw new Error('card missing delete control');
     });
 
+    await t('a deleted comment keeps its slot, its name, and its replies (#354)', async () => {
+      // Deleting the comment used to take the whole thread with it: every
+      // reply under it, other people's included, simply stopped being served.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        // c_fixture_1 is tester's, and tester2's reply hangs under it. Delete
+        // it through the API — the affordance is gated on identity the local
+        // rig does not have, and this is about what a delete leaves behind.
+        const status = await page.evaluate(async () => {
+          const r = await fetch('/api/comments?slug=hostile-body-css&id=c_fixture_1&version=1', { method: 'DELETE' });
+          return r.status;
+        });
+        if (status !== 200) throw new Error(`delete failed: ${status}`);
+        await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.waitForSelector(`${card}.tdoc-deleted`, { timeout: 4000 });
+        const shown = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          return {
+            text: el.querySelector('.text')?.textContent,
+            author: el.querySelector('.author .login')?.textContent,
+            replies: [...el.querySelectorAll('.tdoc-reply .text')].map((n) => n.textContent),
+            actions: [...el.querySelectorAll(':scope > .meta .actions button')].length,
+            reanchor: !!el.querySelector('.tdoc-reanchor-btn'),
+          };
+        }, card);
+        if (!/deleted/i.test(shown.text || '')) throw new Error(`tombstone does not say so: ${JSON.stringify(shown.text)}`);
+        if (shown.author !== 'tester') throw new Error(`the name must stay: ${JSON.stringify(shown.author)}`);
+        if (!shown.replies.includes('a reply worth deep-linking to')) {
+          throw new Error(`the reply did not survive its parent: ${JSON.stringify(shown.replies)}`);
+        }
+        if (shown.actions) throw new Error(`a tombstone still offers ${shown.actions} action(s)`);
+        if (shown.reanchor) throw new Error('a tombstone still offers a re-anchor');
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
     await t('agent comment: pin shows the agent mark, card shows a resolved chip', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
