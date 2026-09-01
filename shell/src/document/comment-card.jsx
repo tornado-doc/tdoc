@@ -249,6 +249,20 @@ export function CommentCard({
     const next = Math.max(52, Math.min(position.top, limit));
     setClampedTop(next === position.top ? null : next);
   }, [floating, position, repliesOpen, replyTarget, comment]);
+
+  // A posted reply closes the composer it came from and opens the thread it
+  // landed in. Before, the form stayed on screen under a collapsed "N replies"
+  // fold: the reply was saved, nothing visibly changed, and only a page
+  // refresh cleared the box. A failure (onReply === false) keeps the composer
+  // and its draft so the text isn't lost.
+  const submitReply = async (parentId, text) => {
+    const result = await onReply(parentId, text);
+    if (result === false) return false;
+    setReplyTarget(null);
+    setRepliesOpen(true);
+    return result;
+  };
+
   const reactionCount = hasReactions(comment);
   const canMutate = mayMutate(comment, currentUser, isOwner);
   const createdAt = formatCreated(comment.created);
@@ -347,7 +361,7 @@ export function CommentCard({
                 isOwner={isOwner}
                 replyTarget={replyTarget}
                 onReplyTarget={setReplyTarget}
-                onReply={onReply}
+                onReply={submitReply}
                 onReact={onReact}
                 onDelete={onDelete}
               />
@@ -357,7 +371,7 @@ export function CommentCard({
       ) : null}
 
       {replyTarget === comment.id ? (
-        <ReplyForm commentId={comment.id} onReply={onReply} />
+        <ReplyForm commentId={comment.id} onReply={submitReply} />
       ) : null}
     </article>
   );
