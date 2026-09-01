@@ -425,6 +425,86 @@ const SLUG = 'hostile-body-css';
       }
     });
 
+    await t('a thread stops indenting and continues at one level (#365)', async () => {
+      // Every level costs ~24px of a 306px card, and depth was unbounded: a
+      // chain deep enough ends up reading in a column too narrow to read, and
+      // the wrapping makes the card taller as it goes.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        const chain = await page.evaluate(async () => {
+          let parent = 'c_fixture_1';
+          const ids = [];
+          for (let i = 1; i <= 8; i += 1) {
+            // eslint-disable-next-line no-await-in-loop
+            const res = await fetch('/api/comments', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ slug: 'hostile-body-css', version: 1, parent_id: parent, text: `depth ${i}` }),
+            });
+            // eslint-disable-next-line no-await-in-loop
+            const body = await res.json();
+            ids.push(body.id);
+            parent = body.id;
+          }
+          return ids;
+        });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+        await page.waitForSelector(`${card} .tdoc-replies-toggle`, { timeout: 4000 });
+        await page.click(`${card} .tdoc-replies-toggle`);
+        await page.waitForTimeout(400);
+
+        const folded = await page.evaluate((sel) => {
+          const rows = [...document.querySelectorAll(`${sel} .tdoc-reply`)];
+          return {
+            maxDepth: Math.max(...rows.map((n) => Number(n.dataset.depth))),
+            shown: rows.length,
+            more: document.querySelector(`${sel} .tdoc-thread-more`)?.textContent.trim() || null,
+          };
+        }, card);
+        if (folded.maxDepth > 4) throw new Error(`the thread still indents to depth ${folded.maxDepth}`);
+        if (!folded.more || !/continue this thread/.test(folded.more)) {
+          throw new Error(`no continuation offered: ${JSON.stringify(folded.more)}`);
+        }
+        if (!/4$/.test(folded.more)) throw new Error(`the continuation miscounts what it holds: ${folded.more}`);
+
+        await page.click(`${card} .tdoc-thread-more`);
+        await page.waitForTimeout(400);
+        const opened = await page.evaluate((sel) => {
+          const rows = [...document.querySelectorAll(`${sel} .tdoc-reply`)];
+          const flat = [...document.querySelectorAll(`${sel} .tdoc-reply-flat`)];
+          return {
+            maxDepth: Math.max(...rows.map((n) => Number(n.dataset.depth))),
+            shown: rows.length,
+            flat: flat.length,
+            everyFlatSaysWhoItAnswers: flat.every((n) => /Replying to @/.test(n.querySelector('.tdoc-reply-to')?.textContent || '')),
+            deepest: !!document.querySelector(`${sel} .tdoc-reply .text`),
+          };
+        }, card);
+        if (opened.shown !== folded.shown + 4) {
+          throw new Error(`continuing the thread should reveal the remaining 4: ${JSON.stringify(opened)}`);
+        }
+        if (opened.maxDepth > 4) throw new Error('the continuation kept indenting');
+        if (opened.flat !== 4) throw new Error(`expected 4 flattened replies, got ${opened.flat}`);
+        if (!opened.everyFlatSaysWhoItAnswers) {
+          throw new Error('a flattened reply must say who it answers — it has no position left to say it');
+        }
+
+        // A deep link into the continuation must not land on a folded thread.
+        await page.goto(`${shellUrl}&comment=${chain[7]}`, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(800);
+        const linked = await page.evaluate((id) => {
+          const el = document.querySelector(`.tdoc-reply[data-comment-id="${id}"]`);
+          return !!el && el.getBoundingClientRect().height > 0;
+        }, chain[7]);
+        if (!linked) throw new Error('a deep link to a reply inside a continuation lands on it folded away');
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
     await t('agent comment: pin shows the agent mark, card shows a resolved chip', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });

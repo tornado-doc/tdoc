@@ -2717,6 +2717,118 @@ function nextDuplicateSlug(sourceSlug, n) {
   return isValidSlug(candidate) ? candidate : null;
 }
 
+// A doc created in the browser has no title yet — you type it into the page —
+// so its slug cannot be derived from one. It gets an opaque id instead, the
+// way Google Docs and Notion address a document: unique by construction, so
+// there is no de-duplication question and no rename when the title changes.
+// The caller supplies random bytes (crypto.getRandomValues / randomBytes).
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocSlug(bytes) {
+  // No look-alike characters: a slug gets read aloud and retyped.
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += alphabet[(Number(bytes && bytes[i]) || 0) % alphabet.length];
+  return `d-${out}`;
+}
+
+// The document a "start from scratch" create writes as v1. Deliberately empty,
+// heading included: the author types the title into the page, and the save path
+// reads it back out. Both placeholders paint only while the editor is live
+// (`html[data-tdoc-editing]`), so a reader of a still-empty doc sees a blank
+// page rather than instructions meant for its author. They are :empty rules
+// rather than seeded text, so the hints come back whenever a line is cleared.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Untitled</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #fff; color: #17171a;
+    font: 17px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  /* The editor's focus ring frames this element. On a doc with content that is
+     the whole page; on a blank one, without a floor, it would draw a small box
+     around two empty lines — and clicking below it would miss the editor. */
+  main { max-width: 46rem; margin: 0 auto; padding: 4.5rem 1.5rem 8rem; min-height: 60vh; }
+  h1 { font-size: 2.1rem; line-height: 1.25; margin: 0 0 1.5rem; letter-spacing: -0.02em; }
+  h2 { font-size: 1.35rem; margin: 2.5rem 0 .75rem; letter-spacing: -0.01em; }
+  p { margin: 0 0 1.15rem; }
+  a { color: #2f5bea; }
+  blockquote { margin: 0 0 1.15rem; padding-left: 1rem; border-left: 3px solid #e4e4e9; color: #55555f; }
+  code { background: #f3f3f6; padding: .12em .35em; border-radius: 4px;
+    font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty::before {
+    content: attr(data-tdoc-placeholder);
+    color: #b0b0ba;
+    pointer-events: none;
+  }
+  /* An empty block is zero pixels tall, so without a floor the placeholder
+     paragraph is unclickable: the click falls through to <main> and the caret
+     stays wherever it was. */
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty {
+    min-height: 1.75em;
+  }
+  /* Put the caret in a line and its hint steps aside — it has said what it had
+     to say. frame-probe marks the line, and only once the reader has moved the
+     caret themselves, so the guidance survives the first paint. */
+  html[data-tdoc-editing] [data-tdoc-placeholder][data-tdoc-caret]:empty::before {
+    content: none;
+  }
+</style>
+</head>
+<body>
+<main>
+<h1 data-tdoc-placeholder="Untitled"></h1>
+<p data-tdoc-placeholder="Start writing…"></p>
+</main>
+</body>
+</html>
+`;
+}
+
+// The document's own first <h1> is the title. Reading it back on every browser
+// save is what lets an author name an untitled doc by typing into the page, and
+// rename it later the same way. Returns '' when there is no usable heading, so
+// callers can leave the stored title alone rather than blanking it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function titleFromDocument(html) {
+  const match = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(String(html == null ? '' : html));
+  if (!match) return '';
+  const text = match[1]
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;| /g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    // One pass of <[^>]*> cannot be trusted on nested or malformed markup
+    // (`<<script>>` leaves `<script`), and decoding entities just above can
+    // put an angle bracket back. A title is a label, never markup, so every
+    // surviving bracket is dropped and the result provably carries none.
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 120);
+}
+
+// Keep <title> in step with the heading the author just edited, so the browser
+// tab, the exported file and the hub all agree. Only rewrites an existing tag —
+// a document without one is left exactly as its author wrote it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function syncDocumentTitle(html, title) {
+  const safe = String(title == null ? '' : title)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return String(html == null ? '' : html)
+    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, () => `<title>${safe}</title>`);
+}
+
 async function hostedAccountForGithub(env, login) {
   const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
@@ -3660,7 +3772,11 @@ export class CommentsStore {
       const widgetFrom = `/d/${slug}/v/${op.baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${reservation.next}/widget/`;
       const rewritten = String(op.html).split(widgetFrom).join(widgetTo);
-      const stamped = await prepareDocVersion(rewritten);
+      // The author renames a doc by editing its heading, which is the only
+      // title they can actually reach from the editor. An empty or missing h1
+      // leaves the stored title alone rather than blanking it.
+      const nextTitle = titleFromDocument(rewritten);
+      const stamped = await prepareDocVersion(nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
       const key = `docs/${slug}/v${reservation.next}/index.html`;
       await this.env.DOCS.put(key, stamped.html, {
@@ -3681,7 +3797,11 @@ export class CommentsStore {
         ...(op.actorLogin ? { author: op.actorLogin } : {}),
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
-      await this.env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, versions }));
+      await this.env.META.put(`meta:${slug}`, JSON.stringify({
+        ...meta,
+        ...(nextTitle ? { title: nextTitle } : {}),
+        versions,
+      }));
       committed = true;
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
       // reporting a failed save after META committed would make the browser
@@ -4027,6 +4147,9 @@ export default {
           page: 'docs-hub',
           identity,
           runtime: runtimeInfo(),
+          // Mirrors the /api/doc/create gate: offering "start from scratch" on a
+          // host that will 403 it is worse than not offering it.
+          capabilities: { create: isOwnerSession(env, s) || hostedAccountCopiesEnabled(env, req) },
           ...data,
         }),
       }), {
@@ -4282,6 +4405,98 @@ export default {
     // Content snapshot only: one new slug, v1, no comments, no history, no
     // widget islands. Download stays on /export. This is the hosted "make a
     // copy in my account" path (#146), not a file download.
+    // ---- create a blank doc ----
+    // Everything /api/doc/duplicate does except read a source document: claim a
+    // derived slug, charge it to the caller's hosted quota, write v1 and the
+    // meta record. The browser had no way to make a document before this; edit
+    // mode could only ever change one that already existed.
+    if (p === '/api/doc/create' && method === 'POST') {
+      const session = await getSession(env, req);
+      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      const ownerCreate = isOwnerSession(env, session);
+      let actor = { kind: 'owner_session' };
+      if (!ownerCreate) {
+        // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
+        // its owner unless it has opted into hosted accounts. tdoc.dev is open.
+        if (!hostedAccountCopiesEnabled(env, req)) {
+          return json({
+            error: 'account_create_unavailable',
+            message: 'This host only lets its owner create documents. Publish from the CLI instead.',
+          }, { status: 403 });
+        }
+        // Not a precondition — this mints the account on first use. A null here
+        // means the account store itself is unreachable.
+        const acct = await hostedAccountForGithub(env, session.login);
+        if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+      }
+
+      const html = blankDocHtml();
+      if (actor.kind === 'hosted') {
+        const maxBytes = hostedMaxUploadBytes(env);
+        const size = utf8ByteLength(html);
+        if (size > maxBytes) return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
+        const limit = hostedMaxDocs(env);
+        const used = await countHostedDocs(env, actor.account_id, limit);
+        if (used >= limit) return json({ error: 'quota_docs', limit, used }, { status: 403 });
+      }
+
+      // Opaque ids don't collide in practice; the loop is here so that when one
+      // does, the answer is another id rather than a failed create.
+      let newSlug = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const candidate = blankDocSlug(crypto.getRandomValues(new Uint8Array(8)));
+        const existsMeta = await loadDocMeta(env, candidate);
+        if (existsMeta) continue;
+        const bytes = await docBytesExist(env, candidate);
+        if (!bytes.ok) return bytes.response;
+        if (bytes.exists) continue;
+        if (actor.kind === 'hosted') {
+          const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: actor.account_id });
+          if (!claimed.ok) {
+            if (
+              claimed.status === 503
+              || claimed.error === 'hosted_owner_store_unavailable'
+              || claimed.error === 'owner_store_conflict'
+            ) {
+              return json({ error: claimed.error || 'hosted_owner_store_unavailable' }, { status: claimed.status || 503 });
+            }
+            continue;
+          }
+        }
+        newSlug = candidate;
+        break;
+      }
+      if (!newSlug) return json({ error: 'slug_exhausted' }, { status: 409 });
+
+      const now = new Date().toISOString();
+      let incoming = {
+        // Renamed by the first save that finds a heading in the document.
+        title: 'Untitled',
+        slug: newSlug,
+        created: now,
+        versions: [{ n: 1, created: now, prompt: 'Created from scratch in the browser' }],
+        created_by: session.login,
+        access: normalizeAccess({}, { legacy: false }),
+      };
+      incoming = stampHostedOwnership(incoming, actor);
+
+      const { html: stampedHtml, sha: blankSha } = await prepareDocVersion(html);
+      incoming.versions[0].sha = blankSha;
+      const r2Key = `docs/${newSlug}/v1/index.html`;
+      try {
+        await env.DOCS.put(r2Key, stampedHtml, {
+          httpMetadata: { contentType: 'text/html; charset=utf-8' },
+        });
+      } catch (e) {
+        return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+      }
+      const verify = await env.DOCS.head(r2Key);
+      if (!verify) return json({ error: 'r2_write_lost' }, { status: 500 });
+      await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
+      return json({ ok: true, slug: newSlug, version: 1, url: `/d/${newSlug}/v/1?edit=1` });
+    }
+
     if (p === '/api/doc/duplicate' && method === 'POST') {
       const session = await getSession(env, req);
       if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });

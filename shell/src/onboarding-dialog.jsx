@@ -1,17 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
-import { copyText } from './document/model.js';
+import { CreateChoice, FIRST_DOC_RECIPE } from './create-from-scratch.jsx';
+import { createDocument } from './document/api.js';
 
-const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
-export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
+export { FIRST_DOC_RECIPE };
 
-export function OnboardingDialog({ open, onOpenChange }) {
-  const [copied, setCopied] = useState(false);
+export function OnboardingDialog({ open, onOpenChange, identity }) {
   const [hosted, setHosted] = useState(false);
+  const [createError, setCreateError] = useState(null);
 
   useEffect(() => {
     if (!open) return;
-    setCopied(false);
     fetch('/api/hosted/token', {
       method: 'POST',
       credentials: 'same-origin',
@@ -25,7 +24,22 @@ export function OnboardingDialog({ open, onOpenChange }) {
       .catch(() => {});
   }, [open]);
 
-  const copy = () => copyText(FIRST_DOC_RECIPE).then(setCopied);
+  // This dialog has no toast, so a refusal is reported in place. Only signed-in
+  // readers get the blank-doc card at all — creating always needs a session.
+  const createHere = async () => {
+    setCreateError(null);
+    try {
+      const made = await createDocument();
+      if (!made || !made.url) throw new Error('The server did not return a document');
+      location.href = made.url;
+      return true;
+    } catch (error) {
+      setCreateError(error.status === 401
+        ? 'Your session expired — sign in again, then create.'
+        : (error.message || 'Could not create the doc'));
+      return false;
+    }
+  };
 
   return (
     <AppDialog
@@ -35,12 +49,8 @@ export function OnboardingDialog({ open, onOpenChange }) {
       description="Paste this into your AI. It installs tdoc, writes and publishes a live commentable page, then gives you a link."
       actions={<button type="button" className="primary" onClick={() => onOpenChange(false)}>Done</button>}
     >
-      <div className="tdoc-recipe-wrap">
-        <code>{FIRST_DOC_RECIPE}</code>
-        <button type="button" className={copied ? 'done' : undefined} onClick={copy}>
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
+      <CreateChoice create={createHere} canCreate={Boolean(identity)} />
+      {createError ? <p className="mk-scratch-error">{createError}</p> : null}
       <details className="tdoc-onboarding-details">
         <summary>What does it do?</summary>
         <ol>

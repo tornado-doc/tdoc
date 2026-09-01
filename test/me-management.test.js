@@ -48,12 +48,21 @@ t('Docs Hub exposes search, sort, tabs, folders, star, selection, and batch acti
   ]) assert(hub.includes(needle), `missing Docs Hub behavior: ${needle}`);
 });
 
-t('Create a doc reuses the first-doc recipe, copy helper, and shared dialog actions', () => {
-  assert(/import \{ FIRST_DOC_RECIPE \}/.test(docsHub), 'Create dialog does not reuse the onboarding recipe');
-  assert(/copyText\(FIRST_DOC_RECIPE\)\.then\(setCreateCopied\)/.test(docsHub), 'Create recipe is not copyable');
-  assert(/className="tdoc-recipe-wrap"/.test(docsHub), 'shared recipe treatment missing');
-  assert(/createCopied \? 'Copied' : 'Copy'/.test(docsHub), 'Copy feedback state missing');
-  assert(/actions=\{<button[^>]+className="primary"[^>]*>Done/.test(docsHub), 'Create dialog does not use the shared action row');
+t('Create a doc is a two-card fork rendered by the shared component', () => {
+  const choice = fs.readFileSync(path.join(root, 'shell/src/create-from-scratch.jsx'), 'utf8');
+  assert(/import \{ CreateChoice \}/.test(docsHub), 'the Create dialog should render the shared component');
+  assert(/<CreateChoice create=\{hub\.createDoc\} canCreate=\{capabilities\.create\} \/>/.test(docsHub),
+    'the cards must be wired to the hub hook and its capability');
+  assert(/copyText\(FIRST_DOC_RECIPE\)\.then\(setCopied\)/.test(choice), 'the recipe is not copyable');
+  assert(/className="tdoc-recipe-wrap"/.test(choice), 'shared recipe treatment missing');
+  assert(/copied \? 'Copied' : 'Copy'/.test(choice), 'Copy feedback state missing');
+  // The dialog now carries its own actions — the cards themselves (#356) — so
+  // the footer is a plain dismiss. Two primaries in one dialog is the thing to
+  // guard against, not the missing "Done".
+  assert(/actions=\{<button type="button" onClick=\{closeModal\}>Close<\/button>\}/.test(docsHub),
+    'Create dialog should close through the shared action row');
+  assert(!/actions=\{<button[^>]+className="primary"/.test(docsHub),
+    'the footer must not compete with the cards');
 });
 
 t('mobile hub keeps 44px actions while quieting management controls', () => {

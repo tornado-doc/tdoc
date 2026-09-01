@@ -61,9 +61,7 @@
   .tdoc-bar .tdoc-gh-stars { display: inline-flex; align-items: center; gap: 3px; color: #444; }
   .tdoc-bar .tdoc-gh-stars svg { display: block; }
 
-  /* Breadcrumb: workspace · slug · v3 — separated by " / ". */
-  .tdoc-bar .crumb { color: #555; font-weight: 500; padding: 4px 6px; border-radius: 6px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tdoc-bar .crumb-sep { color: #c0c0c4; user-select: none; padding: 0 1px; }
+  /* Left cluster: the version chip and the document title. */
   /* flex-grow 0 (was 1): the title must hug its text so the star sits right
      beside it — growing pushed the star to the far end of the left cluster.
      Shrink+min-width:0 keeps the ellipsis when space runs out. */
@@ -338,6 +336,14 @@
   .tdoc-reply .tdoc-reply-toggle:hover,
   .tdoc-reply .tdoc-edit-toggle:hover { text-decoration: underline; }
   .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
+  /* Past the indent cap a thread continues at one level (#365). The rail stays
+     — these are still replies inside the thread — but the width stops being
+     spent, and each one says who it answers in place of the position it lost. */
+  .tdoc-thread-more { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; cursor: pointer; color: var(--td-accent); font-size: 11px; }
+  .tdoc-thread-more:hover { text-decoration: underline; }
+  .tdoc-thread-more .chev { transition: transform .12s; }
+  .tdoc-thread-more.open .chev { transform: rotate(90deg); }
+  .tdoc-thread-tail { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
   .tdoc-reply .author { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
   .tdoc-reply .author .login { font-weight: 600; font-size: 12px; color: #111; }
@@ -517,14 +523,12 @@
 
   /* Bar collapse breakpoints — tied to viewport width, not layout class.
      The bar progressively hides elements as the viewport tightens, so it
-     stays elegant at every size.
-       ≥1100px: logo · slug · v · title ……………… identity · share · ⋯
-       <1100px: logo ·      · v · title ……………… identity · share · ⋯  (slug hides)
-       < 900px: logo ·      · v · title ……………… avatar   · share · ⋯  (name hides)
-       < 700px: logo ·          title ………………            share · ⋯  (version+identity into ⋯) */
-  @media (max-width: 1100px) {
-    .tdoc-bar .crumb-slug, .tdoc-bar .crumb-sep-slug { display: none; }
-  }
+     stays elegant at every size. The slug used to lead this ladder and was the
+     first thing dropped; it is gone at every width now — the title names the
+     document, and the slug is in the address bar.
+       ≥ 900px: logo · v · title ……………… identity · share · ⋯
+       < 900px: logo · v · title ……………… avatar   · share · ⋯  (name hides)
+       < 700px: logo ·     title ………………            share · ⋯  (version+identity into ⋯) */
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
