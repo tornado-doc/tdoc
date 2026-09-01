@@ -71,6 +71,7 @@ export function DesktopCommentLayer({
   pinIds,
   currentUser,
   isOwner,
+  mentionable,
   cardPosition,
   expandReplies,
   onOpenComment,
@@ -118,6 +119,7 @@ export function DesktopCommentLayer({
           comment={openComment}
           currentUser={currentUser}
           isOwner={isOwner}
+          mentionable={mentionable}
           unanchored={!pinIds.has(openComment.id)}
           floating
           position={cardPosition}
@@ -138,6 +140,7 @@ export function MobileCommentDrawer({
   pinIds,
   currentUser,
   isOwner,
+  mentionable,
   openCommentId,
   expandReplies,
   onOpenChange,
@@ -177,6 +180,7 @@ export function MobileCommentDrawer({
                   comment={comment}
                   currentUser={currentUser}
                   isOwner={isOwner}
+                  mentionable={mentionable}
                   unanchored={!pinIds.has(comment.id)}
                   expandReplies={openCommentId === comment.id && expandReplies}
                   selected={openCommentId === comment.id}

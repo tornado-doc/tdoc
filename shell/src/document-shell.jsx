@@ -7,6 +7,7 @@ import {
   MobileCommentDrawer,
 } from './document/comment-layer.jsx';
 import {
+  MentionReachDialog,
   MessageDialog,
   PublishDialog,
   ShareDialog,
@@ -29,6 +30,7 @@ import {
 } from './document/owner-access-dialog.jsx';
 import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { useComments } from './hooks/use-comments.js';
+import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
@@ -140,6 +142,14 @@ export function DocumentShell({ boot, config }) {
     version: config.version,
     onUnauthorized: signIn,
   });
+
+  const [invited, setInvited] = useState(null);
+
+  const mentionable = useMentionable(
+    config.slug,
+    Boolean(config.identity?.login),
+    comments.comments.length,
+  );
 
   const selectFromFrame = useCallback((selection) => {
     const reanchoring = reanchorRef.current;
@@ -312,27 +322,54 @@ export function DocumentShell({ boot, config }) {
   // mutation succeeded so callers can keep the composer/reply text on failure.
   const attempt = async (operation) => {
     try {
-      await operation();
-      return true;
+      return { ok: true, value: await operation() };
     } catch (error) {
       showToast(error.message || 'Request failed', true);
-      return false;
+      return { ok: false };
+    }
+  };
+
+  // What the server did with each @mention. An invite is only half done — the
+  // named person has no way of hearing about it until someone sends them the
+  // link — so it opens a dialog rather than a toast that scrolls away. A
+  // blocked name has to be said out loud too, or it fails silently as plain
+  // text the author believes was delivered.
+  const reportMentions = (value) => {
+    const outcome = value?.mention_outcome;
+    if (!outcome) return;
+    // Anyone new to this doc — invited onto a private one, or simply named on
+    // a public one — is someone the author may still have to reach by hand.
+    if (outcome.newcomers?.length) {
+      setInvited(outcome.newcomers);
+      return;
+    }
+    if (outcome.blocked?.length) {
+      const names = outcome.blocked.map((login) => `@${login}`).join(', ');
+      showToast(`${names} can't open this doc — ask the owner to invite them`, true);
     }
   };
 
   const postComment = async (text) => {
-    if (await attempt(() => comments.addComment(composer, text))) closeComposer();
+    const { ok, value } = await attempt(() => comments.addComment(composer, text));
+    if (!ok) return;
+    closeComposer();
+    reportMentions(value);
   };
 
-  const replyTo = (parentId, text) => attempt(() => comments.addReply(parentId, text));
+  const replyTo = async (parentId, text) => {
+    const { ok, value } = await attempt(() => comments.addReply(parentId, text));
+    if (ok) reportMentions(value);
+    return ok;
+  };
+
   const reactTo = (commentId, emoji) => attempt(() => comments.react(commentId, emoji));
 
   const removeComment = async (id) => {
-    if (await attempt(() => comments.remove(id))) setOpenCommentId(null);
+    if ((await attempt(() => comments.remove(id))).ok) setOpenCommentId(null);
   };
 
   const removeAnchor = async () => {
-    if (!await attempt(() => comments.moveAnchor(reanchorId, { kind: 'none' }))) return;
+    if (!(await attempt(() => comments.moveAnchor(reanchorId, { kind: 'none' }))).ok) return;
     setReanchorId(null);
     setOpenCommentId(null);
   };
@@ -519,6 +556,7 @@ export function DocumentShell({ boot, config }) {
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
           isOwner={Boolean(config.isOwner)}
+          mentionable={mentionable}
           openCommentId={openCommentId}
           expandReplies={deepReply}
           onOpenChange={setDrawerOpen}
@@ -540,6 +578,7 @@ export function DocumentShell({ boot, config }) {
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
           isOwner={Boolean(config.isOwner)}
+          mentionable={mentionable}
           cardPosition={cardPosition}
           expandReplies={deepReply}
           onOpenComment={(id) => {
@@ -556,8 +595,21 @@ export function DocumentShell({ boot, config }) {
       )}
 
       {composer ? (
-        <CommentComposer selection={composer} onSubmit={postComment} onClose={closeComposer} />
+        <CommentComposer
+          selection={composer}
+          mentionable={mentionable}
+          onSubmit={postComment}
+          onClose={closeComposer}
+        />
       ) : null}
+
+      <MentionReachDialog
+        open={Boolean(invited?.length)}
+        newcomers={invited || []}
+        url={shareUrl}
+        onOpenChange={(open) => !open && setInvited(null)}
+        onCopied={() => { setInvited(null); showToast('Link copied'); }}
+      />
 
       <PublishDialog
         open={dialog?.type === 'publish'}

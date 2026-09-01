@@ -2128,6 +2128,7 @@ function snapshotAt(c, V) {
     version: c.created_in,
     anchor: null,
     text: '',
+    mentions: [],
     status: 'open',
     applied_in: undefined,
     replies: [],
@@ -2155,6 +2156,7 @@ function snapshotAt(c, V) {
       case 'created':
         snap.anchor = e.anchor || null;
         snap.text = e.text || '';
+        snap.mentions = Array.isArray(e.mentions) ? e.mentions : [];
         break;
       case 'text_edited':
         snap.text = e.text || '';
@@ -2200,6 +2202,7 @@ function snapshotAt(c, V) {
           id: e.reply.id, parent_id: e.reply.parent_id || c.id,
           author: e.reply.author || null,
           text: e.reply.text || '',
+          mentions: Array.isArray(e.reply.mentions) ? e.reply.mentions : [],
           agent_status: e.reply.agent_status || null,
           created: e.at,
           reactions: {},
@@ -2848,6 +2851,10 @@ function inboxKey(login) {
 }
 
 function inboxGroupKey(kind, slug, targetId) {
+  // A mention is addressed to you by name, so it keeps its own row: rolling it
+  // into `comment:<slug>` would let a busy doc swallow the one notification
+  // that was actually about you.
+  if (kind === 'mention') return `mention:${targetId || slug}`;
   if (kind === 'comment') return `comment:${slug}`;
   if (kind === 'reply') return `reply:${targetId}`;
   if (kind === 'reaction') return `reaction:${targetId}`;
@@ -2921,8 +2928,9 @@ function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE } = {}) {
 }
 
 // Reddit-style: top-level comment → doc owner; reply → direct parent author
-// only; reaction → author of that item. Never notify the actor.
-function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targetAuthorLogin }) {
+// only; reaction → author of that item; mention → everyone named in the text.
+// Never notify the actor.
+function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targetAuthorLogin, mentionLogins }) {
   const actor = sessionLogin({ login: actorLogin });
   const out = [];
   const push = (login) => {
@@ -2933,6 +2941,175 @@ function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targ
   if (kind === 'comment') push(ownerLogin);
   else if (kind === 'reply') push(parentAuthorLogin);
   else if (kind === 'reaction') push(targetAuthorLogin);
+  else if (kind === 'mention') for (const login of (Array.isArray(mentionLogins) ? mentionLogins : [])) push(login);
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// @mentions
+//
+// A comment reaches people by NAME, not only by position in the thread. Any
+// GitHub login can be named — the composer searches GitHub itself — but the
+// gate on DELIVERY is whether that person can actually open the doc:
+//
+//   public / unlisted   anyone can read it, so anyone named is notified
+//   private, invited    already on the allowlist, notified
+//   private, stranger   the OWNER naming them is an invite (they go on the
+//                       allowlist, then get notified); anyone else naming
+//                       them changes nothing — plain text, no notification
+//
+// The last row is the one that matters: an inbox row carries the doc title
+// and a line of the comment, so notifying a stranger about a private doc
+// would hand them content they are not allowed to open.
+//
+// Mentions are resolved on the SERVER from the posted text. A client-supplied
+// list would let a crafted request notify anyone.
+// ─────────────────────────────────────────────────────────────────────────
+
+// One comment cannot notify an unbounded crowd.
+const MENTION_MAX_PER_COMMENT = 10;
+// Ceiling for the allowlist growing by @mention. Not applied retroactively to
+// a list an owner built by hand in the Share panel.
+const MENTION_INVITE_ALLOWLIST_MAX = 100;
+
+// GitHub login shape: alphanumeric plus inner hyphens, 39 max. The leading
+// group swallows the preceding character so `a@b` (an email) and `@@x` don't
+// match, and so two mentions separated by one space both do.
+const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+
+function parseMentionLogins(text) {
+  if (typeof text !== 'string' || !text) return [];
+  const out = [];
+  const seen = new Set();
+  const re = new RegExp(MENTION_RE.source, 'g');
+  let m;
+  while ((m = re.exec(text))) {
+    // A GitHub login never ends in a hyphen, so `@dana-` names dana.
+    const login = String(m[2]).replace(/-+$/, '').toLowerCase();
+    if (!login || seen.has(login)) continue;
+    seen.add(login);
+    out.push(login);
+  }
+  return out;
+}
+
+// The logins a single comment may act on: parsed in the order they were
+// typed, deduped, and capped.
+function mentionCandidates(text) {
+  return parseMentionLogins(text).slice(0, MENTION_MAX_PER_COMMENT);
+}
+
+// Everyone who has written on this doc, newest record last. Reads the raw
+// event log rather than a snapshot so the author of a DELETED comment still
+// counts as someone you can talk to.
+function commentParticipants(list) {
+  const byLogin = new Map();
+  const push = (author) => {
+    const login = normalizeGithubLogin(author && author.login);
+    if (!login) return;
+    const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
+    byLogin.set(login, {
+      login,
+      name: prev.name || (author && author.name) || '',
+      avatar_url: prev.avatar_url || (author && author.avatar_url) || '',
+    });
+  };
+  for (const c of (Array.isArray(list) ? list : [])) {
+    if (!c) continue;
+    push(c.author);
+    for (const e of (Array.isArray(c.events) ? c.events : [])) {
+      if (e && e.kind === 'reply_added' && e.reply) push(e.reply.author);
+    }
+    for (const r of (Array.isArray(c.replies) ? c.replies : [])) push(r && r.author);
+  }
+  return [...byLogin.values()];
+}
+
+// Who this session may name. `includeAllowed` is the requester's own insider
+// status: the private-doc allowlist is not public roster material, so a
+// signed-in stranger on a public doc gets the owner and the people who have
+// already spoken, and nothing that would let them enumerate the invite list.
+function mentionableUsers({ ownerLogin, allowedUsers, participants, includeAllowed = true }) {
+  const byLogin = new Map();
+  const push = (entry) => {
+    const login = normalizeGithubLogin(entry && entry.login);
+    if (!login) return;
+    const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
+    byLogin.set(login, {
+      login,
+      name: prev.name || (entry && entry.name) || '',
+      avatar_url: prev.avatar_url || (entry && entry.avatar_url) || '',
+    });
+  };
+  push({ login: ownerLogin });
+  if (includeAllowed) for (const u of (Array.isArray(allowedUsers) ? allowedUsers : [])) push({ login: u });
+  for (const p of (Array.isArray(participants) ? participants : [])) push(p);
+  return [...byLogin.values()];
+}
+
+// Being named outranks sitting in the thread. Returns the login that should
+// still get the positional notification (owner of the doc, author of the
+// parent), or null when the mention already reached them — one row, not two.
+function positionalRecipient(login, mentions) {
+  const n = normalizeGithubLogin(login);
+  if (n && (Array.isArray(mentions) ? mentions : []).includes(n)) return null;
+  return login;
+}
+
+// Split the named logins by what can actually happen to them.
+//   canRead(login)  — can that person open this doc as it stands
+//   canInvite       — may THIS commenter widen the allowlist (owner only)
+//   inviteBudget    — how many more the allowlist may take
+// `notified` includes `invited`: an invite is only worth anything if the
+// mention that triggered it also lands.
+function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0 } = {}) {
+  const notified = [];
+  const invited = [];
+  const blocked = [];
+  for (const login of (Array.isArray(logins) ? logins : [])) {
+    if (canRead(login)) { notified.push(login); continue; }
+    if (canInvite && invited.length < inviteBudget) {
+      invited.push(login);
+      notified.push(login);
+      continue;
+    }
+    blocked.push(login);
+  }
+  return { notified, invited, blocked };
+}
+
+// Has this login ever actually used tdoc on THIS host? Read-only on purpose,
+// and two tempting sources are deliberately not consulted:
+//   - `inbox:` — a mention CREATES it, so the probe would answer its own
+//     question and every second mention would read as an established user.
+//   - hostedAccountForGithub() — it MINTS an account when none exists, so
+//     probing with it would manufacture the very record it reports.
+// What is left is evidence the person came here themselves: a doc they opened
+// while signed in, a doc they starred, or a hosted account they registered.
+// `false` is the safe answer — it tells the author to send the link, which is
+// never wrong, only sometimes unnecessary.
+const PRESENCE_PREFIXES = ['recents', 'stars', 'hosted-account', 'hosted-github'];
+async function hasUsedTdoc(env, login) {
+  const n = normalizeGithubLogin(login);
+  if (!n || !env || !env.META) return false;
+  for (const prefix of PRESENCE_PREFIXES) {
+    if (await env.META.get(`${prefix}:${n}`)) return true;
+  }
+  return false;
+}
+
+// Which of the notified were not already part of this document. These are the
+// only people the author may still have to reach by hand — everyone else
+// (the owner, the allowlist, anyone already in the thread) has their own
+// reason to come back. Each carries whether they have ever used tdoc, because
+// that decides whether the mention can find them on its own.
+async function describeNewcomers(env, { notified = [], invited = [], insiders = [] } = {}) {
+  const inside = new Set(insiders.map(normalizeGithubLogin).filter(Boolean));
+  const out = [];
+  for (const login of notified) {
+    if (inside.has(login)) continue;
+    out.push({ login, invited: invited.includes(login), known: await hasUsedTdoc(env, login) });
+  }
   return out;
 }
 
@@ -2947,7 +3124,8 @@ function applyCommentOp(list, op) {
     case 'create': {
       const entry = {
         id: op.id, author: op.author, created: now, created_in: op.version,
-        events: [{ kind: 'created', at_version: op.version, at: now, anchor: op.anchor || null, text: op.text }],
+        events: [{ kind: 'created', at_version: op.version, at: now, anchor: op.anchor || null, text: op.text,
+          mentions: Array.isArray(op.mentions) ? op.mentions : [] }],
       };
       backfillEids(entry.events);
       list.push(entry);
@@ -2957,7 +3135,8 @@ function applyCommentOp(list, op) {
       const thread = findCommentThread(list, op.parent_id);
       if (!thread) return { status: 404, body: { error: 'parent_not_found' } };
       appendEvent(thread.root, { kind: 'reply_added', at_version: op.version, at: now,
-        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null, parent_id: op.parent_id } });
+        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null, parent_id: op.parent_id,
+          mentions: Array.isArray(op.mentions) ? op.mentions : [] } });
       return { status: 200, body: { id: op.reply_id, parent_id: op.parent_id, thread_id: thread.root.id, author: op.author, text: op.text, created: now, version: op.version } };
     }
     case 'patch_anchor': {
@@ -3098,6 +3277,8 @@ async function deliverInbox(env, recipientLogin, ev) {
     ownerLogin: ev.kind === 'comment' ? recipientLogin : '',
     parentAuthorLogin: ev.kind === 'reply' ? recipientLogin : '',
     targetAuthorLogin: ev.kind === 'reaction' ? recipientLogin : '',
+    // A mention has no single recipient — it carries its own list.
+    mentionLogins: ev.kind === 'mention' ? ev.mentions : [],
   });
   const at = ev.at || new Date().toISOString();
   for (const who of recips) {
@@ -4342,6 +4523,28 @@ export default {
       return json(V === 'all' ? historyList(list) : snapshotList(list, V));
     }
 
+    // Who the composer offers after `@`. Same gate as posting a comment: if
+    // you cannot comment here, there is nobody for you to name.
+    if (p === '/api/mentions' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      const slug = url.searchParams.get('slug');
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const meta = await loadDocMeta(env, slug);
+      const access = accessFromMeta(meta || {});
+      if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+      if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
+      const list = await readComments(env, slug);
+      const me = sessionLogin(s);
+      const users = mentionableUsers({
+        ownerLogin: hostedGithubLogin(meta) || env.TDOC_OWNER,
+        allowedUsers: access.allowed_users,
+        participants: commentParticipants(list),
+        includeAllowed: isAllowlisted(access, s, env, meta),
+      }).filter((u) => u.login !== me);
+      return json({ users });
+    }
+
     if (p === '/api/comments' && method === 'POST') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -4350,41 +4553,94 @@ export default {
       const { slug, version, anchor, text: commentText, parent_id } = body;
       if (!slug || !commentText) return json({ error: 'slug and text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      {
-        const meta = await loadDocMeta(env, slug);
-        const access = accessFromMeta(meta || {});
-        if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
-        if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
-      }
+      const meta = await loadDocMeta(env, slug);
+      const access = accessFromMeta(meta || {});
+      if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+      if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
       const author = { login: s.login, avatar_url: s.avatar_url, name: s.name };
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
+      const ownerLogin = hostedGithubLogin(meta) || env.TDOC_OWNER;
+      // Resolve @mentions BEFORE the write: the delivered list is stamped onto
+      // the event, so a chip on the card is exactly the set that was notified.
+      // Named logins come from the text, never from the request body.
+      const priorList = await readComments(env, slug);
+      const isDocOwner = isDocOwnerSession(env, s, meta);
+      const outcome = classifyMentions(
+        mentionCandidates(commentText).filter((login) => login !== sessionLogin(s)),
+        {
+          canRead: (login) => canReadDoc(access, { login }, env, meta),
+          canInvite: isDocOwner,
+          inviteBudget: Math.max(0, MENTION_INVITE_ALLOWLIST_MAX - access.allowed_users.length),
+        },
+      );
+      const mentions = outcome.notified;
+      // Who among them is new to this doc, and can the mention find them on
+      // its own. Computed against the doc as it stood BEFORE the invite below
+      // widened the allowlist, so an invitee still reads as a newcomer.
+      outcome.newcomers = await describeNewcomers(env, {
+        notified: outcome.notified,
+        invited: outcome.invited,
+        insiders: mentionableUsers({
+          ownerLogin,
+          allowedUsers: access.allowed_users,
+          participants: commentParticipants(priorList),
+        }).map((u) => u.login),
+      });
+      // An invite is a meta write, so it happens before the comment lands: a
+      // notification whose link 403s is worse than no notification.
+      if (outcome.invited.length) {
+        const patched = applyAccessPatch(meta, {
+          allowed_users: access.allowed_users.concat(outcome.invited),
+        });
+        if (patched.error) return json(patched, { status: 400 });
+        await env.META.put(`meta:${slug}`, JSON.stringify(patched.meta));
+      }
       // Serialized through the per-slug DO (mutation logic lives once in
       // applyCommentOp). create + reply are both id-stamped here so the
       // response is deterministic regardless of where the write runs.
       const op = parent_id
-        ? { kind: 'reply', slug, parent_id, reply_id: `r_${Date.now()}_${rand(4)}`, author, text: commentText, version: V, at: created }
-        : { kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author, text: commentText, anchor: anchor || null, version: V, at: created };
+        ? { kind: 'reply', slug, parent_id, reply_id: `r_${Date.now()}_${rand(4)}`, author, text: commentText, mentions, version: V, at: created }
+        : { kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author, text: commentText, mentions, anchor: anchor || null, version: V, at: created };
       const res = await mutateComments(env, slug, op);
       if (res.status === 200) {
-        const meta = await loadDocMeta(env, slug);
         const title = (meta && meta.title) || slug;
-        if (!parent_id) {
-          await deliverInbox(env, hostedGithubLogin(meta) || env.TDOC_OWNER, {
-            kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
-            actor: author, preview: commentText, title, at: created,
-          });
-        } else {
-          const list = await readComments(env, slug);
-          const parentA = recordAuthor(list, parent_id);
-          await deliverInbox(env, parentA && parentA.login, {
-            kind: 'reply', slug, version: V, comment_id: op.reply_id,
-            thread_id: res.body && res.body.thread_id, target_id: parent_id,
+        const commentId = parent_id ? op.reply_id : op.id;
+        const threadId = parent_id ? (res.body && res.body.thread_id) : op.id;
+        if (mentions.length) {
+          await deliverInbox(env, null, {
+            kind: 'mention', slug, version: V, comment_id: commentId,
+            thread_id: threadId, target_id: commentId, mentions,
             actor: author, preview: commentText, title, at: created,
           });
         }
+        if (!parent_id) {
+          const owner = positionalRecipient(ownerLogin, mentions);
+          if (owner) {
+            await deliverInbox(env, owner, {
+              kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
+              actor: author, preview: commentText, title, at: created,
+            });
+          }
+        } else {
+          const parentA = recordAuthor(priorList, parent_id);
+          const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
+          if (parentLogin) {
+            await deliverInbox(env, parentLogin, {
+              kind: 'reply', slug, version: V, comment_id: op.reply_id,
+              thread_id: res.body && res.body.thread_id, target_id: parent_id,
+              actor: author, preview: commentText, title, at: created,
+            });
+          }
+        }
       }
-      return json(res.body, { status: res.status });
+      // The composer needs to know what became of each name: an invite is
+      // worth telling the owner about (they still have to send the link), and
+      // a blocked name would otherwise fail silently.
+      const body_out = res.status === 200 && res.body && typeof res.body === 'object'
+        ? { ...res.body, mention_outcome: outcome }
+        : res.body;
+      return json(body_out, { status: res.status });
     }
 
     // Re-anchor a comment. Only the original author can re-anchor their own
