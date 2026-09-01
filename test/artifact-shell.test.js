@@ -366,6 +366,65 @@ const SLUG = 'hostile-body-css';
       }
     });
 
+    await t('a thread taller than the screen scrolls inside its card (#363)', async () => {
+      // The card had no height cap and no overflow, so a long thread simply
+      // ran off the bottom of the viewport: the page scrolled the document
+      // underneath while the card stayed put, and the last replies could not
+      // be reached at all. The rule that would have capped it existed, behind
+      // `body.tdoc-pins` — a class the React shell has never set.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        // A short viewport, which is what a laptop with browser chrome is.
+        await page.setViewportSize({ width: 1280, height: 700 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        await page.evaluate(async () => {
+          for (let i = 1; i <= 12; i += 1) {
+            // eslint-disable-next-line no-await-in-loop
+            await fetch('/api/comments', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                slug: 'hostile-body-css', version: 1, parent_id: 'c_fixture_1',
+                text: `reply ${i} — long enough to wrap onto two lines inside the card`,
+              }),
+            });
+          }
+        });
+        await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.waitForSelector(`${card} .tdoc-replies-toggle`, { timeout: 4000 });
+        await page.click(`${card} .tdoc-replies-toggle`);
+        await page.waitForTimeout(500);
+        const box = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          const rect = el.getBoundingClientRect();
+          return {
+            bottom: Math.round(rect.bottom),
+            viewport: window.innerHeight,
+            overflowY: getComputedStyle(el).overflowY,
+            canScroll: el.scrollHeight > el.clientHeight,
+          };
+        }, card);
+        if (box.bottom > box.viewport) {
+          throw new Error(`the card still hangs ${box.bottom - box.viewport}px below the fold`);
+        }
+        if (!box.canScroll || box.overflowY === 'visible') {
+          throw new Error(`a card too tall for the screen must scroll: ${JSON.stringify(box)}`);
+        }
+        const reached = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          el.scrollTop = el.scrollHeight;
+          const last = [...el.querySelectorAll('.tdoc-reply')].pop();
+          const rect = last.getBoundingClientRect();
+          return rect.top >= 0 && rect.bottom <= window.innerHeight + 1;
+        }, card);
+        if (!reached) throw new Error('scrolling the card to the end does not reach the last reply');
+      } finally {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
     await t('a thread stops indenting and continues at one level (#365)', async () => {
       // Every level costs ~24px of a 306px card, and depth was unbounded: a
       // chain deep enough ends up reading in a column too narrow to read, and
@@ -931,6 +990,64 @@ const SLUG = 'hostile-body-css';
             });
             if (left.includes('c_fixture_1')) throw new Error('an empty tombstone stayed behind');
           } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+        await t('the @mention list is not clipped by the card it opens inside (#363)', async () => {
+          // The card is a scroll container now, and the menu was an
+          // absolutely-positioned child of one — cut off at the card's edge
+          // exactly when the composer sits at the bottom of a long thread,
+          // which is when you are most likely to be answering someone by name.
+          // (The list only loads for a signed-in viewer, which is why this
+          // half lives here rather than in the anonymous rig above.)
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1280, height: 700 });
+            await page.goto(authedUrl, { waitUntil: 'networkidle' });
+            await page.evaluate(async () => {
+              for (let i = 1; i <= 12; i += 1) {
+                // eslint-disable-next-line no-await-in-loop
+                await fetch('/api/comments', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    slug: 'hostile-body-css', version: 1, parent_id: 'c_fixture_1',
+                    text: `reply ${i} — long enough to wrap onto two lines inside the card`,
+                  }),
+                });
+              }
+            });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            const tall = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+            await page.waitForSelector(`${tall} .tdoc-replies-toggle`, { timeout: 4000 });
+            await page.click(`${tall} .tdoc-replies-toggle`);
+            await page.waitForTimeout(500);
+            await page.evaluate((sel) => { document.querySelector(sel).scrollTop = 1e6; }, tall);
+            await page.waitForTimeout(200);
+            const toggles = await page.$$(`${tall} .tdoc-reply > .meta .tdoc-reply-toggle`);
+            await toggles[toggles.length - 1].click();
+            await page.waitForTimeout(300);
+            await page.keyboard.type('@t');
+            await page.waitForTimeout(900);
+            const menu = await page.evaluate(() => {
+              const el = document.querySelector('.tdoc-mention-menu');
+              if (!el) return null;
+              const rect = el.getBoundingClientRect();
+              return {
+                inBody: el.parentElement === document.body,
+                position: getComputedStyle(el).position,
+                insideViewport: rect.top >= 0 && rect.bottom <= window.innerHeight,
+                options: el.querySelectorAll('.tdoc-mention-option').length,
+              };
+            });
+            if (!menu) throw new Error('the @mention menu never opened');
+            if (!menu.options) throw new Error('the @mention menu opened with nobody in it');
+            if (!menu.inBody || menu.position !== 'fixed') {
+              throw new Error(`the menu is still inside the scroll container: ${JSON.stringify(menu)}`);
+            }
+            if (!menu.insideViewport) throw new Error(`the menu is off screen: ${JSON.stringify(menu)}`);
+          } finally {
+            await page.setViewportSize({ width: 1400, height: 900 });
             fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
           }
         });
