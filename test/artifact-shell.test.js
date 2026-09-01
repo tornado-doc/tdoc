@@ -316,6 +316,56 @@ const SLUG = 'hostile-body-css';
       }
     });
 
+    await t('a deleted comment keeps its slot, its name, and its replies (#354)', async () => {
+      // Deleting the comment used to take the whole thread with it: every
+      // reply under it, other people's included, simply stopped being served.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        // c_fixture_1 is tester's, and tester2's reply hangs under it. Delete
+        // it through the API — the affordance is gated on identity the local
+        // rig does not have, and this is about what a delete leaves behind.
+        const status = await page.evaluate(async () => {
+          const r = await fetch('/api/comments?slug=hostile-body-css&id=c_fixture_1&version=1', { method: 'DELETE' });
+          return r.status;
+        });
+        if (status !== 200) throw new Error(`delete failed: ${status}`);
+        await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.waitForSelector(`${card}.tdoc-deleted`, { timeout: 4000 });
+        const shown = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          return {
+            text: el.querySelector('.text')?.textContent,
+            author: el.querySelector('.author .login')?.textContent,
+            replies: [...el.querySelectorAll('.tdoc-reply .text')].map((n) => n.textContent),
+            actions: [...el.querySelectorAll(':scope > .meta .actions button')].length,
+            reanchor: !!el.querySelector('.tdoc-reanchor-btn'),
+          };
+        }, card);
+        if (!/deleted/i.test(shown.text || '')) throw new Error(`tombstone does not say so: ${JSON.stringify(shown.text)}`);
+        if (shown.author !== 'tester') throw new Error(`the name must stay: ${JSON.stringify(shown.author)}`);
+        if (!shown.replies.includes('a reply worth deep-linking to')) {
+          throw new Error(`the reply did not survive its parent: ${JSON.stringify(shown.replies)}`);
+        }
+        if (shown.actions) throw new Error(`a tombstone still offers ${shown.actions} action(s)`);
+        if (shown.reanchor) throw new Error('a tombstone still offers a re-anchor');
+        // On a fresh load the gutter is pins, not cards. An unmarked tombstone
+        // pin is indistinguishable from a comment waiting for an answer, which
+        // is how a tombstone reads as "nothing happened" after a refresh.
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 4000 });
+        const marked = await page.evaluate(() => {
+          const pin = document.querySelector('.tdoc-pin[data-id="c_fixture_1"]');
+          return { deleted: pin.classList.contains('tdoc-pin-deleted'), face: !!pin.querySelector('img, .tdoc-pin-anon:not([hidden])') };
+        });
+        if (!marked.deleted) throw new Error('a tombstone’s pin looks like any other comment');
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
     await t('agent comment: pin shows the agent mark, card shows a resolved chip', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
@@ -767,6 +817,39 @@ const SLUG = 'hostile-body-css';
             if (stored.text !== 'rewritten by its author' || !stored.edited) {
               throw new Error(`edit did not persist: ${JSON.stringify(stored.text)} / ${stored.edited}`);
             }
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+        await t('deleting a comment leaves its tombstone on screen, not an empty gutter', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.waitForSelector(`${card} > .meta .del`, { timeout: 4000 });
+            await page.click(`${card} > .meta .del`);
+            // The card used to close on any delete, so the tombstone you just
+            // made — and the reply still under it — went off screen with it.
+            await page.waitForSelector(`${card}.tdoc-deleted`, { timeout: 4000 });
+            await page.click(`${card} .tdoc-replies-toggle`);
+            await page.waitForSelector(`${card} .tdoc-replies.open .tdoc-reply`, { timeout: 2000 });
+
+            // Deleting the last thing under it takes the whole thread away.
+            // That reply is tester2's, and delete is the author's now (#349
+            // point 3), so it goes through the API — the collapse is the
+            // subject here, not who may press the button.
+            const gone = await page.evaluate(async () => {
+              const r = await fetch('/api/comments?slug=hostile-body-css&id=r_fixture_1a&version=1', { method: 'DELETE' });
+              return r.status;
+            });
+            if (gone !== 200) throw new Error(`deleting the reply failed: ${gone}`);
+            await page.goto(authedUrl, { waitUntil: 'networkidle' });
+            await page.waitForTimeout(500);
+            const left = await page.evaluate(async () => {
+              const r = await fetch('/api/comments?slug=hostile-body-css&version=1');
+              return (await r.json()).map((c) => c.id);
+            });
+            if (left.includes('c_fixture_1')) throw new Error('an empty tombstone stayed behind');
           } finally {
             fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
           }

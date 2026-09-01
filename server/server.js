@@ -86,6 +86,45 @@ function e2eIdentity() {
 function inboxFile(login) {
   return path.join(ROOT, `.inbox-${String(login).toLowerCase()}.json`);
 }
+// Mirrors the Worker's asTombstone: the words go, the name stays (GitHub's
+// "user deleted this"), and everything the words earned goes with them.
+function localTombstone(record) {
+  const out = {
+    ...record,
+    text: '',
+    deleted: true,
+    reactions: {},
+    mentions: [],
+    status: 'open',
+  };
+  delete out.edited;
+  delete out.applied_in;
+  delete out.agent_status;
+  delete out.agent_actor;
+  return out;
+}
+
+// The Worker gets this for free — it folds, so a tombstone with nothing left
+// under it simply stops being emitted. Local storage is written, not folded,
+// so the collapse has to happen at delete time: drop tombstoned replies that
+// no longer hold anything, repeatedly (a chain of them collapses), and then
+// the record itself if it is a tombstone with an empty thread. Returns false
+// when the whole comment should go.
+function collapseLocalTombstones(comment) {
+  const replies = comment.replies || [];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = replies.length - 1; i >= 0; i--) {
+      const r = replies[i];
+      if (!r.deleted) continue;
+      if (replies.some(other => other.parent_id === r.id)) continue;
+      replies.splice(i, 1);
+      changed = true;
+    }
+  }
+  return !(comment.deleted && !replies.length);
+}
+
 function localRecordAuthor(comments, id) {
   for (const c of comments) {
     if (c.id === id) return c.author || null;
@@ -1399,18 +1438,31 @@ const server = http.createServer(async (req, res) => {
     if (!slug || !id) return json(res, 400, { error: 'invalid slug or missing id' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
+    // Same rule the Worker folds (#354): a record that still holds replies
+    // keeps its slot as a tombstone — text gone, author kept — so deleting
+    // your own words never takes everyone else's off the page. A record with
+    // nothing under it goes for real. Local storage is flat, not an event log,
+    // so the tombstone is written rather than folded.
     const top = all.find(c => c.id === id);
     if (top) {
-      writeJson(file, all.filter(c => c.id !== id));
+      if ((top.replies || []).length) {
+        writeJson(file, all.map(c => (c.id === id ? localTombstone(c) : c)));
+      } else {
+        writeJson(file, all.filter(c => c.id !== id));
+      }
       return json(res, 200, { ok: true });
     }
     for (const c of all) {
       if (!Array.isArray(c.replies)) continue;
-      if (c.replies.some(r => r.id === id)) {
-        c.replies = c.replies.filter(r => r.id !== id);
-        writeJson(file, all);
-        return json(res, 200, { ok: true });
-      }
+      const reply = c.replies.find(r => r.id === id);
+      if (!reply) continue;
+      const hasChildren = c.replies.some(r => r.parent_id === id && !r.deleted);
+      c.replies = hasChildren
+        ? c.replies.map(r => (r.id === id ? localTombstone(r) : r))
+        : c.replies.filter(r => r.id !== id);
+      const keep = collapseLocalTombstones(c);
+      writeJson(file, keep ? all : all.filter(x => x.id !== c.id));
+      return json(res, 200, { ok: true });
     }
     return json(res, 404, { error: 'not_found' });
   }

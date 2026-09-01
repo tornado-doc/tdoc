@@ -167,6 +167,97 @@ t('patch_anchor: re-anchors; 404 if target missing', () => {
   assert(apply(list, { kind: 'patch_anchor', id: 'zzz', anchor: {}, version: 2, actor: mkAuthor('a') }).status === 404, 'missing target should 404');
 });
 
+// ---- delete: what happens to the replies (#354) ----
+const listAt = (list, V) => box.snapshotList(list, V);
+
+t('deleting a comment that holds replies leaves a tombstone, not a hole', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'ALICE asks', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('bob'), text: 'BOB answers', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'delete', id: 'c1', version: 1, actor: mkAuthor('alice'), at: '2026-01-03' });
+  const [c] = listAt(list, 1);
+  assert(c, 'the whole thread vanished — bob’s answer went with alice’s question');
+  assert(c.text === '', `tombstone kept the text: ${JSON.stringify(c.text)}`);
+  assert(c.deleted === true, 'tombstone is not marked deleted');
+  assert(c.author && c.author.login === 'alice', 'the name must stay on the tombstone');
+  assert(c.replies.length === 1 && c.replies[0].text === 'BOB answers', 'the reply did not survive');
+});
+
+t('deleting a comment with nothing under it still disappears outright', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'alone', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'delete', id: 'c1', version: 1, actor: mkAuthor('alice'), at: '2026-01-02' });
+  assert(listAt(list, 1).length === 0, 'a tombstone with no thread under it is litter');
+});
+
+t('a tombstone drops what the words earned: reactions, verdict, mentions', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'ALICE asks', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('bob'), text: 'BOB answers', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'react', comment_id: 'c1', emoji: '👍', by: 'bob', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'raw_events', id: 'c1', events: [{ kind: 'marked_applied', at_version: 1, at: '2026-01-02', applied_in: 1, by: 'claude', agent_status: 'applied' }] });
+  apply(list, { kind: 'delete', id: 'c1', version: 1, actor: mkAuthor('alice'), at: '2026-01-03' });
+  const [c] = listAt(list, 1);
+  assert(Object.keys(c.reactions).length === 0, `tombstone kept reactions: ${JSON.stringify(c.reactions)}`);
+  assert(c.status === 'open' && c.applied_in === undefined, 'tombstone still claims to be resolved');
+});
+
+t('a deleted MIDDLE reply is a tombstone too, and keeps its child in place', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'top', version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('bob'), text: 'middle', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'reply', parent_id: 'r1', reply_id: 'r2', author: mkAuthor('alice'), text: 'child of middle', version: 1, at: '2026-01-03' });
+  apply(list, { kind: 'delete', id: 'r1', version: 1, actor: mkAuthor('bob'), at: '2026-01-04' });
+  const [c] = listAt(list, 1);
+  const mid = c.replies.find(r => r.id === 'r1');
+  assert(mid, 'the middle reply vanished and orphaned its child');
+  assert(mid.text === '' && mid.deleted === true, 'middle reply is not a tombstone');
+  assert(mid.author.login === 'bob', 'the name must stay on a reply tombstone');
+  const kid = c.replies.find(r => r.id === 'r2');
+  assert(kid && kid.parent_id === 'r1', 'the child lost the parent it was answering');
+});
+
+t('a deleted reply whose only child was also deleted goes with it', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'top', version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('bob'), text: 'middle', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'reply', parent_id: 'r1', reply_id: 'r2', author: mkAuthor('bob'), text: 'child', version: 1, at: '2026-01-03' });
+  apply(list, { kind: 'delete', id: 'r2', version: 1, actor: mkAuthor('bob'), at: '2026-01-04' });
+  apply(list, { kind: 'delete', id: 'r1', version: 1, actor: mkAuthor('bob'), at: '2026-01-05' });
+  const [c] = listAt(list, 1);
+  assert(c.replies.length === 0, `a chain of tombstones holding nothing should collapse: ${JSON.stringify(c.replies)}`);
+});
+
+t('an agent comment tombstones on exactly the same terms', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: { kind: 'agent', login: 'claude', name: 'Claude' }, text: 'Rewrote it.', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('alice'), text: 'thanks', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'delete', id: 'c1', version: 1, actor: mkAuthor('alice'), at: '2026-01-03' });
+  const [c] = listAt(list, 1);
+  assert(c && c.text === '' && c.deleted === true, 'agent comment did not tombstone');
+  assert(c.author.login === 'claude' && c.author.kind === 'agent', 'the agent keeps its name too');
+});
+
+t('the agent’s own view (?version=all) still shows no deleted records', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'ALICE asks', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('bob'), text: 'BOB answers', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'delete', id: 'c1', version: 1, actor: mkAuthor('alice'), at: '2026-01-03' });
+  // A tombstone has no text to act on; /tdoc edit must not be handed one.
+  assert(box.historyList(list).length === 0, 'tdoc-pull would write a blank comment into comments.json');
+});
+
+t('an older version still folds to the comment as it stood, not a tombstone', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'ALICE asks', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('bob'), text: 'BOB answers', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'delete', id: 'c1', version: 3, actor: mkAuthor('alice'), at: '2026-01-03' });
+  const [atV2] = listAt(list, 2);
+  assert(atV2.text === 'ALICE asks' && !atV2.deleted, 'a delete at v3 rewrote v2');
+  const [atV3] = listAt(list, 3);
+  assert(atV3.text === '' && atV3.deleted === true, 'v3 should be the tombstone');
+});
+
 // ---- publish_merge: the data-safety-critical one ----
 t('publish_merge: adds local-only comments, NEVER overwrites/deletes worker ones', () => {
   const list = [];
