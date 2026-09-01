@@ -155,6 +155,14 @@ function authoredBy(item, currentUser) {
   );
 }
 
+// Mirrors the worker's mayDelete(): your own words, plus — for the doc owner —
+// an agent's, because /api/agent/reply runs on the owner's upload token. The
+// agent is the owner writing through a tool, not a third party with speech of
+// its own. Editing stays authoredBy: nobody rewrites what the agent said.
+function mayDelete(item, currentUser, isOwner) {
+  return authoredBy(item, currentUser) || (isOwner && item.author?.kind === 'agent');
+}
+
 // Mirrors the worker's canMutate(): re-anchoring is the author's or the doc
 // owner's, nobody else's. Without this the button rendered for every reader
 // and the server's 403 (`not_author`) was the only thing stopping them — a
@@ -208,6 +216,7 @@ function ReplyCard({
   rootId,
   depth,
   currentUser,
+  isOwner,
   mentionable,
   replyTarget,
   onReplyTarget,
@@ -254,7 +263,7 @@ function ReplyCard({
               edit
             </button>
           ) : null}
-          {authoredBy(reply, currentUser) ? (
+          {mayDelete(reply, currentUser, isOwner) ? (
             <button type="button" className="del" onClick={() => onDelete(reply.id)}>
               delete
             </button>
@@ -276,6 +285,7 @@ function ReplyCard({
               rootId={rootId}
               depth={depth + 1}
               currentUser={currentUser}
+              isOwner={isOwner}
               mentionable={mentionable}
               replyTarget={replyTarget}
               onReplyTarget={onReplyTarget}
@@ -336,6 +346,7 @@ export function CommentCard({
 
   const reactionCount = hasReactions(comment);
   const isMine = authoredBy(comment, currentUser);
+  const canDelete = mayDelete(comment, currentUser, isOwner);
   const canMutate = mayMutate(comment, currentUser, isOwner);
   const createdAt = formatCreated(comment.created);
   const replies = comment.replies || [];
@@ -416,7 +427,7 @@ export function CommentCard({
               edit
             </button>
           ) : null}
-          {isMine ? (
+          {canDelete ? (
             <button type="button" className="del" onClick={() => onDelete(comment.id)}>
               delete
             </button>
@@ -443,6 +454,7 @@ export function CommentCard({
                 rootId={comment.id}
                 depth={1}
                 currentUser={currentUser}
+                isOwner={isOwner}
                 mentionable={mentionable}
                 replyTarget={replyTarget}
                 onReplyTarget={setReplyTarget}

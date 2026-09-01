@@ -633,7 +633,7 @@ const SLUG = 'hostile-body-css';
       const authedUrl = `${authed.url.replace(/\/d\/.*/, '')}/d/${SLUG}/v/1?shell=1`;
       const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
       try {
-        await t('a comment offers edit and delete to its author and to nobody else', async () => {
+        await t('edit is the author\'s alone; delete adds the owner on an agent comment', async () => {
           const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
           try {
             await page.setViewportSize({ width: 1400, height: 900 });
@@ -652,6 +652,14 @@ const SLUG = 'hostile-body-css';
             }
             if (await page.$(`${other} .del`)) {
               throw new Error('the doc owner was offered a delete on someone else\'s comment');
+            }
+            // …but c_fixture_3 is Claude's, and an agent writes with the doc's
+            // own upload token. The owner reaches that one, and only that one.
+            await page.goto(`${authedUrl}&comment=c_fixture_3`, { waitUntil: 'networkidle' });
+            const agentCard = '.tdoc-margin-comment[data-comment-id="c_fixture_3"]';
+            await page.waitForSelector(`${agentCard} .del`, { timeout: 4000 });
+            if (await page.$(`${agentCard} .tdoc-edit-toggle`)) {
+              throw new Error('nobody rewrites what the agent said — not even the owner');
             }
           } finally {
             fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
