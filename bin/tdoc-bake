@@ -43,7 +43,10 @@ function templateStamp(css) {
 }
 
 function hasBlock(html) {
-  return html.includes('id="tdoc-reader"');
+  // Tag match, not substring: a document whose prose quotes id="tdoc-reader"
+  // in a code sample must still be baked. Mirrors hasReaderBlock() in
+  // worker/worker.js.
+  return /<style[^>]*\bid="tdoc-reader"/i.test(html);
 }
 
 // Returns true when the file was changed.

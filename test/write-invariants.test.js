@@ -218,6 +218,47 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     assert(!(await w.text()).includes('id="tdoc-reader"'), 'widget was baked — reading template leaked into an island');
   });
 
+  await t('a doc whose PROSE quotes id="tdoc-reader" is still baked', async () => {
+    // The check is a tag match, not a substring: tdoc's own design docs quote
+    // the id in code samples, and a substring check would skip baking them.
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env);
+    const quoting = DOC.replace('<p>hi</p>', '<p>Never write your own <code>id="tdoc-reader"</code> block.</p>');
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'q1', version: 1, html: quoting, meta: { title: 'q1', slug: 'q1', versions: [{ n: 1 }] } },
+    }), env, {});
+    const stored = await (await env.DOCS.get('docs/q1/v1/index.html')).text();
+    assert(/<style[^>]*id="tdoc-reader"/.test(stored), 'prose mention suppressed the bake');
+    assert((stored.match(/<style[^>]*id="tdoc-reader"/g) || []).length === 1, 'expected exactly one real block');
+  });
+
+  await t('history backfill refreshes the version entry sha', async () => {
+    // Re-uploading an old version stores freshly-prepared bytes; the recorded
+    // sha must follow them or /raw serves a stale ETag.
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env);
+    for (const v of [1, 2]) {
+      await worker.fetch(req('/api/upload', {
+        method: 'POST', token: a.token,
+        body: { slug: 'bf', version: v, html: DOC.replace('<p>hi</p>', `<p>v${v}</p>`), meta: { title: 'bf', slug: 'bf', versions: [{ n: 1 }, { n: 2 }].slice(0, v) } },
+      }), env, {});
+    }
+    const meta0 = JSON.parse(await env.META.get('meta:bf'));
+    meta0.versions.find((v) => v.n === 1).sha = 'deadbeefdeadbeef';
+    await env.META.put('meta:bf', JSON.stringify(meta0));
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'bf', version: 1, html: DOC.replace('<p>hi</p>', '<p>v1</p>'), meta: { title: 'bf', slug: 'bf', versions: [{ n: 1 }, { n: 2 }] } },
+    }), env, {});
+    const meta = JSON.parse(await env.META.get('meta:bf'));
+    const sha = meta.versions.find((v) => v.n === 1).sha;
+    const stored = await (await env.DOCS.get('docs/bf/v1/index.html')).text();
+    const expect = crypto.createHash('sha256').update(stored).digest('hex').slice(0, 16);
+    assert(sha === expect, `backfill left a stale sha: ${sha} != ${expect}`);
+    assert(meta.versions.find((v) => v.n === 2), 'backfill must not drop other version entries');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

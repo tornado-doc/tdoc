@@ -106,7 +106,9 @@ try {
     const src = fs.readFileSync(path.join(ROOT, 'worker', 'worker.js'), 'utf8');
     const fn = src.slice(src.indexOf('function injectReaderCss'));
     const body = fn.slice(0, fn.indexOf('\n}'));
-    if (!body.includes("html.includes('id=\"tdoc-reader\"')")) {
+    // The guard is the shared tag-matching test (a substring check
+    // false-positives on prose that quotes the id).
+    if (!body.includes('hasReaderBlock(html)')) {
       throw new Error('injectReaderCss has no presence guard — downloads get two reader blocks');
     }
   });

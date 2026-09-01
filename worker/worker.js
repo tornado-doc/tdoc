@@ -1486,6 +1486,17 @@ function forceWidgetSandbox(html) {
 function readerCssSource() {
   return (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
 }
+// Whether the document CARRIES the baked reading template — as an actual
+// <style> tag, not as prose. A substring check false-positives on any document
+// whose text discusses the mechanism (tdoc's own design docs quote
+// id="tdoc-reader" in code samples), and a false positive here means an
+// unbaked document is skipped. Every bake/skip decision uses this one test so
+// the write side and the read side cannot disagree.
+const READER_BLOCK_RE = /<style[^>]*\bid="tdoc-reader"/i;
+function hasReaderBlock(html) {
+  return READER_BLOCK_RE.test(html);
+}
+
 // The document-content invariants, in ONE place. Every path that stores a
 // version of a document — /api/upload, the browser Save inside the Durable
 // Object, and duplicate — goes through this. It exists because there used to
@@ -1506,7 +1517,7 @@ function readerCssSource() {
 async function prepareDocVersion(rawHtml) {
   let html = String(rawHtml);
   const css = readerCssSource();
-  if (css && !html.includes('id="tdoc-reader"')) {
+  if (css && !hasReaderBlock(html)) {
     const stamp = (await sha256Hex(css)).slice(0, 8);
     const tag = `<style id="tdoc-reader" data-tdoc-template="${stamp}">${css}</style>\n`;
     // Callback so a `$` in the template stays literal.
@@ -1522,7 +1533,7 @@ function injectReaderCss(html, css) {
   // Documents have been self-contained since creation-time baking landed, so
   // most already carry the block. Stamping a second copy is 8KB of duplicate
   // CSS and a duplicate id in every downloaded file.
-  if (html.includes('id="tdoc-reader"')) return html;
+  if (hasReaderBlock(html)) return html;
   const tag = `<style id="tdoc-reader">${css}</style>\n`;
   if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, () => `${tag}</head>`);
   return tag + html;
@@ -3707,7 +3718,7 @@ export default {
         // max-width" proxy starved the documents that followed the contract,
         // and :where() zero-specificity makes the injection harmless to a
         // document that styles itself.
-        if (!body.includes('id="tdoc-reader"')) {
+        if (!hasReaderBlock(body)) {
           const rcss = (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
           if (rcss) {
             const rtag = `<style id="tdoc-reader">${rcss}</style>`;
@@ -4739,6 +4750,26 @@ export default {
           // repairs the cursor from META; never report this committed version
           // as failed and invite an unsafe retry.
           console.error('[upload] version cursor finalize failed (recoverable):', e.message || String(e));
+        }
+      } else {
+        // History backfill (re-uploading v1..vN-1) stores freshly-prepared
+        // bytes but skips the latest-meta merge above — without this, the
+        // entry keeps a sha for bytes that no longer exist, and /raw serves a
+        // stale ETag after a reader-template generation change. Refresh just
+        // this entry; touch nothing else in meta.
+        try {
+          const currentMeta = await loadDocMeta(env, slug);
+          const entry = (Array.isArray(currentMeta && currentMeta.versions) ? currentMeta.versions : [])
+            .find((v) => Number(v.n) === verNum);
+          if (entry && (entry.sha !== uploadSha || (clientVersion && entry.client !== clientVersion))) {
+            entry.sha = uploadSha;
+            if (clientVersion) entry.client = clientVersion;
+            await env.META.put(`meta:${slug}`, JSON.stringify(currentMeta));
+          }
+        } catch (e) {
+          // The bytes are stored and correct; a stale recorded sha costs at
+          // worst one spurious /raw re-download. Never fail the upload for it.
+          console.error('[upload] backfill sha refresh failed (recoverable):', e.message || String(e));
         }
       }
       // Reconcile existing open comments against the new artifact set:
