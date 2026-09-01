@@ -177,6 +177,44 @@ function mentionCandidates(text) {
   return parseMentionLogins(text).slice(0, MENTION_MAX_PER_COMMENT);
 }
 
+// The local stand-in for the worker's presence probe. A local tree has no
+// accounts, so the honest analogue of "has used tdoc here" is "has written
+// something here": an author line in some doc under TDOC_DIR. Inboxes are not
+// consulted, for the same reason the worker skips them — a mention creates
+// one, so it would answer its own question.
+function localHasUsedTdoc(login) {
+  const n = normalizeGithubLogin(login);
+  if (!n) return false;
+  let slugs = [];
+  try { slugs = fs.readdirSync(ROOT); } catch { return false; }
+  const seen = (author) => normalizeGithubLogin(author && author.login) === n;
+  for (const slug of slugs) {
+    let list = [];
+    try { list = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'comments.json'), 'utf8')); } catch { continue; }
+    for (const c of (Array.isArray(list) ? list : [])) {
+      if (!c) continue;
+      if (seen(c.author)) return true;
+      for (const r of (Array.isArray(c.replies) ? c.replies : [])) if (seen(r && r.author)) return true;
+    }
+  }
+  return false;
+}
+
+// Same shape the worker returns. A local doc has no access policy, so nobody
+// is ever invited or blocked — but "new to this doc" and "never used tdoc"
+// are both real locally, so the composer still reports them.
+function localMentionOutcome(comments, mentions) {
+  const inside = new Set(localMentionable(comments).map((u) => u.login));
+  return {
+    notified: mentions,
+    invited: [],
+    blocked: [],
+    newcomers: mentions
+      .filter((login) => !inside.has(login))
+      .map((login) => ({ login, invited: false, known: localHasUsedTdoc(login) })),
+  };
+}
+
 // Local comments.json is already folded (no event log), so participants come
 // straight off the records and their replies.
 function localMentionable(comments) {
@@ -1038,9 +1076,7 @@ const server = http.createServer(async (req, res) => {
         const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
         if (parentLogin) localDeliver(parentLogin, { ...ev, kind: 'reply', target_id: parent_id });
       }
-      // Same shape the worker returns. A local doc has no access policy, so
-      // nothing is ever invited or blocked here.
-      return json(res, 200, { ...reply, mention_outcome: { notified: mentions, invited: [], blocked: [] } });
+      return json(res, 200, { ...reply, mention_outcome: localMentionOutcome(comments, mentions) });
     }
     const entry = {
       id: `c_${Date.now()}`,
@@ -1067,7 +1103,7 @@ const server = http.createServer(async (req, res) => {
       const owner = positionalRecipient(E2E_OWNER, mentions);
       if (owner) localDeliver(owner, { ...ev, kind: 'comment' });
     }
-    return json(res, 200, { ...entry, mention_outcome: { notified: mentions, invited: [], blocked: [] } });
+    return json(res, 200, { ...entry, mention_outcome: localMentionOutcome(comments, mentions) });
   }
 
   // Agent reply: posts a reply attributed to the acting agent, updates the

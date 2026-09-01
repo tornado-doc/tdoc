@@ -3078,6 +3078,41 @@ function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0
   return { notified, invited, blocked };
 }
 
+// Has this login ever actually used tdoc on THIS host? Read-only on purpose,
+// and two tempting sources are deliberately not consulted:
+//   - `inbox:` — a mention CREATES it, so the probe would answer its own
+//     question and every second mention would read as an established user.
+//   - hostedAccountForGithub() — it MINTS an account when none exists, so
+//     probing with it would manufacture the very record it reports.
+// What is left is evidence the person came here themselves: a doc they opened
+// while signed in, a doc they starred, or a hosted account they registered.
+// `false` is the safe answer — it tells the author to send the link, which is
+// never wrong, only sometimes unnecessary.
+const PRESENCE_PREFIXES = ['recents', 'stars', 'hosted-account', 'hosted-github'];
+async function hasUsedTdoc(env, login) {
+  const n = normalizeGithubLogin(login);
+  if (!n || !env || !env.META) return false;
+  for (const prefix of PRESENCE_PREFIXES) {
+    if (await env.META.get(`${prefix}:${n}`)) return true;
+  }
+  return false;
+}
+
+// Which of the notified were not already part of this document. These are the
+// only people the author may still have to reach by hand — everyone else
+// (the owner, the allowlist, anyone already in the thread) has their own
+// reason to come back. Each carries whether they have ever used tdoc, because
+// that decides whether the mention can find them on its own.
+async function describeNewcomers(env, { notified = [], invited = [], insiders = [] } = {}) {
+  const inside = new Set(insiders.map(normalizeGithubLogin).filter(Boolean));
+  const out = [];
+  for (const login of notified) {
+    if (inside.has(login)) continue;
+    out.push({ login, invited: invited.includes(login), known: await hasUsedTdoc(env, login) });
+  }
+  return out;
+}
+
 // Apply one comment operation to the in-memory list. PURE w.r.t. I/O: it only
 // mutates `list` and returns { status, body }. Both the DO path and the KV
 // fallback call this, so mutation logic is defined exactly once.
@@ -4540,6 +4575,18 @@ export default {
         },
       );
       const mentions = outcome.notified;
+      // Who among them is new to this doc, and can the mention find them on
+      // its own. Computed against the doc as it stood BEFORE the invite below
+      // widened the allowlist, so an invitee still reads as a newcomer.
+      outcome.newcomers = await describeNewcomers(env, {
+        notified: outcome.notified,
+        invited: outcome.invited,
+        insiders: mentionableUsers({
+          ownerLogin,
+          allowedUsers: access.allowed_users,
+          participants: commentParticipants(priorList),
+        }).map((u) => u.login),
+      });
       // An invite is a meta write, so it happens before the comment lands: a
       // notification whose link 403s is worse than no notification.
       if (outcome.invited.length) {

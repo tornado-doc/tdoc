@@ -17,8 +17,11 @@ const src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 const serverSrc = fs.readFileSync(path.join(root, 'server', 'server.js'), 'utf8');
 
 function fn(source, name) {
-  const s = source.indexOf(`function ${name}(`);
+  let s = source.indexOf(`function ${name}(`);
   if (s === -1) throw new Error(`fn ${name} not found`);
+  // Keep a leading `async`: slicing from `function` alone yields a body with
+  // `await` in a sync function, which is a SyntaxError rather than a failure.
+  if (source.slice(s - 6, s) === 'async ') s -= 6;
   let i = source.indexOf('(', s), d = 0;
   for (; i < source.length; i++) {
     if (source[i] === '(') d++;
@@ -51,6 +54,9 @@ vm.runInContext([
   fn(src, 'mentionableUsers'),
   fn(src, 'mentionCandidates'),
   fn(src, 'classifyMentions'),
+  constLine(src, 'PRESENCE_PREFIXES'),
+  fn(src, 'hasUsedTdoc'),
+  fn(src, 'describeNewcomers'),
   fn(src, 'positionalRecipient'),
   fn(src, 'inboxRecipients'),
   fn(src, 'inboxGroupKey'),
@@ -250,5 +256,61 @@ t('the local server parses mentions the same way as the worker', () => {
   }
 });
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+// ── who has actually used tdoc ───────────────────────────────────────────
+const asyncTests = [];
+function ta(n, f) { asyncTests.push([n, f]); }
+
+// META with only the keys named; everything else reads as absent.
+const envWith = (...keys) => ({ META: { get: async (k) => (keys.includes(k) ? '{}' : null) } });
+
+ta('a doc opened while signed in counts as having used tdoc', async () => {
+  assert(await box.hasUsedTdoc(envWith('recents:ada'), 'ada') === true);
+});
+
+ta('a star counts, and so does a hosted account (new key or legacy)', async () => {
+  assert(await box.hasUsedTdoc(envWith('stars:ada'), 'ada') === true, 'stars');
+  assert(await box.hasUsedTdoc(envWith('hosted-account:ada'), 'ada') === true, 'hosted-account');
+  assert(await box.hasUsedTdoc(envWith('hosted-github:ada'), 'ada') === true, 'legacy hosted-github');
+});
+
+// The regression this whole probe exists to avoid: a mention writes the
+// inbox, so an inbox must never be evidence that its owner has been here.
+ta('an inbox is NOT evidence — a mention creates one', async () => {
+  assert(await box.hasUsedTdoc(envWith('inbox:ada'), 'ada') === false,
+    'inbox: made the probe answer its own question');
+});
+
+ta('a stranger with nothing on this host reads as never having used tdoc', async () => {
+  assert(await box.hasUsedTdoc(envWith(), 'ada') === false);
+  assert(await box.hasUsedTdoc(envWith('recents:ada'), '') === false, 'empty login');
+});
+
+// ── who the author still has to reach by hand ────────────────────────────
+ta('people already on the doc are not reported as newcomers', async () => {
+  const out = await box.describeNewcomers(envWith('recents:ada'), {
+    notified: ['ada', 'bo'],
+    invited: [],
+    insiders: ['ada'],
+  });
+  assert(out.length === 1, `expected only bo, got ${JSON.stringify(out)}`);
+  assert(out[0].login === 'bo');
+});
+
+ta('each newcomer carries whether the mention can find them on its own', async () => {
+  const out = await box.describeNewcomers(envWith('recents:bo'), {
+    notified: ['bo', 'cy'],
+    invited: ['cy'],
+    insiders: [],
+  });
+  const by = Object.fromEntries(out.map((p) => [p.login, p]));
+  assert(by.bo.known === true && by.bo.invited === false, 'bo uses tdoc, was not invited');
+  assert(by.cy.known === false && by.cy.invited === true, 'cy is new to tdoc and was invited');
+});
+
+(async () => {
+  for (const [n, f] of asyncTests) {
+    try { await f(); ok(n); } catch (e) { bad(n, e.message); }
+  }
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})();

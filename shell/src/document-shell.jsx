@@ -7,7 +7,7 @@ import {
   MobileCommentDrawer,
 } from './document/comment-layer.jsx';
 import {
-  MentionInviteDialog,
+  MentionReachDialog,
   MessageDialog,
   PublishDialog,
   ShareDialog,
@@ -337,8 +337,10 @@ export function DocumentShell({ boot, config }) {
   const reportMentions = (value) => {
     const outcome = value?.mention_outcome;
     if (!outcome) return;
-    if (outcome.invited?.length) {
-      setInvited(outcome.invited);
+    // Anyone new to this doc — invited onto a private one, or simply named on
+    // a public one — is someone the author may still have to reach by hand.
+    if (outcome.newcomers?.length) {
+      setInvited(outcome.newcomers);
       return;
     }
     if (outcome.blocked?.length) {
@@ -601,9 +603,9 @@ export function DocumentShell({ boot, config }) {
         />
       ) : null}
 
-      <MentionInviteDialog
+      <MentionReachDialog
         open={Boolean(invited?.length)}
-        invited={invited || []}
+        newcomers={invited || []}
         url={shareUrl}
         onOpenChange={(open) => !open && setInvited(null)}
         onCopied={() => { setInvited(null); showToast('Link copied'); }}
