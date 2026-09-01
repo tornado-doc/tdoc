@@ -2753,13 +2753,18 @@ function titleFromDocument(html) {
   if (!match) return '';
   const text = match[1]
     .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]*>/g, '')
+    .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;|&#160;| /g, ' ')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&amp;/g, '&')
+    // One pass of <[^>]*> cannot be trusted on nested or malformed markup
+    // (`<<script>>` leaves `<script`), and decoding entities just above can
+    // put an angle bracket back. A title is a label, never markup, so every
+    // surviving bracket is dropped and the result provably carries none.
+    .replace(/[<>]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   return text.slice(0, 120);

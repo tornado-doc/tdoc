@@ -344,13 +344,18 @@ function titleFromDocument(html) {
   if (!match) return '';
   const text = match[1]
     .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]*>/g, '')
+    .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;|&#160;| /g, ' ')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&amp;/g, '&')
+    // One pass of <[^>]*> cannot be trusted on nested or malformed markup
+    // (`<<script>>` leaves `<script`), and decoding entities just above can
+    // put an angle bracket back. A title is a label, never markup, so every
+    // surviving bracket is dropped and the result provably carries none.
+    .replace(/[<>]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   return text.slice(0, 120);
@@ -1093,7 +1098,10 @@ const server = http.createServer(async (req, res) => {
       fs.renameSync(stageDir, docRoot);
     } catch (error) {
       try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch {}
-      return json(res, 500, { error: 'create_failed', message: error.message || String(error) });
+      // The message can carry a filesystem path or a stack; log it here and
+      // hand the browser the code alone.
+      console.error('[create] blank doc write failed:', error && error.message ? error.message : error);
+      return json(res, 500, { error: 'create_failed' });
     }
     return json(res, 200, {
       ok: true,

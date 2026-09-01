@@ -75,9 +75,28 @@ t('the title is read back out of the document heading', () => {
   assert(titleFromDocument('<h1>烘焙是什么</h1>') === '烘焙是什么', 'plain CJK heading');
   assert(titleFromDocument('<h1 data-tdoc-placeholder="Untitled">My <em>notes</em></h1>') === 'My notes',
     'inline markup should be stripped, not kept');
-  assert(titleFromDocument('<h1>a &amp; b &lt;c&gt;</h1>') === 'a & b <c>', 'entities should decode');
+  assert(titleFromDocument('<h1>a &amp; b &lt;c&gt;</h1>') === 'a & b c', 'entities decode, then angle brackets are dropped');
   assert(titleFromDocument('<h1>  spaced\n  out  </h1>') === 'spaced out', 'whitespace should collapse');
   assert(titleFromDocument('<h1>' + 'x'.repeat(300) + '</h1>').length === 120, 'a runaway heading is capped');
+});
+
+t('a heading can never smuggle markup into the title', () => {
+  // One pass of <[^>]*> is not a sanitizer: nested brackets survive it, and the
+  // entity decode below it can hand back the character it just removed.
+  for (const evil of [
+    '<h1><<script>>alert(1)<</script>></h1>',
+    '<h1><scr<x>ipt>alert(1)</scr<x>ipt></h1>',
+    '<h1>&lt;script&gt;alert(1)&lt;/script&gt;</h1>',
+    '<h1>&amp;lt;img src=x onerror=alert(1)&amp;gt;</h1>',
+  ]) {
+    const out = titleFromDocument(evil);
+    assert(!/[<>]/.test(out), `angle bracket survived: ${JSON.stringify(out)}`);
+    assert(!/script/i.test(out) || !/[<>]/.test(out), `markup survived: ${JSON.stringify(out)}`);
+  }
+  // And what it produces is safe to hand straight to the <title> writer.
+  const round = syncDocumentTitle('<html><head><title>x</title></head><body></body></html>',
+    titleFromDocument('<h1><<script>>hi<</script>></h1>'));
+  assert(!/<script/i.test(round), 'a crafted heading reached <title> as markup');
 });
 
 t('an empty or missing heading leaves the stored title alone', () => {
