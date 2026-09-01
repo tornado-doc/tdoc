@@ -92,6 +92,10 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
     <div className="tdoc-reply-form open" data-parent-id={commentId}>
       {replyingTo ? <div className="tdoc-reply-to">Replying to @{replyingTo}</div> : null}
       <MentionField
+        // The box you asked for is the box you want to type in. Without this,
+        // clicking Reply put a composer on screen and left the caret wherever
+        // it was, so the first thing you do is click the thing you just opened.
+        autoFocus
         placeholder="Reply… (@ to notify someone)"
         value={text}
         people={mentionable}

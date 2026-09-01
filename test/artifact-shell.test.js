@@ -292,6 +292,12 @@ const SLUG = 'hostile-body-css';
         await page.waitForSelector(`${card} .tdoc-reply-toggle`, { timeout: 2000 });
         await page.click(`${card} > .meta .tdoc-reply-toggle`);
         await page.waitForSelector(`${card} .tdoc-reply-form.open textarea`, { timeout: 2000 });
+        // the caret is already in it — you asked for this box by clicking Reply
+        const focused = await page.evaluate((sel) => {
+          const box = document.querySelector(`${sel} .tdoc-reply-form.open textarea`);
+          return document.activeElement === box;
+        }, card);
+        if (!focused) throw new Error('the reply box opened without the caret in it');
         await page.fill(`${card} .tdoc-reply-form.open textarea`, 'submitted reply #349');
         await page.click(`${card} .tdoc-reply-submit`);
         // the composer goes away on its own — no reload
