@@ -161,7 +161,10 @@ button.tdoc-pin {
 }
 
 .ui-menu-positioner {
-  z-index: 1100;
+  /* Menus are portalled to body and may overlap the shell's old-version
+     strip (999998) and top bar (999999). Keep them above reader chrome while
+     leaving dialogs (1000001) as the top interactive layer. */
+  z-index: 1000000;
 }
 
 .ui-menu-popup {
