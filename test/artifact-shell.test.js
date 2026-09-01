@@ -313,6 +313,16 @@ const SLUG = 'hostile-body-css';
         }
         if (shown.actions) throw new Error(`a tombstone still offers ${shown.actions} action(s)`);
         if (shown.reanchor) throw new Error('a tombstone still offers a re-anchor');
+        // On a fresh load the gutter is pins, not cards. An unmarked tombstone
+        // pin is indistinguishable from a comment waiting for an answer, which
+        // is how a tombstone reads as "nothing happened" after a refresh.
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 4000 });
+        const marked = await page.evaluate(() => {
+          const pin = document.querySelector('.tdoc-pin[data-id="c_fixture_1"]');
+          return { deleted: pin.classList.contains('tdoc-pin-deleted'), face: !!pin.querySelector('img, .tdoc-pin-anon:not([hidden])') };
+        });
+        if (!marked.deleted) throw new Error('a tombstone’s pin looks like any other comment');
       } finally {
         fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
       }

@@ -17,6 +17,10 @@ function Pin({ cluster, top, left, frameTop, onOpenComment, onOpenCluster }) {
         'tdoc-pin',
         single ? '' : 'tdoc-pin-cluster',
         single?.resolved ? 'tdoc-pin-resolved' : '',
+        // A tombstone keeps its pin — that is the way back to the replies
+        // under it — but it must not look like a comment somebody is waiting
+        // on. Without this a deleted thread is invisible until you click it.
+        single?.deleted ? 'tdoc-pin-deleted' : '',
         !single && resolved ? 'tdoc-cluster-allresolved' : '',
       ].filter(Boolean).join(' ')}
       data-id={single?.id}
