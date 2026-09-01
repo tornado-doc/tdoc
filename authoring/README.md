@@ -37,18 +37,60 @@ This matters more for tdoc than for a hand-written site: the whole product
 generates prose with a model, so the AI-slop failure mode is the house
 default unless something pushes back on it.
 
-## style/ and structure/ are empty on purpose
+## Where the opinion lives, and what it can override
 
-Both are reserved mount points. The directory layout and the way a doc
-names its choice are settled here so adding entries later is additive,
-but no entries ship yet.
+Three layers express taste, and only one of them is enforced:
 
-- **style/** — visual register: type, color, density, measure. Author CSS
-  always wins over the overlay (`:where()` zero-specificity), so a style
-  entry can also break overlay chrome. Anything added here has to respect
-  the "Author HTML compatibility contract" in `SKILL.md`.
-- **structure/** — section skeletons per document kind. Default is empty,
-  meaning the agent picks the shape from the prompt, exactly as today.
+| Layer | Where | Strength |
+|---|---|---|
+| Defaults | `server/reader.css`, baked into every document at creation | `:where()` zero-specificity — the author wins every property they name, property by property |
+| Recommendation | this directory | Prose and CSS the agent may take or leave |
+| Contract | `bin/tdoc-validate-template` | The only MUST, and only for what breaks rendering |
+
+The validator prints house-style deviations as **notes** and creates the
+document anyway; `--strict` is how a caller asks for conformance to be
+enforced. So a doc that brings its own design system is composing with tdoc,
+not fighting it — which is the point of the zero-specificity defaults.
+
+Precedence, when they disagree: **the user's own words, then the document's
+declared style, then what this directory recommends, then the defaults.**
+
+- **style/** — visual register: type, color, density, measure. Four entries
+  ship (`default`, `technical`, `editorial`, `paper`); the agent picks the one
+  that fits the content.
+- **structure/** — `components.md` says what the parts are. Section skeletons
+  are deliberately not prescribed: the agent picks the shape from the prompt.
+
+## Before writing CSS, write the plan
+
+Three lines, then build to them. Deciding the palette and the type pairing up
+front is what separates a designed page from one that accumulates rules as it
+goes — and it is cheap, because it is three lines.
+
+- **Color** — 4–6 named values. Name the role, not the hex: `ink`, `rule`,
+  `muted`, `surface`, `accent`.
+- **Type** — at least two roles: a display face, a body face, and a utility
+  face for captions or data when the content has any.
+- **Layout** — one or two sentences on how the page is organised.
+
+Then follow it. A rule that is not in the plan is a rule to question.
+
+## The looks to avoid
+
+Not "have taste" — a named list, because a named list is actionable and
+"have taste" is not. When nothing in the prompt points at one of these, do not
+spend the freedom on it:
+
+- warm cream ground with a serif display and a terracotta accent
+- near-black with a single acid-green or vermilion pop
+- a purple-to-blue gradient hero on white
+- emoji as section markers
+- everything centered
+- a rounded card with an accent bar down its left edge, repeated down the page
+- numbered eyebrows (01 / 02 / 03) on content that is not a sequence
+
+If the user asks for one of these, they get it — their words win. This list is
+about where an unguided default lands.
 
 ## Vendored upstream
 
