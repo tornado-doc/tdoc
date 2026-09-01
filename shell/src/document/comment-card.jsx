@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronRight, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { MentionField, MentionText } from './mention-field.jsx';
@@ -113,6 +113,18 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
 // leaves the card untouched when the text comes back unchanged.
 function EditForm({ item, onSave, onCancel }) {
   const [text, setText] = useState(item.text || '');
+  const boxRef = useRef(null);
+
+  // Open at the END of what is already written. autoFocus alone leaves the
+  // caret in front of your own sentence, so the first keystroke lands before
+  // the first word — an edit is a correction, and you carry on from where the
+  // text stopped.
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }, []);
 
   const submit = async () => {
     const next = text.trim();
@@ -125,7 +137,7 @@ function EditForm({ item, onSave, onCancel }) {
   return (
     <div className="tdoc-edit-form open" data-comment-id={item.id}>
       <textarea
-        autoFocus
+        ref={boxRef}
         value={text}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
