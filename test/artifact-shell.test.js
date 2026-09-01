@@ -379,6 +379,34 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"] .tdoc-replies.open', { timeout: 2000 });
     });
 
+    await t('a reply carries its own react + Reply controls, aimed at the reply (#343)', async () => {
+      // Between the overlay rewrite and the React port a reply rendered as
+      // author + text only: no reaction, no Reply, nowhere to go. The server
+      // accepted both all along (parent_id resolves replies, /api/reactions
+      // toggles on a reply id) — only the markup was missing.
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl + '&comment=r_fixture_1a', { waitUntil: 'networkidle' });
+      const reply = '.tdoc-margin-comment[data-comment-id="c_fixture_1"] .tdoc-reply[data-comment-id="r_fixture_1a"]';
+      await page.waitForSelector(reply, { timeout: 4000 });
+      const controls = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        return {
+          react: !!el.querySelector(':scope > .meta .tdoc-react-add'),
+          reply: !!el.querySelector(':scope > .meta .tdoc-reply-toggle'),
+          stamp: (el.querySelector(':scope > .meta > span')?.textContent || '').trim(),
+        };
+      }, reply);
+      if (!controls.react) throw new Error('reply has no reaction control');
+      if (!controls.reply) throw new Error('reply has no Reply control');
+      if (!controls.stamp) throw new Error('reply has no timestamp');
+      await page.click(`${reply} > .meta .tdoc-reply-toggle`);
+      await page.waitForSelector(`${reply} .tdoc-reply-form.open textarea`, { timeout: 2000 });
+      const parent = await page.$eval(`${reply} .tdoc-reply-form`, el => el.dataset.parentId);
+      if (parent !== 'r_fixture_1a') throw new Error(`reply form targets ${parent}, expected the reply itself`);
+      const hint = await page.$eval(`${reply} .tdoc-reply-to`, el => el.textContent);
+      if (!/tester2/.test(hint)) throw new Error(`reply form does not name who it answers: "${hint}"`);
+    });
+
     await t('author data-tdoc-default-theme="dark" opens the shell dark (no stored pref)', async () => {
       const darkDocUrl = `${base}/d/copy-doc/v/1`;
       await page.setViewportSize({ width: 1400, height: 900 });
