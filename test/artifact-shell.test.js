@@ -658,7 +658,7 @@ const SLUG = 'hostile-body-css';
           }
         });
 
-        await t('edit reads as a text control, exactly like Reply beside it', async () => {
+        await t('edit reads as a text control, exactly like the reply beside it', async () => {
           // It shipped as a raw <button>: ui.css lists the chrome buttons that
           // "read as text" by class, and a class missing from that list keeps
           // the UA button box — a grey chip sitting between two text links.
@@ -676,8 +676,13 @@ const SLUG = 'hostile-body-css';
             ];
           }, card);
           if (reply !== edit) {
-            throw new Error(`edit does not read like Reply:\n  Reply: ${reply}\n  edit:  ${edit}`);
+            throw new Error(`edit does not read like reply:\n  reply: ${reply}\n  edit:  ${edit}`);
           }
+          // …and they are one row of controls, so they are written one way.
+          const labels = await page.evaluate((sel) => [...document.querySelectorAll(`${sel} > .meta .actions button`)]
+            .map((b) => b.textContent.trim()).filter(Boolean), card);
+          const shouty = labels.filter((label) => label !== label.toLowerCase());
+          if (shouty.length) throw new Error(`the action row is not written one way: ${JSON.stringify(labels)}`);
         });
 
         await t('editing rewrites the comment in place and marks it edited (#349)', async () => {
