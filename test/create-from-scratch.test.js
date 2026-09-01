@@ -44,63 +44,68 @@ const load = (names) => {
   // eslint-disable-next-line no-new-func
   return new Function(`${names.map((n) => fnSource(server, n)).join('\n')}\nreturn { ${names.join(', ')} };`)();
 };
-const { slugifyTitle, nextCreateSlug, blankDocHtml } = load(['slugifyTitle', 'nextCreateSlug', 'blankDocHtml']);
+const { blankDocSlug, blankDocHtml, titleFromDocument, syncDocumentTitle } =
+  load(['blankDocSlug', 'blankDocHtml', 'titleFromDocument', 'syncDocumentTitle']);
+const crypto = require('crypto');
 const SLUG_RULE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 console.log('create a doc from scratch');
 
-t('a plain title becomes the obvious slug', () => {
-  // Mixed titles keep their ASCII words: the CJK run collapses to a separator
-  // rather than swallowing the words around it.
-  assert(slugifyTitle('Hook 与本地 Daemon') === 'hook-daemon', `got ${slugifyTitle('Hook 与本地 Daemon')}`);
-  assert(slugifyTitle('My First Doc') === 'my-first-doc');
-  assert(slugifyTitle("Serena's notes!!") === 'serenas-notes');
+t('a browser-created slug is an opaque id, so it can never collide', () => {
+  const seen = new Set();
+  for (let i = 0; i < 2000; i++) {
+    const slug = blankDocSlug(crypto.randomBytes(8));
+    assert(SLUG_RULE.test(slug), `${slug} breaks the slug rule`);
+    assert(/^d-[a-z0-9]{8}$/.test(slug), `unexpected shape: ${slug}`);
+    seen.add(slug);
+  }
+  assert(seen.size > 1990, `only ${seen.size}/2000 distinct — the id is not random enough`);
+  // Look-alikes are excluded: these get read aloud and retyped.
+  for (const slug of seen) assert(!/[lo01]/.test(slug.slice(2)), `${slug} contains a look-alike character`);
 });
 
-t('a title with no ASCII at all still yields a valid slug', () => {
-  for (const title of ['烘焙是什么', '🎂🎂🎂', '。。。', '——']) {
-    const slug = slugifyTitle(title);
-    assert(SLUG_RULE.test(slug), `${title} → ${JSON.stringify(slug)} breaks the slug rule`);
-    assert(slug === 'doc', `${title} should fall back to "doc", got ${slug}`);
+t('short or missing randomness still yields a valid slug', () => {
+  for (const bytes of [[], [1, 2], null, undefined]) {
+    const slug = blankDocSlug(bytes);
+    assert(SLUG_RULE.test(slug), `${JSON.stringify(bytes)} produced ${JSON.stringify(slug)}`);
   }
 });
 
-t('a very long title is truncated without a trailing dash', () => {
-  const slug = slugifyTitle('a '.repeat(200));
-  assert(SLUG_RULE.test(slug), `long title produced ${JSON.stringify(slug)}`);
-  assert(slug.length <= 48, `expected <= 48 chars, got ${slug.length}`);
-  assert(!slug.endsWith('-'), 'slug must not end on a dash');
+t('the title is read back out of the document heading', () => {
+  assert(titleFromDocument('<h1>烘焙是什么</h1>') === '烘焙是什么', 'plain CJK heading');
+  assert(titleFromDocument('<h1 data-tdoc-placeholder="Untitled">My <em>notes</em></h1>') === 'My notes',
+    'inline markup should be stripped, not kept');
+  assert(titleFromDocument('<h1>a &amp; b &lt;c&gt;</h1>') === 'a & b <c>', 'entities should decode');
+  assert(titleFromDocument('<h1>  spaced\n  out  </h1>') === 'spaced out', 'whitespace should collapse');
+  assert(titleFromDocument('<h1>' + 'x'.repeat(300) + '</h1>').length === 120, 'a runaway heading is capped');
 });
 
-t('de-duplication counts up and never breaks the slug rule', () => {
-  assert(nextCreateSlug('notes', 1) === 'notes', 'first candidate is the bare base');
-  assert(nextCreateSlug('notes', 2) === 'notes-2');
-  assert(nextCreateSlug('notes', 99) === 'notes-99');
-  const long = 'a'.repeat(64);
-  for (const n of [1, 2, 10, 99]) {
-    const candidate = nextCreateSlug(long, n);
-    assert(candidate && SLUG_RULE.test(candidate), `n=${n} produced ${JSON.stringify(candidate)}`);
-    assert(candidate.length <= 64, `n=${n} exceeded 64 chars`);
-  }
-  assert(nextCreateSlug('', 1) === null, 'an empty base has no candidate');
-  assert(nextCreateSlug('notes', 0) === null, 'n starts at 1');
+t('an empty or missing heading leaves the stored title alone', () => {
+  // Returning '' is what makes the caller skip the rename — a doc whose h1 the
+  // author cleared must not silently become "".
+  assert(titleFromDocument('<h1 data-tdoc-placeholder="Untitled"></h1>') === '', 'empty h1');
+  assert(titleFromDocument('<h1><br></h1>') === '', 'a lone <br> is still empty');
+  assert(titleFromDocument('<p>no heading here</p>') === '', 'no h1 at all');
+  assert(titleFromDocument(null) === '', 'null input');
 });
 
-t('the blank document escapes the title instead of trusting it', () => {
-  const html = blankDocHtml('</title><script>alert(1)</script>');
-  assert(!html.includes('<script>'), 'title injected raw markup');
-  assert(html.includes('&lt;script&gt;'), 'title should be escaped');
-  const quoted = blankDocHtml('a "quoted" title');
-  assert(quoted.includes('&quot;quoted&quot;'), 'double quotes must be escaped');
+t('<title> follows the heading, and is escaped on the way', () => {
+  const out = syncDocumentTitle('<html><head><title>Untitled</title></head><body></body></html>', 'My <notes>');
+  assert(out.includes('<title>My &lt;notes&gt;</title>'), `got ${out}`);
+  const none = syncDocumentTitle('<html><head></head><body></body></html>', 'x');
+  assert(!none.includes('<title>'), 'a document without a <title> should be left as its author wrote it');
 });
 
-t('the blank document is genuinely blank, with an editor-only placeholder', () => {
-  const html = blankDocHtml('Notes');
-  assert(html.includes('<h1>Notes</h1>'), 'the typed title becomes the heading');
+t('the blank document is blank all the way down, heading included', () => {
+  const html = blankDocHtml();
+  assert(/<h1 data-tdoc-placeholder="[^"]+"><\/h1>/.test(html), 'the heading must start empty — the author types it');
   assert(/<p data-tdoc-placeholder="[^"]+"><\/p>/.test(html), 'body should be one empty paragraph');
+  assert(html.includes('<title>Untitled</title>'), 'a placeholder <title> for the tab, renamed on first save');
   assert(html.includes('html[data-tdoc-editing] [data-tdoc-placeholder]:empty::before'),
     'the placeholder rule must be scoped to editing, or readers of an empty doc see it');
   assert(/<main>/.test(html), 'findEditRoot() looks for main/article before falling back to body');
+  // Round trip: the document it writes is one the title reader understands.
+  assert(titleFromDocument(html) === '', 'a fresh blank doc has no title yet');
 });
 
 t('the worker create route claims a slug, charges quota, and writes v1', () => {
@@ -109,13 +114,12 @@ t('the worker create route claims a slug, charges quota, and writes v1', () => {
   const route = worker.slice(start, worker.indexOf("if (p === '/api/doc/duplicate'", start));
   for (const needle of [
     "json({ error: 'sign_in_required' }, { status: 401 })",
-    "json({ error: 'title_required' }, { status: 400 })",
     'hostedAccountCopiesEnabled(env, req)',
     'hostedAccountForGithub(env, session.login)',
     'countHostedDocs(env, actor.account_id, limit)',
     "kind: 'claim_owner'",
-    'blankDocHtml(rawTitle)',
-    'slugifyTitle(rawTitle)',
+    'blankDocHtml()',
+    'blankDocSlug(crypto.getRandomValues(new Uint8Array(8)))',
     'prepareDocVersion(html)',
     'env.META.put(`meta:${newSlug}`',
   ]) assert(route.includes(needle), `worker create route missing: ${needle}`);
@@ -141,28 +145,47 @@ t('a host that would refuse the create never offers the form', () => {
     'the /me boot must publish the same gate the create route enforces');
   assert(read('server/server.js').includes('star: false, create: true'),
     'the local server always allows creating');
-  assert(hub.includes('capabilities.create ?'), 'the modal must honour the capability');
+  assert(hub.includes('canCreate={capabilities.create}'), 'the modal must honour the capability');
 });
 
-t('both entry points offer the form, and neither loses the recipe', () => {
+t('the choice is two cards, and neither path is a form', () => {
   assert(shellApi.includes("request('/api/doc/create'"), 'createDocument missing from the shell API');
-  assert(form.includes('Start from scratch'), 'the shared form lost its heading');
-  assert(form.includes('mk-scratch-go'), 'the create button needs a stable hook');
-  // One form, two callers — a second hand-written copy is how the two drift.
-  // The markup, not the prose: `Start from scratch` also appears in comments.
-  assert(!hub.includes('mk-scratch-row'), 'the Docs Hub should render the shared form, not its own copy');
-  assert(!onboarding.includes('mk-scratch-row'), 'the onboarding dialog should render the shared form, not its own copy');
-  assert(hub.includes('<CreateFromScratch create={hub.createDoc} />'), 'the hub must wire the form to its hook');
-  assert(onboarding.includes('<CreateFromScratch create={createHere} />'), 'the onboarding dialog must wire the form');
-  assert(hub.includes('FIRST_DOC_RECIPE') && onboarding.includes('FIRST_DOC_RECIPE'),
-    'the paste-into-your-AI recipe must stay on both');
+  assert(form.includes('Start from scratch') && form.includes('Build it with your AI'),
+    'both cards must exist');
+  assert(form.includes('className="mk-card"'), 'the cards need a stable hook');
+  // The blank doc opens on the click. A title field here is the thing this
+  // design replaced — the title is typed into the page instead.
+  assert(!/<input/.test(form), 'the scratch card must not ask for a title');
+  assert(form.includes('FIRST_DOC_RECIPE'), 'the recipe lives behind the second card');
 });
 
-t('the onboarding dialog only offers the form to a signed-in reader', () => {
-  assert(/\{identity \? \(/.test(onboarding), 'the form must be gated on identity');
-  assert(onboarding.includes("error.status === 401"), 'a expired session needs its own message, not a raw HTTP error');
+t('one component serves both entry points', () => {
+  // A second hand-written copy is how the two drift apart.
+  assert(!hub.includes('className="mk-card"'), 'the Docs Hub should render the shared component');
+  assert(!onboarding.includes('className="mk-card"'), 'the onboarding dialog should render the shared component');
+  assert(hub.includes('<CreateChoice create={hub.createDoc} canCreate={capabilities.create} />'),
+    'the hub must wire the cards to its hook');
+  assert(onboarding.includes('<CreateChoice create={createHere} canCreate={Boolean(identity)} />'),
+    'the onboarding dialog must wire the cards');
+});
+
+t('the onboarding dialog only offers the blank doc to a signed-in reader', () => {
+  assert(onboarding.includes('canCreate={Boolean(identity)}'), 'the scratch card must be gated on identity');
+  assert(onboarding.includes('error.status === 401'), 'an expired session needs its own message, not a raw HTTP error');
   assert(read('shell/src/document-shell.jsx').includes('identity={config.identity}'),
     'document-shell must pass identity into the dialog');
+  // Signed out, the recipe card is still the whole point of this dialog.
+  assert(form.includes('canCreate ? ('), 'the recipe card must survive canCreate=false');
+});
+
+t('entering edit mode puts the caret in the document', () => {
+  const probe = read('server/frame-probe.js');
+  const start = probe.indexOf('function enableEditing(');
+  const block = probe.slice(start, probe.indexOf('function disableEditing(', start));
+  assert(block.includes('selectionInsideRoot()'), 'an existing selection must be left alone');
+  assert(block.includes("querySelector('[data-tdoc-placeholder]')"),
+    'the caret should land on the first placeholder line — the heading of a blank doc');
+  assert(block.includes('root.focus({ preventScroll: true })'), 'the editor must actually take focus');
 });
 
 t('a doc created from scratch opens in edit mode, not read mode', () => {

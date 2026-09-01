@@ -1,20 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
-import { CreateFromScratch } from './create-from-scratch.jsx';
+import { CreateChoice, FIRST_DOC_RECIPE } from './create-from-scratch.jsx';
 import { createDocument } from './document/api.js';
-import { copyText } from './document/model.js';
 
-const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
-export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
+export { FIRST_DOC_RECIPE };
 
 export function OnboardingDialog({ open, onOpenChange, identity }) {
-  const [copied, setCopied] = useState(false);
   const [hosted, setHosted] = useState(false);
   const [createError, setCreateError] = useState(null);
 
   useEffect(() => {
     if (!open) return;
-    setCopied(false);
     fetch('/api/hosted/token', {
       method: 'POST',
       credentials: 'same-origin',
@@ -28,14 +24,12 @@ export function OnboardingDialog({ open, onOpenChange, identity }) {
       .catch(() => {});
   }, [open]);
 
-  const copy = () => copyText(FIRST_DOC_RECIPE).then(setCopied);
-
   // This dialog has no toast, so a refusal is reported in place. Only signed-in
-  // readers are offered the form at all — creating always needs a session.
-  const createHere = async (title) => {
+  // readers get the blank-doc card at all — creating always needs a session.
+  const createHere = async () => {
     setCreateError(null);
     try {
-      const made = await createDocument(title);
+      const made = await createDocument();
       if (!made || !made.url) throw new Error('The server did not return a document');
       location.href = made.url;
       return true;
@@ -55,19 +49,8 @@ export function OnboardingDialog({ open, onOpenChange, identity }) {
       description="Paste this into your AI. It installs tdoc, writes and publishes a live commentable page, then gives you a link."
       actions={<button type="button" className="primary" onClick={() => onOpenChange(false)}>Done</button>}
     >
-      {identity ? (
-        <>
-          <CreateFromScratch create={createHere} />
-          {createError ? <p className="mk-scratch-error">{createError}</p> : null}
-          <div className="mk-or"><span>or</span></div>
-        </>
-      ) : null}
-      <div className="tdoc-recipe-wrap">
-        <code>{FIRST_DOC_RECIPE}</code>
-        <button type="button" className={copied ? 'done' : undefined} onClick={copy}>
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
+      <CreateChoice create={createHere} canCreate={Boolean(identity)} />
+      {createError ? <p className="mk-scratch-error">{createError}</p> : null}
       <details className="tdoc-onboarding-details">
         <summary>What does it do?</summary>
         <ol>

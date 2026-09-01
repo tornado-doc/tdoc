@@ -1,48 +1,72 @@
 import React, { useState } from 'react';
+import { ChevronLeft, FilePlus2, Sparkles } from 'lucide-react';
+import { copyText } from './document/model.js';
 
-// The direct half of "Create a doc": a title, and a blank document opened in
-// edit mode. One component for both entry points — the Docs Hub modal and the
-// landing's onboarding dialog — because they only differ in how a failure is
-// reported, not in what the form is.
+const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
+export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
+
+// "Create a doc" is a fork, not a form: write it yourself, or have your agent
+// write it. Two cards, one per answer — the blank doc opens immediately (you
+// name it by typing into the page, which is where the title lives anyway), and
+// the agent recipe is one step in.
 //
-// `create` receives the trimmed title and resolves truthy once the browser is
-// on its way to the new document. `busy` is deliberately never cleared on
-// success: the page is already navigating, and flipping the button back to
-// "Create" underneath it reads as if nothing happened.
-export function CreateFromScratch({ create }) {
-  const [title, setTitle] = useState('');
+// Shared by both entry points, the Docs Hub modal and the landing's onboarding
+// dialog, which differ only in how a refusal is reported.
+//
+// `create` resolves truthy once the browser is on its way to the new document.
+// `busy` is deliberately never cleared on success: the page is already leaving,
+// and flipping the card back to its resting state underneath reads as a
+// no-op.
+export function CreateChoice({ create, canCreate = true }) {
+  const [view, setView] = useState('choice');
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const submit = async () => {
-    const value = title.trim();
-    if (!value || busy) return;
+  const startBlank = async () => {
+    if (busy) return;
     setBusy(true);
-    if (!await create(value)) setBusy(false);
+    if (!await create()) setBusy(false);
   };
 
-  return (
-    <div className="mk-scratch">
-      <strong>Start from scratch</strong>
-      <p className="mk-scratch-hint">A blank doc, opened straight into edit mode.</p>
-      <div className="mk-scratch-row">
-        <input
-          type="text"
-          maxLength="120"
-          placeholder="Title"
-          aria-label="Title"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') submit(); }}
-        />
-        <button
-          type="button"
-          className="primary mk-scratch-go"
-          disabled={!title.trim() || busy}
-          onClick={submit}
-        >
-          {busy ? 'Creating…' : 'Create'}
-        </button>
+  if (view === 'recipe') {
+    return (
+      <div className="mk-recipe">
+        {canCreate ? (
+          <button type="button" className="mk-back" onClick={() => setView('choice')}>
+            <ChevronLeft size={14} /> Back
+          </button>
+        ) : null}
+        <p>Paste this into your AI. It installs tdoc, builds your personal AI portrait, publishes it privately, and gives you the link.</p>
+        <div className="tdoc-recipe-wrap">
+          <code>{FIRST_DOC_RECIPE}</code>
+          <button
+            type="button"
+            className={copied ? 'done' : undefined}
+            onClick={() => copyText(FIRST_DOC_RECIPE).then(setCopied)}
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="mk-cards">
+      {canCreate ? (
+        <button type="button" className="mk-card" onClick={startBlank} disabled={busy}>
+          <FilePlus2 className="mk-card-icon" size={22} />
+          <strong>Start from scratch</strong>
+          <span>A blank doc, opened straight into edit mode. Type the title into the page.</span>
+          <em>{busy ? 'Creating…' : 'Open a blank doc'}</em>
+        </button>
+      ) : null}
+      <button type="button" className="mk-card" onClick={() => setView('recipe')}>
+        <Sparkles className="mk-card-icon" size={22} />
+        <strong>Build it with your AI</strong>
+        <span>Copy one line into your agent. It writes the doc, publishes it, and hands back the link.</span>
+        <em>Get the prompt</em>
+      </button>
     </div>
   );
 }

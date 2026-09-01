@@ -703,6 +703,23 @@
     root.addEventListener('input', onEditInput);
     root.addEventListener('keydown', onEditKeydown);
     document.documentElement.setAttribute('data-tdoc-editing', '');
+    // Entering edit mode should leave you able to type. Without this the root
+    // is editable but unfocused, so a doc created from scratch — which lands
+    // here with nothing on the page — swallows the first thing you type until
+    // you think to click. The caret goes to the first placeholder line (the
+    // heading of a blank doc) and an existing selection is left alone.
+    try {
+      if (!selectionInsideRoot()) {
+        var caretAt = root.querySelector('[data-tdoc-placeholder]') || root;
+        var caret = document.createRange();
+        caret.selectNodeContents(caretAt);
+        caret.collapse(true);
+        var caretSel = window.getSelection();
+        caretSel.removeAllRanges();
+        caretSel.addRange(caret);
+      }
+      root.focus({ preventScroll: true });
+    } catch (e) {}
   }
   function disableEditing() {
     var root = findEditRoot();

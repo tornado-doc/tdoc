@@ -119,9 +119,9 @@ export function useDocsHub({ boot, onUnauthorized }) {
   // Start from scratch. On success the browser leaves for the new document, so
   // there is no success toast to raise — only a failure keeps us on /me, and
   // `run` has already turned that into one.
-  const createDoc = useCallback(async (title) => {
+  const createDoc = useCallback(async () => {
     let created = null;
-    const ok = await run(async () => { created = await createDocument(title); });
+    const ok = await run(async () => { created = await createDocument(); });
     if (!ok || !created || !created.url) return false;
     location.href = created.url;
     return true;

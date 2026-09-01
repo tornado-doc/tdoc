@@ -262,58 +262,42 @@ function safeSlug(slug) {
   return (typeof slug === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(slug)) ? slug : null;
 }
 
-// A blank doc's slug is derived from the title the author typed, so nobody has
-// to invent a unique one. A title with no ASCII word characters at all — CJK,
-// emoji, pure punctuation — still has to produce a valid slug, so the fallback
-// is the literal 'doc' rather than an error; de-duplication makes it unique.
+// A doc created in the browser has no title yet — you type it into the page —
+// so its slug cannot be derived from one. It gets an opaque id instead, the
+// way Google Docs and Notion address a document: unique by construction, so
+// there is no de-duplication question and no rename when the title changes.
+// The caller supplies random bytes (crypto.getRandomValues / randomBytes).
 // Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
-function slugifyTitle(title) {
-  const base = String(title == null ? '' : title)
-    .toLowerCase()
-    .replace(/['’]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48)
-    .replace(/-+$/g, '');
-  return base || 'doc';
+function blankDocSlug(bytes) {
+  // No look-alike characters: a slug gets read aloud and retyped.
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += alphabet[(Number(bytes && bytes[i]) || 0) % alphabet.length];
+  return `d-${out}`;
 }
 
-// nth candidate for a derived slug: the bare base first, then -2, -3, … The
-// slug rule is inlined rather than delegated so the worker and server copies
-// stay byte-identical for the drift guard.
-function nextCreateSlug(base, n) {
-  if (typeof base !== 'string' || !base) return null;
-  if (!Number.isInteger(n) || n < 1) return null;
-  const suffix = n === 1 ? '' : `-${n}`;
-  const trimmed = base.slice(0, 64 - suffix.length).replace(/-+$/g, '');
-  if (!trimmed) return null;
-  const candidate = `${trimmed}${suffix}`;
-  return /^[a-z0-9][a-z0-9-]{0,63}$/.test(candidate) ? candidate : null;
-}
-
-// The document a "start from scratch" create writes as v1. Deliberately empty:
-// a title, and one paragraph carrying a placeholder that only paints while the
-// editor is live (`html[data-tdoc-editing]`), so a reader of a still-empty doc
-// never sees "Start writing…". The hint returns whenever the paragraph is
-// emptied again, because it is an :empty rule and not seeded text.
+// The document a "start from scratch" create writes as v1. Deliberately empty,
+// heading included: the author types the title into the page, and the save path
+// reads it back out. Both placeholders paint only while the editor is live
+// (`html[data-tdoc-editing]`), so a reader of a still-empty doc sees a blank
+// page rather than instructions meant for its author. They are :empty rules
+// rather than seeded text, so the hints come back whenever a line is cleared.
 // Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
-function blankDocHtml(title) {
-  const safe = String(title == null ? '' : title)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function blankDocHtml() {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${safe}</title>
+<title>Untitled</title>
 <style>
   :root { color-scheme: light; }
   body { margin: 0; background: #fff; color: #17171a;
     font: 17px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  main { max-width: 46rem; margin: 0 auto; padding: 4.5rem 1.5rem 8rem; }
+  /* The editor's focus ring frames this element. On a doc with content that is
+     the whole page; on a blank one, without a floor, it would draw a small box
+     around two empty lines — and clicking below it would miss the editor. */
+  main { max-width: 46rem; margin: 0 auto; padding: 4.5rem 1.5rem 8rem; min-height: 60vh; }
   h1 { font-size: 2.1rem; line-height: 1.25; margin: 0 0 1.5rem; letter-spacing: -0.02em; }
   h2 { font-size: 1.35rem; margin: 2.5rem 0 .75rem; letter-spacing: -0.01em; }
   p { margin: 0 0 1.15rem; }
@@ -321,8 +305,6 @@ function blankDocHtml(title) {
   blockquote { margin: 0 0 1.15rem; padding-left: 1rem; border-left: 3px solid #e4e4e9; color: #55555f; }
   code { background: #f3f3f6; padding: .12em .35em; border-radius: 4px;
     font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
-  /* The placeholder paints only while the editor is live, so a reader of a
-     still-empty document never sees it. */
   html[data-tdoc-editing] [data-tdoc-placeholder]:empty::before {
     content: attr(data-tdoc-placeholder);
     color: #b0b0ba;
@@ -332,12 +314,47 @@ function blankDocHtml(title) {
 </head>
 <body>
 <main>
-<h1>${safe}</h1>
+<h1 data-tdoc-placeholder="Untitled"></h1>
 <p data-tdoc-placeholder="Start writing…"></p>
 </main>
 </body>
 </html>
 `;
+}
+
+// The document's own first <h1> is the title. Reading it back on every browser
+// save is what lets an author name an untitled doc by typing into the page, and
+// rename it later the same way. Returns '' when there is no usable heading, so
+// callers can leave the stored title alone rather than blanking it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function titleFromDocument(html) {
+  const match = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(String(html == null ? '' : html));
+  if (!match) return '';
+  const text = match[1]
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;|&#160;| /g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 120);
+}
+
+// Keep <title> in step with the heading the author just edited, so the browser
+// tab, the exported file and the hub all agree. Only rewrites an existing tag —
+// a document without one is left exactly as its author wrote it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function syncDocumentTitle(html, title) {
+  const safe = String(title == null ? '' : title)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return String(html == null ? '' : html)
+    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, () => `<title>${safe}</title>`);
 }
 
 function latestLocalVersion(slug, meta) {
@@ -1031,16 +1048,11 @@ const server = http.createServer(async (req, res) => {
   // written doc never appears in My docs.
   if (p === '/api/doc/create' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
-    const body = await readBody(req);
-    const rawTitle = typeof body.title === 'string' ? body.title.trim() : '';
-    if (!rawTitle) return json(res, 400, { error: 'title_required' });
-    if (rawTitle.length > 120) return json(res, 400, { error: 'title_too_long', limit: 120 });
-
-    const base = slugifyTitle(rawTitle);
+    // Opaque ids don't collide in practice; the loop is here so that when one
+    // does, the answer is another id rather than a failed create.
     let slug = null;
-    for (let n = 1; n <= 99; n++) {
-      const candidate = nextCreateSlug(base, n);
-      if (!candidate) continue;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const candidate = blankDocSlug(crypto.randomBytes(8));
       if (fs.existsSync(path.join(ROOT, candidate))) continue;
       slug = candidate;
       break;
@@ -1052,9 +1064,10 @@ const server = http.createServer(async (req, res) => {
     const stageDir = path.join(ROOT, `.create-${crypto.randomBytes(6).toString('hex')}`);
     try {
       fs.mkdirSync(path.join(stageDir, 'v1'), { recursive: true });
-      fs.writeFileSync(path.join(stageDir, 'v1', 'index.html'), blankDocHtml(rawTitle));
+      fs.writeFileSync(path.join(stageDir, 'v1', 'index.html'), blankDocHtml());
       fs.writeFileSync(path.join(stageDir, 'meta.json'), JSON.stringify({
-        title: rawTitle,
+        // Renamed by the first save that finds a heading in the document.
+        title: 'Untitled',
         slug,
         created: now,
         versions: [{
@@ -1118,17 +1131,25 @@ const server = http.createServer(async (req, res) => {
     }
     const stageDir = path.join(docRoot, `.v${nextVersion}-browser-${crypto.randomBytes(6).toString('hex')}`);
     const now = new Date().toISOString();
+    let nextTitle = '';
     try {
       fs.mkdirSync(stageDir, { recursive: false });
       const widgetFrom = `/d/${slug}/v/${baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${nextVersion}/widget/`;
-      fs.writeFileSync(path.join(stageDir, 'index.html'), doc.split(widgetFrom).join(widgetTo));
+      const rewritten = doc.split(widgetFrom).join(widgetTo);
+      // The author renames a doc by editing its heading, which is the only
+      // title they can actually reach from the editor. An empty or missing h1
+      // leaves the stored title alone rather than blanking it.
+      nextTitle = titleFromDocument(rewritten);
+      fs.writeFileSync(path.join(stageDir, 'index.html'),
+        nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       const baseWidgets = path.join(docRoot, `v${baseVersion}`, 'widgets');
       if (fs.existsSync(baseWidgets)) fs.cpSync(baseWidgets, path.join(stageDir, 'widgets'), { recursive: true });
       fs.renameSync(stageDir, finalDir);
 
       const nextMeta = {
         ...meta,
+        ...(nextTitle ? { title: nextTitle } : {}),
         versions: [
           ...(Array.isArray(meta.versions) ? meta.versions : []),
           { n: nextVersion, created: now, prompt: 'Browser edit', source: 'browser', ...(E2E_USER ? { author: E2E_USER } : {}) },

@@ -302,32 +302,80 @@ button.tdoc-pin {
   position: relative;
 }
 
-/* "Start from scratch" — the direct half of the Create a doc modal, above the
-   paste-into-your-AI recipe. */
-.mk-scratch strong {
-  display: block;
-  font-size: 14px;
+/* "Create a doc" is a fork: two cards, one per answer. They stack below the
+   narrow breakpoint rather than shrinking into unreadable columns. */
+.mk-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
-.mk-scratch-hint {
-  margin: 4px 0 10px;
-  color: var(--td-ink-soft, #6b6b73);
+@media (max-width: 560px) {
+  .mk-cards { grid-template-columns: 1fr; }
 }
 
-.mk-scratch-row {
+.tdoc-modal .mk-cards button.mk-card {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  height: 100%;
+  padding: 16px;
+  border: 1px solid var(--td-line);
+  border-radius: 12px;
+  background: var(--td-ground);
+  color: var(--td-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, transform .12s;
+}
+
+.tdoc-modal .mk-cards button.mk-card:hover:not(:disabled) {
+  border-color: var(--td-accent);
+  background: var(--td-surface-2);
+}
+
+.tdoc-modal .mk-cards button.mk-card:disabled {
+  cursor: default;
+  opacity: .7;
+}
+
+.mk-card-icon { color: var(--td-accent); }
+
+.mk-card strong { font-size: 14px; }
+
+.mk-card span {
+  color: var(--td-ink-soft, #6b6b73);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mk-card em {
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--td-accent);
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The recipe step, one click in from its card. */
+.tdoc-modal button.mk-back {
+  display: inline-flex;
   align-items: center;
+  gap: 2px;
+  margin-bottom: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--td-ink-soft, #6b6b73);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
 }
 
-.mk-scratch-row input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.tdoc-modal .mk-scratch-row button.mk-scratch-go {
-  flex: 0 0 auto;
-}
+.tdoc-modal button.mk-back:hover { color: var(--td-ink); }
 
 .mk-scratch-error {
   margin: 8px 0 0;
