@@ -44,6 +44,7 @@
 .tdoc-margin-comment button.tdoc-reply-toggle,
 .tdoc-margin-comment button.tdoc-edit-toggle,
 .tdoc-margin-comment button.tdoc-replies-toggle,
+.tdoc-margin-comment button.tdoc-thread-more,
 .tdoc-margin-comment button.tdoc-reanchor-btn,
 button.tdoc-cluster-row,
 button.tdoc-drawer-handle,
@@ -59,10 +60,14 @@ button.tdoc-drawer-handle,
   cursor: pointer;
 }
 
-.tdoc-margin-comment button.tdoc-replies-toggle {
+.tdoc-margin-comment button.tdoc-replies-toggle,
+.tdoc-margin-comment button.tdoc-thread-more {
   display: inline-flex;
   align-items: center;
 }
+
+/* Reset above swallows the colour, same as the other text buttons. */
+.tdoc-margin-comment button.tdoc-thread-more { color: var(--td-accent); }
 
 button.tdoc-cluster-row {
   width: 100%;

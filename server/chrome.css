@@ -322,6 +322,14 @@
   .tdoc-reply .tdoc-reply-toggle:hover,
   .tdoc-reply .tdoc-edit-toggle:hover { text-decoration: underline; }
   .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
+  /* Past the indent cap a thread continues at one level (#365). The rail stays
+     — these are still replies inside the thread — but the width stops being
+     spent, and each one says who it answers in place of the position it lost. */
+  .tdoc-thread-more { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; cursor: pointer; color: var(--td-accent); font-size: 11px; }
+  .tdoc-thread-more:hover { text-decoration: underline; }
+  .tdoc-thread-more .chev { transition: transform .12s; }
+  .tdoc-thread-more.open .chev { transform: rotate(90deg); }
+  .tdoc-thread-tail { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
   .tdoc-reply .author { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
   .tdoc-reply .author .login { font-weight: 600; font-size: 12px; color: #111; }
