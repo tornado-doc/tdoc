@@ -178,6 +178,24 @@ t('the onboarding dialog only offers the blank doc to a signed-in reader', () =>
   assert(form.includes('canCreate ? ('), 'the recipe card must survive canCreate=false');
 });
 
+t('a hint steps aside for the caret, but not for the one we place', () => {
+  const html = blankDocHtml();
+  assert(html.includes('html[data-tdoc-editing] [data-tdoc-placeholder][data-tdoc-caret]:empty::before'),
+    'the caret-line rule is missing, so a hint sits under the cursor you just placed');
+  assert(/\[data-tdoc-placeholder\]:empty \{\s*min-height/.test(html),
+    'an empty block is 0px tall — without a floor the placeholder line cannot be clicked into');
+  const probe = read('server/frame-probe.js');
+  assert(probe.includes('var caretHintsArmed = false;'), 'the arming flag is gone');
+  assert(/caretHintsArmed = false;\n    markCaretLine\(\);/.test(probe),
+    'entering edit mode must re-disarm, or the caret it places blanks the guidance on the first paint');
+  assert(probe.includes("addEventListener('mousedown', armCaretHints, true)")
+    && probe.includes("addEventListener('keydown', armCaretHints, true)"),
+    'the reader moving the caret themselves is what arms the marking');
+  const clean = probe.slice(probe.indexOf('function cleanEditorAttributes('));
+  assert(clean.includes("querySelectorAll('[data-tdoc-caret]')"),
+    'the caret marker is editor chrome and must be stripped before a version is stored');
+});
+
 t('entering edit mode puts the caret in the document', () => {
   const probe = read('server/frame-probe.js');
   const start = probe.indexOf('function enableEditing(');

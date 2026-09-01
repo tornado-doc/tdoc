@@ -617,12 +617,50 @@
     }
     if (interactionMode !== 'edit' || !selectionInsideRoot()) return;
     try { savedRange = window.getSelection().getRangeAt(0).cloneRange(); } catch (e) {}
+    markCaretLine();
   });
+
+  // A placeholder line stops showing its hint once the caret is actually in it:
+  // the hint is there to say what to write, and by then you are writing. The
+  // caret this file places on entering edit mode does NOT count — it would blank
+  // the guidance before the first paint — so the marking only starts after the
+  // reader moves the caret themselves.
+  var caretHintsArmed = false;
+  function markCaretLine() {
+    var root = findEditRoot();
+    if (!root || !root.querySelectorAll) return;
+    var current = null;
+    if (caretHintsArmed) {
+      try {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          var node = sel.getRangeAt(0).startContainer;
+          node = node.nodeType === 1 ? node : node.parentNode;
+          current = node && node.closest ? node.closest('[data-tdoc-placeholder]') : null;
+        }
+      } catch (e) {}
+    }
+    Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-caret]'), function (node) {
+      if (node !== current) node.removeAttribute('data-tdoc-caret');
+    });
+    if (current) current.setAttribute('data-tdoc-caret', '');
+  }
+  function armCaretHints() {
+    if (caretHintsArmed) return;
+    caretHintsArmed = true;
+    markCaretLine();
+  }
+  document.addEventListener('mousedown', armCaretHints, true);
+  document.addEventListener('keydown', armCaretHints, true);
   function cleanEditorAttributes(root) {
     if (!root || !root.querySelectorAll) return;
     var roots = [];
     if (root.hasAttribute && root.hasAttribute('data-tdoc-editor-root')) roots.push(root);
     Array.prototype.push.apply(roots, root.querySelectorAll('[data-tdoc-editor-root]'));
+    Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-caret]'), function (node) {
+      node.removeAttribute('data-tdoc-caret');
+    });
+    if (root.removeAttribute) root.removeAttribute('data-tdoc-caret');
     roots.forEach(function (node) {
       node.removeAttribute('data-tdoc-editor-root');
       var original = node.getAttribute('data-tdoc-editor-original-editable');
@@ -720,6 +758,8 @@
       }
       root.focus({ preventScroll: true });
     } catch (e) {}
+    caretHintsArmed = false;
+    markCaretLine();
   }
   function disableEditing() {
     var root = findEditRoot();

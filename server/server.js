@@ -310,6 +310,18 @@ function blankDocHtml() {
     color: #b0b0ba;
     pointer-events: none;
   }
+  /* An empty block is zero pixels tall, so without a floor the placeholder
+     paragraph is unclickable: the click falls through to <main> and the caret
+     stays wherever it was. */
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty {
+    min-height: 1.75em;
+  }
+  /* Put the caret in a line and its hint steps aside — it has said what it had
+     to say. frame-probe marks the line, and only once the reader has moved the
+     caret themselves, so the guidance survives the first paint. */
+  html[data-tdoc-editing] [data-tdoc-placeholder][data-tdoc-caret]:empty::before {
+    content: none;
+  }
 </style>
 </head>
 <body>
