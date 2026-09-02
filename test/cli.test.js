@@ -13,7 +13,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync, spawn, spawnSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
+// Stubs get their port from the OS, never from a guess — see startStub's note.
+const { startStub } = require('./helpers/fixture-server');
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -42,6 +44,36 @@ t('every curl call carries --max-time (no unbounded hang)', () => {
       assert(/--max-time/.test(line), `${f}: curl without --max-time:\n      ${line.trim()}`);
     }
   }
+});
+
+// A test that picks its own port is a test that can be answered by a stranger.
+// The stub servers here used to draw one out of a fixed range and never check
+// the bind, so an unrelated process holding the drawn port made the CLI talk to
+// it instead — an occupied 8787 read back as an HTTP 401 from the product. That
+// is invisible when it happens and looks like flake when it recurs, so the ban
+// is enforced rather than remembered. startStub() binds port 0 and reports the
+// port the OS gave it; resolveTarget() reserves one the same way.
+t('no test picks a server port for itself', () => {
+  const testDir = __dirname;
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(full); continue; }
+      if (!entry.name.endsWith('.js')) continue;
+      fs.readFileSync(full, 'utf8').split('\n').forEach((l, i) => {
+        if (l.trim().startsWith('//')) return;               // prose about ports is fine
+        if (!/\bport\b/i.test(l)) return;
+        if (/Math\.random\(\)/.test(l) || /\bport\s*=\s*\d{4}\b/.test(l)) {
+          offenders.push(`${path.relative(testDir, full)}:${i + 1}: ${l.trim().slice(0, 80)}`);
+        }
+      });
+    }
+  };
+  walk(testDir);
+  assert(offenders.length === 0,
+    `a hardcoded or randomly drawn port is back — use startStub()/reservePort() ` +
+    `from test/helpers/fixture-server.js instead:\n      ${offenders.join('\n      ')}`);
 });
 
 t('tdoc-publish has a cf_api helper that checks HTTP status', () => {
@@ -735,24 +767,17 @@ t('tdoc-agent-reply gates on HTTP status and on 200-with-error bodies', () => {
 t('tdoc-agent-reply exits non-zero when the server rejects the reply', () => {
   const bin = path.join(BIN, 'tdoc-agent-reply');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
-  const port = 7900 + Math.floor(Math.random() * 300);
   // Stub the reply endpoint: 200 with an error body, exactly what the server
   // returns for an unknown parent. That is the case the bug reported.
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{` +
+  const stub = startStub(
+    `(q,s)=>{` +
     `s.writeHead(200,{'content-type':'application/json'});` +
     `s.end(JSON.stringify({error:'parent_not_found'}));` +
-    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+    `}`);
   try {
-    const up = spawnSync('bash', ['-c',
-      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
-      { encoding: 'utf8', timeout: 15000 });
-    assert(up.status === 0, 'stub server never came up');
-
     const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_missing',
       '--text', 'applied', '--status', 'applied'], {
-      env: { ...process.env, HOME: home, TDOC_PORT: String(port) },
+      env: { ...process.env, HOME: home, TDOC_PORT: String(stub.port) },
       encoding: 'utf8', timeout: 20000,
     });
     assert(r.status !== 0,
@@ -761,7 +786,7 @@ t('tdoc-agent-reply exits non-zero when the server rejects the reply', () => {
       `server error not surfaced: ${r.stdout} ${r.stderr}`);
     assert(/NOT posted/.test(r.stderr), `no failure line on stderr: ${r.stderr}`);
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -769,27 +794,20 @@ t('tdoc-agent-reply exits non-zero when the server rejects the reply', () => {
 t('tdoc-agent-reply still exits 0 when the reply is accepted', () => {
   const bin = path.join(BIN, 'tdoc-agent-reply');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
-  const port = 8300 + Math.floor(Math.random() * 300);
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{` +
+  const stub = startStub(
+    `(q,s)=>{` +
     `s.writeHead(200,{'content-type':'application/json'});` +
     `s.end(JSON.stringify({id:'c_1',replies:[],reactions:{}}));` +
-    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+    `}`);
   try {
-    const up = spawnSync('bash', ['-c',
-      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
-      { encoding: 'utf8', timeout: 15000 });
-    assert(up.status === 0, 'stub server never came up');
-
     const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
-      env: { ...process.env, HOME: home, TDOC_PORT: String(port) },
+      env: { ...process.env, HOME: home, TDOC_PORT: String(stub.port) },
       encoding: 'utf8', timeout: 20000,
     });
     assert(r.status === 0, `accepted reply exited ${r.status}; stderr=${r.stderr}`);
     assert(/"id":"c_1"/.test(r.stdout), `server body not passed through: ${r.stdout}`);
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -802,30 +820,23 @@ t('tdoc-agent-reply still exits 0 when the reply is accepted', () => {
 t('tdoc-agent-reply posts to .base on a hosted config', () => {
   const bin = path.join(BIN, 'tdoc-agent-reply');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-hosted-'));
-  const port = 8700 + Math.floor(Math.random() * 300);
+  // Record the path the reply actually arrives on, so a request that never
+  // leaves for the right host cannot pass.
+  const stub = startStub(
+    `(q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({id:'c_hosted',path:q.url,replies:[],reactions:{}}));` +
+    `}`);
   fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
   // A real hosted config: .base and .upload_token, and deliberately NO
   // .subdomain / .worker — that absence is what the bug tripped over.
   fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
     platform: 'hosted',
-    base: `http://127.0.0.1:${port}`,
+    base: stub.base,
     public_host: '127.0.0.1',
     upload_token: 'tok_test',
   }));
-  // Record the path the reply actually arrives on, so a request that never
-  // leaves for the right host cannot pass.
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{` +
-    `s.writeHead(200,{'content-type':'application/json'});` +
-    `s.end(JSON.stringify({id:'c_hosted',path:q.url,replies:[],reactions:{}}));` +
-    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
   try {
-    const up = spawnSync('bash', ['-c',
-      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-      `-X POST http://127.0.0.1:${port}/ping && exit 0; sleep 0.05; done; exit 1`],
-      { encoding: 'utf8', timeout: 15000 });
-    assert(up.status === 0, 'stub server never came up');
-
     const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
       env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
     });
@@ -837,7 +848,7 @@ t('tdoc-agent-reply posts to .base on a hosted config', () => {
     assert(!/workers\.dev/.test(r.stdout + r.stderr),
       `hosted config still derived a workers.dev host: ${r.stderr}`);
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -1328,7 +1339,6 @@ t('SKILL.md resolves the checkout for the active agent host', () => {
 t('a hosted publish with access flags works with no jq on PATH', () => {
   const bin = path.join(BIN, 'tdoc-publish');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nojq-'));
-  const port = 8600 + Math.floor(Math.random() * 300);
   const binDir = path.join(home, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
 
@@ -1347,25 +1357,19 @@ t('a hosted publish with access flags works with no jq on PATH', () => {
   }
   assert(!fs.existsSync(path.join(binDir, 'jq')), 'the jq-free PATH still has jq');
 
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
+  const stub = startStub(
+    `(q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
     `s.setHeader('content-type','application/json');` +
     `const u=q.url.split('?')[0];` +
     `if(u==='/api/upload'){const j=JSON.parse(b||'{}');` +
     `return s.end(JSON.stringify({ok:true,slug:j.slug,version:j.version,size:42,` +
     `access:(j.meta&&j.meta.access)||null}));}` +
-    `s.statusCode=404;s.end('{}');});}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+    `s.statusCode=404;s.end('{}');});}`);
 
   try {
-    const up = spawnSync('bash', ['-c',
-      `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 -X POST ` +
-      `http://127.0.0.1:${port}/api/upload && exit 0; sleep 0.05; done; exit 1`],
-      { encoding: 'utf8', timeout: 15000 });
-    assert(up.status === 0, 'stub server never came up');
-
     fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
     fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
-      platform: 'hosted', base: `http://127.0.0.1:${port}`,
+      platform: 'hosted', base: stub.base,
       public_host: '127.0.0.1', upload_token: 'tok', github_login: 'tester',
     }));
     const docs = path.join(home, 'tdocs', 'first-doc', 'v1');
@@ -1409,7 +1413,7 @@ t('a hosted publish with access flags works with no jq on PATH', () => {
     assert(meta2.access.history_visibility === 'owner',
       `history_visibility was reset to ${meta2.access.history_visibility} instead of merging`);
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -1492,30 +1496,25 @@ function jqFreePath(home) {
 
 // A stand-in worker: serves a comment list, accepts agent replies, accepts
 // deletes. Routes are the ones the three scripts actually call.
-function startStubWorker(port, state) {
-  const child = spawn(process.execPath, ['-e',
-    `const st=${JSON.stringify(state)};` +
-    `require('http').createServer((q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
+function startStubWorker(state) {
+  // The state travels into the child as a closure argument, so the handler
+  // stays the single expression startStub() wraps.
+  return startStub(
+    `((st)=>(q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
     `s.setHeader('content-type','application/json');` +
     `const u=q.url.split('?')[0];` +
     `if(u==='/api/comments')return s.end(JSON.stringify(st.comments));` +
     `if(u==='/api/agent/reply'){st.lastReply=JSON.parse(b||'{}');` +
     `return s.end(JSON.stringify({ok:true,echo:st.lastReply}));}` +
     `if(u==='/api/doc')return s.end(JSON.stringify({ok:true,deleted:3}));` +
-    `s.statusCode=404;s.end('{}');});}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
-  const up = spawnSync('bash', ['-c',
-    `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-    `http://127.0.0.1:${port}/api/comments && exit 0; sleep 0.05; done; exit 1`],
-    { encoding: 'utf8', timeout: 15000 });
-  assert(up.status === 0, 'stub worker never came up');
-  return child;
+    `s.statusCode=404;s.end('{}');});})(${JSON.stringify(state)})`);
 }
 
-function hostedHome(port) {
+function hostedHome(base) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nojq2-'));
   fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
   fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
-    platform: 'hosted', base: `http://127.0.0.1:${port}`,
+    platform: 'hosted', base,
     public_host: '127.0.0.1', upload_token: 'tok', github_login: 'tester',
   }));
   return home;
@@ -1524,10 +1523,9 @@ function hostedHome(port) {
 const noJq = (r) => !/jq: command not found|needs jq/.test(r.stdout + r.stderr);
 
 t('tdoc-pull works with no jq on PATH, and still merges local-only comments', () => {
-  const port = 8900 + Math.floor(Math.random() * 200);
   const remote = [{ id: 'r1', text: 'from worker', version: 1 }];
-  const stub = startStubWorker(port, { comments: remote });
-  const home = hostedHome(port);
+  const stub = startStubWorker({ comments: remote });
+  const home = hostedHome(stub.base);
   try {
     const binDir = jqFreePath(home);
     const doc = path.join(home, 'tdocs', 'pull-doc');
@@ -1555,7 +1553,7 @@ t('tdoc-pull works with no jq on PATH, and still merges local-only comments', ()
     assert(/Pulled 2 comments/.test(r.stdout), `wrong count reported: ${r.stdout}`);
     assert(/Merged 1 local-only/.test(r.stdout), `merge not reported: ${r.stdout}`);
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -1563,14 +1561,10 @@ t('tdoc-pull works with no jq on PATH, and still merges local-only comments', ()
 t('tdoc-pull refuses to clobber comments.json when the worker misbehaves', () => {
   // The array check is the guard that keeps a 500 or an HTML error page from
   // wiping local comments. It has to survive the move off jq.
-  const port = 9150 + Math.floor(Math.random() * 200);
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{s.statusCode=500;s.end('<html>bad gateway</html>');})` +
-    `.listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
-  const home = hostedHome(port);
+  const stub = startStub(
+    `(q,s)=>{s.statusCode=500;s.end('<html>bad gateway</html>');}`);
+  const home = hostedHome(stub.base);
   try {
-    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
     const binDir = jqFreePath(home);
     const doc = path.join(home, 'tdocs', 'pull-doc');
     fs.mkdirSync(doc, { recursive: true });
@@ -1599,15 +1593,14 @@ t('tdoc-pull refuses to clobber comments.json when the worker misbehaves', () =>
     assert(!fs.existsSync(path.join(doc, 'comments.json.bak')),
       'a bad response should not leave a spurious .bak behind');
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
 t('tdoc-agent-reply posts with no jq on PATH, and builds the payload right', () => {
-  const port = 9400 + Math.floor(Math.random() * 200);
-  const stub = startStubWorker(port, { comments: [] });
-  const home = hostedHome(port);
+  const stub = startStubWorker({ comments: [] });
+  const home = hostedHome(stub.base);
   try {
     const binDir = jqFreePath(home);
     // Quotes and non-ASCII in the reply text: hand-rolled JSON is where this
@@ -1633,7 +1626,7 @@ t('tdoc-agent-reply posts with no jq on PATH, and builds the payload right', () 
     assert(typeof echoed.agent_login === 'string', 'agent_login must always be present');
     assert(!('agent_avatar_url' in echoed), 'an empty avatar must be omitted, not sent as ""');
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -1642,15 +1635,11 @@ t('tdoc-agent-reply still reports a 200-with-error as a failure', () => {
   // The worker rejects some replies with a 200 body carrying {"error": ...}.
   // Without this check a rejected reply is indistinguishable from a posted one,
   // which is how comments silently go unanswered.
-  const port = 9650 + Math.floor(Math.random() * 200);
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{s.setHeader('content-type','application/json');` +
-    `s.end(JSON.stringify({error:'parent_not_found'}));}).listen(${port},'127.0.0.1');`],
-    { stdio: 'ignore' });
-  const home = hostedHome(port);
+  const stub = startStub(
+    `(q,s)=>{s.setHeader('content-type','application/json');` +
+    `s.end(JSON.stringify({error:'parent_not_found'}));}`);
+  const home = hostedHome(stub.base);
   try {
-    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
     const binDir = jqFreePath(home);
     const r = spawnSync(path.join(BIN, 'tdoc-agent-reply'), [
       '--slug', 'reply-doc', '--parent', 'missing', '--text', 'hi',
@@ -1663,15 +1652,14 @@ t('tdoc-agent-reply still reports a 200-with-error as a failure', () => {
     assert(/parent_not_found/.test(r.stderr),
       `the worker's reason should reach the user: ${r.stderr}`);
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
 t('tdoc-unpublish works with no jq on PATH', () => {
-  const port = 9900 + Math.floor(Math.random() * 90);
-  const stub = startStubWorker(port, { comments: [] });
-  const home = hostedHome(port);
+  const stub = startStubWorker({ comments: [] });
+  const home = hostedHome(stub.base);
   try {
     const binDir = jqFreePath(home);
     const r = spawnSync(path.join(BIN, 'tdoc-unpublish'), ['gone-doc'], {
@@ -1683,7 +1671,7 @@ t('tdoc-unpublish works with no jq on PATH', () => {
     assert(/Unpublished gone-doc/.test(r.stdout), `no confirmation: ${r.stdout}`);
     assert(/"deleted": 3/.test(r.stdout), `the worker response was not printed: ${r.stdout}`);
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -1768,22 +1756,19 @@ t('lib/json.sh survives the inputs that actually show up', () => {
 // the owner their own comments.
 
 t('tdoc-pull sends the account token', () => {
-  const port = 8150 + Math.floor(Math.random() * 200);
   // A worker that behaves like the real one: no token, no private doc.
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{` +
+  const stub = startStub(
+    `(q,s)=>{` +
     `s.setHeader('content-type','application/json');` +
     `const a=q.headers.authorization||'';` +
     `if(a!=='Bearer sekret'){s.statusCode=403;return s.end('{"error":"access_denied"}');}` +
     `s.end(JSON.stringify([{id:'c1',text:'owner can see this',version:1}]));` +
-    `}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+    `}`);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-pullauth-'));
   try {
-    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
     fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
     fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
-      platform: 'hosted', base: `http://127.0.0.1:${port}`, upload_token: 'sekret',
+      platform: 'hosted', base: stub.base, upload_token: 'sekret',
       public_host: '127.0.0.1', github_login: 'owner',
     }));
     const doc = path.join(home, 'tdocs', 'priv-doc');
@@ -1799,7 +1784,7 @@ t('tdoc-pull sends the account token', () => {
     assert(got.length === 1 && got[0].text === 'owner can see this',
       `wrong comments pulled: ${JSON.stringify(got)}`);
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -1807,18 +1792,14 @@ t('tdoc-pull sends the account token', () => {
 t('a denied pull explains it is an access problem, not a network one', () => {
   // "network error or bad slug?" sent people looking at their wifi. A denial
   // has one likely cause and one fix, so say both.
-  const port = 8400 + Math.floor(Math.random() * 200);
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{s.setHeader('content-type','application/json');` +
-    `s.statusCode=403;s.end('{"error":"access_denied"}');}).listen(${port},'127.0.0.1');`],
-    { stdio: 'ignore' });
+  const stub = startStub(
+    `(q,s)=>{s.setHeader('content-type','application/json');` +
+    `s.statusCode=403;s.end('{"error":"access_denied"}');}`);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-pulldenied-'));
   try {
-    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
     fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
     fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
-      platform: 'hosted', base: `http://127.0.0.1:${port}`, upload_token: 'stale',
+      platform: 'hosted', base: stub.base, upload_token: 'stale',
     }));
     const doc = path.join(home, 'tdocs', 'priv-doc');
     fs.mkdirSync(doc, { recursive: true });
@@ -1849,7 +1830,7 @@ t('a denied pull explains it is an access problem, not a network one', () => {
     assert(fs.readFileSync(path.join(doc, 'comments.json'), 'utf8') === original,
       'a denial must not touch local comments');
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -1857,18 +1838,15 @@ t('a denied pull explains it is an access problem, not a network one', () => {
 t('tdoc-pull still works against a config that has no token', () => {
   // Self-host configs written before tokens, and local-only setups. Sending no
   // header must stay a supported shape rather than becoming "Bearer ".
-  const port = 8480 + Math.floor(Math.random() * 100);
-  const stub = spawn(process.execPath, ['-e',
-    `require('http').createServer((q,s)=>{s.setHeader('content-type','application/json');` +
+  const stub = startStub(
+    `(q,s)=>{s.setHeader('content-type','application/json');` +
     `if('authorization' in q.headers){s.statusCode=400;return s.end('{"error":"sent_empty_bearer"}');}` +
-    `s.end('[]');}).listen(${port},'127.0.0.1');`], { stdio: 'ignore' });
+    `s.end('[]');}`);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-pullnotoken-'));
   try {
-    spawnSync('bash', ['-c', `for i in $(seq 1 100); do curl -sS -o /dev/null --max-time 1 ` +
-      `http://127.0.0.1:${port}/ && break; sleep 0.05; done`], { timeout: 15000 });
     fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
     fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
-      platform: 'hosted', base: `http://127.0.0.1:${port}`,
+      platform: 'hosted', base: stub.base,
     }));
     fs.mkdirSync(path.join(home, 'tdocs', 'open-doc'), { recursive: true });
     const r = spawnSync(path.join(BIN, 'tdoc-pull'), ['open-doc'], {
@@ -1880,7 +1858,7 @@ t('tdoc-pull still works against a config that has no token', () => {
     assert(!/sent_empty_bearer/.test(r.stdout + r.stderr),
       'an empty token was sent as a header instead of being omitted');
   } finally {
-    stub.kill();
+    stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

@@ -6,7 +6,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
-const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
+const { requirePlaywrightOrSkip, reservePort } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('browser-editing.test.js');
 const PRIMARY_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -74,7 +74,10 @@ async function chooseMode(page, label) {
     slug, title: 'Browser editing', versions: [{ n: 1, created: new Date().toISOString() }],
   }, null, 2));
 
-  const port = 7987;
+  // Not a fixed port: waitForServer below only asks whether ANYTHING answers,
+  // so a port another process already held would have quietly become the
+  // subject of this whole suite.
+  const port = await reservePort();
   const serverPath = path.join(__dirname, '..', 'server', 'server.js');
   const server = spawn(process.execPath, [serverPath], {
     env: { ...process.env, TDOC_DIR: root, TDOC_PORT: String(port), TDOC_E2E_USER: 'owner' },
