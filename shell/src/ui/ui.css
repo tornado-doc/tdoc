@@ -589,3 +589,12 @@ button.tdoc-pin {
   margin: 6px 0 14px;
 }
 .tdoc-activate-page .tdoc-activate-error { color: #b3503c; max-width: 46ch; }
+
+/* Invite chip for an email entry — no GitHub avatar exists for an address,
+   so stand in an initial at the same size the avatar occupies. */
+.tdoc-token-initial {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--tdoc-surface, #eee); color: var(--tdoc-muted, #555);
+  font-size: 10px; font-weight: 600; flex: none;
+}

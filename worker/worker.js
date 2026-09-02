@@ -101,7 +101,14 @@ function isOwnerSession(env, session) {
 function canMutate(record, session, env, meta) {
   if (isDocOwnerSession(env, session, meta)) return true;
   const who = record && record.author && record.author.login;
-  return !!(who && session && session.login && who === session.login);
+  // Compare on the actor key so an email-keyed author can edit their own
+  // comment. Case: `who` is stored as written, and actorKey lowercases the
+  // email half — so normalize both sides rather than trusting the stored
+  // casing, which is how the old raw === comparison quietly disagreed with
+  // sessionLogin everywhere else.
+  const me = actorKey(session);
+  if (!who || !me) return false;
+  return String(who).toLowerCase() === String(me).toLowerCase();
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -156,6 +163,33 @@ function sessionPrincipal(session) {
   return sessionLogin(session) || normalizeEmail(session && session.email) || '';
 }
 
+// The stable key an identity is recorded under: a GitHub handle stays a bare
+// handle (every comment, inbox and allowlist entry ever written uses that
+// shape, and none of them are getting rewritten), and an identity with no
+// handle takes an `email:` prefix. The prefix is what keeps the two
+// namespaces from colliding — a handle can never contain "@", so
+// `email:a@b.com` can never be mistaken for a GitHub user, and vice versa.
+// normalizeGithubLogin already strips a `github:` prefix, so this is the
+// namespacing hook the original author left, finally used.
+function actorKey(session) {
+  const login = sessionLogin(session);
+  if (login) return login;
+  const email = normalizeEmail(session && session.email);
+  return email ? `email:${email}` : '';
+}
+
+// Render an actor key for humans: an email-keyed identity shows its local
+// part, never the full address — a comment thread is visible to every reader
+// of the doc, and leaking someone's address there is not something they
+// opted into by commenting.
+function actorDisplayName(session) {
+  if (session && session.name) return session.name;
+  const login = sessionLogin(session);
+  if (login) return login;
+  const email = normalizeEmail(session && session.email);
+  return email ? email.split('@')[0] : '';
+}
+
 function isDocOwnerSession(env, session, meta) {
   // account_id is the canonical identity (phase 1), so compare it first —
   // this is what makes a doc published through an email-keyed account
@@ -189,7 +223,7 @@ function normalizeAccess(raw, { legacy = true } = {}) {
   const seen = new Set();
   const srcList = Array.isArray(a.allowed_users) ? a.allowed_users : [];
   for (const item of srcList) {
-    const login = normalizeGithubLogin(item);
+    const login = normalizeInvitee(item);
     if (!login || seen.has(login)) continue;
     seen.add(login);
     allowed.push(login);
@@ -236,7 +270,7 @@ function validateAccessWrite(access) {
     const allowed = [];
     const seen = new Set();
     for (const item of access.allowed_users) {
-      const login = normalizeGithubLogin(item);
+      const login = normalizeInvitee(item);
       if (!login) return { error: 'invalid_access_value', field: 'allowed_users' };
       if (seen.has(login)) continue;
       seen.add(login);
@@ -271,9 +305,16 @@ function applyAccessPatch(meta, patch) {
 
 function isAllowlisted(access, session, env, meta) {
   if (isDocOwnerSession(env, session, meta)) return true;
+  const allowed = access.allowed_users || [];
+  // Two shapes match, because two shapes get invited: legacy entries are
+  // GitHub handles, new ones are email addresses (D2). A session offers
+  // whichever of the two it has — and an email-keyed session matches a bare
+  // address in the list, not the `email:`-prefixed actor key, because what
+  // the doc owner typed into the invite box is an address.
   const login = sessionLogin(session);
-  if (!login) return false;
-  return (access.allowed_users || []).includes(login);
+  if (login && allowed.includes(login)) return true;
+  const email = normalizeEmail(session && session.email);
+  return !!(email && allowed.includes(email));
 }
 
 function canReadDoc(access, session, env, meta) {
@@ -290,7 +331,9 @@ function canSeeHistory(access, session, env, meta) {
 
 function canCommentOnDoc(access, session, env, meta) {
   if (access.commenting === 'off') return false;
-  if (!sessionLogin(session)) return false;
+  // Was sessionLogin: an OIDC visitor could publish and approve a pairing but
+  // could not leave a single comment — the one thing tdoc exists for.
+  if (!sessionPrincipal(session)) return false;
   if (access.commenting === 'signed_in') return true;
   if (access.commenting === 'owner') return isDocOwnerSession(env, session, meta);
   if (access.commenting === 'invited') return isAllowlisted(access, session, env, meta);
@@ -369,7 +412,7 @@ async function enforceDocAccess(env, req, slug, version) {
   if (await docOwnerToken(env, req, meta)) {
     return { ok: true, access, session, meta, ownerToken: true };
   }
-  if (!sessionLogin(session)) {
+  if (!sessionPrincipal(session)) {
     return {
       ok: false,
       response: accessDeniedHtml({
@@ -385,7 +428,7 @@ async function enforceDocAccess(env, req, slug, version) {
     response: accessDeniedHtml({
       status: 403,
       title: 'Access denied',
-      body: `Signed in as ${session.login}, but this private document does not include you on the allowlist.`,
+      body: `Signed in as ${actorDisplayName(session)}, but this private document does not include you on the allowlist.`,
       slug, version,
     }),
   };
@@ -1671,7 +1714,9 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   if (!obj) return { ok: false, response: text(`Not found: ${slug} v${version}`, { status: 404 }) };
   const raw = await obj.text();
   const session = gate.session;
-  const identity = session ? { login: session.login, avatar_url: session.avatar_url, name: session.name } : null;
+  const identity = sessionPrincipal(session)
+    ? { login: actorKey(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
+    : null;
   // Pure-publish: version picker only for callers allowed by history_visibility.
   let versions = [{ n: version, created: null }];
   try {
@@ -1713,9 +1758,9 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   // only for signed-in readers on non-landing pages. One KV get; sign-in
   // elsewhere reloads the page, so server-rendered state stays fresh.
   let viewerStar = null;
-  if (!isLanding && sessionLogin(session)) {
+  if (!isLanding && actorKey(session)) {
     try {
-      viewerStar = { starred: (await loadStars(env, sessionLogin(session))).some((i) => i.slug === slug) };
+      viewerStar = { starred: (await loadStars(env, actorKey(session))).some((i) => i.slug === slug) };
     } catch {}
   }
   const render = shellDocumentWorker;
@@ -1954,8 +1999,10 @@ const FOLDER_DEPTH_MAX = 4;
 // window does not rewrite KV — visits are a signal, not an access log.
 const RECENT_REVISIT_MS = 5 * 60 * 1000;
 
+// Stars, recents and folders are per-identity too, so they take actor keys
+// for the same reason the inbox does.
 function personalKey(prefix, login) {
-  const n = normalizeGithubLogin(login);
+  const n = normalizeActorKey(login);
   return n ? `${prefix}:${n}` : null;
 }
 
@@ -2097,13 +2144,17 @@ async function indexData(env, session, origin) {
 
   const hosted = hostedRegistrationEnabled(env, origin);
   const viewer = sessionLogin(session);
+  // Personal state is keyed on the actor (so an email identity has stars and
+  // recents at all); the BYOK owner column stays a handle comparison, since
+  // row.owner is a github_login and always will be for those docs.
+  const viewerKey = actorKey(session);
   const mine = catalog.filter((row) => {
     if (hosted) return isDocOwnerSession(env, session, row.meta);
     return !row.owner || row.owner === viewer;
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 
-  const [starItems, recentItems, folderState] = viewer
-    ? await Promise.all([loadStars(env, viewer), loadRecents(env, viewer), loadFolderState(env, viewer)])
+  const [starItems, recentItems, folderState] = viewerKey
+    ? await Promise.all([loadStars(env, viewerKey), loadRecents(env, viewerKey), loadFolderState(env, viewerKey)])
     : [[], [], { folders: [], docs: {} }];
   const starred = new Set(starItems.map((item) => item.slug));
   const bySlug = new Map(catalog.map((row) => [row.slug, row]));
@@ -3323,7 +3374,9 @@ function recordAuthor(list, id) {
 // too: nobody rewrites what the agent said, including the person it ran for.
 function isRecordAuthor(record, session) {
   const who = record && record.author && record.author.login;
-  return !!(who && session && session.login && who === session.login);
+  const me = actorKey(session);
+  if (!who || !me) return false;
+  return String(who).toLowerCase() === String(me).toLowerCase();
 }
 
 function isAgentRecord(record) {
@@ -3347,8 +3400,37 @@ function mayDelete(record, session, env, meta) {
 const INBOX_MAX = 200;
 const INBOX_PAGE = 20;
 
+// Accepts either shape of actor key. normalizeGithubLogin rejects anything
+// with an "@" in it, so routing an email identity through it alone silently
+// produced null — i.e. an email-keyed reader would never receive a single
+// notification, with nothing to see in any log.
+// An invite entry is whatever the doc owner typed into the box: a GitHub
+// handle (legacy, and still valid) or an email address (D2). Stored bare in
+// both cases — an address is what the owner recognises when they look at the
+// list later, and isAllowlisted matches a session against either shape.
+function normalizeInvitee(item) {
+  const raw = String(item || '').trim();
+  // Not "contains @" — a handle may be written "@Bob", which is a handle
+  // wearing a sigil, not an address. An address is the shape with something
+  // on BOTH sides of a single @, so try the handle reading first (it also
+  // strips the "@" and "github:" prefixes) and fall through to email only
+  // when what is left cannot be a handle.
+  const asLogin = normalizeGithubLogin(raw);
+  if (asLogin) return asLogin;
+  return normalizeEmail(raw);
+}
+
+function normalizeActorKey(who) {
+  const raw = String(who || '').trim().toLowerCase();
+  if (raw.startsWith('email:')) {
+    const email = normalizeEmail(raw.slice('email:'.length));
+    return email ? `email:${email}` : null;
+  }
+  return normalizeGithubLogin(raw);
+}
+
 function inboxKey(login) {
-  const n = normalizeGithubLogin(login);
+  const n = normalizeActorKey(login);
   return n ? `inbox:${n}` : null;
 }
 
@@ -4408,7 +4490,7 @@ export default {
         });
       }
       const nonce = rand(16);
-      const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
+      const identity = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       const data = await indexData(env, s, url.origin);
       return html(SHELL.appHtml({
         title: 'My docs',
@@ -5200,7 +5282,7 @@ export default {
     if (p === '/api/notifications' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(s.login);
+      const key = inboxKey(actorKey(s));
       if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
       let inbox = emptyInbox();
       try {
@@ -5213,7 +5295,7 @@ export default {
     if (p === '/api/notifications/unread' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(s.login);
+      const key = inboxKey(actorKey(s));
       if (!key) return json({ unread: 0 });
       let inbox = emptyInbox();
       try {
@@ -5225,7 +5307,7 @@ export default {
     if (p === '/api/notifications/read' && method === 'POST') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(s.login);
+      const key = inboxKey(actorKey(s));
       if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
@@ -5246,7 +5328,7 @@ export default {
     // stars:<login> / folders:<login> KV value.
     if (p === '/api/star' && method === 'POST') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const slug = body.slug;
@@ -5258,7 +5340,7 @@ export default {
         const meta = await loadDocMeta(env, slug);
         if (!meta || !docReadableBy(env, s, meta)) return json({ error: 'not_found' }, { status: 404 });
       }
-      await setDocStar(env, s.login, slug, starred);
+      await setDocStar(env, actorKey(s), slug, starred);
       return json({ ok: true, slug, starred });
     }
 
@@ -5455,7 +5537,10 @@ export default {
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
-      const author = { login: s.login, avatar_url: s.avatar_url, name: s.name };
+      // login carries the actor key (a handle, or email:<addr>); name is what
+      // readers see, and for an email identity that is the local part only —
+      // the address itself never renders in a thread.
+      const author = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
       const ownerLogin = hostedGithubLogin(meta) || env.TDOC_OWNER;
@@ -5465,7 +5550,7 @@ export default {
       const priorList = await readComments(env, slug);
       const isDocOwner = isDocOwnerSession(env, s, meta);
       const outcome = classifyMentions(
-        mentionCandidates(commentText).filter((login) => login !== sessionLogin(s)),
+        mentionCandidates(commentText).filter((login) => login !== actorKey(s)),
         {
           canRead: (login) => canReadDoc(access, { login }, env, meta),
           canInvite: isDocOwner,
@@ -5570,7 +5655,7 @@ export default {
         if (!isRecordAuthor(target, s)) return json({ error: 'not_author' }, { status: 403 });
         const V = coerceBodyVersion(version);
         const res = await mutateComments(env, slug, {
-          kind: 'edit_text', slug, id, text, version: V, actor: { login: s.login },
+          kind: 'edit_text', slug, id, text, version: V, actor: { login: actorKey(s) },
         });
         return json(res.body, { status: res.status });
       }
@@ -5586,7 +5671,7 @@ export default {
       if (!canMutate(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const V = coerceBodyVersion(version, target.created_in || 1);
       const res = await mutateComments(env, slug, {
-        kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: s.login },
+        kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: actorKey(s) },
       });
       return json(res.body, { status: res.status });
     }
@@ -5641,7 +5726,7 @@ export default {
       const meta = await loadDocMeta(env, slug);
       if (!mayDelete(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const res = await mutateComments(env, slug, {
-        kind: 'delete', slug, id, version: stampVersion, actor: { login: s.login },
+        kind: 'delete', slug, id, version: stampVersion, actor: { login: actorKey(s) },
       });
       return json(res.body, { status: res.status });
     }
