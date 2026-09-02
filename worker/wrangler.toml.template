@@ -3,6 +3,16 @@ main = "_worker.bundled.js"
 compatibility_date = "2025-01-01"
 workers_dev = true
 
+# Workers Logs: persisted, searchable invocation logs in the Cloudflare
+# dashboard (Workers > tdoc > Logs), with sampled traces. Without this the
+# only view into a live worker is `wrangler tail`, which shows nothing that
+# happened before you attached — so a 500 reported after the fact could only
+# be chased by reproducing it. head_sampling_rate = 1 keeps every invocation;
+# lower it if request volume ever makes the included quota the binding cost.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[r2_buckets]]
 binding = "DOCS"
 bucket_name = "tdoc-docs"
@@ -43,3 +53,11 @@ TDOC_OWNER = "PLACEHOLDER_OWNER"
 #   Leave unset to keep the device-code flow (no browser redirect).
 # TDOC_HOSTED_REGISTRATION — leave unset on BYOK so /me stays single-owner.
 # Unset + hostname https://tdoc.dev enables hosted signup; set to "0" to force off.
+# The OIDC provider seat (Clerk on hosted tdoc.dev; any spec-compliant issuer
+# fits). All three unset → the "Continue with …" buttons simply do not render
+# and GitHub carries sign-in exactly as before.
+#   [vars] OIDC_ISSUER    = "https://<instance>.clerk.accounts.dev"  (issuer base URL)
+#   [vars] OIDC_CLIENT_ID = "<oauth application client id>"
+#   [vars] OIDC_LABEL     = "Clerk"            (button text; default "Email")
+# Secret: OIDC_CLIENT_SECRET — set via `wrangler secret put OIDC_CLIENT_SECRET`.
+#   Register the callback as https://<host>/auth/oidc/callback on the issuer.

@@ -173,6 +173,29 @@ jobs:
             echo "preview host never answered /api/ping: $BASE" >&2
             exit 1
           fi
+          # A PR reuses its alias and preview storage across pushes. Clear the
+          # two deterministic fixtures before reseeding so an older preview
+          # cannot reject v1 as a stale write (or keep serving old PR code).
+          reset_preview_slug() {
+            local slug="$1"
+            local status
+            status="$(curl -sS --connect-timeout 10 --max-time 60 -X DELETE \
+              "$BASE/api/doc?slug=$slug" \
+              -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" \
+              -o /tmp/tdoc-preview-delete-resp.json \
+              -w '%{http_code}')"
+            case "$status" in
+              200|404) ;;
+              *)
+                cat /tmp/tdoc-preview-delete-resp.json >&2
+                echo "could not reset preview fixture $slug (HTTP $status)" >&2
+                return 1
+                ;;
+            esac
+          }
+          reset_preview_slug conway-life
+          reset_preview_slug tornado-doc
+
           seed() {
             local v="$1" html="$2"
             jq -n \

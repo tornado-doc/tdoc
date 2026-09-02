@@ -26,7 +26,7 @@ function childEnv() {
 
 const PORT = process.env.TDOC_PORT ? Number(process.env.TDOC_PORT) : 7878;
 const ROOT = process.env.TDOC_DIR || path.join(os.homedir(), 'tdocs');
-const FRAME_PROBE_PATH = path.join(__dirname, 'frame-probe.js');
+const frameProbeSource = require('./frame-probe-source');
 // Shared shell builder keeps local and production boot markup identical.
 const SHELL = require('./shell.js');
 const { loadRuntimeAssets } = require('./runtime-assets.js');
@@ -660,6 +660,10 @@ function shellDocument(slug, version, nonce) {
     mode: 'local',
     versions,
     identity: ident,
+    // The local server is anonymous by design and records nobody as a document's
+    // owner, so there is never a name to show here. Declared rather than omitted
+    // so the shell reads the same shape from both hosts.
+    author: null,
     isOwner,
     canEdit: !isLanding && Number(version) === Number(latestVersion),
     canComment: true,
@@ -1071,7 +1075,7 @@ const server = http.createServer(async (req, res) => {
       // DOM. Nonced so it runs under the frame CSP while author <script> stays
       // inert (same guarantee as the single-origin path).
       try {
-        const probe = fs.readFileSync(FRAME_PROBE_PATH, 'utf8');
+        const probe = frameProbeSource();
         const tag = `<script id="tdoc-frame-probe" data-tdoc-provider nonce="${nonce}">${probe}</script>`;
         body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
       } catch {}

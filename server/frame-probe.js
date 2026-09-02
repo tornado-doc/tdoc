@@ -728,6 +728,12 @@
     post({ type: 'tdoc:editState', dirty: editDirty, checking: !!checking });
   }
   function reportDraft() {
+    // Recovery is not debounced. A refresh can arrive between any two
+    // keystrokes, so hand the shell a restorable snapshot before yielding.
+    // The more expensive baseline/pin bookkeeping can still settle once the
+    // input burst is over.
+    var immediateHtml = draftBodyHtml();
+    post({ type: 'tdoc:editDraft', bodyHtml: immediateHtml });
     clearTimeout(editTimer);
     editTimer = setTimeout(function () {
       var bodyHtml = draftBodyHtml();
@@ -737,13 +743,36 @@
       rereportPins();
     }, 350);
   }
-  function onEditInput() {
-    // Cloning and normalizing the whole author DOM is O(document size). Mark
-    // the draft immediately, then do that work once after the input burst.
+  function markdownCtx() {
+    return { root: findEditRoot(), atomicSelector: ATOMIC + ',[data-tdoc-editor-atomic]' };
+  }
+  function onEditInput(event) {
+    var md = window.tdocEditMarkdown;
+    if (event && md) {
+      try { md.applyAfterInput(event, markdownCtx()); } catch (e) {}
+    }
+    // Mark the comparison as pending; reportDraft persists first, then
+    // settles baseline equality after the input burst.
     setDirty(true, true);
     reportDraft();
   }
+  function onEditBeforeInput(event) {
+    var md = window.tdocEditMarkdown;
+    if (!md) return;
+    try {
+      if (md.applyBeforeInput(event, markdownCtx())) onEditInput();
+    } catch (e) {}
+  }
   function onEditKeydown(event) {
+    var md = window.tdocEditMarkdown;
+    if (md) {
+      try {
+        if (md.applyKeydown(event, markdownCtx())) {
+          onEditInput();
+          return;
+        }
+      } catch (e) {}
+    }
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
     var key = String(event.key || '').toLowerCase(), command = null;
     if (key === 'b' && !event.shiftKey) command = 'bold';
@@ -773,9 +802,11 @@
       node.setAttribute('contenteditable', 'false');
     });
     if (editBaselineHtml == null) editBaselineHtml = draftBodyHtml();
+    root.addEventListener('beforeinput', onEditBeforeInput, true);
     root.addEventListener('input', onEditInput);
     root.addEventListener('keydown', onEditKeydown);
     document.documentElement.setAttribute('data-tdoc-editing', '');
+    post({ type: 'tdoc:editBaseline', publishedHtml: editBaselineHtml, bodyHtml: draftBodyHtml() });
     // Entering edit mode should leave you able to type. Without this the root
     // is editable but unfocused, so a doc created from scratch — which lands
     // here with nothing on the page — swallows the first thing you type until
@@ -798,6 +829,7 @@
   }
   function disableEditing() {
     var root = findEditRoot();
+    if (root) root.removeEventListener('beforeinput', onEditBeforeInput, true);
     if (root) root.removeEventListener('input', onEditInput);
     if (root) root.removeEventListener('keydown', onEditKeydown);
     cleanEditorAttributes(document.documentElement);
@@ -829,7 +861,21 @@
     try {
       findEditRoot().focus();
       restoreSelection();
-      document.execCommand(command, false, nextValue || null);
+      if (command === 'code') {
+        var live = window.getSelection();
+        var text = live && !live.isCollapsed ? live.toString() : '';
+        if (!text) return;
+        // Keep this safe even if the optional input-rule helper failed to
+        // initialize: selected author text is interpolated into insertHTML.
+        var esc = String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+        document.execCommand('insertHTML', false, '<code>' + esc + '</code>');
+      } else {
+        document.execCommand(command, false, nextValue || null);
+      }
       onEditInput();
     } catch (e) {}
   }

@@ -74,6 +74,11 @@ t('GITHUB_CLIENT_ID has a single SoT (shared/github-oauth.js)', () => {
   assert(read('shared/github-oauth.js').includes(id), 'SoT module missing its own id');
   assert(!read('vercel/api/tdoc.js').includes('Ov23liZ1UAGOchvKPmlS'),
     'vercel still hardcodes the retired personal OAuth client id');
+  assert(template.includes('[observability]') && /enabled\s*=\s*true/.test(template),
+    'wrangler.toml.template must keep Workers Logs on — without it a live 500 can only be chased by reproducing it');
+  const preview = read('worker/wrangler.preview.toml.template');
+  assert(preview.includes('[observability]') && /enabled\s*=\s*true/.test(preview),
+    'the preview worker needs logs too — PR previews are where a break is cheapest to catch');
   assert(!template.includes('Ov23liZ1UAGOchvKPmlS'),
     'wrangler.toml.template still hardcodes the retired personal OAuth client id');
   assert(read('bin/tdoc-publish').includes('shared/github-oauth.js'),

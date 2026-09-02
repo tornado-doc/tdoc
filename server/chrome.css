@@ -66,6 +66,10 @@
      beside it — growing pushed the star to the far end of the left cluster.
      Shrink+min-width:0 keeps the ellipsis when space runs out. */
   .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Whose document this is. flex-shrink:0 with its own max-width so a long
+     login truncates itself instead of eating the title's room. */
+  .tdoc-bar .doc-author { color: #8a8a8f; font-size: 13px; flex: 0 0 auto; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-bar .doc-author::before { content: "·"; color: #c8c8cc; margin: 0 6px 0 0; }
 
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
@@ -526,12 +530,15 @@
      stays elegant at every size. The slug used to lead this ladder and was the
      first thing dropped; it is gone at every width now — the title names the
      document, and the slug is in the address bar.
-       ≥ 900px: logo · v · title ……………… identity · share · ⋯
-       < 900px: logo · v · title ……………… avatar   · share · ⋯  (name hides)
+       ≥ 900px: logo · v · title · author …… identity · share · ⋯
+       < 900px: logo · v · title ……………… avatar   · share · ⋯  (author + name hide)
        < 700px: logo ·     title ………………            share · ⋯  (version+identity into ⋯) */
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
+    /* The title has to outlive the author: one names the document, the other
+       annotates it. */
+    .tdoc-bar .doc-author { display: none; }
   }
   @media (max-width: 700px) {
     .tdoc-bar { padding: 0 8px; gap: 4px; }

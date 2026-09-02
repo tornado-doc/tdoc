@@ -24,6 +24,7 @@ import {
   LinkDialog,
   SaveConflictDialog,
   SaveNoticeDialog,
+  StaleDraftDialog,
   saveNoticeDismissed,
 } from './document/editor-toolbar.jsx';
 import {
@@ -190,6 +191,8 @@ export function DocumentShell({ boot, config }) {
       comments.refresh();
     },
     'tdoc:editState': (message) => editorRef.current?.frameHandlers.editState(message),
+    'tdoc:editBaseline': (message) => editorRef.current?.frameHandlers.editBaseline(message),
+    'tdoc:editDraft': (message) => editorRef.current?.frameHandlers.editDraft(message),
     'tdoc:editSnapshot': (message) => editorRef.current?.frameHandlers.editSnapshot(message),
     'tdoc:editDocument': (message) => editorRef.current?.frameHandlers.editDocument(message),
     'tdoc:copyText': (message) => copyText(message.text || ''),
@@ -686,6 +689,12 @@ export function DocumentShell({ boot, config }) {
         onConfirm={editor.save}
       />
       <SaveConflictDialog conflict={editor.conflict} onClose={editor.closeConflict} />
+      <StaleDraftDialog
+        draft={editor.staleDraft}
+        currentVersion={config.version}
+        onRestore={editor.restoreDraft}
+        onKeep={editor.keepPublished}
+      />
       <LinkDialog
         open={dialog?.type === 'link'}
         onOpenChange={(open) => !open && setDialog(null)}

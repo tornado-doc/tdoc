@@ -21,7 +21,7 @@ const root = path.join(__dirname, '..');
 console.log('browser bundles parse');
 
 // Everything the worker injects into a page.
-for (const rel of ['server/shell.js', 'server/frame-probe.js']) {
+for (const rel of ['server/shell.js', 'server/frame-probe.js', 'server/edit-markdown.js']) {
   t(`${rel} is valid JavaScript`, () => {
     const src = fs.readFileSync(path.join(root, rel), 'utf8');
     // Compile without running: catches syntax errors, touches no globals.
@@ -36,6 +36,11 @@ for (const rel of ['server/shell.js', 'server/frame-probe.js']) {
 const asScript = (src) => src
   .replace(/^export default /gm, 'const __default = ')
   .replace(/^export (class|function|const|let|var) /gm, '$1 ');
+
+t('injected frame probe (markdown + probe) is valid JavaScript', () => {
+  const src = require(path.join(root, 'server/frame-probe-source.js'))();
+  new vm.Script(src, { filename: 'frame-probe-source' });
+});
 
 t('worker/worker.js is valid JavaScript', () => {
   const src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
