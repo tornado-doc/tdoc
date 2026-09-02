@@ -54,6 +54,16 @@ t('sticky comment matches the #148 template', () => {
   assert(/"access":\{"visibility":"public","commenting":"signed_in","history_visibility":"public"/.test(wf),
     'the linked demo doc must be anonymously readable without enabling anonymous writes');
   assert(/seed .*landing|seeded landing/.test(wf), 'the preview must seed the landing doc');
+  const reset = wf.indexOf('reset_preview_slug conway-life');
+  const seed = wf.indexOf('seed 1 test/fixtures/tdocs/sample-doc/v1/index.html');
+  assert(reset !== -1 && reset < seed,
+    'reruns must clear the retained preview fixtures before reseeding v1');
+  assert(wf.includes('reset_preview_slug tornado-doc'),
+    'reruns must clear the retained landing fixture before reseeding it');
+  assert(/-X DELETE[\s\\]*\n[\s\S]*\/api\/doc\?slug=\$slug/.test(wf),
+    'preview fixture reset must use the authenticated document delete route');
+  assert(wf.includes('200|404)'),
+    'preview fixture reset must be idempotent when a fixture does not exist yet');
   assert(wf.includes('It is not [tdoc.dev](https://tdoc.dev)'),
     'must say the link is not tdoc.dev');
   assert(wf.includes('issues/comments/'), 'must PATCH an existing comment rather than always POST');
