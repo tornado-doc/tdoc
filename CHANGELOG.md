@@ -32,6 +32,16 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **Onboarding observability moved to the provider boundary.** The skill no
+  longer prompts for analytics consent, writes per-machine/session telemetry,
+  or sends events to the retired Supabase project. The hosted Worker instead
+  emits a four-stage, identifier-free funnel (`onboarding_started`,
+  `onboarding_approved`, `token_minted`, `publish_succeeded`) into the
+  persisted Workers Logs enabled for production and previews. Product-event
+  fields are allowlisted in Worker code and exercised end to end so document
+  content, slugs, accounts, logins, tokens, and pairing secrets cannot enter
+  the structured payload. `#397`.
+
 - **Relicensed to AGPL v3, with a commercial licence available.** Apache 2.0
   let anyone embed tdoc in a closed product and keep their changes; AGPL's
   section 13 makes running a modified tdoc as a network service count as

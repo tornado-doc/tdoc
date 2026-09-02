@@ -1114,44 +1114,18 @@ t('build_payload embeds the document without a shell round trip', () => {
   assert(/Object\.keys\(widgets\)\.length/.test(fn), 'widgets must stay optional');
 });
 
-// ---- consent is asked after the work, not before it (#236 S9) ----
+// ---- telemetry lives at the hosted provider boundary (#397) ----
 
-t('a first run defers the telemetry question and records nothing', () => {
+t('the skill never interrupts a user for client-side telemetry', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
-  const step0 = skill.slice(skill.indexOf('## Step 0'), skill.indexOf('## Final Step'));
-
-  // First run resolves to "deferred", not "on".
-  // Checked as a line sequence rather than one regex. The regex version had
-  // two alternatives matching the same input inside a star — exponential
-  // backtracking, which CodeQL flagged as js/redos.
-  const lines = step0.split('\n').map((l) => l.trim());
-  const branch = lines.findIndex((l) => l.includes('TEL_PROMPTED" = "no" ]; then'));
-  assert(branch !== -1, 'no first-run branch in the mode resolution');
-  const body = lines.slice(branch + 1).filter((l) => l && !l.startsWith('#'));
-  assert(body[0] === 'TEL_EFFECTIVE="deferred"',
-    `a first run should resolve TEL_EFFECTIVE to deferred, got: ${body[0]}`);
-
-  // And "deferred" must not slip through a `!= off` gate and write a sentinel.
-  assert(!/TEL_EFFECTIVE" != "off" \]; then\s*\n\s*mkdir -p "\$TEL_HOME\/sentinels"/.test(step0),
-    'the sentinel gate must require "on", not merely "not off" — deferred would pass');
-  assert(/TEL_EFFECTIVE" = "on" \]; then\s*\n\s*mkdir -p "\$TEL_HOME\/sentinels"/.test(step0),
-    'the sentinel should only be written when telemetry is on');
-
-  // Step 0 must not contain the question any more.
-  assert(!/ask the user ONCE with this text/.test(step0),
-    'Step 0 still asks the consent question before doing the work');
-});
-
-t('the Final Step owns the consent question and logs nothing for that run', () => {
-  const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
-  const final = skill.slice(skill.indexOf('## Final Step'));
-  assert(/is `deferred`/.test(final), 'the Final Step should handle the deferred first run');
-  assert(/Hand over the finished work FIRST/.test(final),
-    'the Final Step should deliver before asking');
-  assert(/\.telemetry-prompted/.test(final) && /\.telemetry-mode/.test(final),
-    'the Final Step should persist the answer');
-  assert(/log nothing for this run/.test(final),
-    'the deferred run must not be logged — that would be recording before consent');
+  for (const forbidden of ['SKILL_TELEMETRY', '.telemetry-prompted',
+    'telemetry-log', 'consent question', 'Final Step — Telemetry']) {
+    assert(!skill.includes(forbidden), `SKILL.md still contains client telemetry: ${forbidden}`);
+  }
+  assert(!fs.existsSync(path.join(__dirname, '..', 'telemetry', 'bin', 'telemetry-log')),
+    'the retired client telemetry sender is still shipped');
+  assert(!fs.existsSync(path.join(BIN, 'postinstall-telemetry.sh')),
+    'the retired telemetry installer is still shipped');
 });
 
 // ---- the local server must hand its own node down to spawned CLIs (#259) ----
@@ -1278,7 +1252,7 @@ t('SKILL.md resolves the checkout for the active agent host', () => {
   const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
   const resolvers = skill.match(/tdoc_resolve_skill_dir\(\) \{[\s\S]*?\n\}/g) || [];
   assert(resolvers.length === 2,
-    `expected setup + telemetry resolvers, found ${resolvers.length}`);
+    `expected setup + automatic-update resolvers, found ${resolvers.length}`);
 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-agent-roots-'));
   const roots = {
