@@ -102,7 +102,7 @@ async function loadWorker() {
     'const READER_CSS = ' + JSON.stringify(readerCss) + ';'
   );
   const shellMod = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
-  const probeJs = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
+  const probeJs = require(path.join(root, 'server', 'frame-probe-source.js'))();
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);

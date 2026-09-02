@@ -152,6 +152,13 @@ function deadPid() {
     eq(r.body.signin, null, 'signin');
   });
 
+  await t('a pair secret riding the device_code seat is never served either', async () => {
+    writePending({ device_code: 'pair:pairsec_super_secret', base: 'https://tdoc.dev' });
+    const r = await get(`/api/publish/signin?slug=${SLUG}`);
+    eq(r.body.signin && r.body.signin.user_code, 'ABCD-1234', 'user_code');
+    eq(JSON.stringify(r.body).includes('pairsec'), false, 'pair secret leaked');
+  });
+
   await t('device_code is never served to the modal', async () => {
     // The pending file carries device_code so a later CLI run can resume the
     // sign-in. That value can redeem the approval — the endpoint whitelists

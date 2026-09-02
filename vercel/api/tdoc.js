@@ -66,6 +66,17 @@ async function buildEnv() {
       // Same public GitHub Device Flow app as Cloudflare (shared/github-oauth.js).
       // Device flow has no redirect URI, so it works from any host.
       GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID || githubOauth.GITHUB_CLIENT_ID,
+      // Absent → webAuth stays false and the device flow carries sign-in,
+      // exactly as before. This line existing is what makes the web redirect
+      // flow POSSIBLE on Vercel — it was silently impossible: the worker
+      // gates on env.GITHUB_CLIENT_SECRET and the map never passed it.
+      GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET || '',
+      // The OIDC provider seat (Clerk on hosted). All three absent → the
+      // buttons simply do not render; GitHub carries sign-in as before.
+      OIDC_ISSUER: process.env.OIDC_ISSUER || '',
+      OIDC_CLIENT_ID: process.env.OIDC_CLIENT_ID || '',
+      OIDC_CLIENT_SECRET: process.env.OIDC_CLIENT_SECRET || '',
+      OIDC_LABEL: process.env.OIDC_LABEL || '',
       TDOC_DEBUG: process.env.TDOC_DEBUG || '',
     },
   };

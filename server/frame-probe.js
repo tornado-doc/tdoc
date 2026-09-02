@@ -23,6 +23,11 @@
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
   var interactionMode = 'read';
+  // Whether the shell currently has a comment card, cluster, or composer open.
+  // While something is open, the next click anywhere in the document only
+  // dismisses it — it must not open a different comment or start a new one.
+  var shellUiOpen = false;
+  var swallowClick = false;
   var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
@@ -247,6 +252,14 @@
   // shell / 404), not the page. Intercept and hand navigation to the shell,
   // which navigates the top document (or opens a tab for target=_blank).
   document.addEventListener('click', function (e) {
+    // The mousedown of this same gesture dismissed something. Let it end there.
+    if (swallowClick) {
+      swallowClick = false;
+      if (e.target && e.target.closest && e.target.closest('a[href]')) {
+        e.preventDefault(); e.stopPropagation();
+      }
+      return;
+    }
     var commentId = interactionMode === 'edit' ? null : anchorIdAtPoint(e.clientX, e.clientY);
     if (commentId) {
       e.preventDefault(); e.stopPropagation();
@@ -286,7 +299,12 @@
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
     if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
-    if (anchorIdAtPoint(e.clientX, e.clientY)) return;
+    // Dismissal does not hit-test. While the shell has something open, an anchor
+    // under the pointer stops being special — the click that closes a card must
+    // not also open the next one. Fall through rather than returning, so a drag
+    // that starts here still paints its selection.
+    swallowClick = shellUiOpen;
+    if (!shellUiOpen && anchorIdAtPoint(e.clientX, e.clientY)) return;
     if (interactionMode === 'comment' && e.button === 0
       && !(e.target && e.target.closest && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
       var point = caretAtPoint(e.clientX, e.clientY);
@@ -841,6 +859,12 @@
     post({ type: 'tdoc:editState', dirty: editDirty, checking: !!checking });
   }
   function reportDraft() {
+    // Recovery is not debounced. A refresh can arrive between any two
+    // keystrokes, so hand the shell a restorable snapshot before yielding.
+    // The more expensive baseline/pin bookkeeping can still settle once the
+    // input burst is over.
+    var immediateHtml = draftBodyHtml();
+    post({ type: 'tdoc:editDraft', bodyHtml: immediateHtml });
     clearTimeout(editTimer);
     editTimer = setTimeout(function () {
       var bodyHtml = draftBodyHtml();
@@ -850,13 +874,36 @@
       rereportPins();
     }, 350);
   }
-  function onEditInput() {
-    // Cloning and normalizing the whole author DOM is O(document size). Mark
-    // the draft immediately, then do that work once after the input burst.
+  function markdownCtx() {
+    return { root: findEditRoot(), atomicSelector: ATOMIC + ',[data-tdoc-editor-atomic]' };
+  }
+  function onEditInput(event) {
+    var md = window.tdocEditMarkdown;
+    if (event && md) {
+      try { md.applyAfterInput(event, markdownCtx()); } catch (e) {}
+    }
+    // Mark the comparison as pending; reportDraft persists first, then
+    // settles baseline equality after the input burst.
     setDirty(true, true);
     reportDraft();
   }
+  function onEditBeforeInput(event) {
+    var md = window.tdocEditMarkdown;
+    if (!md) return;
+    try {
+      if (md.applyBeforeInput(event, markdownCtx())) onEditInput();
+    } catch (e) {}
+  }
   function onEditKeydown(event) {
+    var md = window.tdocEditMarkdown;
+    if (md) {
+      try {
+        if (md.applyKeydown(event, markdownCtx())) {
+          onEditInput();
+          return;
+        }
+      } catch (e) {}
+    }
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
     var key = String(event.key || '').toLowerCase(), command = null;
     if (key === 'b' && !event.shiftKey) command = 'bold';
@@ -886,9 +933,11 @@
       node.setAttribute('contenteditable', 'false');
     });
     if (editBaselineHtml == null) editBaselineHtml = draftBodyHtml();
+    root.addEventListener('beforeinput', onEditBeforeInput, true);
     root.addEventListener('input', onEditInput);
     root.addEventListener('keydown', onEditKeydown);
     document.documentElement.setAttribute('data-tdoc-editing', '');
+    post({ type: 'tdoc:editBaseline', publishedHtml: editBaselineHtml, bodyHtml: draftBodyHtml() });
     // Entering edit mode should leave you able to type. Without this the root
     // is editable but unfocused, so a doc created from scratch — which lands
     // here with nothing on the page — swallows the first thing you type until
@@ -911,6 +960,7 @@
   }
   function disableEditing() {
     var root = findEditRoot();
+    if (root) root.removeEventListener('beforeinput', onEditBeforeInput, true);
     if (root) root.removeEventListener('input', onEditInput);
     if (root) root.removeEventListener('keydown', onEditKeydown);
     cleanEditorAttributes(document.documentElement);
@@ -942,7 +992,21 @@
     try {
       findEditRoot().focus();
       restoreSelection();
-      document.execCommand(command, false, nextValue || null);
+      if (command === 'code') {
+        var live = window.getSelection();
+        var text = live && !live.isCollapsed ? live.toString() : '';
+        if (!text) return;
+        // Keep this safe even if the optional input-rule helper failed to
+        // initialize: selected author text is interpolated into insertHTML.
+        var esc = String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+        document.execCommand('insertHTML', false, '<code>' + esc + '</code>');
+      } else {
+        document.execCommand(command, false, nextValue || null);
+      }
       onEditInput();
     } catch (e) {}
   }
@@ -969,6 +1033,7 @@
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode);
+    else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
     else if (d.type === 'tdoc:editRestore') {
       var restoreRoot = findEditRoot();

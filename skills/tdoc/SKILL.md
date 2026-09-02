@@ -354,11 +354,14 @@ bash "$SKILL_DIR/bin/tdoc-publish" --signin-only
 ```
 
 Launch this in the **background** (Bash `run_in_background: true`) and go
-straight on to writing the doc. It opens GitHub in the user's browser and
-prints a short code that they type there — GitHub does not accept the code
-through the URL, so it has to be entered by hand. Tell the user in one line
-that a GitHub page has opened and that the code is in the terminal; then keep
-working. Skip Step 0 entirely for the local-only and self-host destinations.
+straight on to writing the doc. Against a current hosted worker this is the
+tdoc pairing flow: it opens `tdoc.dev/activate` in the user's browser with
+the code prefilled — they sign in there however they like and click Approve.
+Where auto-open cannot fire, relay the URL and code to the human and wait;
+never open the URL in your own browser (your session is not theirs). Against
+an older worker it falls back to the GitHub device flow, where the code is
+typed on github.com. Tell the user in one line what opened and that the code
+is in the terminal; then keep working. Skip Step 0 entirely for the local-only and self-host destinations.
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
 2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, `$SKILL_DIR/authoring/structure/components.md`, and the `$SKILL_DIR/authoring/style/` entry you picked.**
@@ -704,8 +707,11 @@ it before changing `bin/tdoc-publish`, `bin/tdoc-update-nag`, or the worker
 auth/hosted-token routes.
 
 Default target is **hosted** (`https://tdoc.dev`). First run signs in with
-GitHub (Device Flow), then asks the host for an account-scoped upload token
-bound to that login and stores it in `~/.tdoc/published.json`. That token can
+the tdoc pairing flow: the CLI shows a short code, the human approves it at
+`tdoc.dev/activate` in their own browser (signed in with whatever that page
+offers), and the poll returns an account-scoped upload token stored in
+`~/.tdoc/published.json`. Workers that predate pairing fall back to the
+GitHub Device Flow automatically. That token can
 only mutate docs it owns. The sign-in is **resumable**: if the process dies
 while waiting (agent harness timeout, killed sandbox), just run the same
 command again — it picks up the pending device code and keeps polling, so an

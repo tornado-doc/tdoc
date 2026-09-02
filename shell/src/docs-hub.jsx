@@ -48,6 +48,15 @@ function FolderNameDialog({ title, confirmLabel, initialName, onSave, onClose })
   );
 }
 
+// One rule for every list: a document says whose it is, and your own say "me",
+// the way a docs list's Owner column reads. A document with nobody recorded —
+// published before hosted accounts, or living on a self-hosted worker — says
+// nothing rather than guessing.
+function ownerLabel(doc, viewer) {
+  if (!doc.owner) return null;
+  return viewer && doc.owner === viewer ? 'me' : doc.owner;
+}
+
 function FlatList({ docs, label, viewer, empty, onToggleStar }) {
   if (!docs.length) return <p className="empty">{empty}</p>;
   return (
@@ -57,7 +66,7 @@ function FlatList({ docs, label, viewer, empty, onToggleStar }) {
           key={doc.slug}
           doc={doc}
           className="flat-row"
-          meta={`${doc.owner && doc.owner !== viewer ? `by ${doc.owner} · ` : ''}${label} ${day(doc.at)}`}
+          meta={[ownerLabel(doc, viewer), `${label} ${day(doc.at)}`].filter(Boolean).join(' · ')}
           onToggleStar={onToggleStar}
         />
       ))}
@@ -205,6 +214,7 @@ export function DocsHub({ boot }) {
                   key={doc.slug}
                   doc={doc}
                   meta={[
+                    ownerLabel(doc, viewer),
                     `${doc.slug} · v${doc.latest}`,
                     day(doc.updated) ? `updated ${day(doc.updated)}` : null,
                     doc.folder ? `in ${hub.folderById.get(doc.folder)?.name || ''}` : null,

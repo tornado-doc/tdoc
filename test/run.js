@@ -31,6 +31,10 @@ const OFFLINE = [
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
   'hosted-oob.test.js',       // hosted token bootstrap + scoped writes
   'hosted-oob-behavior.test.js', // hosted token ownership behavior with fake bindings
+  'account-email-groundwork.test.js', // phase-1 identity: email merge key, no mint-on-signin, field-preserving rewrite
+  'pairing-flow.test.js',     // phase-2: tdoc-owned pair codes — strikes, single redemption, origin/session gates
+  'pair-signin-cli.test.js',  // phase-2 CLI: pairing-first, 404 fallback, probe-first resume
+  'oidc-provider-seat.test.js', // phase-3: OIDC seat — verified-email sessions, email-born accounts, sub never a key
   'duplicate-download.test.js', // #146 Duplicate vs Download chrome + route contract
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
@@ -39,8 +43,11 @@ const OFFLINE = [
   'bar-overflow-trigger.test.js', // the ⋯ trigger is hidden where its menu would be empty
   'editor-save-hover.test.js', // #382 a button must never paint its background its own text colour
   'create-from-scratch.test.js', // #356 blank doc: slug derivation, both create routes, edit-on-arrival
+  'draft-store.test.js',       // #369 per-doc draft cache + fingerprint restore
+  'edit-markdown.test.js',     // #374 markdown input rules (no schema parser)
   'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
   'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
+  'document-owner.test.js',   // #395 the bar and the lists name the document's owner
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',

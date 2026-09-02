@@ -574,3 +574,18 @@ button.tdoc-pin {
   margin-top: 8px;
   color: var(--td-accent);
 }
+
+/* /activate — the pairing approval page. Inherits the status-page frame. */
+.tdoc-activate-page .tdoc-activate-code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 22px;
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  border: 1px solid var(--tdoc-rule, #d9d9d9);
+  border-radius: 6px;
+  width: 12ch;
+  margin: 6px 0 14px;
+}
+.tdoc-activate-page .tdoc-activate-error { color: #b3503c; max-width: 46ch; }

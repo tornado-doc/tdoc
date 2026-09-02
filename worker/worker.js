@@ -147,7 +147,23 @@ function hostedGithubLogin(meta) {
 // True when this session owns this document:
 //   - hosted: meta.hosted.github_login matches the session
 //   - unhosted / legacy: the Worker operator (TDOC_OWNER)
+// A session is "someone" if it carries a GitHub login OR a provider-attested
+// email (an OIDC sign-in has no GitHub-shaped login and never will). Gates
+// that mean "any authenticated human" use this; gates that specifically need
+// a handle (comment authorship, handle ACLs) keep sessionLogin until the
+// identity surface widens deliberately.
+function sessionPrincipal(session) {
+  return sessionLogin(session) || normalizeEmail(session && session.email) || '';
+}
+
 function isDocOwnerSession(env, session, meta) {
+  // account_id is the canonical identity (phase 1), so compare it first —
+  // this is what makes a doc published through an email-keyed account
+  // manageable from the browser by the same person, whatever button they
+  // signed in with.
+  const acct = session && session.account_id;
+  const docAcct = meta && meta.hosted && meta.hosted.account_id;
+  if (acct && docAcct && acct === docAcct) return true;
   const login = sessionLogin(session);
   if (!login) return false;
   const hostedLogin = hostedGithubLogin(meta);
@@ -1542,7 +1558,7 @@ function injectReaderCss(html, css) {
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docTitle) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
@@ -1553,12 +1569,19 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // document was named after its URL. That read as a title only while slugs
   // were agent-picked words; a browser-created doc's slug is an opaque id.
   // The slug remains the fallback for a doc whose meta carries no title.
+  const docTitle = docMeta && docMeta.title;
   const title = typeof docTitle === 'string' && docTitle.trim() ? docTitle.trim() : slug;
+  // Who the document belongs to, shown beside its title. Only hosted publishes
+  // record a person; a doc from before hosted accounts, the landing doc, and
+  // everything on a self-hosted worker have nobody to name, and name nobody
+  // rather than guessing from versions[].author (which only browser edits set).
+  const author = hostedGithubLogin(docMeta) || null;
   const cfg = {
     slug,
     title,
     version,
     identity: identity || null,
+    author,
     isOwner: !!isOwner,
     canEdit: !!versionWritesEnabled && !!isOwner && !isLanding,
     canComment: !!commentWritesEnabled,
@@ -1701,7 +1724,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta && gate.meta.title), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1750,6 +1773,8 @@ function neutralLandingResponse(env, notice) {
       page: 'neutral-landing',
       authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
       webAuth: !!env?.GITHUB_CLIENT_SECRET,
+      oidcAuth: !!oidcConfig(env),
+      oidcLabel: (oidcConfig(env) || {}).label || '',
       notice: messages[notice] || '',
     }),
   }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
@@ -1760,6 +1785,107 @@ function neutralLandingResponse(env, notice) {
 // Approve, so nobody is stranded on GitHub's "Congratulations" page. Active
 // only when GITHUB_CLIENT_SECRET is set (the token exchange requires it), so a
 // deploy without the secret silently keeps the device flow.
+// ---- CLI pairing (tdoc-owned sign-in handoff) -------------------------------
+// The device-flow MECHANISM without the provider: the CLI shows a short code,
+// the human approves it at /activate in their own browser (signed in however
+// they like), and the poll returns an account-scoped upload token. tdoc issues
+// the code, so no provider is wired into the CLI at all — this is what lets
+// GitHub become just one button on /activate, next to whatever comes later.
+//
+// Not full OAuth, on purpose: the CLI is first-party, so there is no client
+// registration, no scopes, no redirect URI. Two endpoints and one page.
+//
+// Threat model (see the design doc, tdoc.dev/d/tdoc-auth-refactor):
+//   - code guessing: 28^8 ≈ 3.8e11 codes, 10-minute TTL, per-IP mint limits,
+//     and a per-code strike cap that burns the record — guessing needs the
+//     matching pair_secret anyway, which never leaves the CLI.
+//   - approval phishing: /activate names the terminal (its label) and the
+//     signed-in account before the confirm button.
+//   - replay: single redemption — the record is deleted the moment a poll
+//     collects the token.
+// The KV counters are per-colo approximations (KV is eventually consistent);
+// they are the baseline, and a Cloudflare zone rate-limit rule on
+// /api/cli/pair/* is the belt-and-braces an operator adds in the dashboard.
+
+// No 0/O, 1/I/L, U/V ambiguity — this code is read off one screen and typed
+// into another, sometimes over a shoulder or a screenshot.
+const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTWXYZ2345679';
+const PAIR_TTL_SECONDS = 600;
+const PAIR_MAX_STRIKES = 5;
+
+function pairCode() {
+  const buf = new Uint8Array(8);
+  crypto.getRandomValues(buf);
+  const pick = [...buf].map((b) => PAIR_ALPHABET[b % PAIR_ALPHABET.length]);
+  return `${pick.slice(0, 4).join('')}-${pick.slice(4).join('')}`;
+}
+
+function normalizePairCode(raw) {
+  const v = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (v.length !== 8) return null;
+  return `${v.slice(0, 4)}-${v.slice(4)}`;
+}
+
+// Fixed-window KV counter. Approximate by design (per-colo, eventually
+// consistent) — good enough to make brute force boring, not an SLA.
+async function rateLimited(env, bucket, limit, windowSeconds) {
+  if (!env || !env.META) return false;
+  const windowId = Math.floor(Date.now() / (windowSeconds * 1000));
+  const key = `rl:${bucket}:${windowId}`;
+  let count = 0;
+  try { count = Number(await env.META.get(key)) || 0; } catch {}
+  if (count >= limit) return true;
+  try { await env.META.put(key, String(count + 1), { expirationTtl: windowSeconds * 2 }); } catch {}
+  return false;
+}
+
+function clientIp(req) {
+  return req.headers.get('cf-connecting-ip') || 'unknown';
+}
+
+// JSON POSTs from the /activate page carry the browser's Origin; a cross-site
+// page cannot fake it. Absent Origin (curl, the CLI) is fine — those requests
+// carry no ambient session cookie worth stealing via CSRF anyway, and approve
+// (the only session-cookie-authenticated pair route) demands a match.
+function sameOrigin(req, url) {
+  const o = req.headers.get('origin');
+  return !o || o === url.origin;
+}
+
+// ---- OIDC provider seat --------------------------------------------------
+// One adapter, any spec-compliant issuer. The deployment decision is Clerk
+// (used strictly as an OIDC provider — never as a session layer), but nothing
+// here knows that: swap the three env values and a different issuer sits in
+// the same seat. The discipline that keeps this rug-pull-proof, per the
+// design doc: we store only what the issuer ATTESTS about an email
+// (userinfo's email + email_verified), the issuer's user IDs never become
+// keys, and the GitHub button stays direct — if this vendor vanishes, sign-in
+// degrades to GitHub while the seat is re-filled, and no account moves.
+function oidcConfig(env) {
+  const issuer = String(env && env.OIDC_ISSUER || '').trim().replace(/\/$/, '');
+  const clientId = String(env && env.OIDC_CLIENT_ID || '').trim();
+  const clientSecret = String(env && env.OIDC_CLIENT_SECRET || '').trim();
+  if (!/^https:\/\//.test(issuer) || !clientId || !clientSecret) return null;
+  return { issuer, clientId, clientSecret, label: String(env.OIDC_LABEL || 'Email').trim() || 'Email' };
+}
+
+// Per-isolate discovery cache. Discovery is static config on the issuer's
+// side; refetching it per sign-in would add a round trip for nothing.
+let OIDC_DISCOVERY = { issuer: null, doc: null };
+async function oidcDiscovery(cfg) {
+  if (OIDC_DISCOVERY.issuer === cfg.issuer && OIDC_DISCOVERY.doc) return OIDC_DISCOVERY.doc;
+  const r = await fetch(`${cfg.issuer}/.well-known/openid-configuration`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
+  });
+  if (!r.ok) throw new Error(`oidc discovery ${r.status}`);
+  const doc = await r.json();
+  if (!doc || !doc.authorization_endpoint || !doc.token_endpoint || !doc.userinfo_endpoint) {
+    throw new Error('oidc discovery incomplete');
+  }
+  OIDC_DISCOVERY = { issuer: cfg.issuer, doc };
+  return doc;
+}
+
 function authStatusResponse(message, { error = false, status = 200 } = {}) {
   const nonce = rand(16);
   return html(SHELL.appHtml({
@@ -2589,6 +2715,40 @@ async function ghPost(path, formObj) {
   if (!Object.keys(out).length) return { error: 'gh_empty', error_description: `status=${r.status} ct=${ct}` };
   return out;
 }
+// The merge key's gatekeeper. Loose on purpose — the provider already proved
+// deliverability; this only guards KV key hygiene (no spaces/control chars,
+// exactly one @, bounded length) and canonicalizes case.
+function normalizeEmail(email) {
+  const v = String(email || '').trim().toLowerCase();
+  if (v.length > 254) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return null;
+  return v;
+}
+
+// The signed-in user's verified email, or null. Requires the user:email
+// scope; a token minted before the scope widened gets [] or 403 here, and
+// null is the correct answer — the account simply gains its email key on a
+// later sign-in (migration is lazy by design).
+async function ghVerifiedEmail(token) {
+  try {
+    const r = await fetch('https://api.github.com/user/emails', {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${token}`,
+        'User-Agent': 'tdoc-worker',
+      },
+    });
+    if (!r.ok) return null;
+    const list = await r.json();
+    if (!Array.isArray(list)) return null;
+    const hit = list.find((e) => e && e.primary && e.verified && typeof e.email === 'string')
+      || list.find((e) => e && e.verified && typeof e.email === 'string');
+    return hit ? normalizeEmail(hit.email) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function ghUser(token) {
   const r = await fetch('https://api.github.com/user', {
     headers: {
@@ -2642,7 +2802,7 @@ function hostedRegistrationEnabled(env, origin) {
 }
 
 function canSeeMyDocs(env, session, origin) {
-  if (!sessionLogin(session)) return false;
+  if (!sessionPrincipal(session)) return false;
   if (hostedRegistrationEnabled(env, origin)) return true;
   return isOwnerSession(env, session);
 }
@@ -2834,34 +2994,63 @@ function syncDocumentTitle(html, title) {
     .replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, () => `<title>${safe}</title>`);
 }
 
-async function hostedAccountForGithub(env, login) {
+// Read-only twin of hostedAccountForGithub: resolves an existing account and
+// never mints one. Sign-in goes through THIS — a commenter is not a
+// publisher, and hasUsedTdoc treats hosted-account presence as "has
+// registered", so minting on sign-in would both fill KV with spectator
+// accounts and make every second commenter read as an established user.
+async function lookupHostedAccount(env, login) {
+  const norm = normalizeGithubLogin(login);
+  if (!norm || !env || !env.META) return null;
+  for (const key of [`hosted-account:${norm}`, `hosted-github:${norm}`]) {
+    try {
+      const rec = JSON.parse(await env.META.get(key));
+      if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
+    } catch {}
+  }
+  return null;
+}
+
+async function hostedAccountForGithub(env, login, verifiedEmail = null) {
   const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
   const primary = `hosted-account:${norm}`;
-  const legacy = `hosted-github:${norm}`;
-  let rec = null;
-  try {
-    const raw = await env.META.get(primary);
-    if (raw) rec = JSON.parse(raw);
-  } catch {}
-  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
-    try {
-      const raw = await env.META.get(legacy);
-      if (raw) rec = JSON.parse(raw);
-    } catch {}
-  }
-  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+  let rec = await lookupHostedAccount(env, login);
+  if (!rec) {
     rec = {
       account_id: `acct_${rand(12)}`,
       github_login: norm,
       created: new Date().toISOString(),
     };
   } else {
+    // Spread first: the record is about to grow fields this function does not
+    // know about (email today, linked identities later), and the old
+    // fixed-three-field rewrite silently dropped anything extra on every
+    // sign-in — data written once and erased on next login.
     rec = {
+      ...rec,
       account_id: rec.account_id,
       github_login: norm,
       created: rec.created || new Date().toISOString(),
     };
+  }
+  // The email merge key. First writer wins: if the index already names a
+  // DIFFERENT account, this account does not get the key — silently stealing
+  // it would hand one user's future sign-ins to another's docs. Verified-only
+  // is enforced upstream (callers pass what the provider attested, nothing
+  // user-typed).
+  const email = normalizeEmail(verifiedEmail);
+  if (email && rec.email !== email) {
+    const key = `account-email:${email}`;
+    let existing = null;
+    try { existing = JSON.parse(await env.META.get(key)); } catch {}
+    if (!existing || !existing.account_id || existing.account_id === rec.account_id) {
+      await env.META.put(key, JSON.stringify({
+        account_id: rec.account_id,
+        created: (existing && existing.created) || new Date().toISOString(),
+      }));
+      rec.email = email;
+    }
   }
   await env.META.put(primary, JSON.stringify(rec));
   return rec;
@@ -2876,18 +3065,43 @@ async function sourceHasWidgets(env, slug, version) {
   }
 }
 
-async function issueHostedToken(env, body = {}) {
+// The account home for someone with no GitHub login at all (an OIDC
+// sign-in). The account-email index doubles as the record: for GitHub-born
+// accounts it is a pointer ({account_id}) whose record lives at
+// hosted-account:<login>; for email-born accounts it IS the record. Minting
+// only ever needs account_id, so both shapes serve.
+async function hostedAccountForEmail(env, verifiedEmail) {
+  const email = normalizeEmail(verifiedEmail);
+  if (!email || !env || !env.META) return null;
+  const key = `account-email:${email}`;
+  let rec = null;
+  try { rec = JSON.parse(await env.META.get(key)); } catch {}
+  if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
+  rec = { account_id: `acct_${rand(12)}`, email, created: new Date().toISOString() };
+  await env.META.put(key, JSON.stringify(rec));
+  return rec;
+}
+
+async function issueHostedToken(env, body = {}, verifiedEmail = null) {
   const github_login = normalizeGithubLogin(body.login);
-  if (!github_login) {
+  // Two doors to an account, one canonical identity behind both: a GitHub
+  // login keys the legacy registry; an attested email (an OIDC approver) keys
+  // the email registry. Neither is ever taken from the client body — login
+  // comes from the session route-side, email as its own trusted argument.
+  let account = null;
+  if (github_login) {
+    account = await hostedAccountForGithub(env, github_login, verifiedEmail);
+  } else if (normalizeEmail(verifiedEmail)) {
+    account = await hostedAccountForEmail(env, verifiedEmail);
+  } else {
     return { error: 'sign_in_required', status: 401 };
   }
-  const account = await hostedAccountForGithub(env, github_login);
   if (!account) return { error: 'sign_in_required', status: 401 };
   const token = `tdoc_${rand(24)}`;
   const tokenHash = await sha256Hex(token);
   const record = {
     account_id: account.account_id,
-    github_login,
+    ...(github_login ? { github_login } : {}),
     created: new Date().toISOString(),
   };
   if (typeof body.label === 'string' && body.label.trim()) {
@@ -4079,6 +4293,32 @@ export default {
     // `/start` is the homepage CTA's no-script destination: the same
     // onboarding written as a page. Same fail-safe as `/` — if that doc is
     // missing, the visitor gets the neutral page, never a 404.
+    // The pairing approval page. Everything meaningful happens through the
+    // session + the pair/* API; this only ships the shell page with the code
+    // prefilled (normalized — a mangled ?code renders an empty field, never
+    // an error page).
+    if (p === '/activate' && (method === 'GET' || method === 'HEAD')) {
+      const session = await getSession(env, req);
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        title: 'tdoc - connect a terminal',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'activate',
+          code: normalizePairCode(url.searchParams.get('code')) || '',
+          identity: sessionPrincipal(session)
+            ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '' }
+            : null,
+          webAuth: !!env?.GITHUB_CLIENT_SECRET,
+          authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
+          oidcAuth: !!oidcConfig(env),
+          oidcLabel: (oidcConfig(env) || {}).label || '',
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+    }
+
     if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
       return landingResponse(env, req, START_SLUG);
     }
@@ -4122,12 +4362,21 @@ export default {
         }
         const user = await ghUser(r.access_token);
         if (!user.login) return authStatusResponse('GitHub returned no account.', { error: true, status: 500 });
+        // The only moment the GitHub token exists is now, so the verified
+        // email is read now; it is the merge key that routes every sign-in
+        // method to one account. Resolve-don't-mint: sign-in must not create
+        // hosted accounts (see lookupHostedAccount).
+        const email = await ghVerifiedEmail(r.access_token);
+        const existing = await lookupHostedAccount(env, user.login);
+        const account = existing ? await hostedAccountForGithub(env, user.login, email) : null;
         const sid = rand(24);
         const session = {
           login: user.login,
           avatar_url: user.avatar_url,
           name: user.name || user.login,
           created: new Date().toISOString(),
+          ...(account ? { account_id: account.account_id } : {}),
+          ...(email ? { email } : {}),
         };
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
         return redirectTo(ret, [
@@ -4449,7 +4698,7 @@ export default {
         }
         // Not a precondition — this mints the account on first use. A null here
         // means the account store itself is unreachable.
-        const acct = await hostedAccountForGithub(env, session.login);
+        const acct = await hostedAccountForGithub(env, session.login, session && session.email);
         if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
         actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
       }
@@ -4553,7 +4802,7 @@ export default {
 
       let actor = { kind: 'owner_session' };
       if (!ownerCopy) {
-        const acct = await hostedAccountForGithub(env, session.login);
+        const acct = await hostedAccountForGithub(env, session.login, session && session.email);
         if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
         actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
       }
@@ -4656,18 +4905,220 @@ export default {
       const gh = new URL('https://github.com/login/oauth/authorize');
       gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
       gh.searchParams.set('redirect_uri', `${url.origin}/auth/github/callback`);
-      gh.searchParams.set('scope', 'read:user');
+      gh.searchParams.set('scope', 'read:user user:email');
       gh.searchParams.set('state', nonce);
       return redirectTo(gh.toString(), [
         `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
     }
 
+    // ---- CLI pairing routes (see the pairing block above) ----
+    if (p === '/api/cli/pair/start' && method === 'POST') {
+      if (await rateLimited(env, `pairstart:${clientIp(req)}`, 20, 600)) {
+        return json({ error: 'slow_down' }, { status: 429 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const label = typeof body.label === 'string' ? body.label.trim().slice(0, 80) : '';
+      const user_code = pairCode();
+      const pair_secret = `pairsec_${rand(24)}`;
+      const record = {
+        secret_hash: await sha256Hex(pair_secret),
+        status: 'pending',
+        strikes: 0,
+        label,
+        created: new Date().toISOString(),
+      };
+      await env.META.put(`pair:${user_code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS + 60 });
+      return json({
+        user_code,
+        pair_secret,
+        verification_uri: `${url.origin}/activate`,
+        verification_uri_complete: `${url.origin}/activate?code=${user_code}`,
+        expires_in: PAIR_TTL_SECONDS,
+        interval: 5,
+      });
+    }
+
+    if (p === '/api/cli/pair/poll' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const code = normalizePairCode(body.user_code);
+      if (!code) return json({ error: 'expired_token' }, { status: 400 });
+      let record = null;
+      try { record = JSON.parse(await env.META.get(`pair:${code}`)); } catch {}
+      if (!record) return json({ error: 'expired_token' }, { status: 400 });
+      const okSecret = await timingSafeEqual(record.secret_hash, await sha256Hex(String(body.pair_secret || '')));
+      if (!okSecret) {
+        // A wrong secret is someone who saw the code but was never the CLI.
+        // Strike the record, and burn it before guesses get interesting.
+        record.strikes = (record.strikes || 0) + 1;
+        if (record.strikes >= PAIR_MAX_STRIKES) await env.META.delete(`pair:${code}`);
+        else await env.META.put(`pair:${code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS });
+        return json({ error: 'expired_token' }, { status: 400 });
+      }
+      if (record.status !== 'approved') return json({ error: 'authorization_pending' });
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        await env.META.delete(`pair:${code}`);
+        return json({ error: 'hosted_registration_disabled' }, { status: 403 });
+      }
+      // Single redemption: the record dies before the token leaves, so a
+      // replayed poll (or a second reader of the code) collects nothing.
+      await env.META.delete(`pair:${code}`);
+      const approved = record.approved || {};
+      const issued = await issueHostedToken(env, { login: approved.login, label: record.label }, approved.email);
+      if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
+      return json({
+        ok: true,
+        token: issued.token,
+        account_id: issued.record.account_id,
+        github_login: issued.record.github_login,
+        base: url.origin,
+        identity: { login: approved.login, name: approved.name || approved.login },
+      });
+    }
+
+    if (p === '/api/cli/pair/lookup' && method === 'POST') {
+      // Signed-in only, and rate-limited: this is what lets /activate name
+      // the asking terminal before the human commits. It never returns the
+      // secret or the status of somebody else's guessing game.
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (await rateLimited(env, `pairlook:${session.id}`, 30, 600)) {
+        return json({ error: 'slow_down' }, { status: 429 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const code = normalizePairCode(body.user_code);
+      let record = null;
+      try { record = JSON.parse(await env.META.get(`pair:${code}`)); } catch {}
+      if (!code || !record || record.status !== 'pending') {
+        return json({ ok: false, error: 'unknown_code' }, { status: 404 });
+      }
+      return json({ ok: true, label: record.label || '', created: record.created });
+    }
+
+    if (p === '/api/cli/pair/approve' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (await rateLimited(env, `pairok:${session.id}`, 10, 600)) {
+        return json({ error: 'slow_down' }, { status: 429 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const code = normalizePairCode(body.user_code);
+      let record = null;
+      try { record = JSON.parse(await env.META.get(`pair:${code}`)); } catch {}
+      if (!code || !record || record.status !== 'pending') {
+        return json({ ok: false, error: 'unknown_code' }, { status: 404 });
+      }
+      // The approver's identity is a server-side snapshot of THEIR session —
+      // nothing in the request body can pose as it, same discipline as the
+      // hosted-token mint.
+      record.status = 'approved';
+      record.approved = {
+        login: session.login || null,
+        name: session.name || session.login || (session.email ? String(session.email).split('@')[0] : ''),
+        email: session.email || null,
+      };
+      await env.META.put(`pair:${code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS });
+      return json({ ok: true, label: record.label || '' });
+    }
+
+    if (p === '/api/auth/oidc/login' && method === 'GET') {
+      const cfg = oidcConfig(env);
+      if (!cfg) return redirectTo('/?notice=signin');
+      const nonce = rand(16);
+      const ret = sanitizeReturn(url.searchParams.get('return'));
+      await env.META.put(`oauthstate:oidc:${nonce}`, ret, { expirationTtl: 600 });
+      let auth;
+      try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
+      catch (e) { return authStatusResponse('Sign-in is not available right now: ' + e.message, { error: true, status: 502 }); }
+      auth.searchParams.set('client_id', cfg.clientId);
+      auth.searchParams.set('redirect_uri', `${url.origin}/auth/oidc/callback`);
+      auth.searchParams.set('response_type', 'code');
+      auth.searchParams.set('scope', 'openid email profile');
+      auth.searchParams.set('state', nonce);
+      return redirectTo(auth.toString(), [
+        `tdoc_oidcst=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+      ]);
+    }
+
+    if (p === '/auth/oidc/callback' && method === 'GET') {
+      const cfg = oidcConfig(env);
+      if (!cfg) return redirectTo('/?notice=signin');
+      const code = url.searchParams.get('code');
+      const state = String(url.searchParams.get('state') || '');
+      const cookieState = (req.headers.get('cookie') || '').match(/(?:^|;\s*)tdoc_oidcst=([a-f0-9]+)/);
+      if (!code || !state || !cookieState || cookieState[1] !== state) {
+        return authStatusResponse('Sign-in could not be verified (state mismatch). Please try again.', { error: true, status: 400 });
+      }
+      const ret = sanitizeReturn(await env.META.get(`oauthstate:oidc:${state}`));
+      await env.META.delete(`oauthstate:oidc:${state}`);
+      try {
+        const disc = await oidcDiscovery(cfg);
+        const tr = await fetch(disc.token_endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: `${url.origin}/auth/oidc/callback`,
+            client_id: cfg.clientId,
+            client_secret: cfg.clientSecret,
+          }).toString(),
+        });
+        const tok = await tr.json().catch(() => null);
+        if (!tr.ok || !tok || !tok.access_token) {
+          return authStatusResponse('Sign-in failed: ' + ((tok && (tok.error_description || tok.error)) || `token exchange ${tr.status}`), { error: true, status: 400 });
+        }
+        // userinfo over TLS from the issuer we were configured with — the
+        // spec-sanctioned alternative to verifying the id_token signature,
+        // and the same trust shape as the GitHub /user call above it.
+        const ur = await fetch(disc.userinfo_endpoint, {
+          headers: { 'Authorization': `Bearer ${tok.access_token}`, 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
+        });
+        const user = await ur.json().catch(() => null);
+        const email = normalizeEmail(user && user.email);
+        // Verified only — the account-takeover rule, same as everywhere else.
+        if (!email || user.email_verified !== true) {
+          return authStatusResponse('This sign-in did not come with a verified email, so it cannot be used here.', { error: true, status: 403 });
+        }
+        // Resolve-don't-mint, same as GitHub sign-in: an account exists only
+        // once something is published. The issuer's own user id ("sub") is
+        // deliberately NOT stored — email is the merge key, sub would be a
+        // second identity to migrate off some day.
+        let account_id = null;
+        try {
+          const idx = JSON.parse(await env.META.get(`account-email:${email}`));
+          if (idx && typeof idx.account_id === 'string') account_id = idx.account_id;
+        } catch {}
+        const sid = rand(24);
+        const session = {
+          name: (user.name || user.given_name || email.split('@')[0]),
+          avatar_url: typeof user.picture === 'string' ? user.picture : '',
+          email,
+          oidc: true,
+          created: new Date().toISOString(),
+          ...(account_id ? { account_id } : {}),
+        };
+        await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+        return redirectTo(ret, [
+          `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+          'tdoc_oidcst=; Path=/; Max-Age=0',
+        ]);
+      } catch (e) {
+        return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
+      }
+    }
+
     if (p === '/api/auth/device/start' && method === 'POST') {
       try {
         const r = await ghPost('/login/device/code', {
           client_id: env.GITHUB_CLIENT_ID,
-          scope: 'read:user',
+          scope: 'read:user user:email',
         });
         if (r.error) return json({ error: r.error, message: r.error_description }, { status: 400 });
         return json({
@@ -4711,16 +5162,22 @@ export default {
         const user = await ghUser(r.access_token);
         debug(env, '[poll] gh /user response keys:', Object.keys(user).join(','), 'login:', user.login || 'none');
         if (!user.login) return json({ error: 'no_user', message: user.message || 'GitHub /user returned no login' }, { status: 500 });
+        const email = await ghVerifiedEmail(r.access_token);
+        const existing = await lookupHostedAccount(env, user.login);
+        const account = existing ? await hostedAccountForGithub(env, user.login, email) : null;
         const sid = rand(24);
         // Store only the identity we actually use. The GitHub access token is
         // intentionally NOT persisted: nothing downstream reads session.token,
-        // and keeping a read:user token at rest for 30 days is needless
-        // exposure (data minimization).
+        // and keeping a token at rest for 30 days is needless exposure. The
+        // verified email IS stored: it is the merge key (and what email-based
+        // invites will match), attested by the provider, not user-typed.
         const session = {
           login: user.login,
           avatar_url: user.avatar_url,
           name: user.name || user.login,
           created: new Date().toISOString(),
+          ...(account ? { account_id: account.account_id } : {}),
+          ...(email ? { email } : {}),
         };
         // 30 day TTL
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
@@ -4918,18 +5375,23 @@ export default {
       }
       const session = await getSession(env, req);
       const login = sessionLogin(session);
+      const principal = sessionPrincipal(session);
       // Additive `hint` so a stale CLI that just prints the error body still
       // gets an actionable next step. A current CLI ran the device flow and
       // sent a session cookie, so it never lands here; one that hits this
       // without showing a device code is out of date. Fail-open: no new
       // rejection, just a clearer 401.
-      if (!login) return json({
+      if (!principal) return json({
         error: 'sign_in_required',
         hint: 'Hosted publish needs a GitHub sign-in. If your tdoc CLI did not show a device code to approve, it is out of date — run: /tdoc update --yes',
       }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
-      const issued = await issueHostedToken(env, { ...body, login });
+      // session.email is the provider-attested address captured at sign-in —
+      // passed as its own argument so nothing in the client-controlled body
+      // can pose as it. This is what gives a brand-new publisher their email
+      // merge key at the moment their account is minted.
+      const issued = await issueHostedToken(env, { ...body, login }, session && session.email);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       return json({
         ok: true,
