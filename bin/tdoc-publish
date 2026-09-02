@@ -437,9 +437,10 @@ hosted_github_signin() {
   # they already got that tab once, and if they are mid-approval a second tab
   # would land on top of the page they are typing into.
   echo "[tdoc] Resuming the GitHub sign-in from the previous run — the code is still valid." >&2
-  echo "[tdoc] If you already clicked Authorize, there is nothing more to do." >&2
-  echo "[tdoc] Otherwise open: $uri" >&2
-  echo "[tdoc] and enter this code:" >&2
+  echo "[tdoc] If the human already clicked Authorize, there is nothing more to do." >&2
+  echo "[tdoc] Otherwise, agent: give the human this URL — do not open it yourself:" >&2
+  echo "[tdoc]   $uri" >&2
+  echo "[tdoc] where they enter this code:" >&2
   echo "" >&2
   echo "        $user_code" >&2
   echo "" >&2
@@ -490,7 +491,16 @@ hosted_github_signin() {
     echo "[tdoc] A GitHub page just opened in your browser." >&2
     echo "[tdoc] Enter this code there (it is only shown here):" >&2
   else
-    echo "[tdoc] Open this page in your browser to finish signing in:" >&2
+    # This branch's reader is usually an AGENT, not the human: auto-open only
+    # fails where there is no desktop (cloud sandbox, SSH, CI), and there the
+    # human never sees this terminal. "Open this page in your browser" read as
+    # an instruction to the agent — watched live in ChatGPT: it opened the
+    # URL in its own cloud browser, whose session is not the human's, and hit
+    # a login wall. Address the agent first, and say whose browser counts.
+    echo "[tdoc] Agent: relay the URL and code below to the human, then wait here." >&2
+    echo "[tdoc] Do NOT open the URL in your own browser — your browser is not signed" >&2
+    echo "[tdoc] in as them, and the approval only counts from THEIR browser." >&2
+    echo "[tdoc] Ask the human to open:" >&2
     echo "[tdoc]   $uri" >&2
     echo "[tdoc] and enter this code:" >&2
   fi
@@ -498,7 +508,7 @@ hosted_github_signin() {
   echo "        $user_code" >&2
   echo "" >&2
   [ "${opened:-0}" = "1" ] && echo "[tdoc] (If nothing opened: $uri )" >&2
-  echo "[tdoc] After you click Authorize, I'll continue here." >&2
+  echo "[tdoc] Once it's approved, I'll continue here on my own." >&2
   fi
   # From here the code exists and nothing else will print it. Hand it to the
   # side channel before the first sleep, so a modal polling for it sees the

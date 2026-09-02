@@ -145,6 +145,11 @@ function runSigninOnly(home, port) {
     try {
       assert(code === 0, `expected exit 0, got ${code}:\n${stderr}`);
       assert(stderr.includes('Resuming the GitHub sign-in'), `no resume message:\n${stderr}`);
+      // The reader of this stderr is usually an agent. It must be told, in
+      // words, not to complete the approval in its own browser — a ChatGPT
+      // session was watched doing exactly that off the old wording.
+      assert(stderr.includes('do not open it yourself'),
+        `resume message lost its agent instruction:\n${stderr}`);
       assert(stderr.includes('RSME-4321'), `resumed code not shown again:\n${stderr}`);
       assert(hits.start === 0, `device/start was called ${hits.start}x on resume`);
       assert(hits.lastPolledCode === 'resumable-device-code',
@@ -168,6 +173,13 @@ function runSigninOnly(home, port) {
       assert(!stderr.includes('Resuming'), `resumed an expired code:\n${stderr}`);
       assert(hits.start === 1, `device/start called ${hits.start}x, expected 1`);
       assert(hits.lastPolledCode === 'fresh-device-code', 'did not poll the fresh code');
+      // Fresh-code path, no auto-open (TDOC_NO_BROWSER=1): the exact branch a
+      // cloud agent reads. The agent line and whose-browser-counts line must
+      // both be there.
+      assert(stderr.includes('Agent: relay the URL and code'),
+        `fresh sign-in lost its agent-first instruction:\n${stderr}`);
+      assert(stderr.includes('THEIR browser'),
+        `fresh sign-in no longer says whose browser counts:\n${stderr}`);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
