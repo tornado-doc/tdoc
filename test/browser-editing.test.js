@@ -172,6 +172,49 @@ async function chooseMode(page, label) {
       await frame.evaluate(() => window.getSelection().removeAllRanges());
     });
 
+    await test('while a card is open, a click anywhere outside it only dismisses', async () => {
+      // Dismissal must not hit-test. Whatever is under the pointer — another
+      // anchor, plain prose, blank space — the click that closes a card does
+      // not also open the next thing.
+      const box = await page.locator('.tdoc-doc-frame').boundingBox();
+      const geometry = await frame.evaluate(() => {
+        const paragraph = document.querySelector('#editable-paragraph');
+        const text = paragraph.firstChild;
+        const spot = (from, to) => {
+          const range = document.createRange();
+          range.setStart(text, from); range.setEnd(text, to);
+          const rect = range.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        };
+        const rect = paragraph.getBoundingClientRect();
+        return { first: spot(0, 4), later: spot(10, 18), blank: { x: rect.right - 20, y: rect.top + 12 } };
+      });
+      const clickAt = async (point) => {
+        await page.mouse.click(box.x + point.x, box.y + point.y);
+        await page.waitForTimeout(250);
+      };
+      const openCount = () => page.locator('.tdoc-popup, .tdoc-margin-comment.active').count();
+
+      await clickAt(geometry.first);
+      assert(await openCount() > 0, 'a click on a word no longer opens the composer');
+
+      // A second word: the open composer must close, and this word must not
+      // become a new one.
+      await clickAt(geometry.later);
+      assert(await openCount() === 0, 'clicking another word opened something instead of dismissing');
+
+      await clickAt(geometry.first);
+      assert(await openCount() > 0, 'precondition: composer did not reopen');
+      await clickAt(geometry.blank);
+      assert(await openCount() === 0, 'clicking blank space left the composer open');
+
+      // With nothing open, a click on a word still starts a comment.
+      await clickAt(geometry.first);
+      assert(await openCount() > 0, 'dismissal state leaked: a fresh click stopped opening the composer');
+      await page.locator('.tdoc-popup button.x').click();
+      await frame.evaluate(() => window.getSelection().removeAllRanges());
+    });
+
     await test('Read mode opens existing anchors but does not create a comment selection', async () => {
       await chooseMode(page, 'Read');
       await selectParagraph(frame);

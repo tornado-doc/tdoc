@@ -234,6 +234,13 @@ export function DocumentShell({ boot, config }) {
   });
   editorRef.current = editor;
 
+  // The frame decides whether a click dismisses or acts, so it has to know when
+  // the shell has something open. While it does, the next click anywhere in the
+  // document only closes it — no hit-testing, no opening the comment underneath.
+  useEffect(() => {
+    bridge.send({ type: 'tdoc:uiOpen', open: Boolean(openCommentId || openClusterKey || composer) });
+  }, [bridge.send, composer, openClusterKey, openCommentId]);
+
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
     setOpenClusterKey(null);
