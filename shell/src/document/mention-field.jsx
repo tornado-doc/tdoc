@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useGithubUserSearch } from './github-user-search.js';
 import { insertMention, matchMentionable, mentionQueryAt, splitMentions } from './mentions.js';
 
@@ -8,6 +9,11 @@ import { insertMention, matchMentionable, mentionQueryAt, splitMentions } from '
 // The doc's own people answer first and instantly. GitHub's search is only
 // reached when they do not match — its unauthenticated limit is 10/min per
 // visitor and the Share panel's invite field spends from the same budget.
+// Kept in step with `.tdoc-mention-menu`'s max-height in chrome.css: the
+// placement needs to know how tall the menu can get to decide which side of
+// the textarea it fits on.
+const MENU_MAX_HEIGHT = 184;
+
 export function MentionField({
   value,
   onChange,
@@ -48,6 +54,42 @@ export function MentionField({
   }, [value]);
 
   useEffect(() => { setActive(0); }, [query?.query]);
+
+  // Where to draw the menu, in viewport coordinates. It renders in a portal
+  // rather than under the textarea because the comment card is a scroll
+  // container now (#363) and an absolutely-positioned child of one is clipped
+  // at its edge — the list would be cut in half the moment the composer sits
+  // near the bottom of a tall thread. Fixed coordinates measured off the
+  // textarea keep it whole and keep it glued to the field while that container
+  // scrolls; it flips above the box when there is more room up there.
+  const [menuBox, setMenuBox] = useState(null);
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuBox(null);
+      return undefined;
+    }
+    const place = () => {
+      const box = ref.current;
+      if (!box) return;
+      const rect = box.getBoundingClientRect();
+      const below = window.innerHeight - rect.bottom;
+      setMenuBox({
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+        ...(below < MENU_MAX_HEIGHT + 8 && rect.top > below
+          ? { bottom: Math.round(window.innerHeight - rect.top + 4) }
+          : { top: Math.round(rect.bottom + 4) }),
+      });
+    };
+    place();
+    // `true`: the scroll that moves the field is the card's, not the window's.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, matches.length]);
 
   const syncQuery = (element) => {
     setQuery(mentionQueryAt(element.value, element.selectionStart));
@@ -106,8 +148,8 @@ export function MentionField({
         onBlur={() => setQuery(null)}
         onKeyDown={onKeyDown}
       />
-      {open ? (
-        <div className="tdoc-mention-menu" id="tdoc-mention-menu" role="listbox">
+      {open && menuBox ? createPortal((
+        <div className="tdoc-mention-menu" id="tdoc-mention-menu" role="listbox" style={menuBox}>
           {matches.map((person, index) => (
             <button
               key={person.login}
@@ -129,7 +171,7 @@ export function MentionField({
             </button>
           ))}
         </div>
-      ) : null}
+      ), document.body) : null}
     </div>
   );
 }

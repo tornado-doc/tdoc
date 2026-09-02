@@ -35,7 +35,7 @@
 set -euo pipefail
 # BYOK: tell the user immediately when this checkout is behind origin/main.
 # Human nag on stderr; discard the machine line (skill preamble / doctor).
-"$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
+bash "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
 
 usage() {
   cat >&2 <<'EOF'
@@ -298,10 +298,10 @@ require_vercel() {
 # to be read aloud off a screen — but it is a live credential-shaped token for
 # as long as it lasts, so it gets the same 600 the upload token gets.
 write_pending_signin() {
-  local code="$1" uri="$2" expires_in="$3" opened="$4"
+  local code="$1" uri="$2" expires_in="$3" opened="$4" dcode="$5" wbase="$6"
   ( umask 077
     node -e '
-      const [code, uri, expiresIn, opened, slug, pid] = process.argv.slice(1);
+      const [code, uri, expiresIn, opened, slug, pid, dcode, wbase] = process.argv.slice(1);
       process.stdout.write(JSON.stringify({
         user_code: code,
         verification_uri: uri,
@@ -309,8 +309,17 @@ write_pending_signin() {
         opened: opened === "1",
         slug,
         pid: Number(pid),
+        // device_code is what makes a sign-in survive its process: a later run
+        // reads it and keeps polling, so an approval granted while no tdoc was
+        // alive still lands. It can redeem that approval, which is why this
+        // file is 0600 — the same standing as the upload token that replaces
+        // it. The local server reads this file for the publish modal and must
+        // never serve device_code (its handler whitelists fields; a test pins
+        // that).
+        device_code: dcode,
+        base: wbase,
       }));
-    ' "$code" "$uri" "$expires_in" "$opened" "$SLUG" "$$" > "$PENDING_SIGNIN_FILE".tmp 2>/dev/null
+    ' "$code" "$uri" "$expires_in" "$opened" "$SLUG" "$$" "$dcode" "$wbase" > "$PENDING_SIGNIN_FILE".tmp 2>/dev/null
   ) || { rm -f "$PENDING_SIGNIN_FILE".tmp; return 0; }
   chmod 600 "$PENDING_SIGNIN_FILE".tmp 2>/dev/null || true
   mv -f "$PENDING_SIGNIN_FILE".tmp "$PENDING_SIGNIN_FILE" 2>/dev/null || true
@@ -323,10 +332,48 @@ clear_pending_signin() { rm -f "$PENDING_SIGNIN_FILE" "$PENDING_SIGNIN_FILE".tmp
 hosted_github_signin() {
   local base="$1" cookiejar="$2"
   local resp http payload
+  local user_code device_code uri interval expires resumed=0
+
+  # A sign-in that lost its process is not a sign-in that failed. Agent
+  # harnesses kill long-waiting shells (observed in Codex cloud: the process
+  # died mid-poll, the human approved into the void, and the leftover pending
+  # file was the fossil). The device_code in that file is still redeemable
+  # until it expires, so the recovery story is: run the same command again and
+  # it keeps polling the same code — no flag to learn, approvals never wasted.
+  if [ -f "$PENDING_SIGNIN_FILE" ]; then
+    local pending
+    pending="$(node -e '
+      const fs = require("fs");
+      try {
+        const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        const left = Math.floor((Number(p.expires_at) - Date.now()) / 1000);
+        if (!p.device_code || !p.user_code || !p.verification_uri) process.exit(0);
+        if (p.base !== process.argv[2]) process.exit(0);
+        // 15s floor: a code about to die mid-first-poll is not worth resuming.
+        if (!(left >= 15)) process.exit(0);
+        process.stdout.write([p.device_code, p.user_code, p.verification_uri, left].join("\n"));
+      } catch {}
+    ' "$PENDING_SIGNIN_FILE" "$base" 2>/dev/null)" || pending=""
+    if [ -n "$pending" ]; then
+      device_code="$(printf '%s\n' "$pending" | sed -n 1p)"
+      user_code="$(printf '%s\n' "$pending" | sed -n 2p)"
+      uri="$(printf '%s\n' "$pending" | sed -n 3p)"
+      expires="$(printf '%s\n' "$pending" | sed -n 4p)"
+      interval=5
+      resumed=1
+    else
+      # Expired, another base, or a pre-resume-era file without device_code:
+      # all it can do is advertise a code nobody is polling for. Clear it so
+      # the publish modal never shows a dead code.
+      clear_pending_signin
+    fi
+  fi
+
+  if [ "$resumed" = "0" ]; then
   resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
     -X POST "$base/api/auth/device/start" -H "Content-Type: application/json" -d '{}')" || {
       fail_with_agent_prompt "hosted GitHub sign-in is unreachable" \
-        "The hosted tdoc service at $base did not start GitHub sign-in. Retry '/tdoc publish $SLUG' later, or self-host with '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+        "The hosted tdoc service at $base did not start GitHub sign-in. If this is a sandboxed agent environment, its network policy may not allow $base — ask for that host to be allowed, or retry '/tdoc publish $SLUG' later. To self-host instead: '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
     }
   http="${resp##*$'\n'}"
   payload="${resp%$'\n'*}"
@@ -335,7 +382,6 @@ hosted_github_signin() {
     printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
     exit 1
   fi
-  local user_code device_code uri interval expires
   user_code="$(printf '%s' "$payload" | json_get user_code)"
   device_code="$(printf '%s' "$payload" | json_get device_code)"
   uri="$(printf '%s' "$payload" | json_get verification_uri_complete)"
@@ -350,6 +396,7 @@ hosted_github_signin() {
   case "$interval" in ''|*[!0-9]*) interval=5 ;; esac
   [ "$interval" -lt 5 ] && interval=5
   case "$expires" in ''|*[!0-9]*) expires=900 ;; esac
+  fi
 
   WAITING_SHOWN=0
   WAITING_TTY=0
@@ -384,6 +431,19 @@ hosted_github_signin() {
   # channel and must never be reported as a GitHub denial.
   trap 'stop_hosted_signin "GitHub sign-in canceled." 130' INT
 
+  if [ "$resumed" = "1" ]; then
+  # Same code as last time, on purpose: if the human already clicked Authorize
+  # while no tdoc was alive, the next poll lands it. No auto-open on resume —
+  # they already got that tab once, and if they are mid-approval a second tab
+  # would land on top of the page they are typing into.
+  echo "[tdoc] Resuming the GitHub sign-in from the previous run — the code is still valid." >&2
+  echo "[tdoc] If you already clicked Authorize, there is nothing more to do." >&2
+  echo "[tdoc] Otherwise open: $uri" >&2
+  echo "[tdoc] and enter this code:" >&2
+  echo "" >&2
+  echo "        $user_code" >&2
+  echo "" >&2
+  else
   # No attempt to pre-fill the code in the URL. GitHub returns no
   # verification_uri_complete, and appending ?user_code= does NOT work in
   # practice: a signed-out visitor is sent to the account chooser first and the
@@ -439,10 +499,13 @@ hosted_github_signin() {
   echo "" >&2
   [ "${opened:-0}" = "1" ] && echo "[tdoc] (If nothing opened: $uri )" >&2
   echo "[tdoc] After you click Authorize, I'll continue here." >&2
+  fi
   # From here the code exists and nothing else will print it. Hand it to the
   # side channel before the first sleep, so a modal polling for it sees the
-  # code on its next tick rather than after the whole flow resolves.
-  write_pending_signin "$user_code" "$uri" "$expires" "${opened:-0}"
+  # code on its next tick rather than after the whole flow resolves. On resume
+  # this rewrites the file with this process's pid, so the local server's
+  # liveness guard tracks the poller that is actually alive.
+  write_pending_signin "$user_code" "$uri" "$expires" "${opened:-0}" "$device_code" "$base"
   local waited=0 err
   show_signin_wait "$expires"
   while [ "$waited" -lt "$expires" ]; do

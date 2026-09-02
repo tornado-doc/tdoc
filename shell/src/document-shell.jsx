@@ -23,6 +23,8 @@ import {
   EditorToolbar,
   LinkDialog,
   SaveConflictDialog,
+  SaveNoticeDialog,
+  saveNoticeDismissed,
 } from './document/editor-toolbar.jsx';
 import {
   DeleteDocumentDialog,
@@ -108,6 +110,7 @@ export function DocumentShell({ boot, config }) {
   const [openClusterKey, setOpenClusterKey] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [reanchorId, setReanchorId] = useState(null);
+  const [saveNoticeOpen, setSaveNoticeOpen] = useState(false);
   const [dialog, setDialog] = useState(null);
   const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
@@ -311,6 +314,16 @@ export function DocumentShell({ boot, config }) {
     setDeepTarget(null);
   }, [bridge.layout.scrollY, bridge.send, clusters, comments.comments, deepTarget, narrow]);
 
+  // Save explains itself the first time, then gets out of the way for good if
+  // the author asked it to.
+  const requestSave = () => {
+    if (saveNoticeDismissed()) {
+      editor.save();
+      return;
+    }
+    setSaveNoticeOpen(true);
+  };
+
   const closeComposer = () => {
     setComposer(null);
     bridge.send({ type: 'tdoc:clearPending' });
@@ -369,8 +382,20 @@ export function DocumentShell({ boot, config }) {
 
   const reactTo = (commentId, emoji) => attempt(() => comments.react(commentId, emoji));
 
+  // Closing the card was unconditional, which hid the two cases where there is
+  // still something to look at: deleting a comment that holds replies leaves a
+  // tombstone with the thread under it (#354), and deleting a reply never
+  // touched the comment it hung from at all. Either way the card vanished and
+  // took the surviving conversation off screen — a delete that looked like it
+  // had removed far more than it did. It closes only when the comment the card
+  // is showing is really gone.
   const removeComment = async (id) => {
-    if ((await attempt(() => comments.remove(id))).ok) setOpenCommentId(null);
+    const { ok } = await attempt(() => comments.remove(id));
+    if (!ok) return;
+    // Not the mutation's own response — that is `{ ok: true }` either way.
+    // The refreshed list is what says whether this card still has anything on
+    // it. (comments.comments is the pre-refresh render's state here.)
+    if (!comments.latest.current.some((c) => c.id === openCommentId)) setOpenCommentId(null);
   };
 
   const removeAnchor = async () => {
@@ -534,7 +559,7 @@ export function DocumentShell({ boot, config }) {
             else editor.format(command, value);
           }}
           onDiscard={editor.discard}
-          onSave={editor.save}
+          onSave={requestSave}
         />
       ) : null}
 
@@ -647,6 +672,11 @@ export function DocumentShell({ boot, config }) {
       <MessageDialog
         message={dialog?.type === 'message' ? dialog : null}
         onOpenChange={(open) => !open && setDialog(null)}
+      />
+      <SaveNoticeDialog
+        open={saveNoticeOpen}
+        onOpenChange={setSaveNoticeOpen}
+        onConfirm={editor.save}
       />
       <SaveConflictDialog conflict={editor.conflict} onClose={editor.closeConflict} />
       <LinkDialog

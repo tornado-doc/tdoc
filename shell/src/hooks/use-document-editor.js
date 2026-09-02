@@ -16,8 +16,19 @@ export function useDocumentEditor({
   onDisableCommentSelection,
 }) {
   const requests = useRef(new Map());
+  // Set for the save's own navigation, so the unload warning below can tell a
+  // deliberate hop to the new version from a tab closing mid-edit.
+  const leavingForSave = useRef(false);
   const storeKey = useMemo(() => draftKey(config), [config]);
-  const [mode, setMode] = useState(() => (config.canComment ? 'comment' : 'read'));
+  // A doc created from scratch arrives at ?edit=1: it is blank, so dropping the
+  // author in read mode would show an empty page and hide the one control they
+  // need. `tdoc:ready` re-sends whatever mode is current, so the frame picks
+  // this up even though it is set before the iframe has loaded.
+  const [mode, setMode] = useState(() => {
+    const wantsEdit = new URLSearchParams(location.search).get('edit') === '1';
+    if (wantsEdit && config.canEdit) return 'edit';
+    return config.canComment ? 'comment' : 'read';
+  });
   const [dirty, setDirty] = useState(false);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -37,7 +48,14 @@ export function useDocumentEditor({
 
   useEffect(() => {
     if (!dirty) return undefined;
-    const warn = (event) => { event.preventDefault(); event.returnValue = ''; };
+    const warn = (event) => {
+      // A save commits the draft server-side and then navigates to the version
+      // it just created. Warning about unsaved work there is a lie, and it put
+      // a browser confirm in front of the author every single time they saved.
+      if (leavingForSave.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
@@ -72,7 +90,15 @@ export function useDocumentEditor({
       const html = await requestDocument();
       const result = await saveDocumentVersion(config.slug, config.version, html);
       await clearDraft(storeKey);
-      location.href = result.url;
+      leavingForSave.current = true;
+      // Stay in the editor on the version that was just written. Saving is a
+      // checkpoint in the middle of writing, not the end of it — dropping the
+      // author into read mode made them find the mode switch again after every
+      // save, which is worst on a doc they only just started. Built through URL
+      // so a response that ever carries a query string still composes.
+      const next = new URL(result.url, location.origin);
+      next.searchParams.set('edit', '1');
+      location.href = `${next.pathname}${next.search}`;
     } catch (error) {
       if (error.status === 409 && error.body?.error === 'version_conflict') {
         const latestVersion = Number(error.body.latestVersion);

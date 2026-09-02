@@ -223,6 +223,52 @@ function childrenOf(replies, parentId, rootId) {
   return replies.filter((reply) => (reply.parent_id || rootId) === parentId);
 }
 
+// Past this depth a thread stops indenting. Each level costs about 24px of a
+// 306px card, so a chain that keeps nesting ends up reading in a column too
+// narrow to read — and a narrower column wraps more, which makes the card
+// taller, which is the other half of #363. Reddit stops at a similar point
+// and offers "continue this thread"; here the whole thread is already in
+// memory, so the continuation is a fold rather than another page.
+const REPLY_INDENT_CAP = 4;
+
+// Everything hanging off a reply, at any depth, in thread order. What the
+// continuation shows: the shape is flattened, not truncated — every reply is
+// still there, each one saying who it answers.
+function descendantsOf(replies, parentId, rootId) {
+  const out = [];
+  for (const kid of childrenOf(replies, parentId, rootId)) {
+    out.push(kid);
+    out.push(...descendantsOf(replies, kid.id, rootId));
+  }
+  return out;
+}
+
+// Who a reply is answering, for the line a flattened reply carries in place of
+// the indentation it lost.
+function answers(replies, reply, rootComment) {
+  const parent = reply.parent_id === rootComment.id || !reply.parent_id
+    ? rootComment
+    : replies.find((other) => other.id === reply.parent_id) || rootComment;
+  return parent.author?.login || parent.author?.name || '';
+}
+
+// A comment or reply whose text was taken down but whose slot still holds a
+// thread together (#354). Everything that acts on the words is gone with them
+// — no reply, no react, no delete, no re-anchor — but the name and the place
+// stay, so the answers under it still read as answers to someone.
+function Tombstone({ item, children }) {
+  return (
+    <>
+      <Author author={item.author} />
+      <div className="text tdoc-deleted-text">Comment deleted</div>
+      <div className="meta">
+        <span>{formatCreated(item.created)}</span>
+      </div>
+      {children}
+    </>
+  );
+}
+
 // A reply carries the same affordances as the comment it hangs under: react,
 // reply, and delete-your-own. Between the overlay rewrite and the React port
 // these were "deferred", which left every answer in a thread a dead end.
@@ -230,7 +276,10 @@ function ReplyCard({
   reply,
   replies,
   rootId,
+  rootComment,
   depth,
+  expandAll = false,
+  flattened = false,
   currentUser,
   isOwner,
   mentionable,
@@ -246,9 +295,84 @@ function ReplyCard({
   const kids = childrenOf(replies, reply.id, rootId);
   const reacted = hasReactions(reply);
   const author = reply.author?.login || reply.author?.name || '';
+  // A deep link lands on a reply that may live inside a continuation, so an
+  // expanded thread opens its continuations too — otherwise the link arrives
+  // at a thread with its own target folded away.
+  const [tailOpen, setTailOpen] = useState(expandAll);
+  const capped = depth >= REPLY_INDENT_CAP;
+  // A flattened reply's children are already in the list it belongs to.
+  const tail = flattened ? [] : (capped ? descendantsOf(replies, reply.id, rootId) : []);
+
+  const kidOf = (kid, kidDepth, isFlat) => (
+    <ReplyCard
+      key={kid.id}
+      reply={kid}
+      replies={replies}
+      rootId={rootId}
+      rootComment={rootComment}
+      depth={kidDepth}
+      expandAll={expandAll}
+      flattened={isFlat}
+      currentUser={currentUser}
+      isOwner={isOwner}
+      mentionable={mentionable}
+      replyTarget={replyTarget}
+      onReplyTarget={onReplyTarget}
+      editTarget={editTarget}
+      onEditTarget={onEditTarget}
+      onReply={onReply}
+      onReact={onReact}
+      onDelete={onDelete}
+      onEdit={onEdit}
+    />
+  );
+
+  let kidCards = null;
+  if (flattened) {
+    kidCards = null;
+  } else if (capped) {
+    kidCards = tail.length ? (
+      <>
+        <button
+          type="button"
+          className={`tdoc-thread-more${tailOpen ? ' open' : ''}`}
+          onClick={() => setTailOpen((open) => !open)}
+        >
+          <ChevronRight className="chev" size={10} />
+          {tailOpen ? 'hide the rest of this thread' : `continue this thread · ${tail.length}`}
+        </button>
+        {tailOpen ? (
+          <div className="tdoc-thread-tail">
+            {tail.map((kid) => kidOf(kid, depth, true))}
+          </div>
+        ) : null}
+      </>
+    ) : null;
+  } else if (kids.length) {
+    kidCards = <div className="tdoc-reply-kids">{kids.map((kid) => kidOf(kid, depth + 1, false))}</div>;
+  }
+
+  if (reply.deleted) {
+    return (
+      <div
+        className={`tdoc-reply tdoc-deleted${flattened ? ' tdoc-reply-flat' : ''}`}
+        data-comment-id={reply.id}
+        data-depth={depth}
+      >
+        <Tombstone item={reply}>{kidCards}</Tombstone>
+      </div>
+    );
+  }
 
   return (
-    <div className="tdoc-reply" data-comment-id={reply.id} data-depth={depth}>
+    <div
+      className={`tdoc-reply${flattened ? ' tdoc-reply-flat' : ''}`}
+      data-comment-id={reply.id}
+      data-depth={depth}
+    >
+      {flattened ? (
+        <div className="tdoc-reply-to">Replying to @{answers(replies, reply, rootComment)}</div>
+      ) : null}
       <Author author={reply.author} />
       {editTarget === reply.id ? (
         <EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} />
@@ -291,30 +415,7 @@ function ReplyCard({
         <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} mentionable={mentionable} />
       ) : null}
 
-      {kids.length ? (
-        <div className="tdoc-reply-kids">
-          {kids.map((kid) => (
-            <ReplyCard
-              key={kid.id}
-              reply={kid}
-              replies={replies}
-              rootId={rootId}
-              depth={depth + 1}
-              currentUser={currentUser}
-              isOwner={isOwner}
-              mentionable={mentionable}
-              replyTarget={replyTarget}
-              onReplyTarget={onReplyTarget}
-              editTarget={editTarget}
-              onEditTarget={onEditTarget}
-              onReply={onReply}
-              onReact={onReact}
-              onDelete={onDelete}
-              onEdit={onEdit}
-            />
-          ))}
-        </div>
-      ) : null}
+      {kidCards}
     </div>
   );
 }
@@ -393,7 +494,61 @@ export function CommentCard({
     selected ? 'tdoc-current-comment' : '',
     comment.status === 'applied' ? 'tdoc-resolved' : '',
     unanchored ? 'tdoc-unanchored' : '',
+    comment.deleted ? 'tdoc-deleted' : '',
   ].filter(Boolean).join(' ');
+
+  // The thread block is the same whether the comment above it is still there
+  // or is a tombstone — the replies are why the tombstone exists.
+  const threadBlock = replies.length ? (
+    <>
+      <button
+        type="button"
+        className={`tdoc-replies-toggle${repliesOpen ? ' open' : ''}`}
+        onClick={() => setRepliesOpen((open) => !open)}
+      >
+        <ChevronRight className="chev" size={10} />
+        {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+      </button>
+      <div className={`tdoc-replies${repliesOpen ? ' open' : ''}`}>
+        {rootReplies.map((reply) => (
+          <ReplyCard
+            key={reply.id}
+            reply={reply}
+            replies={replies}
+            rootId={comment.id}
+            rootComment={comment}
+            depth={1}
+            expandAll={expandReplies}
+            currentUser={currentUser}
+            isOwner={isOwner}
+            mentionable={mentionable}
+            replyTarget={replyTarget}
+            onReplyTarget={setReplyTarget}
+            editTarget={editTarget}
+            onEditTarget={setEditTarget}
+            onReply={submitReply}
+            onReact={onReact}
+            onDelete={onDelete}
+            onEdit={saveEdit}
+          />
+        ))}
+      </div>
+    </>
+  ) : null;
+
+  if (comment.deleted) {
+    return (
+      <article
+        ref={cardRef}
+        className={className}
+        data-comment-id={comment.id}
+        style={floating ? { ...position, top: clampedTop ?? position.top } : undefined}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <Tombstone item={comment}>{threadBlock}</Tombstone>
+      </article>
+    );
+  }
 
   return (
     <article
@@ -465,40 +620,7 @@ export function CommentCard({
         </span>
       </div>
 
-      {replies.length ? (
-        <>
-          <button
-            type="button"
-            className={`tdoc-replies-toggle${repliesOpen ? ' open' : ''}`}
-            onClick={() => setRepliesOpen((open) => !open)}
-          >
-            <ChevronRight className="chev" size={10} />
-            {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
-          </button>
-          <div className={`tdoc-replies${repliesOpen ? ' open' : ''}`}>
-            {rootReplies.map((reply) => (
-              <ReplyCard
-                key={reply.id}
-                reply={reply}
-                replies={replies}
-                rootId={comment.id}
-                depth={1}
-                currentUser={currentUser}
-                isOwner={isOwner}
-                mentionable={mentionable}
-                replyTarget={replyTarget}
-                onReplyTarget={setReplyTarget}
-                editTarget={editTarget}
-                onEditTarget={setEditTarget}
-                onReply={submitReply}
-                onReact={onReact}
-                onDelete={onDelete}
-                onEdit={saveEdit}
-              />
-            ))}
-          </div>
-        </>
-      ) : null}
+      {threadBlock}
 
       {replyTarget === comment.id ? (
         <ReplyForm commentId={comment.id} onReply={submitReply} mentionable={mentionable} />

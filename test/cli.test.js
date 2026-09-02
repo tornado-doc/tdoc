@@ -1161,7 +1161,9 @@ t('server spawns CLIs with the running interpreter on PATH', () => {
   assert(/function childEnv\(\)/.test(src), 'childEnv helper missing');
   assert(/path\.dirname\(process\.execPath\)/.test(src),
     'childEnv does not derive the node directory from process.execPath');
-  const spawns = src.split('\n').filter(l => /\bspawn\(bin\b/.test(l));
+  // Spawned as `spawn('bash', [bin, ...])` since the noexec fix — the skill
+  // dir may be a noexec mount, so the interpreter is explicit.
+  const spawns = src.split('\n').filter(l => /\bspawn\('bash', \[bin\b/.test(l));
   assert(spawns.length >= 2, `expected at least 2 spawn sites, found ${spawns.length}`);
   for (const s of spawns) {
     assert(/env:\s*childEnv\(\)/.test(s),
@@ -1259,7 +1261,7 @@ t('SKILL.md resolves its own directory at runtime, not at install time', () => {
   assert(/TDOC_SKILL_ROOT=/.test(skill), 'no runtime resolution of the skill directory');
   assert(/tdoc-update" --auto/.test(skill) || /tdoc-update" --auto/.test(skill.replace(/\n\s*/g, ' ')),
     'the automatic update call is gone');
-  assert(/SKILL_DIR="\$TDOC_SKILL_ROOT"\s+"\$TDOC_SKILL_ROOT\/bin\/tdoc-update" --auto/.test(skill),
+  assert(/SKILL_DIR="\$TDOC_SKILL_ROOT"\s+bash "\$TDOC_SKILL_ROOT\/bin\/tdoc-update" --auto/.test(skill),
     'the preamble does not pin old updaters to the resolved active checkout');
 
   // And the guard must actually pass against a real checkout.

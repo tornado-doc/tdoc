@@ -168,7 +168,7 @@ if [ -f "$CONFIG_FILE" ]; then
   if [ "$YES" = "1" ]; then
     if [ -n "$PUBLISHED_SLUG" ]; then
       echo "[tdoc-update] --yes: redeploying worker (and uploading $PUBLISHED_SLUG)..."
-      "$SKILL_DIR/bin/tdoc-publish" "$PUBLISHED_SLUG" || true
+      bash "$SKILL_DIR/bin/tdoc-publish" "$PUBLISHED_SLUG" || true
     else
       # No local doc to re-publish — calling tdoc-publish with an empty slug
       # would just hit its usage error (silently, via || true). Skip cleanly.

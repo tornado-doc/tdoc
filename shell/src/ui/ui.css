@@ -44,6 +44,7 @@
 .tdoc-margin-comment button.tdoc-reply-toggle,
 .tdoc-margin-comment button.tdoc-edit-toggle,
 .tdoc-margin-comment button.tdoc-replies-toggle,
+.tdoc-margin-comment button.tdoc-thread-more,
 .tdoc-margin-comment button.tdoc-reanchor-btn,
 button.tdoc-cluster-row,
 button.tdoc-drawer-handle,
@@ -59,10 +60,14 @@ button.tdoc-drawer-handle,
   cursor: pointer;
 }
 
-.tdoc-margin-comment button.tdoc-replies-toggle {
+.tdoc-margin-comment button.tdoc-replies-toggle,
+.tdoc-margin-comment button.tdoc-thread-more {
   display: inline-flex;
   align-items: center;
 }
+
+/* Reset above swallows the colour, same as the other text buttons. */
+.tdoc-margin-comment button.tdoc-thread-more { color: var(--td-accent); }
 
 button.tdoc-cluster-row {
   width: 100%;
@@ -304,6 +309,123 @@ button.tdoc-pin {
 
 .tdoc-recipe-wrap {
   position: relative;
+}
+
+/* The "don't show this again" line in the save notice. */
+.tdoc-save-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--td-ink-soft, #6b6b73);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tdoc-save-remember input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--td-accent);
+  cursor: pointer;
+}
+
+/* "Create a doc" is a fork: two cards, one per answer. They stack below the
+   narrow breakpoint rather than shrinking into unreadable columns. */
+.mk-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 560px) {
+  .mk-cards { grid-template-columns: 1fr; }
+}
+
+.tdoc-modal .mk-cards button.mk-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  height: 100%;
+  padding: 16px;
+  border: 1px solid var(--td-line);
+  border-radius: 12px;
+  background: var(--td-ground);
+  color: var(--td-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, transform .12s;
+}
+
+.tdoc-modal .mk-cards button.mk-card:hover:not(:disabled) {
+  border-color: var(--td-accent);
+  background: var(--td-surface-2);
+}
+
+.tdoc-modal .mk-cards button.mk-card:disabled {
+  cursor: default;
+  opacity: .7;
+}
+
+.mk-card-icon { color: var(--td-accent); }
+
+.mk-card strong { font-size: 14px; }
+
+.mk-card span {
+  color: var(--td-ink-soft, #6b6b73);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mk-card em {
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--td-accent);
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The recipe step, one click in from its card. */
+.tdoc-modal button.mk-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--td-ink-soft, #6b6b73);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tdoc-modal button.mk-back:hover { color: var(--td-ink); }
+
+.mk-scratch-error {
+  margin: 8px 0 0;
+  color: #c0392b;
+  font-size: 13px;
+}
+
+/* A labelled rule between the two paths, so neither reads as a footnote of the
+   other. */
+.mk-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 14px;
+  color: #98989f;
+  font-size: 12px;
+}
+
+.mk-or::before,
+.mk-or::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--td-line);
 }
 
 .tdoc-recipe-wrap code {

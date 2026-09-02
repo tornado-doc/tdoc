@@ -71,6 +71,10 @@ function pendingSignin(slug) {
     // exists and is not ours, which still counts as alive.
     try { process.kill(p.pid, 0); } catch (e) { if (e.code !== 'EPERM') return null; }
   }
+  // Explicit whitelist, and it is a contract: the file also carries
+  // device_code (what makes a sign-in resumable), which can REDEEM the
+  // approval. The modal only ever needs the user-facing half. Never add
+  // device_code here — test/publish-signin.test.js pins this.
   return {
     user_code: String(p.user_code),
     verification_uri: String(p.verification_uri),
@@ -86,6 +90,45 @@ function e2eIdentity() {
 function inboxFile(login) {
   return path.join(ROOT, `.inbox-${String(login).toLowerCase()}.json`);
 }
+// Mirrors the Worker's asTombstone: the words go, the name stays (GitHub's
+// "user deleted this"), and everything the words earned goes with them.
+function localTombstone(record) {
+  const out = {
+    ...record,
+    text: '',
+    deleted: true,
+    reactions: {},
+    mentions: [],
+    status: 'open',
+  };
+  delete out.edited;
+  delete out.applied_in;
+  delete out.agent_status;
+  delete out.agent_actor;
+  return out;
+}
+
+// The Worker gets this for free — it folds, so a tombstone with nothing left
+// under it simply stops being emitted. Local storage is written, not folded,
+// so the collapse has to happen at delete time: drop tombstoned replies that
+// no longer hold anything, repeatedly (a chain of them collapses), and then
+// the record itself if it is a tombstone with an empty thread. Returns false
+// when the whole comment should go.
+function collapseLocalTombstones(comment) {
+  const replies = comment.replies || [];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = replies.length - 1; i >= 0; i--) {
+      const r = replies[i];
+      if (!r.deleted) continue;
+      if (replies.some(other => other.parent_id === r.id)) continue;
+      replies.splice(i, 1);
+      changed = true;
+    }
+  }
+  return !(comment.deleted && !replies.length);
+}
+
 function localRecordAuthor(comments, id) {
   for (const c of comments) {
     if (c.id === id) return c.author || null;
@@ -260,6 +303,118 @@ function readBody(req, maxBytes = MAX_BODY_BYTES) {
 // comment routes). Returns the slug if safe, else null.
 function safeSlug(slug) {
   return (typeof slug === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(slug)) ? slug : null;
+}
+
+// A doc created in the browser has no title yet — you type it into the page —
+// so its slug cannot be derived from one. It gets an opaque id instead, the
+// way Google Docs and Notion address a document: unique by construction, so
+// there is no de-duplication question and no rename when the title changes.
+// The caller supplies random bytes (crypto.getRandomValues / randomBytes).
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocSlug(bytes) {
+  // No look-alike characters: a slug gets read aloud and retyped.
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += alphabet[(Number(bytes && bytes[i]) || 0) % alphabet.length];
+  return `d-${out}`;
+}
+
+// The document a "start from scratch" create writes as v1. Deliberately empty,
+// heading included: the author types the title into the page, and the save path
+// reads it back out. Both placeholders paint only while the editor is live
+// (`html[data-tdoc-editing]`), so a reader of a still-empty doc sees a blank
+// page rather than instructions meant for its author. They are :empty rules
+// rather than seeded text, so the hints come back whenever a line is cleared.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Untitled</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #fff; color: #17171a;
+    font: 17px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  /* The editor's focus ring frames this element. On a doc with content that is
+     the whole page; on a blank one, without a floor, it would draw a small box
+     around two empty lines — and clicking below it would miss the editor. */
+  main { max-width: 46rem; margin: 0 auto; padding: 4.5rem 1.5rem 8rem; min-height: 60vh; }
+  h1 { font-size: 2.1rem; line-height: 1.25; margin: 0 0 1.5rem; letter-spacing: -0.02em; }
+  h2 { font-size: 1.35rem; margin: 2.5rem 0 .75rem; letter-spacing: -0.01em; }
+  p { margin: 0 0 1.15rem; }
+  a { color: #2f5bea; }
+  blockquote { margin: 0 0 1.15rem; padding-left: 1rem; border-left: 3px solid #e4e4e9; color: #55555f; }
+  code { background: #f3f3f6; padding: .12em .35em; border-radius: 4px;
+    font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty::before {
+    content: attr(data-tdoc-placeholder);
+    color: #b0b0ba;
+    pointer-events: none;
+  }
+  /* An empty block is zero pixels tall, so without a floor the placeholder
+     paragraph is unclickable: the click falls through to <main> and the caret
+     stays wherever it was. */
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty {
+    min-height: 1.75em;
+  }
+  /* Put the caret in a line and its hint steps aside — it has said what it had
+     to say. frame-probe marks the line, and only once the reader has moved the
+     caret themselves, so the guidance survives the first paint. */
+  html[data-tdoc-editing] [data-tdoc-placeholder][data-tdoc-caret]:empty::before {
+    content: none;
+  }
+</style>
+</head>
+<body>
+<main>
+<h1 data-tdoc-placeholder="Untitled"></h1>
+<p data-tdoc-placeholder="Start writing…"></p>
+</main>
+</body>
+</html>
+`;
+}
+
+// The document's own first <h1> is the title. Reading it back on every browser
+// save is what lets an author name an untitled doc by typing into the page, and
+// rename it later the same way. Returns '' when there is no usable heading, so
+// callers can leave the stored title alone rather than blanking it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function titleFromDocument(html) {
+  const match = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(String(html == null ? '' : html));
+  if (!match) return '';
+  const text = match[1]
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;| /g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    // One pass of <[^>]*> cannot be trusted on nested or malformed markup
+    // (`<<script>>` leaves `<script`), and decoding entities just above can
+    // put an angle bracket back. A title is a label, never markup, so every
+    // surviving bracket is dropped and the result provably carries none.
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 120);
+}
+
+// Keep <title> in step with the heading the author just edited, so the browser
+// tab, the exported file and the hub all agree. Only rewrites an existing tag —
+// a document without one is left exactly as its author wrote it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function syncDocumentTitle(html, title) {
+  const safe = String(title == null ? '' : title)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return String(html == null ? '' : html)
+    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, () => `<title>${safe}</title>`);
 }
 
 function latestLocalVersion(slug, meta) {
@@ -554,7 +709,7 @@ function localHubDocument(nonce) {
     bootJson: safeJsonForScript({
       page: 'docs-hub',
       identity: e2eIdentity(),
-      capabilities: { folders: false, delete: false, star: false },
+      capabilities: { folders: false, delete: false, star: false, create: true },
       ...localDocsData(),
     }),
   });
@@ -947,6 +1102,58 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Start from scratch: the local twin of the worker's /api/doc/create. The
+  // document is staged under a dot-prefixed directory (which the hub listing
+  // skips, since safeSlug rejects a dot) and renamed into place, so a half
+  // written doc never appears in My docs.
+  if (p === '/api/doc/create' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    // Opaque ids don't collide in practice; the loop is here so that when one
+    // does, the answer is another id rather than a failed create.
+    let slug = null;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const candidate = blankDocSlug(crypto.randomBytes(8));
+      if (fs.existsSync(path.join(ROOT, candidate))) continue;
+      slug = candidate;
+      break;
+    }
+    if (!slug) return json(res, 409, { error: 'slug_exhausted' });
+
+    const now = new Date().toISOString();
+    const docRoot = path.join(ROOT, slug);
+    const stageDir = path.join(ROOT, `.create-${crypto.randomBytes(6).toString('hex')}`);
+    try {
+      fs.mkdirSync(path.join(stageDir, 'v1'), { recursive: true });
+      fs.writeFileSync(path.join(stageDir, 'v1', 'index.html'), blankDocHtml());
+      fs.writeFileSync(path.join(stageDir, 'meta.json'), JSON.stringify({
+        // Renamed by the first save that finds a heading in the document.
+        title: 'Untitled',
+        slug,
+        created: now,
+        versions: [{
+          n: 1,
+          created: now,
+          prompt: 'Created from scratch in the browser',
+          source: 'browser',
+          ...(E2E_USER ? { author: E2E_USER } : {}),
+        }],
+      }, null, 2) + '\n');
+      fs.renameSync(stageDir, docRoot);
+    } catch (error) {
+      try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch {}
+      // The message can carry a filesystem path or a stack; log it here and
+      // hand the browser the code alone.
+      console.error('[create] blank doc write failed:', error && error.message ? error.message : error);
+      return json(res, 500, { error: 'create_failed' });
+    }
+    return json(res, 200, {
+      ok: true,
+      slug,
+      version: 1,
+      url: `/d/${encodeURIComponent(slug)}/v/1?edit=1`,
+    });
+  }
+
   // Explicit human save. Keystrokes stay in a browser draft; this endpoint is
   // the only local-browser path that creates a full document snapshot.
   if (p === '/api/doc/versions' && req.method === 'POST') {
@@ -987,17 +1194,25 @@ const server = http.createServer(async (req, res) => {
     }
     const stageDir = path.join(docRoot, `.v${nextVersion}-browser-${crypto.randomBytes(6).toString('hex')}`);
     const now = new Date().toISOString();
+    let nextTitle = '';
     try {
       fs.mkdirSync(stageDir, { recursive: false });
       const widgetFrom = `/d/${slug}/v/${baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${nextVersion}/widget/`;
-      fs.writeFileSync(path.join(stageDir, 'index.html'), doc.split(widgetFrom).join(widgetTo));
+      const rewritten = doc.split(widgetFrom).join(widgetTo);
+      // The author renames a doc by editing its heading, which is the only
+      // title they can actually reach from the editor. An empty or missing h1
+      // leaves the stored title alone rather than blanking it.
+      nextTitle = titleFromDocument(rewritten);
+      fs.writeFileSync(path.join(stageDir, 'index.html'),
+        nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       const baseWidgets = path.join(docRoot, `v${baseVersion}`, 'widgets');
       if (fs.existsSync(baseWidgets)) fs.cpSync(baseWidgets, path.join(stageDir, 'widgets'), { recursive: true });
       fs.renameSync(stageDir, finalDir);
 
       const nextMeta = {
         ...meta,
+        ...(nextTitle ? { title: nextTitle } : {}),
         versions: [
           ...(Array.isArray(meta.versions) ? meta.versions : []),
           { n: nextVersion, created: now, prompt: 'Browser edit', source: 'browser', ...(E2E_USER ? { author: E2E_USER } : {}) },
@@ -1227,18 +1442,31 @@ const server = http.createServer(async (req, res) => {
     if (!slug || !id) return json(res, 400, { error: 'invalid slug or missing id' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
+    // Same rule the Worker folds (#354): a record that still holds replies
+    // keeps its slot as a tombstone — text gone, author kept — so deleting
+    // your own words never takes everyone else's off the page. A record with
+    // nothing under it goes for real. Local storage is flat, not an event log,
+    // so the tombstone is written rather than folded.
     const top = all.find(c => c.id === id);
     if (top) {
-      writeJson(file, all.filter(c => c.id !== id));
+      if ((top.replies || []).length) {
+        writeJson(file, all.map(c => (c.id === id ? localTombstone(c) : c)));
+      } else {
+        writeJson(file, all.filter(c => c.id !== id));
+      }
       return json(res, 200, { ok: true });
     }
     for (const c of all) {
       if (!Array.isArray(c.replies)) continue;
-      if (c.replies.some(r => r.id === id)) {
-        c.replies = c.replies.filter(r => r.id !== id);
-        writeJson(file, all);
-        return json(res, 200, { ok: true });
-      }
+      const reply = c.replies.find(r => r.id === id);
+      if (!reply) continue;
+      const hasChildren = c.replies.some(r => r.parent_id === id && !r.deleted);
+      c.replies = hasChildren
+        ? c.replies.map(r => (r.id === id ? localTombstone(r) : r))
+        : c.replies.filter(r => r.id !== id);
+      const keep = collapseLocalTombstones(c);
+      writeJson(file, keep ? all : all.filter(x => x.id !== c.id));
+      return json(res, 200, { ok: true });
     }
     return json(res, 404, { error: 'not_found' });
   }
@@ -1303,7 +1531,7 @@ const server = http.createServer(async (req, res) => {
     // Same spawn hardening as /api/publish: error listener, hard timeout,
     // bounded output. Deleting is quick; 60s covers a slow unpublish curl.
     const args = body.published === false ? [slug, '--local-only'] : [slug];
-    const proc = spawn(bin, args, { env: childEnv() });
+    const proc = spawn('bash', [bin, ...args], { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 64 * 1024;
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
@@ -1345,13 +1573,16 @@ const server = http.createServer(async (req, res) => {
     }
     const bin = path.join(__dirname, '..', 'bin', 'tdoc-publish');
     if (!fs.existsSync(bin)) return json(res, 500, { error: 'tdoc-publish script not found' });
+    // Spawned through bash, not exec'd: the skill checkout can live on a
+    // noexec mount (Codex skills dir), where the x bit is set but direct exec
+    // is EACCES.
     // Spawn hardening: an `error` listener (so an EACCES doesn't crash the whole
     // server with an unhandled 'error' event), a hard timeout (SIGTERM→SIGKILL)
     // so a hung wrangler/curl can't leave the HTTP response pending forever, and
     // a bounded output buffer so runaway child output can't OOM us. wrangler
     // legitimately needs the inherited env (CLOUDFLARE_* creds), so we keep it
     // but this endpoint is now origin/CSRF-gated above.
-    const proc = spawn(bin, [slug], { env: childEnv() });
+    const proc = spawn('bash', [bin, slug], { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 256 * 1024; // 256 KiB of captured output is plenty
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);

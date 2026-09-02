@@ -36,6 +36,8 @@ const OFFLINE = [
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
   'bar-overflow-trigger.test.js', // the ⋯ trigger is hidden where its menu would be empty
+  'create-from-scratch.test.js', // #356 blank doc: slug derivation, both create routes, edit-on-arrival
+  'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
@@ -68,6 +70,7 @@ const OFFLINE = [
   'vercel-shim.test.js',      // vercel storage shims (KV/R2 contract, rewrite URL)
   'api.test.js',              // hermetic: spawns its own server in a temp dir
   'publish-signin.test.js',   // device code reaches the publish modal (expiry/pid/slug guards)
+  'resume-signin.test.js',    // dead process ≠ dead sign-in: device_code resumes on re-run
   'onboarding-terminal-recovery.test.js', // provider retry flags + honest SIGINT recovery
 ];
 
