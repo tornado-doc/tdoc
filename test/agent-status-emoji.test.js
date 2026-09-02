@@ -167,7 +167,7 @@ async function loadWorker() {
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8'));
   src = src.replace(
     /const PROBE_JS = `__TDOC_PROBE_JS__`;/,
-    'const PROBE_JS = ' + JSON.stringify(fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8')) + ';'
+    'const PROBE_JS = ' + JSON.stringify(require(path.join(root, 'server', 'frame-probe-source.js'))()) + ';'
   );
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);

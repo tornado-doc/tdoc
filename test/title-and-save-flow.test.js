@@ -58,7 +58,15 @@ t('a save leaves you where you were: still editing, on the new version', () => {
     'compose the URL rather than appending ?edit=1, so a response with a query still works');
   // ?edit=1 is honoured only when the reader can actually edit, so this cannot
   // hand an editor to someone who has nothing to save to.
-  assert(/wantsEdit && config\.canEdit/.test(editorHook), 'the canEdit gate on ?edit=1 is gone');
+  assert(editorHook.includes('urlWantsEdit() && config.canEdit'), 'the canEdit gate on ?edit=1 is gone');
+});
+
+t('a draft restores only after the published bytes are known, and per doc', () => {
+  assert(shell.includes("'tdoc:editBaseline'"), 'the shell never listens for the published HTML');
+  assert(editorHook.includes('considerDraft'), 'a matching fingerprint is the silent path; a mismatch has to prompt');
+  assert(editorHook.includes('staleDraft'), 'the prompt for a draft whose base moved is gone');
+  assert(read('shell/src/document/draft-store.js').includes('${config.slug}:${author}'),
+    'the cache key must be per document, not per version and not global');
 });
 
 t('the first save explains that it publishes, and can be told to stop', () => {

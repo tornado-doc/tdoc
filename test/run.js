@@ -37,6 +37,8 @@ const OFFLINE = [
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
   'bar-overflow-trigger.test.js', // the ⋯ trigger is hidden where its menu would be empty
   'create-from-scratch.test.js', // #356 blank doc: slug derivation, both create routes, edit-on-arrival
+  'draft-store.test.js',       // #369 per-doc draft cache + fingerprint restore
+  'edit-markdown.test.js',     // #374 markdown input rules (no schema parser)
   'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages

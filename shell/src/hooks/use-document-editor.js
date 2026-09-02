@@ -2,10 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveDocumentVersion } from '../document/api.js';
 import {
   clearDraft,
+  clearDraftBody,
+  draftBodyExpired,
   draftKey,
+  htmlHash,
+  legacyDraftKey,
   loadDraft,
   saveDraft,
+  saveDraftMode,
 } from '../document/draft-store.js';
+
+function urlWantsEdit() {
+  return new URLSearchParams(location.search).get('edit') === '1';
+}
+
+function allowedMode(mode, config) {
+  if (mode === 'edit') return config.canEdit ? 'edit' : null;
+  if (mode === 'comment') return config.canComment ? 'comment' : null;
+  if (mode === 'read') return 'read';
+  return null;
+}
 
 export function useDocumentEditor({
   boot,
@@ -20,31 +36,50 @@ export function useDocumentEditor({
   // deliberate hop to the new version from a tab closing mid-edit.
   const leavingForSave = useRef(false);
   const storeKey = useMemo(() => draftKey(config), [config]);
+  const legacyKey = useMemo(() => legacyDraftKey(config), [config]);
+  const publishedHtml = useRef(null);
+  const consideringDraft = useRef(false);
+  const [sessionReady, setSessionReady] = useState(false);
   // A doc created from scratch arrives at ?edit=1: it is blank, so dropping the
   // author in read mode would show an empty page and hide the one control they
   // need. `tdoc:ready` re-sends whatever mode is current, so the frame picks
   // this up even though it is set before the iframe has loaded.
   const [mode, setMode] = useState(() => {
-    const wantsEdit = new URLSearchParams(location.search).get('edit') === '1';
-    if (wantsEdit && config.canEdit) return 'edit';
+    if (urlWantsEdit() && config.canEdit) return 'edit';
     return config.canComment ? 'comment' : 'read';
   });
   const [dirty, setDirty] = useState(false);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(null);
+  const [staleDraft, setStaleDraft] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadDraft(storeKey, legacyKey).then((record) => {
+      if (cancelled) return;
+      if (!urlWantsEdit()) {
+        const next = allowedMode(record?.mode, config);
+        if (next) setMode(next);
+      }
+      setSessionReady(true);
+    }).catch(() => {
+      if (!cancelled) setSessionReady(true);
+    });
+    return () => { cancelled = true; };
+    // Load once per document. Mode is omitted so this cannot fight the author
+    // switching Read/Comment/Edit after the restore.
+  }, [storeKey, legacyKey]);
 
   useEffect(() => {
     send({ type: 'tdoc:mode', mode });
-    if (mode !== 'edit') return undefined;
-    let cancelled = false;
-    loadDraft(storeKey).then((draft) => {
-      if (!cancelled && draft?.bodyHtml) {
-        send({ type: 'tdoc:editRestore', bodyHtml: draft.bodyHtml });
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [mode, send, storeKey]);
+  }, [mode, send]);
+
+  useEffect(() => {
+    if (!sessionReady) return undefined;
+    saveDraftMode(storeKey, mode).catch(() => {});
+    return undefined;
+  }, [mode, sessionReady, storeKey]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -89,7 +124,7 @@ export function useDocumentEditor({
     try {
       const html = await requestDocument();
       const result = await saveDocumentVersion(config.slug, config.version, html);
-      await clearDraft(storeKey);
+      await clearDraftBody(storeKey);
       leavingForSave.current = true;
       // Stay in the editor on the version that was just written. Saving is a
       // checkpoint in the middle of writing, not the end of it — dropping the
@@ -115,23 +150,77 @@ export function useDocumentEditor({
   }, [checking, config.slug, config.version, dirty, requestDocument, saving, showToast, storeKey]);
 
   const discard = useCallback(async () => {
-    await clearDraft(storeKey);
+    await clearDraftBody(storeKey);
     setDirty(false);
     setChecking(false);
+    setStaleDraft(null);
     if (frameRef.current) frameRef.current.src = boot.frameSrc;
   }, [boot.frameSrc, frameRef, storeKey]);
+
+  const restoreDraft = useCallback((bodyHtml) => {
+    consideringDraft.current = true;
+    send({ type: 'tdoc:editRestore', bodyHtml });
+    setStaleDraft(null);
+  }, [send]);
+
+  const keepPublished = useCallback(async () => {
+    await clearDraftBody(storeKey);
+    setStaleDraft(null);
+  }, [storeKey]);
+
+  const considerDraft = useCallback(async (published, current) => {
+    if (consideringDraft.current) return;
+    if (current !== published) return;
+    let record;
+    try {
+      record = await loadDraft(storeKey, legacyKey);
+    } catch {
+      return;
+    }
+    if (!record?.bodyHtml) return;
+    if (record.bodyHtml === published) {
+      await clearDraftBody(storeKey);
+      return;
+    }
+    if (draftBodyExpired(record)) {
+      await clearDraftBody(storeKey);
+      return;
+    }
+    if (record.baseHash && record.baseHash === htmlHash(published)) {
+      restoreDraft(record.bodyHtml);
+      return;
+    }
+    setStaleDraft({
+      bodyHtml: record.bodyHtml,
+      updatedAt: record.bodyUpdatedAt || record.updatedAt,
+      baseVersion: record.baseVersion,
+    });
+  }, [legacyKey, restoreDraft, storeKey]);
 
   const frameHandlers = {
     editState(message) {
       setDirty(Boolean(message.dirty));
       setChecking(Boolean(message.checking));
     },
+    editBaseline(message) {
+      if (typeof message.publishedHtml !== 'string') return;
+      publishedHtml.current = message.publishedHtml;
+      const current = typeof message.bodyHtml === 'string' ? message.bodyHtml : message.publishedHtml;
+      considerDraft(message.publishedHtml, current).catch(() => {});
+    },
     editSnapshot(message) {
+      consideringDraft.current = false;
       if (typeof message.bodyHtml !== 'string') return;
       const nextDirty = Boolean(message.dirty);
       setChecking(false);
-      if (nextDirty) saveDraft(storeKey, message.bodyHtml).catch(() => {});
-      else clearDraft(storeKey).catch(() => {});
+      if (nextDirty) {
+        saveDraft(storeKey, message.bodyHtml, {
+          baseHash: htmlHash(publishedHtml.current || ''),
+          baseVersion: config.version,
+        }).catch(() => {});
+      } else {
+        clearDraftBody(storeKey).catch(() => {});
+      }
     },
     editDocument(message) {
       const pending = requests.current.get(message.requestId);
@@ -147,9 +236,12 @@ export function useDocumentEditor({
     checking,
     saving,
     conflict,
+    staleDraft,
     changeMode,
     discard,
     save,
+    restoreDraft: () => staleDraft && restoreDraft(staleDraft.bodyHtml),
+    keepPublished,
     closeConflict: () => setConflict(null),
     format: (command, value) => send({ type: 'tdoc:editFormat', command, value }),
     frameHandlers,
