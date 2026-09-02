@@ -4502,7 +4502,6 @@ export default {
         // something an author wrote.
         versions: [{ n: 1, created: now, prompt: 'Created from scratch in the browser', blank: true }],
         created_by: session.login,
-        access: normalizeAccess({}, { legacy: false }),
       };
       incoming = stampHostedOwnership(incoming, actor);
 
@@ -4609,6 +4608,11 @@ export default {
         versions: [{ n: 1, created: now, prompt: `Duplicated from ${slug} v${version}` }],
         source: { slug, version },
         duplicated_by: session.login,
+        // Deliberately NOT inherited from the source: on tdoc.dev a reader may
+        // duplicate someone else's doc, and a copy that carried a public policy
+        // would republish it. hosted-oob-behavior asserts this defaults
+        // unlisted. Creating a doc from scratch is the case that should match
+        // a CLI publish; duplicating is not.
         access: normalizeAccess({}, { legacy: false }),
       };
       incoming = stampHostedOwnership(incoming, actor);
