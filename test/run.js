@@ -34,6 +34,7 @@ const OFFLINE = [
   'account-email-groundwork.test.js', // phase-1 identity: email merge key, no mint-on-signin, field-preserving rewrite
   'pairing-flow.test.js',     // phase-2: tdoc-owned pair codes — strikes, single redemption, origin/session gates
   'pair-signin-cli.test.js',  // phase-2 CLI: pairing-first, 404 fallback, probe-first resume
+  'oidc-provider-seat.test.js', // phase-3: OIDC seat — verified-email sessions, email-born accounts, sub never a key
   'duplicate-download.test.js', // #146 Duplicate vs Download chrome + route contract
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate

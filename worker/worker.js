@@ -147,7 +147,23 @@ function hostedGithubLogin(meta) {
 // True when this session owns this document:
 //   - hosted: meta.hosted.github_login matches the session
 //   - unhosted / legacy: the Worker operator (TDOC_OWNER)
+// A session is "someone" if it carries a GitHub login OR a provider-attested
+// email (an OIDC sign-in has no GitHub-shaped login and never will). Gates
+// that mean "any authenticated human" use this; gates that specifically need
+// a handle (comment authorship, handle ACLs) keep sessionLogin until the
+// identity surface widens deliberately.
+function sessionPrincipal(session) {
+  return sessionLogin(session) || normalizeEmail(session && session.email) || '';
+}
+
 function isDocOwnerSession(env, session, meta) {
+  // account_id is the canonical identity (phase 1), so compare it first —
+  // this is what makes a doc published through an email-keyed account
+  // manageable from the browser by the same person, whatever button they
+  // signed in with.
+  const acct = session && session.account_id;
+  const docAcct = meta && meta.hosted && meta.hosted.account_id;
+  if (acct && docAcct && acct === docAcct) return true;
   const login = sessionLogin(session);
   if (!login) return false;
   const hostedLogin = hostedGithubLogin(meta);
@@ -1750,6 +1766,8 @@ function neutralLandingResponse(env, notice) {
       page: 'neutral-landing',
       authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
       webAuth: !!env?.GITHUB_CLIENT_SECRET,
+      oidcAuth: !!oidcConfig(env),
+      oidcLabel: (oidcConfig(env) || {}).label || '',
       notice: messages[notice] || '',
     }),
   }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
@@ -1825,6 +1843,40 @@ function clientIp(req) {
 function sameOrigin(req, url) {
   const o = req.headers.get('origin');
   return !o || o === url.origin;
+}
+
+// ---- OIDC provider seat --------------------------------------------------
+// One adapter, any spec-compliant issuer. The deployment decision is Clerk
+// (used strictly as an OIDC provider — never as a session layer), but nothing
+// here knows that: swap the three env values and a different issuer sits in
+// the same seat. The discipline that keeps this rug-pull-proof, per the
+// design doc: we store only what the issuer ATTESTS about an email
+// (userinfo's email + email_verified), the issuer's user IDs never become
+// keys, and the GitHub button stays direct — if this vendor vanishes, sign-in
+// degrades to GitHub while the seat is re-filled, and no account moves.
+function oidcConfig(env) {
+  const issuer = String(env && env.OIDC_ISSUER || '').trim().replace(/\/$/, '');
+  const clientId = String(env && env.OIDC_CLIENT_ID || '').trim();
+  const clientSecret = String(env && env.OIDC_CLIENT_SECRET || '').trim();
+  if (!/^https:\/\//.test(issuer) || !clientId || !clientSecret) return null;
+  return { issuer, clientId, clientSecret, label: String(env.OIDC_LABEL || 'Email').trim() || 'Email' };
+}
+
+// Per-isolate discovery cache. Discovery is static config on the issuer's
+// side; refetching it per sign-in would add a round trip for nothing.
+let OIDC_DISCOVERY = { issuer: null, doc: null };
+async function oidcDiscovery(cfg) {
+  if (OIDC_DISCOVERY.issuer === cfg.issuer && OIDC_DISCOVERY.doc) return OIDC_DISCOVERY.doc;
+  const r = await fetch(`${cfg.issuer}/.well-known/openid-configuration`, {
+    headers: { 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
+  });
+  if (!r.ok) throw new Error(`oidc discovery ${r.status}`);
+  const doc = await r.json();
+  if (!doc || !doc.authorization_endpoint || !doc.token_endpoint || !doc.userinfo_endpoint) {
+    throw new Error('oidc discovery incomplete');
+  }
+  OIDC_DISCOVERY = { issuer: cfg.issuer, doc };
+  return doc;
 }
 
 function authStatusResponse(message, { error = false, status = 200 } = {}) {
@@ -2743,7 +2795,7 @@ function hostedRegistrationEnabled(env, origin) {
 }
 
 function canSeeMyDocs(env, session, origin) {
-  if (!sessionLogin(session)) return false;
+  if (!sessionPrincipal(session)) return false;
   if (hostedRegistrationEnabled(env, origin)) return true;
   return isOwnerSession(env, session);
 }
@@ -3006,18 +3058,43 @@ async function sourceHasWidgets(env, slug, version) {
   }
 }
 
+// The account home for someone with no GitHub login at all (an OIDC
+// sign-in). The account-email index doubles as the record: for GitHub-born
+// accounts it is a pointer ({account_id}) whose record lives at
+// hosted-account:<login>; for email-born accounts it IS the record. Minting
+// only ever needs account_id, so both shapes serve.
+async function hostedAccountForEmail(env, verifiedEmail) {
+  const email = normalizeEmail(verifiedEmail);
+  if (!email || !env || !env.META) return null;
+  const key = `account-email:${email}`;
+  let rec = null;
+  try { rec = JSON.parse(await env.META.get(key)); } catch {}
+  if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
+  rec = { account_id: `acct_${rand(12)}`, email, created: new Date().toISOString() };
+  await env.META.put(key, JSON.stringify(rec));
+  return rec;
+}
+
 async function issueHostedToken(env, body = {}, verifiedEmail = null) {
   const github_login = normalizeGithubLogin(body.login);
-  if (!github_login) {
+  // Two doors to an account, one canonical identity behind both: a GitHub
+  // login keys the legacy registry; an attested email (an OIDC approver) keys
+  // the email registry. Neither is ever taken from the client body — login
+  // comes from the session route-side, email as its own trusted argument.
+  let account = null;
+  if (github_login) {
+    account = await hostedAccountForGithub(env, github_login, verifiedEmail);
+  } else if (normalizeEmail(verifiedEmail)) {
+    account = await hostedAccountForEmail(env, verifiedEmail);
+  } else {
     return { error: 'sign_in_required', status: 401 };
   }
-  const account = await hostedAccountForGithub(env, github_login, verifiedEmail);
   if (!account) return { error: 'sign_in_required', status: 401 };
   const token = `tdoc_${rand(24)}`;
   const tokenHash = await sha256Hex(token);
   const record = {
     account_id: account.account_id,
-    github_login,
+    ...(github_login ? { github_login } : {}),
     created: new Date().toISOString(),
   };
   if (typeof body.label === 'string' && body.label.trim()) {
@@ -4224,11 +4301,13 @@ export default {
         bootJson: safeJsonForScript({
           page: 'activate',
           code: normalizePairCode(url.searchParams.get('code')) || '',
-          identity: sessionLogin(session)
-            ? { login: session.login, name: session.name || session.login, avatar_url: session.avatar_url || '' }
+          identity: sessionPrincipal(session)
+            ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '' }
             : null,
           webAuth: !!env?.GITHUB_CLIENT_SECRET,
           authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
+          oidcAuth: !!oidcConfig(env),
+          oidcLabel: (oidcConfig(env) || {}).label || '',
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -4898,7 +4977,7 @@ export default {
       // secret or the status of somebody else's guessing game.
       if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
       const session = await getSession(env, req);
-      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
       if (await rateLimited(env, `pairlook:${session.id}`, 30, 600)) {
         return json({ error: 'slow_down' }, { status: 429 });
       }
@@ -4916,7 +4995,7 @@ export default {
     if (p === '/api/cli/pair/approve' && method === 'POST') {
       if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
       const session = await getSession(env, req);
-      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
       if (await rateLimited(env, `pairok:${session.id}`, 10, 600)) {
         return json({ error: 'slow_down' }, { status: 429 });
       }
@@ -4933,12 +5012,99 @@ export default {
       // hosted-token mint.
       record.status = 'approved';
       record.approved = {
-        login: session.login,
-        name: session.name || session.login,
+        login: session.login || null,
+        name: session.name || session.login || (session.email ? String(session.email).split('@')[0] : ''),
         email: session.email || null,
       };
       await env.META.put(`pair:${code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS });
       return json({ ok: true, label: record.label || '' });
+    }
+
+    if (p === '/api/auth/oidc/login' && method === 'GET') {
+      const cfg = oidcConfig(env);
+      if (!cfg) return redirectTo('/?notice=signin');
+      const nonce = rand(16);
+      const ret = sanitizeReturn(url.searchParams.get('return'));
+      await env.META.put(`oauthstate:oidc:${nonce}`, ret, { expirationTtl: 600 });
+      let auth;
+      try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
+      catch (e) { return authStatusResponse('Sign-in is not available right now: ' + e.message, { error: true, status: 502 }); }
+      auth.searchParams.set('client_id', cfg.clientId);
+      auth.searchParams.set('redirect_uri', `${url.origin}/auth/oidc/callback`);
+      auth.searchParams.set('response_type', 'code');
+      auth.searchParams.set('scope', 'openid email profile');
+      auth.searchParams.set('state', nonce);
+      return redirectTo(auth.toString(), [
+        `tdoc_oidcst=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+      ]);
+    }
+
+    if (p === '/auth/oidc/callback' && method === 'GET') {
+      const cfg = oidcConfig(env);
+      if (!cfg) return redirectTo('/?notice=signin');
+      const code = url.searchParams.get('code');
+      const state = String(url.searchParams.get('state') || '');
+      const cookieState = (req.headers.get('cookie') || '').match(/(?:^|;\s*)tdoc_oidcst=([a-f0-9]+)/);
+      if (!code || !state || !cookieState || cookieState[1] !== state) {
+        return authStatusResponse('Sign-in could not be verified (state mismatch). Please try again.', { error: true, status: 400 });
+      }
+      const ret = sanitizeReturn(await env.META.get(`oauthstate:oidc:${state}`));
+      await env.META.delete(`oauthstate:oidc:${state}`);
+      try {
+        const disc = await oidcDiscovery(cfg);
+        const tr = await fetch(disc.token_endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: `${url.origin}/auth/oidc/callback`,
+            client_id: cfg.clientId,
+            client_secret: cfg.clientSecret,
+          }).toString(),
+        });
+        const tok = await tr.json().catch(() => null);
+        if (!tr.ok || !tok || !tok.access_token) {
+          return authStatusResponse('Sign-in failed: ' + ((tok && (tok.error_description || tok.error)) || `token exchange ${tr.status}`), { error: true, status: 400 });
+        }
+        // userinfo over TLS from the issuer we were configured with — the
+        // spec-sanctioned alternative to verifying the id_token signature,
+        // and the same trust shape as the GitHub /user call above it.
+        const ur = await fetch(disc.userinfo_endpoint, {
+          headers: { 'Authorization': `Bearer ${tok.access_token}`, 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
+        });
+        const user = await ur.json().catch(() => null);
+        const email = normalizeEmail(user && user.email);
+        // Verified only — the account-takeover rule, same as everywhere else.
+        if (!email || user.email_verified !== true) {
+          return authStatusResponse('This sign-in did not come with a verified email, so it cannot be used here.', { error: true, status: 403 });
+        }
+        // Resolve-don't-mint, same as GitHub sign-in: an account exists only
+        // once something is published. The issuer's own user id ("sub") is
+        // deliberately NOT stored — email is the merge key, sub would be a
+        // second identity to migrate off some day.
+        let account_id = null;
+        try {
+          const idx = JSON.parse(await env.META.get(`account-email:${email}`));
+          if (idx && typeof idx.account_id === 'string') account_id = idx.account_id;
+        } catch {}
+        const sid = rand(24);
+        const session = {
+          name: (user.name || user.given_name || email.split('@')[0]),
+          avatar_url: typeof user.picture === 'string' ? user.picture : '',
+          email,
+          oidc: true,
+          created: new Date().toISOString(),
+          ...(account_id ? { account_id } : {}),
+        };
+        await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+        return redirectTo(ret, [
+          `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+          'tdoc_oidcst=; Path=/; Max-Age=0',
+        ]);
+      } catch (e) {
+        return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
+      }
     }
 
     if (p === '/api/auth/device/start' && method === 'POST') {
@@ -5202,12 +5368,13 @@ export default {
       }
       const session = await getSession(env, req);
       const login = sessionLogin(session);
+      const principal = sessionPrincipal(session);
       // Additive `hint` so a stale CLI that just prints the error body still
       // gets an actionable next step. A current CLI ran the device flow and
       // sent a session cookie, so it never lands here; one that hits this
       // without showing a device code is out of date. Fail-open: no new
       // rejection, just a clearer 401.
-      if (!login) return json({
+      if (!principal) return json({
         error: 'sign_in_required',
         hint: 'Hosted publish needs a GitHub sign-in. If your tdoc CLI did not show a device code to approve, it is out of date — run: /tdoc update --yes',
       }, { status: 401 });

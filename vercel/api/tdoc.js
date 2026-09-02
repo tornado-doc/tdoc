@@ -71,6 +71,12 @@ async function buildEnv() {
       // flow POSSIBLE on Vercel — it was silently impossible: the worker
       // gates on env.GITHUB_CLIENT_SECRET and the map never passed it.
       GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET || '',
+      // The OIDC provider seat (Clerk on hosted). All three absent → the
+      // buttons simply do not render; GitHub carries sign-in as before.
+      OIDC_ISSUER: process.env.OIDC_ISSUER || '',
+      OIDC_CLIENT_ID: process.env.OIDC_CLIENT_ID || '',
+      OIDC_CLIENT_SECRET: process.env.OIDC_CLIENT_SECRET || '',
+      OIDC_LABEL: process.env.OIDC_LABEL || '',
       TDOC_DEBUG: process.env.TDOC_DEBUG || '',
     },
   };
