@@ -3769,7 +3769,21 @@ export class CommentsStore {
     const meta = await loadDocMeta(this.env, slug);
     if (!meta) return { status: 404, body: { error: 'not_found' } };
     const metaLatest = latestVersionNumber(meta);
-    const reservation = await this._reserveVersion(op.baseVersion, metaLatest);
+    // The blank page a browser create lays down is scaffolding, not a version
+    // anyone wrote. The first real save becomes v1 rather than appending v2, so
+    // a document's history starts with the first thing someone actually wrote.
+    // Bounded by construction: it needs the mark the create route set, the doc
+    // must still have only that one version, and the save that takes this path
+    // writes a version record without the mark — so no document can replace
+    // twice. Docs created before the mark existed keep the old behaviour.
+    const priorVersions = Array.isArray(meta.versions) ? meta.versions : [];
+    const replacesScaffold = priorVersions.length === 1
+      && Number(priorVersions[0] && priorVersions[0].n) === 1
+      && Boolean(priorVersions[0] && priorVersions[0].blank)
+      && Number(op.baseVersion) === 1;
+    const reservation = replacesScaffold
+      ? { ok: true, next: 1 }
+      : await this._reserveVersion(op.baseVersion, metaLatest);
     if (!reservation.ok) return { status: reservation.status, body: reservation.body };
 
     let committed = false;
@@ -3782,7 +3796,9 @@ export class CommentsStore {
       // leaves the stored title alone rather than blanking it.
       const nextTitle = titleFromDocument(rewritten);
       const stamped = await prepareDocVersion(nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
-      await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
+      // Nothing to carry across when the target IS the source; a scaffold has
+      // no widgets either way.
+      if (!replacesScaffold) await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
       const key = `docs/${slug}/v${reservation.next}/index.html`;
       await this.env.DOCS.put(key, stamped.html, {
         httpMetadata: { contentType: 'text/html; charset=utf-8' },
@@ -3811,10 +3827,12 @@ export class CommentsStore {
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
       // reporting a failed save after META committed would make the browser
       // retry a snapshot that already exists.
-      try {
-        await this._finishVersion(reservation, true);
-      } catch (error) {
-        console.error('[browser-save] version cursor finalize failed (recoverable):', error.message || String(error));
+      if (!replacesScaffold) {
+        try {
+          await this._finishVersion(reservation, true);
+        } catch (error) {
+          console.error('[browser-save] version cursor finalize failed (recoverable):', error.message || String(error));
+        }
       }
 
       // Comments are an independent event log. Reconcile the authoritative
@@ -3836,7 +3854,7 @@ export class CommentsStore {
         body: { ok: true, version: reservation.next, url: `/d/${slug}/v/${reservation.next}` },
       };
     } catch (error) {
-      if (!committed) {
+      if (!committed && !replacesScaffold) {
         try { await this._finishVersion(reservation, false); } catch {}
       }
       return { status: 500, body: { error: 'version_write_failed', message: error.message || String(error) } };
@@ -4480,7 +4498,9 @@ export default {
         title: 'Untitled',
         slug: newSlug,
         created: now,
-        versions: [{ n: 1, created: now, prompt: 'Created from scratch in the browser' }],
+        // The mark the first save consumes: this v1 is scaffolding, not
+        // something an author wrote.
+        versions: [{ n: 1, created: now, prompt: 'Created from scratch in the browser', blank: true }],
         created_by: session.login,
         access: normalizeAccess({}, { legacy: false }),
       };

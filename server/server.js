@@ -1135,6 +1135,9 @@ const server = http.createServer(async (req, res) => {
           created: now,
           prompt: 'Created from scratch in the browser',
           source: 'browser',
+          // The mark the first save consumes: this v1 is scaffolding, not
+          // something an author wrote.
+          blank: true,
           ...(E2E_USER ? { author: E2E_USER } : {}),
         }],
       }, null, 2) + '\n');
@@ -1187,9 +1190,21 @@ const server = http.createServer(async (req, res) => {
       return json(res, 409, { error: 'version_conflict', baseVersion, latestVersion: latest });
     }
 
-    const nextVersion = latest + 1;
+    // The blank page a browser create lays down is scaffolding, not a version
+    // anyone wrote. The first real save becomes v1 rather than appending v2, so
+    // a document's history starts with the first thing someone actually wrote.
+    // Bounded by construction: it needs the mark the create route set, the doc
+    // must still have only that one version, and the record this save writes
+    // carries no mark — so no document can replace twice.
+    const priorVersions = Array.isArray(meta.versions) ? meta.versions : [];
+    const replacesScaffold = priorVersions.length === 1
+      && Number(priorVersions[0] && priorVersions[0].n) === 1
+      && Boolean(priorVersions[0] && priorVersions[0].blank)
+      && baseVersion === 1;
+
+    const nextVersion = replacesScaffold ? 1 : latest + 1;
     const finalDir = path.join(docRoot, `v${nextVersion}`);
-    if (fs.existsSync(finalDir)) {
+    if (!replacesScaffold && fs.existsSync(finalDir)) {
       return json(res, 409, { error: 'version_conflict', baseVersion, latestVersion: nextVersion });
     }
     const stageDir = path.join(docRoot, `.v${nextVersion}-browser-${crypto.randomBytes(6).toString('hex')}`);
@@ -1208,15 +1223,25 @@ const server = http.createServer(async (req, res) => {
         nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       const baseWidgets = path.join(docRoot, `v${baseVersion}`, 'widgets');
       if (fs.existsSync(baseWidgets)) fs.cpSync(baseWidgets, path.join(stageDir, 'widgets'), { recursive: true });
+      // Replacing the scaffold means the target directory already exists; swap
+      // it out of the way first so the rename is still the atomic step, and
+      // keep the old one until the new one is in place.
+      let displaced = null;
+      if (replacesScaffold && fs.existsSync(finalDir)) {
+        displaced = path.join(docRoot, `.v1-replaced-${crypto.randomBytes(6).toString('hex')}`);
+        fs.renameSync(finalDir, displaced);
+      }
       fs.renameSync(stageDir, finalDir);
+      if (displaced) fs.rmSync(displaced, { recursive: true, force: true });
 
       const nextMeta = {
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions: [
-          ...(Array.isArray(meta.versions) ? meta.versions : []),
+          // Dropping the scaffold's record is what clears its `blank` mark.
+          ...priorVersions.filter((item) => Number(item && item.n) !== nextVersion),
           { n: nextVersion, created: now, prompt: 'Browser edit', source: 'browser', ...(E2E_USER ? { author: E2E_USER } : {}) },
-        ],
+        ].sort((a, b) => Number(a.n) - Number(b.n)),
       };
       const metaStage = `${metaFile}.browser-${crypto.randomBytes(6).toString('hex')}`;
       fs.writeFileSync(metaStage, JSON.stringify(nextMeta, null, 2) + '\n');
