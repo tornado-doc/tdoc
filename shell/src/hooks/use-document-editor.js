@@ -208,6 +208,13 @@ export function useDocumentEditor({
       const current = typeof message.bodyHtml === 'string' ? message.bodyHtml : message.publishedHtml;
       considerDraft(message.publishedHtml, current).catch(() => {});
     },
+    editDraft(message) {
+      if (typeof message.bodyHtml !== 'string') return;
+      saveDraft(storeKey, message.bodyHtml, {
+        baseHash: htmlHash(publishedHtml.current || ''),
+        baseVersion: config.version,
+      }).catch(() => {});
+    },
     editSnapshot(message) {
       consideringDraft.current = false;
       if (typeof message.bodyHtml !== 'string') return;

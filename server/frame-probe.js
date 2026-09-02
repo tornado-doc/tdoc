@@ -693,6 +693,12 @@
     post({ type: 'tdoc:editState', dirty: editDirty, checking: !!checking });
   }
   function reportDraft() {
+    // Recovery is not debounced. A refresh can arrive between any two
+    // keystrokes, so hand the shell a restorable snapshot before yielding.
+    // The more expensive baseline/pin bookkeeping can still settle once the
+    // input burst is over.
+    var immediateHtml = draftBodyHtml();
+    post({ type: 'tdoc:editDraft', bodyHtml: immediateHtml });
     clearTimeout(editTimer);
     editTimer = setTimeout(function () {
       var bodyHtml = draftBodyHtml();
@@ -710,8 +716,8 @@
     if (event && md) {
       try { md.applyAfterInput(event, markdownCtx()); } catch (e) {}
     }
-    // Cloning and normalizing the whole author DOM is O(document size). Mark
-    // the draft immediately, then do that work once after the input burst.
+    // Mark the comparison as pending; reportDraft persists first, then
+    // settles baseline equality after the input burst.
     setDirty(true, true);
     reportDraft();
   }
@@ -824,9 +830,13 @@
         var live = window.getSelection();
         var text = live && !live.isCollapsed ? live.toString() : '';
         if (!text) return;
-        var esc = (window.tdocEditMarkdown && window.tdocEditMarkdown.escapeHtml)
-          ? window.tdocEditMarkdown.escapeHtml(text)
-          : text;
+        // Keep this safe even if the optional input-rule helper failed to
+        // initialize: selected author text is interpolated into insertHTML.
+        var esc = String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
         document.execCommand('insertHTML', false, '<code>' + esc + '</code>');
       } else {
         document.execCommand(command, false, nextValue || null);

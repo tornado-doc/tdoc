@@ -37,37 +37,69 @@ function storageKey(key) {
   return `tdoc-draft:${key}`;
 }
 
-async function readRecord(key) {
+function readLocalRecord(key) {
   try {
-    return await transact('readonly', (store) => store.get(key)) || null;
+    const value = localStorage.getItem(storageKey(key));
+    return value ? JSON.parse(value) : null;
   } catch {
-    try {
-      const value = localStorage.getItem(storageKey(key));
-      return value ? JSON.parse(value) : null;
-    } catch {
-      return null;
-    }
+    return null;
+  }
+}
+
+function writeLocalRecord(key, value) {
+  try {
+    localStorage.setItem(storageKey(key), JSON.stringify(value));
+  } catch {
+    // IndexedDB remains the large-draft fallback.
+  }
+}
+
+function recordStamp(record) {
+  const updated = Number(record?.updatedAt || 0);
+  const bodyUpdated = Number(record?.bodyUpdatedAt || 0);
+  return Math.max(
+    Number.isFinite(updated) ? updated : 0,
+    Number.isFinite(bodyUpdated) ? bodyUpdated : 0,
+  );
+}
+
+async function readRecord(key) {
+  const local = readLocalRecord(key);
+  try {
+    const indexed = await transact('readonly', (store) => store.get(key)) || null;
+    const value = recordStamp(local) >= recordStamp(indexed) ? local : indexed;
+    if (value === indexed && indexed) writeLocalRecord(key, indexed);
+    return value;
+  } catch {
+    return local;
   }
 }
 
 async function writeRecord(key, value) {
+  // localStorage is deliberately first and synchronous. If the page reloads
+  // before the IndexedDB request settles, the newest keystroke is still there.
+  writeLocalRecord(key, value);
   try {
     await transact('readwrite', (store) => store.put(value, key));
-  } catch {
-    localStorage.setItem(storageKey(key), JSON.stringify(value));
-  }
+  } catch {}
 }
 
 async function deleteRecord(key) {
+  try { localStorage.removeItem(storageKey(key)); } catch {}
   try {
     await transact('readwrite', (store) => store.delete(key));
-  } catch {
-    localStorage.removeItem(storageKey(key));
-  }
+  } catch {}
 }
 
 // Per document, not per version and not a global last-mode. A draft started
 // on v1 has to be able to surface when the author opens v2 of the same doc.
+//
+// Multi-tab/collaboration note: this intentionally remains one record per
+// author + document, so concurrent tabs currently use last-write-wins. Before
+// supporting simultaneous editors, give each editing session its own id and
+// revision, announce newer drafts with BroadcastChannel (or a server-side
+// revision), and prompt instead of silently replacing an active editor. A
+// successful save must then clear only the session it published.
 export function draftKey(config) {
   const author = config.identity?.login || 'local';
   return `${config.slug}:${author}`;
@@ -88,14 +120,18 @@ export function htmlHash(html) {
 }
 
 export function formatDraftAge(updatedAt, now = Date.now()) {
-  const ms = Math.max(0, now - Number(updatedAt || 0));
+  const stamped = Number(updatedAt);
+  const current = Number(now);
+  if (!Number.isFinite(stamped) || stamped <= 0) return 'recently';
+  const ms = Math.max(0, (Number.isFinite(current) ? current : Date.now()) - stamped);
   if (ms < 45_000) return 'just now';
   if (ms < 90_000) return 'a minute ago';
   if (ms < 45 * 60_000) return `${Math.round(ms / 60_000)} minutes ago`;
   if (ms < 90 * 60_000) return 'an hour ago';
   if (ms < 22 * 3600_000) return `${Math.round(ms / 3600_000)} hours ago`;
   if (ms < 36 * 3600_000) return 'yesterday';
-  return new Date(updatedAt).toLocaleDateString();
+  const date = new Date(stamped);
+  return Number.isFinite(date.getTime()) ? date.toLocaleDateString() : 'recently';
 }
 
 export function draftBodyExpired(record, now = Date.now()) {
@@ -122,13 +158,17 @@ export async function patchDraft(key, patch) {
   return value;
 }
 
-export async function saveDraft(key, bodyHtml, meta = {}) {
-  return patchDraft(key, {
+export function saveDraft(key, bodyHtml, meta = {}) {
+  const now = Date.now();
+  const value = {
+    ...(readLocalRecord(key) || {}),
     bodyHtml,
     baseHash: meta.baseHash,
     baseVersion: meta.baseVersion,
-    bodyUpdatedAt: Date.now(),
-  });
+    bodyUpdatedAt: now,
+    updatedAt: now,
+  };
+  return writeRecord(key, value).then(() => value);
 }
 
 export async function saveDraftMode(key, mode) {

@@ -73,6 +73,16 @@ console.log('draft-store per-doc cache');
     assert.strictEqual(record.baseHash === htmlHash('<p>new</p>'), false);
   });
 
+  await t('a draft reaches synchronous storage before its async write settles', async () => {
+    const key = 'instant:ada';
+    const pending = saveDraft(key, '<p>last keystroke</p>', { baseHash: 'abc', baseVersion: 4 });
+    const immediate = JSON.parse(memory.get('tdoc-draft:instant:ada'));
+    assert.strictEqual(immediate.bodyHtml, '<p>last keystroke</p>');
+    assert.strictEqual(immediate.baseVersion, 4);
+    await pending;
+    await clearDraft(key);
+  });
+
   await t('mode is stored on the same per-doc record as the body', async () => {
     const key = 'doc:ada';
     await saveDraftMode(key, 'edit');
@@ -116,6 +126,9 @@ console.log('draft-store per-doc cache');
     assert.strictEqual(formatDraftAge(now - 5 * 60_000, now), '5 minutes ago');
     assert.strictEqual(formatDraftAge(now - 3 * 3600_000, now), '3 hours ago');
     assert.strictEqual(formatDraftAge(now - 30 * 3600_000, now), 'yesterday');
+    assert.strictEqual(formatDraftAge(undefined, now), 'recently');
+    assert.strictEqual(formatDraftAge('corrupt', now), 'recently');
+    assert.strictEqual(formatDraftAge(Number.POSITIVE_INFINITY, now), 'recently');
   });
 
   await clearDraft('doc:ada');

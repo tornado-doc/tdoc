@@ -66,7 +66,7 @@ async function chooseMode(page, label) {
 <style>body{font:18px/1.6 system-ui;margin:0}.page{max-width:720px;margin:48px auto;padding:0 24px}img{max-width:180px}</style>
 </head><body><main class="page"><h1>Browser editing</h1>
 <p id="editable-paragraph">Edit this sentence and save one snapshot.</p>
-<p id="markdown-paragraph">Type markdown here.</p>
+<p id="markdown-paragraph">Type <a href="https://example.com/markdown"><em>markdown</em></a> here.</p>
 <section id="comment-artifact" data-tdoc-artifact><p id="artifact-copy">Commentable artifact copy.</p></section>
 <section id="edit-atomic" data-tdoc-edit-atomic><p>Explicitly locked widget copy.</p></section>
 <img alt="Atomic artifact" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">
@@ -262,13 +262,18 @@ async function chooseMode(page, label) {
       await page.keyboard.type('## ');
       const markdownState = await frame.evaluate(() => {
         const heading = document.querySelector('[data-tdoc-editor-root] h2');
+        const link = heading && heading.querySelector('a');
         return {
           hasMarkdown: typeof window.tdocEditMarkdown,
           heading: heading ? heading.textContent : null,
+          linkHref: link ? link.getAttribute('href') : null,
+          emphasis: Boolean(link && link.querySelector('em')),
         };
       });
       assert(markdownState.hasMarkdown === 'object' && /Type markdown here/.test(markdownState.heading || ''),
         `## space did not turn the block into an h2: ${JSON.stringify(markdownState)}`);
+      assert(markdownState.linkHref === 'https://example.com/markdown' && markdownState.emphasis,
+        `block conversion flattened existing inline HTML: ${JSON.stringify(markdownState)}`);
       await page.keyboard.press(`${PRIMARY_MODIFIER}+z`);
       const afterUndo = await frame.evaluate(() => {
         const node = document.getElementById('markdown-paragraph');
@@ -278,7 +283,7 @@ async function chooseMode(page, label) {
         `undo did not restore the markdown marks: ${JSON.stringify(afterUndo)}`);
     });
 
-    await test('Edit mode keeps changes in a recoverable draft until explicit Save', async () => {
+    await test('Edit mode survives an immediate refresh and waits for explicit Save', async () => {
       await chooseMode(page, 'Edit');
       await frame.locator('[data-tdoc-editor-root]').waitFor();
       const editability = await frame.evaluate(() => ({
@@ -290,9 +295,10 @@ async function chooseMode(page, label) {
       await frame.locator('#editable-paragraph').click();
       await frame.locator('#editable-paragraph').press('Meta+A');
       await frame.locator('#editable-paragraph').fill('A draft that survives reload.');
-      await page.waitForTimeout(500);
       assert(!fs.existsSync(path.join(docRoot, 'v2')), 'a keystroke created v2 before Save');
 
+      // Do not wait for the 350ms comparison debounce: recovery persistence is
+      // required to happen on the input turn, before an automatic refresh.
       await page.reload({ waitUntil: 'networkidle' });
       const reloadedFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
       await chooseMode(page, 'Edit');

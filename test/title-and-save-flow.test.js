@@ -20,6 +20,7 @@ const worker = read('worker/worker.js');
 const editorHook = read('shell/src/hooks/use-document-editor.js');
 const toolbar = read('shell/src/document/editor-toolbar.jsx');
 const shell = read('shell/src/document-shell.jsx');
+const frameProbe = read('server/frame-probe.js');
 
 console.log('hosted title + save flow (#367)');
 
@@ -67,6 +68,15 @@ t('a draft restores only after the published bytes are known, and per doc', () =
   assert(editorHook.includes('staleDraft'), 'the prompt for a draft whose base moved is gone');
   assert(read('shell/src/document/draft-store.js').includes('${config.slug}:${author}'),
     'the cache key must be per document, not per version and not global');
+});
+
+t('each edit is handed to synchronous draft storage before debounce settles', () => {
+  assert(frameProbe.includes("post({ type: 'tdoc:editDraft', bodyHtml: immediateHtml })"),
+    'the frame leaves the newest keystroke inside the debounce window');
+  assert(shell.includes("'tdoc:editDraft'"), 'the shell does not receive immediate recovery snapshots');
+  assert(editorHook.includes('editDraft(message)'), 'immediate recovery snapshots are not persisted');
+  assert(read('shell/src/document/draft-store.js').includes('writeLocalRecord(key, value);'),
+    'draft persistence does not synchronously mirror before IndexedDB');
 });
 
 t('the first save explains that it publishes, and can be told to stop', () => {

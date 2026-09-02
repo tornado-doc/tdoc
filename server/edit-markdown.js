@@ -80,6 +80,18 @@
     return post.toString().replace(/\u200B/g, '');
   }
 
+  // The prefix is matched as text, but the content after it is still the
+  // author's HTML. Clone the live range so converting "## " in front of a
+  // link or styled span does not flatten that content into plain text.
+  function rangeToBlockEndHtml(block, range) {
+    var post = document.createRange();
+    post.selectNodeContents(block);
+    post.setStart(range.startContainer, range.startOffset);
+    var container = document.createElement('div');
+    container.appendChild(post.cloneContents());
+    return container.innerHTML;
+  }
+
   function replaceNodeWithHtml(node, html) {
     var range = document.createRange();
     range.selectNode(node);
@@ -89,13 +101,15 @@
     document.execCommand('insertHTML', false, html);
   }
 
-  function blockHtml(rule, rest) {
-    var inner = rest ? escapeHtml(rest) : '<br>';
+  function blockHtml(rule, restHtml) {
+    // restHtml comes only from rangeToBlockEndHtml: it is serialized from the
+    // current author DOM, not interpolated user text.
+    var inner = restHtml || '<br>';
     if (rule.kind === 'heading') return '<h' + rule.level + '>' + inner + '</h' + rule.level + '>';
     if (rule.kind === 'ul') return '<ul><li>' + inner + '</li></ul>';
     if (rule.kind === 'ol') return '<ol><li>' + inner + '</li></ol>';
     if (rule.kind === 'quote') return '<blockquote><p>' + inner + '</p></blockquote>';
-    if (rule.kind === 'hr') return rest ? '<hr><p>' + escapeHtml(rest) + '</p>' : '<hr><p><br></p>';
+    if (rule.kind === 'hr') return restHtml ? '<hr><p>' + restHtml + '</p>' : '<hr><p><br></p>';
     return null;
   }
 
@@ -154,7 +168,7 @@
     var block = closestBlock(node, ctx.root);
     if (!block) return false;
     var before = rangeToBlockStart(block, live.range);
-    var after = rangeToBlockEnd(block, live.range);
+    var afterHtml = rangeToBlockEndHtml(block, live.range);
     var prefix = before;
     if (alreadyInserted) {
       if (incoming === '\n') {
@@ -165,7 +179,7 @@
     }
     var rule = matchBlock(prefix, incoming);
     if (!rule) return false;
-    var html = blockHtml(rule, after);
+    var html = blockHtml(rule, afterHtml);
     if (!html) return false;
     replaceNodeWithHtml(block, html);
     return true;
@@ -222,9 +236,9 @@
     }
 
     var before = rangeToBlockStart(block, live.range);
-    var after = rangeToBlockEnd(block, live.range);
+    var afterHtml = rangeToBlockEndHtml(block, live.range);
     if (matchBlock(before, '\n')) {
-      var html = blockHtml({ kind: 'hr' }, after);
+      var html = blockHtml({ kind: 'hr' }, afterHtml);
       event.preventDefault();
       replaceNodeWithHtml(block, html);
       return true;
