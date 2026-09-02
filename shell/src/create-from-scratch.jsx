@@ -1,9 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronLeft, FilePlus2, Sparkles } from 'lucide-react';
-import { copyText } from './document/model.js';
-
-const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
-export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
+import { FirstDocRecipe } from './onboarding-dialog.jsx';
 
 // "Create a doc" is a fork, not a form: write it yourself, or have your agent
 // write it. Two cards, one per answer — the blank doc opens immediately (you
@@ -20,7 +17,6 @@ export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL
 export function CreateChoice({ create, canCreate = true }) {
   const [view, setView] = useState('choice');
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const startBlank = async () => {
     if (busy) return;
@@ -37,16 +33,7 @@ export function CreateChoice({ create, canCreate = true }) {
           </button>
         ) : null}
         <p>Paste this into your AI. It installs tdoc, builds your personal AI portrait, publishes it privately, and gives you the link.</p>
-        <div className="tdoc-recipe-wrap">
-          <code>{FIRST_DOC_RECIPE}</code>
-          <button
-            type="button"
-            className={copied ? 'done' : undefined}
-            onClick={() => copyText(FIRST_DOC_RECIPE).then(setCopied)}
-          >
-            {copied ? 'Copied' : 'Copy'}
-          </button>
-        </div>
+        <FirstDocRecipe />
       </div>
     );
   }

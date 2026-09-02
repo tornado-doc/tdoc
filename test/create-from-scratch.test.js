@@ -175,25 +175,31 @@ t('the choice is two cards, and neither path is a form', () => {
   // The blank doc opens on the click. A title field here is the thing this
   // design replaced — the title is typed into the page instead.
   assert(!/<input/.test(form), 'the scratch card must not ask for a title');
-  assert(form.includes('FIRST_DOC_RECIPE'), 'the recipe lives behind the second card');
+  assert(form.includes('<FirstDocRecipe />'), 'the recipe lives behind the second card');
 });
 
-t('one component serves both entry points', () => {
-  // A second hand-written copy is how the two drift apart.
-  assert(!hub.includes('className="mk-card"'), 'the Docs Hub should render the shared component');
-  assert(!onboarding.includes('className="mk-card"'), 'the onboarding dialog should render the shared component');
+t('the cards live in the Docs Hub, and the recipe has one implementation', () => {
   assert(hub.includes('<CreateChoice create={hub.createDoc} canCreate={capabilities.create} />'),
     'the hub must wire the cards to its hook');
-  assert(onboarding.includes('<CreateChoice create={createHere} canCreate={Boolean(identity)} />'),
-    'the onboarding dialog must wire the cards');
+  // A second hand-written copy is how the two drift apart.
+  assert(!hub.includes('className="mk-card"'), 'the Docs Hub should render the shared component');
+  assert(form.includes('<FirstDocRecipe />'), 'the AI card should render the shared recipe, not its own copy');
+  assert(!form.includes('tdoc-recipe-wrap'), 'the recipe markup belongs to one component');
+  assert(onboarding.includes('export function FirstDocRecipe('), 'the shared recipe lost its home');
 });
 
-t('the onboarding dialog only offers the blank doc to a signed-in reader', () => {
-  assert(onboarding.includes('canCreate={Boolean(identity)}'), 'the scratch card must be gated on identity');
-  assert(onboarding.includes('error.status === 401'), 'an expired session needs its own message, not a raw HTTP error');
-  assert(read('shell/src/document-shell.jsx').includes('identity={config.identity}'),
-    'document-shell must pass identity into the dialog');
-  // Signed out, the recipe card is still the whole point of this dialog.
+t('the onboarding dialog is onboarding, not a doc launcher (#371)', () => {
+  // The landing dialog exists to get tdoc installed and a first doc published
+  // through the reader's own agent. A blank-doc card answers a question a
+  // first-time visitor has not asked yet.
+  assert(!onboarding.includes('CreateChoice'), 'the onboarding dialog must not offer the cards');
+  assert(!onboarding.includes('createDocument'), 'the onboarding dialog must not create documents');
+  assert(onboarding.includes('<FirstDocRecipe />'), 'the recipe is the whole of this dialog');
+  // TopBar still takes an identity; the dialog does not.
+  assert(/<OnboardingDialog open=\{onboardingOpen\} onOpenChange=\{setOnboardingOpen\} \/>/
+    .test(read('shell/src/document-shell.jsx')),
+    'the dialog no longer needs an identity, so the shell should stop passing one');
+  // The hub's own card still respects the host capability.
   assert(form.includes('canCreate ? ('), 'the recipe card must survive canCreate=false');
 });
 

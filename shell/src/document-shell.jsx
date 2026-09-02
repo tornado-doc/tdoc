@@ -689,11 +689,7 @@ export function DocumentShell({ boot, config }) {
         onOpenChange={setSignInOpen}
         onSuccess={completeSignIn}
       />
-      <OnboardingDialog
-        open={onboardingOpen}
-        onOpenChange={setOnboardingOpen}
-        identity={config.identity}
-      />
+      <OnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
 
       {toast ? (
         <div className={`tdoc-shell-toast${toast.error ? ' error' : ''}`} role="status">

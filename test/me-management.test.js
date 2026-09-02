@@ -49,7 +49,10 @@ t('Docs Hub exposes search, sort, tabs, folders, star, selection, and batch acti
 });
 
 t('Create a doc is a two-card fork rendered by the shared component', () => {
-  const choice = fs.readFileSync(path.join(root, 'shell/src/create-from-scratch.jsx'), 'utf8');
+  // The cards live in create-from-scratch; the recipe they open lives with the
+  // onboarding copy that owns its wording (#371).
+  const choice = ['shell/src/create-from-scratch.jsx', 'shell/src/onboarding-dialog.jsx']
+    .map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
   assert(/import \{ CreateChoice \}/.test(docsHub), 'the Create dialog should render the shared component');
   assert(/<CreateChoice create=\{hub\.createDoc\} canCreate=\{capabilities\.create\} \/>/.test(docsHub),
     'the cards must be wired to the hub hook and its capability');
