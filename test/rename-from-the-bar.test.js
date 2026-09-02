@@ -87,5 +87,23 @@ t('the new name appears at once and rolls back if the server refuses', () => {
   assert(/showToast\(error\.message \|\| 'Could not rename', true\)/.test(block), 'say so when it fails');
 });
 
+t('the list can rename too, through the same route', () => {
+  const hub = read('shell/src/docs-hub.jsx');
+  const hook = read('shell/src/hooks/use-docs-hub.js');
+  assert(/label: 'Rename',/.test(hub), 'Rename is missing from the row menu');
+  assert(/doc && \(!doc\.owner \|\| doc\.owner === viewer\) \?/.test(hub),
+    'only offer Rename where the server would allow it, rather than serving a 403');
+  assert(/initialName=\{modal\.doc\.title \|\| ''\}/.test(hub), 'the dialog should start from the current name');
+  assert(/maxLength=\{120\}/.test(hub), 'the list dialog must accept as long a title as the route does');
+  // One name prompt, two callers — folders had it first.
+  assert(hub.includes('function NameDialog('), 'the shared name dialog is gone');
+  assert(!hub.includes('FolderNameDialog'), 'a folder-specific copy came back');
+  assert(/saved = await renameDocument\(slug, trimmed\)/.test(hook), 'the list must use the same route');
+  assert(/item\.slug === slug \? \{ \.\.\.item, title: saved\.title \}/.test(hook),
+    'the row should take the title the server echoed, not the one that was typed');
+  assert(/setDocs\(apply\);\s*\n\s*setRecent\(apply\);\s*\n\s*setStarred\(apply\);/.test(hook),
+    'every list holding that doc has to move together');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

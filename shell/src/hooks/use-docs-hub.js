@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   createDocument,
   createFolder,
+  renameDocument,
   deleteDocument,
   deleteFolder as deleteFolderRequest,
   moveDocsToFolder,
@@ -127,6 +128,24 @@ export function useDocsHub({ boot, onUnauthorized }) {
     return true;
   }, [run]);
 
+  // Renaming from the list, the same metadata edit the document bar performs.
+  // The row updates from the title the server echoes back rather than the one
+  // that was typed, so what the list shows is what was stored.
+  const renameDoc = useCallback(async (slug, name) => {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return false;
+    let saved;
+    const ok = await run(async () => { saved = await renameDocument(slug, trimmed); });
+    if (!ok) return false;
+    const apply = (items) => items.map((item) => (
+      item.slug === slug ? { ...item, title: saved.title } : item
+    ));
+    setDocs(apply);
+    setRecent(apply);
+    setStarred(apply);
+    return true;
+  }, [run]);
+
   const toggleStar = useCallback(async (slug, on) => {
     paintStar(slug, on);
     const ok = await run(() => setDocumentStar(slug, on));
@@ -215,6 +234,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     selectAll,
     toast,
     createDoc,
+    renameDoc,
     toggleStar,
     moveDocs,
     deleteDocs,
