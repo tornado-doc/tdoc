@@ -23,6 +23,11 @@
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
   var interactionMode = 'read';
+  // Whether the shell currently has a comment card, cluster, or composer open.
+  // While something is open, the next click anywhere in the document only
+  // dismisses it — it must not open a different comment or start a new one.
+  var shellUiOpen = false;
+  var swallowClick = false;
   var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
@@ -181,6 +186,14 @@
   // shell / 404), not the page. Intercept and hand navigation to the shell,
   // which navigates the top document (or opens a tab for target=_blank).
   document.addEventListener('click', function (e) {
+    // The mousedown of this same gesture dismissed something. Let it end there.
+    if (swallowClick) {
+      swallowClick = false;
+      if (e.target && e.target.closest && e.target.closest('a[href]')) {
+        e.preventDefault(); e.stopPropagation();
+      }
+      return;
+    }
     var commentId = interactionMode === 'edit' ? null : anchorIdAtPoint(e.clientX, e.clientY);
     if (commentId) {
       e.preventDefault(); e.stopPropagation();
@@ -220,7 +233,12 @@
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
     if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
-    if (anchorIdAtPoint(e.clientX, e.clientY)) return;
+    // Dismissal does not hit-test. While the shell has something open, an anchor
+    // under the pointer stops being special — the click that closes a card must
+    // not also open the next one. Fall through rather than returning, so a drag
+    // that starts here still paints its selection.
+    swallowClick = shellUiOpen;
+    if (!shellUiOpen && anchorIdAtPoint(e.clientX, e.clientY)) return;
     if (interactionMode === 'comment' && e.button === 0
       && !(e.target && e.target.closest && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
       var point = caretAtPoint(e.clientX, e.clientY);
@@ -838,6 +856,7 @@
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode);
+    else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
     else if (d.type === 'tdoc:editRestore') {
       var restoreRoot = findEditRoot();
