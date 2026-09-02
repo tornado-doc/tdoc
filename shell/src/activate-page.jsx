@@ -105,11 +105,24 @@ export function ActivatePage({ boot }) {
       {!identity ? (
         <>
           <p>A terminal wants to publish to your tdoc account. Sign in first, then confirm the code it showed you.</p>
+          {boot.oidcAuth ? (
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
+                location.href = `/api/auth/oidc/login?return=${encodeURIComponent(back)}`;
+              }}
+            >
+              Continue with {boot.oidcLabel || 'Email'}
+            </button>
+          ) : null}
           {boot.authConfigured ? (
-            <button type="button" className="primary" onClick={signIn}>Sign in with GitHub</button>
-          ) : (
+            <button type="button" className={boot.oidcAuth ? '' : 'primary'} onClick={signIn}>Sign in with GitHub</button>
+          ) : null}
+          {!boot.oidcAuth && !boot.authConfigured ? (
             <p>Sign-in is not configured on this host.</p>
-          )}
+          ) : null}
         </>
       ) : !pending ? (
         <>

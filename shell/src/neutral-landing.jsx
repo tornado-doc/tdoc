@@ -23,8 +23,17 @@ export function NeutralLanding({ boot }) {
       <img src="/tdoc_logo.svg" width="54" height="54" alt="" />
       <h1>tdoc</h1>
       <p>Prompt-native, commentable documents.</p>
+      {boot.oidcAuth ? (
+        <button
+          type="button"
+          className="primary"
+          onClick={() => { location.href = '/api/auth/oidc/login?return=%2Fme'; }}
+        >
+          Continue with {boot.oidcLabel || 'Email'}
+        </button>
+      ) : null}
       {boot.authConfigured ? (
-        <button type="button" className="primary" onClick={signIn}>Sign in with GitHub</button>
+        <button type="button" className={boot.oidcAuth ? '' : 'primary'} onClick={signIn}>Sign in with GitHub</button>
       ) : null}
       <a href="https://github.com/tornado-doc/tdoc">
         github.com/tornado-doc/tdoc <ExternalLink size={14} />
