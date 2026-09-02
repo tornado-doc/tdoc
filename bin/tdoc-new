@@ -108,7 +108,7 @@ done
 # Human nag on stderr; discard the machine line (skill preamble captures
 # it; doctor uses --json). `tail -n 1` / `tail -n 2` stay URL-only.
 if [ "$QUIET" != "1" ]; then
-  "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
+  bash "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
 fi
 
 [ -n "$SLUG" ]  || die "--slug required"
@@ -237,7 +237,7 @@ fi
 VALIDATOR="$(cd "$(dirname "$0")" && pwd)/tdoc-validate-template"
 VALIDATOR_ARGS=("$STAGE_HTML" --style "$STYLE")
 [ "$CUSTOM_TEMPLATE" = "1" ] && VALIDATOR_ARGS+=(--custom-template)
-if ! "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
+if ! python3 "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
   die "default-template validation failed (existing doc, if any, left untouched)"
 fi
 
@@ -245,7 +245,7 @@ fi
 # origin shell serves author HTML in an isolated frame and injects nothing
 # into storage). bin/tdoc-bake owns the operation and is idempotent, so every
 # path that writes a version can call it without checking first.
-"$(cd "$(dirname "$0")" && pwd)/tdoc-bake" "$STAGE_HTML" >/dev/null \
+node "$(cd "$(dirname "$0")" && pwd)/tdoc-bake" "$STAGE_HTML" >/dev/null \
   || die "reader-template bake failed (existing doc, if any, left untouched)"
 
 # Validation passed — NOW it's safe to replace. Swap the existing doc out only
@@ -370,7 +370,7 @@ LOCAL_URL="http://localhost:${TDOC_PORT}/d/$SLUG/v/$VERSION_N"
 PUBLISHED_URL=""
 if [ "$PUBLISH" = "1" ]; then
   info "publishing to Cloudflare Worker..."
-  if PUB_OUT=$("$SKILL_DIR/bin/tdoc-publish" "$SLUG" 2>&1); then
+  if PUB_OUT=$(bash "$SKILL_DIR/bin/tdoc-publish" "$SLUG" 2>&1); then
     PUBLISHED_URL=$(printf '%s\n' "$PUB_OUT" | awk '/^Published:/ { print $2 }')
     [ -n "$PUBLISHED_URL" ] && info "published: $PUBLISHED_URL"
   else

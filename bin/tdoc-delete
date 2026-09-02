@@ -25,7 +25,7 @@ deleted_something=0
 if [ "$MODE" != "--local-only" ]; then
   # Best-effort: only try the network delete when a publish config exists.
   if [ -f "$HOME/.tdoc/published.json" ]; then
-    if "$SCRIPT_DIR/tdoc-unpublish" "$SLUG"; then
+    if bash "$SCRIPT_DIR/tdoc-unpublish" "$SLUG"; then
       deleted_something=1
     else
       # A doc that was never published 404s here — that's fine when we're
