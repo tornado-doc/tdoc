@@ -41,6 +41,13 @@ export function anchorFromSelection(selection) {
     text: selection.text,
     context_before: selection.context_before,
     context_after: selection.context_after,
+    // Which occurrence of this text was selected, counted by the frame. The
+    // resolver falls back to it when context cannot tell two matches apart;
+    // an anchor written before this existed simply has no number, and
+    // resolves the way it always did.
+    ...(typeof selection.occurrence === 'number' && typeof selection.occurrences === 'number'
+      ? { occurrence: selection.occurrence, occurrences: selection.occurrences }
+      : {}),
   };
 }
 

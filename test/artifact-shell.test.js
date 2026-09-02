@@ -173,10 +173,21 @@ const SLUG = 'hostile-body-css';
       await page.waitForTimeout(300);
       const pins = await page.evaluate(() => document.querySelectorAll('.tdoc-pin').length);
       if (pins < 2) throw new Error(`expected 2 pins (single-node + cross-block), got ${pins} — normalized anchor matching regressed`);
+      const crossBlockFound = await page.evaluate(() =>
+        [...document.querySelectorAll('.tdoc-pin')].some((pin) =>
+          String(pin.dataset.key || '').includes('c_fixture_2')));
+      if (!crossBlockFound) throw new Error('saved h1-to-p anchor did not resolve across a block boundary');
       // Pins sit at the article's right edge, not pinned to the far viewport edge
       // (the fixture body is max-width:900 centered in 1400 → edge ~1100).
       const pinLeft = await page.evaluate(() => Math.round(document.querySelector('.tdoc-pin').getBoundingClientRect().left));
       if (pinLeft > 1300) throw new Error(`pin is pinned to the viewport edge (${pinLeft}), not the article gutter`);
+    });
+
+    await t('a table-cell selection spanning <span> + <br> resolves to a pin', async () => {
+      const found = await page.evaluate(() =>
+        [...document.querySelectorAll('.tdoc-pin')].some((pin) =>
+          String(pin.dataset.key || '').includes('c_fixture_6')));
+      if (!found) throw new Error('saved anchor "有\\n可做到低频轮询 / 单连接" did not resolve across <br>');
     });
 
     await t('clicking a pin opens the card by its pin, without scrolling the doc', async () => {

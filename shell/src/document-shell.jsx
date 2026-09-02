@@ -241,8 +241,11 @@ export function DocumentShell({ boot, config }) {
   // the shell has something open. While it does, the next click anywhere in the
   // document only closes it — no hit-testing, no opening the comment underneath.
   useEffect(() => {
-    bridge.send({ type: 'tdoc:uiOpen', open: Boolean(openCommentId || openClusterKey || composer) });
-  }, [bridge.send, composer, openClusterKey, openCommentId]);
+    // Re-anchoring is the exception: the card stays open precisely so the author
+    // can click the new spot, and treating that click as a dismissal ate it.
+    const open = Boolean((openCommentId || openClusterKey || composer) && !reanchorId);
+    bridge.send({ type: 'tdoc:uiOpen', open });
+  }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId]);
 
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
