@@ -47,6 +47,7 @@ const OFFLINE = [
   'edit-markdown.test.js',     // #374 markdown input rules (no schema parser)
   'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
   'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
+  'document-owner.test.js',   // #395 the bar and the lists name the document's owner
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',

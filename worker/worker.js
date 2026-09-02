@@ -1558,7 +1558,7 @@ function injectReaderCss(html, css) {
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docTitle) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
@@ -1569,12 +1569,19 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // document was named after its URL. That read as a title only while slugs
   // were agent-picked words; a browser-created doc's slug is an opaque id.
   // The slug remains the fallback for a doc whose meta carries no title.
+  const docTitle = docMeta && docMeta.title;
   const title = typeof docTitle === 'string' && docTitle.trim() ? docTitle.trim() : slug;
+  // Who the document belongs to, shown beside its title. Only hosted publishes
+  // record a person; a doc from before hosted accounts, the landing doc, and
+  // everything on a self-hosted worker have nobody to name, and name nobody
+  // rather than guessing from versions[].author (which only browser edits set).
+  const author = hostedGithubLogin(docMeta) || null;
   const cfg = {
     slug,
     title,
     version,
     identity: identity || null,
+    author,
     isOwner: !!isOwner,
     canEdit: !!versionWritesEnabled && !!isOwner && !isLanding,
     canComment: !!commentWritesEnabled,
@@ -1717,7 +1724,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta && gate.meta.title), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };

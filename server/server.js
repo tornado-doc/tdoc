@@ -660,6 +660,10 @@ function shellDocument(slug, version, nonce) {
     mode: 'local',
     versions,
     identity: ident,
+    // The local server is anonymous by design and records nobody as a document's
+    // owner, so there is never a name to show here. Declared rather than omitted
+    // so the shell reads the same shape from both hosts.
+    author: null,
     isOwner,
     canEdit: !isLanding && Number(version) === Number(latestVersion),
     canComment: true,
