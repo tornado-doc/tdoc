@@ -48,7 +48,11 @@ t('Worker exposes provider-gated hosted token bootstrap', () => {
 });
 
 t('CLI mint and Duplicate share one hosted-account registry', () => {
-  const acctStart = worker.indexOf('async function hostedAccountForGithub');
+  // The legacy hosted-github: read moved into lookupHostedAccount, the
+  // read-only resolver hostedAccountForGithub now delegates to — slice from
+  // there so the invariant (one registry, legacy records still readable)
+  // is checked where it now lives.
+  const acctStart = worker.indexOf('async function lookupHostedAccount');
   const acct = worker.slice(acctStart, worker.indexOf('async function sourceHasWidgets'));
   const issue = worker.slice(
     worker.indexOf('async function issueHostedToken'),
@@ -57,7 +61,7 @@ t('CLI mint and Duplicate share one hosted-account registry', () => {
   assert(acct.includes('hosted-account:'), 'canonical account key is hosted-account:<login>');
   assert(acct.includes('hosted-github:'), 'must still read leftover hosted-github records');
   assert(!acct.includes("source: 'duplicate'"), 'must not mint a second registry just for Duplicate');
-  assert(issue.includes('hostedAccountForGithub(env, github_login)'),
+  assert(issue.includes('hostedAccountForGithub(env, github_login, verifiedEmail)'),
     'token mint must reuse hostedAccountForGithub');
   assert(!issue.includes('hosted-github:'), 'token mint must not write a second registry');
 });

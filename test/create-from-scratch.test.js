@@ -134,7 +134,7 @@ t('the worker create route claims a slug, charges quota, and writes v1', () => {
   for (const needle of [
     "json({ error: 'sign_in_required' }, { status: 401 })",
     'hostedAccountCopiesEnabled(env, req)',
-    'hostedAccountForGithub(env, session.login)',
+    'hostedAccountForGithub(env, session.login, session && session.email)',
     'countHostedDocs(env, actor.account_id, limit)',
     "kind: 'claim_owner'",
     'blankDocHtml()',

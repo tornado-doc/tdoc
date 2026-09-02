@@ -2589,6 +2589,40 @@ async function ghPost(path, formObj) {
   if (!Object.keys(out).length) return { error: 'gh_empty', error_description: `status=${r.status} ct=${ct}` };
   return out;
 }
+// The merge key's gatekeeper. Loose on purpose — the provider already proved
+// deliverability; this only guards KV key hygiene (no spaces/control chars,
+// exactly one @, bounded length) and canonicalizes case.
+function normalizeEmail(email) {
+  const v = String(email || '').trim().toLowerCase();
+  if (v.length > 254) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return null;
+  return v;
+}
+
+// The signed-in user's verified email, or null. Requires the user:email
+// scope; a token minted before the scope widened gets [] or 403 here, and
+// null is the correct answer — the account simply gains its email key on a
+// later sign-in (migration is lazy by design).
+async function ghVerifiedEmail(token) {
+  try {
+    const r = await fetch('https://api.github.com/user/emails', {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${token}`,
+        'User-Agent': 'tdoc-worker',
+      },
+    });
+    if (!r.ok) return null;
+    const list = await r.json();
+    if (!Array.isArray(list)) return null;
+    const hit = list.find((e) => e && e.primary && e.verified && typeof e.email === 'string')
+      || list.find((e) => e && e.verified && typeof e.email === 'string');
+    return hit ? normalizeEmail(hit.email) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function ghUser(token) {
   const r = await fetch('https://api.github.com/user', {
     headers: {
@@ -2834,34 +2868,63 @@ function syncDocumentTitle(html, title) {
     .replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, () => `<title>${safe}</title>`);
 }
 
-async function hostedAccountForGithub(env, login) {
+// Read-only twin of hostedAccountForGithub: resolves an existing account and
+// never mints one. Sign-in goes through THIS — a commenter is not a
+// publisher, and hasUsedTdoc treats hosted-account presence as "has
+// registered", so minting on sign-in would both fill KV with spectator
+// accounts and make every second commenter read as an established user.
+async function lookupHostedAccount(env, login) {
+  const norm = normalizeGithubLogin(login);
+  if (!norm || !env || !env.META) return null;
+  for (const key of [`hosted-account:${norm}`, `hosted-github:${norm}`]) {
+    try {
+      const rec = JSON.parse(await env.META.get(key));
+      if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
+    } catch {}
+  }
+  return null;
+}
+
+async function hostedAccountForGithub(env, login, verifiedEmail = null) {
   const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
   const primary = `hosted-account:${norm}`;
-  const legacy = `hosted-github:${norm}`;
-  let rec = null;
-  try {
-    const raw = await env.META.get(primary);
-    if (raw) rec = JSON.parse(raw);
-  } catch {}
-  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
-    try {
-      const raw = await env.META.get(legacy);
-      if (raw) rec = JSON.parse(raw);
-    } catch {}
-  }
-  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+  let rec = await lookupHostedAccount(env, login);
+  if (!rec) {
     rec = {
       account_id: `acct_${rand(12)}`,
       github_login: norm,
       created: new Date().toISOString(),
     };
   } else {
+    // Spread first: the record is about to grow fields this function does not
+    // know about (email today, linked identities later), and the old
+    // fixed-three-field rewrite silently dropped anything extra on every
+    // sign-in — data written once and erased on next login.
     rec = {
+      ...rec,
       account_id: rec.account_id,
       github_login: norm,
       created: rec.created || new Date().toISOString(),
     };
+  }
+  // The email merge key. First writer wins: if the index already names a
+  // DIFFERENT account, this account does not get the key — silently stealing
+  // it would hand one user's future sign-ins to another's docs. Verified-only
+  // is enforced upstream (callers pass what the provider attested, nothing
+  // user-typed).
+  const email = normalizeEmail(verifiedEmail);
+  if (email && rec.email !== email) {
+    const key = `account-email:${email}`;
+    let existing = null;
+    try { existing = JSON.parse(await env.META.get(key)); } catch {}
+    if (!existing || !existing.account_id || existing.account_id === rec.account_id) {
+      await env.META.put(key, JSON.stringify({
+        account_id: rec.account_id,
+        created: (existing && existing.created) || new Date().toISOString(),
+      }));
+      rec.email = email;
+    }
   }
   await env.META.put(primary, JSON.stringify(rec));
   return rec;
@@ -2876,12 +2939,12 @@ async function sourceHasWidgets(env, slug, version) {
   }
 }
 
-async function issueHostedToken(env, body = {}) {
+async function issueHostedToken(env, body = {}, verifiedEmail = null) {
   const github_login = normalizeGithubLogin(body.login);
   if (!github_login) {
     return { error: 'sign_in_required', status: 401 };
   }
-  const account = await hostedAccountForGithub(env, github_login);
+  const account = await hostedAccountForGithub(env, github_login, verifiedEmail);
   if (!account) return { error: 'sign_in_required', status: 401 };
   const token = `tdoc_${rand(24)}`;
   const tokenHash = await sha256Hex(token);
@@ -4122,12 +4185,21 @@ export default {
         }
         const user = await ghUser(r.access_token);
         if (!user.login) return authStatusResponse('GitHub returned no account.', { error: true, status: 500 });
+        // The only moment the GitHub token exists is now, so the verified
+        // email is read now; it is the merge key that routes every sign-in
+        // method to one account. Resolve-don't-mint: sign-in must not create
+        // hosted accounts (see lookupHostedAccount).
+        const email = await ghVerifiedEmail(r.access_token);
+        const existing = await lookupHostedAccount(env, user.login);
+        const account = existing ? await hostedAccountForGithub(env, user.login, email) : null;
         const sid = rand(24);
         const session = {
           login: user.login,
           avatar_url: user.avatar_url,
           name: user.name || user.login,
           created: new Date().toISOString(),
+          ...(account ? { account_id: account.account_id } : {}),
+          ...(email ? { email } : {}),
         };
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
         return redirectTo(ret, [
@@ -4449,7 +4521,7 @@ export default {
         }
         // Not a precondition — this mints the account on first use. A null here
         // means the account store itself is unreachable.
-        const acct = await hostedAccountForGithub(env, session.login);
+        const acct = await hostedAccountForGithub(env, session.login, session && session.email);
         if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
         actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
       }
@@ -4553,7 +4625,7 @@ export default {
 
       let actor = { kind: 'owner_session' };
       if (!ownerCopy) {
-        const acct = await hostedAccountForGithub(env, session.login);
+        const acct = await hostedAccountForGithub(env, session.login, session && session.email);
         if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
         actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
       }
@@ -4656,7 +4728,7 @@ export default {
       const gh = new URL('https://github.com/login/oauth/authorize');
       gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
       gh.searchParams.set('redirect_uri', `${url.origin}/auth/github/callback`);
-      gh.searchParams.set('scope', 'read:user');
+      gh.searchParams.set('scope', 'read:user user:email');
       gh.searchParams.set('state', nonce);
       return redirectTo(gh.toString(), [
         `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
@@ -4667,7 +4739,7 @@ export default {
       try {
         const r = await ghPost('/login/device/code', {
           client_id: env.GITHUB_CLIENT_ID,
-          scope: 'read:user',
+          scope: 'read:user user:email',
         });
         if (r.error) return json({ error: r.error, message: r.error_description }, { status: 400 });
         return json({
@@ -4711,16 +4783,22 @@ export default {
         const user = await ghUser(r.access_token);
         debug(env, '[poll] gh /user response keys:', Object.keys(user).join(','), 'login:', user.login || 'none');
         if (!user.login) return json({ error: 'no_user', message: user.message || 'GitHub /user returned no login' }, { status: 500 });
+        const email = await ghVerifiedEmail(r.access_token);
+        const existing = await lookupHostedAccount(env, user.login);
+        const account = existing ? await hostedAccountForGithub(env, user.login, email) : null;
         const sid = rand(24);
         // Store only the identity we actually use. The GitHub access token is
         // intentionally NOT persisted: nothing downstream reads session.token,
-        // and keeping a read:user token at rest for 30 days is needless
-        // exposure (data minimization).
+        // and keeping a token at rest for 30 days is needless exposure. The
+        // verified email IS stored: it is the merge key (and what email-based
+        // invites will match), attested by the provider, not user-typed.
         const session = {
           login: user.login,
           avatar_url: user.avatar_url,
           name: user.name || user.login,
           created: new Date().toISOString(),
+          ...(account ? { account_id: account.account_id } : {}),
+          ...(email ? { email } : {}),
         };
         // 30 day TTL
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
@@ -4929,7 +5007,11 @@ export default {
       }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
-      const issued = await issueHostedToken(env, { ...body, login });
+      // session.email is the provider-attested address captured at sign-in —
+      // passed as its own argument so nothing in the client-controlled body
+      // can pose as it. This is what gives a brand-new publisher their email
+      // merge key at the moment their account is minted.
+      const issued = await issueHostedToken(env, { ...body, login }, session && session.email);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       return json({
         ok: true,
