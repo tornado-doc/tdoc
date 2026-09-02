@@ -3,12 +3,17 @@ import {
   Bold,
   Check,
   ChevronDown,
+  Code,
   Eye,
   Heading1,
   Heading2,
+  Heading3,
   Italic,
   Link,
+  List,
+  ListOrdered,
   Pencil,
+  Quote,
   Redo2,
   RotateCcw,
   Save,
@@ -17,6 +22,7 @@ import {
 import { AppDialog } from '../ui/dialog.jsx';
 import { CommentIcon } from '../ui/comment-icon.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { formatDraftAge } from './draft-store.js';
 
 const MODES = [
   { value: 'read', label: 'Read', Icon: Eye },
@@ -88,6 +94,11 @@ export function EditorToolbar({ dirty, checking, saving, onFormat, onDiscard, on
         <span className="tdoc-editor-divider" />
         <ToolButton label="Heading 1" icon={<Heading1 size={17} />} command="formatBlock" value="h1" onFormat={onFormat} />
         <ToolButton label="Heading 2" icon={<Heading2 size={17} />} command="formatBlock" value="h2" onFormat={onFormat} />
+        <ToolButton label="Heading 3" icon={<Heading3 size={17} />} command="formatBlock" value="h3" onFormat={onFormat} />
+        <ToolButton label="Bullet list" icon={<List size={16} />} command="insertUnorderedList" onFormat={onFormat} />
+        <ToolButton label="Numbered list" icon={<ListOrdered size={16} />} command="insertOrderedList" onFormat={onFormat} />
+        <ToolButton label="Quote" icon={<Quote size={16} />} command="formatBlock" value="blockquote" onFormat={onFormat} />
+        <ToolButton label="Inline code" icon={<Code size={16} />} command="code" onFormat={onFormat} />
         <ToolButton label="Add link" icon={<Link size={16} />} command="createLink" onFormat={onFormat} />
         <span className="tdoc-editor-divider" />
         <ToolButton label="Undo" icon={<Undo2 size={16} />} command="undo" onFormat={onFormat} />
@@ -103,6 +114,30 @@ export function EditorToolbar({ dirty, checking, saving, onFormat, onDiscard, on
         </button>
       </div>
     </div>
+  );
+}
+
+export function StaleDraftDialog({ draft, currentVersion, onRestore, onKeep }) {
+  if (!draft) return null;
+  const age = formatDraftAge(draft.updatedAt);
+  const fromOtherVersion = Number(draft.baseVersion) > 0
+    && Number(draft.baseVersion) !== Number(currentVersion);
+  const description = fromOtherVersion
+    ? `You have a draft from ${age}, started on v${draft.baseVersion}. Restore it, or keep the version on the page.`
+    : `You have a draft from ${age}. Restore it, or keep the version on the page.`;
+  return (
+    <AppDialog
+      open
+      onOpenChange={(open) => { if (!open) onKeep(); }}
+      title="A draft of this document is saved here"
+      description={description}
+      actions={(
+        <>
+          <button type="button" onClick={onKeep}>Keep this version</button>
+          <button type="button" className="primary" onClick={onRestore}>Restore draft</button>
+        </>
+      )}
+    />
   );
 }
 

@@ -247,7 +247,7 @@ t('the bar names a document by its title, never by its slug', () => {
 
 t('a doc created from scratch opens in edit mode, not read mode', () => {
   assert(editorHook.includes("get('edit') === '1'"), 'the editor never looks at ?edit=1');
-  assert(/wantsEdit && config\.canEdit/.test(editorHook),
+  assert(/(?:urlWantsEdit\(\)|wantsEdit) && config\.canEdit/.test(editorHook),
     'edit-on-arrival must still respect canEdit, or a reader gets an editor that cannot save');
 });
 

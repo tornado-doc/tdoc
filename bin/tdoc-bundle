@@ -24,7 +24,7 @@ const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
 // The shell builder runs server-side in the worker; the framework-free probe is
 // injected into isolated author frames.
 const shellMod = fs.readFileSync(path.join(skill, 'server/shell.js'), 'utf8');
-const frameProbe = fs.readFileSync(path.join(skill, 'server/frame-probe.js'), 'utf8');
+const frameProbe = require(path.join(skill, 'server/frame-probe-source.js'))();
 const readerCss = fs.readFileSync(path.join(skill, 'server/reader.css'), 'utf8');
 const runtimeManifest = JSON.parse(fs.readFileSync(path.join(skill, 'server/runtime/manifest.json'), 'utf8'));
 const runtimeEntry = Object.values(runtimeManifest).find((item) => item && item.isEntry);
