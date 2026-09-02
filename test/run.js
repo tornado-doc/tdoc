@@ -31,6 +31,7 @@ const OFFLINE = [
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
   'hosted-oob.test.js',       // hosted token bootstrap + scoped writes
   'hosted-oob-behavior.test.js', // hosted token ownership behavior with fake bindings
+  'account-email-groundwork.test.js', // phase-1 identity: email merge key, no mint-on-signin, field-preserving rewrite
   'duplicate-download.test.js', // #146 Duplicate vs Download chrome + route contract
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
