@@ -66,6 +66,12 @@
      beside it — growing pushed the star to the far end of the left cluster.
      Shrink+min-width:0 keeps the ellipsis when space runs out. */
   .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The title is a control when you own the document: it looks like text until
+     you point at it, so the bar stays quiet for everyone who cannot rename. */
+  .tdoc-bar button.doc-title-edit { appearance: none; border: 1px solid transparent; background: none; padding: 2px 6px; margin: 0 -6px; border-radius: 6px; font: inherit; font-weight: 600; font-size: 14px; color: #1a1a1a; cursor: text; text-align: left; }
+  .tdoc-bar button.doc-title-edit:hover { border-color: #e5e5e7; background: #fafafa; }
+  .tdoc-bar .doc-title-input { border: 1px solid var(--td-accent); background: #fff; padding: 2px 6px; margin: 0 -6px; border-radius: 6px; font: inherit; font-weight: 600; font-size: 14px; color: #1a1a1a; outline: none; min-width: 12ch; max-width: 40ch; }
+
   /* Whose document this is. flex-shrink:0 with its own max-width so a long
      login truncates itself instead of eating the title's room. */
   .tdoc-bar .doc-author { color: #8a8a8f; font-size: 13px; flex: 0 0 auto; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

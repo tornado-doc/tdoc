@@ -1106,6 +1106,31 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // A title is a property of the document, not of its text: renaming edits the
+  // meta record and leaves the body and the version history alone (#383).
+  if (p === '/api/doc/title' && req.method === 'PATCH') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const slug = safeSlug(body.slug);
+    const clean = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
+    if (!clean) return json(res, 400, { error: 'title_required' });
+    if (clean.length > 120) return json(res, 400, { error: 'title_too_long', limit: 120 });
+    const metaFile = path.join(ROOT, slug, 'meta.json');
+    const meta = readJson(metaFile, null);
+    if (!meta || typeof meta !== 'object') return json(res, 404, { error: 'not_found' });
+    const stage = `${metaFile}.title-${crypto.randomBytes(6).toString('hex')}`;
+    try {
+      fs.writeFileSync(stage, JSON.stringify({ ...meta, title: clean }, null, 2) + '\n');
+      fs.renameSync(stage, metaFile);
+    } catch (error) {
+      try { fs.rmSync(stage, { force: true }); } catch {}
+      console.error('[rename] meta write failed:', error && error.message ? error.message : error);
+      return json(res, 500, { error: 'rename_failed' });
+    }
+    return json(res, 200, { ok: true, slug, title: clean });
+  }
+
   // Start from scratch: the local twin of the worker's /api/doc/create. The
   // document is staged under a dot-prefixed directory (which the hub listing
   // skips, since safeSlug rejects a dot) and renamed into place, so a half
@@ -1130,8 +1155,11 @@ const server = http.createServer(async (req, res) => {
       fs.mkdirSync(path.join(stageDir, 'v1'), { recursive: true });
       fs.writeFileSync(path.join(stageDir, 'v1', 'index.html'), blankDocHtml());
       fs.writeFileSync(path.join(stageDir, 'meta.json'), JSON.stringify({
-        // Renamed by the first save that finds a heading in the document.
+        // Renamed by the first save that finds a heading in the document, and
+        // by every save after it. This is the only kind of document whose
+        // heading is authoritative for its title.
         title: 'Untitled',
+        created_from: 'blank',
         slug,
         created: now,
         versions: [{
@@ -1219,10 +1247,12 @@ const server = http.createServer(async (req, res) => {
       const widgetFrom = `/d/${slug}/v/${baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${nextVersion}/widget/`;
       const rewritten = doc.split(widgetFrom).join(widgetTo);
-      // The author renames a doc by editing its heading, which is the only
-      // title they can actually reach from the editor. An empty or missing h1
-      // leaves the stored title alone rather than blanking it.
-      nextTitle = titleFromDocument(rewritten);
+      // A document created blank IS its heading — that is where its author
+      // typed the title, and it keeps following the heading. Every other
+      // document has a title of its own, which renaming changes; its first h1
+      // may not even be a title, so a save must never re-read it. An empty or
+      // missing h1 leaves the stored title alone rather than blanking it.
+      nextTitle = meta.created_from === 'blank' ? titleFromDocument(rewritten) : '';
       fs.writeFileSync(path.join(stageDir, 'index.html'),
         nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       const baseWidgets = path.join(docRoot, `v${baseVersion}`, 'widgets');

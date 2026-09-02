@@ -4005,10 +4005,13 @@ export class CommentsStore {
       const widgetFrom = `/d/${slug}/v/${op.baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${reservation.next}/widget/`;
       const rewritten = String(op.html).split(widgetFrom).join(widgetTo);
-      // The author renames a doc by editing its heading, which is the only
-      // title they can actually reach from the editor. An empty or missing h1
-      // leaves the stored title alone rather than blanking it.
-      const nextTitle = titleFromDocument(rewritten);
+      // A document created blank IS its heading — that is where its author
+      // typed the title, and it keeps following the heading. Every other
+      // document has a title of its own, which renaming changes; its first h1
+      // may not even be a title (tdoc-start's is a tagline), so a save must
+      // never re-read it. An empty or missing h1 leaves the stored title alone
+      // rather than blanking it.
+      const nextTitle = meta.created_from === 'blank' ? titleFromDocument(rewritten) : '';
       const stamped = await prepareDocVersion(nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       // Nothing to carry across when the target IS the source; a scaffold has
       // no widgets either way.
@@ -4743,8 +4746,11 @@ export default {
 
       const now = new Date().toISOString();
       let incoming = {
-        // Renamed by the first save that finds a heading in the document.
+        // Renamed by the first save that finds a heading in the document, and
+        // by every save after it — see _saveVersion. This is the only kind of
+        // document whose heading is authoritative for its title.
         title: 'Untitled',
+        created_from: 'blank',
         slug: newSlug,
         created: now,
         // The mark the first save consumes: this v1 is scaffolding, not
@@ -6069,6 +6075,39 @@ export default {
       }
       await env.META.put(`meta:${slug}`, JSON.stringify(next.meta));
       return json({ ok: true, slug, access: next.access });
+    }
+
+    // ---- rename ----
+    // A title is a property of the document, not of its text: renaming edits
+    // the meta record and leaves the body and the version history alone. The
+    // alternative — rewriting the document's heading — mangles documents whose
+    // first h1 is not their title (tdoc-start's is a tagline), and turns
+    // changing a display name into publishing a new version (#383).
+    if (p === '/api/doc/title' && method === 'PATCH') {
+      const TITLE_PATCH_MAX_BYTES = 4 * 1024;
+      const clRaw = req.headers.get('content-length');
+      if (clRaw != null && clRaw !== '') {
+        const cl = Number(clRaw);
+        if (!Number.isFinite(cl) || cl < 0 || cl > TITLE_PATCH_MAX_BYTES) {
+          return json({ error: 'payload_too_large' }, { status: 413 });
+        }
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const unknownTop = Object.keys(body || {}).filter((k) => k !== 'slug' && k !== 'title');
+      if (unknownTop.length) return json({ error: 'invalid_field', fields: unknownTop }, { status: 400 });
+      const { slug, title } = body || {};
+      if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const clean = typeof title === 'string' ? title.trim() : '';
+      if (!clean) return json({ error: 'title_required' }, { status: 400 });
+      if (clean.length > 120) return json({ error: 'title_too_long', limit: 120 }, { status: 400 });
+      const auth = await authorizeOwnerMutation(req, env, slug);
+      if (!auth.ok) return auth.response;
+      const meta = auth.meta || await loadDocMeta(env, slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      await env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, title: clean }));
+      return json({ ok: true, slug, title: clean });
     }
 
     // ---- admin delete ----
