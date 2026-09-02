@@ -116,6 +116,17 @@ body,
   color: #fff;
 }
 
+/* The generic hover above paints a button white, which is right for the ghost
+   buttons on this bar — they carry dark text — and wrong for the one button
+   that does not. It also outranks `.primary` by two pseudo-classes, so Save
+   went white under the cursor while its label stayed white: the control
+   disappeared exactly when you pointed at it. This says what hovering the
+   primary button means, at a specificity that wins. */
+.tdoc-editor-toolbar button.primary:hover:not(:disabled) {
+  background: var(--td-accent-hover);
+  border-color: transparent;
+}
+
 .tdoc-editor-toolbar button:disabled { opacity: .45; cursor: default; }
 .tdoc-editor-divider { width: 1px; height: 20px; margin: 0 3px; background: #d9d9dc; flex: none; }
 .tdoc-editor-status { min-width: 112px; margin-right: 4px; color: #777; font-size: 12px; text-align: right; white-space: nowrap; }
