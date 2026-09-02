@@ -112,6 +112,12 @@ const CASES = [
   // anchoring, because it looks anchored.
   ['a row in a block of rows that all read the same', 'row9',
     () => { const n = document.querySelector('#row9').firstChild; const r = document.createRange(); r.setStart(n, 2); r.setEnd(n, 4); return r; }],
+  // What a triple-click leaves behind: a range whose endpoints are the ELEMENT,
+  // not a text node inside it. It is the fastest way to select a whole line,
+  // and it used to lose exact placement — which only shows up when the line
+  // has identical twins.
+  ['a whole row selected the way a triple-click selects it', 'row5',
+    () => { const r = document.createRange(); r.selectNodeContents(document.querySelector('#row5')); return r; }],
 ];
 
 (async () => {

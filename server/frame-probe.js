@@ -114,9 +114,16 @@
       var view = docView();
       var needle = normalizeNeedle(text);
       if (!needle || !view.norm) return null;
+      // Where the selection starts, in raw view coordinates. A triple-click, or
+      // dragging across a whole table cell, leaves the range's endpoint on an
+      // ELEMENT rather than a text node — so matching on startContainer alone
+      // loses exact placement for exactly the selections people make fastest.
+      // The first text node the range touches is where its text begins.
       var raw = -1;
       for (var i = 0; i < view.nodes.length; i++) {
-        if (view.nodes[i].node === range.startContainer) { raw = view.nodes[i].start + range.startOffset; break; }
+        var node = view.nodes[i].node;
+        if (node === range.startContainer) { raw = view.nodes[i].start + range.startOffset; break; }
+        if (range.intersectsNode && range.intersectsNode(node)) { raw = view.nodes[i].start; break; }
       }
       if (raw < 0) return null;
       // normToRaw ascends: the first norm index at or past this raw offset.
