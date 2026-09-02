@@ -36,6 +36,7 @@ const OFFLINE = [
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
   'bar-overflow-trigger.test.js', // the ⋯ trigger is hidden where its menu would be empty
+  'editor-save-hover.test.js', // #382 a button must never paint its background its own text colour
   'create-from-scratch.test.js', // #356 blank doc: slug derivation, both create routes, edit-on-arrival
   'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
   'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
