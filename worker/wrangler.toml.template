@@ -3,6 +3,16 @@ main = "_worker.bundled.js"
 compatibility_date = "2025-01-01"
 workers_dev = true
 
+# Workers Logs: persisted, searchable invocation logs in the Cloudflare
+# dashboard (Workers > tdoc > Logs), with sampled traces. Without this the
+# only view into a live worker is `wrangler tail`, which shows nothing that
+# happened before you attached — so a 500 reported after the fact could only
+# be chased by reproducing it. head_sampling_rate = 1 keeps every invocation;
+# lower it if request volume ever makes the included quota the binding cost.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[r2_buckets]]
 binding = "DOCS"
 bucket_name = "tdoc-docs"
