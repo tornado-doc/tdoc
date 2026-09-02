@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
-import { duplicateDocument, setDocumentStar } from './document/api.js';
+import { duplicateDocument, renameDocument, setDocumentStar } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
   DesktopCommentLayer,
@@ -112,6 +112,9 @@ export function DocumentShell({ boot, config }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [reanchorId, setReanchorId] = useState(null);
   const [saveNoticeOpen, setSaveNoticeOpen] = useState(false);
+  // The bar's copy of the name, so a rename shows immediately instead of
+  // waiting for a reload. The boot config stays the source it starts from.
+  const [title, setTitle] = useState(config.title || '');
   const [dialog, setDialog] = useState(null);
   const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
@@ -417,6 +420,22 @@ export function DocumentShell({ boot, config }) {
     setOpenCommentId(null);
   };
 
+  // Optimistic: the name in the bar changes as you commit it and rolls back if
+  // the server refuses, because a rename that appears to work and silently did
+  // not is worse than a slow one.
+  const renameDoc = async (next) => {
+    const previous = title;
+    setTitle(next);
+    document.title = next;
+    try {
+      await renameDocument(config.slug, next);
+    } catch (error) {
+      setTitle(previous);
+      document.title = previous;
+      showToast(error.message || 'Could not rename', true);
+    }
+  };
+
   const toggleStar = async () => {
     const next = !starred;
     setStarred(next);
@@ -557,7 +576,13 @@ export function DocumentShell({ boot, config }) {
         authConfigured={config.authConfigured !== false}
         onSignIn={signIn}
       >
-        <DocumentBreadcrumbs config={config} starred={starred} onToggleStar={toggleStar} />
+        <DocumentBreadcrumbs
+          config={config}
+          title={title}
+          starred={starred}
+          onRename={renameDoc}
+          onToggleStar={toggleStar}
+        />
       </TopBar>
 
       <OldVersionNotice value={boot.oldVersion} />
