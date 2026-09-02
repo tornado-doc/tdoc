@@ -1,6 +1,7 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronRight, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
+import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 
 function Author({ author }) {
@@ -78,7 +79,7 @@ function Reactions({ item, me, onReact }) {
   );
 }
 
-function ReplyForm({ commentId, onReply }) {
+function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
   const [text, setText] = useState('');
 
   const submit = async () => {
@@ -89,13 +90,17 @@ function ReplyForm({ commentId, onReply }) {
 
   return (
     <div className="tdoc-reply-form open" data-parent-id={commentId}>
-      <textarea
-        placeholder="Reply…"
+      {replyingTo ? <div className="tdoc-reply-to">Replying to @{replyingTo}</div> : null}
+      <MentionField
+        // The box you asked for is the box you want to type in. Without this,
+        // clicking Reply put a composer on screen and left the caret wherever
+        // it was, so the first thing you do is click the thing you just opened.
+        autoFocus
+        placeholder="Reply… (@ to notify someone)"
         value={text}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') submit();
-        }}
+        people={mentionable}
+        onChange={setText}
+        onSubmit={submit}
       />
       <div className="tdoc-reply-form-foot">
         <span className="hint" />
@@ -107,10 +112,319 @@ function ReplyForm({ commentId, onReply }) {
   );
 }
 
+// An inline rewrite of a comment or reply that is already on screen. Opens
+// seeded with the current text — an edit is a correction, not a re-draft — and
+// leaves the card untouched when the text comes back unchanged.
+function EditForm({ item, onSave, onCancel }) {
+  const [text, setText] = useState(item.text || '');
+  const boxRef = useRef(null);
+
+  // Open at the END of what is already written. autoFocus alone leaves the
+  // caret in front of your own sentence, so the first keystroke lands before
+  // the first word — an edit is a correction, and you carry on from where the
+  // text stopped.
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }, []);
+
+  const submit = async () => {
+    const next = text.trim();
+    if (!next || next === item.text) return onCancel();
+    // onSave resolves false when the shell reported a failure; keep the draft.
+    if (await onSave(item.id, next) !== false) onCancel();
+    return undefined;
+  };
+
+  return (
+    <div className="tdoc-edit-form open" data-comment-id={item.id}>
+      <textarea
+        ref={boxRef}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') submit();
+          if (event.key === 'Escape') onCancel();
+        }}
+      />
+      <div className="tdoc-edit-form-foot">
+        <button className="tdoc-edit-cancel" type="button" onClick={onCancel}>Cancel</button>
+        <button className="tdoc-edit-save" type="button" onClick={submit}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+// Your own words: what you may edit, and what you may delete. Deliberately
+// narrower than mayMutate below, which also grants the doc owner — neither
+// rewriting nor removing somebody else's comment is a power owning the
+// document confers. The worker enforces the same rule on PATCH and DELETE,
+// and this keeps the buttons from rendering where they would 403.
+function authoredBy(item, currentUser) {
+  return Boolean(
+    currentUser
+    && currentUser !== 'anon'
+    && item.author?.login
+    && item.author.login === currentUser,
+  );
+}
+
+// Mirrors the worker's mayDelete(): your own words, plus — for the doc owner —
+// an agent's, because /api/agent/reply runs on the owner's upload token. The
+// agent is the owner writing through a tool, not a third party with speech of
+// its own. Editing stays authoredBy: nobody rewrites what the agent said.
+function mayDelete(item, currentUser, isOwner) {
+  return authoredBy(item, currentUser) || (isOwner && item.author?.kind === 'agent');
+}
+
+// Mirrors the worker's canMutate(): re-anchoring is the author's or the doc
+// owner's, nobody else's. Without this the button rendered for every reader
+// and the server's 403 (`not_author`) was the only thing stopping them — a
+// toast where there should have been no affordance at all. Delete used to
+// share this gate; it is authoredBy's now.
+function mayMutate(item, currentUser, isOwner) {
+  return Boolean(
+    isOwner
+    || (currentUser
+      && currentUser !== 'anon'
+      && item.author?.login
+      && item.author.login === currentUser),
+  );
+}
+
+function hasReactions(item) {
+  return Object.values(item.reactions || {}).some((users) => users?.length);
+}
+
+// "· edited" rather than a second timestamp: which words changed matters, the
+// minute they changed at does not.
+function editedSuffix(item) {
+  return item.edited ? ' · edited' : '';
+}
+
+function formatCreated(created) {
+  return created
+    ? new Date(created).toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+    : '';
+}
+
+// A reply's parent is another comment id: the thread root when parent_id is
+// absent (every reply written before threads nested) or another reply when the
+// conversation went deeper. The server has always stored the chain — see the
+// `reply_added` fold, which defaults parent_id to the root comment.
+function childrenOf(replies, parentId, rootId) {
+  return replies.filter((reply) => (reply.parent_id || rootId) === parentId);
+}
+
+// Past this depth a thread stops indenting. Each level costs about 24px of a
+// 306px card, so a chain that keeps nesting ends up reading in a column too
+// narrow to read — and a narrower column wraps more, which makes the card
+// taller, which is the other half of #363. Reddit stops at a similar point
+// and offers "continue this thread"; here the whole thread is already in
+// memory, so the continuation is a fold rather than another page.
+const REPLY_INDENT_CAP = 4;
+
+// Everything hanging off a reply, at any depth, in thread order. What the
+// continuation shows: the shape is flattened, not truncated — every reply is
+// still there, each one saying who it answers.
+function descendantsOf(replies, parentId, rootId) {
+  const out = [];
+  for (const kid of childrenOf(replies, parentId, rootId)) {
+    out.push(kid);
+    out.push(...descendantsOf(replies, kid.id, rootId));
+  }
+  return out;
+}
+
+// Who a reply is answering, for the line a flattened reply carries in place of
+// the indentation it lost.
+function answers(replies, reply, rootComment) {
+  const parent = reply.parent_id === rootComment.id || !reply.parent_id
+    ? rootComment
+    : replies.find((other) => other.id === reply.parent_id) || rootComment;
+  return parent.author?.login || parent.author?.name || '';
+}
+
+// A comment or reply whose text was taken down but whose slot still holds a
+// thread together (#354). Everything that acts on the words is gone with them
+// — no reply, no react, no delete, no re-anchor — but the name and the place
+// stay, so the answers under it still read as answers to someone.
+function Tombstone({ item, children }) {
+  return (
+    <>
+      <Author author={item.author} />
+      <div className="text tdoc-deleted-text">Comment deleted</div>
+      <div className="meta">
+        <span>{formatCreated(item.created)}</span>
+      </div>
+      {children}
+    </>
+  );
+}
+
+// A reply carries the same affordances as the comment it hangs under: react,
+// reply, and delete-your-own. Between the overlay rewrite and the React port
+// these were "deferred", which left every answer in a thread a dead end.
+function ReplyCard({
+  reply,
+  replies,
+  rootId,
+  rootComment,
+  depth,
+  expandAll = false,
+  flattened = false,
+  currentUser,
+  isOwner,
+  mentionable,
+  replyTarget,
+  onReplyTarget,
+  editTarget,
+  onEditTarget,
+  onReply,
+  onReact,
+  onDelete,
+  onEdit,
+}) {
+  const kids = childrenOf(replies, reply.id, rootId);
+  const reacted = hasReactions(reply);
+  const author = reply.author?.login || reply.author?.name || '';
+  // A deep link lands on a reply that may live inside a continuation, so an
+  // expanded thread opens its continuations too — otherwise the link arrives
+  // at a thread with its own target folded away.
+  const [tailOpen, setTailOpen] = useState(expandAll);
+  const capped = depth >= REPLY_INDENT_CAP;
+  // A flattened reply's children are already in the list it belongs to.
+  const tail = flattened ? [] : (capped ? descendantsOf(replies, reply.id, rootId) : []);
+
+  const kidOf = (kid, kidDepth, isFlat) => (
+    <ReplyCard
+      key={kid.id}
+      reply={kid}
+      replies={replies}
+      rootId={rootId}
+      rootComment={rootComment}
+      depth={kidDepth}
+      expandAll={expandAll}
+      flattened={isFlat}
+      currentUser={currentUser}
+      isOwner={isOwner}
+      mentionable={mentionable}
+      replyTarget={replyTarget}
+      onReplyTarget={onReplyTarget}
+      editTarget={editTarget}
+      onEditTarget={onEditTarget}
+      onReply={onReply}
+      onReact={onReact}
+      onDelete={onDelete}
+      onEdit={onEdit}
+    />
+  );
+
+  let kidCards = null;
+  if (flattened) {
+    kidCards = null;
+  } else if (capped) {
+    kidCards = tail.length ? (
+      <>
+        <button
+          type="button"
+          className={`tdoc-thread-more${tailOpen ? ' open' : ''}`}
+          onClick={() => setTailOpen((open) => !open)}
+        >
+          <ChevronRight className="chev" size={10} />
+          {tailOpen ? 'hide the rest of this thread' : `continue this thread · ${tail.length}`}
+        </button>
+        {tailOpen ? (
+          <div className="tdoc-thread-tail">
+            {tail.map((kid) => kidOf(kid, depth, true))}
+          </div>
+        ) : null}
+      </>
+    ) : null;
+  } else if (kids.length) {
+    kidCards = <div className="tdoc-reply-kids">{kids.map((kid) => kidOf(kid, depth + 1, false))}</div>;
+  }
+
+  if (reply.deleted) {
+    return (
+      <div
+        className={`tdoc-reply tdoc-deleted${flattened ? ' tdoc-reply-flat' : ''}`}
+        data-comment-id={reply.id}
+        data-depth={depth}
+      >
+        <Tombstone item={reply}>{kidCards}</Tombstone>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`tdoc-reply${flattened ? ' tdoc-reply-flat' : ''}`}
+      data-comment-id={reply.id}
+      data-depth={depth}
+    >
+      {flattened ? (
+        <div className="tdoc-reply-to">Replying to @{answers(replies, reply, rootComment)}</div>
+      ) : null}
+      <Author author={reply.author} />
+      {editTarget === reply.id ? (
+        <EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} />
+      ) : (
+        <div className="text"><MentionText text={reply.text} mentions={reply.mentions} /></div>
+      )}
+      {reacted ? <Reactions item={reply} me={currentUser} onReact={onReact} /> : null}
+
+      <div className="meta">
+        <span>{formatCreated(reply.created)}{editedSuffix(reply)}</span>
+        <span className="actions">
+          {reacted ? null : (
+            <ReactionPicker onPick={(emoji) => onReact(reply.id, emoji)} />
+          )}
+          <button
+            type="button"
+            className="tdoc-reply-toggle"
+            onClick={() => onReplyTarget(replyTarget === reply.id ? null : reply.id)}
+          >
+            reply
+          </button>
+          {authoredBy(reply, currentUser) ? (
+            <button
+              type="button"
+              className="tdoc-edit-toggle"
+              onClick={() => onEditTarget(editTarget === reply.id ? null : reply.id)}
+            >
+              edit
+            </button>
+          ) : null}
+          {mayDelete(reply, currentUser, isOwner) ? (
+            <button type="button" className="del" onClick={() => onDelete(reply.id)}>
+              delete
+            </button>
+          ) : null}
+        </span>
+      </div>
+
+      {replyTarget === reply.id ? (
+        <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} mentionable={mentionable} />
+      ) : null}
+
+      {kidCards}
+    </div>
+  );
+}
+
 export function CommentCard({
   comment,
   currentUser,
   isOwner = false,
+  mentionable = [],
   unanchored,
   floating = false,
   position,
@@ -120,10 +434,14 @@ export function CommentCard({
   onReply,
   onReact,
   onDelete,
+  onEdit,
   onReanchor,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
-  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyTarget, setReplyTarget] = useState(null);
+  // One record at a time is being rewritten — this card's comment or any reply
+  // under it — the same way one reply form is open at a time.
+  const [editTarget, setEditTarget] = useState(null);
   const cardRef = useRef(null);
   const [clampedTop, setClampedTop] = useState(null);
 
@@ -135,29 +453,39 @@ export function CommentCard({
     const limit = window.innerHeight - cardRef.current.offsetHeight - 8;
     const next = Math.max(52, Math.min(position.top, limit));
     setClampedTop(next === position.top ? null : next);
-  }, [floating, position, repliesOpen, replyOpen, comment]);
-  const reactionCount = Object.values(comment.reactions || {})
-    .some((users) => users?.length);
-  // Mirrors the worker's canMutate(): delete and re-anchor are the comment
-  // author's or the doc owner's, nobody else's. Without this the buttons
-  // rendered for every reader and the server's 403 (`not_author`) was the
-  // only thing stopping them — a toast where there should have been no
-  // affordance at all.
-  const canMutate = Boolean(
-    isOwner
-    || (currentUser
-      && currentUser !== 'anon'
-      && comment.author?.login
-      && comment.author.login === currentUser),
-  );
-  const createdAt = comment.created
-    ? new Date(comment.created).toLocaleString([], {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    })
-    : '';
+  }, [floating, position, repliesOpen, replyTarget, editTarget, comment]);
+
+  // A posted reply closes the composer it came from and opens the thread it
+  // landed in. Before, the form stayed on screen under a collapsed "N replies"
+  // fold: the reply was saved, nothing visibly changed, and only a page
+  // refresh cleared the box. A failure (onReply === false) keeps the composer
+  // and its draft so the text isn't lost.
+  const submitReply = async (parentId, text) => {
+    const result = await onReply(parentId, text);
+    if (result === false) return false;
+    setReplyTarget(null);
+    setRepliesOpen(true);
+    return result;
+  };
+
+  const saveEdit = async (id, text) => {
+    const result = await onEdit(id, text);
+    if (result === false) return false;
+    setEditTarget(null);
+    return result;
+  };
+
+  const reactionCount = hasReactions(comment);
+  const isMine = authoredBy(comment, currentUser);
+  const canDelete = mayDelete(comment, currentUser, isOwner);
+  const canMutate = mayMutate(comment, currentUser, isOwner);
+  const createdAt = formatCreated(comment.created);
+  const replies = comment.replies || [];
+  // Orphans — their parent reply was deleted — still show under the root
+  // rather than vanishing with it.
+  const known = new Set(replies.map((reply) => reply.id).concat([comment.id]));
+  const rootReplies = childrenOf(replies, comment.id, comment.id)
+    .concat(replies.filter((reply) => reply.parent_id && !known.has(reply.parent_id)));
 
   const className = [
     'tdoc-margin-comment',
@@ -166,7 +494,61 @@ export function CommentCard({
     selected ? 'tdoc-current-comment' : '',
     comment.status === 'applied' ? 'tdoc-resolved' : '',
     unanchored ? 'tdoc-unanchored' : '',
+    comment.deleted ? 'tdoc-deleted' : '',
   ].filter(Boolean).join(' ');
+
+  // The thread block is the same whether the comment above it is still there
+  // or is a tombstone — the replies are why the tombstone exists.
+  const threadBlock = replies.length ? (
+    <>
+      <button
+        type="button"
+        className={`tdoc-replies-toggle${repliesOpen ? ' open' : ''}`}
+        onClick={() => setRepliesOpen((open) => !open)}
+      >
+        <ChevronRight className="chev" size={10} />
+        {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+      </button>
+      <div className={`tdoc-replies${repliesOpen ? ' open' : ''}`}>
+        {rootReplies.map((reply) => (
+          <ReplyCard
+            key={reply.id}
+            reply={reply}
+            replies={replies}
+            rootId={comment.id}
+            rootComment={comment}
+            depth={1}
+            expandAll={expandReplies}
+            currentUser={currentUser}
+            isOwner={isOwner}
+            mentionable={mentionable}
+            replyTarget={replyTarget}
+            onReplyTarget={setReplyTarget}
+            editTarget={editTarget}
+            onEditTarget={setEditTarget}
+            onReply={submitReply}
+            onReact={onReact}
+            onDelete={onDelete}
+            onEdit={saveEdit}
+          />
+        ))}
+      </div>
+    </>
+  ) : null;
+
+  if (comment.deleted) {
+    return (
+      <article
+        ref={cardRef}
+        className={className}
+        data-comment-id={comment.id}
+        style={floating ? { ...position, top: clampedTop ?? position.top } : undefined}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <Tombstone item={comment}>{threadBlock}</Tombstone>
+      </article>
+    );
+  }
 
   return (
     <article
@@ -199,13 +581,17 @@ export function CommentCard({
       ) : null}
 
       <Author author={comment.author} />
-      <div className="text">{comment.text}</div>
+      {editTarget === comment.id ? (
+        <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
+      ) : (
+        <div className="text"><MentionText text={comment.text} mentions={comment.mentions} /></div>
+      )}
       {reactionCount ? (
         <Reactions item={comment} me={currentUser} onReact={onReact} />
       ) : null}
 
       <div className="meta">
-        <span>v{comment.version || 1}{createdAt ? ` · ${createdAt}` : ''}</span>
+        <span>v{comment.version || 1}{createdAt ? ` · ${createdAt}` : ''}{editedSuffix(comment)}</span>
         <span className="actions">
           {!reactionCount ? (
             <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
@@ -213,11 +599,20 @@ export function CommentCard({
           <button
             type="button"
             className="tdoc-reply-toggle"
-            onClick={() => setReplyOpen((open) => !open)}
+            onClick={() => setReplyTarget((open) => (open === comment.id ? null : comment.id))}
           >
-            Reply
+            reply
           </button>
-          {canMutate ? (
+          {isMine ? (
+            <button
+              type="button"
+              className="tdoc-edit-toggle"
+              onClick={() => setEditTarget(editTarget === comment.id ? null : comment.id)}
+            >
+              edit
+            </button>
+          ) : null}
+          {canDelete ? (
             <button type="button" className="del" onClick={() => onDelete(comment.id)}>
               delete
             </button>
@@ -225,28 +620,11 @@ export function CommentCard({
         </span>
       </div>
 
-      {comment.replies?.length ? (
-        <>
-          <button
-            type="button"
-            className={`tdoc-replies-toggle${repliesOpen ? ' open' : ''}`}
-            onClick={() => setRepliesOpen((open) => !open)}
-          >
-            <ChevronRight className="chev" size={10} />
-            {comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}
-          </button>
-          <div className={`tdoc-replies${repliesOpen ? ' open' : ''}`}>
-            {comment.replies.map((reply) => (
-              <div key={reply.id} className="tdoc-reply" data-comment-id={reply.id}>
-                <Author author={reply.author} />
-                <div className="text">{reply.text}</div>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : null}
+      {threadBlock}
 
-      {replyOpen ? <ReplyForm commentId={comment.id} onReply={onReply} /> : null}
+      {replyTarget === comment.id ? (
+        <ReplyForm commentId={comment.id} onReply={submitReply} mentionable={mentionable} />
+      ) : null}
     </article>
   );
 }

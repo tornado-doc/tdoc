@@ -13,7 +13,11 @@ const latest = meta.versions[meta.versions.length - 1].n;
 const html = fs.readFileSync(path.join(root, 'landing', 'tdoc-start', `v${latest}`, 'index.html'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'server', 'server.js'), 'utf8');
-const dialog = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-dialog.jsx'), 'utf8');
+// The dialog and the create-choice component it renders: the recipe itself
+// moved into the shared component when Create a doc became two cards (#356),
+// so the prompt contract spans both files.
+const dialog = ['shell/src/onboarding-dialog.jsx', 'shell/src/create-from-scratch.jsx']
+  .map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
 const documentShell = fs.readFileSync(path.join(root, 'shell', 'src', 'document-shell.jsx'), 'utf8');
 const probe = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
 const recipe = fs.readFileSync(path.join(root, 'FIRST-DOC.md'), 'utf8');

@@ -2,9 +2,8 @@ import React, { useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
+import { CreateChoice } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
-import { FIRST_DOC_RECIPE } from './onboarding-dialog.jsx';
-import { copyText } from './document/model.js';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
@@ -70,7 +69,7 @@ function FlatList({ docs, label, viewer, empty, onToggleStar }) {
 // rows and menus are the shared docs-hub/rows.jsx components; every modal is
 // the AppDialog facade. This component only decides what is on screen.
 export function DocsHub({ boot }) {
-  const capabilities = { folders: true, delete: true, star: true, ...(boot.capabilities || {}) };
+  const capabilities = { folders: true, delete: true, star: true, create: true, ...(boot.capabilities || {}) };
   const viewer = boot.identity?.login || '';
   const hub = useDocsHub({
     boot,
@@ -80,14 +79,9 @@ export function DocsHub({ boot }) {
   });
   const [tab, setTab] = useState('mine');
   const [modal, setModal] = useState(null);
-  const [createCopied, setCreateCopied] = useState(false);
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
-  const openCreateHelp = () => {
-    setCreateCopied(false);
-    setModal({ type: 'create-help' });
-  };
-  const copyFirstDocRecipe = () => copyText(FIRST_DOC_RECIPE).then(setCreateCopied);
+  const openCreateHelp = () => setModal({ type: 'create-help' });
 
   const docMenu = (slugs) => [
     capabilities.folders ? {
@@ -245,15 +239,9 @@ export function DocsHub({ boot }) {
         <HubDialog
           title="Create a doc"
           onClose={closeModal}
-          actions={<button type="button" className="primary" onClick={closeModal}>Done</button>}
+          actions={<button type="button" onClick={closeModal}>Close</button>}
         >
-          <p>Paste this into your AI. It installs tdoc, builds your personal AI portrait, publishes it privately, and gives you the link.</p>
-          <div className="tdoc-recipe-wrap">
-            <code>{FIRST_DOC_RECIPE}</code>
-            <button type="button" className={createCopied ? 'done' : undefined} onClick={copyFirstDocRecipe}>
-              {createCopied ? 'Copied' : 'Copy'}
-            </button>
-          </div>
+          <CreateChoice create={hub.createDoc} canCreate={capabilities.create} />
         </HubDialog>
       ) : null}
       {modal?.type === 'new-folder' ? (

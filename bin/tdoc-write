@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# tdoc-write — the single gateway for writing a document version.
+#
+# Creating a version has to do five things every time: validate the host HTML,
+# bake the reading template, write v<n>/index.html, update meta.json, and leave
+# comments.json alone if it already exists. Those five were previously spread
+# across one script (bin/tdoc-new, v1 only) and two prose procedures in
+# SKILL.md (/tdoc new and /tdoc edit), and prose cannot enforce anything — so
+# /tdoc edit skipped baking entirely and a document edited after the shell
+# migration stayed without a reading template forever.
+#
+#   tdoc-write --slug <slug> --title "<t>" --html-file <f>                 # v1
+#   tdoc-write --slug <slug> --title "<t>" --html-file <f> --version next  # v2+
+#
+# Every other flag is bin/tdoc-new's; this is the same implementation under the
+# name that says what it does.
+exec bash "$(cd "$(dirname "$0")" && pwd)/tdoc-new" "$@"

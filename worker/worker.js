@@ -1486,23 +1486,74 @@ function forceWidgetSandbox(html) {
 function readerCssSource() {
   return (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
 }
+// Whether the document CARRIES the baked reading template — as an actual
+// <style> tag, not as prose. A substring check false-positives on any document
+// whose text discusses the mechanism (tdoc's own design docs quote
+// id="tdoc-reader" in code samples), and a false positive here means an
+// unbaked document is skipped. Every bake/skip decision uses this one test so
+// the write side and the read side cannot disagree.
+const READER_BLOCK_RE = /<style[^>]*\bid="tdoc-reader"/i;
+function hasReaderBlock(html) {
+  return READER_BLOCK_RE.test(html);
+}
+
+// The document-content invariants, in ONE place. Every path that stores a
+// version of a document — /api/upload, the browser Save inside the Durable
+// Object, and duplicate — goes through this. It exists because there used to
+// be no function named "store a version": each writer assembled the invariants
+// itself, which is how the browser Save path shipped without baking and how
+// nobody ever recorded a content hash (there was nowhere to put it).
+//
+// What it guarantees about the stored bytes:
+//   1. The reading template is baked in, stamped with its generation
+//      (data-tdoc-template), so the file is self-contained however old the
+//      client that produced it. No-op when the document already carries the
+//      block, and when this worker is unbundled (tests on raw worker.js).
+//   2. Artifact aids are stamped (comment anchor identity).
+//   3. `sha` is the hash of the EXACT bytes stored — what a client compares
+//      against to know whether its local copy is current.
+// Widget HTML must NOT come through here: widgets are sandboxed islands with
+// their own CSP, and the reading template does not belong in them.
+async function prepareDocVersion(rawHtml) {
+  let html = String(rawHtml);
+  const css = readerCssSource();
+  if (css && !hasReaderBlock(html)) {
+    const stamp = (await sha256Hex(css)).slice(0, 8);
+    const tag = `<style id="tdoc-reader" data-tdoc-template="${stamp}">${css}</style>\n`;
+    // Callback so a `$` in the template stays literal.
+    html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, () => `${tag}</head>`) : tag + html;
+  }
+  const stamped = stampAids(html);
+  const sha = (await sha256Hex(stamped.html)).slice(0, 16);
+  return { html: stamped.html, aids: stamped.aids, sha };
+}
+
 function injectReaderCss(html, css) {
   if (!css) return html;
+  // Documents have been self-contained since creation-time baking landed, so
+  // most already carry the block. Stamping a second copy is 8KB of duplicate
+  // CSS and a duplicate id in every downloaded file.
+  if (hasReaderBlock(html)) return html;
   const tag = `<style id="tdoc-reader">${css}</style>\n`;
-  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${tag}</head>`);
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, () => `${tag}</head>`);
   return tag + html;
 }
 
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docTitle) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const vlist = Array.isArray(versions) && versions.length ? versions : [{ n: version }];
-  let title = slug;
+  // The document's own title, which the bar and the browser tab both show.
+  // This used to be the slug and nothing ever reassigned it, so every hosted
+  // document was named after its URL. That read as a title only while slugs
+  // were agent-picked words; a browser-created doc's slug is an opaque id.
+  // The slug remains the fallback for a doc whose meta carries no title.
+  const title = typeof docTitle === 'string' && docTitle.trim() ? docTitle.trim() : slug;
   const cfg = {
     slug,
     title,
@@ -1650,7 +1701,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta)), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta && gate.meta.title), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1974,6 +2025,12 @@ function legacyToEvents(c) {
     anchor: c.anchor || null,
     text: c.text || '',
   });
+  // A comment the local server edited carries `edited` and the NEW text on one
+  // flat record. Replay it as an edit of the same text so the marker survives
+  // the publish merge instead of arriving as an original that was never touched.
+  if (c.edited) {
+    events.push({ kind: 'text_edited', at_version: v, at: c.edited, text: c.text || '' });
+  }
   if (c.status === 'applied') {
     events.push({
       kind: 'marked_applied', at_version: Number(c.applied_in) || v, at,
@@ -2002,6 +2059,12 @@ function legacyToEvents(c) {
           agent_status: r.agent_status || null,
         },
       });
+      if (r.edited) {
+        events.push({
+          kind: 'reply_text_edited', at_version: Number(r.version) || v,
+          at: r.edited, reply_id: r.id, text: r.text || '',
+        });
+      }
       if (r.reactions && typeof r.reactions === 'object') {
         for (const emoji of Object.keys(r.reactions)) {
           for (const login of (r.reactions[emoji] || [])) {
@@ -2082,6 +2145,8 @@ function snapshotAt(c, V) {
     version: c.created_in,
     anchor: null,
     text: '',
+    mentions: [],
+    edited: null,
     status: 'open',
     applied_in: undefined,
     replies: [],
@@ -2109,9 +2174,11 @@ function snapshotAt(c, V) {
       case 'created':
         snap.anchor = e.anchor || null;
         snap.text = e.text || '';
+        snap.mentions = Array.isArray(e.mentions) ? e.mentions : [];
         break;
       case 'text_edited':
         snap.text = e.text || '';
+        snap.edited = e.at || snap.edited;
         break;
       case 'anchor_changed':
         snap.anchor = e.anchor || null;
@@ -2154,6 +2221,8 @@ function snapshotAt(c, V) {
           id: e.reply.id, parent_id: e.reply.parent_id || c.id,
           author: e.reply.author || null,
           text: e.reply.text || '',
+          mentions: Array.isArray(e.reply.mentions) ? e.reply.mentions : [],
+          edited: null,
           agent_status: e.reply.agent_status || null,
           created: e.at,
           reactions: {},
@@ -2165,7 +2234,7 @@ function snapshotAt(c, V) {
       }
       case 'reply_text_edited': {
         const r = replyById.get(e.reply_id);
-        if (r) r.text = e.text || '';
+        if (r) { r.text = e.text || ''; r.edited = e.at || r.edited; }
         break;
       }
       case 'reply_deleted': {
@@ -2202,8 +2271,49 @@ function snapshotAt(c, V) {
     snap.reactions[emoji] = u;
   }
   delete snap._agentVerdict;
-  snap.replies = replyOrder.map(id => replyById.get(id)).filter(r => r && !r.deleted);
+  snap.replies = keepThread(replyOrder, replyById).map(r => (r.deleted ? asTombstone(r) : r));
   return snap;
+}
+
+// Which replies survive the fold. An alive reply always does. A DELETED one
+// does too when something that survives still hangs off it — otherwise the
+// answers to it would vanish with it, and a conversation would lose its middle.
+// Resolved to a fixpoint, so a deleted reply whose only child was itself
+// deleted-and-dropped goes as well.
+function keepThread(order, byId) {
+  const keep = new Set(order.filter(id => byId.get(id) && !byId.get(id).deleted));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const id of order) {
+      if (keep.has(id)) continue;
+      if (order.some(k => keep.has(k) && byId.get(k).parent_id === id)) {
+        keep.add(id);
+        changed = true;
+      }
+    }
+  }
+  return order.filter(id => keep.has(id)).map(id => byId.get(id));
+}
+
+// What is left of a comment or reply whose text was taken down but whose slot
+// is still holding a thread together. The name stays — this is GitHub's "user
+// deleted this", not an anonymous [deleted]: a thread reads as a conversation
+// between people, and blanking who spoke rewrites the other replies' meaning.
+// Everything the words earned goes with the words: reactions, the agent
+// verdict, mentions, the edited marker. The anchor stays so the surviving
+// replies are still reachable where the conversation happened.
+function asTombstone(record) {
+  return {
+    ...record,
+    text: '',
+    deleted: true,
+    reactions: {},
+    mentions: [],
+    edited: null,
+    agent_status: null,
+    status: 'open',
+    applied_in: undefined,
+  };
 }
 
 // Fold the full list at version V, filter out alive comments only.
@@ -2213,7 +2323,12 @@ function snapshotList(list, V) {
   const out = [];
   for (const c of list) {
     const s = snapshotAt(c, V);
-    if (s && !s.deleted) out.push(s);
+    if (!s) continue;
+    // A deleted comment that still holds replies stays as a tombstone; deleting
+    // your own words must not be a way to take everyone else's off the page.
+    // One with nothing under it disappears, as it always has.
+    if (s.deleted && !s.replies.length) continue;
+    out.push(s.deleted ? asTombstone(s) : s);
   }
   return out;
 }
@@ -2233,6 +2348,82 @@ function historyList(list) {
     if (s && !s.deleted) out.push(s);
   }
   return out;
+}
+
+// Has this agent already answered here, and has a human said anything since?
+//
+// A folded comment is not enough to answer that. When a human deletes the
+// agent's reply — or rewrites it — every folded view loses it, so the next
+// generation round reads a thread it has never answered and answers it again,
+// in the same place, with the same words. The event log still holds the
+// reply_added, so the gate reads the log rather than the snapshot: what a
+// human removed is exactly what has to be remembered.
+//
+// Open again only when a HUMAN REPLIES after the agent's last word on this
+// thread. Nothing else counts, and in particular EDITING THE COMMENT DOES NOT:
+// a person fixing their own typo has not asked a second time, and an answered
+// comment that changes shape is not a new comment. Deleting or editing the
+// agent's own answer does not count either — that is the clearest "I have
+// dealt with this" there is, not an invitation to repeat it.
+//
+// The one exception is a re-anchor, which the product already treats as
+// reopening (patch_anchor resets status to open, and SKILL.md says /tdoc edit
+// picks it up again): the comment now points at different text, so it is no
+// longer the same place.
+//
+// Returns { allowed, reason }. Reasons are stable strings the CLI prints.
+function agentReplyGate(record, agentLogin) {
+  if (!record) return { allowed: false, reason: 'parent_not_found' };
+  ensureEventLog(record);
+  // Same ordering the fold uses — by version, ties broken by append order —
+  // so "who spoke last" means the same thing here as it does on the card.
+  // Timestamps are not the tiebreak: two events in one round land in the same
+  // millisecond, and a tie must not read as "nobody has answered since".
+  const ordered = dedupEvents(record.events)
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => ((a.e.at_version || 0) - (b.e.at_version || 0)) || (a.i - b.i))
+    .map((x) => x.e);
+  const isAgentAuthor = (author) => !!(author && author.kind === 'agent');
+  let answered = false;   // this agent has spoken at least once
+  let theirTurn = true;   // a human has moved since it last did
+  let deleted = false;
+  for (const e of ordered) {
+    if (!e) continue;
+    switch (e.kind) {
+      case 'deleted':
+        deleted = true;
+        break;
+      case 'reply_added':
+        if (!e.reply) break;
+        if (isAgentAuthor(e.reply.author) && e.reply.author.login === agentLogin) {
+          answered = true;
+          theirTurn = false;
+        } else if (!isAgentAuthor(e.reply.author)) {
+          theirTurn = true;
+        }
+        break;
+      case 'text_edited':
+        // Rewriting the comment is not asking again. Whoever edited it, the
+        // question the agent already answered is still the question.
+        break;
+      case 'anchor_changed':
+        // The agent's own re-anchor (bind_anchor_aid) is not a human turn.
+        if (e.by !== agentLogin) theirTurn = true;
+        break;
+      case 'reply_deleted':
+      case 'reply_text_edited':
+        // A human removing or rewriting the agent's answer keeps the gate SHUT.
+        // It is the clearest "I have dealt with this" there is, not a request
+        // to hear the same thing again.
+        break;
+      default:
+        break;
+    }
+  }
+  if (deleted) return { allowed: false, reason: 'comment_deleted' };
+  if (!answered) return { allowed: true, reason: 'first_reply' };
+  if (theirTurn) return { allowed: true, reason: 'human_replied_since' };
+  return { allowed: false, reason: 'already_answered' };
 }
 
 // Helper used by all mutating endpoints: ensure the list is migrated to the
@@ -2531,6 +2722,118 @@ function nextDuplicateSlug(sourceSlug, n) {
   return isValidSlug(candidate) ? candidate : null;
 }
 
+// A doc created in the browser has no title yet — you type it into the page —
+// so its slug cannot be derived from one. It gets an opaque id instead, the
+// way Google Docs and Notion address a document: unique by construction, so
+// there is no de-duplication question and no rename when the title changes.
+// The caller supplies random bytes (crypto.getRandomValues / randomBytes).
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocSlug(bytes) {
+  // No look-alike characters: a slug gets read aloud and retyped.
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += alphabet[(Number(bytes && bytes[i]) || 0) % alphabet.length];
+  return `d-${out}`;
+}
+
+// The document a "start from scratch" create writes as v1. Deliberately empty,
+// heading included: the author types the title into the page, and the save path
+// reads it back out. Both placeholders paint only while the editor is live
+// (`html[data-tdoc-editing]`), so a reader of a still-empty doc sees a blank
+// page rather than instructions meant for its author. They are :empty rules
+// rather than seeded text, so the hints come back whenever a line is cleared.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Untitled</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #fff; color: #17171a;
+    font: 17px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  /* The editor's focus ring frames this element. On a doc with content that is
+     the whole page; on a blank one, without a floor, it would draw a small box
+     around two empty lines — and clicking below it would miss the editor. */
+  main { max-width: 46rem; margin: 0 auto; padding: 4.5rem 1.5rem 8rem; min-height: 60vh; }
+  h1 { font-size: 2.1rem; line-height: 1.25; margin: 0 0 1.5rem; letter-spacing: -0.02em; }
+  h2 { font-size: 1.35rem; margin: 2.5rem 0 .75rem; letter-spacing: -0.01em; }
+  p { margin: 0 0 1.15rem; }
+  a { color: #2f5bea; }
+  blockquote { margin: 0 0 1.15rem; padding-left: 1rem; border-left: 3px solid #e4e4e9; color: #55555f; }
+  code { background: #f3f3f6; padding: .12em .35em; border-radius: 4px;
+    font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty::before {
+    content: attr(data-tdoc-placeholder);
+    color: #b0b0ba;
+    pointer-events: none;
+  }
+  /* An empty block is zero pixels tall, so without a floor the placeholder
+     paragraph is unclickable: the click falls through to <main> and the caret
+     stays wherever it was. */
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty {
+    min-height: 1.75em;
+  }
+  /* Put the caret in a line and its hint steps aside — it has said what it had
+     to say. frame-probe marks the line, and only once the reader has moved the
+     caret themselves, so the guidance survives the first paint. */
+  html[data-tdoc-editing] [data-tdoc-placeholder][data-tdoc-caret]:empty::before {
+    content: none;
+  }
+</style>
+</head>
+<body>
+<main>
+<h1 data-tdoc-placeholder="Untitled"></h1>
+<p data-tdoc-placeholder="Start writing…"></p>
+</main>
+</body>
+</html>
+`;
+}
+
+// The document's own first <h1> is the title. Reading it back on every browser
+// save is what lets an author name an untitled doc by typing into the page, and
+// rename it later the same way. Returns '' when there is no usable heading, so
+// callers can leave the stored title alone rather than blanking it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function titleFromDocument(html) {
+  const match = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(String(html == null ? '' : html));
+  if (!match) return '';
+  const text = match[1]
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;| /g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    // One pass of <[^>]*> cannot be trusted on nested or malformed markup
+    // (`<<script>>` leaves `<script`), and decoding entities just above can
+    // put an angle bracket back. A title is a label, never markup, so every
+    // surviving bracket is dropped and the result provably carries none.
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 120);
+}
+
+// Keep <title> in step with the heading the author just edited, so the browser
+// tab, the exported file and the hub all agree. Only rewrites an existing tag —
+// a document without one is left exactly as its author wrote it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function syncDocumentTitle(html, title) {
+  const safe = String(title == null ? '' : title)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return String(html == null ? '' : html)
+    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, () => `<title>${safe}</title>`);
+}
+
 async function hostedAccountForGithub(env, login) {
   const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
@@ -2780,15 +3083,49 @@ function findCommentThread(list, id) {
   return null;
 }
 
-function recordAuthor(list, id) {
+// Resolve a comment id to the record that carries its author — the top-level
+// comment, or the reply object stored on its thread's reply_added event.
+// Returns null only when the id exists nowhere, which callers must tell apart
+// from a record whose author is missing (legacy; mutable by nobody).
+function findRecord(list, id) {
   if (!id || !Array.isArray(list)) return null;
   const top = list.find(c => c && c.id === id);
-  if (top) return top.author || null;
+  if (top) return top;
   for (const c of list) {
     const ev = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
-    if (ev) return ev.reply.author || null;
+    if (ev) return ev.reply;
   }
   return null;
+}
+
+function recordAuthor(list, id) {
+  const record = findRecord(list, id);
+  return (record && record.author) || null;
+}
+
+// Editing is the author's ALONE — deliberately not canMutate(), which also
+// grants the doc owner. Rewriting somebody else's words under their name is
+// not a power owning the document confers. That holds for an agent's words
+// too: nobody rewrites what the agent said, including the person it ran for.
+function isRecordAuthor(record, session) {
+  const who = record && record.author && record.author.login;
+  return !!(who && session && session.login && who === session.login);
+}
+
+function isAgentRecord(record) {
+  return !!(record && record.author && record.author.kind === 'agent');
+}
+
+// Deleting is the author's — and an agent's words belong to the person whose
+// token it ran on. /api/agent/reply is authed with the doc's upload token, so
+// an agent is not a third party with speech of its own; it is the owner
+// writing through a tool. Reading it that way answers "whose words are these"
+// rather than punching a hole in "deletion belongs to whoever wrote it", and
+// it keeps the flow #349 describes possible: a person clearing an AI comment
+// they did not want.
+function mayDelete(record, session, env, meta) {
+  if (isRecordAuthor(record, session)) return true;
+  return isAgentRecord(record) && isDocOwnerSession(env, session, meta);
 }
 
 // Per-user inbox (same host, cross-doc). KV key inbox:<github-login>.
@@ -2802,6 +3139,10 @@ function inboxKey(login) {
 }
 
 function inboxGroupKey(kind, slug, targetId) {
+  // A mention is addressed to you by name, so it keeps its own row: rolling it
+  // into `comment:<slug>` would let a busy doc swallow the one notification
+  // that was actually about you.
+  if (kind === 'mention') return `mention:${targetId || slug}`;
   if (kind === 'comment') return `comment:${slug}`;
   if (kind === 'reply') return `reply:${targetId}`;
   if (kind === 'reaction') return `reaction:${targetId}`;
@@ -2875,8 +3216,9 @@ function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE } = {}) {
 }
 
 // Reddit-style: top-level comment → doc owner; reply → direct parent author
-// only; reaction → author of that item. Never notify the actor.
-function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targetAuthorLogin }) {
+// only; reaction → author of that item; mention → everyone named in the text.
+// Never notify the actor.
+function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targetAuthorLogin, mentionLogins }) {
   const actor = sessionLogin({ login: actorLogin });
   const out = [];
   const push = (login) => {
@@ -2887,6 +3229,175 @@ function inboxRecipients({ kind, actorLogin, ownerLogin, parentAuthorLogin, targ
   if (kind === 'comment') push(ownerLogin);
   else if (kind === 'reply') push(parentAuthorLogin);
   else if (kind === 'reaction') push(targetAuthorLogin);
+  else if (kind === 'mention') for (const login of (Array.isArray(mentionLogins) ? mentionLogins : [])) push(login);
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// @mentions
+//
+// A comment reaches people by NAME, not only by position in the thread. Any
+// GitHub login can be named — the composer searches GitHub itself — but the
+// gate on DELIVERY is whether that person can actually open the doc:
+//
+//   public / unlisted   anyone can read it, so anyone named is notified
+//   private, invited    already on the allowlist, notified
+//   private, stranger   the OWNER naming them is an invite (they go on the
+//                       allowlist, then get notified); anyone else naming
+//                       them changes nothing — plain text, no notification
+//
+// The last row is the one that matters: an inbox row carries the doc title
+// and a line of the comment, so notifying a stranger about a private doc
+// would hand them content they are not allowed to open.
+//
+// Mentions are resolved on the SERVER from the posted text. A client-supplied
+// list would let a crafted request notify anyone.
+// ─────────────────────────────────────────────────────────────────────────
+
+// One comment cannot notify an unbounded crowd.
+const MENTION_MAX_PER_COMMENT = 10;
+// Ceiling for the allowlist growing by @mention. Not applied retroactively to
+// a list an owner built by hand in the Share panel.
+const MENTION_INVITE_ALLOWLIST_MAX = 100;
+
+// GitHub login shape: alphanumeric plus inner hyphens, 39 max. The leading
+// group swallows the preceding character so `a@b` (an email) and `@@x` don't
+// match, and so two mentions separated by one space both do.
+const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+
+function parseMentionLogins(text) {
+  if (typeof text !== 'string' || !text) return [];
+  const out = [];
+  const seen = new Set();
+  const re = new RegExp(MENTION_RE.source, 'g');
+  let m;
+  while ((m = re.exec(text))) {
+    // A GitHub login never ends in a hyphen, so `@dana-` names dana.
+    const login = String(m[2]).replace(/-+$/, '').toLowerCase();
+    if (!login || seen.has(login)) continue;
+    seen.add(login);
+    out.push(login);
+  }
+  return out;
+}
+
+// The logins a single comment may act on: parsed in the order they were
+// typed, deduped, and capped.
+function mentionCandidates(text) {
+  return parseMentionLogins(text).slice(0, MENTION_MAX_PER_COMMENT);
+}
+
+// Everyone who has written on this doc, newest record last. Reads the raw
+// event log rather than a snapshot so the author of a DELETED comment still
+// counts as someone you can talk to.
+function commentParticipants(list) {
+  const byLogin = new Map();
+  const push = (author) => {
+    const login = normalizeGithubLogin(author && author.login);
+    if (!login) return;
+    const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
+    byLogin.set(login, {
+      login,
+      name: prev.name || (author && author.name) || '',
+      avatar_url: prev.avatar_url || (author && author.avatar_url) || '',
+    });
+  };
+  for (const c of (Array.isArray(list) ? list : [])) {
+    if (!c) continue;
+    push(c.author);
+    for (const e of (Array.isArray(c.events) ? c.events : [])) {
+      if (e && e.kind === 'reply_added' && e.reply) push(e.reply.author);
+    }
+    for (const r of (Array.isArray(c.replies) ? c.replies : [])) push(r && r.author);
+  }
+  return [...byLogin.values()];
+}
+
+// Who this session may name. `includeAllowed` is the requester's own insider
+// status: the private-doc allowlist is not public roster material, so a
+// signed-in stranger on a public doc gets the owner and the people who have
+// already spoken, and nothing that would let them enumerate the invite list.
+function mentionableUsers({ ownerLogin, allowedUsers, participants, includeAllowed = true }) {
+  const byLogin = new Map();
+  const push = (entry) => {
+    const login = normalizeGithubLogin(entry && entry.login);
+    if (!login) return;
+    const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
+    byLogin.set(login, {
+      login,
+      name: prev.name || (entry && entry.name) || '',
+      avatar_url: prev.avatar_url || (entry && entry.avatar_url) || '',
+    });
+  };
+  push({ login: ownerLogin });
+  if (includeAllowed) for (const u of (Array.isArray(allowedUsers) ? allowedUsers : [])) push({ login: u });
+  for (const p of (Array.isArray(participants) ? participants : [])) push(p);
+  return [...byLogin.values()];
+}
+
+// Being named outranks sitting in the thread. Returns the login that should
+// still get the positional notification (owner of the doc, author of the
+// parent), or null when the mention already reached them — one row, not two.
+function positionalRecipient(login, mentions) {
+  const n = normalizeGithubLogin(login);
+  if (n && (Array.isArray(mentions) ? mentions : []).includes(n)) return null;
+  return login;
+}
+
+// Split the named logins by what can actually happen to them.
+//   canRead(login)  — can that person open this doc as it stands
+//   canInvite       — may THIS commenter widen the allowlist (owner only)
+//   inviteBudget    — how many more the allowlist may take
+// `notified` includes `invited`: an invite is only worth anything if the
+// mention that triggered it also lands.
+function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0 } = {}) {
+  const notified = [];
+  const invited = [];
+  const blocked = [];
+  for (const login of (Array.isArray(logins) ? logins : [])) {
+    if (canRead(login)) { notified.push(login); continue; }
+    if (canInvite && invited.length < inviteBudget) {
+      invited.push(login);
+      notified.push(login);
+      continue;
+    }
+    blocked.push(login);
+  }
+  return { notified, invited, blocked };
+}
+
+// Has this login ever actually used tdoc on THIS host? Read-only on purpose,
+// and two tempting sources are deliberately not consulted:
+//   - `inbox:` — a mention CREATES it, so the probe would answer its own
+//     question and every second mention would read as an established user.
+//   - hostedAccountForGithub() — it MINTS an account when none exists, so
+//     probing with it would manufacture the very record it reports.
+// What is left is evidence the person came here themselves: a doc they opened
+// while signed in, a doc they starred, or a hosted account they registered.
+// `false` is the safe answer — it tells the author to send the link, which is
+// never wrong, only sometimes unnecessary.
+const PRESENCE_PREFIXES = ['recents', 'stars', 'hosted-account', 'hosted-github'];
+async function hasUsedTdoc(env, login) {
+  const n = normalizeGithubLogin(login);
+  if (!n || !env || !env.META) return false;
+  for (const prefix of PRESENCE_PREFIXES) {
+    if (await env.META.get(`${prefix}:${n}`)) return true;
+  }
+  return false;
+}
+
+// Which of the notified were not already part of this document. These are the
+// only people the author may still have to reach by hand — everyone else
+// (the owner, the allowlist, anyone already in the thread) has their own
+// reason to come back. Each carries whether they have ever used tdoc, because
+// that decides whether the mention can find them on its own.
+async function describeNewcomers(env, { notified = [], invited = [], insiders = [] } = {}) {
+  const inside = new Set(insiders.map(normalizeGithubLogin).filter(Boolean));
+  const out = [];
+  for (const login of notified) {
+    if (inside.has(login)) continue;
+    out.push({ login, invited: invited.includes(login), known: await hasUsedTdoc(env, login) });
+  }
   return out;
 }
 
@@ -2901,7 +3412,8 @@ function applyCommentOp(list, op) {
     case 'create': {
       const entry = {
         id: op.id, author: op.author, created: now, created_in: op.version,
-        events: [{ kind: 'created', at_version: op.version, at: now, anchor: op.anchor || null, text: op.text }],
+        events: [{ kind: 'created', at_version: op.version, at: now, anchor: op.anchor || null, text: op.text,
+          mentions: Array.isArray(op.mentions) ? op.mentions : [] }],
       };
       backfillEids(entry.events);
       list.push(entry);
@@ -2911,7 +3423,8 @@ function applyCommentOp(list, op) {
       const thread = findCommentThread(list, op.parent_id);
       if (!thread) return { status: 404, body: { error: 'parent_not_found' } };
       appendEvent(thread.root, { kind: 'reply_added', at_version: op.version, at: now,
-        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null, parent_id: op.parent_id } });
+        reply: { id: op.reply_id, author: op.author, text: op.text, agent_status: null, parent_id: op.parent_id,
+          mentions: Array.isArray(op.mentions) ? op.mentions : [] } });
       return { status: 200, body: { id: op.reply_id, parent_id: op.parent_id, thread_id: thread.root.id, author: op.author, text: op.text, created: now, version: op.version } };
     }
     case 'patch_anchor': {
@@ -2947,6 +3460,27 @@ function applyCommentOp(list, op) {
       const fresh = snapshotAt(host, op.version);
       const reactions = isReply ? (fresh.replies.find(r => r.id === replyId)?.reactions || {}) : fresh.reactions;
       return { status: 200, body: { ok: true, reactions, added: !had } };
+    }
+    case 'edit_text': {
+      // Authorization enforced upstream (the worker resolves the target and
+      // checks it is the author's own record). The DO only serializes the
+      // write. Stamped at the viewed version like every other event, so an
+      // older version keeps the words it was published with.
+      const top = list.find(c => c.id === op.id);
+      if (top) {
+        appendEvent(top, { kind: 'text_edited', at_version: op.version, at: now, text: op.text, by: op.actor.login });
+        return { status: 200, body: snapshotAt(top, op.version) };
+      }
+      for (const c of list) {
+        ensureEventLog(c);
+        const re = (c.events || []).find(e => e.kind === 'reply_added' && e.reply?.id === op.id);
+        if (re) {
+          appendEvent(c, { kind: 'reply_text_edited', at_version: op.version, at: now, reply_id: op.id, text: op.text, by: op.actor.login });
+          const snap = snapshotAt(c, op.version);
+          return { status: 200, body: (snap && snap.replies.find(r => r.id === op.id)) || { ok: true } };
+        }
+      }
+      return { status: 404, body: { error: 'not_found' } };
     }
     case 'delete': {
       // Authorization enforced upstream (worker resolves target + canMutate
@@ -3052,6 +3586,8 @@ async function deliverInbox(env, recipientLogin, ev) {
     ownerLogin: ev.kind === 'comment' ? recipientLogin : '',
     parentAuthorLogin: ev.kind === 'reply' ? recipientLogin : '',
     targetAuthorLogin: ev.kind === 'reaction' ? recipientLogin : '',
+    // A mention has no single recipient — it carries its own list.
+    mentionLogins: ev.kind === 'mention' ? ev.mentions : [],
   });
   const at = ev.at || new Date().toISOString();
   for (const who of recips) {
@@ -3233,7 +3769,21 @@ export class CommentsStore {
     const meta = await loadDocMeta(this.env, slug);
     if (!meta) return { status: 404, body: { error: 'not_found' } };
     const metaLatest = latestVersionNumber(meta);
-    const reservation = await this._reserveVersion(op.baseVersion, metaLatest);
+    // The blank page a browser create lays down is scaffolding, not a version
+    // anyone wrote. The first real save becomes v1 rather than appending v2, so
+    // a document's history starts with the first thing someone actually wrote.
+    // Bounded by construction: it needs the mark the create route set, the doc
+    // must still have only that one version, and the save that takes this path
+    // writes a version record without the mark — so no document can replace
+    // twice. Docs created before the mark existed keep the old behaviour.
+    const priorVersions = Array.isArray(meta.versions) ? meta.versions : [];
+    const replacesScaffold = priorVersions.length === 1
+      && Number(priorVersions[0] && priorVersions[0].n) === 1
+      && Boolean(priorVersions[0] && priorVersions[0].blank)
+      && Number(op.baseVersion) === 1;
+    const reservation = replacesScaffold
+      ? { ok: true, next: 1 }
+      : await this._reserveVersion(op.baseVersion, metaLatest);
     if (!reservation.ok) return { status: reservation.status, body: reservation.body };
 
     let committed = false;
@@ -3241,8 +3791,14 @@ export class CommentsStore {
       const widgetFrom = `/d/${slug}/v/${op.baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${reservation.next}/widget/`;
       const rewritten = String(op.html).split(widgetFrom).join(widgetTo);
-      const stamped = stampAids(rewritten);
-      await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
+      // The author renames a doc by editing its heading, which is the only
+      // title they can actually reach from the editor. An empty or missing h1
+      // leaves the stored title alone rather than blanking it.
+      const nextTitle = titleFromDocument(rewritten);
+      const stamped = await prepareDocVersion(nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
+      // Nothing to carry across when the target IS the source; a scaffold has
+      // no widgets either way.
+      if (!replacesScaffold) await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
       const key = `docs/${slug}/v${reservation.next}/index.html`;
       await this.env.DOCS.put(key, stamped.html, {
         httpMetadata: { contentType: 'text/html; charset=utf-8' },
@@ -3258,18 +3814,25 @@ export class CommentsStore {
         created: now,
         prompt: 'Browser edit',
         source: 'browser',
+        sha: stamped.sha,
         ...(op.actorLogin ? { author: op.actorLogin } : {}),
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
-      await this.env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, versions }));
+      await this.env.META.put(`meta:${slug}`, JSON.stringify({
+        ...meta,
+        ...(nextTitle ? { title: nextTitle } : {}),
+        versions,
+      }));
       committed = true;
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
       // reporting a failed save after META committed would make the browser
       // retry a snapshot that already exists.
-      try {
-        await this._finishVersion(reservation, true);
-      } catch (error) {
-        console.error('[browser-save] version cursor finalize failed (recoverable):', error.message || String(error));
+      if (!replacesScaffold) {
+        try {
+          await this._finishVersion(reservation, true);
+        } catch (error) {
+          console.error('[browser-save] version cursor finalize failed (recoverable):', error.message || String(error));
+        }
       }
 
       // Comments are an independent event log. Reconcile the authoritative
@@ -3291,7 +3854,7 @@ export class CommentsStore {
         body: { ok: true, version: reservation.next, url: `/d/${slug}/v/${reservation.next}` },
       };
     } catch (error) {
-      if (!committed) {
+      if (!committed && !replacesScaffold) {
         try { await this._finishVersion(reservation, false); } catch {}
       }
       return { status: 500, body: { error: 'version_write_failed', message: error.message || String(error) } };
@@ -3607,6 +4170,9 @@ export default {
           page: 'docs-hub',
           identity,
           runtime: runtimeInfo(),
+          // Mirrors the /api/doc/create gate: offering "start from scratch" on a
+          // host that will 403 it is worse than not offering it.
+          capabilities: { create: isOwnerSession(env, s) || hostedAccountCopiesEnabled(env, req) },
           ...data,
         }),
       }), {
@@ -3649,6 +4215,46 @@ export default {
     // shell embeds. Gated on Sec-Fetch-Dest: iframe like widgets, so it can never
     // be loaded top-level — only inside the shell. Access-gated identically to
     // the doc view. Only our nonced probe runs inside; author JS stays inert.
+    // ---- raw stored bytes (agent read path) ----
+    // The document's stored bytes, exactly as R2 holds them. This is how an
+    // agent reads the source of truth before an edit, instead of trusting a
+    // possibly-stale local copy (AGENTS.md line one vs the old /tdoc edit
+    // step 2, which read local and faithfully imitated a 26-byte stale file).
+    //
+    // Served as text/plain with nosniff, NEVER text/html: author HTML on this
+    // shared origin outside the sandboxed /frame would be stored XSS. Access
+    // is the same gate as every other doc read. ETag is the sha of the stored
+    // bytes (recorded at write by prepareDocVersion; computed here for
+    // pre-existing storage), so a client that already holds the current copy
+    // pays one conditional request and gets 304, no body.
+    const rawMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/raw\/?$/);
+    if (rawMatch && (method === 'GET' || method === 'HEAD')) {
+      const [, slug, vStr] = rawMatch;
+      if (!isValidSlug(slug)) return text('invalid slug', { status: 400 });
+      const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+      if (!gate.ok) return gate.response;
+      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
+      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+      const body = await obj.text();
+      const meta = gate.meta || await loadDocMeta(env, slug);
+      const entry = (Array.isArray(meta && meta.versions) ? meta.versions : []).find((v) => Number(v.n) === Number(vStr));
+      const sha = (entry && typeof entry.sha === 'string' && /^[0-9a-f]{16}$/.test(entry.sha))
+        ? entry.sha
+        : (await sha256Hex(body)).slice(0, 16);
+      const etag = `"${sha}"`;
+      const headers = {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-cache',
+        'ETag': etag,
+      };
+      const inm = req.headers.get('if-none-match');
+      if (inm && inm.split(',').map((s2) => s2.trim()).includes(etag)) {
+        return new Response(null, { status: 304, headers });
+      }
+      return new Response(method === 'HEAD' ? null : body, { status: 200, headers });
+    }
+
     const frameMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/frame\/?$/);
     if (frameMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr] = frameMatch;
@@ -3664,16 +4270,19 @@ export default {
       let body = '';
       if (method !== 'HEAD') {
         body = forceWidgetSandbox(await obj.text());
-        // Legacy template-reliant docs (published before creation-time baking):
-        // no #tdoc-reader block AND no styling of their own reading column →
-        // inject the reader CSS into the FRAME RESPONSE (never into storage).
-        // Self-contained docs are excluded by the max-width check; the template
-        // is :where() zero-specificity, so author CSS always wins.
-        if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+        // Documents created before creation-time baking carry no #tdoc-reader
+        // block, so the reading template is supplied in the FRAME RESPONSE
+        // (never written back to storage). No second condition: see the
+        // matching comment in server/server.js — the old "and contains no
+        // max-width" proxy starved the documents that followed the contract,
+        // and :where() zero-specificity makes the injection harmless to a
+        // document that styles itself.
+        if (!hasReaderBlock(body)) {
           const rcss = (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
           if (rcss) {
             const rtag = `<style id="tdoc-reader">${rcss}</style>`;
-            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+            // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
+            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
           }
         }
         const tag = `<script id="tdoc-frame-probe" data-tdoc-provider nonce="${nonce}">${PROBE_JS}</script>`;
@@ -3819,6 +4428,99 @@ export default {
     // Content snapshot only: one new slug, v1, no comments, no history, no
     // widget islands. Download stays on /export. This is the hosted "make a
     // copy in my account" path (#146), not a file download.
+    // ---- create a blank doc ----
+    // Everything /api/doc/duplicate does except read a source document: claim a
+    // derived slug, charge it to the caller's hosted quota, write v1 and the
+    // meta record. The browser had no way to make a document before this; edit
+    // mode could only ever change one that already existed.
+    if (p === '/api/doc/create' && method === 'POST') {
+      const session = await getSession(env, req);
+      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      const ownerCreate = isOwnerSession(env, session);
+      let actor = { kind: 'owner_session' };
+      if (!ownerCreate) {
+        // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
+        // its owner unless it has opted into hosted accounts. tdoc.dev is open.
+        if (!hostedAccountCopiesEnabled(env, req)) {
+          return json({
+            error: 'account_create_unavailable',
+            message: 'This host only lets its owner create documents. Publish from the CLI instead.',
+          }, { status: 403 });
+        }
+        // Not a precondition — this mints the account on first use. A null here
+        // means the account store itself is unreachable.
+        const acct = await hostedAccountForGithub(env, session.login);
+        if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+      }
+
+      const html = blankDocHtml();
+      if (actor.kind === 'hosted') {
+        const maxBytes = hostedMaxUploadBytes(env);
+        const size = utf8ByteLength(html);
+        if (size > maxBytes) return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
+        const limit = hostedMaxDocs(env);
+        const used = await countHostedDocs(env, actor.account_id, limit);
+        if (used >= limit) return json({ error: 'quota_docs', limit, used }, { status: 403 });
+      }
+
+      // Opaque ids don't collide in practice; the loop is here so that when one
+      // does, the answer is another id rather than a failed create.
+      let newSlug = null;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const candidate = blankDocSlug(crypto.getRandomValues(new Uint8Array(8)));
+        const existsMeta = await loadDocMeta(env, candidate);
+        if (existsMeta) continue;
+        const bytes = await docBytesExist(env, candidate);
+        if (!bytes.ok) return bytes.response;
+        if (bytes.exists) continue;
+        if (actor.kind === 'hosted') {
+          const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: actor.account_id });
+          if (!claimed.ok) {
+            if (
+              claimed.status === 503
+              || claimed.error === 'hosted_owner_store_unavailable'
+              || claimed.error === 'owner_store_conflict'
+            ) {
+              return json({ error: claimed.error || 'hosted_owner_store_unavailable' }, { status: claimed.status || 503 });
+            }
+            continue;
+          }
+        }
+        newSlug = candidate;
+        break;
+      }
+      if (!newSlug) return json({ error: 'slug_exhausted' }, { status: 409 });
+
+      const now = new Date().toISOString();
+      let incoming = {
+        // Renamed by the first save that finds a heading in the document.
+        title: 'Untitled',
+        slug: newSlug,
+        created: now,
+        // The mark the first save consumes: this v1 is scaffolding, not
+        // something an author wrote.
+        versions: [{ n: 1, created: now, prompt: 'Created from scratch in the browser', blank: true }],
+        created_by: session.login,
+      };
+      incoming = stampHostedOwnership(incoming, actor);
+
+      const { html: stampedHtml, sha: blankSha } = await prepareDocVersion(html);
+      incoming.versions[0].sha = blankSha;
+      const r2Key = `docs/${newSlug}/v1/index.html`;
+      try {
+        await env.DOCS.put(r2Key, stampedHtml, {
+          httpMetadata: { contentType: 'text/html; charset=utf-8' },
+        });
+      } catch (e) {
+        return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+      }
+      const verify = await env.DOCS.head(r2Key);
+      if (!verify) return json({ error: 'r2_write_lost' }, { status: 500 });
+      await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
+      return json({ ok: true, slug: newSlug, version: 1, url: `/d/${newSlug}/v/1?edit=1` });
+    }
+
     if (p === '/api/doc/duplicate' && method === 'POST') {
       const session = await getSession(env, req);
       if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -3906,11 +4608,17 @@ export default {
         versions: [{ n: 1, created: now, prompt: `Duplicated from ${slug} v${version}` }],
         source: { slug, version },
         duplicated_by: session.login,
+        // Deliberately NOT inherited from the source: on tdoc.dev a reader may
+        // duplicate someone else's doc, and a copy that carried a public policy
+        // would republish it. hosted-oob-behavior asserts this defaults
+        // unlisted. Creating a doc from scratch is the case that should match
+        // a CLI publish; duplicating is not.
         access: normalizeAccess({}, { legacy: false }),
       };
       incoming = stampHostedOwnership(incoming, actor);
 
-      const { html: stampedHtml } = stampAids(rawHtml);
+      const { html: stampedHtml, sha: dupSha } = await prepareDocVersion(rawHtml);
+      incoming.versions[0].sha = dupSha;
       const r2Key = `docs/${newSlug}/v1/index.html`;
       try {
         await env.DOCS.put(r2Key, stampedHtml, {
@@ -4251,6 +4959,28 @@ export default {
       return json(V === 'all' ? historyList(list) : snapshotList(list, V));
     }
 
+    // Who the composer offers after `@`. Same gate as posting a comment: if
+    // you cannot comment here, there is nobody for you to name.
+    if (p === '/api/mentions' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
+      const slug = url.searchParams.get('slug');
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const meta = await loadDocMeta(env, slug);
+      const access = accessFromMeta(meta || {});
+      if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+      if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
+      const list = await readComments(env, slug);
+      const me = sessionLogin(s);
+      const users = mentionableUsers({
+        ownerLogin: hostedGithubLogin(meta) || env.TDOC_OWNER,
+        allowedUsers: access.allowed_users,
+        participants: commentParticipants(list),
+        includeAllowed: isAllowlisted(access, s, env, meta),
+      }).filter((u) => u.login !== me);
+      return json({ users });
+    }
+
     if (p === '/api/comments' && method === 'POST') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -4259,52 +4989,129 @@ export default {
       const { slug, version, anchor, text: commentText, parent_id } = body;
       if (!slug || !commentText) return json({ error: 'slug and text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      {
-        const meta = await loadDocMeta(env, slug);
-        const access = accessFromMeta(meta || {});
-        if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
-        if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
-      }
+      const meta = await loadDocMeta(env, slug);
+      const access = accessFromMeta(meta || {});
+      if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+      if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
       const author = { login: s.login, avatar_url: s.avatar_url, name: s.name };
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
+      const ownerLogin = hostedGithubLogin(meta) || env.TDOC_OWNER;
+      // Resolve @mentions BEFORE the write: the delivered list is stamped onto
+      // the event, so a chip on the card is exactly the set that was notified.
+      // Named logins come from the text, never from the request body.
+      const priorList = await readComments(env, slug);
+      const isDocOwner = isDocOwnerSession(env, s, meta);
+      const outcome = classifyMentions(
+        mentionCandidates(commentText).filter((login) => login !== sessionLogin(s)),
+        {
+          canRead: (login) => canReadDoc(access, { login }, env, meta),
+          canInvite: isDocOwner,
+          inviteBudget: Math.max(0, MENTION_INVITE_ALLOWLIST_MAX - access.allowed_users.length),
+        },
+      );
+      const mentions = outcome.notified;
+      // Who among them is new to this doc, and can the mention find them on
+      // its own. Computed against the doc as it stood BEFORE the invite below
+      // widened the allowlist, so an invitee still reads as a newcomer.
+      outcome.newcomers = await describeNewcomers(env, {
+        notified: outcome.notified,
+        invited: outcome.invited,
+        insiders: mentionableUsers({
+          ownerLogin,
+          allowedUsers: access.allowed_users,
+          participants: commentParticipants(priorList),
+        }).map((u) => u.login),
+      });
+      // An invite is a meta write, so it happens before the comment lands: a
+      // notification whose link 403s is worse than no notification.
+      if (outcome.invited.length) {
+        const patched = applyAccessPatch(meta, {
+          allowed_users: access.allowed_users.concat(outcome.invited),
+        });
+        if (patched.error) return json(patched, { status: 400 });
+        await env.META.put(`meta:${slug}`, JSON.stringify(patched.meta));
+      }
       // Serialized through the per-slug DO (mutation logic lives once in
       // applyCommentOp). create + reply are both id-stamped here so the
       // response is deterministic regardless of where the write runs.
       const op = parent_id
-        ? { kind: 'reply', slug, parent_id, reply_id: `r_${Date.now()}_${rand(4)}`, author, text: commentText, version: V, at: created }
-        : { kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author, text: commentText, anchor: anchor || null, version: V, at: created };
+        ? { kind: 'reply', slug, parent_id, reply_id: `r_${Date.now()}_${rand(4)}`, author, text: commentText, mentions, version: V, at: created }
+        : { kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author, text: commentText, mentions, anchor: anchor || null, version: V, at: created };
       const res = await mutateComments(env, slug, op);
       if (res.status === 200) {
-        const meta = await loadDocMeta(env, slug);
         const title = (meta && meta.title) || slug;
-        if (!parent_id) {
-          await deliverInbox(env, hostedGithubLogin(meta) || env.TDOC_OWNER, {
-            kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
-            actor: author, preview: commentText, title, at: created,
-          });
-        } else {
-          const list = await readComments(env, slug);
-          const parentA = recordAuthor(list, parent_id);
-          await deliverInbox(env, parentA && parentA.login, {
-            kind: 'reply', slug, version: V, comment_id: op.reply_id,
-            thread_id: res.body && res.body.thread_id, target_id: parent_id,
+        const commentId = parent_id ? op.reply_id : op.id;
+        const threadId = parent_id ? (res.body && res.body.thread_id) : op.id;
+        if (mentions.length) {
+          await deliverInbox(env, null, {
+            kind: 'mention', slug, version: V, comment_id: commentId,
+            thread_id: threadId, target_id: commentId, mentions,
             actor: author, preview: commentText, title, at: created,
           });
         }
+        if (!parent_id) {
+          const owner = positionalRecipient(ownerLogin, mentions);
+          if (owner) {
+            await deliverInbox(env, owner, {
+              kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
+              actor: author, preview: commentText, title, at: created,
+            });
+          }
+        } else {
+          const parentA = recordAuthor(priorList, parent_id);
+          const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
+          if (parentLogin) {
+            await deliverInbox(env, parentLogin, {
+              kind: 'reply', slug, version: V, comment_id: op.reply_id,
+              thread_id: res.body && res.body.thread_id, target_id: parent_id,
+              actor: author, preview: commentText, title, at: created,
+            });
+          }
+        }
       }
-      return json(res.body, { status: res.status });
+      // The composer needs to know what became of each name: an invite is
+      // worth telling the owner about (they still have to send the link), and
+      // a blocked name would otherwise fail silently.
+      const body_out = res.status === 200 && res.body && typeof res.body === 'object'
+        ? { ...res.body, mention_outcome: outcome }
+        : res.body;
+      return json(body_out, { status: res.status });
     }
 
-    // Re-anchor a comment. Only the original author can re-anchor their own
-    // comment. Appends an `anchor_changed` event stamped at the current
-    // version, so OLDER versions still resolve to the previous anchor.
+    // Re-anchor a comment, or edit its text. Appends an `anchor_changed` /
+    // `text_edited` event stamped at the current version, so OLDER versions
+    // still resolve to the anchor and the words they were published with.
+    //
+    // The two differ in who may do them: re-anchor is the author's or the doc
+    // owner's (canMutate), but an EDIT is the author's alone — rewriting
+    // somebody else's words under their name is not a power a doc owner gets.
     if (p === '/api/comments' && method === 'PATCH') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, id, anchor, version } = body;
+      if (typeof body.text === 'string') {
+        const text = body.text.trim();
+        if (!slug || !id || !text) return json({ error: 'slug, id, text required' }, { status: 400 });
+        if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+        const list = await readComments(env, slug);
+        ensureMigrated(list);
+        const meta = await loadDocMeta(env, slug);
+        const access = accessFromMeta(meta || {});
+        if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+        // The target is a top-level comment or a reply; either way the record
+        // that carries the author is the one that has to match the session.
+        const target = findRecord(list, id);
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        if (!isRecordAuthor(target, s)) return json({ error: 'not_author' }, { status: 403 });
+        const V = coerceBodyVersion(version);
+        const res = await mutateComments(env, slug, {
+          kind: 'edit_text', slug, id, text, version: V, actor: { login: s.login },
+        });
+        return json(res.body, { status: res.status });
+      }
       if (!slug || !id || !anchor) return json({ error: 'slug, id, anchor required' }, { status: 400 });
       // Auth read (canMutate needs session+env): resolve the target up front.
       // The serialized write then runs through the DO. A target deleted between
@@ -4342,9 +5149,17 @@ export default {
     }
     // Soft-delete: append a `deleted` event at the current version. The
     // record is preserved; older versions still see the comment as it was.
-    // Author-only. ?version=N to stamp the delete at a specific version
-    // (defaults to Infinity, meaning "delete forward from now" which the
-    // overlay supplies as the current view's version).
+    //
+    // The author's — mayDelete, not canMutate. A doc owner used to be able to
+    // delete anybody's comment here, which is the wrong power to hand the
+    // person being reviewed: taking someone's words off the page is theirs to
+    // do. The one thing an owner still reaches is an AGENT's comment, because
+    // the agent wrote it with the owner's own upload token. What is gone is
+    // silencing a reader; what is kept is clearing what your tools said.
+    //
+    // ?version=N to stamp the delete at a specific version (defaults to
+    // Infinity, meaning "delete forward from now" which the overlay supplies
+    // as the current view's version).
     if (p === '/api/comments' && method === 'DELETE') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -4359,24 +5174,10 @@ export default {
       // is harmless (applyCommentOp returns 404).
       const authList = await readComments(env, slug);
       ensureMigrated(authList);
+      const target = findRecord(authList, id);
+      if (!target) return json({ error: 'not_found' }, { status: 404 });
       const meta = await loadDocMeta(env, slug);
-      let authorized = false;
-      const top = authList.find(c => c.id === id);
-      if (top) {
-        if (!canMutate(top, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
-        authorized = true;
-      } else {
-        for (const c of authList) {
-          ensureEventLog(c);
-          const reply = (c.events || []).find(e => e.kind === 'reply_added' && e.reply && e.reply.id === id);
-          if (reply) {
-            if (!canMutate(reply.reply, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
-            authorized = true;
-            break;
-          }
-        }
-      }
-      if (!authorized) return json({ error: 'not_found' }, { status: 404 });
+      if (!mayDelete(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const res = await mutateComments(env, slug, {
         kind: 'delete', slug, id, version: stampVersion, actor: { login: s.login },
       });
@@ -4453,6 +5254,17 @@ export default {
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
+      // One answer per human turn. A round that re-reads comments.json after
+      // somebody deleted the agent's reply would otherwise post the same words
+      // in the same place; the log remembers what the fold forgot. `force`
+      // exists for the caller that means it — nothing in /tdoc edit sets it.
+      const gate = agentReplyGate(parent, agent.login);
+      if (!gate.allowed && body.force !== true) {
+        return json({
+          ok: true, skipped: true, reason: gate.reason,
+          parent_id, thread_id: parent.id,
+        });
+      }
       const V = coerceBodyVersion(applied_in, parent.created_in || 1);
       const now = new Date().toISOString();
       const replyId = `r_${Date.now()}_${rand(4)}`;
@@ -4576,7 +5388,12 @@ export default {
       // data-tdoc-aid. The SAME artifact in a different version has the
       // SAME aid — so a comment anchored by aid resolves identity-first
       // and cannot drift onto a different artifact.
-      const { html: stampedHtml, aids } = stampAids(doc);
+      const { html: stampedHtml, aids, sha: uploadSha } = await prepareDocVersion(doc);
+      // Tier-1 client visibility: the server is the only place guaranteed to
+      // see every publish, so the version entry records which client produced
+      // it. The self-update machinery has failed silently in seven distinct
+      // ways; this is the observability that does not depend on it.
+      const clientVersion = (req.headers.get('x-tdoc-client') || '').slice(0, 64) || null;
       const r2Key = `docs/${slug}/v${verNum}/index.html`;
       const incomingLatest = latestVersionNumber(incoming);
       const writesLatestMeta = !!incoming && (incomingLatest === 0 || verNum === incomingLatest);
@@ -4669,6 +5486,11 @@ export default {
           if (!versionByNumber.has(verNum)) {
             versionByNumber.set(verNum, { n: verNum, created: new Date().toISOString() });
           }
+          // The entry for the version whose bytes this request just stored
+          // records the hash of those bytes and the client that sent them.
+          const storedEntry = { ...versionByNumber.get(verNum), sha: uploadSha };
+          if (clientVersion) storedEntry.client = clientVersion;
+          versionByNumber.set(verNum, storedEntry);
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
             .sort((a, b) => Number(a.n) - Number(b.n));
@@ -4689,6 +5511,26 @@ export default {
           // repairs the cursor from META; never report this committed version
           // as failed and invite an unsafe retry.
           console.error('[upload] version cursor finalize failed (recoverable):', e.message || String(e));
+        }
+      } else {
+        // History backfill (re-uploading v1..vN-1) stores freshly-prepared
+        // bytes but skips the latest-meta merge above — without this, the
+        // entry keeps a sha for bytes that no longer exist, and /raw serves a
+        // stale ETag after a reader-template generation change. Refresh just
+        // this entry; touch nothing else in meta.
+        try {
+          const currentMeta = await loadDocMeta(env, slug);
+          const entry = (Array.isArray(currentMeta && currentMeta.versions) ? currentMeta.versions : [])
+            .find((v) => Number(v.n) === verNum);
+          if (entry && (entry.sha !== uploadSha || (clientVersion && entry.client !== clientVersion))) {
+            entry.sha = uploadSha;
+            if (clientVersion) entry.client = clientVersion;
+            await env.META.put(`meta:${slug}`, JSON.stringify(currentMeta));
+          }
+        } catch (e) {
+          // The bytes are stored and correct; a stale recorded sha costs at
+          // worst one spurious /raw re-download. Never fail the upload for it.
+          console.error('[upload] backfill sha refresh failed (recoverable):', e.message || String(e));
         }
       }
       // Reconcile existing open comments against the new artifact set:
@@ -4722,7 +5564,10 @@ export default {
       } catch (e) {
         console.error('[upload] comment merge/reconcile failed (non-fatal):', e.message);
       }
-      return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, mergedComments: mergedLocal });
+      // `sha` is the hash of the exact stored bytes (post-bake, post-stamp). The
+      // client records it so a later edit can ask "has remote moved since I
+      // published?" with one HEAD request instead of re-downloading the doc.
+      return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal });
     }
 
     // ---- admin access mutation ----

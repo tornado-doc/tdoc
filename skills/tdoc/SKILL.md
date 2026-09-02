@@ -175,8 +175,8 @@ sharing, with GitHub auth gating comments.
 
 Server runs at `http://localhost:7878` (override with `TDOC_PORT`) and serves:
 - `/` — index of all docs
-- `/d/<slug>/v/<n>` — a specific version (injects comment overlay)
-- `/d/<slug>/v/<n>/widget/<name>` — sandboxed interactive island (no overlay)
+- `/d/<slug>/v/<n>` — a specific version (reader shell + the author document in an isolated frame)
+- `/d/<slug>/v/<n>/widget/<name>` — sandboxed interactive island (no reader chrome)
 - `/api/comments` GET/POST — comment persistence
 - `/api/ping` — health check; responds `{"ok":true,"service":"tdoc"}`. The
   `service` field is the identity marker — a foreign service answering 200 on
@@ -213,6 +213,9 @@ tdoc_resolve_skill_dir() {
   fi
 }
 SKILL_DIR="$(tdoc_resolve_skill_dir)"
+# Always invoke the CLIs as `bash "$SKILL_DIR/bin/..."` — some skill mounts
+# (Codex, hardened containers) are noexec, where the x bit is set but direct
+# execution fails with Permission denied.
 mkdir -p "$TDOC_DIR"
 
 # Check server is running. Identity-check the body — 200 alone is not proof
@@ -347,7 +350,7 @@ user at the end:
 
 ```bash
 # no-op and instant when already signed in
-"$SKILL_DIR/bin/tdoc-publish" --signin-only
+bash "$SKILL_DIR/bin/tdoc-publish" --signin-only
 ```
 
 Launch this in the **background** (Bash `run_in_background: true`) and go
@@ -364,7 +367,8 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
    apply it unless the user named another entry in `$SKILL_DIR/authoring/style/`.
    The named style file is the complete visual contract: use its CSS, but do
    not invent a second page-wide aesthetic on top of it.
-3. Create `~/tdocs/<slug>/v1/index.html` — the host document:
+3. Write the host document to a temp file (not into `~/tdocs` — step 4 puts it
+   there):
    - All host CSS inline in `<style>`. **Never put JavaScript in the host.**
      Host `<script>`, `on*=` handlers, and `javascript:` URLs are inert under
      CSP and therefore create controls or empty panels that cannot work. If
@@ -375,30 +379,37 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
      programmatic callers must make that exception visible with
      `--custom-template`.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
-4. **Validate the host before recording or opening the doc. This is mandatory
-   for every generated version, including chat-driven `/tdoc new`:**
+4. **Hand the HTML to `bin/tdoc-write`. Do not write into `~/tdocs` yourself.**
+
    ```bash
-   "$SKILL_DIR/bin/tdoc-validate-template" \
-     "$TDOC_DIR/<slug>/v1/index.html" --style <selected-style>
+   bash "$SKILL_DIR/bin/tdoc-write" \
+     --slug <slug> --title "<title>" --style <selected-style> \
+     --prompt "<the user's request, one line>" \
+     --html-file /tmp/<slug>.html
    ```
-   Use `--custom-template` only when the user explicitly requested a custom
-   whole-page design. It never permits host JavaScript. If validation fails,
-   fix the host or move computation into `v1/widgets/<name>.html`; do not open,
-   publish, or report the document as complete.
-5. Write `meta.json`:
-   ```json
-   { "title": "...", "slug": "...", "created": "<iso>", "versions": [{ "n": 1, "created": "<iso>", "prompt": "..." }] }
-   ```
-6. Init `comments.json` as `[]`.
-7. **Publish and hand over the link.**
+
+   One call does everything a version needs: validates the host, bakes the
+   reading template so the document is self-contained, writes
+   `v1/index.html`, writes `meta.json`, and initializes `comments.json`. It
+   prints the local URL on the last line.
+
+   Doing these by hand is what let documents ship without a reading template —
+   validation and baking are properties of *writing a version*, not of any one
+   command, so they live in one place that every path goes through. Add
+   `--widgets-dir <dir>` for sandboxed islands, and `--custom-template` only
+   when the user explicitly asked for a whole-page custom design.
+
+   If it exits non-zero, fix the host and run it again; nothing has been
+   written. Do not open, publish, or report the document as complete.
+5. **Publish and hand over the link.**
 
    *Hosted (the default).* Confirm the background sign-in from Step 0 finished,
    then publish:
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-publish" <slug>
+   bash "$SKILL_DIR/bin/tdoc-publish" <slug>
    # keep earlier drafts to yourself:
-   #   "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
+   #   bash "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
    ```
 
    Report the `https://tdoc.dev/d/<slug>/v/1` URL on its own line, and say what
@@ -420,7 +431,7 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
    GitHub page finishes it — or that they can say "publish it" later and you'll
    get them a fresh code. The doc stays in `$TDOC_DIR/<slug>/`.
 
-   *Self-host.* `"$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
+   *Self-host.* `bash "$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
    (or `vercel`). Report the worker URL, with the same note about access.
 
    **Local preview stays available to self-hosting users** — `/tdoc serve` and
@@ -523,8 +534,34 @@ This is a hard requirement, not a suggestion. The user can't tell which
 comments you handled unless you reply on each one. Skipping comments
 silently is the #1 source of regression complaints.
 
-1. Read `~/tdocs/<slug>/comments.json` — filter to `status: "open"`.
-2. Read latest version's `index.html`, and re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
+1. **Pull the comments first, then read them.** `~/tdocs/<slug>/comments.json`
+   is a cache of a file other people are writing: everything said since your
+   last round — including a comment someone deleted — is only in the published
+   doc. Skip for a doc that was never published.
+
+   ```bash
+   bash "$SKILL_DIR/bin/tdoc-pull" <slug>
+   ```
+
+   Then read `~/tdocs/<slug>/comments.json` and filter to `status: "open"`.
+2. **Get the current document — remote is the source of truth, local is a
+   cache.** The local `v<n>/index.html` can be stale: a browser edit or a
+   publish from another machine creates versions your checkout never saw, and
+   an edit based on a stale copy silently discards them. One conditional
+   request settles it (`published.json` holds the base URL; skip this entirely
+   for a doc that was never published):
+
+   ```bash
+   REMOTE_SHA="$(curl -sfI "$BASE/d/<slug>/v/<n>/raw" | tr -d '\r' | sed -n 's/^etag: "\(.*\)"$/\1/Ip')"
+   LOCAL_SHA="$(node -e 'const m=require(process.argv[1]);const e=(m.versions||[]).find(v=>v.n===Number(process.argv[2]));console.log(e&&e.sha||"")' "$TDOC_DIR/<slug>/meta.json" <n>)"
+   ```
+
+   - **Match** → your local copy produced what remote holds; use it as the base.
+   - **Differ (or no local sha)** → pull the truth: `curl -sf "$BASE/d/<slug>/v/<n>/raw" -o "$TDOC_DIR/<slug>/v<n>/index.html"` and base the edit on that.
+   - **Unreachable** → use the local copy, and say so in your reply: the edit
+     is based on a possibly-stale cache.
+
+   Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice, and
@@ -538,19 +575,32 @@ silently is the #1 source of regression complaints.
    - **question** — you can't act without clarification (the comment is
      ambiguous, contradicts another comment, or refers to content that
      doesn't exist in the current doc).
-4. Regenerate as `v<n+1>/index.html` incorporating every `applied` and
+4. Regenerate the full HTML to a temp file, incorporating every `applied` and
    `partial` comment. A comment's anchor has:
    - `anchor.text` — the exact text the user highlighted (may span across
      paragraphs and inline elements)
    - `anchor.context_before` / `anchor.context_after` — surrounding text
      (~60 chars each side) for disambiguation when the same text appears
      multiple times
-5. **Validate `v<n+1>/index.html` before updating metadata or replying to
-   comments.** Run `bin/tdoc-validate-template` with the style already used by
-   the document. If validation fails, repair the host or move the computation
-   into `v<n+1>/widgets/<name>.html`; never publish or report a broken version.
-6. Append to `meta.json` versions array.
-7. **For each comment, post an agent reply** so the user sees the outcome
+5. **Hand it to `bin/tdoc-write --version next`. Do not write `v<n+1>/` yourself.**
+
+   ```bash
+   bash "$SKILL_DIR/bin/tdoc-write" \
+     --slug <slug> --title "<existing title>" --style <the doc's style> \
+     --prompt "<what this revision changes, one line>" \
+     --html-file /tmp/<slug>-next.html --version next
+   ```
+
+   Same gateway as `/tdoc new`, so a new version gets the same treatment a
+   first version does: validated, baked, `meta.json` appended, and
+   `comments.json` left alone — the thread you are answering survives.
+   Earlier versions are untouched.
+
+   This is not a convenience. Writing `v<n+1>/index.html` by hand skipped the
+   bake, so a document that predates creation-time baking could be edited any
+   number of times and still ship without a reading template — it had no path
+   to recover on its own. The gateway is that path.
+6. **For each comment, post an agent reply** so the user sees the outcome
    in the doc UI. This is mandatory.
 
    Use `bin/tdoc-agent-reply`. It auto-detects the host runtime (Claude Code,
@@ -562,7 +612,7 @@ silently is the #1 source of regression complaints.
    request leaves the machine.
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-agent-reply" \
+   bash "$SKILL_DIR/bin/tdoc-agent-reply" \
      --slug "<slug>" \
      --parent "<comment_id>" \
      --text "<one or two sentences>" \
@@ -575,6 +625,15 @@ silently is the #1 source of regression complaints.
    to any reply (HN/Reddit-style nesting); `parent` is the comment or reply
    you are answering.
 
+   **A skip is a normal outcome, not an error.** The published Worker answers
+   a comment once per human turn: if your answer is already the last word on
+   that thread it prints `not posted: this comment already has your answer`
+   and exits 0. That is the server protecting the reader from hearing the same
+   thing twice — most often because they deleted your last answer, which
+   removes it from the comments.json you just read but not from the log the
+   server keeps. Do not retry it, and do not reach for `--force`: pass that
+   only when a person has asked you to say it again.
+
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading
      is now 'What an Agent Needs'."
@@ -583,7 +642,7 @@ silently is the #1 source of regression complaints.
    - question: "Two of your comments asked for different tones — formal in
      the intro and casual in section II. Which should I prioritize?"
 
-8. Update `comments.json`: set `status: "applied"` (or leave `"open"` for
+7. Update `comments.json`: set `status: "applied"` (or leave `"open"` for
    partial/question) and `applied_in: n+1`. The agent-reply endpoint
    already flips the status server-side AND drops a status emoji on the
    parent comment (✅ applied, 🟡 partial, ❓ question), clearing any
@@ -594,14 +653,14 @@ silently is the #1 source of regression complaints.
    If a comment is later re-anchored by the user (anchor moved to new
    text), the server automatically clears the agent's emoji and resets
    `status: "open"`. Re-running `/tdoc edit` will pick it up again.
-9. **Publish the new version and hand back its link**, the same way `/tdoc new`
+8. **Publish the new version and hand back its link**, the same way `/tdoc new`
    does. A doc that was published stays published; report
    `https://tdoc.dev/d/<slug>/v/<n+1>` so the reviewer can see the version
    their comment produced. The link a user already shared keeps working — a new
    version never breaks it.
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-publish" <slug>
+   bash "$SKILL_DIR/bin/tdoc-publish" <slug>
    ```
 
    Only report a `localhost` URL if this doc is local-only because the user
@@ -647,7 +706,12 @@ auth/hosted-token routes.
 Default target is **hosted** (`https://tdoc.dev`). First run signs in with
 GitHub (Device Flow), then asks the host for an account-scoped upload token
 bound to that login and stores it in `~/.tdoc/published.json`. That token can
-only mutate docs it owns. `/me` on tdoc.dev lists that GitHub user's docs. If
+only mutate docs it owns. The sign-in is **resumable**: if the process dies
+while waiting (agent harness timeout, killed sandbox), just run the same
+command again — it picks up the pending device code and keeps polling, so an
+approval the human already granted still lands. Never mint a fresh sign-in by
+hand after an interruption; the re-run does the right thing.
+`/me` on tdoc.dev lists that GitHub user's docs. If
 hosted signup is not open on the target, the CLI fails with a clear prompt to
 self-host instead — do **not** tell the user to flip a Worker env flag.
 
@@ -670,7 +734,7 @@ Pass a different `--platform` any time to switch: full re-setup rewrites
 `published.json` (previous file kept as `published.json.bak.switch`). A custom
 domain and `*.workers.dev` on the same Worker are two hostnames, not two
 platforms. Self-host targets
-compare a content hash of the Worker/overlay bundle against the last deployed
+compare a content hash of the bundled Worker (shell + probe + reader CSS) against the last deployed
 hash in `~/.tdoc/published.json` and redeploy automatically when runtime code
 changed. Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch
 uploads). Published pages expose runtime provenance at `/api/runtime` and in
@@ -689,7 +753,7 @@ Hosted needs no extra CLI beyond Node 18+ and curl. Self-hosting needs `jq`. Clo
 (`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
 
 ```bash
-"$SKILL_DIR/bin/tdoc-publish" <slug>
+bash "$SKILL_DIR/bin/tdoc-publish" <slug>
 ```
 
 Prints the published URL: `https://tdoc.dev/d/<slug>/v/<N>` (hosted),
@@ -702,7 +766,7 @@ Overwrites local `~/tdocs/<slug>/comments.json` with comments collected on the
 published Worker. Run before `/tdoc edit` to regenerate using community feedback.
 
 ```bash
-"$SKILL_DIR/bin/tdoc-pull" <slug>
+bash "$SKILL_DIR/bin/tdoc-pull" <slug>
 ```
 
 ### `/tdoc unpublish <slug>` — remove from your Worker
@@ -711,7 +775,7 @@ Deletes all versions, meta, and comments for `<slug>` from R2/KV. Local files
 are untouched.
 
 ```bash
-"$SKILL_DIR/bin/tdoc-unpublish" <slug>
+bash "$SKILL_DIR/bin/tdoc-unpublish" <slug>
 ```
 
 ### `/tdoc onboard` — guided first-time setup
@@ -722,7 +786,7 @@ installed, or might be partway through. You **must** drive the flow from
 
 **Algorithm:**
 
-1. Run `"$SKILL_DIR/bin/tdoc-doctor" --json` and parse the JSON. This is non-destructive.
+1. Run `bash "$SKILL_DIR/bin/tdoc-doctor" --json` and parse the JSON. This is non-destructive.
    The doctor is target-aware and reports what it assessed under `.target`.
    The default is `hosted` (tdoc.dev), which needs only Node 18+ and curl —
    **no Cloudflare account, no wrangler, nothing to click in a dashboard.**
@@ -769,17 +833,17 @@ Wraps `bin/tdoc-update`. Runs `git fetch + git merge --ff-only` against
 `origin/main` of `tornado-doc/tdoc`.
 
 - `tdoc-update --check` → report-only, prints incoming commits without changing anything
-- `tdoc-update` → apply, with auto-stash of local edits, **auto-restarts the running local server** so new routes / overlay code take effect
-- `tdoc-update --yes` → also redeploy the Worker so users get the new overlay
+- `tdoc-update` → apply, with auto-stash of local edits, **auto-restarts the running local server** so new routes / shell code take effect
+- `tdoc-update --yes` → also redeploy the Worker so readers get the new shell
 
 BYOK CLIs (`tdoc-publish` / `pull` / `unpublish` / `new`) and every skill
 run also check origin/main and nag immediately when this checkout is
 behind. `tdoc-doctor` reports the same as `.update` (not a missing_step).
 
 ```bash
-"$SKILL_DIR/bin/tdoc-update" --check    # see what's new
-"$SKILL_DIR/bin/tdoc-update"            # apply
-"$SKILL_DIR/bin/tdoc-update" --yes      # apply + redeploy worker
+bash "$SKILL_DIR/bin/tdoc-update" --check    # see what's new
+bash "$SKILL_DIR/bin/tdoc-update"            # apply
+bash "$SKILL_DIR/bin/tdoc-update" --yes      # apply + redeploy worker
 ```
 
 If the user has not yet `git clone`'d (the skill dir is not a git checkout),
@@ -791,8 +855,8 @@ Prints a concise human health summary. Use this when the user reports a
 problem; pass `--json` when an agent needs the full machine report.
 
 ```bash
-"$SKILL_DIR/bin/tdoc-doctor"
-"$SKILL_DIR/bin/tdoc-doctor" --json
+bash "$SKILL_DIR/bin/tdoc-doctor"
+bash "$SKILL_DIR/bin/tdoc-doctor" --json
 ```
 
 ## Troubleshooting
@@ -800,7 +864,7 @@ problem; pass `--json` when an agent needs the full machine report.
 When the user reports a problem, check these first:
 
 - **`/api/publish` 404, or "string did not match the expected pattern" in the Publish modal** → the running server is stale (old process, doesn't have current routes). Restart it: `pkill -f "$SKILL_DIR/server/server.js" && nohup node "$SKILL_DIR/server/server.js" > "$TDOC_DIR/.server.log" 2>&1 &`. `/tdoc update` now auto-restarts, but a server that was started before the update is still running stale code until restarted.
-- **Comment popup doesn't appear when selecting text** → ensure overlay.js has the fix where a drag-without-artifact-intersection falls through to the text-selection branch (regression test: `ui.test.js` "Drag-to-select TEXT in a `<p>` opens the comment popup"). If the test fails, check `overlay.js` mouseup handler: the `if (dragged) { ... return; }` block must only `return` when an artifact was actually hit.
+- **Comment popup doesn't appear when selecting text** → selection is captured by `server/frame-probe.js` inside the author frame and posted to the shell over `postMessage`; the composer is drawn by `shell/src/document/`. Check the probe's mouseup/touchend handler first, then whether the `tdoc:selection` message reaches the shell.
 - **Publish modal hangs forever** → check `~/tdocs/.server.log`. On the BYOK path it is usually `wrangler login` waiting for browser auth, or R2 not enabled. On a first hosted publish the modal now shows the GitHub device code itself and waits for it, so a hang there means the sign-in was never approved — the code expires and the publish fails on its own.
 - **Local doc URLs show the wrong content / weird JSON, or the server "is up" but docs 404** → another local service may be squatting the tdoc port (seen in the wild: a daemon from another product bound 7878). Run `curl -s http://localhost:7878/api/ping` — if the body lacks `"service":"tdoc"`, the answerer is not tdoc. Identify the squatter with `lsof -i :7878`, then free the port or run tdoc on another port via `TDOC_PORT=<port>` (the bin scripts and server all honor it).
 
@@ -814,7 +878,7 @@ When the user reports a problem, check these first:
   **Exception — sandboxed island:** if the doc needs computation, write `v<n>/widgets/<name>.html` and embed `<iframe sandbox="allow-scripts" src="/d/<slug>/v/<n>/widget/<name>">`. Inline `<script>` in that widget file **does** run. Never put author JS in the host document. See "When the prompt wants something CSS can't express" below.
 - Host document is one HTML file (no imports). Optional islands are extra files under `v<n>/widgets/`. External `<script src>` in the host is blocked by the same CSP, so a CDN library (D3, Chart.js, …) will not load in the host — put it in a widget island or say so rather than shipping a dead reference.
 - Sandboxed-safe: the author document renders inside a sandboxed, opaque-origin iframe (`/frame`), so don't rely on top-level navigation, `window.parent`, cookies, or `localStorage`.
-- The comment overlay is injected by the server — **don't** add commenting UI yourself.
+- Comment chrome lives in the reader shell, outside your document — **don't** add commenting UI yourself.
 - Don't add a "made with tdoc" footer, version selector, or share button. The shell handles those.
 - Use SVG for diagrams (commentable text, and CSS can animate it). **Don't use `<canvas>` in the host** — nothing can draw to it without JS. Draw inside a widget island if needed.
 - Default font stack: `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`. Mono: `ui-monospace, "SF Mono", Menlo, monospace`.
@@ -949,7 +1013,7 @@ scaffold owns that block. The values below are that template, at `:where()`
 zero specificity — the house style and your doc CSS sit on top of them and
 always win.
 
-The overlay's template is modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only. **Download** is a menu: **Download HTML** (`/export`, reader CSS inlined as `<style id="tdoc-reader">`) and **Download PDF** (print that same reading column; use the browser's Save as PDF). Neither includes overlay chrome (bar, comments).
+The template is modeled after the `conway-life` doc ("What if a doc could think?"): tight, readable, system fonts only. **Download** is a menu: **Download HTML** (`/export`, which relies on the same `<style id="tdoc-reader">` block your document already carries) and **Download PDF** (print that same reading column; use the browser's Save as PDF). Neither includes reader chrome (bar, comments).
 
 - System font stack (`system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`)
 - Body: 17px / line-height 1.65 / `#111` on white
@@ -980,6 +1044,12 @@ What to write:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
+  <style>
+    /* Required: an explicit ground, so the page never renders transparent.
+       Everything else — type, headings, tables, code, the column — comes from
+       the baked template unless your style entry says otherwise. */
+    body { background: #fff; }
+  </style>
 </head><body>
   <div class="wrap">
     <h1>{title}</h1>
@@ -991,8 +1061,10 @@ What to write:
 </body></html>
 ```
 
-The overlay's `:where()` defaults handle:
-- Centered article column (`max-width: 720px`, padded)
+The baked template's `:where()` rules handle:
+- Centered article column (`max-width: 720px`, padded) — **do not restate it**;
+  writing your own root width is rejected by the validator, because the
+  reading column is also what `frame-probe.js` measures to place comment pins
 - All heading sizes, weights, spacing
 - Paragraph + list spacing
 - Code/pre, blockquote, table styling
@@ -1003,23 +1075,25 @@ Only add CSS for **doc-specific** content (a custom widget, a simulation, a char
 
 ### Required container structure
 
-Wrap the doc content in a single container element with one of these selectors: **`.wrap`** (preferred), `main`, `article`, `.content`, or `.container`. The overlay relies on this to:
+Wrap the doc content in a single container element with one of these selectors: **`.wrap`** (preferred), `main`, `article`, `.content`, or `.container`. `frame-probe.js` relies on this to:
 - Detect article width for the responsive breakpoint
 - Anchor the article to the LEFT when there are comments (so growing/shrinking the window preserves the right-side comment column)
 - Calculate where comment cards land
 
-Note: the container should **not** have `margin: 0 auto`. The overlay sets its margins itself based on comment state (overrides with `!important` if you write it).
+Note: the container should **not** set its own width, margin or padding. The baked template centers it, and the resulting column is what the probe measures to park comment pins in the gutter beside it.
 
 ### Required: explicit body background
 
-Always set `body { background: #fff; }` (or your chosen color) so the page doesn't render as transparent over the browser default. Light mode only; the overlay does not currently support dark mode.
+Always set `body { background: #fff; }` (or your chosen color) so the page doesn't render as transparent over the reader's own ground.
+
+**Author in light only — dark mode is a whole-page invert**, applied inside the frame by `frame-probe.js` (`filter: invert(1) hue-rotate(180deg)`, the Dark Reader trick). A hand-written dark palette gets inverted back to light, so a `@media (prefers-color-scheme: dark)` block that sets dark colors renders *light*. Style the light look well and the dark one is its clean inverse, for free. See `$SKILL_DIR/authoring/style/technical.md` for the full rule.
 
 ### Responsive defaults (REQUIRED)
 
-Every doc must work on mobile out of the box. The overlay injects defensive CSS for artifacts, but the doc itself should also be authored responsively:
+Every doc must work on mobile out of the box. The baked template carries defensive caps for media, but the document itself has to be authored responsively — it is a file that will also be read outside tdoc:
 
-- **Always include** `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`. (The overlay injects this if you forget, but include it.)
-- **Use fluid widths**, not hardcoded pixels. Container: `max-width: 720px;` (no `margin: 0 auto`; no top-level `padding: 0 ...` — overlay handles margins and top/bottom reading space). If you need custom inner spacing, put it on a child element inside the container.
+- **Always include** `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`. Nothing adds it for you — the frame serves your HTML as written — and the validator rejects a document without it.
+- **Use fluid widths**, not hardcoded pixels. **Do not set width, margin or padding on the content root at all** — the baked template gives you a 720px column with 24px of side padding, so your usable canvas is **672px**. Size figures against that number. If you need custom inner spacing, put it on a child element inside the container.
 - **SVG / images**: do NOT hardcode width=N height=M. Either:
   - Use `width="100%"` + CSS aspect-ratio (`aspect-ratio: 16/9`), or
   - Use a wrapper with `max-width: 100%` and let the artifact scale.
@@ -1029,21 +1103,21 @@ Every doc must work on mobile out of the box. The overlay injects defensive CSS 
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
 - **Test at 375px wide** in your head before claiming done. If anything overflows the viewport on a phone, fix it before writing meta.json.
 
-The overlay applies these as `:where()` defensive defaults so old docs degrade gracefully, but new docs should bake responsiveness in.
+The baked template carries `:where()` defensive defaults (media elements are capped at `max-width: 100%`), but that cap only applies where tdoc serves the document. Author responsively so the file is correct wherever it is read.
 
-### Don't conflict with the overlay's UI
+### Don't conflict with the reader
 
-- **Don't define `button:hover { background: ... }`** globally — it will override the overlay's Comment pill on artifacts. Scope hover rules to your own buttons (e.g. `.my-btn:hover`, or `.wrap button:hover`).
-- **Don't use these ids/classes** in your doc — they're reserved by the overlay: `tdoc-*`, `#tdoc-*`, and any class starting with `tdoc-`.
-- **Don't position-fixed elements at the top** — the overlay's 44px top bar lives there.
-- **Don't use a footer at the bottom** — the overlay injects its own.
+- **Don't define `button:hover { background: ... }`** globally — `frame-probe.js` injects the hover Comment pill as a `<button>` *inside* your document, so a global rule reaches it. Scope hover rules to your own buttons (e.g. `.my-btn:hover`, or `.wrap button:hover`).
+- **Don't invent new `tdoc-*` names.** The prefix belongs to tdoc, and the probe injects `.tdoc-hover-outline` / `.tdoc-comment-pill` into your document. Two `tdoc-*` classes are the opposite — they are **for you to use**, and the components file asks you to: `tdoc-table-scroll` (a table's scroll wrapper) and `tdoc-artifact` / `data-tdoc-artifact` (make a composed block one comment anchor).
+- **Don't position-fixed elements at the top.** The top bar is in the shell now, so you will not overlap it — but a fixed banner is positioned against the frame's own viewport and will sit on top of your text as it scrolls.
+- **Don't use a `<footer>`.** The shell supplies the page footer; the validator rejects an author one.
 
 ### Author HTML compatibility contract (invariant)
 
-Agents generate arbitrary HTML. Overlay defaults use **`:where()` zero-specificity** so **author CSS always wins**. That means a bad author rule can also silently break layout (e.g. `padding: 0 24px` on the content root wiped overlay top reading space — fixed in #96). Contract:
+Agents generate arbitrary HTML. The baked template is **`:where()` zero-specificity** so **author CSS always wins** — property by property: what you name is yours, what you leave alone keeps the default. That also means a bad author rule silently breaks layout (e.g. `padding: 0 24px` on the content root wiped the top reading space — #96). Contract:
 
 - One primary content container: `.wrap` (preferred), `main`, `article`, `.content`, or `.container`.
-- **No** top-level container `padding: 0 ...` / `margin: 0 auto` — overlay owns chrome spacing.
+- **No** top-level container width / `margin` / `padding` — the baked template owns the reading column, and the probe measures it to place comment pins.
 - Treat `tdoc-*` classes/ids as reserved.
 - Scope document UI rules to the document (never global `button:hover`).
 - Prefer fluid/`max-width` layouts over fixed pixel shells.
@@ -1082,7 +1156,7 @@ The **same artifact in any future version gets the same aid**, regardless of how
 
 ### Make an author-composed block commentable as a unit
 
-If your doc has a "card" or composite widget built from `<div>`s (a transcript panel, a comparison card, a custom interactive widget), it won't be commentable as a unit by default — the overlay sees its inner text, not the card. Two ways to fix:
+If your doc has a "card" or composite widget built from `<div>`s (a transcript panel, a comparison card, a custom interactive widget), it won't be commentable as a unit by default — the probe resolves anchors to its inner text, not to the card. Two ways to fix:
 
 1. **Use a semantic tag**: change `<div class="my-card">` to `<section class="my-card">` (or `<aside>`, `<details>` if appropriate). Automatic — no other change needed.
 2. **Opt in explicitly** with `data-tdoc-artifact`:
@@ -1246,7 +1320,7 @@ if [ "$TEL_EFFECTIVE" = "on" ]; then
     _P_SID="$(echo "$_PDATA" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
     [ -z "$_P_SKILL" ] && continue
     if [ -x "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" ]; then
-      "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+      bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
         --skill "$_P_SKILL" --outcome unknown \
         --step "reaped-incomplete-run" --session-id "$_P_SID" 2>/dev/null || true
     fi
@@ -1254,7 +1328,7 @@ if [ "$TEL_EFFECTIVE" = "on" ]; then
 fi
 
 # ─── Upgrade check (BYOK: origin/main, every run) ───────────
-# GitHub releases lag (v0.9.0 sat while overlay kept shipping on main).
+# GitHub releases lag (v0.9.0 sat while the reader kept shipping on main).
 # Compare this skill checkout to origin/main the same way tdoc-update does.
 #
 # Resolve the skill directory at RUNTIME. This used to be a placeholder token
@@ -1318,15 +1392,15 @@ if [ -z "${TDOC_SKIP_UPDATE_CHECK:-}" ] && [ -x "$TDOC_SKILL_ROOT/bin/tdoc-updat
    && grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" 2>/dev/null; then
   # Pass the resolved checkout explicitly so versions older than #332, whose
   # internal default was ~/.claude, can still bootstrap the correct install.
-  SKILL_DIR="$TDOC_SKILL_ROOT" "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
+  SKILL_DIR="$TDOC_SKILL_ROOT" bash "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
 fi
 
 if [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" ]; then
-  NAG_LINE="$("$TDOC_SKILL_ROOT/bin/tdoc-update-nag" 2>/dev/null || true)"
+  NAG_LINE="$(bash "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" 2>/dev/null || true)"
   if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
     echo "$NAG_LINE"
     if [ "$TEL_EFFECTIVE" = "on" ]; then
-      "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+      bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
         --skill tdoc \
         --event-type upgrade_prompted \
         --outcome unknown \
@@ -1393,7 +1467,7 @@ immediately (before the rest of the tdoc work). Do not wait until the
 end, and do not swallow it. Example:
 
 > tdoc on origin/main is newer than this skill checkout. Published docs
-> still serve the old overlay until we update. I can run `/tdoc update
+> still serve the old reader until we update. I can run `/tdoc update
 > --yes` now (pulls the skill and redeploys your worker).
 
 Encourage them to update. If they say no, continue with what they asked.
@@ -1468,7 +1542,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On success**:
 
 ```bash
-"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome success \
   --duration "$DURATION" \
@@ -1480,7 +1554,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On error**:
 
 ```bash
-"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome error \
   --duration "$DURATION" \
@@ -1494,7 +1568,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On abandoned** (user asked to stop):
 
 ```bash
-"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome abandoned \
   --duration "$DURATION" \

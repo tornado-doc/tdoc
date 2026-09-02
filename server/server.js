@@ -71,6 +71,10 @@ function pendingSignin(slug) {
     // exists and is not ours, which still counts as alive.
     try { process.kill(p.pid, 0); } catch (e) { if (e.code !== 'EPERM') return null; }
   }
+  // Explicit whitelist, and it is a contract: the file also carries
+  // device_code (what makes a sign-in resumable), which can REDEEM the
+  // approval. The modal only ever needs the user-facing half. Never add
+  // device_code here — test/publish-signin.test.js pins this.
   return {
     user_code: String(p.user_code),
     verification_uri: String(p.verification_uri),
@@ -86,6 +90,45 @@ function e2eIdentity() {
 function inboxFile(login) {
   return path.join(ROOT, `.inbox-${String(login).toLowerCase()}.json`);
 }
+// Mirrors the Worker's asTombstone: the words go, the name stays (GitHub's
+// "user deleted this"), and everything the words earned goes with them.
+function localTombstone(record) {
+  const out = {
+    ...record,
+    text: '',
+    deleted: true,
+    reactions: {},
+    mentions: [],
+    status: 'open',
+  };
+  delete out.edited;
+  delete out.applied_in;
+  delete out.agent_status;
+  delete out.agent_actor;
+  return out;
+}
+
+// The Worker gets this for free — it folds, so a tombstone with nothing left
+// under it simply stops being emitted. Local storage is written, not folded,
+// so the collapse has to happen at delete time: drop tombstoned replies that
+// no longer hold anything, repeatedly (a chain of them collapses), and then
+// the record itself if it is a tombstone with an empty thread. Returns false
+// when the whole comment should go.
+function collapseLocalTombstones(comment) {
+  const replies = comment.replies || [];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = replies.length - 1; i >= 0; i--) {
+      const r = replies[i];
+      if (!r.deleted) continue;
+      if (replies.some(other => other.parent_id === r.id)) continue;
+      replies.splice(i, 1);
+      changed = true;
+    }
+  }
+  return !(comment.deleted && !replies.length);
+}
+
 function localRecordAuthor(comments, id) {
   for (const c of comments) {
     if (c.id === id) return c.author || null;
@@ -100,7 +143,8 @@ function localDeliver(recipient, ev) {
   const file = inboxFile(who);
   const inbox = readJson(file, { items: [] });
   const items = Array.isArray(inbox.items) ? inbox.items : [];
-  const gk = ev.kind === 'comment' ? `comment:${ev.slug}`
+  const gk = ev.kind === 'mention' ? `mention:${ev.target_id || ev.slug}`
+    : ev.kind === 'comment' ? `comment:${ev.slug}`
     : ev.kind === 'reply' ? `reply:${ev.target_id}`
     : ev.kind === 'reaction' ? `reaction:${ev.target_id}`
     : `other:${ev.slug}`;
@@ -126,6 +170,117 @@ function localDeliver(recipient, ev) {
   });
   writeJson(file, { items: items.slice(0, 200) });
 }
+// ── @mentions (mirror of worker.js — kept identical by test/no-drift) ──────
+// A comment reaches people by NAME, not only by position in the thread. Any
+// GitHub login can be named. The hosted worker gates delivery on whether that
+// person can open the doc; a local doc has no access policy — it is served to
+// whoever is at the keyboard — so every name here is simply delivered.
+const MENTION_MAX_PER_COMMENT = 10;
+const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+
+function normalizeGithubLogin(v) {
+  if (typeof v !== 'string') return null;
+  let s = v.trim().toLowerCase();
+  if (!s) return null;
+  if (s.startsWith('github:')) s = s.slice('github:'.length);
+  if (s.startsWith('@')) s = s.slice(1);
+  // GitHub logins: alphanumeric + hyphen
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(s)) return null;
+  return s;
+}
+
+function parseMentionLogins(text) {
+  if (typeof text !== 'string' || !text) return [];
+  const out = [];
+  const seen = new Set();
+  const re = new RegExp(MENTION_RE.source, 'g');
+  let m;
+  while ((m = re.exec(text))) {
+    // A GitHub login never ends in a hyphen, so `@dana-` names dana.
+    const login = String(m[2]).replace(/-+$/, '').toLowerCase();
+    if (!login || seen.has(login)) continue;
+    seen.add(login);
+    out.push(login);
+  }
+  return out;
+}
+
+// Being named outranks sitting in the thread. Returns the login that should
+// still get the positional notification (owner of the doc, author of the
+// parent), or null when the mention already reached them — one row, not two.
+function positionalRecipient(login, mentions) {
+  const n = normalizeGithubLogin(login);
+  if (n && (Array.isArray(mentions) ? mentions : []).includes(n)) return null;
+  return login;
+}
+
+// The logins a single comment may act on: parsed in the order they were
+// typed, deduped, and capped.
+function mentionCandidates(text) {
+  return parseMentionLogins(text).slice(0, MENTION_MAX_PER_COMMENT);
+}
+
+// The local stand-in for the worker's presence probe. A local tree has no
+// accounts, so the honest analogue of "has used tdoc here" is "has written
+// something here": an author line in some doc under TDOC_DIR. Inboxes are not
+// consulted, for the same reason the worker skips them — a mention creates
+// one, so it would answer its own question.
+function localHasUsedTdoc(login) {
+  const n = normalizeGithubLogin(login);
+  if (!n) return false;
+  let slugs = [];
+  try { slugs = fs.readdirSync(ROOT); } catch { return false; }
+  const seen = (author) => normalizeGithubLogin(author && author.login) === n;
+  for (const slug of slugs) {
+    let list = [];
+    try { list = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'comments.json'), 'utf8')); } catch { continue; }
+    for (const c of (Array.isArray(list) ? list : [])) {
+      if (!c) continue;
+      if (seen(c.author)) return true;
+      for (const r of (Array.isArray(c.replies) ? c.replies : [])) if (seen(r && r.author)) return true;
+    }
+  }
+  return false;
+}
+
+// Same shape the worker returns. A local doc has no access policy, so nobody
+// is ever invited or blocked — but "new to this doc" and "never used tdoc"
+// are both real locally, so the composer still reports them.
+function localMentionOutcome(comments, mentions) {
+  const inside = new Set(localMentionable(comments).map((u) => u.login));
+  return {
+    notified: mentions,
+    invited: [],
+    blocked: [],
+    newcomers: mentions
+      .filter((login) => !inside.has(login))
+      .map((login) => ({ login, invited: false, known: localHasUsedTdoc(login) })),
+  };
+}
+
+// Local comments.json is already folded (no event log), so participants come
+// straight off the records and their replies.
+function localMentionable(comments) {
+  const byLogin = new Map();
+  const push = (author) => {
+    const login = normalizeGithubLogin(author && author.login);
+    if (!login) return;
+    const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
+    byLogin.set(login, {
+      login,
+      name: prev.name || (author && author.name) || '',
+      avatar_url: prev.avatar_url || (author && author.avatar_url) || '',
+    });
+  };
+  if (E2E_OWNER) push({ login: E2E_OWNER, name: E2E_OWNER });
+  for (const c of (Array.isArray(comments) ? comments : [])) {
+    if (!c) continue;
+    push(c.author);
+    for (const r of (c.replies || [])) push(r && r.author);
+  }
+  return [...byLogin.values()];
+}
+
 // Cap request bodies so a hostile/buggy client can't OOM the local server.
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — comments are small
 const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
@@ -148,6 +303,118 @@ function readBody(req, maxBytes = MAX_BODY_BYTES) {
 // comment routes). Returns the slug if safe, else null.
 function safeSlug(slug) {
   return (typeof slug === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(slug)) ? slug : null;
+}
+
+// A doc created in the browser has no title yet — you type it into the page —
+// so its slug cannot be derived from one. It gets an opaque id instead, the
+// way Google Docs and Notion address a document: unique by construction, so
+// there is no de-duplication question and no rename when the title changes.
+// The caller supplies random bytes (crypto.getRandomValues / randomBytes).
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocSlug(bytes) {
+  // No look-alike characters: a slug gets read aloud and retyped.
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += alphabet[(Number(bytes && bytes[i]) || 0) % alphabet.length];
+  return `d-${out}`;
+}
+
+// The document a "start from scratch" create writes as v1. Deliberately empty,
+// heading included: the author types the title into the page, and the save path
+// reads it back out. Both placeholders paint only while the editor is live
+// (`html[data-tdoc-editing]`), so a reader of a still-empty doc sees a blank
+// page rather than instructions meant for its author. They are :empty rules
+// rather than seeded text, so the hints come back whenever a line is cleared.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function blankDocHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Untitled</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #fff; color: #17171a;
+    font: 17px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  /* The editor's focus ring frames this element. On a doc with content that is
+     the whole page; on a blank one, without a floor, it would draw a small box
+     around two empty lines — and clicking below it would miss the editor. */
+  main { max-width: 46rem; margin: 0 auto; padding: 4.5rem 1.5rem 8rem; min-height: 60vh; }
+  h1 { font-size: 2.1rem; line-height: 1.25; margin: 0 0 1.5rem; letter-spacing: -0.02em; }
+  h2 { font-size: 1.35rem; margin: 2.5rem 0 .75rem; letter-spacing: -0.01em; }
+  p { margin: 0 0 1.15rem; }
+  a { color: #2f5bea; }
+  blockquote { margin: 0 0 1.15rem; padding-left: 1rem; border-left: 3px solid #e4e4e9; color: #55555f; }
+  code { background: #f3f3f6; padding: .12em .35em; border-radius: 4px;
+    font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty::before {
+    content: attr(data-tdoc-placeholder);
+    color: #b0b0ba;
+    pointer-events: none;
+  }
+  /* An empty block is zero pixels tall, so without a floor the placeholder
+     paragraph is unclickable: the click falls through to <main> and the caret
+     stays wherever it was. */
+  html[data-tdoc-editing] [data-tdoc-placeholder]:empty {
+    min-height: 1.75em;
+  }
+  /* Put the caret in a line and its hint steps aside — it has said what it had
+     to say. frame-probe marks the line, and only once the reader has moved the
+     caret themselves, so the guidance survives the first paint. */
+  html[data-tdoc-editing] [data-tdoc-placeholder][data-tdoc-caret]:empty::before {
+    content: none;
+  }
+</style>
+</head>
+<body>
+<main>
+<h1 data-tdoc-placeholder="Untitled"></h1>
+<p data-tdoc-placeholder="Start writing…"></p>
+</main>
+</body>
+</html>
+`;
+}
+
+// The document's own first <h1> is the title. Reading it back on every browser
+// save is what lets an author name an untitled doc by typing into the page, and
+// rename it later the same way. Returns '' when there is no usable heading, so
+// callers can leave the stored title alone rather than blanking it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function titleFromDocument(html) {
+  const match = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(String(html == null ? '' : html));
+  if (!match) return '';
+  const text = match[1]
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;| /g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    // One pass of <[^>]*> cannot be trusted on nested or malformed markup
+    // (`<<script>>` leaves `<script`), and decoding entities just above can
+    // put an angle bracket back. A title is a label, never markup, so every
+    // surviving bracket is dropped and the result provably carries none.
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 120);
+}
+
+// Keep <title> in step with the heading the author just edited, so the browser
+// tab, the exported file and the hub all agree. Only rewrites an existing tag —
+// a document without one is left exactly as its author wrote it.
+// Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+function syncDocumentTitle(html, title) {
+  const safe = String(title == null ? '' : title)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return String(html == null ? '' : html)
+    .replace(/<title\b[^>]*>[\s\S]*?<\/title>/i, () => `<title>${safe}</title>`);
 }
 
 function latestLocalVersion(slug, meta) {
@@ -442,7 +709,7 @@ function localHubDocument(nonce) {
     bootJson: safeJsonForScript({
       page: 'docs-hub',
       identity: e2eIdentity(),
-      capabilities: { folders: false, delete: false, star: false },
+      capabilities: { folders: false, delete: false, star: false, create: true },
       ...localDocsData(),
     }),
   });
@@ -775,16 +1042,29 @@ const server = http.createServer(async (req, res) => {
     let body = '';
     if (req.method !== 'HEAD') {
       body = forceWidgetSandbox(fs.readFileSync(file, 'utf8'));
-      // Legacy template-reliant docs (published before creation-time baking):
-      // no #tdoc-reader block AND no styling of their own reading column →
-      // inject the reader CSS into the FRAME RESPONSE (never into storage).
-      // Self-contained docs are excluded by the max-width check, and the
-      // template is :where() zero-specificity, so author CSS always wins.
-      if (!body.includes('id="tdoc-reader"') && !body.includes('max-width')) {
+      // Documents created before creation-time baking carry no #tdoc-reader
+      // block, so the reading template is supplied in the FRAME RESPONSE
+      // (never written back to storage).
+      //
+      // There is deliberately no second condition. This used to also require
+      // that the document not contain the string "max-width" anywhere, as a
+      // proxy for "this document styles itself" — and it punished exactly the
+      // documents that followed the authoring contract: one `@media
+      // (max-width: 520px)` breakpoint, which the contract asks for, and a
+      // document that wrote no font-family (because the contract says the
+      // template owns typography) lost the template and rendered in Times New
+      // Roman. The proxy is unnecessary: the template is :where()
+      // zero-specificity throughout, so a document that does style itself
+      // wins every property it declares and is unaffected by the injection.
+      // Tag match, not substring: a doc whose PROSE quotes id="tdoc-reader"
+      // (tdoc's own design docs do) must still receive the template. Mirrors
+      // hasReaderBlock() in worker.js.
+      if (!/<style[^>]*\bid="tdoc-reader"/i.test(body)) {
         const rcss = readerCss();
         if (rcss) {
           const rtag = `<style id="tdoc-reader">${rcss}</style>`;
-          body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, `${rtag}</head>`) : rtag + body;
+          // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
+          body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
         }
       }
       // Inject the anchoring probe — the only tdoc code allowed into the author
@@ -822,6 +1102,61 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Start from scratch: the local twin of the worker's /api/doc/create. The
+  // document is staged under a dot-prefixed directory (which the hub listing
+  // skips, since safeSlug rejects a dot) and renamed into place, so a half
+  // written doc never appears in My docs.
+  if (p === '/api/doc/create' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    // Opaque ids don't collide in practice; the loop is here so that when one
+    // does, the answer is another id rather than a failed create.
+    let slug = null;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const candidate = blankDocSlug(crypto.randomBytes(8));
+      if (fs.existsSync(path.join(ROOT, candidate))) continue;
+      slug = candidate;
+      break;
+    }
+    if (!slug) return json(res, 409, { error: 'slug_exhausted' });
+
+    const now = new Date().toISOString();
+    const docRoot = path.join(ROOT, slug);
+    const stageDir = path.join(ROOT, `.create-${crypto.randomBytes(6).toString('hex')}`);
+    try {
+      fs.mkdirSync(path.join(stageDir, 'v1'), { recursive: true });
+      fs.writeFileSync(path.join(stageDir, 'v1', 'index.html'), blankDocHtml());
+      fs.writeFileSync(path.join(stageDir, 'meta.json'), JSON.stringify({
+        // Renamed by the first save that finds a heading in the document.
+        title: 'Untitled',
+        slug,
+        created: now,
+        versions: [{
+          n: 1,
+          created: now,
+          prompt: 'Created from scratch in the browser',
+          source: 'browser',
+          // The mark the first save consumes: this v1 is scaffolding, not
+          // something an author wrote.
+          blank: true,
+          ...(E2E_USER ? { author: E2E_USER } : {}),
+        }],
+      }, null, 2) + '\n');
+      fs.renameSync(stageDir, docRoot);
+    } catch (error) {
+      try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch {}
+      // The message can carry a filesystem path or a stack; log it here and
+      // hand the browser the code alone.
+      console.error('[create] blank doc write failed:', error && error.message ? error.message : error);
+      return json(res, 500, { error: 'create_failed' });
+    }
+    return json(res, 200, {
+      ok: true,
+      slug,
+      version: 1,
+      url: `/d/${encodeURIComponent(slug)}/v/1?edit=1`,
+    });
+  }
+
   // Explicit human save. Keystrokes stay in a browser draft; this endpoint is
   // the only local-browser path that creates a full document snapshot.
   if (p === '/api/doc/versions' && req.method === 'POST') {
@@ -855,28 +1190,58 @@ const server = http.createServer(async (req, res) => {
       return json(res, 409, { error: 'version_conflict', baseVersion, latestVersion: latest });
     }
 
-    const nextVersion = latest + 1;
+    // The blank page a browser create lays down is scaffolding, not a version
+    // anyone wrote. The first real save becomes v1 rather than appending v2, so
+    // a document's history starts with the first thing someone actually wrote.
+    // Bounded by construction: it needs the mark the create route set, the doc
+    // must still have only that one version, and the record this save writes
+    // carries no mark — so no document can replace twice.
+    const priorVersions = Array.isArray(meta.versions) ? meta.versions : [];
+    const replacesScaffold = priorVersions.length === 1
+      && Number(priorVersions[0] && priorVersions[0].n) === 1
+      && Boolean(priorVersions[0] && priorVersions[0].blank)
+      && baseVersion === 1;
+
+    const nextVersion = replacesScaffold ? 1 : latest + 1;
     const finalDir = path.join(docRoot, `v${nextVersion}`);
-    if (fs.existsSync(finalDir)) {
+    if (!replacesScaffold && fs.existsSync(finalDir)) {
       return json(res, 409, { error: 'version_conflict', baseVersion, latestVersion: nextVersion });
     }
     const stageDir = path.join(docRoot, `.v${nextVersion}-browser-${crypto.randomBytes(6).toString('hex')}`);
     const now = new Date().toISOString();
+    let nextTitle = '';
     try {
       fs.mkdirSync(stageDir, { recursive: false });
       const widgetFrom = `/d/${slug}/v/${baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${nextVersion}/widget/`;
-      fs.writeFileSync(path.join(stageDir, 'index.html'), doc.split(widgetFrom).join(widgetTo));
+      const rewritten = doc.split(widgetFrom).join(widgetTo);
+      // The author renames a doc by editing its heading, which is the only
+      // title they can actually reach from the editor. An empty or missing h1
+      // leaves the stored title alone rather than blanking it.
+      nextTitle = titleFromDocument(rewritten);
+      fs.writeFileSync(path.join(stageDir, 'index.html'),
+        nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       const baseWidgets = path.join(docRoot, `v${baseVersion}`, 'widgets');
       if (fs.existsSync(baseWidgets)) fs.cpSync(baseWidgets, path.join(stageDir, 'widgets'), { recursive: true });
+      // Replacing the scaffold means the target directory already exists; swap
+      // it out of the way first so the rename is still the atomic step, and
+      // keep the old one until the new one is in place.
+      let displaced = null;
+      if (replacesScaffold && fs.existsSync(finalDir)) {
+        displaced = path.join(docRoot, `.v1-replaced-${crypto.randomBytes(6).toString('hex')}`);
+        fs.renameSync(finalDir, displaced);
+      }
       fs.renameSync(stageDir, finalDir);
+      if (displaced) fs.rmSync(displaced, { recursive: true, force: true });
 
       const nextMeta = {
         ...meta,
+        ...(nextTitle ? { title: nextTitle } : {}),
         versions: [
-          ...(Array.isArray(meta.versions) ? meta.versions : []),
+          // Dropping the scaffold's record is what clears its `blank` mark.
+          ...priorVersions.filter((item) => Number(item && item.n) !== nextVersion),
           { n: nextVersion, created: now, prompt: 'Browser edit', source: 'browser', ...(E2E_USER ? { author: E2E_USER } : {}) },
-        ],
+        ].sort((a, b) => Number(a.n) - Number(b.n)),
       };
       const metaStage = `${metaFile}.browser-${crypto.randomBytes(6).toString('hex')}`;
       fs.writeFileSync(metaStage, JSON.stringify(nextMeta, null, 2) + '\n');
@@ -891,6 +1256,15 @@ const server = http.createServer(async (req, res) => {
       version: nextVersion,
       url: `/d/${encodeURIComponent(slug)}/v/${nextVersion}`,
     });
+  }
+
+  // Who the composer offers after `@` — the doc's own people, same as hosted.
+  if (p === '/api/mentions' && req.method === 'GET') {
+    const slug = safeSlug(url.searchParams.get('slug'));
+    if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
+    const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
+    const viewer = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
+    return json(res, 200, { users: localMentionable(comments).filter((u) => u.login !== viewer) });
   }
 
   // --- COMMENTS (anonymous) ---
@@ -913,6 +1287,10 @@ const server = http.createServer(async (req, res) => {
     const file = path.join(ROOT, slug, 'comments.json');
     const comments = readCommentFile(file);
     const created = new Date().toISOString();
+    // Resolved server-side, before the write, so the card chips exactly the
+    // names that were notified.
+    const me = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
+    const mentions = mentionCandidates(text).filter((login) => login !== me);
     if (parent_id) {
       const thread = comments.find(c => c.id === parent_id)
         || comments.find(c => (c.replies || []).some(r => r.id === parent_id));
@@ -923,25 +1301,29 @@ const server = http.createServer(async (req, res) => {
       // `r.version` check falls back to the parent's created_in, so replies were
       // never hidden on older versions (diverging from the worker).
       // parent_id is the immediate parent (top-level or another reply).
-      const reply = { id: `r_${Date.now()}`, parent_id, text, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
+      const reply = { id: `r_${Date.now()}`, parent_id, text, mentions, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
       thread.replies.push(reply);
       writeJson(file, comments);
       if (E2E_USER) {
         const parentA = localRecordAuthor(comments, parent_id);
         let title = slug;
         try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
-        localDeliver(parentA && parentA.login, {
-          kind: 'reply', slug, version: Number(version) || 1, comment_id: reply.id,
-          thread_id: thread.id, target_id: parent_id, actor: reply.author, preview: text, title, at: created,
-        });
+        const ev = {
+          slug, version: Number(version) || 1, comment_id: reply.id,
+          thread_id: thread.id, target_id: reply.id, actor: reply.author, preview: text, title, at: created,
+        };
+        for (const who of mentions) localDeliver(who, { ...ev, kind: 'mention' });
+        const parentLogin = positionalRecipient(parentA && parentA.login, mentions);
+        if (parentLogin) localDeliver(parentLogin, { ...ev, kind: 'reply', target_id: parent_id });
       }
-      return json(res, 200, reply);
+      return json(res, 200, { ...reply, mention_outcome: localMentionOutcome(comments, mentions) });
     }
     const entry = {
       id: `c_${Date.now()}`,
       version: version || 1,
       anchor: anchor || null,
       text,
+      mentions,
       author: e2eIdentity(),
       status: 'open',
       created,
@@ -953,12 +1335,15 @@ const server = http.createServer(async (req, res) => {
     if (E2E_USER && E2E_OWNER) {
       let title = slug;
       try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}
-      localDeliver(E2E_OWNER, {
-        kind: 'comment', slug, version: Number(version) || 1, comment_id: entry.id,
-        thread_id: entry.id, actor: entry.author, preview: text, title, at: created,
-      });
+      const ev = {
+        slug, version: Number(version) || 1, comment_id: entry.id,
+        thread_id: entry.id, target_id: entry.id, actor: entry.author, preview: text, title, at: created,
+      };
+      for (const who of mentions) localDeliver(who, { ...ev, kind: 'mention' });
+      const owner = positionalRecipient(E2E_OWNER, mentions);
+      if (owner) localDeliver(owner, { ...ev, kind: 'comment' });
     }
-    return json(res, 200, entry);
+    return json(res, 200, { ...entry, mention_outcome: localMentionOutcome(comments, mentions) });
   }
 
   // Agent reply: posts a reply attributed to the acting agent, updates the
@@ -970,6 +1355,13 @@ const server = http.createServer(async (req, res) => {
   //   question -> ❓
   // The agent always clears its previous emoji on this comment first, so a
   // stale "applied" emoji can't outlive a later "question" outcome.
+  // NOTE: local preview does NOT gate a repeated agent reply the way the
+  // published Worker does (#349). It cannot: a delete here removes the reply
+  // from the array outright, so there is no record that the agent ever
+  // answered — the Worker's event log is what makes "already answered, and
+  // deleted since" a knowable thing. Local preview is one person on one
+  // machine; the loop this protects against is a published doc being pulled
+  // and regenerated.
   if (p === '/api/agent/reply' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
@@ -1018,6 +1410,35 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const slug = safeSlug(body.slug);
     const { id, anchor } = body;
+    // Editing a comment's text. Local preview is anonymous — there is no
+    // session to check the author against, the way the worker does — so the
+    // affordance the shell shows is the gate. `edited` is what the card reads
+    // to mark it, and legacyToEvents replays it as a text_edited event when
+    // this comment is published.
+    if (typeof body.text === 'string') {
+      const text = body.text.trim();
+      if (!slug || !id || !text) return json(res, 400, { error: 'invalid slug or missing id/text' });
+      const file = path.join(ROOT, slug, 'comments.json');
+      const all = readCommentFile(file);
+      const edited = new Date().toISOString();
+      const top = all.find(c => c.id === id);
+      if (top) {
+        top.text = text;
+        top.edited = edited;
+        writeJson(file, all);
+        return json(res, 200, top);
+      }
+      for (const c of all) {
+        const reply = (c.replies || []).find(r => r.id === id);
+        if (reply) {
+          reply.text = text;
+          reply.edited = edited;
+          writeJson(file, all);
+          return json(res, 200, reply);
+        }
+      }
+      return json(res, 404, { error: 'not_found' });
+    }
     if (!slug || !id || !anchor) return json(res, 400, { error: 'invalid slug or missing id/anchor' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
@@ -1046,18 +1467,31 @@ const server = http.createServer(async (req, res) => {
     if (!slug || !id) return json(res, 400, { error: 'invalid slug or missing id' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
+    // Same rule the Worker folds (#354): a record that still holds replies
+    // keeps its slot as a tombstone — text gone, author kept — so deleting
+    // your own words never takes everyone else's off the page. A record with
+    // nothing under it goes for real. Local storage is flat, not an event log,
+    // so the tombstone is written rather than folded.
     const top = all.find(c => c.id === id);
     if (top) {
-      writeJson(file, all.filter(c => c.id !== id));
+      if ((top.replies || []).length) {
+        writeJson(file, all.map(c => (c.id === id ? localTombstone(c) : c)));
+      } else {
+        writeJson(file, all.filter(c => c.id !== id));
+      }
       return json(res, 200, { ok: true });
     }
     for (const c of all) {
       if (!Array.isArray(c.replies)) continue;
-      if (c.replies.some(r => r.id === id)) {
-        c.replies = c.replies.filter(r => r.id !== id);
-        writeJson(file, all);
-        return json(res, 200, { ok: true });
-      }
+      const reply = c.replies.find(r => r.id === id);
+      if (!reply) continue;
+      const hasChildren = c.replies.some(r => r.parent_id === id && !r.deleted);
+      c.replies = hasChildren
+        ? c.replies.map(r => (r.id === id ? localTombstone(r) : r))
+        : c.replies.filter(r => r.id !== id);
+      const keep = collapseLocalTombstones(c);
+      writeJson(file, keep ? all : all.filter(x => x.id !== c.id));
+      return json(res, 200, { ok: true });
     }
     return json(res, 404, { error: 'not_found' });
   }
@@ -1122,7 +1556,7 @@ const server = http.createServer(async (req, res) => {
     // Same spawn hardening as /api/publish: error listener, hard timeout,
     // bounded output. Deleting is quick; 60s covers a slow unpublish curl.
     const args = body.published === false ? [slug, '--local-only'] : [slug];
-    const proc = spawn(bin, args, { env: childEnv() });
+    const proc = spawn('bash', [bin, ...args], { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 64 * 1024;
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
@@ -1164,13 +1598,16 @@ const server = http.createServer(async (req, res) => {
     }
     const bin = path.join(__dirname, '..', 'bin', 'tdoc-publish');
     if (!fs.existsSync(bin)) return json(res, 500, { error: 'tdoc-publish script not found' });
+    // Spawned through bash, not exec'd: the skill checkout can live on a
+    // noexec mount (Codex skills dir), where the x bit is set but direct exec
+    // is EACCES.
     // Spawn hardening: an `error` listener (so an EACCES doesn't crash the whole
     // server with an unhandled 'error' event), a hard timeout (SIGTERM→SIGKILL)
     // so a hung wrangler/curl can't leave the HTTP response pending forever, and
     // a bounded output buffer so runaway child output can't OOM us. wrangler
     // legitimately needs the inherited env (CLOUDFLARE_* creds), so we keep it
     // but this endpoint is now origin/CSRF-gated above.
-    const proc = spawn(bin, [slug], { env: childEnv() });
+    const proc = spawn('bash', [bin, slug], { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 256 * 1024; // 256 KiB of captured output is plenty
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);

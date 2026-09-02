@@ -3,6 +3,7 @@ import { Trash2 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { deleteDocument, updateDocumentAccess } from './api.js';
+import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
 import { copyText } from './model.js';
 
 const COMMENTING_OPTIONS = [
@@ -18,53 +19,17 @@ const HISTORY_OPTIONS = [
   { value: 'public', label: 'Everyone' },
 ];
 
-function normalizeLogin(value) {
-  return value
-    .trim()
-    .replace(/^@/, '')
-    .replace(/^https?:\/\/github\.com\//i, '')
-    .replace(/\/.*$/, '');
-}
-
 function InviteField({ users, onChange }) {
   const [value, setValue] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
   const [focused, setFocused] = useState(false);
-
-  useEffect(() => {
-    const login = normalizeLogin(value);
-    if (login.length < 2) {
-      setSuggestions([]);
-      return undefined;
-    }
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      const query = new URLSearchParams({ q: `${login} in:login`, per_page: '5' });
-      try {
-        const response = await fetch(`https://api.github.com/search/users?${query}`, {
-          signal: controller.signal,
-          headers: { Accept: 'application/vnd.github+json' },
-        });
-        const body = response.ok ? await response.json() : {};
-        setSuggestions(Array.isArray(body.items) ? body.items : []);
-      } catch (error) {
-        if (error.name !== 'AbortError') setSuggestions([]);
-      }
-    }, 250);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [value]);
+  // Same GitHub search the @ picker uses — see github-user-search.js.
+  const suggestions = useGithubUserSearch(value);
 
   const add = (rawValue) => {
     const login = normalizeLogin(rawValue);
     if (!login || users.some((user) => user.toLowerCase() === login.toLowerCase())) return;
     onChange([...users, login]);
     setValue('');
-    setSuggestions([]);
   };
 
   return (
@@ -166,9 +131,8 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
       actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
     >
       <div
-        className="code"
+        className="code url"
         id="tdoc-share-url"
-        style={{ fontSize: 14, letterSpacing: 0, textAlign: 'left', cursor: 'copy' }}
         onClick={() => copyText(url).then(onCopied)}
       >
         {url}

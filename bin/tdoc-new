@@ -67,6 +67,11 @@ QUIET=0
 FORCE=0
 CUSTOM_TEMPLATE=0
 STYLE="default"
+# Which version this call writes. "1" creates the document; "next" (or an
+# explicit number) adds a version to an existing one — the path /tdoc edit
+# takes, which used to write v<n>/index.html by hand and therefore skipped
+# validation, baking, and the meta update that this script performs.
+VERSION_ARG="1"
 
 err() { echo "tdoc-new: $*" >&2; }
 info() { [ "$QUIET" = "1" ] || echo "[tdoc-new] $*"; }
@@ -85,6 +90,8 @@ while [ $# -gt 0 ]; do
     --quiet)      QUIET=1; shift ;;
     --style)      STYLE="${2:-}"; shift 2 ;;
     --custom-template) CUSTOM_TEMPLATE=1; shift ;;
+    --version)    VERSION_ARG="${2:-}"; [ -n "$VERSION_ARG" ] || usage; shift 2 ;;
+    --version=*)  VERSION_ARG="${1#--version=}"; [ -n "$VERSION_ARG" ] || usage; shift ;;
     --force)      FORCE=1; shift ;;
     --no-server)  NO_SERVER=1; shift ;;   # scaffold only — skip serving (CI / programmatic callers)
     -h|--help)
@@ -101,7 +108,7 @@ done
 # Human nag on stderr; discard the machine line (skill preamble captures
 # it; doctor uses --json). `tail -n 1` / `tail -n 2` stay URL-only.
 if [ "$QUIET" != "1" ]; then
-  "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
+  bash "$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag" >/dev/null || true
 fi
 
 [ -n "$SLUG" ]  || die "--slug required"
@@ -135,11 +142,54 @@ fi
 TDOC_DIR="${TDOC_DIR:-$HOME/tdocs}"
 SKILL_DIR="$HOME/.claude/skills/tdoc"
 DOC_DIR="$TDOC_DIR/$SLUG"
-V1_DIR="$DOC_DIR/v1"
 mkdir -p "$TDOC_DIR"
 
-if [ -d "$DOC_DIR" ] && [ "$FORCE" != "1" ]; then
-  die "slug '$SLUG' already exists at $DOC_DIR; use --force to overwrite, or a different slug"
+# Resolve the version this call writes. "next" reads meta.json rather than the
+# directory listing so the number matches what the version picker will show.
+if [ "$VERSION_ARG" = "next" ]; then
+  # "next" adds to an existing document. Creating one is a different intent and
+  # a different flag, so a typo in the slug fails here instead of quietly
+  # starting a second document under the wrong name.
+  [ -d "$DOC_DIR" ] || die "no document at $DOC_DIR — '--version next' adds to an existing doc; create v1 first"
+  # Take the highest of what meta.json records and what is on disk. They can
+  # disagree: a version directory written by hand (the old /tdoc edit path)
+  # never reached meta.json, and reusing its number would overwrite it.
+  VERSION_N=$(python3 -c '
+import json, os, re, sys
+doc = sys.argv[1]
+ns = [0]
+try:
+    m = json.load(open(os.path.join(doc, "meta.json")))
+    ns += [v.get("n") for v in m.get("versions", []) if isinstance(v, dict) and isinstance(v.get("n"), int)]
+except Exception:
+    pass
+try:
+    ns += [int(d[1:]) for d in os.listdir(doc) if re.fullmatch(r"v\d+", d)]
+except Exception:
+    pass
+print(max(ns) + 1)
+' "$DOC_DIR")
+else
+  case "$VERSION_ARG" in
+    ''|*[!0-9]*) die "--version takes a positive number or 'next' (got '$VERSION_ARG')" ;;
+  esac
+  VERSION_N="$VERSION_ARG"
+  [ "$VERSION_N" -ge 1 ] || die "--version must be >= 1"
+fi
+V_DIR="$DOC_DIR/v$VERSION_N"
+
+if [ "$VERSION_N" = "1" ]; then
+  if [ -d "$DOC_DIR" ] && [ "$FORCE" != "1" ]; then
+    die "slug '$SLUG' already exists at $DOC_DIR; use --force to overwrite, or a different slug"
+  fi
+else
+  # Adding a version never destroys the document: the existing versions and
+  # the comment thread have to survive, so this branch refuses to invent a
+  # document and refuses to silently replace a version that already exists.
+  [ -d "$DOC_DIR" ] || die "no document at $DOC_DIR — create v1 first"
+  if [ -d "$V_DIR" ] && [ "$FORCE" != "1" ]; then
+    die "version v$VERSION_N already exists at $V_DIR; use --force to replace it"
+  fi
 fi
 
 # Stage-validate-swap: write + validate the new HTML in a TEMP dir first, and
@@ -149,8 +199,8 @@ fi
 STAGE_DIR="$(mktemp -d "${TDOC_DIR}/.stage-${SLUG}.XXXXXX")"
 cleanup_stage() { rm -rf "$STAGE_DIR" 2>/dev/null || true; }
 trap cleanup_stage EXIT
-mkdir -p "$STAGE_DIR/v1"
-STAGE_HTML="$STAGE_DIR/v1/index.html"
+mkdir -p "$STAGE_DIR/v$VERSION_N"
+STAGE_HTML="$STAGE_DIR/v$VERSION_N/index.html"
 
 if [ "$HTML_STDIN" = "1" ]; then
   cat > "$STAGE_HTML"
@@ -159,13 +209,13 @@ else
 fi
 
 if [ -n "$WIDGETS_DIR" ]; then
-  mkdir -p "$STAGE_DIR/v1/widgets"
+  mkdir -p "$STAGE_DIR/v$VERSION_N/widgets"
   WIDGET_COUNT=0
   while IFS= read -r WIDGET_FILE; do
     WIDGET_NAME="$(basename "$WIDGET_FILE" .html)"
     [[ "$WIDGET_NAME" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] \
       || die "invalid widget filename '$WIDGET_NAME.html' (use lowercase kebab-case, max 64 chars)"
-    cp "$WIDGET_FILE" "$STAGE_DIR/v1/widgets/$WIDGET_NAME.html" \
+    cp "$WIDGET_FILE" "$STAGE_DIR/v$VERSION_N/widgets/$WIDGET_NAME.html" \
       || die "could not read widget '$WIDGET_FILE'"
     WIDGET_COUNT=$((WIDGET_COUNT + 1))
   done < <(find "$WIDGETS_DIR" -maxdepth 1 -type f -name '*.html' -print | sort)
@@ -187,40 +237,32 @@ fi
 VALIDATOR="$(cd "$(dirname "$0")" && pwd)/tdoc-validate-template"
 VALIDATOR_ARGS=("$STAGE_HTML" --style "$STYLE")
 [ "$CUSTOM_TEMPLATE" = "1" ] && VALIDATOR_ARGS+=(--custom-template)
-if ! "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
+if ! python3 "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
   die "default-template validation failed (existing doc, if any, left untouched)"
 fi
 
 # Bake the reader template into the doc so it is SELF-CONTAINED (the cross-
-# origin shell serves author HTML in an isolated frame and injects nothing).
-# The template is all :where() zero-specificity, so author CSS always wins;
-# <style id="tdoc-reader"> is the same block /export stamps. Skipped when the
-# doc already carries one (re-runs, hand-authored docs).
-if ! grep -q 'id="tdoc-reader"' "$STAGE_HTML"; then
-  BAKE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-  node -e '
-    const fs = require("fs"), path = require("path");
-    const root = process.argv[1], file = process.argv[2];
-    let css = "";
-    try { css = fs.readFileSync(path.join(root, "server", "reader.css"), "utf8"); } catch (e) {}
-    if (!css) process.exit(0);   // css missing — serve unbaked rather than die
-    let html = fs.readFileSync(file, "utf8");
-    const tag = "<style id=\"tdoc-reader\">" + css + "</style>\n";
-    html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, tag + "</head>") : tag + html;
-    fs.writeFileSync(file, html);
-  ' "$BAKE_ROOT" "$STAGE_HTML" || die "reader-template bake failed (existing doc left untouched)"
-fi
+# origin shell serves author HTML in an isolated frame and injects nothing
+# into storage). bin/tdoc-bake owns the operation and is idempotent, so every
+# path that writes a version can call it without checking first.
+node "$(cd "$(dirname "$0")" && pwd)/tdoc-bake" "$STAGE_HTML" >/dev/null \
+  || die "reader-template bake failed (existing doc, if any, left untouched)"
 
 # Validation passed — NOW it's safe to replace. Swap the existing doc out only
 # at this point. (Same-filesystem mv under TDOC_DIR, so this is atomic-ish.)
-if [ -d "$DOC_DIR" ]; then
-  info "overwriting existing slug '$SLUG' (--force)"
-  rm -rf "$DOC_DIR"
+if [ "$VERSION_N" = "1" ]; then
+  if [ -d "$DOC_DIR" ]; then
+    info "overwriting existing slug '$SLUG' (--force)"
+    rm -rf "$DOC_DIR"
+  fi
+  mkdir -p "$DOC_DIR"
+else
+  # Only the one version directory is replaced. Earlier versions and
+  # comments.json are untouched.
+  rm -rf "$V_DIR"
 fi
-mkdir -p "$DOC_DIR"
-mv "$STAGE_DIR/v1" "$DOC_DIR/v1"
-V1_DIR="$DOC_DIR/v1"
-HTML_PATH="$V1_DIR/index.html"
+mv "$STAGE_DIR/v$VERSION_N" "$V_DIR"
+HTML_PATH="$V_DIR/index.html"
 
 # ─────────────────────────────── meta.json ────────────────────────────────
 CREATED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -230,26 +272,41 @@ PROMPT_RECORDED="${PROMPT:-$DEFAULT_PROMPT}"
 
 # JSON-escape title + prompt the cheap, correct way using python (always
 # present on macOS / linux). Avoids hand-rolled sed escaping.
+# Adding a version rewrites meta.json in place: the title and the original
+# created stamp belong to the document, not to this call. Writing the whole
+# file from Python keeps the escaping correct for titles and prompts.
 META_JSON=$(python3 -c '
-import json, sys
-title, slug, created, prompt = sys.argv[1:5]
+import json, os, sys
+title, slug, created, prompt, n, path = sys.argv[1:7]
+n = int(n)
+meta = {}
+if n > 1 and os.path.exists(path):
+    try:
+        meta = json.load(open(path))
+    except Exception:
+        meta = {}
+versions = [v for v in meta.get("versions", []) if isinstance(v, dict) and v.get("n") != n]
+versions.append({"n": n, "created": created, "prompt": prompt})
+versions.sort(key=lambda v: v.get("n", 0))
 print(json.dumps({
-  "title": title,
-  "slug":  slug,
-  "created": created,
-  "versions": [{ "n": 1, "created": created, "prompt": prompt }],
+  "title": meta.get("title") or title,
+  "slug": slug,
+  "created": meta.get("created") or created,
+  "versions": versions,
 }, indent=2))
-' "$TITLE" "$SLUG" "$CREATED" "$PROMPT_RECORDED")
+' "$TITLE" "$SLUG" "$CREATED" "$PROMPT_RECORDED" "$VERSION_N" "$DOC_DIR/meta.json")
 
 printf '%s\n' "$META_JSON" > "$DOC_DIR/meta.json"
-printf '[]\n' > "$DOC_DIR/comments.json"
-info "scaffolded $DOC_DIR (v1)"
+# Never reset an existing thread — a new version keeps the comments it is
+# answering.
+[ -f "$DOC_DIR/comments.json" ] || printf '[]\n' > "$DOC_DIR/comments.json"
+info "scaffolded $DOC_DIR (v$VERSION_N)"
 
 # --no-server: scaffold-only mode for CI and programmatic callers that don't
 # want a local server (or run where $SKILL_DIR isn't installed). Prints the
 # doc path instead of a URL and skips publish-independent serving entirely.
 if [ "${NO_SERVER:-0}" = "1" ]; then
-  echo "$DOC_DIR/v1/index.html"
+  echo "$HTML_PATH"
   exit 0
 fi
 
@@ -307,13 +364,13 @@ if [ "$SERVER_UP" != "1" ]; then
   exit 1
 fi
 
-LOCAL_URL="http://localhost:${TDOC_PORT}/d/$SLUG/v/1"
+LOCAL_URL="http://localhost:${TDOC_PORT}/d/$SLUG/v/$VERSION_N"
 
 # ─────────────────────────────── publish? ─────────────────────────────────
 PUBLISHED_URL=""
 if [ "$PUBLISH" = "1" ]; then
   info "publishing to Cloudflare Worker..."
-  if PUB_OUT=$("$SKILL_DIR/bin/tdoc-publish" "$SLUG" 2>&1); then
+  if PUB_OUT=$(bash "$SKILL_DIR/bin/tdoc-publish" "$SLUG" 2>&1); then
     PUBLISHED_URL=$(printf '%s\n' "$PUB_OUT" | awk '/^Published:/ { print $2 }')
     [ -n "$PUBLISHED_URL" ] && info "published: $PUBLISHED_URL"
   else

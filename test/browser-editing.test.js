@@ -6,7 +6,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
-const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
+const { requirePlaywrightOrSkip, reservePort } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('browser-editing.test.js');
 const PRIMARY_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -74,7 +74,10 @@ async function chooseMode(page, label) {
     slug, title: 'Browser editing', versions: [{ n: 1, created: new Date().toISOString() }],
   }, null, 2));
 
-  const port = 7987;
+  // Not a fixed port: waitForServer below only asks whether ANYTHING answers,
+  // so a port another process already held would have quietly become the
+  // subject of this whole suite.
+  const port = await reservePort();
   const serverPath = path.join(__dirname, '..', 'server', 'server.js');
   const server = spawn(process.execPath, [serverPath], {
     env: { ...process.env, TDOC_DIR: root, TDOC_PORT: String(port), TDOC_E2E_USER: 'owner' },
@@ -118,6 +121,54 @@ async function chooseMode(page, label) {
         'Comment artifact pill and mode trigger use different icon geometry');
       assert(await pill.locator('svg').evaluate((icon) => getComputedStyle(icon).stroke) === 'none',
         'Comment artifact pill retained an outline around the solid icon');
+    });
+
+    await test('a click in blank space dismisses instead of commenting on the nearest word', async () => {
+      // caretPositionFromPoint answers with the NEAREST caret, so a click in a
+      // margin or below the last line used to select a word the pointer was
+      // never over — dismissing a card and opening a different one.
+      const box = await page.locator('.tdoc-doc-frame').boundingBox();
+      const geometry = await frame.evaluate(() => {
+        const paragraph = document.querySelector('#editable-paragraph');
+        const rect = paragraph.getBoundingClientRect();
+        const word = document.createRange();
+        word.setStart(paragraph.firstChild, 0);
+        word.setEnd(paragraph.firstChild, 4);
+        const wordRect = word.getBoundingClientRect();
+        return {
+          left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+          onWord: { x: wordRect.left + wordRect.width / 2, y: wordRect.top + wordRect.height / 2 },
+        };
+      });
+      const selectionText = () => frame.evaluate(() => {
+        const selection = window.getSelection();
+        return selection && !selection.isCollapsed ? selection.toString() : null;
+      });
+      const clickAt = async (x, y) => {
+        await frame.evaluate(() => window.getSelection().removeAllRanges());
+        await page.mouse.click(box.x + x, box.y + y);
+        await page.waitForTimeout(150);
+      };
+
+      const blankPoints = [
+        ['above the first line', geometry.left + 40, geometry.top - 6],
+        ['below the last line', geometry.left + 40, geometry.bottom + 6],
+        ['in the left margin', geometry.left - 16, geometry.top + 8],
+        ['past the end of a short line', geometry.right - 20, geometry.top + 12],
+      ];
+      for (const [where, x, y] of blankPoints) {
+        await clickAt(x, y);
+        const stray = await selectionText();
+        assert(!stray, `a click ${where} selected ${JSON.stringify(stray)}`);
+      }
+
+      await clickAt(geometry.onWord.x, geometry.onWord.y);
+      assert(await selectionText(), 'a click on the word itself stopped selecting it');
+
+      // That last click opened the composer on purpose. Leave the page as this
+      // test found it, or the suite's later modes inherit an open popup.
+      await page.locator('.tdoc-popup button.x').click();
+      await frame.evaluate(() => window.getSelection().removeAllRanges());
     });
 
     await test('Read mode opens existing anchors but does not create a comment selection', async () => {

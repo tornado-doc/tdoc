@@ -35,6 +35,11 @@ const OFFLINE = [
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
   'dark-mode.test.js',        // #120 top-bar dark mode switch + localStorage
+  'bar-overflow-trigger.test.js', // the ⋯ trigger is hidden where its menu would be empty
+  'editor-save-hover.test.js', // #382 a button must never paint its background its own text colour
+  'create-from-scratch.test.js', // #356 blank doc: slug derivation, both create routes, edit-on-arrival
+  'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
+  'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
@@ -50,9 +55,13 @@ const OFFLINE = [
   'pins-layout.test.js',      // v0.8.0 pins clustering/spread/overflow-fold core
   'worker-shell.test.js',     // step7 worker shell parity: /frame route, CSP, bundled builders
   'bake-reader.test.js',      // tdoc-new bakes the reader template → self-contained docs (shell)
+  'dark-invert-parity.test.js', // the shell's dark invert and the frame's copy must not drift
+  'write-invariants.test.js',  // every server write path bakes, stamps aids, records sha
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
+  'agent-reply-once.test.js', // #349 the agent answers once per human turn
   'notifications.test.js',    // inbox aggregation + Reddit recipients
+  'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
   'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)
@@ -63,6 +72,7 @@ const OFFLINE = [
   'vercel-shim.test.js',      // vercel storage shims (KV/R2 contract, rewrite URL)
   'api.test.js',              // hermetic: spawns its own server in a temp dir
   'publish-signin.test.js',   // device code reaches the publish modal (expiry/pid/slug guards)
+  'resume-signin.test.js',    // dead process ≠ dead sign-in: device_code resumes on re-run
   'onboarding-terminal-recovery.test.js', // provider retry flags + honest SIGINT recovery
 ];
 

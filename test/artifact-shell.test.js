@@ -19,7 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { requirePlaywrightOrSkip, resolveTarget } = require('./helpers/fixture-server');
+const { requirePlaywrightOrSkip, resolveTarget, isPublishedTarget } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('artifact-shell.test.js');
 
 const COMMENTS_FIXTURE = path.join(__dirname, 'fixtures/tdocs/hostile-body-css/comments.json');
@@ -95,6 +95,39 @@ const SLUG = 'hostile-body-css';
       }));
       const missing = Object.keys(chrome).filter(k => !chrome[k]);
       if (missing.length) throw new Error('shell missing real chrome: ' + missing.join(', '));
+    });
+
+    await t('portal menus paint above the old-version banner', async () => {
+      await page.evaluate(() => {
+        const slot = document.createElement('div');
+        slot.id = 'test-old-version-slot';
+        slot.className = 'tdoc-oldver-slot';
+        slot.innerHTML = '<div class="tdoc-oldver-strip tdoc-oldver-visible">Old version</div>';
+        document.querySelector('.tdoc-bar').after(slot);
+      });
+      await page.click('#tdoc-version-toggle');
+      await page.waitForSelector('.ui-menu-positioner');
+      const layers = await page.evaluate(() => {
+        const menu = document.querySelector('.ui-menu-positioner');
+        const banner = document.querySelector('#test-old-version-slot .tdoc-oldver-strip');
+        const menuRect = menu.getBoundingClientRect();
+        const bannerRect = banner.getBoundingClientRect();
+        const x = menuRect.left + Math.min(20, menuRect.width / 2);
+        const y = bannerRect.top + bannerRect.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return {
+          menuZ: getComputedStyle(menu).zIndex,
+          bannerZ: getComputedStyle(banner).zIndex,
+          overlap: menuRect.top < bannerRect.bottom && menuRect.bottom > bannerRect.top,
+          hitInsideMenu: !!hit?.closest('.ui-menu-positioner'),
+        };
+      });
+      await page.keyboard.press('Escape');
+      await page.evaluate(() => document.getElementById('test-old-version-slot')?.remove());
+      if (!layers.overlap) throw new Error('fixture did not reproduce a menu/banner overlap');
+      if (!layers.hitInsideMenu) {
+        throw new Error(`banner painted over portal menu (menu z=${layers.menuZ}, banner z=${layers.bannerZ})`);
+      }
     });
 
     await t('the author document actually renders inside the frame', async () => {
@@ -256,6 +289,233 @@ const SLUG = 'hostile-body-css';
       if (!hasDelete) throw new Error('card missing delete control');
     });
 
+    await t('a submitted reply closes its composer and lands visibly in the thread (#349)', async () => {
+      // The reply posted, but the composer stayed on screen with the thread
+      // still folded shut — nothing looked like it happened, and only a page
+      // refresh cleared the box.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 3000 });
+        await page.click('.tdoc-pin[data-id="c_fixture_1"]');
+        await page.waitForSelector(`${card} .tdoc-reply-toggle`, { timeout: 2000 });
+        await page.click(`${card} > .meta .tdoc-reply-toggle`);
+        await page.waitForSelector(`${card} .tdoc-reply-form.open textarea`, { timeout: 2000 });
+        // the caret is already in it — you asked for this box by clicking Reply
+        const focused = await page.evaluate((sel) => {
+          const box = document.querySelector(`${sel} .tdoc-reply-form.open textarea`);
+          return document.activeElement === box;
+        }, card);
+        if (!focused) throw new Error('the reply box opened without the caret in it');
+        await page.fill(`${card} .tdoc-reply-form.open textarea`, 'submitted reply #349');
+        await page.click(`${card} .tdoc-reply-submit`);
+        // the composer goes away on its own — no reload
+        await page.waitForSelector(`${card} .tdoc-reply-form`, { state: 'detached', timeout: 4000 });
+        // and the new reply is on screen, in the thread, without a refresh
+        await page.waitForSelector(`${card} .tdoc-replies.open`, { timeout: 2000 });
+        const texts = await page.$$eval(
+          `${card} .tdoc-replies.open .tdoc-reply .text`,
+          (nodes) => nodes.map((n) => n.textContent),
+        );
+        if (!texts.includes('submitted reply #349')) {
+          throw new Error(`new reply not visible in the thread: ${JSON.stringify(texts)}`);
+        }
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
+    await t('a deleted comment keeps its slot, its name, and its replies (#354)', async () => {
+      // Deleting the comment used to take the whole thread with it: every
+      // reply under it, other people's included, simply stopped being served.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        // c_fixture_1 is tester's, and tester2's reply hangs under it. Delete
+        // it through the API — the affordance is gated on identity the local
+        // rig does not have, and this is about what a delete leaves behind.
+        const status = await page.evaluate(async () => {
+          const r = await fetch('/api/comments?slug=hostile-body-css&id=c_fixture_1&version=1', { method: 'DELETE' });
+          return r.status;
+        });
+        if (status !== 200) throw new Error(`delete failed: ${status}`);
+        await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.waitForSelector(`${card}.tdoc-deleted`, { timeout: 4000 });
+        const shown = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          return {
+            text: el.querySelector('.text')?.textContent,
+            author: el.querySelector('.author .login')?.textContent,
+            replies: [...el.querySelectorAll('.tdoc-reply .text')].map((n) => n.textContent),
+            actions: [...el.querySelectorAll(':scope > .meta .actions button')].length,
+            reanchor: !!el.querySelector('.tdoc-reanchor-btn'),
+          };
+        }, card);
+        if (!/deleted/i.test(shown.text || '')) throw new Error(`tombstone does not say so: ${JSON.stringify(shown.text)}`);
+        if (shown.author !== 'tester') throw new Error(`the name must stay: ${JSON.stringify(shown.author)}`);
+        if (!shown.replies.includes('a reply worth deep-linking to')) {
+          throw new Error(`the reply did not survive its parent: ${JSON.stringify(shown.replies)}`);
+        }
+        if (shown.actions) throw new Error(`a tombstone still offers ${shown.actions} action(s)`);
+        if (shown.reanchor) throw new Error('a tombstone still offers a re-anchor');
+        // On a fresh load the gutter is pins, not cards. An unmarked tombstone
+        // pin is indistinguishable from a comment waiting for an answer, which
+        // is how a tombstone reads as "nothing happened" after a refresh.
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 4000 });
+        const marked = await page.evaluate(() => {
+          const pin = document.querySelector('.tdoc-pin[data-id="c_fixture_1"]');
+          return { deleted: pin.classList.contains('tdoc-pin-deleted'), face: !!pin.querySelector('img, .tdoc-pin-anon:not([hidden])') };
+        });
+        if (!marked.deleted) throw new Error('a tombstone’s pin looks like any other comment');
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
+    await t('a thread taller than the screen scrolls inside its card (#363)', async () => {
+      // The card had no height cap and no overflow, so a long thread simply
+      // ran off the bottom of the viewport: the page scrolled the document
+      // underneath while the card stayed put, and the last replies could not
+      // be reached at all. The rule that would have capped it existed, behind
+      // `body.tdoc-pins` — a class the React shell has never set.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        // A short viewport, which is what a laptop with browser chrome is.
+        await page.setViewportSize({ width: 1280, height: 700 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        await page.evaluate(async () => {
+          for (let i = 1; i <= 12; i += 1) {
+            // eslint-disable-next-line no-await-in-loop
+            await fetch('/api/comments', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                slug: 'hostile-body-css', version: 1, parent_id: 'c_fixture_1',
+                text: `reply ${i} — long enough to wrap onto two lines inside the card`,
+              }),
+            });
+          }
+        });
+        await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.waitForSelector(`${card} .tdoc-replies-toggle`, { timeout: 4000 });
+        await page.click(`${card} .tdoc-replies-toggle`);
+        await page.waitForTimeout(500);
+        const box = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          const rect = el.getBoundingClientRect();
+          return {
+            bottom: Math.round(rect.bottom),
+            viewport: window.innerHeight,
+            overflowY: getComputedStyle(el).overflowY,
+            canScroll: el.scrollHeight > el.clientHeight,
+          };
+        }, card);
+        if (box.bottom > box.viewport) {
+          throw new Error(`the card still hangs ${box.bottom - box.viewport}px below the fold`);
+        }
+        if (!box.canScroll || box.overflowY === 'visible') {
+          throw new Error(`a card too tall for the screen must scroll: ${JSON.stringify(box)}`);
+        }
+        const reached = await page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          el.scrollTop = el.scrollHeight;
+          const last = [...el.querySelectorAll('.tdoc-reply')].pop();
+          const rect = last.getBoundingClientRect();
+          return rect.top >= 0 && rect.bottom <= window.innerHeight + 1;
+        }, card);
+        if (!reached) throw new Error('scrolling the card to the end does not reach the last reply');
+      } finally {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
+    await t('a thread stops indenting and continues at one level (#365)', async () => {
+      // Every level costs ~24px of a 306px card, and depth was unbounded: a
+      // chain deep enough ends up reading in a column too narrow to read, and
+      // the wrapping makes the card taller as it goes.
+      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+      try {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        const chain = await page.evaluate(async () => {
+          let parent = 'c_fixture_1';
+          const ids = [];
+          for (let i = 1; i <= 8; i += 1) {
+            // eslint-disable-next-line no-await-in-loop
+            const res = await fetch('/api/comments', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ slug: 'hostile-body-css', version: 1, parent_id: parent, text: `depth ${i}` }),
+            });
+            // eslint-disable-next-line no-await-in-loop
+            const body = await res.json();
+            ids.push(body.id);
+            parent = body.id;
+          }
+          return ids;
+        });
+        const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+        await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+        await page.waitForSelector(`${card} .tdoc-replies-toggle`, { timeout: 4000 });
+        await page.click(`${card} .tdoc-replies-toggle`);
+        await page.waitForTimeout(400);
+
+        const folded = await page.evaluate((sel) => {
+          const rows = [...document.querySelectorAll(`${sel} .tdoc-reply`)];
+          return {
+            maxDepth: Math.max(...rows.map((n) => Number(n.dataset.depth))),
+            shown: rows.length,
+            more: document.querySelector(`${sel} .tdoc-thread-more`)?.textContent.trim() || null,
+          };
+        }, card);
+        if (folded.maxDepth > 4) throw new Error(`the thread still indents to depth ${folded.maxDepth}`);
+        if (!folded.more || !/continue this thread/.test(folded.more)) {
+          throw new Error(`no continuation offered: ${JSON.stringify(folded.more)}`);
+        }
+        if (!/4$/.test(folded.more)) throw new Error(`the continuation miscounts what it holds: ${folded.more}`);
+
+        await page.click(`${card} .tdoc-thread-more`);
+        await page.waitForTimeout(400);
+        const opened = await page.evaluate((sel) => {
+          const rows = [...document.querySelectorAll(`${sel} .tdoc-reply`)];
+          const flat = [...document.querySelectorAll(`${sel} .tdoc-reply-flat`)];
+          return {
+            maxDepth: Math.max(...rows.map((n) => Number(n.dataset.depth))),
+            shown: rows.length,
+            flat: flat.length,
+            everyFlatSaysWhoItAnswers: flat.every((n) => /Replying to @/.test(n.querySelector('.tdoc-reply-to')?.textContent || '')),
+            deepest: !!document.querySelector(`${sel} .tdoc-reply .text`),
+          };
+        }, card);
+        if (opened.shown !== folded.shown + 4) {
+          throw new Error(`continuing the thread should reveal the remaining 4: ${JSON.stringify(opened)}`);
+        }
+        if (opened.maxDepth > 4) throw new Error('the continuation kept indenting');
+        if (opened.flat !== 4) throw new Error(`expected 4 flattened replies, got ${opened.flat}`);
+        if (!opened.everyFlatSaysWhoItAnswers) {
+          throw new Error('a flattened reply must say who it answers — it has no position left to say it');
+        }
+
+        // A deep link into the continuation must not land on a folded thread.
+        await page.goto(`${shellUrl}&comment=${chain[7]}`, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(800);
+        const linked = await page.evaluate((id) => {
+          const el = document.querySelector(`.tdoc-reply[data-comment-id="${id}"]`);
+          return !!el && el.getBoundingClientRect().height > 0;
+        }, chain[7]);
+        if (!linked) throw new Error('a deep link to a reply inside a continuation lands on it folded away');
+      } finally {
+        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+      }
+    });
+
     await t('agent comment: pin shows the agent mark, card shows a resolved chip', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
@@ -355,6 +615,34 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"]', { timeout: 4000 });
       // the reply thread is expanded (not born collapsed) so the reply is visible
       await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_1"] .tdoc-replies.open', { timeout: 2000 });
+    });
+
+    await t('a reply carries its own react + Reply controls, aimed at the reply (#343)', async () => {
+      // Between the overlay rewrite and the React port a reply rendered as
+      // author + text only: no reaction, no Reply, nowhere to go. The server
+      // accepted both all along (parent_id resolves replies, /api/reactions
+      // toggles on a reply id) — only the markup was missing.
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl + '&comment=r_fixture_1a', { waitUntil: 'networkidle' });
+      const reply = '.tdoc-margin-comment[data-comment-id="c_fixture_1"] .tdoc-reply[data-comment-id="r_fixture_1a"]';
+      await page.waitForSelector(reply, { timeout: 4000 });
+      const controls = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        return {
+          react: !!el.querySelector(':scope > .meta .tdoc-react-add'),
+          reply: !!el.querySelector(':scope > .meta .tdoc-reply-toggle'),
+          stamp: (el.querySelector(':scope > .meta > span')?.textContent || '').trim(),
+        };
+      }, reply);
+      if (!controls.react) throw new Error('reply has no reaction control');
+      if (!controls.reply) throw new Error('reply has no Reply control');
+      if (!controls.stamp) throw new Error('reply has no timestamp');
+      await page.click(`${reply} > .meta .tdoc-reply-toggle`);
+      await page.waitForSelector(`${reply} .tdoc-reply-form.open textarea`, { timeout: 2000 });
+      const parent = await page.$eval(`${reply} .tdoc-reply-form`, el => el.dataset.parentId);
+      if (parent !== 'r_fixture_1a') throw new Error(`reply form targets ${parent}, expected the reply itself`);
+      const hint = await page.$eval(`${reply} .tdoc-reply-to`, el => el.textContent);
+      if (!/tester2/.test(hint)) throw new Error(`reply form does not name who it answers: "${hint}"`);
     });
 
     await t('author data-tdoc-default-theme="dark" opens the shell dark (no stored pref)', async () => {
@@ -572,6 +860,212 @@ const SLUG = 'hostile-body-css';
       const fabVisible = await page.evaluate(() => { const f = document.querySelector('.tdoc-fab'); return !!f && getComputedStyle(f).display !== 'none'; });
       if (fabVisible) throw new Error('fab still visible after widening');
     });
+
+    // --- EDIT YOUR OWN COMMENT (#349) -----------------------------------------
+    // Needs an identity: every assertion here is about chrome that only exists
+    // for a signed-in viewer, and the default rig browses anonymously. The
+    // local server makes that same login the doc owner, which is exactly what
+    // proves the owner is NOT handed an edit on other people's comments.
+    if (!isPublishedTarget()) {
+      const authed = await resolveTarget({ port: 7994, e2eUser: 'tester' });
+      const authedUrl = `${authed.url.replace(/\/d\/.*/, '')}/d/${SLUG}/v/1?shell=1`;
+      const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+      try {
+        await t('edit is the author\'s alone; delete adds the owner on an agent comment', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
+            await page.waitForSelector(`${card} .del`, { timeout: 2000 });
+            // …and c_fixture_4 belongs to reviewer-a. The viewer owns this
+            // doc, and still gets neither of them on somebody else's comment —
+            // only the re-anchor, which is about where a comment points, not
+            // about what it says.
+            await page.goto(`${authedUrl}&comment=c_fixture_4`, { waitUntil: 'networkidle' });
+            const other = '.tdoc-margin-comment[data-comment-id="c_fixture_4"]';
+            await page.waitForSelector(`${other} .tdoc-reanchor-btn`, { timeout: 4000 });
+            if (await page.$(`${other} .tdoc-edit-toggle`)) {
+              throw new Error('the doc owner was offered an edit on someone else\'s comment');
+            }
+            if (await page.$(`${other} .del`)) {
+              throw new Error('the doc owner was offered a delete on someone else\'s comment');
+            }
+            // …but c_fixture_3 is Claude's, and an agent writes with the doc's
+            // own upload token. The owner reaches that one, and only that one.
+            await page.goto(`${authedUrl}&comment=c_fixture_3`, { waitUntil: 'networkidle' });
+            const agentCard = '.tdoc-margin-comment[data-comment-id="c_fixture_3"]';
+            await page.waitForSelector(`${agentCard} .del`, { timeout: 4000 });
+            if (await page.$(`${agentCard} .tdoc-edit-toggle`)) {
+              throw new Error('nobody rewrites what the agent said — not even the owner');
+            }
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+
+        await t('edit reads as a text control, exactly like the reply beside it', async () => {
+          // It shipped as a raw <button>: ui.css lists the chrome buttons that
+          // "read as text" by class, and a class missing from that list keeps
+          // the UA button box — a grey chip sitting between two text links.
+          await page.setViewportSize({ width: 1400, height: 900 });
+          await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+          await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
+          const [reply, edit] = await page.evaluate((sel) => {
+            const read = (el) => {
+              const c = getComputedStyle(el);
+              return [c.color, c.font, c.padding, c.backgroundColor, c.borderStyle, c.borderWidth].join('|');
+            };
+            return [
+              read(document.querySelector(`${sel} .tdoc-reply-toggle`)),
+              read(document.querySelector(`${sel} .tdoc-edit-toggle`)),
+            ];
+          }, card);
+          if (reply !== edit) {
+            throw new Error(`edit does not read like reply:\n  reply: ${reply}\n  edit:  ${edit}`);
+          }
+          // …and they are one row of controls, so they are written one way.
+          const labels = await page.evaluate((sel) => [...document.querySelectorAll(`${sel} > .meta .actions button`)]
+            .map((b) => b.textContent.trim()).filter(Boolean), card);
+          const shouty = labels.filter((label) => label !== label.toLowerCase());
+          if (shouty.length) throw new Error(`the action row is not written one way: ${JSON.stringify(labels)}`);
+        });
+
+        await t('editing rewrites the comment in place and marks it edited (#349)', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.click(`${card} .tdoc-edit-toggle`);
+            await page.waitForSelector(`${card} .tdoc-edit-form textarea`, { timeout: 2000 });
+            // the box opens on the current text — an edit is a correction
+            const seeded = await page.$eval(`${card} .tdoc-edit-form textarea`, (el) => el.value);
+            if (seeded !== 'a pin should appear for this') {
+              throw new Error(`edit box did not open on the current text: ${JSON.stringify(seeded)}`);
+            }
+            // …with the caret after the last word, not in front of the first
+            const caret = await page.evaluate((sel) => {
+              const box = document.querySelector(`${sel} .tdoc-edit-form textarea`);
+              return { focused: document.activeElement === box, start: box.selectionStart, end: box.selectionEnd, len: box.value.length };
+            }, card);
+            if (!caret.focused) throw new Error('the edit box opened without the caret in it');
+            if (caret.start !== caret.len || caret.end !== caret.len) {
+              throw new Error(`the caret opened at ${caret.start}-${caret.end}, expected ${caret.len} (the end)`);
+            }
+            await page.fill(`${card} .tdoc-edit-form textarea`, 'rewritten by its author');
+            await page.click(`${card} .tdoc-edit-save`);
+            await page.waitForSelector(`${card} .tdoc-edit-form`, { state: 'detached', timeout: 4000 });
+            await page.waitForFunction(
+              (sel) => document.querySelector(`${sel} .text`)?.textContent === 'rewritten by its author',
+              card,
+              { timeout: 4000 },
+            );
+            const meta = await page.$eval(`${card} .meta > span`, (el) => el.textContent);
+            if (!/edited/.test(meta)) throw new Error(`edited comment is not marked: "${meta}"`);
+            const stored = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'))
+              .find((c) => c.id === 'c_fixture_1');
+            if (stored.text !== 'rewritten by its author' || !stored.edited) {
+              throw new Error(`edit did not persist: ${JSON.stringify(stored.text)} / ${stored.edited}`);
+            }
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+        await t('deleting a comment leaves its tombstone on screen, not an empty gutter', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            await page.waitForSelector(`${card} > .meta .del`, { timeout: 4000 });
+            await page.click(`${card} > .meta .del`);
+            // The card used to close on any delete, so the tombstone you just
+            // made — and the reply still under it — went off screen with it.
+            await page.waitForSelector(`${card}.tdoc-deleted`, { timeout: 4000 });
+            await page.click(`${card} .tdoc-replies-toggle`);
+            await page.waitForSelector(`${card} .tdoc-replies.open .tdoc-reply`, { timeout: 2000 });
+
+            // Deleting the last thing under it takes the whole thread away.
+            // That reply is tester2's, and delete is the author's now (#349
+            // point 3), so it goes through the API — the collapse is the
+            // subject here, not who may press the button.
+            const gone = await page.evaluate(async () => {
+              const r = await fetch('/api/comments?slug=hostile-body-css&id=r_fixture_1a&version=1', { method: 'DELETE' });
+              return r.status;
+            });
+            if (gone !== 200) throw new Error(`deleting the reply failed: ${gone}`);
+            await page.goto(authedUrl, { waitUntil: 'networkidle' });
+            await page.waitForTimeout(500);
+            const left = await page.evaluate(async () => {
+              const r = await fetch('/api/comments?slug=hostile-body-css&version=1');
+              return (await r.json()).map((c) => c.id);
+            });
+            if (left.includes('c_fixture_1')) throw new Error('an empty tombstone stayed behind');
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+        await t('the @mention list is not clipped by the card it opens inside (#363)', async () => {
+          // The card is a scroll container now, and the menu was an
+          // absolutely-positioned child of one — cut off at the card's edge
+          // exactly when the composer sits at the bottom of a long thread,
+          // which is when you are most likely to be answering someone by name.
+          // (The list only loads for a signed-in viewer, which is why this
+          // half lives here rather than in the anonymous rig above.)
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1280, height: 700 });
+            await page.goto(authedUrl, { waitUntil: 'networkidle' });
+            await page.evaluate(async () => {
+              for (let i = 1; i <= 12; i += 1) {
+                // eslint-disable-next-line no-await-in-loop
+                await fetch('/api/comments', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    slug: 'hostile-body-css', version: 1, parent_id: 'c_fixture_1',
+                    text: `reply ${i} — long enough to wrap onto two lines inside the card`,
+                  }),
+                });
+              }
+            });
+            await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
+            const tall = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
+            await page.waitForSelector(`${tall} .tdoc-replies-toggle`, { timeout: 4000 });
+            await page.click(`${tall} .tdoc-replies-toggle`);
+            await page.waitForTimeout(500);
+            await page.evaluate((sel) => { document.querySelector(sel).scrollTop = 1e6; }, tall);
+            await page.waitForTimeout(200);
+            const toggles = await page.$$(`${tall} .tdoc-reply > .meta .tdoc-reply-toggle`);
+            await toggles[toggles.length - 1].click();
+            await page.waitForTimeout(300);
+            await page.keyboard.type('@t');
+            await page.waitForTimeout(900);
+            const menu = await page.evaluate(() => {
+              const el = document.querySelector('.tdoc-mention-menu');
+              if (!el) return null;
+              const rect = el.getBoundingClientRect();
+              return {
+                inBody: el.parentElement === document.body,
+                position: getComputedStyle(el).position,
+                insideViewport: rect.top >= 0 && rect.bottom <= window.innerHeight,
+                options: el.querySelectorAll('.tdoc-mention-option').length,
+              };
+            });
+            if (!menu) throw new Error('the @mention menu never opened');
+            if (!menu.options) throw new Error('the @mention menu opened with nobody in it');
+            if (!menu.inBody || menu.position !== 'fixed') {
+              throw new Error(`the menu is still inside the scroll container: ${JSON.stringify(menu)}`);
+            }
+            if (!menu.insideViewport) throw new Error(`the menu is off screen: ${JSON.stringify(menu)}`);
+          } finally {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
+        });
+      } finally {
+        await authed.stop();
+      }
+    }
 
   } finally {
     await browser.close();

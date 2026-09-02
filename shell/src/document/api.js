@@ -19,9 +19,25 @@ export function listComments(slug, version) {
   return request(`/api/comments?${query}`);
 }
 
+// The people this session may name after `@` on this doc.
+export function listMentionableUsers(slug) {
+  const query = new URLSearchParams({ slug });
+  return request(`/api/mentions?${query}`);
+}
+
 export function createComment(payload) {
   return request('/api/comments', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+// Same PATCH as the re-anchor below; a `text` in the body is what makes it an
+// edit. The worker allows it for the record's author only.
+export function updateCommentText(payload) {
+  return request('/api/comments', {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
@@ -53,6 +69,17 @@ export function setDocumentStar(slug, starred) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug, starred }),
+  });
+}
+
+// Start from scratch. There is no title yet — the author types one into the
+// page — so the server mints an opaque slug and returns the new doc's URL,
+// already carrying ?edit=1.
+export function createDocument() {
+  return request('/api/doc/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
   });
 }
 

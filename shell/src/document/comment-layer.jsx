@@ -17,6 +17,10 @@ function Pin({ cluster, top, left, frameTop, onOpenComment, onOpenCluster }) {
         'tdoc-pin',
         single ? '' : 'tdoc-pin-cluster',
         single?.resolved ? 'tdoc-pin-resolved' : '',
+        // A tombstone keeps its pin — that is the way back to the replies
+        // under it — but it must not look like a comment somebody is waiting
+        // on. Without this a deleted thread is invisible until you click it.
+        single?.deleted ? 'tdoc-pin-deleted' : '',
         !single && resolved ? 'tdoc-cluster-allresolved' : '',
       ].filter(Boolean).join(' ')}
       data-id={single?.id}
@@ -71,6 +75,7 @@ export function DesktopCommentLayer({
   pinIds,
   currentUser,
   isOwner,
+  mentionable,
   cardPosition,
   expandReplies,
   onOpenComment,
@@ -78,6 +83,7 @@ export function DesktopCommentLayer({
   onReply,
   onReact,
   onDelete,
+  onEdit,
   onReanchor,
 }) {
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
@@ -118,6 +124,7 @@ export function DesktopCommentLayer({
           comment={openComment}
           currentUser={currentUser}
           isOwner={isOwner}
+          mentionable={mentionable}
           unanchored={!pinIds.has(openComment.id)}
           floating
           position={cardPosition}
@@ -125,6 +132,7 @@ export function DesktopCommentLayer({
           onReply={onReply}
           onReact={onReact}
           onDelete={onDelete}
+          onEdit={onEdit}
           onReanchor={onReanchor}
         />
       ) : null}
@@ -138,12 +146,14 @@ export function MobileCommentDrawer({
   pinIds,
   currentUser,
   isOwner,
+  mentionable,
   openCommentId,
   expandReplies,
   onOpenChange,
   onReply,
   onReact,
   onDelete,
+  onEdit,
   onReanchor,
   onNavigate,
 }) {
@@ -177,6 +187,7 @@ export function MobileCommentDrawer({
                   comment={comment}
                   currentUser={currentUser}
                   isOwner={isOwner}
+                  mentionable={mentionable}
                   unanchored={!pinIds.has(comment.id)}
                   expandReplies={openCommentId === comment.id && expandReplies}
                   selected={openCommentId === comment.id}
@@ -184,6 +195,7 @@ export function MobileCommentDrawer({
                   onReply={onReply}
                   onReact={onReact}
                   onDelete={onDelete}
+                  onEdit={onEdit}
                   onReanchor={onReanchor}
                 />
               ))}

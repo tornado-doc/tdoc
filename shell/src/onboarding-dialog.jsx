@@ -5,13 +5,36 @@ import { copyText } from './document/model.js';
 const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
 export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
 
-export function OnboardingDialog({ open, onOpenChange }) {
+// The one rendering of the first-doc recipe. Shown here as the whole of
+// onboarding, and behind the "Build it with your AI" card in the Docs Hub.
+export function FirstDocRecipe() {
   const [copied, setCopied] = useState(false);
+
+  return (
+    <div className="tdoc-recipe-wrap">
+      <code>{FIRST_DOC_RECIPE}</code>
+      <button
+        type="button"
+        className={copied ? 'done' : undefined}
+        onClick={() => copyText(FIRST_DOC_RECIPE).then(setCopied)}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+}
+
+// First-time onboarding, and only that. This dialog's job is to get tdoc
+// installed and the reader's first doc published through their own agent, so it
+// offers the recipe and nothing else. The blank-doc card lives in the Docs Hub,
+// where the reader already has tdoc and is starting their next document; here
+// it would answer a question a first-time visitor has not asked yet, and
+// compete with the single instruction this page exists to deliver (#371).
+export function OnboardingDialog({ open, onOpenChange }) {
   const [hosted, setHosted] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setCopied(false);
     fetch('/api/hosted/token', {
       method: 'POST',
       credentials: 'same-origin',
@@ -25,8 +48,6 @@ export function OnboardingDialog({ open, onOpenChange }) {
       .catch(() => {});
   }, [open]);
 
-  const copy = () => copyText(FIRST_DOC_RECIPE).then(setCopied);
-
   return (
     <AppDialog
       open={open}
@@ -35,12 +56,7 @@ export function OnboardingDialog({ open, onOpenChange }) {
       description="Paste this into your AI. It installs tdoc, writes and publishes a live commentable page, then gives you a link."
       actions={<button type="button" className="primary" onClick={() => onOpenChange(false)}>Done</button>}
     >
-      <div className="tdoc-recipe-wrap">
-        <code>{FIRST_DOC_RECIPE}</code>
-        <button type="button" className={copied ? 'done' : undefined} onClick={copy}>
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
+      <FirstDocRecipe />
       <details className="tdoc-onboarding-details">
         <summary>What does it do?</summary>
         <ol>

@@ -60,6 +60,120 @@ try {
     cp.execFileSync('python3', [path.join(ROOT, 'bin', 'tdoc-validate-template'), f, '--style', 'default'], { stdio: ['ignore', 'ignore', 'pipe'] });
   });
 
+  t('the baked block records which template generation it is', () => {
+    // Each document freezes the template it was created with, so the
+    // generation has to be readable from the document rather than inferred by
+    // diffing rendered type sizes across documents.
+    const out = fs.readFileSync(path.join(tmp, 'tdocs', 'bake-a', 'v1', 'index.html'), 'utf8');
+    if (!/id="tdoc-reader" data-tdoc-template="[0-9a-f]{8}"/.test(out)) {
+      throw new Error('baked block carries no data-tdoc-template stamp');
+    }
+  });
+
+  t('tdoc-bake is idempotent and reports skip', () => {
+    const f = path.join(tmp, 'tdocs', 'bake-a', 'v1', 'index.html');
+    const before = fs.readFileSync(f, 'utf8');
+    const out = cp.execFileSync('node', [path.join(ROOT, 'bin', 'tdoc-bake'), f], { encoding: 'utf8' });
+    if (!out.startsWith('skip')) throw new Error(`expected skip, got: ${out.trim()}`);
+    if (fs.readFileSync(f, 'utf8') !== before) throw new Error('tdoc-bake rewrote an already-baked file');
+  });
+
+  t('tdoc-bake --scan --apply stamps a version written by hand', () => {
+    // The /tdoc edit path writes v<n>/index.html directly, so a document can
+    // gain a version that never went through creation-time baking.
+    const dir = path.join(tmp, 'tdocs', 'bake-a', 'v2');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'index.html'), FIXTURE);
+    cp.execFileSync('node', [path.join(ROOT, 'bin', 'tdoc-bake'), '--scan', '--apply', '--dir', path.join(tmp, 'tdocs')], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+    if (!out.includes('id="tdoc-reader"')) throw new Error('--apply left a hand-written version unbaked');
+  });
+
+  t('the frame fallback no longer keys off the string "max-width"', () => {
+    // A document that declares a responsive breakpoint — which the authoring
+    // contract asks for — used to be read as "styles itself" and lost the
+    // template entirely. Both serving paths must inject on the presence of the
+    // block alone.
+    for (const rel of ['server/server.js', 'worker/worker.js']) {
+      const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      if (src.includes("includes('max-width')")) {
+        throw new Error(`${rel} still gates the reader template on the string "max-width"`);
+      }
+    }
+  });
+
+  t('/export does not stamp a second copy into an already-baked doc', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'worker', 'worker.js'), 'utf8');
+    const fn = src.slice(src.indexOf('function injectReaderCss'));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    // The guard is the shared tag-matching test (a substring check
+    // false-positives on prose that quotes the id).
+    if (!body.includes('hasReaderBlock(html)')) {
+      throw new Error('injectReaderCss has no presence guard — downloads get two reader blocks');
+    }
+  });
+
+  t('the token block is zero-specificity like the rest of the template', () => {
+    // Dropping the frame's "does this document style itself" guard rests on
+    // the template losing every contest with author CSS. A bare :root is
+    // (0,1,0) and the block is stamped after any author <style> in head, so an
+    // unwrapped token block would override an author's own --td-* values.
+    const css = fs.readFileSync(path.join(ROOT, 'server', 'reader.css'), 'utf8');
+    const bare = css.split('\n').filter((line) => /^\s*:root\s*[,{]/.test(line));
+    if (bare.length) throw new Error(`reader.css has a bare :root (specificity 0,1,0): ${bare[0].trim()}`);
+    if (!/:where\(:root\)/.test(css)) throw new Error('the token block is no longer wrapped in :where()');
+  });
+
+  t('a $ in the template survives baking literally', () => {
+    // `$&`, `$\`` and `$'` are substitution patterns in a replacement string,
+    // and the template is the replacement. [class$="…"] is ordinary CSS.
+    const f = path.join(tmp, 'dollar.html');
+    fs.writeFileSync(f, FIXTURE);
+    const fake = path.join(tmp, 'fake-skill');
+    fs.mkdirSync(path.join(fake, 'server'), { recursive: true });
+    fs.mkdirSync(path.join(fake, 'bin'), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'bin', 'tdoc-bake'), path.join(fake, 'bin', 'tdoc-bake'));
+    fs.writeFileSync(path.join(fake, 'server', 'reader.css'), '[class$="x"]{color:red}/* $& $` $\' $1 */');
+    cp.execFileSync('node', [path.join(fake, 'bin', 'tdoc-bake'), f], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const out = fs.readFileSync(f, 'utf8');
+    if (!out.includes('[class$="x"]')) throw new Error('an attribute-suffix selector did not survive baking');
+    if (!out.includes('$&')) throw new Error('$& was expanded instead of kept literal');
+  });
+
+  t('tdoc-write --version next adds a baked version and keeps the thread', () => {
+    // The gateway exists because /tdoc edit used to write v<n>/index.html by
+    // hand: no validation, no bake, and meta.json updated from prose.
+    const f2 = path.join(tmp, 'gw2.html');
+    fs.writeFileSync(f2, FIXTURE.replace('<h1>Bake</h1>', '<h1>Bake v2</h1>'));
+    const docs = path.join(tmp, 'tdocs');
+    fs.writeFileSync(path.join(docs, 'bake-a', 'comments.json'), '[{"id":"c1","text":"keep"}]');
+    cp.execFileSync('bash', [path.join(ROOT, 'bin', 'tdoc-write'), '--slug', 'bake-a', '--title', 'bake-a',
+      '--html-file', f2, '--version', 'next', '--no-server', '--quiet'],
+      { env: { ...process.env, TDOC_DIR: docs }, stdio: ['ignore', 'ignore', 'pipe'] });
+
+    const meta = JSON.parse(fs.readFileSync(path.join(docs, 'bake-a', 'meta.json'), 'utf8'));
+    const ns = meta.versions.map((v) => v.n);
+    const top = Math.max(...ns);
+    const out = fs.readFileSync(path.join(docs, 'bake-a', `v${top}`, 'index.html'), 'utf8');
+    if (!out.includes('id="tdoc-reader"')) throw new Error(`v${top} written without the reading template`);
+    if (!out.includes('Bake v2')) throw new Error('gateway wrote the wrong HTML');
+    if (!ns.includes(1)) throw new Error('gateway dropped earlier versions from meta.json');
+    const comments = fs.readFileSync(path.join(docs, 'bake-a', 'comments.json'), 'utf8');
+    if (!comments.includes('keep')) throw new Error('gateway reset an existing comment thread');
+  });
+
+  t('tdoc-write --version next refuses to invent a document', () => {
+    const f = path.join(tmp, 'gwx.html');
+    fs.writeFileSync(f, FIXTURE);
+    let failed = false;
+    try {
+      cp.execFileSync('bash', [path.join(ROOT, 'bin', 'tdoc-write'), '--slug', 'no-such-doc', '--title', 'x',
+        '--html-file', f, '--version', 'next', '--no-server', '--quiet'],
+        { env: { ...process.env, TDOC_DIR: path.join(tmp, 'tdocs') }, stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch { failed = true; }
+    if (!failed) throw new Error('adding a version to a nonexistent doc should fail');
+  });
+
   t('the validator still rejects AUTHOR CSS that overrides reader layout', () => {
     // The exemption is scoped to id="tdoc-reader" — a plain author <style>
     // setting the root column must still fail.

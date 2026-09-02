@@ -80,7 +80,9 @@ t('POST /api/doc/duplicate is session-gated, snapshot-only, no comment copy', ()
   assert(dupRoute.includes('sourceHasWidgets'), 'must refuse island-bearing docs');
   assert(!dupRoute.includes('mutateComments'), 'v1 duplicate must not copy comment threads');
   assert(!dupRoute.includes('readComments'), 'v1 duplicate must not snapshot comments');
-  assert(dupRoute.includes('stampAids'), 'copied HTML must be aid-stamped');
+  // prepareDocVersion is the single home for stored-document invariants:
+  // it aid-stamps AND bakes the reading template AND records the content sha.
+  assert(dupRoute.includes('prepareDocVersion'), 'copied HTML must go through prepareDocVersion (aids + bake + sha)');
   assert(dupRoute.includes('hostedAccountForGithub'), 'duplicate must reuse the hosted account registry');
   assert(dupRoute.includes('quota_docs'), 'duplicate must share the hosted doc quota');
   assert(dupRoute.includes('quota_upload_bytes'), 'duplicate must share the hosted upload-size cap');

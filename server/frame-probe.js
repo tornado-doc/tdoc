@@ -152,6 +152,20 @@
     while (end < value.length && isWord(value.charAt(end))) end++;
     return { start: start, end: end };
   }
+  // caretPositionFromPoint answers with the NEAREST caret, not the one under the
+  // pointer: a click in a margin, in the gap between blocks, or below the last
+  // line still resolves into the closest text node. Commenting on a word the
+  // pointer was never over is how a click meant to dismiss a card opened a
+  // different one, and how blank space 30px under a paragraph could select a
+  // word inside a <pre>. A click is on a word or it is not — no proximity.
+  function pointOverRange(range, x, y) {
+    var rects = range.getClientRects();
+    for (var i = 0; i < rects.length; i++) {
+      var r = rects[i];
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+    }
+    return false;
+  }
   function reportPointSelection(event) {
     if (interactionMode !== 'comment' || event.button !== 0) return;
     if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return;
@@ -166,6 +180,9 @@
       range.setStart(point.node, bounds.start); range.setEnd(point.node, bounds.end);
       var text = range.toString().trim();
       if (!text) return;
+      // Clicked past the text, not on it: leave the click to the clear path so
+      // it dismisses whatever is open instead of commenting on a neighbour.
+      if (!pointOverRange(range, event.clientX, event.clientY)) return;
       if (current) { current.removeAllRanges(); current.addRange(range); }
       event.preventDefault(); event.stopPropagation();
       postTextSelection(range, text);
@@ -511,7 +528,7 @@
         if (eel) {
           _anchorTargets[c.id] = { element: eel };
           var er = eel.getBoundingClientRect();
-          pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
+          pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
         }
         return;
       }
@@ -520,9 +537,9 @@
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
       if (!r) return;
       _anchorTargets[c.id] = { range: r };
-      if (hl) hl.add(r);
+      if (hl && !c.deleted) hl.add(r);
       var rect = r.getBoundingClientRect();
-      pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied' });
+      pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
     setActiveAnchor(_activeAnchorId, false);
@@ -647,12 +664,50 @@
     }
     if (interactionMode !== 'edit' || !selectionInsideRoot()) return;
     try { savedRange = window.getSelection().getRangeAt(0).cloneRange(); } catch (e) {}
+    markCaretLine();
   });
+
+  // A placeholder line stops showing its hint once the caret is actually in it:
+  // the hint is there to say what to write, and by then you are writing. The
+  // caret this file places on entering edit mode does NOT count — it would blank
+  // the guidance before the first paint — so the marking only starts after the
+  // reader moves the caret themselves.
+  var caretHintsArmed = false;
+  function markCaretLine() {
+    var root = findEditRoot();
+    if (!root || !root.querySelectorAll) return;
+    var current = null;
+    if (caretHintsArmed) {
+      try {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          var node = sel.getRangeAt(0).startContainer;
+          node = node.nodeType === 1 ? node : node.parentNode;
+          current = node && node.closest ? node.closest('[data-tdoc-placeholder]') : null;
+        }
+      } catch (e) {}
+    }
+    Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-caret]'), function (node) {
+      if (node !== current) node.removeAttribute('data-tdoc-caret');
+    });
+    if (current) current.setAttribute('data-tdoc-caret', '');
+  }
+  function armCaretHints() {
+    if (caretHintsArmed) return;
+    caretHintsArmed = true;
+    markCaretLine();
+  }
+  document.addEventListener('mousedown', armCaretHints, true);
+  document.addEventListener('keydown', armCaretHints, true);
   function cleanEditorAttributes(root) {
     if (!root || !root.querySelectorAll) return;
     var roots = [];
     if (root.hasAttribute && root.hasAttribute('data-tdoc-editor-root')) roots.push(root);
     Array.prototype.push.apply(roots, root.querySelectorAll('[data-tdoc-editor-root]'));
+    Array.prototype.forEach.call(root.querySelectorAll('[data-tdoc-caret]'), function (node) {
+      node.removeAttribute('data-tdoc-caret');
+    });
+    if (root.removeAttribute) root.removeAttribute('data-tdoc-caret');
     roots.forEach(function (node) {
       node.removeAttribute('data-tdoc-editor-root');
       var original = node.getAttribute('data-tdoc-editor-original-editable');
@@ -733,6 +788,25 @@
     root.addEventListener('input', onEditInput);
     root.addEventListener('keydown', onEditKeydown);
     document.documentElement.setAttribute('data-tdoc-editing', '');
+    // Entering edit mode should leave you able to type. Without this the root
+    // is editable but unfocused, so a doc created from scratch — which lands
+    // here with nothing on the page — swallows the first thing you type until
+    // you think to click. The caret goes to the first placeholder line (the
+    // heading of a blank doc) and an existing selection is left alone.
+    try {
+      if (!selectionInsideRoot()) {
+        var caretAt = root.querySelector('[data-tdoc-placeholder]') || root;
+        var caret = document.createRange();
+        caret.selectNodeContents(caretAt);
+        caret.collapse(true);
+        var caretSel = window.getSelection();
+        caretSel.removeAllRanges();
+        caretSel.addRange(caret);
+      }
+      root.focus({ preventScroll: true });
+    } catch (e) {}
+    caretHintsArmed = false;
+    markCaretLine();
   }
   function disableEditing() {
     var root = findEditRoot();
