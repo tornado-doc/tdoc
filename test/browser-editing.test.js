@@ -75,6 +75,31 @@ async function chooseMode(page, label) {
     slug, title: 'Browser editing', versions: [{ n: 1, created: new Date().toISOString() }],
   }, null, 2));
 
+  // A SECOND doc, used only by the Move anchor test. Seeding an anchored
+  // comment into the doc above changes what a click on its paragraph does, and
+  // the neighbouring tests start failing — this keeps that blast radius at zero.
+  const anchorSlug = 'move-anchor';
+  const anchorRoot = path.join(root, anchorSlug);
+  fs.mkdirSync(path.join(anchorRoot, 'v1'), { recursive: true });
+  fs.writeFileSync(path.join(anchorRoot, 'v1', 'index.html'), `<!doctype html>
+<html><head><meta charset="utf-8"><title>Move anchor</title>
+<style>body{font:18px/1.6 system-ui;margin:0}.page{max-width:720px;margin:48px auto;padding:0 24px}</style>
+</head><body><main class="page"><h1>Move anchor</h1>
+<p id="anchor-paragraph">Alpha bravo charlie delta echo foxtrot golf hotel india juliet.</p>
+</main></body></html>`);
+  fs.writeFileSync(path.join(anchorRoot, 'comments.json'), JSON.stringify([{
+    id: 'c_anchored', version: 1,
+    anchor: {
+      kind: 'text', text: 'charlie',
+      context_before: 'Alpha bravo ', context_after: ' delta echo foxtrot golf hotel india juliet.',
+    },
+    text: 'move me', author: { login: 'owner', name: 'owner', avatar_url: '' },
+    status: 'open', created: '2026-09-01T00:00:00Z', replies: [], reactions: {},
+  }], null, 2));
+  fs.writeFileSync(path.join(anchorRoot, 'meta.json'), JSON.stringify({
+    slug: anchorSlug, title: 'Move anchor', versions: [{ n: 1, created: new Date().toISOString() }],
+  }, null, 2));
+
   // Not a fixed port: waitForServer below only asks whether ANYTHING answers,
   // so a port another process already held would have quietly become the
   // subject of this whole suite.
@@ -564,6 +589,63 @@ async function chooseMode(page, label) {
       assert(await versionPopup.evaluate((popup) => getComputedStyle(popup).overflowY) === 'auto',
         'mobile version submenu is not scrollable');
       await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-mobile-version-submenu.png'), fullPage: false });
+    });
+    // Last on purpose: it navigates away from the doc every test above shares.
+    await test('Move anchor lands the new anchor while the card stays open', async () => {
+      // Re-anchoring keeps the card open so the author can click the new spot.
+      // Counting that as "something is open" swallowed the click, and the anchor
+      // silently never moved — no error, no toast, nothing to notice.
+      // The mobile test above leaves the viewport at phone width, where comments
+      // live in a drawer rather than the margin rail.
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto(`http://127.0.0.1:${port}/d/${anchorSlug}/v/1`, { waitUntil: 'networkidle' });
+      const anchorFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
+      assert(anchorFrame, 'author frame missing on the move-anchor doc');
+      // The pin is the signal that comments loaded AND the anchor resolved.
+      // Clicking the word before that lands on plain prose and opens a composer.
+      await page.locator('.tdoc-pin').first().waitFor();
+      // Mode carries across the navigation, and the tests above end in Edit —
+      // where a click on an anchor is a caret, not a comment.
+      await chooseMode(page, 'Comment');
+      const box = await page.locator('.tdoc-doc-frame').boundingBox();
+      const wordAt = (word) => anchorFrame.evaluate((needle) => {
+        const text = document.querySelector('#anchor-paragraph').firstChild;
+        const from = text.nodeValue.indexOf(needle);
+        const range = document.createRange();
+        range.setStart(text, from); range.setEnd(text, from + needle.length);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }, word);
+      const clickWord = async (word) => {
+        const point = await wordAt(word);
+        await page.mouse.click(box.x + point.x, box.y + point.y);
+        await page.waitForTimeout(400);
+      };
+
+      // The card only renders once it is open, so open it from its anchor first.
+      await clickWord('charlie');
+      const reanchor = page.locator('.tdoc-reanchor-btn').first();
+      await reanchor.waitFor().catch(async () => {
+        const seen = await page.evaluate(() => [...document.querySelectorAll('[class*="tdoc-"]')]
+          .map((node) => node.className)
+          .filter((name) => typeof name === 'string' && /comment|drawer|popup/.test(name)));
+        throw new Error(`clicking the anchor did not open its card; saw ${JSON.stringify(seen)}`);
+      });
+      await reanchor.click();
+      await page.locator('.tdoc-reanchor-banner').waitFor();
+      await clickWord('hotel');
+
+      await page.waitForFunction(async (slugName) => {
+        const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
+        return list.some((entry) => entry.anchor && entry.anchor.text === 'hotel');
+      }, anchorSlug, { timeout: 5_000 }).catch(() => {});
+
+      const anchors = await page.evaluate(async (slugName) => {
+        const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
+        return list.map((entry) => entry.anchor && entry.anchor.text);
+      }, anchorSlug);
+      assert(anchors.includes('hotel'),
+        `Move anchor did not land: anchors are ${JSON.stringify(anchors)}`);
     });
   } finally {
     if (browser) await browser.close();
