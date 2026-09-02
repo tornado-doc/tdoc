@@ -32,6 +32,8 @@ const OFFLINE = [
   'hosted-oob.test.js',       // hosted token bootstrap + scoped writes
   'hosted-oob-behavior.test.js', // hosted token ownership behavior with fake bindings
   'account-email-groundwork.test.js', // phase-1 identity: email merge key, no mint-on-signin, field-preserving rewrite
+  'pairing-flow.test.js',     // phase-2: tdoc-owned pair codes — strikes, single redemption, origin/session gates
+  'pair-signin-cli.test.js',  // phase-2 CLI: pairing-first, 404 fallback, probe-first resume
   'duplicate-download.test.js', // #146 Duplicate vs Download chrome + route contract
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate

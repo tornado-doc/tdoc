@@ -1760,6 +1760,73 @@ function neutralLandingResponse(env, notice) {
 // Approve, so nobody is stranded on GitHub's "Congratulations" page. Active
 // only when GITHUB_CLIENT_SECRET is set (the token exchange requires it), so a
 // deploy without the secret silently keeps the device flow.
+// ---- CLI pairing (tdoc-owned sign-in handoff) -------------------------------
+// The device-flow MECHANISM without the provider: the CLI shows a short code,
+// the human approves it at /activate in their own browser (signed in however
+// they like), and the poll returns an account-scoped upload token. tdoc issues
+// the code, so no provider is wired into the CLI at all — this is what lets
+// GitHub become just one button on /activate, next to whatever comes later.
+//
+// Not full OAuth, on purpose: the CLI is first-party, so there is no client
+// registration, no scopes, no redirect URI. Two endpoints and one page.
+//
+// Threat model (see the design doc, tdoc.dev/d/tdoc-auth-refactor):
+//   - code guessing: 28^8 ≈ 3.8e11 codes, 10-minute TTL, per-IP mint limits,
+//     and a per-code strike cap that burns the record — guessing needs the
+//     matching pair_secret anyway, which never leaves the CLI.
+//   - approval phishing: /activate names the terminal (its label) and the
+//     signed-in account before the confirm button.
+//   - replay: single redemption — the record is deleted the moment a poll
+//     collects the token.
+// The KV counters are per-colo approximations (KV is eventually consistent);
+// they are the baseline, and a Cloudflare zone rate-limit rule on
+// /api/cli/pair/* is the belt-and-braces an operator adds in the dashboard.
+
+// No 0/O, 1/I/L, U/V ambiguity — this code is read off one screen and typed
+// into another, sometimes over a shoulder or a screenshot.
+const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTWXYZ2345679';
+const PAIR_TTL_SECONDS = 600;
+const PAIR_MAX_STRIKES = 5;
+
+function pairCode() {
+  const buf = new Uint8Array(8);
+  crypto.getRandomValues(buf);
+  const pick = [...buf].map((b) => PAIR_ALPHABET[b % PAIR_ALPHABET.length]);
+  return `${pick.slice(0, 4).join('')}-${pick.slice(4).join('')}`;
+}
+
+function normalizePairCode(raw) {
+  const v = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (v.length !== 8) return null;
+  return `${v.slice(0, 4)}-${v.slice(4)}`;
+}
+
+// Fixed-window KV counter. Approximate by design (per-colo, eventually
+// consistent) — good enough to make brute force boring, not an SLA.
+async function rateLimited(env, bucket, limit, windowSeconds) {
+  if (!env || !env.META) return false;
+  const windowId = Math.floor(Date.now() / (windowSeconds * 1000));
+  const key = `rl:${bucket}:${windowId}`;
+  let count = 0;
+  try { count = Number(await env.META.get(key)) || 0; } catch {}
+  if (count >= limit) return true;
+  try { await env.META.put(key, String(count + 1), { expirationTtl: windowSeconds * 2 }); } catch {}
+  return false;
+}
+
+function clientIp(req) {
+  return req.headers.get('cf-connecting-ip') || 'unknown';
+}
+
+// JSON POSTs from the /activate page carry the browser's Origin; a cross-site
+// page cannot fake it. Absent Origin (curl, the CLI) is fine — those requests
+// carry no ambient session cookie worth stealing via CSRF anyway, and approve
+// (the only session-cookie-authenticated pair route) demands a match.
+function sameOrigin(req, url) {
+  const o = req.headers.get('origin');
+  return !o || o === url.origin;
+}
+
 function authStatusResponse(message, { error = false, status = 200 } = {}) {
   const nonce = rand(16);
   return html(SHELL.appHtml({
@@ -4142,6 +4209,30 @@ export default {
     // `/start` is the homepage CTA's no-script destination: the same
     // onboarding written as a page. Same fail-safe as `/` — if that doc is
     // missing, the visitor gets the neutral page, never a 404.
+    // The pairing approval page. Everything meaningful happens through the
+    // session + the pair/* API; this only ships the shell page with the code
+    // prefilled (normalized — a mangled ?code renders an empty field, never
+    // an error page).
+    if (p === '/activate' && (method === 'GET' || method === 'HEAD')) {
+      const session = await getSession(env, req);
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        title: 'tdoc - connect a terminal',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'activate',
+          code: normalizePairCode(url.searchParams.get('code')) || '',
+          identity: sessionLogin(session)
+            ? { login: session.login, name: session.name || session.login, avatar_url: session.avatar_url || '' }
+            : null,
+          webAuth: !!env?.GITHUB_CLIENT_SECRET,
+          authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+    }
+
     if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
       return landingResponse(env, req, START_SLUG);
     }
@@ -4733,6 +4824,121 @@ export default {
       return redirectTo(gh.toString(), [
         `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
+    }
+
+    // ---- CLI pairing routes (see the pairing block above) ----
+    if (p === '/api/cli/pair/start' && method === 'POST') {
+      if (await rateLimited(env, `pairstart:${clientIp(req)}`, 20, 600)) {
+        return json({ error: 'slow_down' }, { status: 429 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const label = typeof body.label === 'string' ? body.label.trim().slice(0, 80) : '';
+      const user_code = pairCode();
+      const pair_secret = `pairsec_${rand(24)}`;
+      const record = {
+        secret_hash: await sha256Hex(pair_secret),
+        status: 'pending',
+        strikes: 0,
+        label,
+        created: new Date().toISOString(),
+      };
+      await env.META.put(`pair:${user_code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS + 60 });
+      return json({
+        user_code,
+        pair_secret,
+        verification_uri: `${url.origin}/activate`,
+        verification_uri_complete: `${url.origin}/activate?code=${user_code}`,
+        expires_in: PAIR_TTL_SECONDS,
+        interval: 5,
+      });
+    }
+
+    if (p === '/api/cli/pair/poll' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const code = normalizePairCode(body.user_code);
+      if (!code) return json({ error: 'expired_token' }, { status: 400 });
+      let record = null;
+      try { record = JSON.parse(await env.META.get(`pair:${code}`)); } catch {}
+      if (!record) return json({ error: 'expired_token' }, { status: 400 });
+      const okSecret = await timingSafeEqual(record.secret_hash, await sha256Hex(String(body.pair_secret || '')));
+      if (!okSecret) {
+        // A wrong secret is someone who saw the code but was never the CLI.
+        // Strike the record, and burn it before guesses get interesting.
+        record.strikes = (record.strikes || 0) + 1;
+        if (record.strikes >= PAIR_MAX_STRIKES) await env.META.delete(`pair:${code}`);
+        else await env.META.put(`pair:${code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS });
+        return json({ error: 'expired_token' }, { status: 400 });
+      }
+      if (record.status !== 'approved') return json({ error: 'authorization_pending' });
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        await env.META.delete(`pair:${code}`);
+        return json({ error: 'hosted_registration_disabled' }, { status: 403 });
+      }
+      // Single redemption: the record dies before the token leaves, so a
+      // replayed poll (or a second reader of the code) collects nothing.
+      await env.META.delete(`pair:${code}`);
+      const approved = record.approved || {};
+      const issued = await issueHostedToken(env, { login: approved.login, label: record.label }, approved.email);
+      if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
+      return json({
+        ok: true,
+        token: issued.token,
+        account_id: issued.record.account_id,
+        github_login: issued.record.github_login,
+        base: url.origin,
+        identity: { login: approved.login, name: approved.name || approved.login },
+      });
+    }
+
+    if (p === '/api/cli/pair/lookup' && method === 'POST') {
+      // Signed-in only, and rate-limited: this is what lets /activate name
+      // the asking terminal before the human commits. It never returns the
+      // secret or the status of somebody else's guessing game.
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (await rateLimited(env, `pairlook:${session.id}`, 30, 600)) {
+        return json({ error: 'slow_down' }, { status: 429 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const code = normalizePairCode(body.user_code);
+      let record = null;
+      try { record = JSON.parse(await env.META.get(`pair:${code}`)); } catch {}
+      if (!code || !record || record.status !== 'pending') {
+        return json({ ok: false, error: 'unknown_code' }, { status: 404 });
+      }
+      return json({ ok: true, label: record.label || '', created: record.created });
+    }
+
+    if (p === '/api/cli/pair/approve' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (await rateLimited(env, `pairok:${session.id}`, 10, 600)) {
+        return json({ error: 'slow_down' }, { status: 429 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const code = normalizePairCode(body.user_code);
+      let record = null;
+      try { record = JSON.parse(await env.META.get(`pair:${code}`)); } catch {}
+      if (!code || !record || record.status !== 'pending') {
+        return json({ ok: false, error: 'unknown_code' }, { status: 404 });
+      }
+      // The approver's identity is a server-side snapshot of THEIR session —
+      // nothing in the request body can pose as it, same discipline as the
+      // hosted-token mint.
+      record.status = 'approved';
+      record.approved = {
+        login: session.login,
+        name: session.name || session.login,
+        email: session.email || null,
+      };
+      await env.META.put(`pair:${code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS });
+      return json({ ok: true, label: record.label || '' });
     }
 
     if (p === '/api/auth/device/start' && method === 'POST') {

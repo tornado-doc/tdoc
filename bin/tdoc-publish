@@ -326,6 +326,231 @@ write_pending_signin() {
 }
 clear_pending_signin() { rm -f "$PENDING_SIGNIN_FILE" "$PENDING_SIGNIN_FILE".tmp 2>/dev/null || true; }
 
+# tdoc-owned pairing flow — tried FIRST. The worker mints a short code, the
+# human approves it at $base/activate in their own browser (signed in with
+# whatever that page offers), and the poll returns the upload token directly.
+# The CLI never learns which identity provider the human used — that is the
+# point. A worker without the route answers 404 and we fall back to the
+# GitHub device flow below, so old BYOK deploys keep working untouched.
+#
+# Writes token/account_id/github_login into the caller's variables via
+# globals; returns 0 on success, 1 for "worker has no pairing" (fall back).
+# Every hard failure exits, same contract as hosted_github_signin.
+hosted_pair_signin() {
+  local base="$1"
+  local resp http payload
+  local user_code pair_secret uri interval expires resumed=0
+  # Same recovery story as the device flow: a killed process is not a failed
+  # sign-in. The pending file stores the secret as "pair:<secret>" in the
+  # device_code seat; a fresh run picks it up and keeps polling, so an
+  # approval granted while nothing was alive still lands.
+  if [ -f "$PENDING_SIGNIN_FILE" ]; then
+    local pending
+    pending="$(node -e '
+      const fs = require("fs");
+      try {
+        const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        const left = Math.floor((Number(p.expires_at) - Date.now()) / 1000);
+        if (!p.device_code || !String(p.device_code).startsWith("pair:")) process.exit(0);
+        if (!p.user_code || !p.verification_uri) process.exit(0);
+        if (p.base !== process.argv[2] || !(left >= 15)) process.exit(0);
+        process.stdout.write([String(p.device_code).slice(5), p.user_code, p.verification_uri, left].join("\n"));
+      } catch {}
+    ' "$PENDING_SIGNIN_FILE" "$base" 2>/dev/null)" || pending=""
+    if [ -n "$pending" ]; then
+      pair_secret="$(printf '%s\n' "$pending" | sed -n 1p)"
+      user_code="$(printf '%s\n' "$pending" | sed -n 2p)"
+      uri="$(printf '%s\n' "$pending" | sed -n 3p)"
+      expires="$(printf '%s\n' "$pending" | sed -n 4p)"
+      interval=5
+      resumed=1
+      # Probe before promising anything. Three things can be true of a
+      # resumed code, and two of them mean the resume message must never
+      # print: the human already approved it (finish silently right here),
+      # or the worker no longer speaks pairing (clear and fall back — a
+      # dead code shown as resumable is worse than no message).
+      resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+        -X POST "$base/api/cli/pair/poll" -H "Content-Type: application/json" \
+        -d "{\"user_code\":\"$user_code\",\"pair_secret\":\"$pair_secret\"}")" || resp=$'\n000'
+      http="${resp##*$'\n'}"
+      payload="${resp%$'\n'*}"
+      case "$http" in
+        404|405) clear_pending_signin; return 1 ;;
+      esac
+      if [ "$(printf '%s' "$payload" | json_get ok)" = "true" ]; then
+        PAIR_TOKEN="$(printf '%s' "$payload" | json_get token)"
+        PAIR_ACCOUNT_ID="$(printf '%s' "$payload" | json_get account_id)"
+        PAIR_GITHUB_LOGIN="$(printf '%s' "$payload" | json_get github_login)"
+        _who="$(printf '%s' "$payload" | json_get identity.login)"
+        echo "[tdoc] Signed in as ${_who:-your account} (approved while no tdoc was running)" >&2
+        clear_pending_signin
+        if [ -n "$PAIR_TOKEN" ] && [ -n "$PAIR_ACCOUNT_ID" ]; then return 0; fi
+        echo "[tdoc] pairing response was missing token/account_id." >&2
+        exit 1
+      fi
+      err="$(printf '%s' "$payload" | json_get error)"
+      case "$err" in
+        expired_token) clear_pending_signin; resumed=0 ;;
+      esac
+    fi
+  fi
+
+  if [ "$resumed" = "0" ]; then
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+    -X POST "$base/api/cli/pair/start" -H "Content-Type: application/json" \
+    -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\"}")" || return 1
+  http="${resp##*$'\n'}"
+  payload="${resp%$'\n'*}"
+  case "$http" in
+    404|405) return 1 ;;                       # pre-pairing worker: fall back
+    2[0-9][0-9]) ;;
+    *) echo "[tdoc] pairing start returned HTTP $http — falling back to GitHub sign-in." >&2; return 1 ;;
+  esac
+  user_code="$(printf '%s' "$payload" | json_get user_code)"
+  pair_secret="$(printf '%s' "$payload" | json_get pair_secret)"
+  uri="$(printf '%s' "$payload" | json_get verification_uri_complete)"
+  [ -z "$uri" ] && uri="$(printf '%s' "$payload" | json_get verification_uri)"
+  interval="$(printf '%s' "$payload" | json_get interval)"; interval="${interval:-5}"
+  expires="$(printf '%s' "$payload" | json_get expires_in)"; expires="${expires:-600}"
+  if [ -z "$user_code" ] || [ -z "$pair_secret" ] || [ -z "$uri" ]; then return 1; fi
+  case "$interval" in ''|*[!0-9]*) interval=5 ;; esac
+  case "$expires" in ''|*[!0-9]*) expires=600 ;; esac
+  fi
+
+  WAITING_SHOWN=0
+  WAITING_TTY=0
+  show_signin_wait() {
+    local remaining="$1"
+    [ "$remaining" -lt 0 ] && remaining=0
+    local minutes=$((remaining / 60)) seconds=$((remaining % 60))
+    if [ -t 2 ]; then
+      printf '\r\033[2K[tdoc] Waiting for approval · %d:%02d remaining' "$minutes" "$seconds" >&2
+      WAITING_TTY=1
+    elif [ "$WAITING_SHOWN" = "0" ]; then
+      printf '[tdoc] Waiting for approval · %d:%02d remaining\n' "$minutes" "$seconds" >&2
+    fi
+    WAITING_SHOWN=1
+  }
+  finish_signin_wait() {
+    if [ "$WAITING_TTY" = "1" ]; then printf '\n' >&2; fi
+    WAITING_TTY=0
+  }
+  stop_pair_signin() {
+    local message="$1" status="$2"
+    finish_signin_wait
+    clear_pending_signin
+    echo "[tdoc] $message No credential was saved." >&2
+    echo "[tdoc] Retry: $RETRY_COMMAND" >&2
+    exit "$status"
+  }
+  trap 'stop_pair_signin "Sign-in canceled." 130' INT
+
+  should_open_browser() {
+    [ -n "${TDOC_NO_BROWSER:-}" ] && return 1
+    [ -n "${CI:-}" ] && return 1
+    [ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ] && return 1
+    case "$(uname -s)" in
+      Darwin) command -v open >/dev/null 2>&1 ;;
+      *) [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1 ;;
+    esac
+  }
+  local opened=0
+  # Only ever open a URL on the host we are signing in to.
+  case "$uri" in
+    "$base"/*)
+      if should_open_browser; then
+        if command -v open >/dev/null 2>&1; then open "$uri" >/dev/null 2>&1 || true
+        elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$uri" >/dev/null 2>&1 || true
+        fi
+        opened=1
+      fi
+      ;;
+  esac
+  if [ "$resumed" = "1" ]; then
+    echo "[tdoc] Resuming the sign-in from the previous run — the code is still valid." >&2
+    echo "[tdoc] If the human already approved it, there is nothing more to do." >&2
+    echo "[tdoc] Otherwise, agent: give the human this URL — do not open it yourself:" >&2
+    echo "[tdoc]   $uri" >&2
+    echo "[tdoc] where they sign in and approve this code:" >&2
+    echo "" >&2
+    echo "        $user_code" >&2
+    echo "" >&2
+  else
+  echo "[tdoc] Sign in to publish on $base" >&2
+  if [ "$opened" = "1" ]; then
+    echo "[tdoc] A tdoc page just opened in your browser — the code is filled in; sign in and approve." >&2
+    echo "[tdoc] (If nothing opened: $uri )" >&2
+  else
+    echo "[tdoc] Agent: relay the URL and code below to the human, then wait here." >&2
+    echo "[tdoc] Do NOT open the URL in your own browser — your browser is not signed" >&2
+    echo "[tdoc] in as them, and the approval only counts from THEIR browser." >&2
+    echo "[tdoc] Ask the human to open:" >&2
+    echo "[tdoc]   $uri" >&2
+    echo "[tdoc] sign in there, and approve this code:" >&2
+    echo "" >&2
+    echo "        $user_code" >&2
+    echo "" >&2
+  fi
+  fi
+  echo "[tdoc] Once it's approved, I'll continue here on my own." >&2
+  # Same side channel as the device flow, so the publish modal and the resume
+  # path work identically. pair_secret rides in the device_code seat — it is
+  # the redeemable half, and the local server's whitelist keeps it private.
+  write_pending_signin "$user_code" "$uri" "$expires" "$opened" "pair:$pair_secret" "$base"
+  local waited=0 err
+  show_signin_wait "$expires"
+  while [ "$waited" -lt "$expires" ]; do
+    sleep "$interval"
+    waited=$((waited + interval))
+    if ! resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+      -X POST "$base/api/cli/pair/poll" -H "Content-Type: application/json" \
+      -d "{\"user_code\":\"$user_code\",\"pair_secret\":\"$pair_secret\"}")"; then
+      show_signin_wait "$((expires - waited))"
+      continue
+    fi
+    http="${resp##*$'\n'}"
+    payload="${resp%$'\n'*}"
+    case "$http" in
+      404|405)
+        # The worker stopped speaking pairing under us (rollback, or a resume
+        # against a BYOK host that never did). This record can never be
+        # redeemed here — clear it and let the caller fall back cleanly
+        # instead of polling a 404 until the code expires.
+        finish_signin_wait
+        clear_pending_signin
+        trap - INT
+        return 1
+        ;;
+    esac
+    if [ "$(printf '%s' "$payload" | json_get ok)" = "true" ]; then
+      PAIR_TOKEN="$(printf '%s' "$payload" | json_get token)"
+      PAIR_ACCOUNT_ID="$(printf '%s' "$payload" | json_get account_id)"
+      PAIR_GITHUB_LOGIN="$(printf '%s' "$payload" | json_get github_login)"
+      _who="$(printf '%s' "$payload" | json_get identity.login)"
+      finish_signin_wait
+      echo "[tdoc] Signed in as ${_who:-your account}" >&2
+      clear_pending_signin
+      trap - INT
+      if [ -n "$PAIR_TOKEN" ] && [ -n "$PAIR_ACCOUNT_ID" ]; then return 0; fi
+      echo "[tdoc] pairing response was missing token/account_id." >&2
+      exit 1
+    fi
+    err="$(printf '%s' "$payload" | json_get error)"
+    case "$err" in
+      authorization_pending|'') show_signin_wait "$((expires - waited))" ;;
+      slow_down) interval=$((interval + 5)); show_signin_wait "$((expires - waited))" ;;
+      hosted_registration_disabled)
+        finish_signin_wait; clear_pending_signin; trap - INT
+        fail_with_agent_prompt "hosted signup is not open on $base" \
+          "The default publish target is hosted tdoc ($base), but self-serve signup is not enabled there. Publish to your own account instead: '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."
+        ;;
+      expired_token) stop_pair_signin "Sign-in expired." 1 ;;
+      *) stop_pair_signin "Sign-in failed (${err:-unknown})." 1 ;;
+    esac
+  done
+  stop_pair_signin "Sign-in expired." 1
+}
+
 # GitHub Device Flow against the hosted Worker. Writes the session cookie into
 # $2 (curl cookie jar) so /api/hosted/token can bind the upload token to the
 # signed-in login. Same shape as the overlay sign-in, for the CLI.
@@ -348,6 +573,10 @@ hosted_github_signin() {
         const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
         const left = Math.floor((Number(p.expires_at) - Date.now()) / 1000);
         if (!p.device_code || !p.user_code || !p.verification_uri) process.exit(0);
+        // A "pair:" record belongs to the pairing flow. Reaching this resume
+        // at all means the worker answered 404 to pairing — the record can
+        // never be redeemed there, so let it be cleared and start fresh.
+        if (String(p.device_code).startsWith("pair:")) process.exit(0);
         if (p.base !== process.argv[2]) process.exit(0);
         // 15s floor: a code about to die mid-first-poll is not worth resuming.
         if (!(left >= 15)) process.exit(0);
@@ -565,6 +794,12 @@ first_time_setup_hosted() {
     *) echo "[tdoc] TDOC_HOSTED_BASE must start with http:// or https:// (got '$base')." >&2; exit 1 ;;
   esac
   local cookiejar resp http payload token account_id github_login
+  if hosted_pair_signin "$base"; then
+    # Pairing handed us the token directly — no cookie dance, no second call.
+    token="$PAIR_TOKEN"; account_id="$PAIR_ACCOUNT_ID"; github_login="$PAIR_GITHUB_LOGIN"
+    write_hosted_config "$base" "$token" "$account_id" "$github_login"
+    return 0
+  fi
   cookiejar="$(mktemp -t tdoc-hosted-cookie.XXXXXX)"
   hosted_github_signin "$base" "$cookiejar"
   resp="$(curl -sS --connect-timeout 10 --max-time 30 -b "$cookiejar" -w $'\n%{http_code}' \
@@ -598,6 +833,13 @@ first_time_setup_hosted() {
     printf '%s\n' "$payload" | head -c 400 >&2; echo >&2
     exit 1
   fi
+  write_hosted_config "$base" "$token" "$account_id" "$github_login"
+}
+
+# One writer for ~/.tdoc/published.json on the hosted path, shared by the
+# pairing flow and the legacy device flow so the file cannot drift by route.
+write_hosted_config() {
+  local base="$1" token="$2" account_id="$3" github_login="$4"
   local public_host="${base#http://}"
   public_host="${public_host#https://}"
   (
