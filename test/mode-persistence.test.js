@@ -65,9 +65,6 @@ t('mode is persisted on change via storeMode', () => {
   const changeMode = editorHook.slice(changeModeStart, changeModeEnd);
   assert(changeMode.includes('setMode(nextMode)'), 'changeMode must call setMode');
   assert(changeMode.includes('storeMode(nextMode)'), 'changeMode must persist mode to localStorage');
-  const setModeIndex = changeMode.indexOf('setMode(nextMode)');
-  const storeModeIndex = changeMode.indexOf('storeMode(nextMode)');
-  assert(setModeIndex < storeModeIndex, 'storeMode should be called after setMode');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

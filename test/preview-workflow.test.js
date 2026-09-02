@@ -62,6 +62,8 @@ t('sticky comment matches the #148 template', () => {
     'reruns must clear the retained landing fixture before reseeding it');
   assert(/-X DELETE[\s\\]*\n[\s\S]*\/api\/doc\?slug=\$slug/.test(wf),
     'preview fixture reset must use the authenticated document delete route');
+  assert(wf.includes('200|404)'),
+    'preview fixture reset must be idempotent when a fixture does not exist yet');
   assert(wf.includes('It is not [tdoc.dev](https://tdoc.dev)'),
     'must say the link is not tdoc.dev');
   assert(wf.includes('issues/comments/'), 'must PATCH an existing comment rather than always POST');
