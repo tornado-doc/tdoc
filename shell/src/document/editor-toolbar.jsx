@@ -125,6 +125,65 @@ export function SaveConflictDialog({ conflict, onClose }) {
   );
 }
 
+// Save writes a new version, and on a published doc that version is instantly
+// the one the shared link resolves to. Nothing said so before the click. This
+// says it once; the checkbox is the author telling us they have understood,
+// and it is remembered per browser so the explanation never becomes a nag.
+//
+// The flag lives in localStorage, which throws in some privacy modes and comes
+// back empty in others. Both are read as "not dismissed yet": showing the
+// explanation one extra time is harmless, and a save that never happens
+// because storage threw is not.
+const SAVE_NOTICE_KEY = 'tdoc-save-notice-dismissed';
+
+export function saveNoticeDismissed() {
+  try {
+    return localStorage.getItem(SAVE_NOTICE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function SaveNoticeDialog({ open, onOpenChange, onConfirm }) {
+  const [remember, setRemember] = useState(false);
+
+  useEffect(() => {
+    if (open) setRemember(false);
+  }, [open]);
+
+  const confirm = () => {
+    if (remember) {
+      try { localStorage.setItem(SAVE_NOTICE_KEY, '1'); } catch {}
+    }
+    onOpenChange(false);
+    onConfirm();
+  };
+
+  return (
+    <AppDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Saving publishes a new version"
+      description="Your draft becomes the next version of this document. If you have shared the link, that is what people see from now on — earlier versions stay reachable, and comments stay on the text they were left on."
+      actions={(
+        <>
+          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
+          <button type="button" className="primary" onClick={confirm}>Save and publish</button>
+        </>
+      )}
+    >
+      <label className="tdoc-save-remember">
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={(event) => setRemember(event.target.checked)}
+        />
+        Don&rsquo;t show this again
+      </label>
+    </AppDialog>
+  );
+}
+
 export function LinkDialog({ open, onOpenChange, onSubmit }) {
   const [url, setUrl] = useState('https://');
 
