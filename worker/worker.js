@@ -5022,7 +5022,17 @@ export default {
       // An invite is a meta write, so it happens before the comment lands: a
       // notification whose link 403s is worse than no notification.
       if (outcome.invited.length) {
+        // Send back every field, not just the one being widened.
+        // applyAccessPatch re-baselines a doc that has no stored access to the
+        // product defaults (unlisted + owner-only history) — correct when the
+        // owner is deliberately editing the Share panel, wrong here, where the
+        // policy write is a side effect of posting a comment. Passing the
+        // effective policy through makes the re-baseline a no-op, so an invite
+        // adds a name and changes nothing else.
         const patched = applyAccessPatch(meta, {
+          visibility: access.visibility,
+          commenting: access.commenting,
+          history_visibility: access.history_visibility,
           allowed_users: access.allowed_users.concat(outcome.invited),
         });
         if (patched.error) return json(patched, { status: 400 });

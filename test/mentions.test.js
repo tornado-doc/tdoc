@@ -60,6 +60,14 @@ vm.runInContext([
   fn(src, 'positionalRecipient'),
   fn(src, 'inboxRecipients'),
   fn(src, 'inboxGroupKey'),
+  constLine(src, 'ACCESS_VISIBILITIES'),
+  constLine(src, 'ACCESS_COMMENTING'),
+  constLine(src, 'ACCESS_HISTORY'),
+  constLine(src, 'ACCESS_PATCH_FIELDS'),
+  fn(src, 'normalizeAccess'),
+  fn(src, 'accessFromMeta'),
+  fn(src, 'validateAccessWrite'),
+  fn(src, 'applyAccessPatch'),
 ].join('\n\n'), box);
 
 // The shell's pure half is an ES module; strip the export keyword and run the
@@ -254,6 +262,41 @@ t('the local server parses mentions the same way as the worker', () => {
     assert(norm(fn(src, name)) === norm(fn(serverSrc, name)),
       `${name} has DRIFTED between worker.js and server.js`);
   }
+});
+
+// ── an invite may not re-baseline the doc's policy ─────────────────
+
+// A doc published without an access object reads as public with public
+// history. applyAccessPatch deliberately switches such a doc to the product
+// defaults, which is right when the owner is editing the Share panel and wrong
+// when the write is a side effect of posting a comment: shared links silently
+// lost their version history, and the doc silently left public.
+t('@-inviting on a doc with no stored access leaves the rest of the policy alone', () => {
+  const meta = { slug: 'legacy-doc', title: 'Legacy' };
+  const access = box.accessFromMeta(meta);
+  assert(access.visibility === 'public', `precondition: ${access.visibility}`);
+  assert(access.history_visibility === 'public', `precondition: ${access.history_visibility}`);
+
+  const patched = box.applyAccessPatch(meta, {
+    visibility: access.visibility,
+    commenting: access.commenting,
+    history_visibility: access.history_visibility,
+    allowed_users: access.allowed_users.concat(['bochen']),
+  });
+  assert(!patched.error, `patch rejected: ${patched.error}`);
+  assert(patched.access.visibility === 'public',
+    `an invite made the doc ${patched.access.visibility}`);
+  assert(patched.access.history_visibility === 'public',
+    `an invite hid version history from readers (${patched.access.history_visibility})`);
+  assert(patched.access.allowed_users.join() === 'bochen', 'the invitee was not added');
+});
+
+t('the bare allowed_users patch is the shape that broke it', () => {
+  // Guards the diagnosis, not the product: if applyAccessPatch ever stops
+  // re-baselining, this flips and the workaround above can be simplified.
+  const bare = box.applyAccessPatch({ slug: 'legacy-doc' }, { allowed_users: ['bochen'] });
+  assert(bare.access.history_visibility === 'owner',
+    'applyAccessPatch no longer re-baselines; revisit the invite call site');
 });
 
 // ── who has actually used tdoc ───────────────────────────────────────────
