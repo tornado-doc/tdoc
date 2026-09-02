@@ -38,6 +38,7 @@ const OFFLINE = [
   'bar-overflow-trigger.test.js', // the ⋯ trigger is hidden where its menu would be empty
   'create-from-scratch.test.js', // #356 blank doc: slug derivation, both create routes, edit-on-arrival
   'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
+  'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
