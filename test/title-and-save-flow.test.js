@@ -43,11 +43,22 @@ t('the save navigation is exempt from the unsaved-work warning', () => {
   assert(/if \(leavingForSave\.current\) return;/.test(editorHook),
     'beforeunload must stand down for the save\'s own navigation');
   const save = editorHook.slice(editorHook.indexOf('const save = useCallback'));
-  assert(/leavingForSave\.current = true;\s*\n\s*location\.href = result\.url;/.test(save),
+  assert(save.indexOf('leavingForSave.current = true;') < save.indexOf('location.href ='),
     'the flag has to be set before the navigation, not after');
   // Closing a tab mid-edit must still warn — the guard is conditional, not gone.
   assert(/event\.preventDefault\(\);\s*\n\s*event\.returnValue = '';/.test(editorHook),
     'the unsaved-work warning was removed instead of being made conditional');
+});
+
+t('a save leaves you where you were: still editing, on the new version', () => {
+  const save = editorHook.slice(editorHook.indexOf('const save = useCallback'));
+  assert(/searchParams\.set\('edit', '1'\)/.test(save),
+    'saving must hand the author back an editor, not read mode');
+  assert(/new URL\(result\.url, location\.origin\)/.test(save),
+    'compose the URL rather than appending ?edit=1, so a response with a query still works');
+  // ?edit=1 is honoured only when the reader can actually edit, so this cannot
+  // hand an editor to someone who has nothing to save to.
+  assert(/wantsEdit && config\.canEdit/.test(editorHook), 'the canEdit gate on ?edit=1 is gone');
 });
 
 t('the first save explains that it publishes, and can be told to stop', () => {

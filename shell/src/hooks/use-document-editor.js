@@ -91,7 +91,14 @@ export function useDocumentEditor({
       const result = await saveDocumentVersion(config.slug, config.version, html);
       await clearDraft(storeKey);
       leavingForSave.current = true;
-      location.href = result.url;
+      // Stay in the editor on the version that was just written. Saving is a
+      // checkpoint in the middle of writing, not the end of it — dropping the
+      // author into read mode made them find the mode switch again after every
+      // save, which is worst on a doc they only just started. Built through URL
+      // so a response that ever carries a query string still composes.
+      const next = new URL(result.url, location.origin);
+      next.searchParams.set('edit', '1');
+      location.href = `${next.pathname}${next.search}`;
     } catch (error) {
       if (error.status === 409 && error.body?.error === 'version_conflict') {
         const latestVersion = Number(error.body.latestVersion);
