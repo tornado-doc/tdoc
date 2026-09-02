@@ -96,8 +96,53 @@
       return { before: before, after: after };
     } catch (e) { return { before: '', after: '' }; }
   }
+  // Which occurrence of this text the selection is, counted through the same
+  // normalized view the resolver searches. Context disambiguates most repeats,
+  // but not a short run inside a row that repeats verbatim — and a person who
+  // can select something expects to be able to comment on it. This is the
+  // deterministic tiebreak for that case; it is advisory, so an older anchor
+  // without one, or a regenerated document where the count changed, still
+  // resolves the way it always did.
+  // Where this selection sits in the view the resolver will search, and what
+  // surrounds it THERE. Context read off the live DOM instead drifts from what
+  // resolution compares against: Range.toString() walks into the injected
+  // probe <script> (which collectTextNodes rejects) and misses the virtual
+  // space the view inserts at every <br> and block boundary. Measuring both
+  // sides in one coordinate space is what makes the comparison mean anything.
+  function placeInView(range, text) {
+    try {
+      var view = docView();
+      var needle = normalizeNeedle(text);
+      if (!needle || !view.norm) return null;
+      var raw = -1;
+      for (var i = 0; i < view.nodes.length; i++) {
+        if (view.nodes[i].node === range.startContainer) { raw = view.nodes[i].start + range.startOffset; break; }
+      }
+      if (raw < 0) return null;
+      // normToRaw ascends: the first norm index at or past this raw offset.
+      var lo = 0, hi = view.normToRaw.length - 1, at = view.normToRaw.length;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (view.normToRaw[mid] >= raw) { at = mid; hi = mid - 1; } else lo = mid + 1;
+      }
+      var hits = [];
+      for (var j = 0; (j = view.norm.indexOf(needle, j)) !== -1; j += Math.max(1, needle.length)) hits.push(j);
+      var index = -1;
+      for (var k = 0; k < hits.length; k++) if (hits[k] >= at) { index = k; break; }
+      if (index === -1) index = hits.length ? hits.length - 1 : 0;
+      var start = hits.length ? hits[index] : at;
+      return {
+        occurrence: index,
+        occurrences: hits.length,
+        before: view.norm.slice(Math.max(0, start - 60), start),
+        after: view.norm.slice(start + needle.length, start + needle.length + 60)
+      };
+    } catch (e) { return null; }
+  }
+
   function postTextSelection(range, text) {
-    var ctx = context(range, 60);
+    var placed = placeInView(range, text);
+    var ctx = placed ? { before: placed.before, after: placed.after } : context(range, 60);
     // Paint the pending anchor so it stays visibly marked while the composer
     // (in the shell document) has focus; cleared on cancel/close (#281 parity).
     if (HL) {
@@ -106,7 +151,10 @@
         CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange()));
       } catch (e) {}
     }
-    post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after, rect: selectionRect(range) });
+    post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after,
+           occurrence: placed ? placed.occurrence : null,
+           occurrences: placed ? placed.occurrences : null,
+           rect: selectionRect(range) });
   }
   function reportSelection() {
     if (interactionMode !== 'comment') return;
@@ -403,6 +451,34 @@
         return !!(fragment.querySelector && fragment.querySelector('br'));
       } catch (e) { return false; }
     }
+    // The nearest ancestor that lays out as a block. Cached: this runs once per
+    // text node while building the view, and the same few ancestors repeat.
+    var blockOf = new Map();
+    function nearestBlock(node) {
+      var el = node.parentElement;
+      while (el && el !== document.body) {
+        if (blockOf.has(el)) { var hit = blockOf.get(el); if (hit) return hit; }
+        var display = '';
+        try { display = window.getComputedStyle(el).display; } catch (e) { display = ''; }
+        if (display && display.indexOf('inline') !== 0 && display !== 'contents') {
+          blockOf.set(el, el);
+          return el;
+        }
+        blockOf.set(el, null);
+        el = el.parentElement;
+      }
+      return document.body;
+    }
+    // Two text nodes in different blocks read as separate lines, and
+    // Selection.toString() puts a newline between them — with no <br> and no
+    // whitespace node to show for it when the markup is written `</p><p>`.
+    // Without a boundary here the saved anchor carries a space the rebuilt
+    // text does not have, and a selection across two paragraphs can never be
+    // found again. #339 asked for exactly this alongside the <br> case.
+    function crossesBlock(left, right) {
+      if (!left || !right) return false;
+      try { return nearestBlock(left) !== nearestBlock(right); } catch (e) { return false; }
+    }
     while (walker.nextNode()) {
       var n = walker.currentNode, start = total.length, v = n.nodeValue;
       // Selection.toString() represents <br> as a newline. Text-node walking
@@ -410,7 +486,7 @@
       // could never match the reconstructed "有可做到…" after submission.
       // Add one normalized virtual space and map it to the next node boundary;
       // Range creation can then still use real DOM offsets.
-      if (norm.length && !prevWasSpace && hasLineBreakBetween(previousNode, n)) {
+      if (norm.length && !prevWasSpace && (hasLineBreakBetween(previousNode, n) || crossesBlock(previousNode, n))) {
         norm += ' '; normToRaw.push(start); prevWasSpace = true;
       }
       nodes.push({ node: n, start: start, end: start + v.length });
@@ -444,12 +520,27 @@
     try { var r = document.createRange(); r.setStart(s.node, s.offset); r.setEnd(e.node, e.offset); return r; } catch (x) { return null; }
   }
   function findTextRange(anchor, view) {
-    if (!anchor || !anchor.text || anchor.text.length < 2 || !view.norm) return null;
-    var needleN = normalizeNeedle(anchor.text); if (needleN.length < 2) return null;
+    // No length floor. A one-character anchor used to be refused outright,
+    // which in CJK is an ordinary thing to want to comment on — and the
+    // composer accepted it anyway, so the comment was saved and then never
+    // drawn. Ambiguity is what the floor was really guarding against, and
+    // context plus `occurrence` below answer that directly.
+    if (!anchor || !anchor.text || !view.norm) return null;
+    var needleN = normalizeNeedle(anchor.text); if (!needleN) return null;
     var hits = [];
     for (var i = 0; (i = view.norm.indexOf(needleN, i)) !== -1; i += Math.max(1, needleN.length)) { hits.push(i); if (hits.length > 64) break; }
     if (!hits.length) return null;
     if (hits.length === 1) return rangeFromNorm(view, hits[0], needleN.length); // unique → accept
+    // The copy that was selected, when the document still has exactly the same
+    // copies it had then. This is exact where context is a guess, so it goes
+    // first: twelve identical rows give every candidate the same neighbourhood,
+    // and a score picks one of them at random-looking. If the count changed the
+    // document was regenerated around this text, the index no longer means what
+    // it meant, and context — which travels — takes over.
+    if (typeof anchor.occurrence === 'number' && anchor.occurrences === hits.length
+        && hits[anchor.occurrence] != null) {
+      return rangeFromNorm(view, hits[anchor.occurrence], needleN.length);
+    }
     // Multiple occurrences: disambiguate by saved context; refuse if none clears.
     var beforeN = normalizeContext(anchor.context_before), afterN = normalizeContext(anchor.context_after);
     if (!beforeN && !afterN) return null;
@@ -463,7 +554,10 @@
       var score = (bScore >= MIN ? bScore : 0) + (aScore >= MIN ? aScore : 0);
       if (score > bestScore) { bestScore = score; bestIdx = h; }
     }
-    return (bestIdx === -1 || bestScore === 0) ? null : rangeFromNorm(view, bestIdx, needleN.length);
+    if (bestIdx !== -1 && bestScore > 0) return rangeFromNorm(view, bestIdx, needleN.length);
+    // Nothing decided. A stale index is worse than no pin: it looks anchored
+    // and points at somebody else's sentence.
+    return null;
   }
   // Article right edge (page coords) so the shell can park pins/cards in the
   // gutter just right of the reading column — not pinned to the viewport edge.
