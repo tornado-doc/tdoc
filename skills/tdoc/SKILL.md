@@ -213,6 +213,9 @@ tdoc_resolve_skill_dir() {
   fi
 }
 SKILL_DIR="$(tdoc_resolve_skill_dir)"
+# Always invoke the CLIs as `bash "$SKILL_DIR/bin/..."` — some skill mounts
+# (Codex, hardened containers) are noexec, where the x bit is set but direct
+# execution fails with Permission denied.
 mkdir -p "$TDOC_DIR"
 
 # Check server is running. Identity-check the body — 200 alone is not proof
@@ -347,7 +350,7 @@ user at the end:
 
 ```bash
 # no-op and instant when already signed in
-"$SKILL_DIR/bin/tdoc-publish" --signin-only
+bash "$SKILL_DIR/bin/tdoc-publish" --signin-only
 ```
 
 Launch this in the **background** (Bash `run_in_background: true`) and go
@@ -379,7 +382,7 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
 4. **Hand the HTML to `bin/tdoc-write`. Do not write into `~/tdocs` yourself.**
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-write" \
+   bash "$SKILL_DIR/bin/tdoc-write" \
      --slug <slug> --title "<title>" --style <selected-style> \
      --prompt "<the user's request, one line>" \
      --html-file /tmp/<slug>.html
@@ -404,9 +407,9 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
    then publish:
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-publish" <slug>
+   bash "$SKILL_DIR/bin/tdoc-publish" <slug>
    # keep earlier drafts to yourself:
-   #   "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
+   #   bash "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
    ```
 
    Report the `https://tdoc.dev/d/<slug>/v/1` URL on its own line, and say what
@@ -428,7 +431,7 @@ working. Skip Step 0 entirely for the local-only and self-host destinations.
    GitHub page finishes it — or that they can say "publish it" later and you'll
    get them a fresh code. The doc stays in `$TDOC_DIR/<slug>/`.
 
-   *Self-host.* `"$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
+   *Self-host.* `bash "$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
    (or `vercel`). Report the worker URL, with the same note about access.
 
    **Local preview stays available to self-hosting users** — `/tdoc serve` and
@@ -537,7 +540,7 @@ silently is the #1 source of regression complaints.
    doc. Skip for a doc that was never published.
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-pull" <slug>
+   bash "$SKILL_DIR/bin/tdoc-pull" <slug>
    ```
 
    Then read `~/tdocs/<slug>/comments.json` and filter to `status: "open"`.
@@ -582,7 +585,7 @@ silently is the #1 source of regression complaints.
 5. **Hand it to `bin/tdoc-write --version next`. Do not write `v<n+1>/` yourself.**
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-write" \
+   bash "$SKILL_DIR/bin/tdoc-write" \
      --slug <slug> --title "<existing title>" --style <the doc's style> \
      --prompt "<what this revision changes, one line>" \
      --html-file /tmp/<slug>-next.html --version next
@@ -609,7 +612,7 @@ silently is the #1 source of regression complaints.
    request leaves the machine.
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-agent-reply" \
+   bash "$SKILL_DIR/bin/tdoc-agent-reply" \
      --slug "<slug>" \
      --parent "<comment_id>" \
      --text "<one or two sentences>" \
@@ -657,7 +660,7 @@ silently is the #1 source of regression complaints.
    version never breaks it.
 
    ```bash
-   "$SKILL_DIR/bin/tdoc-publish" <slug>
+   bash "$SKILL_DIR/bin/tdoc-publish" <slug>
    ```
 
    Only report a `localhost` URL if this doc is local-only because the user
@@ -703,7 +706,12 @@ auth/hosted-token routes.
 Default target is **hosted** (`https://tdoc.dev`). First run signs in with
 GitHub (Device Flow), then asks the host for an account-scoped upload token
 bound to that login and stores it in `~/.tdoc/published.json`. That token can
-only mutate docs it owns. `/me` on tdoc.dev lists that GitHub user's docs. If
+only mutate docs it owns. The sign-in is **resumable**: if the process dies
+while waiting (agent harness timeout, killed sandbox), just run the same
+command again — it picks up the pending device code and keeps polling, so an
+approval the human already granted still lands. Never mint a fresh sign-in by
+hand after an interruption; the re-run does the right thing.
+`/me` on tdoc.dev lists that GitHub user's docs. If
 hosted signup is not open on the target, the CLI fails with a clear prompt to
 self-host instead — do **not** tell the user to flip a Worker env flag.
 
@@ -745,7 +753,7 @@ Hosted needs no extra CLI beyond Node 18+ and curl. Self-hosting needs `jq`. Clo
 (`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
 
 ```bash
-"$SKILL_DIR/bin/tdoc-publish" <slug>
+bash "$SKILL_DIR/bin/tdoc-publish" <slug>
 ```
 
 Prints the published URL: `https://tdoc.dev/d/<slug>/v/<N>` (hosted),
@@ -758,7 +766,7 @@ Overwrites local `~/tdocs/<slug>/comments.json` with comments collected on the
 published Worker. Run before `/tdoc edit` to regenerate using community feedback.
 
 ```bash
-"$SKILL_DIR/bin/tdoc-pull" <slug>
+bash "$SKILL_DIR/bin/tdoc-pull" <slug>
 ```
 
 ### `/tdoc unpublish <slug>` — remove from your Worker
@@ -767,7 +775,7 @@ Deletes all versions, meta, and comments for `<slug>` from R2/KV. Local files
 are untouched.
 
 ```bash
-"$SKILL_DIR/bin/tdoc-unpublish" <slug>
+bash "$SKILL_DIR/bin/tdoc-unpublish" <slug>
 ```
 
 ### `/tdoc onboard` — guided first-time setup
@@ -778,7 +786,7 @@ installed, or might be partway through. You **must** drive the flow from
 
 **Algorithm:**
 
-1. Run `"$SKILL_DIR/bin/tdoc-doctor" --json` and parse the JSON. This is non-destructive.
+1. Run `bash "$SKILL_DIR/bin/tdoc-doctor" --json` and parse the JSON. This is non-destructive.
    The doctor is target-aware and reports what it assessed under `.target`.
    The default is `hosted` (tdoc.dev), which needs only Node 18+ and curl —
    **no Cloudflare account, no wrangler, nothing to click in a dashboard.**
@@ -833,9 +841,9 @@ run also check origin/main and nag immediately when this checkout is
 behind. `tdoc-doctor` reports the same as `.update` (not a missing_step).
 
 ```bash
-"$SKILL_DIR/bin/tdoc-update" --check    # see what's new
-"$SKILL_DIR/bin/tdoc-update"            # apply
-"$SKILL_DIR/bin/tdoc-update" --yes      # apply + redeploy worker
+bash "$SKILL_DIR/bin/tdoc-update" --check    # see what's new
+bash "$SKILL_DIR/bin/tdoc-update"            # apply
+bash "$SKILL_DIR/bin/tdoc-update" --yes      # apply + redeploy worker
 ```
 
 If the user has not yet `git clone`'d (the skill dir is not a git checkout),
@@ -847,8 +855,8 @@ Prints a concise human health summary. Use this when the user reports a
 problem; pass `--json` when an agent needs the full machine report.
 
 ```bash
-"$SKILL_DIR/bin/tdoc-doctor"
-"$SKILL_DIR/bin/tdoc-doctor" --json
+bash "$SKILL_DIR/bin/tdoc-doctor"
+bash "$SKILL_DIR/bin/tdoc-doctor" --json
 ```
 
 ## Troubleshooting
@@ -1312,7 +1320,7 @@ if [ "$TEL_EFFECTIVE" = "on" ]; then
     _P_SID="$(echo "$_PDATA" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
     [ -z "$_P_SKILL" ] && continue
     if [ -x "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" ]; then
-      "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+      bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
         --skill "$_P_SKILL" --outcome unknown \
         --step "reaped-incomplete-run" --session-id "$_P_SID" 2>/dev/null || true
     fi
@@ -1384,15 +1392,15 @@ if [ -z "${TDOC_SKIP_UPDATE_CHECK:-}" ] && [ -x "$TDOC_SKILL_ROOT/bin/tdoc-updat
    && grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" 2>/dev/null; then
   # Pass the resolved checkout explicitly so versions older than #332, whose
   # internal default was ~/.claude, can still bootstrap the correct install.
-  SKILL_DIR="$TDOC_SKILL_ROOT" "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
+  SKILL_DIR="$TDOC_SKILL_ROOT" bash "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
 fi
 
 if [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" ]; then
-  NAG_LINE="$("$TDOC_SKILL_ROOT/bin/tdoc-update-nag" 2>/dev/null || true)"
+  NAG_LINE="$(bash "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" 2>/dev/null || true)"
   if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
     echo "$NAG_LINE"
     if [ "$TEL_EFFECTIVE" = "on" ]; then
-      "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+      bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
         --skill tdoc \
         --event-type upgrade_prompted \
         --outcome unknown \
@@ -1534,7 +1542,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On success**:
 
 ```bash
-"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome success \
   --duration "$DURATION" \
@@ -1546,7 +1554,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On error**:
 
 ```bash
-"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome error \
   --duration "$DURATION" \
@@ -1560,7 +1568,7 @@ mention (not a /tdoc command), use `chat` or `freeform`.
 **On abandoned** (user asked to stop):
 
 ```bash
-"$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
+bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
   --skill tdoc \
   --outcome abandoned \
   --duration "$DURATION" \

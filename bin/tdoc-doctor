@@ -184,8 +184,10 @@ fi
 # is already on latest, and a stale checkout is not a Cloudflare dep.
 update_json='{"ok":true,"checked":false,"behind":0}'
 _nag="$(cd "$(dirname "$0")" && pwd)/tdoc-update-nag"
-if [ -x "$_nag" ]; then
-  _uj="$("$_nag" --json 2>/dev/null || true)"
+if [ -f "$_nag" ]; then
+  # -f, not -x: on a noexec mount the x bit is set but exec fails, so test
+  # for the file and run it through bash explicitly.
+  _uj="$(bash "$_nag" --json 2>/dev/null || true)"
   if printf '%s' "$_uj" | grep -q '^{'; then update_json="$_uj"; fi
 fi
 

@@ -71,6 +71,10 @@ function pendingSignin(slug) {
     // exists and is not ours, which still counts as alive.
     try { process.kill(p.pid, 0); } catch (e) { if (e.code !== 'EPERM') return null; }
   }
+  // Explicit whitelist, and it is a contract: the file also carries
+  // device_code (what makes a sign-in resumable), which can REDEEM the
+  // approval. The modal only ever needs the user-facing half. Never add
+  // device_code here — test/publish-signin.test.js pins this.
   return {
     user_code: String(p.user_code),
     verification_uri: String(p.verification_uri),
@@ -1527,7 +1531,7 @@ const server = http.createServer(async (req, res) => {
     // Same spawn hardening as /api/publish: error listener, hard timeout,
     // bounded output. Deleting is quick; 60s covers a slow unpublish curl.
     const args = body.published === false ? [slug, '--local-only'] : [slug];
-    const proc = spawn(bin, args, { env: childEnv() });
+    const proc = spawn('bash', [bin, ...args], { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 64 * 1024;
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
@@ -1569,13 +1573,16 @@ const server = http.createServer(async (req, res) => {
     }
     const bin = path.join(__dirname, '..', 'bin', 'tdoc-publish');
     if (!fs.existsSync(bin)) return json(res, 500, { error: 'tdoc-publish script not found' });
+    // Spawned through bash, not exec'd: the skill checkout can live on a
+    // noexec mount (Codex skills dir), where the x bit is set but direct exec
+    // is EACCES.
     // Spawn hardening: an `error` listener (so an EACCES doesn't crash the whole
     // server with an unhandled 'error' event), a hard timeout (SIGTERM→SIGKILL)
     // so a hung wrangler/curl can't leave the HTTP response pending forever, and
     // a bounded output buffer so runaway child output can't OOM us. wrangler
     // legitimately needs the inherited env (CLOUDFLARE_* creds), so we keep it
     // but this endpoint is now origin/CSRF-gated above.
-    const proc = spawn(bin, [slug], { env: childEnv() });
+    const proc = spawn('bash', [bin, slug], { env: childEnv() });
     let out = '', err = '', settled = false, killed = false;
     const CAP = 256 * 1024; // 256 KiB of captured output is plenty
     const append = (buf, d) => (buf.length < CAP ? buf + d : buf);
