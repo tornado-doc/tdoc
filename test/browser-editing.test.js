@@ -215,6 +215,71 @@ async function chooseMode(page, label) {
       await frame.evaluate(() => window.getSelection().removeAllRanges());
     });
 
+    await test('dismissal spares the drag and the artifact pill', async () => {
+      // Three things the dismiss-first rule broke when it was first written.
+      // Each is a separate path into the same comment UI.
+      const box = await page.locator('.tdoc-doc-frame').boundingBox();
+      const geometry = await frame.evaluate(() => {
+        const paragraph = document.querySelector('#editable-paragraph');
+        const text = paragraph.firstChild;
+        const span = (from, to) => {
+          const range = document.createRange();
+          range.setStart(text, from); range.setEnd(text, to);
+          return range.getBoundingClientRect();
+        };
+        const first = span(0, 4), tail = span(10, 20);
+        const artifact = document.querySelector('#comment-artifact').getBoundingClientRect();
+        return {
+          first: { x: first.left + first.width / 2, y: first.top + first.height / 2 },
+          drag: { x1: tail.left + 1, x2: tail.right - 1, y: tail.top + tail.height / 2 },
+          artifact: { x: artifact.left + artifact.width / 2, y: artifact.top + 12 },
+        };
+      });
+      const openCount = () => page.locator('.tdoc-popup, .tdoc-margin-comment.active').count();
+      const clickAt = async (point) => {
+        await page.mouse.click(box.x + point.x, box.y + point.y);
+        await page.waitForTimeout(250);
+      };
+
+      // 1. A drag while something is open is a selection, not a dismissal.
+      //    Clearing on mousedown unmounted the focused composer, and losing
+      //    that focus wiped the selection mid-drag.
+      await clickAt(geometry.first);
+      assert(await openCount() > 0, 'precondition: a word click did not open the composer');
+      await page.mouse.move(box.x + geometry.drag.x1, box.y + geometry.drag.y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + geometry.drag.x2, box.y + geometry.drag.y, { steps: 12 });
+      await page.mouse.up();
+      await page.waitForTimeout(400);
+      assert(await openCount() > 0, 'a drag while something was open reported no selection');
+      await page.locator('.tdoc-popup button.x').click().catch(() => {});
+      await page.waitForTimeout(200);
+
+      // 2. The artifact pill is our own UI, but while a card is open it is
+      //    outside that card like anything else: it dismisses, it does not
+      //    open an element comment.
+      await clickAt(geometry.first);
+      assert(await openCount() > 0, 'precondition: composer did not reopen');
+      // Dispatch the hover inside the frame: Playwright's own hover() checks
+      // actionability against the top document, where the open composer sits
+      // over the artifact and the check never settles.
+      await frame.evaluate(() => {
+        const element = document.querySelector('#comment-artifact');
+        const rect = element.getBoundingClientRect();
+        element.dispatchEvent(new MouseEvent('mousemove', {
+          bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + 12,
+        }));
+      });
+      await frame.locator('.tdoc-comment-pill').waitFor({ state: 'visible' });
+      const pill = await frame.locator('.tdoc-comment-pill').boundingBox();
+      assert(pill, 'hovering the artifact did not show the comment pill');
+      await page.mouse.click(box.x + pill.x + pill.width / 2, box.y + pill.y + pill.height / 2);
+      await page.waitForTimeout(400);
+      assert(await openCount() === 0, 'clicking the artifact pill opened a comment instead of dismissing');
+
+      await frame.evaluate(() => window.getSelection().removeAllRanges());
+    });
+
     await test('Read mode opens existing anchors but does not create a comment selection', async () => {
       await chooseMode(page, 'Read');
       await selectParagraph(frame);

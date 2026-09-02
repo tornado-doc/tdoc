@@ -82,6 +82,7 @@ const OFFLINE = [
   'publish-signin.test.js',   // device code reaches the publish modal (expiry/pid/slug guards)
   'resume-signin.test.js',    // dead process ≠ dead sign-in: device_code resumes on re-run
   'onboarding-terminal-recovery.test.js', // provider retry flags + honest SIGINT recovery
+  'dismiss-rule.test.js',     // the dismiss-first rule keeps its three exceptions
 ];
 
 // Require network (live Cloudflare) or a browser (playwright). Not run in the
