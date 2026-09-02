@@ -141,6 +141,20 @@
     while (end < value.length && isWord(value.charAt(end))) end++;
     return { start: start, end: end };
   }
+  // caretPositionFromPoint answers with the NEAREST caret, not the one under the
+  // pointer: a click in a margin, in the gap between blocks, or below the last
+  // line still resolves into the closest text node. Commenting on a word the
+  // pointer was never over is how a click meant to dismiss a card opened a
+  // different one, and how blank space 30px under a paragraph could select a
+  // word inside a <pre>. A click is on a word or it is not — no proximity.
+  function pointOverRange(range, x, y) {
+    var rects = range.getClientRects();
+    for (var i = 0; i < rects.length; i++) {
+      var r = rects[i];
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+    }
+    return false;
+  }
   function reportPointSelection(event) {
     if (interactionMode !== 'comment' || event.button !== 0) return;
     if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return;
@@ -155,6 +169,9 @@
       range.setStart(point.node, bounds.start); range.setEnd(point.node, bounds.end);
       var text = range.toString().trim();
       if (!text) return;
+      // Clicked past the text, not on it: leave the click to the clear path so
+      // it dismisses whatever is open instead of commenting on a neighbour.
+      if (!pointOverRange(range, event.clientX, event.clientY)) return;
       if (current) { current.removeAllRanges(); current.addRange(range); }
       event.preventDefault(); event.stopPropagation();
       postTextSelection(range, text);
