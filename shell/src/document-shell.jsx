@@ -23,6 +23,8 @@ import {
   EditorToolbar,
   LinkDialog,
   SaveConflictDialog,
+  SaveNoticeDialog,
+  saveNoticeDismissed,
 } from './document/editor-toolbar.jsx';
 import {
   DeleteDocumentDialog,
@@ -108,6 +110,7 @@ export function DocumentShell({ boot, config }) {
   const [openClusterKey, setOpenClusterKey] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [reanchorId, setReanchorId] = useState(null);
+  const [saveNoticeOpen, setSaveNoticeOpen] = useState(false);
   const [dialog, setDialog] = useState(null);
   const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
@@ -310,6 +313,16 @@ export function DocumentShell({ boot, config }) {
     setOpenCommentId(root.id);
     setDeepTarget(null);
   }, [bridge.layout.scrollY, bridge.send, clusters, comments.comments, deepTarget, narrow]);
+
+  // Save explains itself the first time, then gets out of the way for good if
+  // the author asked it to.
+  const requestSave = () => {
+    if (saveNoticeDismissed()) {
+      editor.save();
+      return;
+    }
+    setSaveNoticeOpen(true);
+  };
 
   const closeComposer = () => {
     setComposer(null);
@@ -546,7 +559,7 @@ export function DocumentShell({ boot, config }) {
             else editor.format(command, value);
           }}
           onDiscard={editor.discard}
-          onSave={editor.save}
+          onSave={requestSave}
         />
       ) : null}
 
@@ -659,6 +672,11 @@ export function DocumentShell({ boot, config }) {
       <MessageDialog
         message={dialog?.type === 'message' ? dialog : null}
         onOpenChange={(open) => !open && setDialog(null)}
+      />
+      <SaveNoticeDialog
+        open={saveNoticeOpen}
+        onOpenChange={setSaveNoticeOpen}
+        onConfirm={editor.save}
       />
       <SaveConflictDialog conflict={editor.conflict} onClose={editor.closeConflict} />
       <LinkDialog

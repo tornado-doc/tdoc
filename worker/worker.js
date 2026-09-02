@@ -1542,13 +1542,18 @@ function injectReaderCss(html, css) {
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docTitle) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const vlist = Array.isArray(versions) && versions.length ? versions : [{ n: version }];
-  let title = slug;
+  // The document's own title, which the bar and the browser tab both show.
+  // This used to be the slug and nothing ever reassigned it, so every hosted
+  // document was named after its URL. That read as a title only while slugs
+  // were agent-picked words; a browser-created doc's slug is an opaque id.
+  // The slug remains the fallback for a doc whose meta carries no title.
+  const title = typeof docTitle === 'string' && docTitle.trim() ? docTitle.trim() : slug;
   const cfg = {
     slug,
     title,
@@ -1696,7 +1701,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta)), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta && gate.meta.title), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
