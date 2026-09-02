@@ -46,6 +46,10 @@ export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
         ))}
       </AppMenu>
       <span className="doc-title">{config.title || 'tdoc'}</span>
+      {/* Whose document this is. Absent for anything published before hosted
+          accounts, for the landing doc, and on a self-hosted worker — those
+          name nobody rather than guessing. Folds away before the title does. */}
+      {config.author ? <span className="doc-author">{config.author}</span> : null}
       {config.viewerStar ? (
         <button
           id="tdoc-star-btn"

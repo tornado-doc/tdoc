@@ -26,8 +26,11 @@ t('ownerManage defaults null and is populated only inside the owner guard', () =
 });
 
 t('shellDocumentWorker strips owner data for non-owners', () => {
+  // The whole function, not a fixed byte window — a window silently stops
+  // covering the gate the moment anything is added above it, which is a test
+  // that reports "gate missing" when the gate is right there (#395).
   const start = worker.indexOf('function shellDocumentWorker(');
-  const block = worker.slice(start, start + 1600);
+  const block = worker.slice(start, worker.indexOf('\nfunction ', start + 20));
   assert(block.includes('ownerManage: isOwner ? (ownerManage || null) : null'), 'defense-in-depth owner check missing');
 });
 
