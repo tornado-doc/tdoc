@@ -247,8 +247,33 @@ t('the bar names a document by its title, never by its slug', () => {
 
 t('a doc created from scratch opens in edit mode, not read mode', () => {
   assert(editorHook.includes("get('edit') === '1'"), 'the editor never looks at ?edit=1');
-  assert(editorHook.includes('urlWantsEdit() && config.canEdit'),
+  assert(/(?:urlWantsEdit\(\)|wantsEdit) && config\.canEdit/.test(editorHook),
     'edit-on-arrival must still respect canEdit, or a reader gets an editor that cannot save');
+});
+
+t('a doc created from scratch shares the CLI default: no stored access policy', () => {
+  // A CLI publish stores no `access`, so accessFromMeta falls back to the
+  // legacy defaults — public, with version history visible to anyone holding
+  // the link. Creating in the browser used to stamp the product defaults into
+  // meta instead (unlisted + owner-only history), so two docs with the same
+  // content behaved differently depending on where they were born, and a
+  // shared link silently showed one version instead of all of them.
+  const scratch = worker.slice(
+    worker.indexOf("prompt: 'Created from scratch in the browser'") - 400,
+    worker.indexOf("prompt: 'Created from scratch in the browser'") + 400,
+  );
+  assert(!/access:\s*normalizeAccess/.test(scratch),
+    'creating from scratch stamps an access policy again; a CLI publish stores none');
+
+  // The duplicate path is deliberately NOT the same: on tdoc.dev a reader may
+  // duplicate someone else's doc, and a copy carrying a public policy would
+  // republish it. hosted-oob-behavior asserts a copy defaults unlisted.
+  const duplicate = worker.slice(
+    worker.indexOf('duplicated_by: session.login') - 200,
+    worker.indexOf('duplicated_by: session.login') + 600,
+  );
+  assert(/access:\s*normalizeAccess\({}, { legacy: false }\)/.test(duplicate),
+    'a duplicate must keep its own conservative default, not inherit or drop it');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

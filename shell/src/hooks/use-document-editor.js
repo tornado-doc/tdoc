@@ -23,6 +23,22 @@ function allowedMode(mode, config) {
   return null;
 }
 
+const MODE_STORAGE_KEY = 'tdoc-mode';
+
+function getStoredMode() {
+  try {
+    return localStorage.getItem(MODE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeMode(mode) {
+  try {
+    localStorage.setItem(MODE_STORAGE_KEY, mode);
+  } catch {}
+}
+
 export function useDocumentEditor({
   boot,
   config,
@@ -45,7 +61,12 @@ export function useDocumentEditor({
   // need. `tdoc:ready` re-sends whatever mode is current, so the frame picks
   // this up even though it is set before the iframe has loaded.
   const [mode, setMode] = useState(() => {
-    if (urlWantsEdit() && config.canEdit) return 'edit';
+    const wantsEdit = new URLSearchParams(location.search).get('edit') === '1';
+    if (wantsEdit && config.canEdit) return 'edit';
+    const stored = getStoredMode();
+    if (stored === 'edit' && config.canEdit) return 'edit';
+    if (stored === 'comment' && config.canComment) return 'comment';
+    if (stored === 'read') return 'read';
     return config.canComment ? 'comment' : 'read';
   });
   const [dirty, setDirty] = useState(false);
@@ -104,6 +125,7 @@ export function useDocumentEditor({
     }
     if (nextMode !== 'comment') onDisableCommentSelection();
     setMode(nextMode);
+    storeMode(nextMode);
   }, [config.canComment, config.canEdit, dirty, onDisableCommentSelection, showToast]);
 
   const requestDocument = useCallback(() => new Promise((resolve, reject) => {

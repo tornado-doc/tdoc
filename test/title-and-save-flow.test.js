@@ -59,7 +59,8 @@ t('a save leaves you where you were: still editing, on the new version', () => {
     'compose the URL rather than appending ?edit=1, so a response with a query still works');
   // ?edit=1 is honoured only when the reader can actually edit, so this cannot
   // hand an editor to someone who has nothing to save to.
-  assert(editorHook.includes('urlWantsEdit() && config.canEdit'), 'the canEdit gate on ?edit=1 is gone');
+  assert(/(?:urlWantsEdit\(\)|wantsEdit) && config\.canEdit/.test(editorHook),
+    'the canEdit gate on ?edit=1 is gone');
 });
 
 t('a draft restores only after the published bytes are known, and per doc', () => {
