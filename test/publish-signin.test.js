@@ -152,6 +152,17 @@ function deadPid() {
     eq(r.body.signin, null, 'signin');
   });
 
+  await t('device_code is never served to the modal', async () => {
+    // The pending file carries device_code so a later CLI run can resume the
+    // sign-in. That value can redeem the approval — the endpoint whitelists
+    // fields and must keep it out of every response.
+    writePending({ device_code: 'super-secret-device-code', base: 'https://tdoc.dev' });
+    const r = await get(`/api/publish/signin?slug=${SLUG}`);
+    eq(r.body.signin && r.body.signin.user_code, 'ABCD-1234', 'user_code');
+    const raw = JSON.stringify(r.body);
+    eq(raw.includes('device_code') || raw.includes('super-secret'), false, 'device_code leaked');
+  });
+
   await t('a file missing its code is withheld', async () => {
     writePending({ user_code: '' });
     const r = await get(`/api/publish/signin?slug=${SLUG}`);

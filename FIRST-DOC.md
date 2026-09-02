@@ -542,7 +542,7 @@ and their working hours, and the default visibility makes the link the
 credential. Resolve it with access, not with localhost:
 
 ```bash
-"$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner what-ai-knows-<name>
+bash "$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner what-ai-knows-<name>
 ```
 
 `private` means the doc is readable by them and by accounts they explicitly

@@ -14,4 +14,4 @@
 #
 # Every other flag is bin/tdoc-new's; this is the same implementation under the
 # name that says what it does.
-exec "$(cd "$(dirname "$0")" && pwd)/tdoc-new" "$@"
+exec bash "$(cd "$(dirname "$0")" && pwd)/tdoc-new" "$@"
