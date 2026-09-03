@@ -141,8 +141,17 @@ jobs:
           set -euo pipefail
           ALIAS="pr-${{ github.event.pull_request.number }}"
           # Alias + worker name must stay within the 63-char DNS label.
+          # Capture and print Wrangler's diagnostics even when upload fails.
+          # A substitution under `set -e` used to exit before `echo "$OUT"`,
+          # leaving failed preview deploys with no actionable error message.
+          set +e
           OUT="$(wrangler versions upload --name tdoc-preview -c wrangler.preview.toml --preview-alias "$ALIAS" --message "PR ${{ github.event.pull_request.number }} ${{ github.sha }}" 2>&1 | tee /tmp/wrangler-preview.out)"
+          STATUS=$?
+          set -e
           echo "$OUT"
+          if [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
           HOST="$(printf '%s\n' "$OUT" | grep -Eo "https://${ALIAS}-tdoc-preview\\.[A-Za-z0-9.-]+\\.workers\\.dev" | head -1 | sed 's|^https://||')"
           if [ -z "$HOST" ]; then
             HOST="$(printf '%s\n' "$OUT" | grep -Eo 'https://[A-Za-z0-9.-]+-tdoc-preview\\.[A-Za-z0-9.-]+\\.workers\\.dev' | head -1 | sed 's|^https://||')"

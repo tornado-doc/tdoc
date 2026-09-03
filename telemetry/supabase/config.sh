@@ -1,2 +1,0 @@
-export SKILL_TELEMETRY_SUPABASE_URL="https://dqkgilwvciuldbqtvegv.supabase.co"
-export SKILL_TELEMETRY_ANON_KEY="sb_publishable_nDMeVcV7E81e2Gn7pkIs8g_BC2MTZ-M"
