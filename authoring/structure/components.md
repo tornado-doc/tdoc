@@ -85,6 +85,27 @@ fill and the radius are separate properties and nothing in that rule mentions
 them. This is the one part of a table that a document cannot leave unsaid, so
 `bin/tdoc-validate-template` fails a document whose cells never name both.
 
+**Tabular is a numeral feature, not a smaller face.** A column of figures lines
+up because the figures are tabular, and that costs nothing:
+
+```css
+.num { font-variant-numeric: tabular-nums; }
+```
+
+Buying the same alignment with a smaller size or a monospaced family costs two
+things instead. The column ends up set differently from the ones beside it, so
+the type changes size mid-row for no reason the reader can see; and a
+monospaced family carries no CJK, so Chinese in that column falls back and
+renders as the same typeface at two sizes, one column apart.
+
+The class also has to sit on what it describes. `.num` on a `<td>` holding a
+sentence is a claim about that cell that is not true — and if it carries
+`white-space: nowrap`, the sentence can never break and the table takes a width
+no viewport can give it, pushing the whole page sideways. Put the class on the
+numerals (`<span class="num">$1.4B</span>`), not on the cell that contains them.
+`bin/tdoc-validate-template` fails a cell class that narrows type or forbids
+wrapping while sitting on prose, on the custom-template path too.
+
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`.
 
