@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -19,7 +19,57 @@ import { AppMenu, AppMenuItem, AppSubmenu } from '../ui/menu.jsx';
 // URL detail — already in the address bar — and a browser-created doc's slug
 // is an opaque id that made a titled document read as untitled. Version and
 // title carry the bar now, which is what the narrow layout already did.
-export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
+// The title in the bar, editable in place by whoever owns the document. Commit
+// on Enter or on leaving the field, abandon on Escape; an empty title is not a
+// rename, it is a mistake, so it restores instead of clearing the name.
+function DocumentTitle({ title, canRename, onRename }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const input = useRef(null);
+
+  useEffect(() => { if (!editing) setDraft(title); }, [title, editing]);
+  useEffect(() => { if (editing) input.current?.select(); }, [editing]);
+
+  if (!canRename) return <span className="doc-title">{title || 'tdoc'}</span>;
+
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (!next || next === title) { setDraft(title); return; }
+    onRename(next);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={input}
+        className="doc-title doc-title-input"
+        aria-label="Document title"
+        maxLength="120"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') { event.preventDefault(); commit(); }
+          if (event.key === 'Escape') { setDraft(title); setEditing(false); }
+        }}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="doc-title doc-title-edit"
+      title="Rename"
+      onClick={() => setEditing(true)}
+    >
+      {title || 'Untitled'}
+    </button>
+  );
+}
+
+export function DocumentBreadcrumbs({ config, title, starred, onRename, onToggleStar }) {
   if (config.isLanding) return null;
 
   return (
@@ -45,7 +95,7 @@ export function DocumentBreadcrumbs({ config, starred, onToggleStar }) {
           </AppMenuItem>
         ))}
       </AppMenu>
-      <span className="doc-title">{config.title || 'tdoc'}</span>
+      <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
       {/* Whose document this is. Absent for anything published before hosted
           accounts, for the landing doc, and on a self-hosted worker — those
           name nobody rather than guessing. Folds away before the title does. */}

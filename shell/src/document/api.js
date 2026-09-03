@@ -115,6 +115,16 @@ export function publishDocument(slug) {
   });
 }
 
+// Renaming is a metadata edit: it changes what the document is called and
+// touches neither its text nor its version history.
+export function renameDocument(slug, title) {
+  return request('/api/doc/title', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, title }),
+  });
+}
+
 export function updateDocumentAccess(slug, access) {
   return request('/api/doc/access', {
     method: 'PATCH',

@@ -31,14 +31,16 @@ function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, 
   );
 }
 
-function FolderNameDialog({ title, confirmLabel, initialName, onSave, onClose }) {
+// A name prompt. Folders were its first caller; renaming a document is its
+// second, and neither wants its own copy of an input that commits on Enter.
+function NameDialog({ title, confirmLabel, initialName, maxLength = 60, onSave, onClose }) {
   const [name, setName] = useState(initialName);
   const save = () => onSave(name);
   return (
     <HubDialog title={title} confirmLabel={confirmLabel} onConfirm={save} onClose={onClose}>
       <input
         type="text"
-        maxLength="60"
+        maxLength={maxLength}
         autoFocus
         value={name}
         onChange={(event) => setName(event.target.value)}
@@ -92,7 +94,12 @@ export function DocsHub({ boot }) {
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
   const openCreateHelp = () => setModal({ type: 'create-help' });
 
-  const docMenu = (slugs) => [
+  const docMenu = (slugs, doc) => [
+    doc && (!doc.owner || doc.owner === viewer) ? {
+      label: 'Rename',
+      className: 'row-rename',
+      onSelect: () => setModal({ type: 'rename-doc', doc }),
+    } : null,
     capabilities.folders ? {
       label: 'Move to folder',
       className: 'row-move',
@@ -222,7 +229,7 @@ export function DocsHub({ boot }) {
                   selection={{ checked: hub.selected.has(doc.slug), onChange: () => hub.toggleSelected(doc.slug) }}
                   starrable={capabilities.star}
                   onToggleStar={hub.toggleStar}
-                  menuItems={docMenu([doc.slug])}
+                  menuItems={docMenu([doc.slug], doc)}
                   data={{ created: doc.created, updated: doc.updated, folder: doc.folder }}
                 />
               ))}
@@ -254,12 +261,22 @@ export function DocsHub({ boot }) {
           <CreateChoice create={hub.createDoc} canCreate={capabilities.create} />
         </HubDialog>
       ) : null}
+      {modal?.type === 'rename-doc' ? (
+        <NameDialog
+          title="Rename doc"
+          confirmLabel="Rename"
+          initialName={modal.doc.title || ''}
+          maxLength={120}
+          onClose={closeModal}
+          onSave={(name) => closeIf(hub.renameDoc(modal.doc.slug, name))}
+        />
+      ) : null}
       {modal?.type === 'new-folder' ? (
-        <FolderNameDialog title="New folder" confirmLabel="Create" initialName="" onClose={closeModal}
+        <NameDialog title="New folder" confirmLabel="Create" initialName="" onClose={closeModal}
           onSave={(name) => closeIf(hub.saveFolder({ name }))} />
       ) : null}
       {modal?.type === 'rename-folder' ? (
-        <FolderNameDialog title="Rename folder" confirmLabel="Save" initialName={modal.folder.name} onClose={closeModal}
+        <NameDialog title="Rename folder" confirmLabel="Save" initialName={modal.folder.name} onClose={closeModal}
           onSave={(name) => closeIf(hub.saveFolder({ id: modal.folder.id, name }))} />
       ) : null}
       {modal?.type === 'move' ? (

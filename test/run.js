@@ -50,6 +50,7 @@ const OFFLINE = [
   'title-and-save-flow.test.js', // #367 hosted title plumbing, save's leave-site prompt, save notice
   'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
   'document-owner.test.js',   // #395 the bar and the lists name the document's owner
+  'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
@@ -84,6 +85,7 @@ const OFFLINE = [
   'publish-signin.test.js',   // device code reaches the publish modal (expiry/pid/slug guards)
   'resume-signin.test.js',    // dead process ≠ dead sign-in: device_code resumes on re-run
   'onboarding-terminal-recovery.test.js', // provider retry flags + honest SIGINT recovery
+  'dismiss-rule.test.js',     // the dismiss-first rule keeps its three exceptions
 ];
 
 // Require network (live Cloudflare) or a browser (playwright). Not run in the
@@ -95,6 +97,7 @@ const GATED = [
   'ui.test.js',          // playwright
   'csp-xss.test.js',     // playwright: author <script>/onclick blocked, overlay still works
   'artifact-shell.test.js', // playwright: cross-origin iframe shell boundary (RED until the re-arch lands; see PLAN.md)
+  'anchor-scenarios.test.js', // #387 everything selectable can carry a comment
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
 ];
 

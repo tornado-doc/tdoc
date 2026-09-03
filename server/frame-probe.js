@@ -23,6 +23,12 @@
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
   var interactionMode = 'read';
+  // Whether the shell currently has a comment card, cluster, or composer open.
+  // While something is open, the next click anywhere in the document only
+  // dismisses it — it must not open a different comment or start a new one.
+  var shellUiOpen = false;
+  var swallowClick = false;
+  var dismissDownX = 0, dismissDownY = 0;
   var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
@@ -80,13 +86,76 @@
   }
   function context(range, chars) {
     try {
-      var before = (range.startContainer.textContent || '').slice(Math.max(0, range.startOffset - chars), range.startOffset);
-      var after = (range.endContainer.textContent || '').slice(range.endOffset, range.endOffset + chars);
+      // Context must cross text-node boundaries. Reading only startContainer
+      // and endContainer leaves both sides empty when a user selects a whole
+      // table cell, heading, or inline run. That makes repeated labels
+      // impossible to disambiguate after reload.
+      var beforeRange = document.createRange();
+      beforeRange.selectNodeContents(document.body);
+      beforeRange.setEnd(range.startContainer, range.startOffset);
+      var afterRange = document.createRange();
+      afterRange.selectNodeContents(document.body);
+      afterRange.setStart(range.endContainer, range.endOffset);
+      var beforeText = beforeRange.toString(), afterText = afterRange.toString();
+      var before = beforeText.slice(Math.max(0, beforeText.length - chars));
+      var after = afterText.slice(0, chars);
       return { before: before, after: after };
     } catch (e) { return { before: '', after: '' }; }
   }
+  // Which occurrence of this text the selection is, counted through the same
+  // normalized view the resolver searches. Context disambiguates most repeats,
+  // but not a short run inside a row that repeats verbatim — and a person who
+  // can select something expects to be able to comment on it. This is the
+  // deterministic tiebreak for that case; it is advisory, so an older anchor
+  // without one, or a regenerated document where the count changed, still
+  // resolves the way it always did.
+  // Where this selection sits in the view the resolver will search, and what
+  // surrounds it THERE. Context read off the live DOM instead drifts from what
+  // resolution compares against: Range.toString() walks into the injected
+  // probe <script> (which collectTextNodes rejects) and misses the virtual
+  // space the view inserts at every <br> and block boundary. Measuring both
+  // sides in one coordinate space is what makes the comparison mean anything.
+  function placeInView(range, text) {
+    try {
+      var view = docView();
+      var needle = normalizeNeedle(text);
+      if (!needle || !view.norm) return null;
+      // Where the selection starts, in raw view coordinates. A triple-click, or
+      // dragging across a whole table cell, leaves the range's endpoint on an
+      // ELEMENT rather than a text node — so matching on startContainer alone
+      // loses exact placement for exactly the selections people make fastest.
+      // The first text node the range touches is where its text begins.
+      var raw = -1;
+      for (var i = 0; i < view.nodes.length; i++) {
+        var node = view.nodes[i].node;
+        if (node === range.startContainer) { raw = view.nodes[i].start + range.startOffset; break; }
+        if (range.intersectsNode && range.intersectsNode(node)) { raw = view.nodes[i].start; break; }
+      }
+      if (raw < 0) return null;
+      // normToRaw ascends: the first norm index at or past this raw offset.
+      var lo = 0, hi = view.normToRaw.length - 1, at = view.normToRaw.length;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (view.normToRaw[mid] >= raw) { at = mid; hi = mid - 1; } else lo = mid + 1;
+      }
+      var hits = [];
+      for (var j = 0; (j = view.norm.indexOf(needle, j)) !== -1; j += Math.max(1, needle.length)) hits.push(j);
+      var index = -1;
+      for (var k = 0; k < hits.length; k++) if (hits[k] >= at) { index = k; break; }
+      if (index === -1) index = hits.length ? hits.length - 1 : 0;
+      var start = hits.length ? hits[index] : at;
+      return {
+        occurrence: index,
+        occurrences: hits.length,
+        before: view.norm.slice(Math.max(0, start - 60), start),
+        after: view.norm.slice(start + needle.length, start + needle.length + 60)
+      };
+    } catch (e) { return null; }
+  }
+
   function postTextSelection(range, text) {
-    var ctx = context(range, 60);
+    var placed = placeInView(range, text);
+    var ctx = placed ? { before: placed.before, after: placed.after } : context(range, 60);
     // Paint the pending anchor so it stays visibly marked while the composer
     // (in the shell document) has focus; cleared on cancel/close (#281 parity).
     if (HL) {
@@ -95,7 +164,10 @@
         CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange()));
       } catch (e) {}
     }
-    post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after, rect: selectionRect(range) });
+    post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after,
+           occurrence: placed ? placed.occurrence : null,
+           occurrences: placed ? placed.occurrences : null,
+           rect: selectionRect(range) });
   }
   function reportSelection() {
     if (interactionMode !== 'comment') return;
@@ -181,6 +253,17 @@
   // shell / 404), not the page. Intercept and hand navigation to the shell,
   // which navigates the top document (or opens a tab for target=_blank).
   document.addEventListener('click', function (e) {
+    // The mousedown of this same gesture dismissed something. Let it end there.
+    if (swallowClick) {
+      swallowClick = false;
+      // Stop only our own affordances and links — the pill would otherwise open
+      // an element comment on the very click that closed a card. Author markup
+      // (a <details> toggle, a button) keeps behaving normally.
+      if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill, a[href]')) {
+        e.preventDefault(); e.stopPropagation();
+      }
+      return;
+    }
     var commentId = interactionMode === 'edit' ? null : anchorIdAtPoint(e.clientX, e.clientY);
     if (commentId) {
       e.preventDefault(); e.stopPropagation();
@@ -199,7 +282,24 @@
   }, true);
 
   function clearSelectingCursor() { document.documentElement.removeAttribute('data-tdoc-selecting'); }
-  document.addEventListener('mouseup', function () { clearSelectingCursor(); setTimeout(reportSelection, 0); }, true);
+  document.addEventListener('mouseup', function (e) {
+    clearSelectingCursor();
+    // A dismissing click must not report a selection either. Content styled
+    // `user-select: all` selects its whole block on a single click, which came
+    // back as a composer on the very click that closed a card. A real drag is
+    // still a selection, so only a pointer that stayed put is suppressed.
+    var moved = Math.abs(e.clientX - dismissDownX) > 4 || Math.abs(e.clientY - dismissDownY) > 4;
+    if (swallowClick && !moved) {
+      // A click whose only job is to dismiss. Content styled `user-select: all`
+      // selects its whole block on one click, which came back as a composer on
+      // the very click that closed a card, so no selection is reported either.
+      if (HL) CSS.highlights.delete('tdoc-pending');
+      setActiveAnchor(null, false);
+      post({ type: 'tdoc:cleared' });
+      return;
+    }
+    setTimeout(reportSelection, 0);
+  }, true);
   document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
   window.addEventListener('blur', clearSelectingCursor);
   document.addEventListener('copy', function (e) {
@@ -219,8 +319,18 @@
     if (interactionMode === 'edit') return;
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
-    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
-    if (anchorIdAtPoint(e.clientX, e.clientY)) return;
+    // The pill is our own UI, so a click on it normally opens the composer
+    // rather than clearing. While something is open it is outside that card
+    // like anything else, and dismissal wins.
+    if (!shellUiOpen && e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
+    // Dismissal does not hit-test. While the shell has something open, an anchor
+    // under the pointer stops being special — the click that closes a card must
+    // not also open the next one. Fall through rather than returning, so a drag
+    // that starts here still paints its selection.
+    swallowClick = shellUiOpen;
+    dismissDownX = e.clientX; dismissDownY = e.clientY;
+
+    if (!shellUiOpen && anchorIdAtPoint(e.clientX, e.clientY)) return;
     if (interactionMode === 'comment' && e.button === 0
       && !(e.target && e.target.closest && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
       var point = caretAtPoint(e.clientX, e.clientY);
@@ -228,6 +338,11 @@
         document.documentElement.setAttribute('data-tdoc-selecting', '');
       }
     }
+    // Dismiss on mouseup, not here. Clearing on mousedown unmounts the focused
+    // composer in the shell, and losing that focus wipes the selection the user
+    // is in the middle of dragging. This sits AFTER the painting setup above:
+    // an early return here stops a drag from painting at all.
+    if (shellUiOpen) return;
     if (HL) CSS.highlights.delete('tdoc-pending');
     setActiveAnchor(null, false);
     post({ type: 'tdoc:cleared' });
@@ -381,9 +496,55 @@
         return NodeFilter.FILTER_ACCEPT;
       }
     });
-    var nodes = [], total = '', norm = '', normToRaw = [], prevWasSpace = false;
+    var nodes = [], total = '', norm = '', normToRaw = [], prevWasSpace = false, previousNode = null;
+    function hasLineBreakBetween(left, right) {
+      if (!left || !right) return false;
+      try {
+        var gap = document.createRange();
+        gap.setStartAfter(left);
+        gap.setEndBefore(right);
+        var fragment = gap.cloneContents();
+        return !!(fragment.querySelector && fragment.querySelector('br'));
+      } catch (e) { return false; }
+    }
+    // The nearest ancestor that lays out as a block. Cached: this runs once per
+    // text node while building the view, and the same few ancestors repeat.
+    var blockOf = new Map();
+    function nearestBlock(node) {
+      var el = node.parentElement;
+      while (el && el !== document.body) {
+        if (blockOf.has(el)) { var hit = blockOf.get(el); if (hit) return hit; }
+        var display = '';
+        try { display = window.getComputedStyle(el).display; } catch (e) { display = ''; }
+        if (display && display.indexOf('inline') !== 0 && display !== 'contents') {
+          blockOf.set(el, el);
+          return el;
+        }
+        blockOf.set(el, null);
+        el = el.parentElement;
+      }
+      return document.body;
+    }
+    // Two text nodes in different blocks read as separate lines, and
+    // Selection.toString() puts a newline between them — with no <br> and no
+    // whitespace node to show for it when the markup is written `</p><p>`.
+    // Without a boundary here the saved anchor carries a space the rebuilt
+    // text does not have, and a selection across two paragraphs can never be
+    // found again. #339 asked for exactly this alongside the <br> case.
+    function crossesBlock(left, right) {
+      if (!left || !right) return false;
+      try { return nearestBlock(left) !== nearestBlock(right); } catch (e) { return false; }
+    }
     while (walker.nextNode()) {
       var n = walker.currentNode, start = total.length, v = n.nodeValue;
+      // Selection.toString() represents <br> as a newline. Text-node walking
+      // used to erase it completely, so an anchor saved as "有\n可做到…"
+      // could never match the reconstructed "有可做到…" after submission.
+      // Add one normalized virtual space and map it to the next node boundary;
+      // Range creation can then still use real DOM offsets.
+      if (norm.length && !prevWasSpace && (hasLineBreakBetween(previousNode, n) || crossesBlock(previousNode, n))) {
+        norm += ' '; normToRaw.push(start); prevWasSpace = true;
+      }
       nodes.push({ node: n, start: start, end: start + v.length });
       total += v;
       for (var i = 0; i < v.length; i++) {
@@ -392,6 +553,7 @@
         if (isWs) { if (!prevWasSpace && norm.length) { norm += ' '; normToRaw.push(start + i); prevWasSpace = true; } }
         else { norm += v[i]; normToRaw.push(start + i); prevWasSpace = false; }
       }
+      previousNode = n;
     }
     normToRaw.push(total.length);
     return { nodes: nodes, total: total, norm: norm, normToRaw: normToRaw };
@@ -414,12 +576,27 @@
     try { var r = document.createRange(); r.setStart(s.node, s.offset); r.setEnd(e.node, e.offset); return r; } catch (x) { return null; }
   }
   function findTextRange(anchor, view) {
-    if (!anchor || !anchor.text || anchor.text.length < 2 || !view.norm) return null;
-    var needleN = normalizeNeedle(anchor.text); if (needleN.length < 2) return null;
+    // No length floor. A one-character anchor used to be refused outright,
+    // which in CJK is an ordinary thing to want to comment on — and the
+    // composer accepted it anyway, so the comment was saved and then never
+    // drawn. Ambiguity is what the floor was really guarding against, and
+    // context plus `occurrence` below answer that directly.
+    if (!anchor || !anchor.text || !view.norm) return null;
+    var needleN = normalizeNeedle(anchor.text); if (!needleN) return null;
     var hits = [];
     for (var i = 0; (i = view.norm.indexOf(needleN, i)) !== -1; i += Math.max(1, needleN.length)) { hits.push(i); if (hits.length > 64) break; }
     if (!hits.length) return null;
     if (hits.length === 1) return rangeFromNorm(view, hits[0], needleN.length); // unique → accept
+    // The copy that was selected, when the document still has exactly the same
+    // copies it had then. This is exact where context is a guess, so it goes
+    // first: twelve identical rows give every candidate the same neighbourhood,
+    // and a score picks one of them at random-looking. If the count changed the
+    // document was regenerated around this text, the index no longer means what
+    // it meant, and context — which travels — takes over.
+    if (typeof anchor.occurrence === 'number' && anchor.occurrences === hits.length
+        && hits[anchor.occurrence] != null) {
+      return rangeFromNorm(view, hits[anchor.occurrence], needleN.length);
+    }
     // Multiple occurrences: disambiguate by saved context; refuse if none clears.
     var beforeN = normalizeContext(anchor.context_before), afterN = normalizeContext(anchor.context_after);
     if (!beforeN && !afterN) return null;
@@ -433,7 +610,10 @@
       var score = (bScore >= MIN ? bScore : 0) + (aScore >= MIN ? aScore : 0);
       if (score > bestScore) { bestScore = score; bestIdx = h; }
     }
-    return (bestIdx === -1 || bestScore === 0) ? null : rangeFromNorm(view, bestIdx, needleN.length);
+    if (bestIdx !== -1 && bestScore > 0) return rangeFromNorm(view, bestIdx, needleN.length);
+    // Nothing decided. A stale index is worse than no pin: it looks anchored
+    // and points at somebody else's sentence.
+    return null;
   }
   // Article right edge (page coords) so the shell can park pins/cards in the
   // gutter just right of the reading column — not pinned to the viewport edge.
@@ -884,6 +1064,7 @@
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode);
+    else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
     else if (d.type === 'tdoc:editRestore') {
       var restoreRoot = findEditRoot();
