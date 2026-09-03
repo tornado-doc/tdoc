@@ -104,8 +104,15 @@ export function ActivatePage({ boot }) {
       <h1>Connect a terminal</h1>
       {!identity ? (
         <>
-          <p>A terminal wants to publish to your tdoc account. Sign in first, then confirm the code it showed you.</p>
+          <p>{code
+            ? 'A terminal wants to publish to your tdoc account. Sign in, then approve the code it showed you.'
+            : 'Sign in to connect a terminal to your tdoc account.'}</p>
           {boot.oidcAuth ? (
+            // One action, not a quiz: every sign-in method lives on the next
+            // page. The GitHub line below is not an alternative — it is the
+            // migration door for people who published with GitHub before the
+            // provider seat existed, whose account is found by handle, not
+            // yet by email.
             <button
               type="button"
               className="primary"
@@ -114,19 +121,32 @@ export function ActivatePage({ boot }) {
                 location.href = `/api/auth/oidc/login?return=${encodeURIComponent(back)}`;
               }}
             >
-              Continue with {boot.oidcLabel || 'Email'}
+              Sign in
             </button>
-          ) : null}
-          {boot.authConfigured ? (
-            <button type="button" className={boot.oidcAuth ? '' : 'primary'} onClick={signIn}>Sign in with GitHub</button>
-          ) : null}
-          {!boot.oidcAuth && !boot.authConfigured ? (
+          ) : boot.authConfigured ? (
+            <button type="button" className="primary" onClick={signIn}>Sign in with GitHub</button>
+          ) : (
             <p>Sign-in is not configured on this host.</p>
+          )}
+          {boot.oidcAuth && boot.authConfigured ? (
+            <p className="tdoc-activate-alt">
+              Published with GitHub before?{' '}
+              <button type="button" className="tdoc-linklike" onClick={signIn}>Sign in with GitHub</button>
+              {' '}so your docs follow you.
+            </p>
           ) : null}
         </>
       ) : !pending ? (
         <>
-          <p>Signed in as <b>{identity.name || identity.login}</b>. Enter the code from your terminal:</p>
+          <p>Signed in as <b>{identity.name || identity.login}</b>.</p>
+          {!boot.code ? (
+            <p className="tdoc-activate-hint">
+              This page connects a terminal: running <code>tdoc publish</code> shows a short
+              code, and approving it here lets that terminal publish as you. No terminal
+              waiting? You're signed in — head to <a href="/me">your docs</a>.
+            </p>
+          ) : null}
+          <p>{boot.code ? 'Confirm the code from your terminal:' : 'Have a code? Enter it:'}</p>
           <input
             className="tdoc-activate-code"
             value={code}
