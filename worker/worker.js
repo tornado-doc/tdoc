@@ -4550,6 +4550,25 @@ export default {
       });
     }
 
+    // ---- doc head → latest version ----
+    // A bare /d/<slug> link (no /v/<n>) is what people naturally paste as the
+    // canonical URL, but only versioned routes existed, so it bounced to the
+    // not-found landing while every /v/<n> of the same doc worked. Redirect to
+    // the latest version. Access is enforced BEFORE the redirect, so an
+    // unauthorized probe gets the same denial screen as /v/<n> and never
+    // learns the version count; unknown slugs fall through to the existing
+    // not-found landing redirect.
+    const docHeadMatch = p.match(/^\/d\/([^/]+)\/?$/);
+    if (docHeadMatch && (method === 'GET' || method === 'HEAD')) {
+      const slug = docHeadMatch[1];
+      const latest = latestVersionNumber(await loadDocMeta(env, slug));
+      if (latest > 0) {
+        const gate = await enforceDocAccess(env, req, slug, latest);
+        if (!gate.ok) return gate.response;
+        return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}`);
+      }
+    }
+
     // ---- doc view ----
     const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
     if (docMatch && (method === 'GET' || method === 'HEAD')) {
