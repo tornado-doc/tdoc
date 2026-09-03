@@ -692,7 +692,11 @@ export function DocumentShell({ boot, config }) {
       {narrow ? (
         <MobileCommentDrawer
           open={drawerOpen}
-          comments={comments.comments}
+          // shownComments, not the raw list: hiding resolved threads took the
+          // pins out of the document but left every one of them in the drawer,
+          // which on a phone IS the comment list. "Hide resolved" appeared to
+          // do nothing at all.
+          comments={shownComments}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
           isOwner={Boolean(config.isOwner)}
