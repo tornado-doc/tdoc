@@ -1235,128 +1235,13 @@ artifacts you genuinely replaced go `kind: "lost"` automatically.
 
 ---
 
-# Telemetry — MANDATORY workflow steps, not optional
+# Automatic skill update (run before tdoc work)
 
-**Treat this skill file as executable instructions, not reference
-material.** Every tdoc invocation runs as a bracketed sequence:
-`Step 0` (telemetry preamble) → the tdoc work (pull / edit / publish /
-new / fix comments) → `Final Step` (telemetry record). All three run,
-in order, every single time.
-
-- **Step 0 (preamble)** runs FIRST, before any tdoc work.
-- **Final Step (record)** runs LAST, after all tdoc work, on every
-  outcome.
-
-Skipping either is a **regression**. A tdoc run is NOT complete until
-the Final Step telemetry event is logged. This applies even in plan
-mode — the telemetry commands are local writes and ALWAYS run.
-
-### Behavioral patch — applies to you, the agent reading this
-
-Your default efficiency habit is to read a skill file, find the part
-relevant to the user's request, do that, and stop. **For tdoc,
-suppress that habit.** Step 0 and the Final Step are not "relevant or
-not" — they are unconditional brackets around the work. A request for
-"just a small edit" or "fix the comment" does NOT exempt the run from
-the bracket. A run that publishes the doc but skips Step 0 or the
-Final Step is an incomplete, broken run — even though the user sees a
-finished doc. Publishing the doc is necessary but not sufficient;
-logging the Final Step telemetry event is what makes the run actually
-complete. Do not declare the task done before the Final Step has run.
-
----
-
-## Step 0 — Telemetry preamble (ALWAYS RUN FIRST)
-
-This block records anonymous usage data so the tdoc maintainer can see
-which features people actually use and what breaks. **Default-on with
-first-run consent prompt.** Three opt-out paths described at the bottom.
+Keep the installed skill current without interrupting the user or coupling
+updates to client-side analytics. Resolve the active host checkout at runtime;
+then fast-forward it only when the updater explicitly supports safe `--auto`.
 
 ```bash
-TEL_HOME="$HOME/.tdoc"
-TEL_PROMPTED_FLAG="$TEL_HOME/.telemetry-prompted"
-TEL_CONFIG_FILE="$TEL_HOME/.telemetry-mode"
-
-mkdir -p "$TEL_HOME"
-
-# Read existing choice. Priority: env var > persisted file > default "on"
-TEL_MODE_PERSISTED="$(cat "$TEL_CONFIG_FILE" 2>/dev/null | tr -d ' \n\r')"
-TEL_PROMPTED="no"
-[ -f "$TEL_PROMPTED_FLAG" ] && TEL_PROMPTED="yes"
-
-if [ -n "${SKILL_TELEMETRY:-}" ]; then
-  TEL_EFFECTIVE="$SKILL_TELEMETRY"
-elif [ -n "$TEL_MODE_PERSISTED" ]; then
-  TEL_EFFECTIVE="$TEL_MODE_PERSISTED"
-elif [ "$TEL_PROMPTED" = "no" ]; then
-  # First ever run. The consent question used to be asked here, before any
-  # work — so the very first thing someone got after asking for a document
-  # was a question about analytics. It moves to the Final Step, after the
-  # link is in their hands.
-  #
-  # Nothing is recorded for this run. Defaulting to "on" and asking
-  # afterwards would be recording before consent; losing one event is the
-  # cheaper mistake.
-  TEL_EFFECTIVE="deferred"
-else
-  TEL_EFFECTIVE="on"
-fi
-
-# Session ID — Claude Code sets $CLAUDE_SESSION_ID in newer versions;
-# fall back to a stable per-shell id so concurrent sessions don't
-# overwrite each other's sentinel.
-TEL_SESSION_ID="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
-
-# Write per-session sentinel (not one global file)
-# Only "on" writes. "deferred" (a first run, consent not yet asked) records
-# nothing at all — no sentinel, no pending marker — so there is nothing to
-# reap and nothing logged before the user agreed to it.
-if [ "$TEL_EFFECTIVE" = "on" ]; then
-  mkdir -p "$TEL_HOME/sentinels"
-  date +%s > "$TEL_HOME/sentinels/$TEL_SESSION_ID"
-  find "$TEL_HOME/sentinels" -type f -mtime +1 -delete 2>/dev/null || true
-
-  # ── Self-healing pending marker (gstack pattern) ──
-  # Write a .pending marker for THIS session. The Final Step deletes it.
-  # If Claude skips the Final Step, this marker is left behind — and the
-  # reaper below records it as outcome=unknown on the next tdoc run, so
-  # a skipped run still produces a (degraded) event instead of vanishing.
-  PENDING_DIR="$TEL_HOME/telemetry/pending"
-  mkdir -p "$PENDING_DIR"
-  TEL_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf '{"skill":"tdoc","ts":"%s","session_id":"%s"}\n' \
-    "$TEL_TS" "$TEL_SESSION_ID" > "$PENDING_DIR/.pending-$TEL_SESSION_ID"
-
-  # Reap stale markers from prior skipped runs (any session but ours)
-  for _PF in "$PENDING_DIR"/.pending-*; do
-    [ -f "$_PF" ] || continue
-    _PF_SID="$(basename "$_PF")"; _PF_SID="${_PF_SID#.pending-}"
-    [ "$_PF_SID" = "$TEL_SESSION_ID" ] && continue
-    _PDATA="$(cat "$_PF" 2>/dev/null || true)"
-    rm -f "$_PF" 2>/dev/null || true
-    [ -z "$_PDATA" ] && continue
-    _P_SKILL="$(echo "$_PDATA" | grep -o '"skill":"[^"]*"' | head -1 | cut -d'"' -f4)"
-    _P_SID="$(echo "$_PDATA" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
-    [ -z "$_P_SKILL" ] && continue
-    if [ -x "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" ]; then
-      bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
-        --skill "$_P_SKILL" --outcome unknown \
-        --step "reaped-incomplete-run" --session-id "$_P_SID" 2>/dev/null || true
-    fi
-  done
-fi
-
-# ─── Upgrade check (BYOK: origin/main, every run) ───────────
-# GitHub releases lag (v0.9.0 sat while the reader kept shipping on main).
-# Compare this skill checkout to origin/main the same way tdoc-update does.
-#
-# Resolve the skill directory at RUNTIME. This used to be a placeholder token
-# substituted at install time, and the substitution never happened:
-# every install carried the literal string, so `[ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ]`
-# was false and the automatic update silently never ran, on any machine, ever.
-# A self-update that depends on an install step is a self-update that does not
-# exist. Note this is a different directory from the TDOC_DIR above, which is
-# the docs root (~/tdocs) — hence the distinct name.
 tdoc_resolve_skill_dir() {
   if [ -n "${TDOC_SKILL_DIR:-}" ]; then
     printf '%s\n' "$TDOC_SKILL_DIR"
@@ -1381,36 +1266,8 @@ tdoc_resolve_skill_dir() {
 }
 TDOC_SKILL_ROOT="$(tdoc_resolve_skill_dir)"
 
-# Resolve installed version, trying multiple sources in order:
-#   1. VERSION file (if maintained, like gstack)
-#   2. git describe --tags (most recent reachable tag)
-#   3. fallback "0.0.0" (skip the check)
-INSTALLED_VERSION="$(cat "$TDOC_SKILL_ROOT/VERSION" 2>/dev/null)"
-if [ -z "$INSTALLED_VERSION" ] && [ -d "$TDOC_SKILL_ROOT/.git" ]; then
-  INSTALLED_VERSION="$(cd "$TDOC_DIR" && git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
-fi
-[ -z "$INSTALLED_VERSION" ] && INSTALLED_VERSION="0.0.0"
-
-# ─── Keep the skill current, automatically ───
-# Every run fast-forwards this checkout to origin/main. No prompt: a user who
-# asked for a doc did not ask to be interviewed about versions.
-#
-# It declines to act, quietly, in the two cases where acting could destroy
-# work: a dirty tree (auto-stashing is the one path here that can lose edits)
-# and a diverged checkout (someone developing tdoc itself). It never redeploys
-# a Worker — pushing to the user's own Cloudflare/Vercel account is a separate
-# action, not a side effect of asking for a doc.
-#
-# TDOC_SKIP_UPDATE_CHECK=1 turns the whole thing off.
-# The capability probe is not optional. tdoc-update's argument loop has no
-# catch-all, so a version that predates --auto would SILENTLY IGNORE the flag
-# and run the full interactive update instead — auto-stashing local edits and
-# offering a redeploy, on every single run. Only invoke it when it is a flag
-# the installed script actually knows.
 if [ -z "${TDOC_SKIP_UPDATE_CHECK:-}" ] && [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update" ] \
    && grep -q -- '--auto)' "$TDOC_SKILL_ROOT/bin/tdoc-update" 2>/dev/null; then
-  # Pass the resolved checkout explicitly so versions older than #332, whose
-  # internal default was ~/.claude, can still bootstrap the correct install.
   SKILL_DIR="$TDOC_SKILL_ROOT" bash "$TDOC_SKILL_ROOT/bin/tdoc-update" --auto 2>&1 || true
 fi
 
@@ -1418,191 +1275,14 @@ if [ -x "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" ]; then
   NAG_LINE="$(bash "$TDOC_SKILL_ROOT/bin/tdoc-update-nag" 2>/dev/null || true)"
   if printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_AVAILABLE:'; then
     echo "$NAG_LINE"
-    if [ "$TEL_EFFECTIVE" = "on" ]; then
-      bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
-        --skill tdoc \
-        --event-type upgrade_prompted \
-        --outcome unknown \
-        --skill-version "$INSTALLED_VERSION" \
-        --step "origin/main" \
-        --session-id "$TEL_SESSION_ID" 2>/dev/null || true
-    fi
   elif printf '%s' "$NAG_LINE" | grep -q '^TDOC_UPDATE_DIVERGED:'; then
     echo "$NAG_LINE"
   fi
 fi
-
-echo "TEL_PROMPTED: $TEL_PROMPTED"
-echo "TEL_EFFECTIVE: $TEL_EFFECTIVE"
-echo "TEL_SESSION_ID: $TEL_SESSION_ID"
-echo "TDOC_VERSION: $INSTALLED_VERSION"
 ```
 
-### Instructions for the agent
-
-**If `TEL_PROMPTED` is `no`, ask nothing now.** The preamble set
-`TEL_EFFECTIVE=deferred`, which records nothing for this run. Do the work
-the user actually asked for, hand over the link, and only then ask — the
-question lives in the Final Step. A person who asked for a document should
-not have their first interaction with tdoc be an analytics prompt.
-
-The question itself, when the Final Step reaches it, is this text with two
-options:
-
-> tdoc can record when it runs, how it went (success/error/abandoned),
-> how long it took, and a random ID for your machine, and send it to
-> the tdoc maintainer's database. It does NOT record your tdoc content,
-> your prompts, or anything else. Nothing is sent to Anthropic.
->
-> A) **Help tdoc improve** — sends events (recommended)
-> B) **Off** — nothing leaves your machine
->
-> Change anytime: edit `~/.tdoc/.telemetry-mode`, or set
-> `SKILL_TELEMETRY=off`.
-
-**How to ask depends on your host:** if the `AskUserQuestion` tool is
-available (Claude Code), use it with the two options above — this is
-the normal path and is unchanged. If it is NOT available (e.g. Codex
-or any other host without that tool), present the same text as plain
-prose and wait for the user's typed reply (A/B). Either way, record
-their choice the same.
-
-Recording their answer is the Final Step's job — see there. Do not ask
-here, and do not ask twice.
-
-**If `TEL_PROMPTED` is `yes`**, do NOT ask again. Proceed silently.
-
-**If the preamble printed `[tdoc] updated tdoc to <sha>`**, the skill just
-fast-forwarded itself. Mention it in one short line and carry on — do not stop
-to ask about it, and do not offer to redeploy anything.
-
-**If it printed `skipping the automatic update`**, the checkout is dirty or has
-diverged, which means someone is working on tdoc itself. Say nothing about it
-unless the user asks; it is not their problem.
-
-**If the preamble printed `TDOC_UPDATE_AVAILABLE`**, the automatic update could
-not apply (see above). Tell the user
-immediately (before the rest of the tdoc work). Do not wait until the
-end, and do not swallow it. Example:
-
-> tdoc on origin/main is newer than this skill checkout. Published docs
-> still serve the old reader until we update. I can run `/tdoc update
-> --yes` now (pulls the skill and redeploys your worker).
-
-Encourage them to update. If they say no, continue with what they asked.
-If the line was `TDOC_UPDATE_DIVERGED`, tdoc-update cannot fast-forward —
-tell them to stash/commit local skill edits or re-clone; do not run
-`--yes`.
-
----
-
-## Final Step — Telemetry record (ALWAYS RUN LAST, no exceptions)
-
-**This is the last required step of every tdoc run.** When the work
-is done — success, error, or abandoned — you MUST record one telemetry
-event before telling the user the task is complete.
-
-**PLAN MODE EXCEPTION — ALWAYS RUN:** local writes + background sync;
-these always run, even in plan mode.
-
-"The doc is published" is NOT the end of the skill. The end of the
-skill is after this telemetry event fires. A tdoc run that publishes
-a doc but logs no Final Step event is an incomplete run — a regression.
-
-```bash
-TEL_HOME="$HOME/.tdoc"
-TEL_SESSION_ID="${CLAUDE_SESSION_ID:-${TEL_SESSION_ID:-shell-$$-$(date +%s)}}"
-END=$(date +%s)
-START=$(cat "$TEL_HOME/sentinels/$TEL_SESSION_ID" 2>/dev/null || echo "$END")
-DURATION=$(( END - START ))
-rm -f "$TEL_HOME/sentinels/$TEL_SESSION_ID"
-
-# Clear THIS session's pending marker — we're about to log the real
-# event, so the self-healing reaper must not later treat it as orphaned.
-rm -f "$TEL_HOME/telemetry/pending/.pending-$TEL_SESSION_ID" 2>/dev/null
-
-TEL_PROMPTED="no"; [ -f "$TEL_HOME/.telemetry-prompted" ] && TEL_PROMPTED="yes"
-TEL_MODE_PERSISTED="$(cat "$TEL_HOME/.telemetry-mode" 2>/dev/null | tr -d ' \n\r')"
-if [ -n "${SKILL_TELEMETRY:-}" ]; then
-  TEL_EFFECTIVE="$SKILL_TELEMETRY"
-elif [ -n "$TEL_MODE_PERSISTED" ]; then
-  TEL_EFFECTIVE="$TEL_MODE_PERSISTED"
-elif [ "$TEL_PROMPTED" = "no" ]; then
-  TEL_EFFECTIVE="deferred"
-else
-  TEL_EFFECTIVE="on"
-fi
-echo "TEL_EFFECTIVE: $TEL_EFFECTIVE"
-```
-
-**If `TEL_EFFECTIVE` is `deferred`** — this was the user's first ever run.
-Hand over the finished work FIRST. Then, once the link is in their hands,
-ask the consent question above, exactly once, and record their answer:
-
-```bash
-echo "MODE_FROM_USER" > "$TEL_HOME/.telemetry-mode"   # "on" or "off"
-touch "$TEL_HOME/.telemetry-prompted"
-```
-
-Then **stop** — log nothing for this run. There is no sentinel and no
-pending marker to clean up, because the preamble wrote neither. The next
-run honours whatever they chose. One lost event is the correct price for
-not recording before someone agreed to it.
-
-If `TEL_EFFECTIVE` is `off`, **stop here** — do not call telemetry-log.
-
-Otherwise pick the block matching the outcome.
-
-**For `--step`, pick the tdoc subcommand**: `new`, `edit`, `publish`,
-`list`, `pull`, `unpublish`, `onboard`, `doctor`, `update`. If the user
-invoked multiple in one session, use the last one. If it was an ad-hoc
-mention (not a /tdoc command), use `chat` or `freeform`.
-
-**On success**:
-
-```bash
-bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
-  --skill tdoc \
-  --outcome success \
-  --duration "$DURATION" \
-  --step "<subcommand: new|edit|publish|list|pull|unpublish|onboard|doctor|update|chat>" \
-  --skill-version "$INSTALLED_VERSION" \
-  --session-id "$TEL_SESSION_ID"
-```
-
-**On error**:
-
-```bash
-bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
-  --skill tdoc \
-  --outcome error \
-  --duration "$DURATION" \
-  --error-class "<short tag, e.g. 'publish_timeout' / 'auth_failed' / 'malformed_input'>" \
-  --error-message "<full debug context, ≤400 chars>" \
-  --step "<which subcommand was running and what phase failed>" \
-  --skill-version "$INSTALLED_VERSION" \
-  --session-id "$TEL_SESSION_ID"
-```
-
-**On abandoned** (user asked to stop):
-
-```bash
-bash "$TDOC_SKILL_ROOT/telemetry/bin/telemetry-log" \
-  --skill tdoc \
-  --outcome abandoned \
-  --duration "$DURATION" \
-  --step "<subcommand + phase you were on>" \
-  --skill-version "$INSTALLED_VERSION" \
-  --session-id "$TEL_SESSION_ID"
-```
-
-The script is fire-and-forget. It returns instantly and syncs to
-Supabase in the background.
-
-### Three opt-out paths
-
-- **First run**: pick "Off" in the consent prompt above
-- **Persistent**: `echo off > ~/.tdoc/.telemetry-mode`
-- **Ephemeral**: `export SKILL_TELEMETRY=off`
-
-See `telemetry/PRIVACY.md` for the full list of recorded fields.
+If the updater prints `[tdoc] updated tdoc to <sha>`, mention it in one short
+line and continue. If it reports `TDOC_UPDATE_AVAILABLE`, tell the user before
+the rest of the work and offer `/tdoc update --yes`. If it reports
+`TDOC_UPDATE_DIVERGED`, tell them to commit/stash or re-clone; do not run
+`--yes`. Quiet dirty-tree skips need no user-facing warning.
