@@ -449,7 +449,9 @@
   .tdoc-drag-marquee { position: absolute; pointer-events: none; z-index: 999997; border: 1.5px solid var(--td-accent); background: var(--td-accent-wash); box-sizing: border-box; }
 
   /* Popup (new-comment) */
-  .tdoc-popup { position: absolute; background: #0a0a0a; color: #fff; border-radius: 10px; padding: 14px; width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); z-index: 999998; font: 13px system-ui, sans-serif; }
+  /* fixed, not absolute: absolute ties the card to the document, and iOS
+     scrolls the document to reveal a focused textarea. See comment-composer.jsx. */
+  .tdoc-popup { position: fixed; background: #0a0a0a; color: #fff; border-radius: 10px; padding: 14px; width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); z-index: 999998; font: 13px system-ui, sans-serif; }
   .tdoc-popup .head { display: flex; justify-content: space-between; margin-bottom: 8px; }
   .tdoc-popup .head .h { color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }

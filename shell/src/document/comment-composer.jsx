@@ -3,17 +3,56 @@ import { MentionField } from './mention-field.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
 
 // The shell's chrome does not scroll — the frame does — so the composer's
-// coordinates are viewport coordinates. On a phone the keyboard shrinks that
-// viewport out from under a position that was computed once at render: the card
-// ends up below the fold, iOS scrolls the page to reveal the focused textarea,
-// and the whole thing appears to fly off. visualViewport is what actually
-// reports that shrink; window.innerHeight can lag or not change at all.
+// coordinates are viewport coordinates.
+//
+// A phone keyboard does TWO things, and reading only the first is why the card
+// still flew after the first attempt at this: it shrinks the visual viewport,
+// and it SHIFTS it, so the visible band no longer starts at y=0. offsetTop is
+// that shift. A card positioned without it sits at a coordinate that is still
+// inside the layout viewport and no longer inside the part you can see.
+//
+// The card is position:fixed for the same reason: absolute positioning ties it
+// to the document, and iOS scrolls the document to reveal the focused textarea.
+// Fixed plus offsetTop keeps it against the band that is actually on screen.
 function readViewport() {
   const visual = typeof window !== 'undefined' ? window.visualViewport : null;
+  if (!visual) {
+    return { width: window.innerWidth, height: window.innerHeight, offsetTop: 0, offsetLeft: 0 };
+  }
   return {
-    width: Math.round(visual ? visual.width : window.innerWidth),
-    height: Math.round(visual ? visual.height : window.innerHeight),
+    width: Math.round(visual.width),
+    height: Math.round(visual.height),
+    offsetTop: Math.round(visual.offsetTop || 0),
+    offsetLeft: Math.round(visual.offsetLeft || 0),
   };
+}
+
+export const COMPOSER_WIDTH = 320;
+export const COMPOSER_HEIGHT = 190;
+
+// Where the card goes, as arithmetic — no DOM, so the keyboard cases are unit
+// tested rather than staged in a browser that has no keyboard.
+//   viewport: { width, height, offsetTop, offsetLeft } from visualViewport
+//   rect:     the selection, in the frame's own viewport coordinates
+// The result is a fixed-position coordinate, clamped into the band that is
+// actually on screen. Both directions matter: the keyboard can leave less room
+// than the card needs, and then staying visible beats staying next to the quote.
+export function composerPosition(rect, viewport) {
+  const visibleTop = viewport.offsetTop || 0;
+  const visibleBottom = visibleTop + viewport.height;
+  const offsetLeft = viewport.offsetLeft || 0;
+
+  const left = Math.max(
+    offsetLeft + 8,
+    Math.min((rect.left || 8) + offsetLeft, offsetLeft + viewport.width - COMPOSER_WIDTH - 8),
+  );
+  let top = visibleTop + TOP_BAR_HEIGHT + (rect.bottom || 0) + 8;
+  if (top + COMPOSER_HEIGHT > visibleBottom - 8) {
+    top = visibleTop + TOP_BAR_HEIGHT + (rect.top || 0) - COMPOSER_HEIGHT - 8;
+  }
+  top = Math.min(top, visibleBottom - COMPOSER_HEIGHT - 8);
+  top = Math.max(top, visibleTop + 8);
+  return { top, left };
 }
 
 export function CommentComposer({ selection, onSubmit, onClose, mentionable = [] }) {
@@ -34,21 +73,7 @@ export function CommentComposer({ selection, onSubmit, onClose, mentionable = []
     };
   }, []);
 
-  const rect = selection.rect || {};
-  const width = 320;
-  const estimatedHeight = 190;
-  const left = Math.max(8, Math.min(rect.left || 8, viewport.width - width - 8));
-  let top = TOP_BAR_HEIGHT + (rect.bottom || 0) + 8;
-
-  if (top + estimatedHeight > viewport.height - 8) {
-    top = Math.max(
-      TOP_BAR_HEIGHT + 4,
-      TOP_BAR_HEIGHT + (rect.top || 0) - estimatedHeight - 8,
-    );
-  }
-  // Above the selection can still overflow when the keyboard leaves less room
-  // than the card needs. Staying on screen wins over staying next to the quote.
-  top = Math.min(top, Math.max(TOP_BAR_HEIGHT + 4, viewport.height - estimatedHeight - 8));
+  const { top, left } = composerPosition(selection.rect || {}, viewport);
 
   const quoted = String(selection.text || '');
   const preview = selection.kind === 'element'
