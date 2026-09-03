@@ -4,6 +4,10 @@
 
 // Same shape as MENTION_RE in worker.js: a GitHub login at a word boundary.
 const MENTION_PATTERN = /(^|[^A-Za-z0-9_@/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+// Mirrors EMAIL_MENTION_RE in worker.js: "@addr" is a deliberate tag. Tried
+// first when splitting, so an address tag is one chip and never half-read as
+// a mention of its local part.
+const EMAIL_MENTION_PATTERN = /(^|[^A-Za-z0-9_@/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 
 // The `@token` being typed immediately before the caret, or null. Requires a
 // word boundary before the `@`, so typing an email address never opens the
@@ -61,22 +65,32 @@ export function splitMentions(text, mentions) {
     .filter(Boolean));
   if (!notified.size) return source ? [{ type: 'text', value: source }] : [];
 
+  // Both tag shapes, found in one left-to-right sweep. The email pattern is
+  // consulted first at each position so "@dana@example.com" is one chip.
+  const spans = [];
+  for (const [pattern, kind] of [[EMAIL_MENTION_PATTERN, 'email'], [MENTION_PATTERN, 'handle']]) {
+    const re = new RegExp(pattern.source, 'g');
+    let match;
+    while ((match = re.exec(source))) {
+      const token = match[2];
+      const key = kind === 'email'
+        ? `email:${token.replace(/[.,;:!?)]+$/, '').toLowerCase()}`
+        // A GitHub login never ends in a hyphen, so `@dana-` resolves to
+        // dana — the chip still shows the token the author typed.
+        : token.replace(/-+$/, '').toLowerCase();
+      if (!notified.has(key)) continue;
+      const at = match.index + match[1].length;
+      spans.push({ at, end: at + 1 + token.length, token, login: key });
+    }
+  }
+  spans.sort((a, b) => a.at - b.at);
   const parts = [];
-  const re = new RegExp(MENTION_PATTERN.source, 'g');
   let last = 0;
-  let match;
-  while ((match = re.exec(source))) {
-    // A GitHub login never ends in a hyphen, so `@dana-` resolves to dana —
-    // the chip still shows the token the author typed.
-    const token = match[2];
-    const login = token.replace(/-+$/, '').toLowerCase();
-    if (!notified.has(login)) continue;
-    // match[1] is the boundary character the pattern had to swallow; it stays
-    // with the preceding text.
-    const at = match.index + match[1].length;
-    if (at > last) parts.push({ type: 'text', value: source.slice(last, at) });
-    parts.push({ type: 'mention', value: `@${token}`, login });
-    last = re.lastIndex;
+  for (const span of spans) {
+    if (span.at < last) continue; // an email span already covered this handle
+    if (span.at > last) parts.push({ type: 'text', value: source.slice(last, span.at) });
+    parts.push({ type: 'mention', value: `@${span.token}`, login: span.login });
+    last = span.end;
   }
   if (last < source.length) parts.push({ type: 'text', value: source.slice(last) });
   return parts;

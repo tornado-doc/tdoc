@@ -177,6 +177,9 @@ function localDeliver(recipient, ev) {
 // whoever is at the keyboard — so every name here is simply delivered.
 const MENTION_MAX_PER_COMMENT = 10;
 const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+// Mirrors the worker: "@dana@example.com" is a deliberate email tag, a bare
+// address in prose is not.
+const EMAIL_MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 
 function normalizeGithubLogin(v) {
   if (typeof v !== 'string') return null;
@@ -193,14 +196,22 @@ function parseMentionLogins(text) {
   if (typeof text !== 'string' || !text) return [];
   const out = [];
   const seen = new Set();
-  const re = new RegExp(MENTION_RE.source, 'g');
+  const add = (key) => { if (key && !seen.has(key)) { seen.add(key); out.push(key); } };
+  // Email tags first, and blank their spans so the handle pass cannot re-read
+  // the local part of an address as a handle.
+  let source = text;
+  const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
-  while ((m = re.exec(text))) {
+  while ((m = er.exec(source))) {
+    const addr = String(m[2]).replace(/[.,;:!?)]+$/, '').toLowerCase();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) add(`email:${addr}`);
+  }
+  source = source.replace(new RegExp(EMAIL_MENTION_RE.source, 'g'), '$1');
+  const re = new RegExp(MENTION_RE.source, 'g');
+  while ((m = re.exec(source))) {
     // A GitHub login never ends in a hyphen, so `@dana-` names dana.
     const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    if (!login || seen.has(login)) continue;
-    seen.add(login);
-    out.push(login);
+    add(login);
   }
   return out;
 }
