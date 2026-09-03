@@ -69,7 +69,9 @@ t('the chip says who decided, because they are different claims', () => {
 
 t('resolve sits with the thread actions, behind canMutate', () => {
   assert(/className="tdoc-resolve-toggle"/.test(card), 'no resolve control');
-  assert(/\{comment\.status === 'applied' \? 'reopen' : 'resolve'\}/.test(card),
+  // Now an icon in the card header, so the way back is carried by its label
+  // rather than by its text. Same control, same both-ways requirement.
+  assert(/comment\.status === 'applied' \? 'Reopen' : 'Resolve'/.test(card),
     'the same control has to offer the way back');
   const start = card.indexOf('className="tdoc-resolve-toggle"');
   assert(card.slice(start - 200, start).includes('canMutate ? ('), 'resolve must be gated like delete');

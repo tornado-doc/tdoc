@@ -715,6 +715,9 @@ async function chooseMode(page, label) {
 
       // The card only renders once it is open, so open it from its anchor first.
       await clickWord('charlie');
+      // Move anchor lives in the card's ⋯ menu since the card took the Google
+      // Docs shape — the control is the same, the path to it is one click longer.
+      await page.locator('.tdoc-margin-comment [aria-label="More actions"]').first().click();
       const reanchor = page.locator('.tdoc-reanchor-btn').first();
       await reanchor.waitFor().catch(async () => {
         const seen = await page.evaluate(() => [...document.querySelectorAll('[class*="tdoc-"]')]

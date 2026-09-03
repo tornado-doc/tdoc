@@ -160,7 +160,7 @@
      it must never paint — resizing back above the breakpoint used to leave its
      rendered cards absolutely-positioned at the page's top-left corner. */
   #tdoc-comment-layer { display: none; }
-  .tdoc-margin-comment { position: absolute; width: 280px; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font: 13px system-ui, sans-serif; transition: box-shadow .15s, transform .15s; z-index: 999996; pointer-events: auto; }
+  .tdoc-margin-comment { position: absolute; width: 280px; background: #fff; border: 1px solid #e8eaed; border-radius: 12px; padding: 14px 14px 12px; box-shadow: 0 1px 3px rgba(60,64,67,.15), 0 4px 8px rgba(60,64,67,.08); font: 13px system-ui, sans-serif; transition: box-shadow .15s, transform .15s; z-index: 999996; pointer-events: auto; }
   .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
   .tdoc-margin-comment.tdoc-current-comment { box-shadow: 0 0 0 2px var(--td-accent-ring-soft), 0 4px 16px var(--td-accent-ring-soft); }
   .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
@@ -168,22 +168,13 @@
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
-  .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored .tdoc-reanchor-btn { display: none; }
   /* Parent-level resolved chip (distinct from the per-reply status chip). */
   .tdoc-resolved-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #e8f5ed; color: #1a7340; }
-  .tdoc-reanchor-btn { display: none; font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 6px; cursor: pointer; background: none; border: none; padding: 0; text-align: left; }
-  .tdoc-margin-comment.tdoc-unanchored .tdoc-reanchor-btn { display: block; }
-  /* Anchored cards also expose a "move anchor" action when they're active. */
-  .tdoc-margin-comment.active .tdoc-reanchor-btn { display: block; }
-  .tdoc-reanchor-btn:hover { color: var(--td-accent); }
-  /* Label swap: "unanchored" wording on unanchored cards, "move anchor" on
-     active anchored cards. */
-  .tdoc-reanchor-btn .tdoc-reanchor-unanchored,
-  .tdoc-reanchor-btn .tdoc-reanchor-anchored { display: none; }
-  .tdoc-margin-comment.tdoc-unanchored .tdoc-reanchor-btn .tdoc-reanchor-unanchored { display: inline; }
-  .tdoc-margin-comment:not(.tdoc-unanchored).active .tdoc-reanchor-btn .tdoc-reanchor-anchored { display: inline; }
-  /* Container for the anchor action buttons. */
-  .tdoc-anchor-actions { display: flex; gap: 12px; align-items: center; margin: 0 0 6px; }
+  /* Re-anchor is a ⋯ menu item now. Its old inline-button dress — 10px, grey,
+     uppercase, and display:none until the card was active — followed it into
+     the menu and made one row shout while the others whispered. The menu item
+     styling is the whole of it; the label is chosen in JS because card-scoped
+     rules cannot reach a menu, which renders through a portal. */
   /* While re-anchor mode is active, dim the rest of the UI and prompt the
      user to select. */
   /* Re-anchor banner: pinned below the bar with three actions. Visible
@@ -208,6 +199,23 @@
      to be. Stays in document coordinates. */
   .tdoc-ghost-marker { position: absolute; left: 0; right: 320px; height: 0; border-top: 1px dashed #d4d4d4; pointer-events: none; z-index: 999990; }
   body.tdoc-narrow .tdoc-ghost-marker { display: none; }
+  /* Card chrome, after the Google Docs shape: avatar beside a name with the
+     time under it, and the two controls a reader actually reaches for — ✓ and
+     ⋯ — pinned to the top right. Everything else lives behind the ⋯. */
+  .tdoc-cc-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+  .tdoc-cc-head .author { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+  .tdoc-cc-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+  .tdoc-cc-when { color: #80868b; font-size: 11px; margin-top: 1px; }
+  .tdoc-cc-head-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin: -2px -4px 0 0; }
+  /* Shape only — no colour. This selector is more specific than the per-control
+     rules in ui.css, so a colour here would decide for both of them and the
+     tick could never be the accent. */
+  .tdoc-margin-comment .tdoc-cc-head-actions .tdoc-resolve-toggle,
+  .tdoc-cc-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 50%; background: transparent; cursor: pointer; transition: background .12s, color .12s; }
+  .tdoc-cc-icon { color: #5f6368; }
+  .tdoc-margin-comment .tdoc-cc-head-actions .tdoc-resolve-toggle:hover,
+  .tdoc-cc-icon:hover { background: #f1f3f4; }
+  .tdoc-cc-icon:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 1px; }
   .tdoc-margin-comment .author { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .tdoc-margin-comment .author img { width: 24px; height: 24px; border-radius: 50%; }
   .tdoc-margin-comment .author .login { font-weight: 600; color: #111; font-size: 13px; }
@@ -222,14 +230,16 @@
   .tdoc-agent-status-applied { background: #e8f5ed; color: #1a7340; }
   .tdoc-agent-status-partial { background: #fff4dc; color: #8a5a00; }
   .tdoc-agent-status-question { background: #ffe7e7; color: #a52323; }
-  .tdoc-margin-comment .text { color: #111; line-height: 1.45; word-wrap: break-word; }
+  .tdoc-margin-comment .text { color: #202124; line-height: 1.5; word-wrap: break-word; font-size: 13.5px; }
   /* A tombstone (#354): the words are gone, the name and the slot are not.
      Muted and italic so it reads as an absence, not as something said. */
   .tdoc-margin-comment .tdoc-deleted-text,
   .tdoc-reply .tdoc-deleted-text { color: #999; font-style: italic; }
   .tdoc-margin-comment.tdoc-deleted .author .login,
   .tdoc-reply.tdoc-deleted .author .login { color: #777; font-weight: 500; }
-  .tdoc-margin-comment .meta { font-size: 11px; color: #888; margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .tdoc-margin-comment .meta { font-size: 12px; color: #5f6368; margin-top: 10px; display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
+  .tdoc-margin-comment .meta .tdoc-reply-toggle { font-weight: 500; color: #1a73e8; padding: 4px 8px; border-radius: 6px; }
+  .tdoc-margin-comment .meta .tdoc-reply-toggle:hover { background: #f1f3f4; }
   .tdoc-margin-comment .meta > span:first-child { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tdoc-margin-comment .del { cursor: pointer; color: #c33; }
   .tdoc-margin-comment .del:hover { text-decoration: underline; }
