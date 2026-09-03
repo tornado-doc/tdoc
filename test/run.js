@@ -25,6 +25,7 @@ const OFFLINE = [
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
+  'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()

@@ -352,7 +352,13 @@ async function loadDocMeta(env, slug) {
 }
 
 function accessDeniedHtml({ status, title, body, slug, version }) {
-  const next = slug && version ? `/d/${encodeURIComponent(slug)}/v/${version}` : '/';
+  // The retry link points back at what was requested: a versioned URL when
+  // the caller was asked for one, the doc's head URL (which resolves to the
+  // latest version only after this same gate passes) when it wasn't. The
+  // head form is what keeps a denial from disclosing any version number.
+  const next = !slug ? '/'
+    : version ? `/d/${encodeURIComponent(slug)}/v/${version}`
+    : `/d/${encodeURIComponent(slug)}`;
   return html(`<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} · tdoc</title>
@@ -4919,6 +4925,28 @@ export default {
           'Vary': 'Sec-Fetch-Dest',
         },
       });
+    }
+
+    // ---- doc head → latest version ----
+    // A bare /d/<slug> link (no /v/<n>) is what people naturally paste as the
+    // canonical URL, but only versioned routes existed, so it bounced to the
+    // not-found landing while every /v/<n> of the same doc worked. Redirect to
+    // the latest version. Access is enforced BEFORE the redirect, so an
+    // unauthorized probe gets the same denial screen as /v/<n> and never
+    // learns the version count; unknown slugs fall through to the existing
+    // not-found landing redirect.
+    const docHeadMatch = p.match(/^\/d\/([^/]+)\/?$/);
+    if (docHeadMatch && (method === 'GET' || method === 'HEAD')) {
+      const slug = docHeadMatch[1];
+      // No version was requested, so none is passed: a denial's retry link
+      // is this same head URL, and an unauthorized probe learns nothing —
+      // not even the version count. On success the gate's own meta yields
+      // the redirect target (one KV read, not two).
+      const gate = await enforceDocAccess(env, req, slug, null);
+      if (!gate.ok) return gate.response;
+      const latest = latestVersionNumber(gate.meta);
+      if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}`);
+      // Unknown slug → the existing not-found landing redirect below.
     }
 
     // ---- doc view ----
