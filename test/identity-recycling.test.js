@@ -210,27 +210,47 @@ async function claimAccount(worker, env, cookie) {
     assert(ids[0].linked_at && ids[0].last_seen, 'link timestamps missing');
   });
 
-  await t('accounts predating the stable index are upgraded on next sign-in', async () => {
+  await t('a backfilled record resolves by its numeric id, handle irrelevant', async () => {
     const env = makeEnv(mod.CommentsStore);
-    // A legacy record: handle index only, no identities, no idp link.
+    // The shape backfill-github-identities.mjs leaves behind.
+    env.META.map.set('hosted-account:frank', JSON.stringify({
+      account_id: 'acct_frank0000', github_login: 'frank', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '444', handle: 'frank' }],
+    }));
+    env.META.map.set('account-idp:github:444', JSON.stringify({
+      account_id: 'acct_frank0000', created: '2026-01-01T00:00:00Z',
+    }));
+    stubProviders({ ghLogin: 'frank', ghId: 444, ghEmail: 'frank@example.com' });
+    const frank = await githubSignIn(worker, env);
+    assert(frank.account_id === 'acct_frank0000', 'backfilled account did not resolve by id');
+  });
+
+  await t('a handle-only record is not claimable by an unknown GitHub id', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    // The pre-backfill shape: handle index only, no recorded id. Nothing can
+    // tell its returning owner from a squatter wearing the freed name, so
+    // NOBODY claims it by handle — the claim window is retired.
     env.META.map.set('hosted-account:frank', JSON.stringify({
       account_id: 'acct_frank0000', github_login: 'frank', created: '2026-01-01T00:00:00Z',
     }));
     stubProviders({ ghLogin: 'frank', ghId: 444, ghEmail: 'frank@example.com' });
     const frank = await githubSignIn(worker, env);
-    assert(frank.account_id === 'acct_frank0000', 'legacy account was not resolved by handle');
-    await claimAccount(worker, env, `tdoc_sid=${frank.sid}`);
-    const link = JSON.parse(env.META.map.get('account-idp:github:444') || 'null');
-    assert(link && link.account_id === 'acct_frank0000',
-      `legacy account was not upgraded: ${JSON.stringify(link)}`);
+    assert(!frank.account_id, `sign-in claimed a handle-only record: ${JSON.stringify(frank)}`);
+    const minted = await claimAccount(worker, env, `tdoc_sid=${frank.sid}`);
+    assert(minted.account_id && minted.account_id !== 'acct_frank0000',
+      `mint claimed a handle-only record: ${JSON.stringify(minted)}`);
   });
 
   await t('a legacy GitHub publisher lands on their account through the provider, no second button', async () => {
     const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
-    // The legacy shape: handle index only — published before phase 1, so no
-    // email index and no stable id anywhere.
+    // A backfilled legacy publisher: numeric id recorded, but no email index
+    // and no oidc link yet — the provider door has never seen her.
     env.META.map.set('hosted-account:gina', JSON.stringify({
       account_id: 'acct_gina00000', github_login: 'gina', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '555', handle: 'gina' }],
+    }));
+    env.META.map.set('account-idp:github:555', JSON.stringify({
+      account_id: 'acct_gina00000', created: '2026-01-01T00:00:00Z',
     }));
     const calls = {};
     stubProviders({ oidcSub: 'user_gina', oidcEmail: 'gina@new-mail.com', clerkExternal: { id: 555, username: 'gina' }, calls });
@@ -256,8 +276,13 @@ async function claimAccount(worker, env, cookie) {
 
   await t('a token mint on a handle-less session does not erase the bridged handle', async () => {
     const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    // Backfilled shape — the bridge resolves her through the numeric id.
     env.META.map.set('hosted-account:gina', JSON.stringify({
       account_id: 'acct_gina00000', github_login: 'gina', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '555', handle: 'gina' }],
+    }));
+    env.META.map.set('account-idp:github:555', JSON.stringify({
+      account_id: 'acct_gina00000', created: '2026-01-01T00:00:00Z',
     }));
     stubProviders({ oidcSub: 'user_gina', oidcEmail: 'gina@new-mail.com', clerkExternal: { id: 555, username: 'gina' } });
     await oidcSignIn(worker, env);
