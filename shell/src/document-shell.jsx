@@ -576,12 +576,6 @@ export function DocumentShell({ boot, config }) {
         theme={theme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
           <>
-            <DocumentModeControl
-              mode={editor.mode}
-              canComment={config.canComment}
-              canEdit={config.canEdit}
-              onChange={editor.changeMode}
-            />
             {/* Resolved threads are out of the margin by default. The switch is
                 the way back, in the bar where it can be seen — it folds into
                 the ⋯ menu with everything else when the bar runs out of room.
@@ -595,6 +589,12 @@ export function DocumentShell({ boot, config }) {
                 label={`Resolved (${resolvedCount})`}
               />
             ) : null}
+            <DocumentModeControl
+              mode={editor.mode}
+              canComment={config.canComment}
+              canEdit={config.canEdit}
+              onChange={editor.changeMode}
+            />
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}

@@ -79,8 +79,12 @@
 
   /* Slide switch in the bar. The label is part of the control, so the whole
      thing is one click target. */
-  .tdoc-bar .tdoc-switch { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; padding: 4px 8px 4px 6px; border-radius: 8px; }
-  .tdoc-bar .tdoc-switch:hover { background: #f0f1f4; }
+  /* Sized to the mode trigger it stands beside — 32px, same radius — so the
+     three controls share a baseline instead of stepping. It stays borderless
+     until hovered: Publish is the only thing in this row that should look
+     filled. */
+  .tdoc-bar .tdoc-switch { display: inline-flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box; padding: 0 12px 0 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; user-select: none; }
+  .tdoc-bar .tdoc-switch:hover { border-color: #e5e5e7; background: #fafafa; }
   .tdoc-bar .tdoc-switch-track { position: relative; flex: 0 0 auto; width: 28px; height: 16px; padding: 0; border: none; border-radius: 999px; background: #d4d4d9; cursor: pointer; transition: background .14s; }
   .tdoc-bar .tdoc-switch-track[data-checked] { background: #1a7340; }
   .tdoc-bar .tdoc-switch-track:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
