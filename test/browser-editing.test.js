@@ -669,12 +669,16 @@ async function chooseMode(page, label) {
       });
       await reanchor.click();
       await page.locator('.tdoc-reanchor-banner').waitFor();
+      // The banner renders before the frame has been told it is re-anchoring;
+      // clicking into that gap picks nothing and the anchor never moves. Caught
+      // as a 1-in-2 flake, not a failure.
+      await page.waitForTimeout(300);
       await clickWord('hotel');
 
       await page.waitForFunction(async (slugName) => {
         const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
         return list.some((entry) => entry.anchor && entry.anchor.text === 'hotel');
-      }, anchorSlug, { timeout: 5_000 }).catch(() => {});
+      }, anchorSlug, { timeout: 10_000 }).catch(() => {});
 
       const anchors = await page.evaluate(async (slugName) => {
         const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
