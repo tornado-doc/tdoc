@@ -34,7 +34,11 @@ t('the two literals are byte-identical', () => {
 
 t('it is the narrow-viewport table rule, and it spares wrapped tables', () => {
   const css = literal(worker) || '';
-  assert(/@media \(max-width:\s*700px\)/.test(css), 'the patch is no longer scoped to narrow viewports');
+  // Deliberately NOT scoped to a phone width: a table wider than its container
+  // breaks a 768px tablet and a narrowed desktop too. Measured on a real doc,
+  // still 171px over at 701px and 20px over at 1024 while it was behind
+  // @media(max-width:700px).
+  assert(!/@media/.test(css), 'the patch went back behind a media query; 701px and up regress');
   assert(/overflow-x:\s*auto/.test(css), 'the patch no longer makes the table scrollable');
   // The author's own `table{min-width:880px}` is what breaks the phone, so this
   // rule has to outrank it — a :where() version loses to the declaration it
@@ -71,7 +75,7 @@ t('the patch anchors on the opening <head>, not the closing one', () => {
 t('newly baked documents get the same rule from reader.css', () => {
   // The patch reaches documents baked before it existed; reader.css is what
   // downloads and self-contained copies carry.
-  assert(/@media \(max-width: 700px\)/.test(reader), 'reader.css lost the narrow-viewport table rule');
+  assert(/table:not\(\.tdoc-table-scroll > table\) \{ display: block/.test(reader), 'reader.css lost the table rule');
   assert(/not\(\.tdoc-table-scroll > table\)/.test(reader), 'reader.css no longer spares wrapped tables');
 });
 
