@@ -590,6 +590,42 @@ async function chooseMode(page, label) {
         'mobile version submenu is not scrollable');
       await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-mobile-version-submenu.png'), fullPage: false });
     });
+    await test('the composer stays on screen when the keyboard shrinks the viewport', async () => {
+      // The shell's chrome does not scroll, so the composer's coordinates are
+      // viewport coordinates — computed once at render. On a phone the keyboard
+      // shrinks that viewport out from under them: the card lands below the
+      // fold, iOS scrolls the page to reveal the focused textarea, and the card
+      // appears to fly off. visualViewport is what reports that shrink.
+      // Wide enough that comments stay in the margin rail rather than the phone
+      // drawer: the bug is the keyboard eating HEIGHT, not the width. Reload to
+      // shed whatever the mobile test above left open in the top bar.
+      await page.setViewportSize({ width: 900, height: 664 });
+      await page.goto(url, { waitUntil: 'networkidle' });
+      const composerFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
+      assert(composerFrame, 'author frame missing');
+      await chooseMode(page, 'Comment');
+      await selectParagraph(composerFrame);
+      const popup = page.locator('.tdoc-popup');
+      await popup.waitFor();
+      const before = await popup.boundingBox();
+      assert(before, 'no composer to measure');
+
+      // Smaller than the top bar plus the card: at 380 the card still fitted
+      // where it was, and the test passed against the unfixed build.
+      const shrunk = 220;
+      await page.setViewportSize({ width: 900, height: shrunk });
+      await page.waitForTimeout(300);
+      const after = await popup.boundingBox();
+      assert(after, 'the composer disappeared when the viewport shrank');
+      assert(after.y >= 0 && after.y + after.height <= shrunk,
+        `the composer left the visible area: top ${Math.round(after.y)}, bottom ${Math.round(after.y + after.height)}, viewport ${shrunk}`);
+
+      // force: the whole point of this test is a card that may be off screen,
+      // and an un-closed popup would be inherited by whatever runs next.
+      await page.locator('.tdoc-popup button.x').click({ force: true }).catch(() => {});
+      await composerFrame.evaluate(() => window.getSelection().removeAllRanges());
+    });
+
     // Last on purpose: it navigates away from the doc every test above shares.
     await test('Move anchor lands the new anchor while the card stays open', async () => {
       // Re-anchoring keeps the card open so the author can click the new spot.
