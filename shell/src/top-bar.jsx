@@ -8,7 +8,7 @@ import {
   Moon,
   Sun,
 } from 'lucide-react';
-import { AppMenu, AppMenuItem } from './ui/menu.jsx';
+import { AppMenu, AppMenuItem, AppMenuSeparator } from './ui/menu.jsx';
 import { useNotifications } from './hooks/use-notifications.js';
 import { NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 
@@ -85,6 +85,7 @@ export function TopBar({
           </button>
         )}>
           {overflowActions}
+          <AppMenuSeparator className="tdoc-mobile-overflow-only" />
           <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={toggleTheme}>
             {dark ? <Sun size={15} /> : <Moon size={15} />}
             {dark ? 'Light mode' : 'Dark mode'}
@@ -95,6 +96,7 @@ export function TopBar({
                 <Bell size={15} />
                 Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
               </AppMenuItem>
+              <AppMenuSeparator className="tdoc-mobile-overflow-only" />
               <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={() => { location.href = '/me'; }}>
                 <Library size={15} /> My docs
               </AppMenuItem>

@@ -44,6 +44,13 @@ export function AppMenuItem({
   );
 }
 
+// A hairline between groups. Carries className so it can inherit the same
+// visibility gate as the items it sits between — a separator that survives when
+// its whole group is hidden reads as a bug.
+export function AppMenuSeparator({ className }) {
+  return <Menu.Separator className={['ui-menu-sep', className].filter(Boolean).join(' ')} />;
+}
+
 export function AppSubmenu({
   trigger,
   children,
