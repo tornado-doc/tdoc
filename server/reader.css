@@ -131,8 +131,11 @@
   .tdoc-table-scroll > table { max-width: none; }
 
   /* An unwrapped table cannot shrink below its content, so max-width alone
-     leaves it pushing the page sideways on a phone. On narrow viewports it
-     becomes a block that scrolls itself. Mirrored as READER_PATCH_CSS at serve
+     leaves it pushing the page sideways. NOT scoped to a phone width: what
+     breaks is a table wider than its container, which a 768px tablet and a
+     narrowed desktop window hit too — a real doc still overflowed by 171px at
+     701px, 164 at 768 and 20 at 1024 while this was behind @media(max-width:700px).
+     A table that already fits is unchanged; one that does not scrolls itself. Mirrored as READER_PATCH_CSS at serve
      time, which is what reaches documents baked before this existed.
 
      Not :where() and not overridable, unlike the rest of this file: the thing
@@ -140,17 +143,15 @@
      `table{min-width:880px}`), so a zero-specificity version loses to exactly
      the declaration it exists to defeat. Same reasoning as the canvas/img
      `max-width:100% !important` above. Desktop is untouched. */
-  @media (max-width: 700px) {
-    body table:not(.tdoc-table-scroll > table) { display: block !important; min-width: 0 !important; max-width: 100% !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    /* Zeroing min-width lets the block fit the screen, but it also lets the
+  body table:not(.tdoc-table-scroll > table) { display: block !important; min-width: 0 !important; max-width: 100% !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* Zeroing min-width lets the block fit its container, but it also lets the
        table collapse below the width the author designed for — a doc built for
-       880px squeezed its prose column to 62px, two characters a line. The rows
-       lay out at max-content instead, so columns keep a readable width and the
-       block scrolls them. */
-    body table:not(.tdoc-table-scroll > table) > thead,
-    body table:not(.tdoc-table-scroll > table) > tbody,
-    body table:not(.tdoc-table-scroll > table) > tfoot { display: table !important; width: max-content !important; min-width: 100% !important; }
-  }
+       880px squeezed its prose column to 62px. The rows lay out at max-content
+       instead, so columns keep the width their content needs and the block
+       scrolls them. */
+  body table:not(.tdoc-table-scroll > table) > thead,
+  body table:not(.tdoc-table-scroll > table) > tbody,
+  body table:not(.tdoc-table-scroll > table) > tfoot { display: table !important; width: max-content !important; min-width: 100% !important; }
   /* Pre/code blocks scroll horizontally instead of breaking the layout. */
   :where(body pre) { max-width: 100%; overflow-x: auto; }
   @media print {
