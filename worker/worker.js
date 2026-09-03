@@ -3131,10 +3131,12 @@ function syncDocumentTitle(html, title) {
 //   account-idp:<provider>:<sub>  → account_id   authoritative. `sub` is the
 //       provider's own immutable id (GitHub's numeric user id, Clerk's
 //       user_xxx). It is never reused and never edited by the user.
-//   hosted-account:<login>        → account_id   legacy, and unsafe alone: a
-//       GitHub login can be RENAMED and the old name becomes available for
-//       anyone to register. Kept so existing accounts resolve, and upgraded
-//       to an idp index the first time their owner signs in.
+//   hosted-account:<login>        → account_id   the CURRENT holder's record,
+//       never proof by itself: a GitHub login can be RENAMED and the old name
+//       becomes available for anyone to register. Every live record carries
+//       its numeric id (backfilled via scripts/backfill-github-identities.mjs
+//       for the ones that predated the index), so resolution never rests on
+//       the handle alone.
 //   account-email:<email>         → account_id   a merge hint, used only when
 //       no idp index exists yet. Addresses change hands (a company reassigns
 //       a departed employee's mailbox), so treating one as proof of identity
@@ -3269,19 +3271,14 @@ async function hostedAccountForGithub(env, login, verifiedEmail = null, githubId
       // Known id: that account, whatever handle it wears today.
       try { rec = JSON.parse(await env.META.get(`hosted-account:${norm}`)); } catch {}
       if (!rec || rec.account_id !== id) rec = { account_id: id, github_login: norm, created: new Date().toISOString() };
-    } else {
-      // Unknown id. The handle index may still name an account — but it was
-      // written for whoever held this handle BEFORE, and a freed GitHub name
-      // can be registered by anyone. Claim it only if it has no stable owner
-      // yet (a legacy account, upgraded here); if it already belongs to a
-      // different id, this is a different person wearing a recycled name and
-      // they start clean.
-      const legacy = await lookupHostedAccount(env, login);
-      if (legacy) {
-        const owner = (legacy.identities || []).find((i) => i && i.provider === 'github');
-        if (!owner) rec = legacy;
-      }
     }
+    // Unknown id: they start clean. The handle index may still name an
+    // account, but it was written for whoever held this handle BEFORE, and a
+    // freed GitHub name can be registered by anyone. There used to be a
+    // claim-by-handle window here for legacy records with no recorded id —
+    // retired once every live record was backfilled with its numeric id
+    // (scripts/backfill-github-identities.mjs), because the window could not
+    // tell a returning owner from a squatter wearing the freed name.
   }
   if (!rec && !githubId) rec = await lookupHostedAccount(env, login);
   if (!rec) {
@@ -4742,11 +4739,12 @@ export default {
         const email = await ghVerifiedEmail(r.access_token);
         // user.id is GitHub's immutable identifier; user.login is a display
         // name the owner can change — and whose old value anyone may then
-        // register. Resolve on the id, falling back to the handle for
-        // accounts that predate it.
+        // register. Resolve on the id, and ONLY the id — the handle fallback
+        // for pre-index accounts is retired (records were backfilled with
+        // their numeric ids), because it handed a freed handle's account to
+        // whoever registered the name next.
         const ghId = user.id ? String(user.id) : null;
-        const existing = (ghId && await accountIdByIdp(env, 'github', ghId))
-          ? true : await lookupHostedAccount(env, user.login);
+        const existing = !!(ghId && await accountIdByIdp(env, 'github', ghId));
         const account = existing ? await hostedAccountForGithub(env, user.login, email, ghId) : null;
         const sid = rand(24);
         const session = {
@@ -5547,14 +5545,10 @@ export default {
         if (!account_id && sub) {
           bridged = await clerkExternalGithub(env, sub);
           if (bridged) {
+            // The numeric id, and only the numeric id — the claim-by-handle
+            // window for records with no recorded id is retired (records were
+            // backfilled), same as the direct GitHub flow.
             if (bridged.ghId) account_id = await accountIdByIdp(env, 'github', bridged.ghId);
-            if (!account_id && bridged.handle) {
-              const legacy = await lookupHostedAccount(env, bridged.handle);
-              // Same guard as the direct flow: a handle whose account already
-              // has a stable GitHub owner is not claimable through a name.
-              const owned = legacy && (legacy.identities || []).some((i) => i && i.provider === 'github');
-              if (legacy && !owned) account_id = legacy.account_id;
-            }
             if (account_id) {
               // Write the links NOW, not at mint: the whole point is that the
               // very next sign-in resolves exactly, and this person may read
@@ -5674,8 +5668,8 @@ export default {
         if (!user.login) return json({ error: 'no_user', message: user.message || 'GitHub /user returned no login' }, { status: 500 });
         const email = await ghVerifiedEmail(r.access_token);
         const ghId = user.id ? String(user.id) : null;
-        const existing = (ghId && await accountIdByIdp(env, 'github', ghId))
-          ? true : await lookupHostedAccount(env, user.login);
+        // Id only, same as the web callback: the handle fallback is retired.
+        const existing = !!(ghId && await accountIdByIdp(env, 'github', ghId));
         const account = existing ? await hostedAccountForGithub(env, user.login, email, ghId) : null;
         const sid = rand(24);
         // Store only the identity we actually use. The GitHub access token is
