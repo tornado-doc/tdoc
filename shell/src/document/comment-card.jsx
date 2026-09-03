@@ -655,9 +655,9 @@ export function CommentCard({
           is the card's dress, not when anything appears. */}
       <div className="meta">
         <span className="actions">
-          {!reactionCount ? (
-            <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
-          ) : null}
+          {/* Reply first, so it keeps its place. The add-reaction control moves
+              into the reactions row once a reaction exists; with it leading,
+              Reply slid sideways the moment anyone reacted. */}
           <button
             type="button"
             className="tdoc-reply-toggle"
@@ -665,6 +665,9 @@ export function CommentCard({
           >
             Reply
           </button>
+          {!reactionCount ? (
+            <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
+          ) : null}
         </span>
       </div>
 
