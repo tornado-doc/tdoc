@@ -4561,12 +4561,15 @@ export default {
     const docHeadMatch = p.match(/^\/d\/([^/]+)\/?$/);
     if (docHeadMatch && (method === 'GET' || method === 'HEAD')) {
       const slug = docHeadMatch[1];
-      const latest = latestVersionNumber(await loadDocMeta(env, slug));
-      if (latest > 0) {
-        const gate = await enforceDocAccess(env, req, slug, latest);
-        if (!gate.ok) return gate.response;
-        return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}`);
-      }
+      // Gate with a falsy version: the denial page only embeds a versioned
+      // retry link when it has a version, so an unauthorized probe learns
+      // nothing here — not even the version count. On success the gate's own
+      // meta yields the redirect target (one KV read, not two).
+      const gate = await enforceDocAccess(env, req, slug, 0);
+      if (!gate.ok) return gate.response;
+      const latest = latestVersionNumber(gate.meta);
+      if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}`);
+      // Unknown slug → the existing not-found landing redirect below.
     }
 
     // ---- doc view ----
