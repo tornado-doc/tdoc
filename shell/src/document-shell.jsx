@@ -136,7 +136,7 @@ export function DocumentShell({ boot, config }) {
     // the first-party GitHub redirect only where the seat is absent, the
     // device-code dialog only where neither is configured.
     if (config.oidcAuth) {
-      location.href = `/api/auth/oidc/login?return=${encodeURIComponent(returnUrl)}`;
+      location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;
       return undefined;
     }
     if (config.webAuth) {
