@@ -142,6 +142,14 @@
      `max-width:100% !important` above. Desktop is untouched. */
   @media (max-width: 700px) {
     body table:not(.tdoc-table-scroll > table) { display: block !important; min-width: 0 !important; max-width: 100% !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* Zeroing min-width lets the block fit the screen, but it also lets the
+       table collapse below the width the author designed for — a doc built for
+       880px squeezed its prose column to 62px, two characters a line. The rows
+       lay out at max-content instead, so columns keep a readable width and the
+       block scrolls them. */
+    body table:not(.tdoc-table-scroll > table) > thead,
+    body table:not(.tdoc-table-scroll > table) > tbody,
+    body table:not(.tdoc-table-scroll > table) > tfoot { display: table !important; width: max-content !important; min-width: 100% !important; }
   }
   /* Pre/code blocks scroll horizontally instead of breaking the layout. */
   :where(body pre) { max-width: 100%; overflow-x: auto; }

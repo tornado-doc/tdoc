@@ -641,7 +641,7 @@ function frameCspHeader(nonce) {
 // documents bake their reader CSS at creation: changing that file alone fixes
 // nothing that is already published. Kept byte-identical in server.js —
 // test/reader-patch-drift.test.js holds the two together.
-const READER_PATCH_CSS = '@media (max-width:700px){body table:not(.tdoc-table-scroll>table){display:block!important;min-width:0!important;max-width:100%!important;overflow-x:auto;-webkit-overflow-scrolling:touch}}';
+const READER_PATCH_CSS = '@media (max-width:700px){body table:not(.tdoc-table-scroll>table){display:block!important;min-width:0!important;max-width:100%!important;overflow-x:auto;-webkit-overflow-scrolling:touch}body table:not(.tdoc-table-scroll>table)>thead,body table:not(.tdoc-table-scroll>table)>tbody,body table:not(.tdoc-table-scroll>table)>tfoot{display:table!important;width:max-content!important;min-width:100%!important}}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {

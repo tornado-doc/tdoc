@@ -41,6 +41,10 @@ t('it is the narrow-viewport table rule, and it spares wrapped tables', () => {
   // exists to defeat.
   assert(/min-width:\s*0\s*!important/.test(css), 'the patch no longer overrides an author min-width');
   assert(!/:where\(/.test(css), 'the patch went back to zero specificity');
+  // Zeroing min-width also lets the table collapse below what the author
+  // designed for: a doc built for 880px squeezed its prose column to 62px.
+  assert(/width:\s*max-content/.test(css) && /tbody/.test(css),
+    'the patch no longer keeps the rows at max-content, so columns collapse again');
   assert(/not\(\.tdoc-table-scroll\s*>\s*table\)/.test(css),
     'the patch no longer spares tables the author already wrapped');
 });
