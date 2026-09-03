@@ -1,5 +1,7 @@
-// GitHub device sign-in remains a deliberate native-link handoff from the
-// reusable React dialog. No scripted popup may steal the current interaction.
+// LEGACY FALLBACK contract. The GitHub device dialog only renders where no
+// OIDC seat and no client secret are configured (a bare BYOK worker); on
+// hosted tdoc.dev it is unreachable. While it exists it must stay a native
+// target=_blank anchor — no scripted popup may steal the current interaction.
 const fs = require('fs');
 const path = require('path');
 

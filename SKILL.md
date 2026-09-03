@@ -159,7 +159,7 @@ artifacts, not files the user maintains.
 Every edit creates a new version. Comments anchor to highlighted text or to
 artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
-sharing, with GitHub auth gating comments.
+sharing, with a one-time sign-in (email, Google, or GitHub) gating comments.
 
 ## Storage layout
 
@@ -344,7 +344,7 @@ iterating is fine whenever the user asks for it — it is simply not what a
 finished doc is delivered as.
 
 **Step 0 — start the sign-in before you start writing.** Hosted publishing
-needs a one-time GitHub sign-in. Generating a doc takes 30–60 s and the device
+needs a one-time sign-in. Generating a doc takes 30–60 s and the pairing
 flow is a poll loop, so run them at the same time rather than interrupting the
 user at the end:
 
@@ -431,7 +431,7 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
 
    *If the sign-in has not completed yet*, do not fall back to localhost and do
    not go quiet. Say the doc is written and waiting, and that approving the
-   GitHub page finishes it — or that they can say "publish it" later and you'll
+   approval page finishes it — or that they can say "publish it" later and you'll
    get them a fresh code. The doc stays in `$TDOC_DIR/<slug>/`.
 
    *Self-host.* `bash "$SKILL_DIR/bin/tdoc-publish" --platform cloudflare <slug>`
@@ -700,7 +700,7 @@ pkill -f "$SKILL_DIR/server/server.js"
 
 Publishes the latest version of `<slug>` to a public URL.
 
-Architecture — publish auth, multi-tenant scoping, GitHub-account/BYOK
+Architecture — publish auth, multi-tenant scoping, account/BYOK
 switching, and the client-version gap — is written up as a tdoc:
 `docs/publish-auth-architecture.html` (live: `tdoc.dev/d/tdoc-auth-arch`). Read
 it before changing `bin/tdoc-publish`, `bin/tdoc-update-nag`, or the worker
@@ -717,7 +717,7 @@ while waiting (agent harness timeout, killed sandbox), just run the same
 command again — it picks up the pending device code and keeps polling, so an
 approval the human already granted still lands. Never mint a fresh sign-in by
 hand after an interruption; the re-run does the right thing.
-`/me` on tdoc.dev lists that GitHub user's docs. If
+`/me` on tdoc.dev lists that account's docs. If
 hosted signup is not open on the target, the CLI fails with a clear prompt to
 self-host instead — do **not** tell the user to flip a Worker env flag.
 
@@ -746,14 +746,23 @@ changed. Set `TDOC_SKIP_WORKER_DEPLOY=1` to skip the redeploy (useful for batch
 uploads). Published pages expose runtime provenance at `/api/runtime` and in
 `window.__TDOC__.runtime`.
 
-Local preview (`tdoc serve`) does not need GitHub login. Published docs —
-hosted (`tdoc.dev`) and BYOK remote (your Cloudflare/Vercel worker) — use
-GitHub Device Flow for commenter sign-in via the org-owned OAuth App in
-`shared/github-oauth.js` (scope `read:user`). Viewers authorize that shared
-app; they do not register their own. Set the OAuth App callback URL to
-`https://<host>/auth/github/callback` — that is what the web redirect flow
-needs; a device approve may still bounce to `/auth/done`, which stays a
-friendly static page. `shared/github-oauth.js` is the source of truth.
+**Existing GitHub users migrate by doing nothing.** Their saved upload token
+keeps working (nothing in the CLI re-authenticates until the token is lost),
+and in the browser they pick GitHub inside the sign-in page — the worker
+recognises the connected GitHub identity and lands them on their existing
+account, docs intact. There is nothing for the local skill to detect or
+convert; the pending-signin/pairing machinery is the same file either way.
+
+Local preview (`tdoc serve`) does not need any sign-in. Published docs —
+hosted (`tdoc.dev`) and BYOK remote (your Cloudflare/Vercel worker) — gate
+commenting behind a sign-in. On hosted that is the provider seat (email,
+Google, or GitHub, all in one page). On a BYOK worker with no OIDC config the
+LEGACY fallback is GitHub Device Flow via the org-owned OAuth App in
+`shared/github-oauth.js` (scope `read:user`); viewers authorize that shared
+app, they do not register their own, and the App's callback URL is
+`https://<host>/auth/github/callback` (a device approve may still bounce to
+`/auth/done`, a friendly static page). `shared/github-oauth.js` stays the
+source of truth for that fallback only.
 
 Hosted needs no extra CLI beyond Node 18+ and curl. Self-hosting needs `jq`. Cloudflare needs `wrangler`
 (`npm i -g wrangler`); Vercel needs `vercel` (`npm i -g vercel`).
@@ -871,7 +880,7 @@ When the user reports a problem, check these first:
 
 - **`/api/publish` 404, or "string did not match the expected pattern" in the Publish modal** → the running server is stale (old process, doesn't have current routes). Restart it: `pkill -f "$SKILL_DIR/server/server.js" && nohup node "$SKILL_DIR/server/server.js" > "$TDOC_DIR/.server.log" 2>&1 &`. `/tdoc update` now auto-restarts, but a server that was started before the update is still running stale code until restarted.
 - **Comment popup doesn't appear when selecting text** → selection is captured by `server/frame-probe.js` inside the author frame and posted to the shell over `postMessage`; the composer is drawn by `shell/src/document/`. Check the probe's mouseup/touchend handler first, then whether the `tdoc:selection` message reaches the shell.
-- **Publish modal hangs forever** → check `~/tdocs/.server.log`. On the BYOK path it is usually `wrangler login` waiting for browser auth, or R2 not enabled. On a first hosted publish the modal now shows the GitHub device code itself and waits for it, so a hang there means the sign-in was never approved — the code expires and the publish fails on its own.
+- **Publish modal hangs forever** → check `~/tdocs/.server.log`. On the BYOK path it is usually `wrangler login` waiting for browser auth, or R2 not enabled. On a first hosted publish the modal now shows the pairing code itself and waits for it, so a hang there means the sign-in was never approved — the code expires and the publish fails on its own.
 - **Local doc URLs show the wrong content / weird JSON, or the server "is up" but docs 404** → another local service may be squatting the tdoc port (seen in the wild: a daemon from another product bound 7878). Run `curl -s http://localhost:7878/api/ping` — if the body lacks `"service":"tdoc"`, the answerer is not tdoc. Identify the squatter with `lsof -i :7878`, then free the port or run tdoc on another port via `TDOC_PORT=<port>` (the bin scripts and server all honor it).
 
 ## HTML generation rules
@@ -1147,7 +1156,7 @@ Remote storage holds optional `meta.access`:
 - Legacy meta without `access` stays world-readable + full history (back-compat).
 - Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
 - After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
-- `/me` on hosted tdoc.dev lists the signed-in GitHub user's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
+- `/me` on hosted tdoc.dev lists the signed-in account's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
 
 
 ### Comment anchor stability (important for `/tdoc edit`)

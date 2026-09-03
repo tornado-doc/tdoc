@@ -22,6 +22,7 @@ export function TopBar({
   onNotificationNavigate,
   authConfigured = false,
   onSignIn,
+  onSwitchAccount,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     localStorage.getItem('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -100,10 +101,15 @@ export function TopBar({
               <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={signOut}>
                 <LogOut size={15} /> Sign out
               </AppMenuItem>
+              {onSwitchAccount ? (
+                <AppMenuItem className="tdoc-action-menu-item" onClick={onSwitchAccount}>
+                  <LogIn size={15} /> Switch account
+                </AppMenuItem>
+              ) : null}
             </>
           ) : authConfigured ? (
             <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={onSignIn}>
-              <LogIn size={15} /> Sign in with GitHub
+              <LogIn size={15} /> Sign in
             </AppMenuItem>
           ) : null}
         </AppMenu>
@@ -113,7 +119,7 @@ export function TopBar({
         {identity ? (
           <AppMenu trigger={(
             <button className="tdoc-chip tdoc-account-trigger" type="button">
-              {identity.avatar_url ? <img src={identity.avatar_url} alt="" /> : <span className="tdoc-avatar-fallback">{identity.login.slice(0, 1).toUpperCase()}</span>}
+              {identity.avatar_url ? <img src={identity.avatar_url} alt="" /> : <span className="tdoc-avatar-fallback">{String(identity.name || identity.login || "?").slice(0, 1).toUpperCase()}</span>}
               <span className="name">{identity.name || identity.login}</span>
               {notifications.unread ? <span className="tdoc-unread-dot" /> : null}
             </button>
@@ -123,10 +129,11 @@ export function TopBar({
             </AppMenuItem>
             <AppMenuItem onClick={() => { location.href = '/me'; }}>My docs</AppMenuItem>
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
+            {onSwitchAccount ? <AppMenuItem onClick={onSwitchAccount}>Switch account</AppMenuItem> : null}
           </AppMenu>
         ) : authConfigured ? (
           <button type="button" className="tdoc-chip signin tdoc-account-trigger" onClick={onSignIn}>
-            Sign in with GitHub
+            Sign in
           </button>
         ) : null}
       </div>

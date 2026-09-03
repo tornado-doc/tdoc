@@ -46,9 +46,12 @@ const box = {};
 vm.createContext(box);
 vm.runInContext([
   constLine(src, 'MENTION_RE'),
+  constLine(src, 'EMAIL_MENTION_RE'),
   constLine(src, 'MENTION_MAX_PER_COMMENT'),
   fn(src, 'sessionLogin'),
   fn(src, 'normalizeGithubLogin'),
+  fn(src, 'normalizeEmail'),
+  fn(src, 'normalizeActorKey'),
   fn(src, 'parseMentionLogins'),
   fn(src, 'commentParticipants'),
   fn(src, 'mentionableUsers'),
@@ -78,9 +81,21 @@ t('a mention is a login at a word boundary', () => {
   assert(JSON.stringify(box.parseMentionLogins('(@dana) in parens')) === '["dana"]');
 });
 
-t('an email address is not a mention', () => {
+t('a bare address in prose is not a mention; "@address" is a deliberate tag', () => {
+  // Writing someone's address is not the same act as calling them in.
   assert(box.parseMentionLogins('write to dana@example.com').length === 0);
   assert(box.parseMentionLogins('ping @@dana').length === 0);
+  // The summons form parses to the email actor key…
+  assert(JSON.stringify(box.parseMentionLogins('cc @dana@example.com please'))
+    === JSON.stringify(['email:dana@example.com']));
+  // …never half-read as a GitHub user named dana,
+  assert(!box.parseMentionLogins('cc @dana@example.com').includes('dana'));
+  // trailing punctuation does not join the address,
+  assert(JSON.stringify(box.parseMentionLogins('ask @dana@example.com.'))
+    === JSON.stringify(['email:dana@example.com']));
+  // and both shapes coexist in one comment.
+  assert(JSON.stringify(box.parseMentionLogins('@alice and @dana@example.com'))
+    === JSON.stringify(['email:dana@example.com', 'alice']));
 });
 
 t('two mentions separated by one space both resolve', () => {

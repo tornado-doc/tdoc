@@ -418,7 +418,7 @@ async function enforceDocAccess(env, req, slug, version) {
       response: accessDeniedHtml({
         status: 401,
         title: 'Sign in required',
-        body: 'This document is private. Sign in with GitHub, then open the link again. Only allowlisted accounts can read it.',
+        body: 'This document is private. Sign in, then open the link again. Only invited accounts can read it.',
         slug, version,
       }),
     };
@@ -1810,7 +1810,7 @@ async function landingResponse(env, req, slug = LANDING_SLUG) {
 function neutralLandingResponse(env, notice) {
   const messages = {
     me: 'My docs is only available after you sign in as the worker owner.',
-    signin: 'Sign in with GitHub to continue.',
+    signin: 'Sign in to continue.',
     notfound: 'That page was not found. Sign in or open a doc from its shared link.',
   };
   const nonce = rand(16);
@@ -2199,13 +2199,24 @@ async function indexData(env, session, origin) {
     const row = bySlug.get(item.slug);
     return row && docReadableBy(env, session, row.meta) ? { ...row, at: item.at } : null;
   }).filter(Boolean);
+  const ownerDisplay = (row) => {
+    if (row.owner) return row.owner;
+    // Email-owned docs have no handle; show the owner's local part, never
+    // the address.
+    const key = normalizeActorKey(row.meta && row.meta.hosted && row.meta.hosted.owner_key);
+    return key && key.startsWith('email:') ? key.slice(6).split('@')[0] : '';
+  };
   const publicRow = (row) => ({
     slug: row.slug,
     title: row.title,
     latest: row.latest,
     created: row.created,
     updated: row.updated,
-    owner: row.owner,
+    owner: ownerDisplay(row),
+    // Computed here because only the server can compare canonical identities;
+    // the client comparing display keys went quietly wrong for every session
+    // shape that is not a bare handle.
+    mine: isDocOwnerSession(env, session, row.meta),
     starred: starred.has(row.slug),
   });
 
@@ -3327,6 +3338,7 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
   const record = {
     account_id: account.account_id,
     ...(github_login ? { github_login } : {}),
+    ...(!github_login && normalizeEmail(account.email) ? { email: normalizeEmail(account.email) } : {}),
     created: new Date().toISOString(),
   };
   if (typeof body.label === 'string' && body.label.trim()) {
@@ -3356,7 +3368,7 @@ async function hostedTokenActor(env, token) {
   } catch {}
   if (!record || typeof record.account_id !== 'string' || !record.account_id) return null;
   const github_login = normalizeGithubLogin(record.github_login);
-  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash, github_login };
+  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash, github_login, email: normalizeEmail(record.email) };
 }
 
 async function hostedOwnerOp(env, slug, op) {
@@ -3469,6 +3481,11 @@ function stampHostedOwnership(meta, actor) {
     account_id: actor.account_id,
   };
   if (actor.github_login) hosted.github_login = actor.github_login;
+  // The owner's actor key, whatever shape their identity is. Without this an
+  // email-born account's doc had no owner anyone could route to, and every
+  // comment notification fell through to the worker operator.
+  const key = actor.github_login || (actor.email ? `email:${actor.email}` : null);
+  if (key) hosted.owner_key = key;
   return {
     ...(meta || {}),
     hosted,
@@ -3744,19 +3761,33 @@ const MENTION_INVITE_ALLOWLIST_MAX = 100;
 // group swallows the preceding character so `a@b` (an email) and `@@x` don't
 // match, and so two mentions separated by one space both do.
 const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+// A deliberate email tag: "@dana@example.com". The leading @ is the summons;
+// a bare address in prose ("write to dana@example.com") stays plain text —
+// writing someone's address is not the same act as calling them into the
+// thread. Matched before the handle pass so "@dana@example.com" cannot be
+// half-read as a mention of a GitHub user named dana.
+const EMAIL_MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 
 function parseMentionLogins(text) {
   if (typeof text !== 'string' || !text) return [];
   const out = [];
   const seen = new Set();
-  const re = new RegExp(MENTION_RE.source, 'g');
+  const add = (key) => { if (key && !seen.has(key)) { seen.add(key); out.push(key); } };
+  // Email tags first, and blank their spans so the handle pass cannot re-read
+  // the local part of an address as a handle.
+  let source = text;
+  const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
-  while ((m = re.exec(text))) {
+  while ((m = er.exec(source))) {
+    const addr = String(m[2]).replace(/[.,;:!?)]+$/, '').toLowerCase();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) add(`email:${addr}`);
+  }
+  source = source.replace(new RegExp(EMAIL_MENTION_RE.source, 'g'), '$1');
+  const re = new RegExp(MENTION_RE.source, 'g');
+  while ((m = re.exec(source))) {
     // A GitHub login never ends in a hyphen, so `@dana-` names dana.
     const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    if (!login || seen.has(login)) continue;
-    seen.add(login);
-    out.push(login);
+    add(login);
   }
   return out;
 }
@@ -3770,10 +3801,17 @@ function mentionCandidates(text) {
 // Everyone who has written on this doc, newest record last. Reads the raw
 // event log rather than a snapshot so the author of a DELETED comment still
 // counts as someone you can talk to.
+// Who owns this doc, as an actor key — handle-shaped or email-shaped. The
+// operator fallback stays for legacy/BYOK docs that predate ownership stamps.
+function ownerActorKey(meta, env) {
+  const stamped = normalizeActorKey(meta && meta.hosted && meta.hosted.owner_key);
+  return hostedGithubLogin(meta) || stamped || (env && env.TDOC_OWNER) || '';
+}
+
 function commentParticipants(list) {
   const byLogin = new Map();
   const push = (author) => {
-    const login = normalizeGithubLogin(author && author.login);
+    const login = normalizeActorKey(author && author.login);
     if (!login) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
     byLogin.set(login, {
@@ -3800,7 +3838,7 @@ function commentParticipants(list) {
 function mentionableUsers({ ownerLogin, allowedUsers, participants, includeAllowed = true }) {
   const byLogin = new Map();
   const push = (entry) => {
-    const login = normalizeGithubLogin(entry && entry.login);
+    const login = normalizeActorKey(entry && entry.login);
     if (!login) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
     byLogin.set(login, {
@@ -4679,7 +4717,7 @@ export default {
     if (p === '/me' && method === 'GET') {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
-        const notice = sessionLogin(s) ? 'me' : 'signin';
+        const notice = sessionPrincipal(s) ? 'me' : 'signin';
         return new Response(null, {
           status: 302,
           headers: { Location: `/?notice=${notice}` },
@@ -4834,8 +4872,8 @@ export default {
       // the signed-in viewer's /me Recent tab. Only successful reads count
       // (the access gate already passed), HEAD probes and anonymous readers
       // don't, and the KV write never blocks the response.
-      if (res.ok && method === 'GET' && sessionLogin(res.session)) {
-        const record = recordDocVisit(env, res.session.login, slug).catch(() => {});
+      if (res.ok && method === 'GET' && actorKey(res.session)) {
+        const record = recordDocVisit(env, actorKey(res.session), slug).catch(() => {});
         if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(record);
         else await record;
       }
@@ -4962,7 +5000,7 @@ export default {
     // mode could only ever change one that already existed.
     if (p === '/api/doc/create' && method === 'POST') {
       const session = await getSession(env, req);
-      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
       const ownerCreate = isOwnerSession(env, session);
       let actor = { kind: 'owner_session' };
       if (!ownerCreate) {
@@ -4976,7 +5014,10 @@ export default {
         }
         // Not a precondition — this mints the account on first use. A null here
         // means the account store itself is unreachable.
-        const acct = await hostedAccountForGithub(env, session.login, session && session.email);
+        const acct = sessionLogin(session)
+        ? await hostedAccountForGithub(env, session.login, session && session.email,
+            session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+        : await hostedAccountForEmail(env, session && session.email, session && session.idp);
         if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
         actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
       }
@@ -5053,7 +5094,7 @@ export default {
 
     if (p === '/api/doc/duplicate' && method === 'POST') {
       const session = await getSession(env, req);
-      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const slug = body && body.slug;
@@ -5083,7 +5124,10 @@ export default {
 
       let actor = { kind: 'owner_session' };
       if (!ownerCopy) {
-        const acct = await hostedAccountForGithub(env, session.login, session && session.email);
+        const acct = sessionLogin(session)
+        ? await hostedAccountForGithub(env, session.login, session && session.email,
+            session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+        : await hostedAccountForEmail(env, session && session.email, session && session.idp);
         if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
         actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
       }
@@ -5167,7 +5211,7 @@ export default {
     if (p === '/api/auth/me' && method === 'GET') {
       const s = await getSession(env, req);
       return json({
-        identity: s ? { login: s.login, avatar_url: s.avatar_url, name: s.name } : null,
+        identity: sessionPrincipal(s) ? { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) } : null,
         isOwner: isOwnerSession(env, s), // worker operator; overlay must not clobber per-doc isOwner
         canSeeMyDocs: canSeeMyDocs(env, s, url.origin),
         authConfigured: true,
@@ -5323,6 +5367,12 @@ export default {
       auth.searchParams.set('response_type', 'code');
       auth.searchParams.set('scope', 'openid email profile');
       auth.searchParams.set('state', nonce);
+      // The provider remembers its own session, so a returning visitor is
+      // signed straight through — correct as a default, bewildering when you
+      // meant to pick a different method. prompt=login is the standard OIDC
+      // lever that forces the chooser; whitelisted so the param can't smuggle
+      // anything else.
+      if (url.searchParams.get('prompt') === 'login') auth.searchParams.set('prompt', 'login');
       return redirectTo(auth.toString(), [
         `tdoc_oidcst=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
@@ -5586,12 +5636,12 @@ export default {
 
     if (p === '/api/folders' && method === 'POST') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const name = validFolderName(body.name);
       if (!name) return json({ error: 'invalid_name' }, { status: 400 });
-      const state = await loadFolderState(env, s.login);
+      const state = await loadFolderState(env, actorKey(s));
       if (state.folders.length >= FOLDERS_MAX) return json({ error: 'too_many_folders' }, { status: 400 });
       const parentId = body.parent == null || body.parent === '' ? null : String(body.parent);
       if (parentId) {
@@ -5605,33 +5655,33 @@ export default {
       }
       const folder = { id: `f_${Date.now()}_${rand(4)}`, name, created: new Date().toISOString(), ...(parentId ? { parent: parentId } : {}) };
       state.folders.push(folder);
-      await saveFolderState(env, s.login, state);
+      await saveFolderState(env, actorKey(s), state);
       return json({ ok: true, folder: { id: folder.id, name: folder.name, parent: parentId } });
     }
 
     if (p === '/api/folders' && method === 'PATCH') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const name = validFolderName(body.name);
       if (!name) return json({ error: 'invalid_name' }, { status: 400 });
-      const state = await loadFolderState(env, s.login);
+      const state = await loadFolderState(env, actorKey(s));
       const folder = state.folders.find((f) => f.id === body.id);
       if (!folder) return json({ error: 'not_found' }, { status: 404 });
       if (state.folders.some((f) => f !== folder && (f.parent || null) === (folder.parent || null) && f.name.toLowerCase() === name.toLowerCase())) {
         return json({ error: 'duplicate_name' }, { status: 400 });
       }
       folder.name = name;
-      await saveFolderState(env, s.login, state);
+      await saveFolderState(env, actorKey(s), state);
       return json({ ok: true, folder: { id: folder.id, name: folder.name } });
     }
 
     if (p === '/api/folders' && method === 'DELETE') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       const id = url.searchParams.get('id');
-      const state = await loadFolderState(env, s.login);
+      const state = await loadFolderState(env, actorKey(s));
       const gone = state.folders.find((f) => f.id === id);
       if (!gone) return json({ error: 'not_found' }, { status: 404 });
       // Contents move UP ONE LEVEL — docs and subfolders reparent to the
@@ -5651,13 +5701,13 @@ export default {
         }
       }
       state.folders = state.folders.filter((f) => f.id !== id);
-      await saveFolderState(env, s.login, state);
+      await saveFolderState(env, actorKey(s), state);
       return json({ ok: true });
     }
 
     if (p === '/api/folders/move' && method === 'POST') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const folderId = body.folder == null ? null : String(body.folder);
@@ -5665,7 +5715,7 @@ export default {
       if (!slugs.length || slugs.length > 100 || !slugs.every((x) => typeof x === 'string' && isValidSlug(x))) {
         return json({ error: 'invalid_slugs' }, { status: 400 });
       }
-      const state = await loadFolderState(env, s.login);
+      const state = await loadFolderState(env, actorKey(s));
       if (folderId && !state.folders.some((f) => f.id === folderId)) {
         return json({ error: 'folder_not_found' }, { status: 404 });
       }
@@ -5681,7 +5731,7 @@ export default {
         if (folderId) state.docs[slug] = folderId;
         else delete state.docs[slug];
       }
-      await saveFolderState(env, s.login, state);
+      await saveFolderState(env, actorKey(s), state);
       return json({ ok: true, moved: slugs.length, folder: folderId });
     }
 
@@ -5705,7 +5755,7 @@ export default {
       // rejection, just a clearer 401.
       if (!principal) return json({
         error: 'sign_in_required',
-        hint: 'Hosted publish needs a GitHub sign-in. If your tdoc CLI did not show a device code to approve, it is out of date — run: /tdoc update --yes',
+        hint: 'Hosted publish needs a sign-in. If your tdoc CLI did not show a code to approve, it is out of date — run: /tdoc update --yes',
       }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
@@ -5757,7 +5807,7 @@ export default {
       const list = await readComments(env, slug);
       const me = sessionLogin(s);
       const users = mentionableUsers({
-        ownerLogin: hostedGithubLogin(meta) || env.TDOC_OWNER,
+        ownerLogin: ownerActorKey(meta, env),
         allowedUsers: access.allowed_users,
         participants: commentParticipants(list),
         includeAllowed: isAllowlisted(access, s, env, meta),
@@ -5783,7 +5833,7 @@ export default {
       const author = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
-      const ownerLogin = hostedGithubLogin(meta) || env.TDOC_OWNER;
+      const ownerLogin = ownerActorKey(meta, env);
       // Resolve @mentions BEFORE the write: the delivered list is stamped onto
       // the event, so a chip on the card is exactly the set that was notified.
       // Named logins come from the text, never from the request body.
@@ -5993,7 +6043,7 @@ export default {
       // serialized write so concurrent toggles can't both add. Any signed-in
       // user may react, so there's no author check to do here.
       const res = await mutateComments(env, slug, {
-        kind: 'react', slug, comment_id, emoji, by: s.login, version: V,
+        kind: 'react', slug, comment_id, emoji, by: actorKey(s), version: V,
       });
       if (res.status === 200 && res.body && res.body.added) {
         const list = await readComments(env, slug);
@@ -6003,7 +6053,7 @@ export default {
         await deliverInbox(env, target && target.login, {
           kind: 'reaction', slug, version: V, comment_id,
           thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
-          actor: { login: s.login, avatar_url: s.avatar_url, name: s.name },
+          actor: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
           title: (meta && meta.title) || slug, emoji,
         });
       }

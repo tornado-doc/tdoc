@@ -29,8 +29,10 @@ export function MentionField({
   const [active, setActive] = useState(0);
 
   const localMatches = query ? matchMentionable(people, query.query) : [];
+  // Typing an address is already a complete tag — asking GitHub's user search
+  // about "dana@corp.com" offers strangers and leaks the address upstream.
   const remote = useGithubUserSearch(query ? query.query : '', {
-    enabled: Boolean(query) && localMatches.length === 0,
+    enabled: Boolean(query) && localMatches.length === 0 && !query.query.includes('@'),
   });
   const matches = useMemo(() => {
     const seen = new Set(localMatches.map((person) => String(person.login).toLowerCase()));
@@ -96,7 +98,10 @@ export function MentionField({
   };
 
   const pick = (person) => {
-    const next = insertMention(value, query, person.login);
+    // An email participant's key is "email:<addr>"; the text form of the tag
+    // is the bare address (the parser reads "@addr" back into the key).
+    const key = String(person.login || '');
+    const next = insertMention(value, query, key.startsWith('email:') ? key.slice(6) : key);
     caretAfterInsert.current = next.caret;
     setQuery(null);
     onChange(next.text);
@@ -163,7 +168,7 @@ export function MentionField({
               onClick={() => pick(person)}
             >
               {person.avatar_url ? <img src={person.avatar_url} alt="" /> : <span className="tdoc-mention-anon" />}
-              <span className="tdoc-mention-login">@{person.login}</span>
+              <span className="tdoc-mention-login">@{String(person.login).startsWith('email:') ? String(person.login).slice(6) : person.login}</span>
               {person.name && person.name.toLowerCase() !== person.login ? (
                 <span className="tdoc-mention-name">{person.name}</span>
               ) : null}
