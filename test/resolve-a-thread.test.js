@@ -88,14 +88,34 @@ t('a resolved thread leaves the margin, except the one being looked at', () => {
     'hiding is about the margin, not about forgetting the comment exists');
 });
 
-t('the way back is in the ⋯ menu, and says how many', () => {
-  assert(/data-action="show-resolved"/.test(toolbar), 'no Show resolved item');
-  assert(/showResolved \? 'Hide resolved' : `Show resolved \(\$\{resolvedCount\}\)`/.test(toolbar),
-    'the item should say how many are hidden, and toggle back');
-  assert(/\{resolvedCount \? \(/.test(toolbar), 'do not offer it when nothing is resolved');
-  assert(/localStorage\.setItem\(RESOLVED_KEY/.test(shell), 'the choice should survive a reload');
+t('the way back is a switch in the bar, off by default', () => {
+  const sw = read('shell/src/ui/switch.jsx');
+  assert(sw.includes('Switch.Root') && sw.includes('Switch.Thumb'),
+    'the switch should lean on the primitive for its semantics, not fake them');
+  assert(/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar has no switch');
+  assert(/label=\{`Resolved \(\$\{resolvedCount\}\)`\}/.test(shell), 'the switch should say how many are hidden');
+  assert(/\{resolvedCount \? \(/.test(shell), 'a control that can only do nothing is worse than no control');
+  // Off by default: the margin starts quiet, and a reader who wants it noisy
+  // says so once.
   assert(/try \{ return localStorage\.getItem\(RESOLVED_KEY\) === '1'; \} catch \{ return false; \}/.test(shell),
-    'storage that throws must mean "quiet margin", not a crash');
+    'default off, and storage that throws still means off rather than a crash');
+  assert(/localStorage\.setItem\(RESOLVED_KEY/.test(shell), 'the choice should survive a reload');
+});
+
+t('the ⋯ menu carries it only where the bar cannot', () => {
+  assert(/data-action="show-resolved"/.test(toolbar), 'the narrow-width fallback is gone');
+  assert(/className="tdoc-action-menu-item tdoc-mobile-overflow-only"\s*\n\s*data-action="show-resolved"/.test(toolbar),
+    'the menu item must be overflow-only, or it duplicates the switch at desktop width');
+  // The switch folds with the controls it stands beside, not on its own rule —
+  // chrome.css has several max-width:700px blocks, so anchor on the group.
+  const css = read('server/chrome.css');
+  const at = css.indexOf('.tdoc-bar #tdoc-star-btn,');
+  assert(at >= 0, 'the bar fold group is gone');
+  const group = css.slice(at, css.indexOf('display: none;', at));
+  assert(group.includes('.tdoc-bar .tdoc-switch,'),
+    'the switch has to fold with the rest of the bar, or it crowds the title on a phone');
+  assert(css.lastIndexOf('@media (max-width: 700px)', at) > css.lastIndexOf('@media (max-width: 900px)', at),
+    'that group has to be the 700px block');
 });
 
 t('resolving closes the card it was pressed on', () => {

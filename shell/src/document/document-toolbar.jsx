@@ -191,7 +191,7 @@ export function DocumentOverflowActions({
       ) : null}
       {resolvedCount ? (
         <AppMenuItem
-          className="tdoc-action-menu-item"
+          className="tdoc-action-menu-item tdoc-mobile-overflow-only"
           data-action="show-resolved"
           onClick={onToggleResolved}
         >

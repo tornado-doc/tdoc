@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
+import { AppSwitch } from './ui/switch.jsx';
 import { duplicateDocument, renameDocument, setDocumentStar } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
@@ -581,6 +582,19 @@ export function DocumentShell({ boot, config }) {
               canEdit={config.canEdit}
               onChange={editor.changeMode}
             />
+            {/* Resolved threads are out of the margin by default. The switch is
+                the way back, in the bar where it can be seen — it folds into
+                the ⋯ menu with everything else when the bar runs out of room.
+                Absent entirely when nothing is resolved: a control that can
+                only do nothing is worse than no control. */}
+            {resolvedCount ? (
+              <AppSwitch
+                id="tdoc-show-resolved"
+                checked={showResolved}
+                onCheckedChange={toggleResolved}
+                label={`Resolved (${resolvedCount})`}
+              />
+            ) : null}
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}

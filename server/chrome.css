@@ -77,6 +77,18 @@
   .tdoc-bar .doc-author { color: #8a8a8f; font-size: 13px; flex: 0 0 auto; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-bar .doc-author::before { content: "·"; color: #c8c8cc; margin: 0 6px 0 0; }
 
+  /* Slide switch in the bar. The label is part of the control, so the whole
+     thing is one click target. */
+  .tdoc-bar .tdoc-switch { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; padding: 4px 8px 4px 6px; border-radius: 8px; }
+  .tdoc-bar .tdoc-switch:hover { background: #f0f1f4; }
+  .tdoc-bar .tdoc-switch-track { position: relative; flex: 0 0 auto; width: 28px; height: 16px; padding: 0; border: none; border-radius: 999px; background: #d4d4d9; cursor: pointer; transition: background .14s; }
+  .tdoc-bar .tdoc-switch-track[data-checked] { background: #1a7340; }
+  .tdoc-bar .tdoc-switch-track:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
+  .tdoc-bar .tdoc-switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .14s; }
+  .tdoc-bar .tdoc-switch-track[data-checked] .tdoc-switch-thumb { transform: translateX(12px); }
+  .tdoc-bar .tdoc-switch-label { font-size: 13px; color: #555; white-space: nowrap; }
+  .tdoc-bar .tdoc-switch:hover .tdoc-switch-label { color: #1a1a1a; }
+
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
   .tdoc-bar button:hover { background: #f0f1f4; color: #1a1a1a; }
@@ -538,7 +550,7 @@
      document, and the slug is in the address bar.
        ≥ 900px: logo · v · title · author …… identity · share · ⋯
        < 900px: logo · v · title ……………… avatar   · share · ⋯  (author + name hide)
-       < 700px: logo ·     title ………………            share · ⋯  (version+identity into ⋯) */
+       < 700px: logo ·     title ………………            share · ⋯  (version+identity+resolved into ⋯) */
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
@@ -555,6 +567,7 @@
     .tdoc-bar #tdoc-star-btn,
     .tdoc-bar .tdoc-document-primary,
     .tdoc-bar #tdoc-theme-btn,
+    .tdoc-bar .tdoc-switch,
     .tdoc-bar .tdoc-account-trigger { display: none; }
     .tdoc-bar .tdoc-secondary-toggle.tdoc-mobile-overflow-trigger { display: inline-flex; }
     .tdoc-bar-right, .tdoc-bar-actions { gap: 0; }
