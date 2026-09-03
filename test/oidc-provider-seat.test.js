@@ -5,8 +5,9 @@
 // rug-pull-proof and takeover-proof:
 //
 //   - unconfigured → the routes bow out and no button flags are advertised;
-//   - a verified email mints a session with NO login and NO issuer user id
-//     stored anywhere (email is the merge key, sub never becomes one);
+//   - a verified email mints a session with no login, and the issuer's `sub`
+//     is recorded as the authoritative way back to the account (an earlier
+//     version refused to store it, calling that lock-in — see below);
 //   - an unverified email is refused a session outright;
 //   - sign-in resolves an existing account but never mints one;
 //   - an OIDC session can approve a pairing, and the redeemed token lands on
@@ -95,7 +96,7 @@ function sessionFrom(env, response) {
     assert(html.includes('"oidcAuth":false'), 'unconfigured host still advertises the button');
   });
 
-  await t('a verified email becomes a session — no login, no issuer sub stored', async () => {
+  await t('a verified email becomes a session keyed on the stable sub, not the address', async () => {
     const env = makeEnv(mod.CommentsStore, OIDC_ENV);
     stubIssuer({ email: 'Person@Example.COM', verified: true });
     const cb = await signIn(worker, env);
@@ -104,9 +105,20 @@ function sessionFrom(env, response) {
     assert(session && session.email === 'person@example.com', `session: ${JSON.stringify(session)}`);
     assert(!('login' in session) || session.login == null, 'OIDC session must not fake a login');
     assert(session.oidc === true, 'session not marked oidc');
-    const everything = JSON.stringify([...env.META.map.entries()]);
-    assert(!everything.includes('user_stub_123'), "the issuer's sub leaked into KV — it must never become a key");
+    // The session carries the identity so a later mint can link it. Storing
+    // `sub` was previously forbidden here on the theory that a vendor's id in
+    // our data is lock-in; that had it backwards. Lock-in is about who owns
+    // the ACCOUNT — account_id is ours, and every doc hangs off it. `sub` is
+    // just the one identifier a provider promises never changes and never
+    // reuses, which an email address explicitly is not: hand a departed
+    // employee's mailbox to someone new and, without it, they inherit the
+    // docs. Drop the provider and this index is dead weight, nothing more.
+    assert(session.idp && session.idp.sub === 'user_stub_123',
+      `session must carry the provider identity: ${JSON.stringify(session)}`);
+    // Still resolve-don't-mint: no account, and so no index of either kind.
     assert(!env.META.map.has('account-email:person@example.com'), 'sign-in minted an account');
+    assert(![...env.META.map.keys()].some((k) => k.startsWith('account-idp:')),
+      'sign-in wrote an idp index for an account that does not exist');
   });
 
   await t('an unverified email is refused a session', async () => {

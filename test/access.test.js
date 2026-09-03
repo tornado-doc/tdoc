@@ -23,7 +23,32 @@ for (; i < workerSrc.length; i++) {
   else if (workerSrc[i] === '}') { depth--; if (depth === 0) { i++; break; } }
 }
 const isOwnerFn = workerSrc.slice(ownerStart, i);
-const block = isOwnerFn + '\n' + workerSrc.slice(start, end);
+
+// Pull a named function out of worker.js by brace-matching from its header.
+// The identity gates gained dependencies (normalizeEmail, actorKey and
+// friends) that sit outside these slices; grab them the same way rather than
+// widening the slice into unrelated code.
+function grabFn(src, header) {
+  const at = src.indexOf(header);
+  if (at < 0) throw new Error(`missing dependency in worker.js: ${header}`);
+  let j = src.indexOf('{', at), d = 0;
+  for (; j < src.length; j++) {
+    if (src[j] === '{') d++;
+    else if (src[j] === '}') { d--; if (d === 0) { j++; break; } }
+  }
+  return src.slice(at, j);
+}
+const IDENTITY_DEPS = [
+  'function normalizeEmail(',
+  'function normalizeGithubLogin(',
+  'function sessionLogin(',
+  'function sessionPrincipal(',
+  'function actorKey(',
+  'function actorDisplayName(',
+  'function normalizeInvitee(',
+];
+const deps = IDENTITY_DEPS.map((h) => grabFn(workerSrc, h)).join('\n');
+const block = deps + '\n' + isOwnerFn + '\n' + workerSrc.slice(start, end);
 
 const box = {};
 vm.createContext(box);
