@@ -28,6 +28,7 @@
   // dismisses it — it must not open a different comment or start a new one.
   var shellUiOpen = false;
   var swallowClick = false;
+  var dismissDownX = 0, dismissDownY = 0;
   var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
@@ -255,7 +256,10 @@
     // The mousedown of this same gesture dismissed something. Let it end there.
     if (swallowClick) {
       swallowClick = false;
-      if (e.target && e.target.closest && e.target.closest('a[href]')) {
+      // Stop only our own affordances and links — the pill would otherwise open
+      // an element comment on the very click that closed a card. Author markup
+      // (a <details> toggle, a button) keeps behaving normally.
+      if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill, a[href]')) {
         e.preventDefault(); e.stopPropagation();
       }
       return;
@@ -278,7 +282,24 @@
   }, true);
 
   function clearSelectingCursor() { document.documentElement.removeAttribute('data-tdoc-selecting'); }
-  document.addEventListener('mouseup', function () { clearSelectingCursor(); setTimeout(reportSelection, 0); }, true);
+  document.addEventListener('mouseup', function (e) {
+    clearSelectingCursor();
+    // A dismissing click must not report a selection either. Content styled
+    // `user-select: all` selects its whole block on a single click, which came
+    // back as a composer on the very click that closed a card. A real drag is
+    // still a selection, so only a pointer that stayed put is suppressed.
+    var moved = Math.abs(e.clientX - dismissDownX) > 4 || Math.abs(e.clientY - dismissDownY) > 4;
+    if (swallowClick && !moved) {
+      // A click whose only job is to dismiss. Content styled `user-select: all`
+      // selects its whole block on one click, which came back as a composer on
+      // the very click that closed a card, so no selection is reported either.
+      if (HL) CSS.highlights.delete('tdoc-pending');
+      setActiveAnchor(null, false);
+      post({ type: 'tdoc:cleared' });
+      return;
+    }
+    setTimeout(reportSelection, 0);
+  }, true);
   document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
   window.addEventListener('blur', clearSelectingCursor);
   document.addEventListener('copy', function (e) {
@@ -298,12 +319,17 @@
     if (interactionMode === 'edit') return;
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
-    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
+    // The pill is our own UI, so a click on it normally opens the composer
+    // rather than clearing. While something is open it is outside that card
+    // like anything else, and dismissal wins.
+    if (!shellUiOpen && e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
     // Dismissal does not hit-test. While the shell has something open, an anchor
     // under the pointer stops being special — the click that closes a card must
     // not also open the next one. Fall through rather than returning, so a drag
     // that starts here still paints its selection.
     swallowClick = shellUiOpen;
+    dismissDownX = e.clientX; dismissDownY = e.clientY;
+
     if (!shellUiOpen && anchorIdAtPoint(e.clientX, e.clientY)) return;
     if (interactionMode === 'comment' && e.button === 0
       && !(e.target && e.target.closest && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
@@ -312,6 +338,11 @@
         document.documentElement.setAttribute('data-tdoc-selecting', '');
       }
     }
+    // Dismiss on mouseup, not here. Clearing on mousedown unmounts the focused
+    // composer in the shell, and losing that focus wipes the selection the user
+    // is in the middle of dragging. This sits AFTER the painting setup above:
+    // an early return here stops a drag from painting at all.
+    if (shellUiOpen) return;
     if (HL) CSS.highlights.delete('tdoc-pending');
     setActiveAnchor(null, false);
     post({ type: 'tdoc:cleared' });

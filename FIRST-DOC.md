@@ -11,8 +11,9 @@ not ask the human which runtime they use; that file tells you how to install
 yourself and how to authenticate.
 
 Publishing is hosted by default and needs no Cloudflare account, no card, and
-nothing to click in a dashboard. If the CLI asks the human to sign in with
-GitHub, print the code and the URL and wait for them. Do not ask them for a
+nothing to click in a dashboard. If the CLI asks the human to sign in, relay
+the code and the URL and wait — they approve it in their own browser, signing
+in there with email, Google, or GitHub. Do not ask them for a
 token; there is nothing for them to paste. Do not ask for a token, and do not
 print one.
 
@@ -521,7 +522,7 @@ resolved for the title, lowercased and kebab-cased:
 what-ai-knows-<name>        →  what-ai-knows-serena
 ```
 
-If no name resolved, fall back to their GitHub login from the hosted account.
+If no name resolved, fall back to the hosted account's handle or email local part.
 If neither exists, append a short random suffix rather than shipping a bare
 title — a slug nobody can claim twice is worth more than a tidy one.
 
@@ -555,7 +556,7 @@ Then say, in one line each:
 - that it is private to them right now, and nobody with the link can open it
 - how to open it up when they want to:
   `tdoc-publish --visibility unlisted <slug>` for link-readable, or
-  `--allow-user <github-login>` to add one person
+  `--allow-user <email-or-github-login>` to add one person
 
 **Do not ask first and publish second.** Asking "shall I publish this?" before
 they have seen anything asks them to consent to a page that does not exist yet.

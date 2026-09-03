@@ -134,7 +134,7 @@ t('the worker create route claims a slug, charges quota, and writes v1', () => {
   for (const needle of [
     "json({ error: 'sign_in_required' }, { status: 401 })",
     'hostedAccountCopiesEnabled(env, req)',
-    'hostedAccountForGithub(env, session.login, session && session.email)',
+    'sessionLogin(session)\n        ? await hostedAccountForGithub(env, session.login, session && session.email',
     'countHostedDocs(env, actor.account_id, limit)',
     "kind: 'claim_owner'",
     'blankDocHtml()',
@@ -235,7 +235,10 @@ t('the bar names a document by its title, never by its slug', () => {
   const toolbar = read('shell/src/document/document-toolbar.jsx');
   const start = toolbar.indexOf('export function DocumentBreadcrumbs(');
   const block = toolbar.slice(start, toolbar.indexOf('\nexport function', start + 20));
-  assert(block.includes('<span className="doc-title">{config.title'), 'the title must still lead the bar');
+  // The title moved into DocumentTitle when it became renameable (#383); what
+  // must not come back is the slug standing in for a name.
+  assert(block.includes('<DocumentTitle title={title}'), 'the title must still lead the bar');
+  assert(toolbar.includes('className="doc-title"'), 'the title lost its hook');
   assert(!toolbar.includes('crumb-slug'), 'the slug crumb is back in the bar');
   // The version menu still needs the slug to build hrefs — that is a URL, not
   // a label; what must not return is the slug rendered as the document's name.

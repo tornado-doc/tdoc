@@ -51,6 +51,16 @@ export function updateCommentAnchor(payload) {
   });
 }
 
+// Marking a thread handled, and taking it back. One status per version, so
+// this converges however two people interleave it.
+export function setCommentResolved({ slug, version, id, resolved }) {
+  return request('/api/comments', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, version, id, resolved }),
+  });
+}
+
 export function removeComment(slug, version, id) {
   const query = new URLSearchParams({ slug, version: String(version), id });
   return request(`/api/comments?${query}`, { method: 'DELETE' });
@@ -112,6 +122,16 @@ export function publishDocument(slug) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slug }),
+  });
+}
+
+// Renaming is a metadata edit: it changes what the document is called and
+// touches neither its text nor its version history.
+export function renameDocument(slug, title) {
+  return request('/api/doc/title', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, title }),
   });
 }
 

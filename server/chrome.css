@@ -66,10 +66,32 @@
      beside it — growing pushed the star to the far end of the left cluster.
      Shrink+min-width:0 keeps the ellipsis when space runs out. */
   .tdoc-bar .doc-title { color: #1a1a1a; font-weight: 600; font-size: 14px; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The title is a control when you own the document: it looks like text until
+     you point at it, so the bar stays quiet for everyone who cannot rename. */
+  .tdoc-bar button.doc-title-edit { appearance: none; border: 1px solid transparent; background: none; padding: 2px 6px; margin: 0 -6px; border-radius: 6px; font: inherit; font-weight: 600; font-size: 14px; color: #1a1a1a; cursor: text; text-align: left; }
+  .tdoc-bar button.doc-title-edit:hover { border-color: #e5e5e7; background: #fafafa; }
+  .tdoc-bar .doc-title-input { border: 1px solid var(--td-accent); background: #fff; padding: 2px 6px; margin: 0 -6px; border-radius: 6px; font: inherit; font-weight: 600; font-size: 14px; color: #1a1a1a; outline: none; min-width: 12ch; max-width: 40ch; }
+
   /* Whose document this is. flex-shrink:0 with its own max-width so a long
      login truncates itself instead of eating the title's room. */
   .tdoc-bar .doc-author { color: #8a8a8f; font-size: 13px; flex: 0 0 auto; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-bar .doc-author::before { content: "·"; color: #c8c8cc; margin: 0 6px 0 0; }
+
+  /* Slide switch in the bar. The label is part of the control, so the whole
+     thing is one click target. */
+  /* Sized to the mode trigger it stands beside — 32px, same radius — so the
+     three controls share a baseline instead of stepping. It stays borderless
+     until hovered: Publish is the only thing in this row that should look
+     filled. */
+  .tdoc-bar .tdoc-switch { display: inline-flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box; padding: 0 12px 0 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; user-select: none; }
+  .tdoc-bar .tdoc-switch:hover { border-color: #e5e5e7; background: #fafafa; }
+  .tdoc-bar .tdoc-switch-track { position: relative; flex: 0 0 auto; width: 28px; height: 16px; padding: 0; border: none; border-radius: 999px; background: #d4d4d9; cursor: pointer; transition: background .14s; }
+  .tdoc-bar .tdoc-switch-track[data-checked] { background: #1a7340; }
+  .tdoc-bar .tdoc-switch-track:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
+  .tdoc-bar .tdoc-switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .14s; }
+  .tdoc-bar .tdoc-switch-track[data-checked] .tdoc-switch-thumb { transform: translateX(12px); }
+  .tdoc-bar .tdoc-switch-label { font-size: 13px; color: #555; white-space: nowrap; }
+  .tdoc-bar .tdoc-switch:hover .tdoc-switch-label { color: #1a1a1a; }
 
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
@@ -427,7 +449,9 @@
   .tdoc-drag-marquee { position: absolute; pointer-events: none; z-index: 999997; border: 1.5px solid var(--td-accent); background: var(--td-accent-wash); box-sizing: border-box; }
 
   /* Popup (new-comment) */
-  .tdoc-popup { position: absolute; background: #0a0a0a; color: #fff; border-radius: 10px; padding: 14px; width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); z-index: 999998; font: 13px system-ui, sans-serif; }
+  /* fixed, not absolute: absolute ties the card to the document, and iOS
+     scrolls the document to reveal a focused textarea. See comment-composer.jsx. */
+  .tdoc-popup { position: fixed; background: #0a0a0a; color: #fff; border-radius: 10px; padding: 14px; width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); z-index: 999998; font: 13px system-ui, sans-serif; }
   .tdoc-popup .head { display: flex; justify-content: space-between; margin-bottom: 8px; }
   .tdoc-popup .head .h { color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
@@ -532,7 +556,7 @@
      document, and the slug is in the address bar.
        ≥ 900px: logo · v · title · author …… identity · share · ⋯
        < 900px: logo · v · title ……………… avatar   · share · ⋯  (author + name hide)
-       < 700px: logo ·     title ………………            share · ⋯  (version+identity into ⋯) */
+       < 700px: logo ·     title ………………            share · ⋯  (version+identity+resolved into ⋯) */
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
@@ -549,6 +573,7 @@
     .tdoc-bar #tdoc-star-btn,
     .tdoc-bar .tdoc-document-primary,
     .tdoc-bar #tdoc-theme-btn,
+    .tdoc-bar .tdoc-switch,
     .tdoc-bar .tdoc-account-trigger { display: none; }
     .tdoc-bar .tdoc-secondary-toggle.tdoc-mobile-overflow-trigger { display: inline-flex; }
     .tdoc-bar-right, .tdoc-bar-actions { gap: 0; }

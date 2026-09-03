@@ -3,6 +3,7 @@ import {
   createComment,
   listComments,
   removeComment,
+  setCommentResolved,
   toggleReaction,
   updateCommentAnchor,
   updateCommentText,
@@ -69,6 +70,10 @@ export function useComments({ slug, version, onChange, onUnauthorized }) {
     return mutate(() => toggleReaction({ slug, version, comment_id: commentId, emoji }));
   }, [mutate, slug, version]);
 
+  const setResolved = useCallback(async (id, resolved) => {
+    return mutate(() => setCommentResolved({ slug, version, id, resolved }));
+  }, [mutate, slug, version]);
+
   const remove = useCallback(async (id) => {
     return mutate(() => removeComment(slug, version, id));
   }, [mutate, slug, version]);
@@ -89,6 +94,7 @@ export function useComments({ slug, version, onChange, onUnauthorized }) {
     addReply,
     edit,
     react,
+    setResolved,
     remove,
     moveAnchor,
   };

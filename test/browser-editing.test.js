@@ -75,6 +75,58 @@ async function chooseMode(page, label) {
     slug, title: 'Browser editing', versions: [{ n: 1, created: new Date().toISOString() }],
   }, null, 2));
 
+  // A doc for the resolved filter, separate for the same reason as the move
+  // anchor one: seeding a resolved comment into the shared fixture changes what
+  // every other test sees in the margin.
+  const resolvedSlug = 'resolved-filter';
+  const resolvedRoot = path.join(root, resolvedSlug);
+  fs.mkdirSync(path.join(resolvedRoot, 'v1'), { recursive: true });
+  fs.writeFileSync(path.join(resolvedRoot, 'v1', 'index.html'), `<!doctype html>
+<html><head><meta charset="utf-8"><title>Resolved filter</title></head>
+<body><main class="page"><h1>Resolved filter</h1>
+<p id="resolved-paragraph">Alpha bravo charlie delta echo foxtrot golf hotel india juliet.</p>
+</main></body></html>`);
+  const anchorFor = (word, before, after) => ({ kind: 'text', text: word, context_before: before, context_after: after });
+  fs.writeFileSync(path.join(resolvedRoot, 'comments.json'), JSON.stringify([
+    { id: 'c_open', version: 1, anchor: anchorFor('charlie', 'Alpha bravo ', ' delta'),
+      text: 'still open', author: { login: 'owner', name: 'owner', avatar_url: '' },
+      status: 'open', created: '2026-09-01T00:00:00Z', replies: [], reactions: {} },
+    { id: 'c_done', version: 1, anchor: anchorFor('hotel', 'golf ', ' india'),
+      text: 'already resolved', author: { login: 'owner', name: 'owner', avatar_url: '' },
+      // applied_in matters: the server reports a thread resolved only when it
+      // was resolved at or before the version being read, so 'applied' alone
+      // comes back as 'open' and the filter has nothing to hide.
+      status: 'applied', applied_in: 1, created: '2026-09-01T00:01:00Z', replies: [], reactions: {} },
+  ], null, 2));
+  fs.writeFileSync(path.join(resolvedRoot, 'meta.json'), JSON.stringify({
+    slug: resolvedSlug, title: 'Resolved filter', versions: [{ n: 1, created: new Date().toISOString() }],
+  }, null, 2));
+
+  // A SECOND doc, used only by the Move anchor test. Seeding an anchored
+  // comment into the doc above changes what a click on its paragraph does, and
+  // the neighbouring tests start failing — this keeps that blast radius at zero.
+  const anchorSlug = 'move-anchor';
+  const anchorRoot = path.join(root, anchorSlug);
+  fs.mkdirSync(path.join(anchorRoot, 'v1'), { recursive: true });
+  fs.writeFileSync(path.join(anchorRoot, 'v1', 'index.html'), `<!doctype html>
+<html><head><meta charset="utf-8"><title>Move anchor</title>
+<style>body{font:18px/1.6 system-ui;margin:0}.page{max-width:720px;margin:48px auto;padding:0 24px}</style>
+</head><body><main class="page"><h1>Move anchor</h1>
+<p id="anchor-paragraph">Alpha bravo charlie delta echo foxtrot golf hotel india juliet.</p>
+</main></body></html>`);
+  fs.writeFileSync(path.join(anchorRoot, 'comments.json'), JSON.stringify([{
+    id: 'c_anchored', version: 1,
+    anchor: {
+      kind: 'text', text: 'charlie',
+      context_before: 'Alpha bravo ', context_after: ' delta echo foxtrot golf hotel india juliet.',
+    },
+    text: 'move me', author: { login: 'owner', name: 'owner', avatar_url: '' },
+    status: 'open', created: '2026-09-01T00:00:00Z', replies: [], reactions: {},
+  }], null, 2));
+  fs.writeFileSync(path.join(anchorRoot, 'meta.json'), JSON.stringify({
+    slug: anchorSlug, title: 'Move anchor', versions: [{ n: 1, created: new Date().toISOString() }],
+  }, null, 2));
+
   // Not a fixed port: waitForServer below only asks whether ANYTHING answers,
   // so a port another process already held would have quietly become the
   // subject of this whole suite.
@@ -212,6 +264,71 @@ async function chooseMode(page, label) {
       await clickAt(geometry.first);
       assert(await openCount() > 0, 'dismissal state leaked: a fresh click stopped opening the composer');
       await page.locator('.tdoc-popup button.x').click();
+      await frame.evaluate(() => window.getSelection().removeAllRanges());
+    });
+
+    await test('dismissal spares the drag and the artifact pill', async () => {
+      // Three things the dismiss-first rule broke when it was first written.
+      // Each is a separate path into the same comment UI.
+      const box = await page.locator('.tdoc-doc-frame').boundingBox();
+      const geometry = await frame.evaluate(() => {
+        const paragraph = document.querySelector('#editable-paragraph');
+        const text = paragraph.firstChild;
+        const span = (from, to) => {
+          const range = document.createRange();
+          range.setStart(text, from); range.setEnd(text, to);
+          return range.getBoundingClientRect();
+        };
+        const first = span(0, 4), tail = span(10, 20);
+        const artifact = document.querySelector('#comment-artifact').getBoundingClientRect();
+        return {
+          first: { x: first.left + first.width / 2, y: first.top + first.height / 2 },
+          drag: { x1: tail.left + 1, x2: tail.right - 1, y: tail.top + tail.height / 2 },
+          artifact: { x: artifact.left + artifact.width / 2, y: artifact.top + 12 },
+        };
+      });
+      const openCount = () => page.locator('.tdoc-popup, .tdoc-margin-comment.active').count();
+      const clickAt = async (point) => {
+        await page.mouse.click(box.x + point.x, box.y + point.y);
+        await page.waitForTimeout(250);
+      };
+
+      // 1. A drag while something is open is a selection, not a dismissal.
+      //    Clearing on mousedown unmounted the focused composer, and losing
+      //    that focus wiped the selection mid-drag.
+      await clickAt(geometry.first);
+      assert(await openCount() > 0, 'precondition: a word click did not open the composer');
+      await page.mouse.move(box.x + geometry.drag.x1, box.y + geometry.drag.y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + geometry.drag.x2, box.y + geometry.drag.y, { steps: 12 });
+      await page.mouse.up();
+      await page.waitForTimeout(400);
+      assert(await openCount() > 0, 'a drag while something was open reported no selection');
+      await page.locator('.tdoc-popup button.x').click().catch(() => {});
+      await page.waitForTimeout(200);
+
+      // 2. The artifact pill is our own UI, but while a card is open it is
+      //    outside that card like anything else: it dismisses, it does not
+      //    open an element comment.
+      await clickAt(geometry.first);
+      assert(await openCount() > 0, 'precondition: composer did not reopen');
+      // Dispatch the hover inside the frame: Playwright's own hover() checks
+      // actionability against the top document, where the open composer sits
+      // over the artifact and the check never settles.
+      await frame.evaluate(() => {
+        const element = document.querySelector('#comment-artifact');
+        const rect = element.getBoundingClientRect();
+        element.dispatchEvent(new MouseEvent('mousemove', {
+          bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + 12,
+        }));
+      });
+      await frame.locator('.tdoc-comment-pill').waitFor({ state: 'visible' });
+      const pill = await frame.locator('.tdoc-comment-pill').boundingBox();
+      assert(pill, 'hovering the artifact did not show the comment pill');
+      await page.mouse.click(box.x + pill.x + pill.width / 2, box.y + pill.y + pill.height / 2);
+      await page.waitForTimeout(400);
+      assert(await openCount() === 0, 'clicking the artifact pill opened a comment instead of dismissing');
+
       await frame.evaluate(() => window.getSelection().removeAllRanges());
     });
 
@@ -499,6 +616,131 @@ async function chooseMode(page, label) {
       assert(await versionPopup.evaluate((popup) => getComputedStyle(popup).overflowY) === 'auto',
         'mobile version submenu is not scrollable');
       await page.screenshot({ path: path.join(os.tmpdir(), 'tdoc-mobile-version-submenu.png'), fullPage: false });
+    });
+    await test('the composer stays on screen when the keyboard shrinks the viewport', async () => {
+      // The shell's chrome does not scroll, so the composer's coordinates are
+      // viewport coordinates — computed once at render. On a phone the keyboard
+      // shrinks that viewport out from under them: the card lands below the
+      // fold, iOS scrolls the page to reveal the focused textarea, and the card
+      // appears to fly off. visualViewport is what reports that shrink.
+      // Wide enough that comments stay in the margin rail rather than the phone
+      // drawer: the bug is the keyboard eating HEIGHT, not the width. Reload to
+      // shed whatever the mobile test above left open in the top bar.
+      await page.setViewportSize({ width: 900, height: 664 });
+      await page.goto(url, { waitUntil: 'networkidle' });
+      const composerFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
+      assert(composerFrame, 'author frame missing');
+      await chooseMode(page, 'Comment');
+      await selectParagraph(composerFrame);
+      const popup = page.locator('.tdoc-popup');
+      await popup.waitFor();
+      const before = await popup.boundingBox();
+      assert(before, 'no composer to measure');
+
+      // Smaller than the top bar plus the card: at 380 the card still fitted
+      // where it was, and the test passed against the unfixed build.
+      const shrunk = 220;
+      await page.setViewportSize({ width: 900, height: shrunk });
+      await page.waitForTimeout(300);
+      const after = await popup.boundingBox();
+      assert(after, 'the composer disappeared when the viewport shrank');
+      assert(after.y >= 0 && after.y + after.height <= shrunk,
+        `the composer left the visible area: top ${Math.round(after.y)}, bottom ${Math.round(after.y + after.height)}, viewport ${shrunk}`);
+
+      // force: the whole point of this test is a card that may be off screen,
+      // and an un-closed popup would be inherited by whatever runs next.
+      await page.locator('.tdoc-popup button.x').click({ force: true }).catch(() => {});
+      await composerFrame.evaluate(() => window.getSelection().removeAllRanges());
+    });
+
+    await test('on a phone, the drawer honours the resolved filter', async () => {
+      // The drawer IS the comment list on a phone, and it was handed the
+      // unfiltered list while only the document's pins were filtered. "Hide
+      // resolved" took the pins away and left every resolved thread sitting in
+      // the drawer, which reads as the control doing nothing at all.
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`http://127.0.0.1:${port}/d/${resolvedSlug}/v/1`, { waitUntil: 'networkidle' });
+      await chooseMode(page, 'Comment');
+      const entries = page.locator('#tdoc-comment-layer .tdoc-margin-comment');
+
+      // Resolved threads are hidden by default, so the drawer opens with one.
+      await page.locator('.tdoc-fab').first().click();
+      await entries.first().waitFor();
+      const hidden = await entries.count();
+      assert(hidden === 1, `the drawer showed ${hidden} threads with resolved hidden, expected 1`);
+
+      // The control is a ⋯ menu item on a phone, not the bar switch — that one
+      // is display:none below 700px.
+      await page.keyboard.press('Escape');
+      await page.locator('#tdoc-more-btn').click();
+      await page.locator('[data-action="show-resolved"]').click();
+      await page.waitForTimeout(400);
+      await page.locator('.tdoc-fab').first().click();
+      await page.waitForTimeout(400);
+      const shown = await entries.count();
+      assert(shown === 2, `asking for resolved left ${shown} threads in the drawer, expected 2`);
+    });
+
+    // Last on purpose: it navigates away from the doc every test above shares.
+    await test('Move anchor lands the new anchor while the card stays open', async () => {
+      // Re-anchoring keeps the card open so the author can click the new spot.
+      // Counting that as "something is open" swallowed the click, and the anchor
+      // silently never moved — no error, no toast, nothing to notice.
+      // The mobile test above leaves the viewport at phone width, where comments
+      // live in a drawer rather than the margin rail.
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto(`http://127.0.0.1:${port}/d/${anchorSlug}/v/1`, { waitUntil: 'networkidle' });
+      const anchorFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
+      assert(anchorFrame, 'author frame missing on the move-anchor doc');
+      // The pin is the signal that comments loaded AND the anchor resolved.
+      // Clicking the word before that lands on plain prose and opens a composer.
+      await page.locator('.tdoc-pin').first().waitFor();
+      // Mode carries across the navigation, and the tests above end in Edit —
+      // where a click on an anchor is a caret, not a comment.
+      await chooseMode(page, 'Comment');
+      const box = await page.locator('.tdoc-doc-frame').boundingBox();
+      const wordAt = (word) => anchorFrame.evaluate((needle) => {
+        const text = document.querySelector('#anchor-paragraph').firstChild;
+        const from = text.nodeValue.indexOf(needle);
+        const range = document.createRange();
+        range.setStart(text, from); range.setEnd(text, from + needle.length);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }, word);
+      const clickWord = async (word) => {
+        const point = await wordAt(word);
+        await page.mouse.click(box.x + point.x, box.y + point.y);
+        await page.waitForTimeout(400);
+      };
+
+      // The card only renders once it is open, so open it from its anchor first.
+      await clickWord('charlie');
+      const reanchor = page.locator('.tdoc-reanchor-btn').first();
+      await reanchor.waitFor().catch(async () => {
+        const seen = await page.evaluate(() => [...document.querySelectorAll('[class*="tdoc-"]')]
+          .map((node) => node.className)
+          .filter((name) => typeof name === 'string' && /comment|drawer|popup/.test(name)));
+        throw new Error(`clicking the anchor did not open its card; saw ${JSON.stringify(seen)}`);
+      });
+      await reanchor.click();
+      await page.locator('.tdoc-reanchor-banner').waitFor();
+      // The banner renders before the frame has been told it is re-anchoring;
+      // clicking into that gap picks nothing and the anchor never moves. Caught
+      // as a 1-in-2 flake, not a failure.
+      await page.waitForTimeout(300);
+      await clickWord('hotel');
+
+      await page.waitForFunction(async (slugName) => {
+        const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
+        return list.some((entry) => entry.anchor && entry.anchor.text === 'hotel');
+      }, anchorSlug, { timeout: 10_000 }).catch(() => {});
+
+      const anchors = await page.evaluate(async (slugName) => {
+        const list = await (await fetch(`/api/comments?slug=${slugName}&version=1`)).json();
+        return list.map((entry) => entry.anchor && entry.anchor.text);
+      }, anchorSlug);
+      assert(anchors.includes('hotel'),
+        `Move anchor did not land: anchors are ${JSON.stringify(anchors)}`);
     });
   } finally {
     if (browser) await browser.close();

@@ -14,7 +14,7 @@ export function ShareDialog({ open, url, onOpenChange, onCopied }) {
       open={open}
       onOpenChange={onOpenChange}
       title="Share"
-      description="Anyone with this link can read. To comment, they sign in with GitHub."
+      description="Anyone with this link can read. To comment, they sign in."
       actions={(
         <>
           <button type="button" onClick={() => onOpenChange(false)}>Close</button>
@@ -161,7 +161,7 @@ export function PublishDialog({ open, slug, onOpenChange }) {
         </>
       )}
     >
-      <p>We'll deploy this so anyone with the link can read it. GitHub sign-in is required for commenting.</p>
+      <p>We'll deploy this so anyone with the link can read it. Commenting just needs a sign-in.</p>
       <div className="step"><span className="n">·</span><span>Slug: <code id="tdoc-pub-slug">{slug}</code></span></div>
       {status ? <div className="status" style={{ marginTop: 10 }}>{status}</div> : null}
       {signin ? <PublishSignin signin={signin} /> : null}

@@ -101,7 +101,14 @@ function isOwnerSession(env, session) {
 function canMutate(record, session, env, meta) {
   if (isDocOwnerSession(env, session, meta)) return true;
   const who = record && record.author && record.author.login;
-  return !!(who && session && session.login && who === session.login);
+  // Compare on the actor key so an email-keyed author can edit their own
+  // comment. Case: `who` is stored as written, and actorKey lowercases the
+  // email half — so normalize both sides rather than trusting the stored
+  // casing, which is how the old raw === comparison quietly disagreed with
+  // sessionLogin everywhere else.
+  const me = actorKey(session);
+  if (!who || !me) return false;
+  return String(who).toLowerCase() === String(me).toLowerCase();
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -156,6 +163,33 @@ function sessionPrincipal(session) {
   return sessionLogin(session) || normalizeEmail(session && session.email) || '';
 }
 
+// The stable key an identity is recorded under: a GitHub handle stays a bare
+// handle (every comment, inbox and allowlist entry ever written uses that
+// shape, and none of them are getting rewritten), and an identity with no
+// handle takes an `email:` prefix. The prefix is what keeps the two
+// namespaces from colliding — a handle can never contain "@", so
+// `email:a@b.com` can never be mistaken for a GitHub user, and vice versa.
+// normalizeGithubLogin already strips a `github:` prefix, so this is the
+// namespacing hook the original author left, finally used.
+function actorKey(session) {
+  const login = sessionLogin(session);
+  if (login) return login;
+  const email = normalizeEmail(session && session.email);
+  return email ? `email:${email}` : '';
+}
+
+// Render an actor key for humans: an email-keyed identity shows its local
+// part, never the full address — a comment thread is visible to every reader
+// of the doc, and leaking someone's address there is not something they
+// opted into by commenting.
+function actorDisplayName(session) {
+  if (session && session.name) return session.name;
+  const login = sessionLogin(session);
+  if (login) return login;
+  const email = normalizeEmail(session && session.email);
+  return email ? email.split('@')[0] : '';
+}
+
 function isDocOwnerSession(env, session, meta) {
   // account_id is the canonical identity (phase 1), so compare it first —
   // this is what makes a doc published through an email-keyed account
@@ -189,7 +223,7 @@ function normalizeAccess(raw, { legacy = true } = {}) {
   const seen = new Set();
   const srcList = Array.isArray(a.allowed_users) ? a.allowed_users : [];
   for (const item of srcList) {
-    const login = normalizeGithubLogin(item);
+    const login = normalizeInvitee(item);
     if (!login || seen.has(login)) continue;
     seen.add(login);
     allowed.push(login);
@@ -236,7 +270,7 @@ function validateAccessWrite(access) {
     const allowed = [];
     const seen = new Set();
     for (const item of access.allowed_users) {
-      const login = normalizeGithubLogin(item);
+      const login = normalizeInvitee(item);
       if (!login) return { error: 'invalid_access_value', field: 'allowed_users' };
       if (seen.has(login)) continue;
       seen.add(login);
@@ -271,9 +305,16 @@ function applyAccessPatch(meta, patch) {
 
 function isAllowlisted(access, session, env, meta) {
   if (isDocOwnerSession(env, session, meta)) return true;
+  const allowed = access.allowed_users || [];
+  // Two shapes match, because two shapes get invited: legacy entries are
+  // GitHub handles, new ones are email addresses (D2). A session offers
+  // whichever of the two it has — and an email-keyed session matches a bare
+  // address in the list, not the `email:`-prefixed actor key, because what
+  // the doc owner typed into the invite box is an address.
   const login = sessionLogin(session);
-  if (!login) return false;
-  return (access.allowed_users || []).includes(login);
+  if (login && allowed.includes(login)) return true;
+  const email = normalizeEmail(session && session.email);
+  return !!(email && allowed.includes(email));
 }
 
 function canReadDoc(access, session, env, meta) {
@@ -290,7 +331,9 @@ function canSeeHistory(access, session, env, meta) {
 
 function canCommentOnDoc(access, session, env, meta) {
   if (access.commenting === 'off') return false;
-  if (!sessionLogin(session)) return false;
+  // Was sessionLogin: an OIDC visitor could publish and approve a pairing but
+  // could not leave a single comment — the one thing tdoc exists for.
+  if (!sessionPrincipal(session)) return false;
   if (access.commenting === 'signed_in') return true;
   if (access.commenting === 'owner') return isDocOwnerSession(env, session, meta);
   if (access.commenting === 'invited') return isAllowlisted(access, session, env, meta);
@@ -309,7 +352,13 @@ async function loadDocMeta(env, slug) {
 }
 
 function accessDeniedHtml({ status, title, body, slug, version }) {
-  const next = slug && version ? `/d/${encodeURIComponent(slug)}/v/${version}` : '/';
+  // The retry link points back at what was requested: a versioned URL when
+  // the caller was asked for one, the doc's head URL (which resolves to the
+  // latest version only after this same gate passes) when it wasn't. The
+  // head form is what keeps a denial from disclosing any version number.
+  const next = !slug ? '/'
+    : version ? `/d/${encodeURIComponent(slug)}/v/${version}`
+    : `/d/${encodeURIComponent(slug)}`;
   return html(`<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} · tdoc</title>
@@ -369,13 +418,13 @@ async function enforceDocAccess(env, req, slug, version) {
   if (await docOwnerToken(env, req, meta)) {
     return { ok: true, access, session, meta, ownerToken: true };
   }
-  if (!sessionLogin(session)) {
+  if (!sessionPrincipal(session)) {
     return {
       ok: false,
       response: accessDeniedHtml({
         status: 401,
         title: 'Sign in required',
-        body: 'This document is private. Sign in with GitHub, then open the link again. Only allowlisted accounts can read it.',
+        body: 'This document is private. Sign in, then open the link again. Only invited accounts can read it.',
         slug, version,
       }),
     };
@@ -385,7 +434,7 @@ async function enforceDocAccess(env, req, slug, version) {
     response: accessDeniedHtml({
       status: 403,
       title: 'Access denied',
-      body: `Signed in as ${session.login}, but this private document does not include you on the allowlist.`,
+      body: `Signed in as ${actorDisplayName(session)}, but this private document does not include you on the allowlist.`,
       slug, version,
     }),
   };
@@ -1548,6 +1597,19 @@ function readerCssSource() {
 // unbaked document is skipped. Every bake/skip decision uses this one test so
 // the write side and the read side cannot disagree.
 const READER_BLOCK_RE = /<style[^>]*\bid="tdoc-reader"/i;
+
+// A table only scrolls sideways when it sits inside .tdoc-table-scroll, and
+// adding that wrapper is the author's job. A document whose agent skipped it
+// pushes the WHOLE page sideways on a phone — 482px of it on a real doc, with
+// five tables and none of them wrapped. A table cannot be its own scroll
+// container while it lays out as a table, so on narrow viewports it becomes a
+// block that scrolls itself; wrapped tables keep the wrapper's behaviour.
+//
+// This rides in at serve time rather than living only in reader.css because
+// documents bake their reader CSS at creation: changing that file alone fixes
+// nothing that is already published. Kept byte-identical in server.js —
+// test/reader-patch-drift.test.js holds the two together.
+const READER_PATCH_CSS = 'body table:not(.tdoc-table-scroll>table){display:block!important;min-width:0!important;max-width:100%!important;overflow-x:auto;-webkit-overflow-scrolling:touch}body table:not(.tdoc-table-scroll>table)>thead,body table:not(.tdoc-table-scroll>table)>tbody,body table:not(.tdoc-table-scroll>table)>tfoot{display:table!important;width:max-content!important;min-width:100%!important}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
 }
@@ -1597,7 +1659,7 @@ function injectReaderCss(html, css) {
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta, oidc) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
@@ -1630,6 +1692,11 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
     webAuth: !!webAuth,
+    // The provider seat, so the doc shell's sign-in goes through the same
+    // single door as /activate and the landing — this was the last surface
+    // still steering people to the first-party GitHub flow.
+    oidcAuth: !!(oidc && oidc.enabled),
+    oidcLabel: (oidc && oidc.label) || '',
     mode: 'published',
     versions: vlist,
     stars: stars || null,
@@ -1710,7 +1777,9 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   if (!obj) return { ok: false, response: text(`Not found: ${slug} v${version}`, { status: 404 }) };
   const raw = await obj.text();
   const session = gate.session;
-  const identity = session ? { login: session.login, avatar_url: session.avatar_url, name: session.name } : null;
+  const identity = sessionPrincipal(session)
+    ? { login: actorKey(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
+    : null;
   // Pure-publish: version picker only for callers allowed by history_visibility.
   let versions = [{ n: version, created: null }];
   try {
@@ -1752,9 +1821,9 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   // only for signed-in readers on non-landing pages. One KV get; sign-in
   // elsewhere reloads the page, so server-rendered state stays fresh.
   let viewerStar = null;
-  if (!isLanding && sessionLogin(session)) {
+  if (!isLanding && actorKey(session)) {
     try {
-      viewerStar = { starred: (await loadStars(env, sessionLogin(session))).some((i) => i.slug === slug) };
+      viewerStar = { starred: (await loadStars(env, actorKey(session))).some((i) => i.slug === slug) };
     } catch {}
   }
   const render = shellDocumentWorker;
@@ -1763,7 +1832,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '' }), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -1799,7 +1868,7 @@ async function landingResponse(env, req, slug = LANDING_SLUG) {
 function neutralLandingResponse(env, notice) {
   const messages = {
     me: 'My docs is only available after you sign in as the worker owner.',
-    signin: 'Sign in with GitHub to continue.',
+    signin: 'Sign in to continue.',
     notfound: 'That page was not found. Sign in or open a doc from its shared link.',
   };
   const nonce = rand(16);
@@ -1900,6 +1969,38 @@ function sameOrigin(req, url) {
 // (userinfo's email + email_verified), the issuer's user IDs never become
 // keys, and the GitHub button stays direct — if this vendor vanishes, sign-in
 // degrades to GitHub while the seat is re-filled, and no account moves.
+// One sign-in surface. GitHub lives INSIDE the provider's modal like every
+// other method — there is no parallel first-party GitHub path on a host that
+// has this seat configured. What made the parallel path tempting was
+// migration: a legacy account is found by GitHub handle, and the OIDC
+// userinfo carries neither handle nor GitHub id. This call is the bridge —
+// the provider's backend API knows which GitHub account the user connected,
+// so a double-miss (no sub index, no email index) resolves through the
+// GitHub identity instead of minting a stranger account. Config-gated on
+// CLERK_SECRET_KEY; absent, the lookup quietly answers null and only
+// genuinely new users are affected (they were getting fresh accounts anyway).
+async function clerkExternalGithub(env, sub) {
+  const key = String(env && env.CLERK_SECRET_KEY || '').trim();
+  const id = String(sub || '').trim();
+  if (!key || !id || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null;
+  try {
+    const r = await fetch(`https://api.clerk.com/v1/users/${id}`, {
+      headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
+    });
+    if (!r.ok) return null;
+    const u = await r.json();
+    const gh = (u && Array.isArray(u.external_accounts) ? u.external_accounts : [])
+      .find((a) => a && /github/i.test(String(a.provider || '')));
+    if (!gh) return null;
+    const ghId = gh.provider_user_id ? String(gh.provider_user_id) : null;
+    const handle = normalizeGithubLogin(gh.username);
+    if (!ghId && !handle) return null;
+    return { ghId, handle };
+  } catch {
+    return null;
+  }
+}
+
 function oidcConfig(env) {
   const issuer = String(env && env.OIDC_ISSUER || '').trim().replace(/\/$/, '');
   const clientId = String(env && env.OIDC_CLIENT_ID || '').trim();
@@ -1993,8 +2094,10 @@ const FOLDER_DEPTH_MAX = 4;
 // window does not rewrite KV — visits are a signal, not an access log.
 const RECENT_REVISIT_MS = 5 * 60 * 1000;
 
+// Stars, recents and folders are per-identity too, so they take actor keys
+// for the same reason the inbox does.
 function personalKey(prefix, login) {
-  const n = normalizeGithubLogin(login);
+  const n = normalizeActorKey(login);
   return n ? `${prefix}:${n}` : null;
 }
 
@@ -2136,13 +2239,17 @@ async function indexData(env, session, origin) {
 
   const hosted = hostedRegistrationEnabled(env, origin);
   const viewer = sessionLogin(session);
+  // Personal state is keyed on the actor (so an email identity has stars and
+  // recents at all); the BYOK owner column stays a handle comparison, since
+  // row.owner is a github_login and always will be for those docs.
+  const viewerKey = actorKey(session);
   const mine = catalog.filter((row) => {
     if (hosted) return isDocOwnerSession(env, session, row.meta);
     return !row.owner || row.owner === viewer;
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 
-  const [starItems, recentItems, folderState] = viewer
-    ? await Promise.all([loadStars(env, viewer), loadRecents(env, viewer), loadFolderState(env, viewer)])
+  const [starItems, recentItems, folderState] = viewerKey
+    ? await Promise.all([loadStars(env, viewerKey), loadRecents(env, viewerKey), loadFolderState(env, viewerKey)])
     : [[], [], { folders: [], docs: {} }];
   const starred = new Set(starItems.map((item) => item.slug));
   const bySlug = new Map(catalog.map((row) => [row.slug, row]));
@@ -2150,13 +2257,24 @@ async function indexData(env, session, origin) {
     const row = bySlug.get(item.slug);
     return row && docReadableBy(env, session, row.meta) ? { ...row, at: item.at } : null;
   }).filter(Boolean);
+  const ownerDisplay = (row) => {
+    if (row.owner) return row.owner;
+    // Email-owned docs have no handle; show the owner's local part, never
+    // the address.
+    const key = normalizeActorKey(row.meta && row.meta.hosted && row.meta.hosted.owner_key);
+    return key && key.startsWith('email:') ? key.slice(6).split('@')[0] : '';
+  };
   const publicRow = (row) => ({
     slug: row.slug,
     title: row.title,
     latest: row.latest,
     created: row.created,
     updated: row.updated,
-    owner: row.owner,
+    owner: ownerDisplay(row),
+    // Computed here because only the server can compare canonical identities;
+    // the client comparing display keys went quietly wrong for every session
+    // shape that is not a bare handle.
+    mine: isDocOwnerSession(env, session, row.meta),
     starred: starred.has(row.slug),
   });
 
@@ -2350,16 +2468,24 @@ function snapshotAt(c, V) {
         // Re-anchor resets the agent verdict (matches prior PATCH behavior).
         if (e.reset_status) { snap.status = 'open'; snap.applied_in = undefined; }
         break;
+      // A person and an agent both write these events, and they mean different
+      // things. An agent's carries a verdict, which the fold turns into the
+      // ✅/🟡/❓ reaction below; a person's is a decision, so it must not put an
+      // emoji in their name. `human` is what tells them apart — absent on every
+      // event written before people could resolve, which is why the agent path
+      // stays the default.
       case 'marked_applied':
         snap.status = 'applied';
         snap.applied_in = e.applied_in || e.at_version;
-        snap._agentVerdict = e.agent_status || 'applied';
+        snap.resolved_by = e.human ? (e.by || '') : '';
+        snap._agentVerdict = e.human ? null : (e.agent_status || 'applied');
         snap._agentActor = e.by || 'tdoc-agent';
         break;
       case 'marked_open':
         snap.status = 'open';
         snap.applied_in = undefined;
-        snap._agentVerdict = e.agent_status || null;
+        snap.resolved_by = '';
+        snap._agentVerdict = e.human ? null : (e.agent_status || null);
         snap._agentActor = e.by || 'tdoc-agent';
         break;
       case 'deleted':
@@ -3038,6 +3164,125 @@ function syncDocumentTitle(html, title) {
 // publisher, and hasUsedTdoc treats hosted-account presence as "has
 // registered", so minting on sign-in would both fill KV with spectator
 // accounts and make every second commenter read as an established user.
+// ---- provider identities ------------------------------------------------
+// An account is reached three ways, and only one of them is authoritative:
+//
+//   account-idp:<provider>:<sub>  → account_id   authoritative. `sub` is the
+//       provider's own immutable id (GitHub's numeric user id, Clerk's
+//       user_xxx). It is never reused and never edited by the user.
+//   hosted-account:<login>        → account_id   the CURRENT holder's record,
+//       never proof by itself: a GitHub login can be RENAMED and the old name
+//       becomes available for anyone to register. Every live record carries
+//       its numeric id (backfilled via scripts/backfill-github-identities.mjs
+//       for the ones that predated the index), so resolution never rests on
+//       the handle alone.
+//   account-email:<email>         → account_id   a merge hint, used only when
+//       no idp index exists yet. Addresses change hands (a company reassigns
+//       a departed employee's mailbox), so treating one as proof of identity
+//       forever is how someone inherits an account they never owned.
+//
+// Storing `sub` is not vendor lock-in: account_id is ours and every doc,
+// token and permission hangs off it. Drop a provider and its idp index
+// becomes dead weight — the account is untouched, and its owner walks back in
+// through the email hint on whatever provider replaces it.
+function idpKey(provider, sub) {
+  const p = String(provider || '').trim().toLowerCase();
+  const id = String(sub || '').trim();
+  if (!/^[a-z0-9_-]{1,32}$/.test(p) || !id || id.length > 128) return null;
+  return `account-idp:${p}:${id}`;
+}
+
+async function accountIdpRecord(env, provider, sub) {
+  const key = idpKey(provider, sub);
+  if (!key || !env || !env.META) return null;
+  try {
+    const rec = JSON.parse(await env.META.get(key));
+    if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
+  } catch {}
+  return null;
+}
+
+async function accountIdByIdp(env, provider, sub) {
+  const key = idpKey(provider, sub);
+  if (!key || !env || !env.META) return null;
+  try {
+    const rec = JSON.parse(await env.META.get(key));
+    if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec.account_id;
+  } catch {}
+  return null;
+}
+
+async function accountIdByEmail(env, email) {
+  const norm = normalizeEmail(email);
+  if (!norm || !env || !env.META) return null;
+  try {
+    const rec = JSON.parse(await env.META.get(`account-email:${norm}`));
+    if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec.account_id;
+  } catch {}
+  return null;
+}
+
+// Record how this person got in, and make that route findable next time.
+// Also moves the email index off any address this identity no longer
+// attests: leaving the old pointer live is exactly the window in which a
+// recycled address inherits the account.
+async function linkIdentity(env, account, { provider, sub, email, handle }) {
+  if (!env || !env.META || !account || !account.account_id) return account;
+  const key = idpKey(provider, sub);
+  const norm = normalizeEmail(email);
+  const now = new Date().toISOString();
+
+  if (key) {
+    // Merge, never rewrite: the bridge stores the verified GitHub handle on
+    // this record so later sign-ins can restore session.login, and a
+    // fixed-two-field rewrite here erased it on the next token mint — at
+    // which point every legacy doc quietly vanished from that person's /me.
+    // Same lesson the hosted-account record already learned above.
+    let prev = null;
+    try { prev = JSON.parse(await env.META.get(key)); } catch {}
+    const keep = prev && prev.account_id === account.account_id ? prev : null;
+    await env.META.put(key, JSON.stringify({
+      ...(keep || {}),
+      account_id: account.account_id,
+      created: (keep && keep.created) || now,
+      ...(handle ? { handle } : {}),
+    }));
+  }
+
+  const identities = Array.isArray(account.identities) ? account.identities.slice() : [];
+  const at = identities.findIndex((i) => i && i.provider === provider && String(i.sub) === String(sub));
+  const entry = {
+    provider,
+    sub: String(sub || ''),
+    ...(norm ? { email: norm } : {}),
+    ...(handle ? { handle } : {}),
+    last_seen: now,
+  };
+  if (at >= 0) identities[at] = { ...identities[at], ...entry };
+  else identities.push({ ...entry, linked_at: now });
+  account.identities = identities;
+
+  if (norm) {
+    const previous = normalizeEmail(account.email);
+    if (previous && previous !== norm) {
+      // Only retract a pointer that still names us; another account may have
+      // legitimately claimed the address since.
+      try {
+        const stale = JSON.parse(await env.META.get(`account-email:${previous}`));
+        if (stale && stale.account_id === account.account_id) {
+          await env.META.delete(`account-email:${previous}`);
+        }
+      } catch {}
+    }
+    const existing = await accountIdByEmail(env, norm);
+    if (!existing || existing === account.account_id) {
+      await env.META.put(`account-email:${norm}`, JSON.stringify({ account_id: account.account_id, created: now }));
+      account.email = norm;
+    }
+  }
+  return account;
+}
+
 async function lookupHostedAccount(env, login) {
   const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
@@ -3050,11 +3295,31 @@ async function lookupHostedAccount(env, login) {
   return null;
 }
 
-async function hostedAccountForGithub(env, login, verifiedEmail = null) {
+async function hostedAccountForGithub(env, login, verifiedEmail = null, githubId = null) {
   const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
   const primary = `hosted-account:${norm}`;
-  let rec = await lookupHostedAccount(env, login);
+  // The numeric id first: a GitHub login can be renamed and the freed name
+  // registered by somebody else, so the handle index alone would hand that
+  // stranger the original owner's account. The id is immutable and never
+  // reissued. Falls back to the handle for accounts that predate this.
+  let rec = null;
+  if (githubId) {
+    const id = await accountIdByIdp(env, 'github', githubId);
+    if (id) {
+      // Known id: that account, whatever handle it wears today.
+      try { rec = JSON.parse(await env.META.get(`hosted-account:${norm}`)); } catch {}
+      if (!rec || rec.account_id !== id) rec = { account_id: id, github_login: norm, created: new Date().toISOString() };
+    }
+    // Unknown id: they start clean. The handle index may still name an
+    // account, but it was written for whoever held this handle BEFORE, and a
+    // freed GitHub name can be registered by anyone. There used to be a
+    // claim-by-handle window here for legacy records with no recorded id —
+    // retired once every live record was backfilled with its numeric id
+    // (scripts/backfill-github-identities.mjs), because the window could not
+    // tell a returning owner from a squatter wearing the freed name.
+  }
+  if (!rec && !githubId) rec = await lookupHostedAccount(env, login);
   if (!rec) {
     rec = {
       account_id: `acct_${rand(12)}`,
@@ -3073,22 +3338,25 @@ async function hostedAccountForGithub(env, login, verifiedEmail = null) {
       created: rec.created || new Date().toISOString(),
     };
   }
-  // The email merge key. First writer wins: if the index already names a
-  // DIFFERENT account, this account does not get the key — silently stealing
-  // it would hand one user's future sign-ins to another's docs. Verified-only
-  // is enforced upstream (callers pass what the provider attested, nothing
-  // user-typed).
-  const email = normalizeEmail(verifiedEmail);
-  if (email && rec.email !== email) {
-    const key = `account-email:${email}`;
-    let existing = null;
-    try { existing = JSON.parse(await env.META.get(key)); } catch {}
-    if (!existing || !existing.account_id || existing.account_id === rec.account_id) {
-      await env.META.put(key, JSON.stringify({
-        account_id: rec.account_id,
-        created: (existing && existing.created) || new Date().toISOString(),
-      }));
-      rec.email = email;
+  // Record the identity and refresh its indexes. First writer still wins on
+  // the email hint: if it already names a DIFFERENT account this one does not
+  // take it, because stealing it would point a stranger's future sign-ins at
+  // these docs. Verified-only is enforced upstream — callers pass what the
+  // provider attested, never anything the client typed.
+  if (githubId) {
+    rec = await linkIdentity(env, rec, {
+      provider: 'github', sub: String(githubId), email: verifiedEmail, handle: norm,
+    });
+  } else {
+    const email = normalizeEmail(verifiedEmail);
+    if (email && rec.email !== email) {
+      const existing = await accountIdByEmail(env, email);
+      if (!existing || existing === rec.account_id) {
+        await env.META.put(`account-email:${email}`, JSON.stringify({
+          account_id: rec.account_id, created: new Date().toISOString(),
+        }));
+        rec.email = email;
+      }
     }
   }
   await env.META.put(primary, JSON.stringify(rec));
@@ -3109,19 +3377,34 @@ async function sourceHasWidgets(env, slug, version) {
 // accounts it is a pointer ({account_id}) whose record lives at
 // hosted-account:<login>; for email-born accounts it IS the record. Minting
 // only ever needs account_id, so both shapes serve.
-async function hostedAccountForEmail(env, verifiedEmail) {
+async function hostedAccountForEmail(env, verifiedEmail, idp = null) {
   const email = normalizeEmail(verifiedEmail);
   if (!email || !env || !env.META) return null;
-  const key = `account-email:${email}`;
+  // The stable identity wins when we have one, so an account survives its
+  // owner changing their address at the provider.
   let rec = null;
-  try { rec = JSON.parse(await env.META.get(key)); } catch {}
-  if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
-  rec = { account_id: `acct_${rand(12)}`, email, created: new Date().toISOString() };
-  await env.META.put(key, JSON.stringify(rec));
+  if (idp && idp.sub) {
+    const id = await accountIdByIdp(env, idp.provider, idp.sub);
+    if (id) rec = { account_id: id, created: new Date().toISOString() };
+  }
+  if (!rec) {
+    try { rec = JSON.parse(await env.META.get(`account-email:${email}`)); } catch {}
+  }
+  if (!(rec && typeof rec.account_id === 'string' && rec.account_id)) {
+    rec = { account_id: `acct_${rand(12)}`, created: new Date().toISOString() };
+  }
+  // This is where a brand-new account is born, so it is also where its
+  // identity is first written down — after this the email index is only ever
+  // a hint, never the thing that proves who someone is.
+  if (idp && idp.sub) rec = await linkIdentity(env, rec, { ...idp, email });
+  else {
+    rec.email = email;
+    await env.META.put(`account-email:${email}`, JSON.stringify({ account_id: rec.account_id, created: rec.created }));
+  }
   return rec;
 }
 
-async function issueHostedToken(env, body = {}, verifiedEmail = null) {
+async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null) {
   const github_login = normalizeGithubLogin(body.login);
   // Two doors to an account, one canonical identity behind both: a GitHub
   // login keys the legacy registry; an attested email (an OIDC approver) keys
@@ -3129,9 +3412,9 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null) {
   // comes from the session route-side, email as its own trusted argument.
   let account = null;
   if (github_login) {
-    account = await hostedAccountForGithub(env, github_login, verifiedEmail);
+    account = await hostedAccountForGithub(env, github_login, verifiedEmail, idp && idp.provider === 'github' ? idp.sub : null);
   } else if (normalizeEmail(verifiedEmail)) {
-    account = await hostedAccountForEmail(env, verifiedEmail);
+    account = await hostedAccountForEmail(env, verifiedEmail, idp);
   } else {
     return { error: 'sign_in_required', status: 401 };
   }
@@ -3141,12 +3424,23 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null) {
   const record = {
     account_id: account.account_id,
     ...(github_login ? { github_login } : {}),
+    ...(!github_login && normalizeEmail(account.email) ? { email: normalizeEmail(account.email) } : {}),
     created: new Date().toISOString(),
   };
   if (typeof body.label === 'string' && body.label.trim()) {
     record.label = body.label.trim().slice(0, 80);
   }
   await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record));
+  // "Has this account ever connected a terminal?" — one key, so the future
+  // browser-side gate (pairing is a sideshow at sign-in, enforced only when
+  // a feature actually needs a terminal) has something O(1) to ask.
+  try {
+    let t = null;
+    try { t = JSON.parse(await env.META.get(`account-terminal:${account.account_id}`)); } catch {}
+    await env.META.put(`account-terminal:${account.account_id}`, JSON.stringify({
+      first: (t && t.first) || record.created, last: record.created,
+    }));
+  } catch {}
   return { token, record };
 }
 
@@ -3160,7 +3454,7 @@ async function hostedTokenActor(env, token) {
   } catch {}
   if (!record || typeof record.account_id !== 'string' || !record.account_id) return null;
   const github_login = normalizeGithubLogin(record.github_login);
-  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash, github_login };
+  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash, github_login, email: normalizeEmail(record.email) };
 }
 
 async function hostedOwnerOp(env, slug, op) {
@@ -3273,6 +3567,14 @@ function stampHostedOwnership(meta, actor) {
     account_id: actor.account_id,
   };
   if (actor.github_login) hosted.github_login = actor.github_login;
+  // The owner's actor key, whatever shape their identity is. Without this an
+  // email-born account's doc had no owner anyone could route to, and every
+  // comment notification fell through to the worker operator.
+  const key = actor.github_login || (actor.email ? `email:${actor.email}` : null);
+  if (key) hosted.owner_key = key;
+  // Authoritative either way: a client-supplied meta.hosted.owner_key must
+  // not survive a token that cannot vouch for one.
+  else delete hosted.owner_key;
   return {
     ...(meta || {}),
     hosted,
@@ -3362,7 +3664,9 @@ function recordAuthor(list, id) {
 // too: nobody rewrites what the agent said, including the person it ran for.
 function isRecordAuthor(record, session) {
   const who = record && record.author && record.author.login;
-  return !!(who && session && session.login && who === session.login);
+  const me = actorKey(session);
+  if (!who || !me) return false;
+  return String(who).toLowerCase() === String(me).toLowerCase();
 }
 
 function isAgentRecord(record) {
@@ -3386,8 +3690,37 @@ function mayDelete(record, session, env, meta) {
 const INBOX_MAX = 200;
 const INBOX_PAGE = 20;
 
+// Accepts either shape of actor key. normalizeGithubLogin rejects anything
+// with an "@" in it, so routing an email identity through it alone silently
+// produced null — i.e. an email-keyed reader would never receive a single
+// notification, with nothing to see in any log.
+// An invite entry is whatever the doc owner typed into the box: a GitHub
+// handle (legacy, and still valid) or an email address (D2). Stored bare in
+// both cases — an address is what the owner recognises when they look at the
+// list later, and isAllowlisted matches a session against either shape.
+function normalizeInvitee(item) {
+  const raw = String(item || '').trim();
+  // Not "contains @" — a handle may be written "@Bob", which is a handle
+  // wearing a sigil, not an address. An address is the shape with something
+  // on BOTH sides of a single @, so try the handle reading first (it also
+  // strips the "@" and "github:" prefixes) and fall through to email only
+  // when what is left cannot be a handle.
+  const asLogin = normalizeGithubLogin(raw);
+  if (asLogin) return asLogin;
+  return normalizeEmail(raw);
+}
+
+function normalizeActorKey(who) {
+  const raw = String(who || '').trim().toLowerCase();
+  if (raw.startsWith('email:')) {
+    const email = normalizeEmail(raw.slice('email:'.length));
+    return email ? `email:${email}` : null;
+  }
+  return normalizeGithubLogin(raw);
+}
+
 function inboxKey(login) {
-  const n = normalizeGithubLogin(login);
+  const n = normalizeActorKey(login);
   return n ? `inbox:${n}` : null;
 }
 
@@ -3517,19 +3850,33 @@ const MENTION_INVITE_ALLOWLIST_MAX = 100;
 // group swallows the preceding character so `a@b` (an email) and `@@x` don't
 // match, and so two mentions separated by one space both do.
 const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+// A deliberate email tag: "@dana@example.com". The leading @ is the summons;
+// a bare address in prose ("write to dana@example.com") stays plain text —
+// writing someone's address is not the same act as calling them into the
+// thread. Matched before the handle pass so "@dana@example.com" cannot be
+// half-read as a mention of a GitHub user named dana.
+const EMAIL_MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 
 function parseMentionLogins(text) {
   if (typeof text !== 'string' || !text) return [];
   const out = [];
   const seen = new Set();
-  const re = new RegExp(MENTION_RE.source, 'g');
+  const add = (key) => { if (key && !seen.has(key)) { seen.add(key); out.push(key); } };
+  // Email tags first, and blank their spans so the handle pass cannot re-read
+  // the local part of an address as a handle.
+  let source = text;
+  const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
-  while ((m = re.exec(text))) {
+  while ((m = er.exec(source))) {
+    const addr = String(m[2]).replace(/[.,;:!?)]+$/, '').toLowerCase();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) add(`email:${addr}`);
+  }
+  source = source.replace(new RegExp(EMAIL_MENTION_RE.source, 'g'), '$1');
+  const re = new RegExp(MENTION_RE.source, 'g');
+  while ((m = re.exec(source))) {
     // A GitHub login never ends in a hyphen, so `@dana-` names dana.
     const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    if (!login || seen.has(login)) continue;
-    seen.add(login);
-    out.push(login);
+    add(login);
   }
   return out;
 }
@@ -3543,10 +3890,17 @@ function mentionCandidates(text) {
 // Everyone who has written on this doc, newest record last. Reads the raw
 // event log rather than a snapshot so the author of a DELETED comment still
 // counts as someone you can talk to.
+// Who owns this doc, as an actor key — handle-shaped or email-shaped. The
+// operator fallback stays for legacy/BYOK docs that predate ownership stamps.
+function ownerActorKey(meta, env) {
+  const stamped = normalizeActorKey(meta && meta.hosted && meta.hosted.owner_key);
+  return hostedGithubLogin(meta) || stamped || (env && env.TDOC_OWNER) || '';
+}
+
 function commentParticipants(list) {
   const byLogin = new Map();
   const push = (author) => {
-    const login = normalizeGithubLogin(author && author.login);
+    const login = normalizeActorKey(author && author.login);
     if (!login) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
     byLogin.set(login, {
@@ -3573,7 +3927,7 @@ function commentParticipants(list) {
 function mentionableUsers({ ownerLogin, allowedUsers, participants, includeAllowed = true }) {
   const byLogin = new Map();
   const push = (entry) => {
-    const login = normalizeGithubLogin(entry && entry.login);
+    const login = normalizeActorKey(entry && entry.login);
     if (!login) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
     byLogin.set(login, {
@@ -3631,7 +3985,7 @@ function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0
 // never wrong, only sometimes unnecessary.
 const PRESENCE_PREFIXES = ['recents', 'stars', 'hosted-account', 'hosted-github'];
 async function hasUsedTdoc(env, login) {
-  const n = normalizeGithubLogin(login);
+  const n = normalizeActorKey(login);
   if (!n || !env || !env.META) return false;
   for (const prefix of PRESENCE_PREFIXES) {
     if (await env.META.get(`${prefix}:${n}`)) return true;
@@ -3645,7 +3999,7 @@ async function hasUsedTdoc(env, login) {
 // reason to come back. Each carries whether they have ever used tdoc, because
 // that decides whether the mention can find them on its own.
 async function describeNewcomers(env, { notified = [], invited = [], insiders = [] } = {}) {
-  const inside = new Set(insiders.map(normalizeGithubLogin).filter(Boolean));
+  const inside = new Set(insiders.map(normalizeActorKey).filter(Boolean));
   const out = [];
   for (const login of notified) {
     if (inside.has(login)) continue;
@@ -3686,6 +4040,19 @@ function applyCommentOp(list, op) {
       const target = list.find(c => c.id === op.id);
       if (!target) return { status: 404, body: { error: 'not_found' } };
       appendEvent(target, { kind: 'anchor_changed', at_version: op.version, at: now, reset_status: op.reset_status, anchor: op.anchor, by: op.actor && op.actor.login });
+      return { status: 200, body: snapshotAt(target, op.version) };
+    }
+    case 'set_status': {
+      // Authorization is enforced UPSTREAM (canMutate needs session+env); the
+      // DO only serializes the write. The event id for both status kinds is
+      // `status:<version>`, so a thread has exactly one status per version and
+      // resolve/reopen converge no matter how they interleave.
+      const target = list.find(c => c.id === op.id);
+      if (!target) return { status: 404, body: { error: 'not_found' } };
+      const by = (op.actor && op.actor.login) || '';
+      appendEvent(target, op.resolved
+        ? { kind: 'marked_applied', at_version: op.version, at: now, applied_in: op.version, by, human: true }
+        : { kind: 'marked_open', at_version: op.version, at: now, by, human: true });
       return { status: 200, body: snapshotAt(target, op.version) };
     }
     case 'react': {
@@ -4044,10 +4411,13 @@ export class CommentsStore {
       const widgetFrom = `/d/${slug}/v/${op.baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${reservation.next}/widget/`;
       const rewritten = String(op.html).split(widgetFrom).join(widgetTo);
-      // The author renames a doc by editing its heading, which is the only
-      // title they can actually reach from the editor. An empty or missing h1
-      // leaves the stored title alone rather than blanking it.
-      const nextTitle = titleFromDocument(rewritten);
+      // A document created blank IS its heading — that is where its author
+      // typed the title, and it keeps following the heading. Every other
+      // document has a title of its own, which renaming changes; its first h1
+      // may not even be a title (tdoc-start's is a tagline), so a save must
+      // never re-read it. An empty or missing h1 leaves the stored title alone
+      // rather than blanking it.
+      const nextTitle = meta.created_from === 'blank' ? titleFromDocument(rewritten) : '';
       const stamped = await prepareDocVersion(nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       // Nothing to carry across when the target IS the source; a scaffold has
       // no widgets either way.
@@ -4406,8 +4776,15 @@ export default {
         // method to one account. Resolve-don't-mint: sign-in must not create
         // hosted accounts (see lookupHostedAccount).
         const email = await ghVerifiedEmail(r.access_token);
-        const existing = await lookupHostedAccount(env, user.login);
-        const account = existing ? await hostedAccountForGithub(env, user.login, email) : null;
+        // user.id is GitHub's immutable identifier; user.login is a display
+        // name the owner can change — and whose old value anyone may then
+        // register. Resolve on the id, and ONLY the id — the handle fallback
+        // for pre-index accounts is retired (records were backfilled with
+        // their numeric ids), because it handed a freed handle's account to
+        // whoever registered the name next.
+        const ghId = user.id ? String(user.id) : null;
+        const existing = !!(ghId && await accountIdByIdp(env, 'github', ghId));
+        const account = existing ? await hostedAccountForGithub(env, user.login, email, ghId) : null;
         const sid = rand(24);
         const session = {
           login: user.login,
@@ -4416,6 +4793,9 @@ export default {
           created: new Date().toISOString(),
           ...(account ? { account_id: account.account_id } : {}),
           ...(email ? { email } : {}),
+          // Kept so a later token mint can link the identity even when this
+          // sign-in found no account to attach it to yet.
+          ...(ghId ? { idp: { provider: 'github', sub: ghId } } : {}),
         };
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
         return redirectTo(ret, [
@@ -4440,14 +4820,14 @@ export default {
     if (p === '/me' && method === 'GET') {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
-        const notice = sessionLogin(s) ? 'me' : 'signin';
+        const notice = sessionPrincipal(s) ? 'me' : 'signin';
         return new Response(null, {
           status: 302,
           headers: { Location: `/?notice=${notice}` },
         });
       }
       const nonce = rand(16);
-      const identity = { login: s.login, avatar_url: s.avatar_url, name: s.name };
+      const identity = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       const data = await indexData(env, s, url.origin);
       return html(SHELL.appHtml({
         title: 'My docs',
@@ -4573,6 +4953,17 @@ export default {
             body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
           }
         }
+        if (body.indexOf('id="tdoc-reader-patch"') === -1) {
+          const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
+          // Anchor on the OPENING tag. The baked reader CSS carries a comment
+          // that quotes `</head>` literally, so a first-match replace on the
+          // closing tag drops the style inside that comment, where it is inert
+          // and invisible — it took a byte-level look at the response to see.
+          // A document's real <head> necessarily precedes any prose quoting it.
+          body = /<head[^>]*>/i.test(body)
+            ? body.replace(/<head[^>]*>/i, (open) => `${open}${ptag}`)
+            : ptag + body;
+        }
         const tag = `<script id="tdoc-frame-probe" data-tdoc-provider nonce="${nonce}">${PROBE_JS}</script>`;
         body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
       }
@@ -4586,6 +4977,28 @@ export default {
       });
     }
 
+    // ---- doc head → latest version ----
+    // A bare /d/<slug> link (no /v/<n>) is what people naturally paste as the
+    // canonical URL, but only versioned routes existed, so it bounced to the
+    // not-found landing while every /v/<n> of the same doc worked. Redirect to
+    // the latest version. Access is enforced BEFORE the redirect, so an
+    // unauthorized probe gets the same denial screen as /v/<n> and never
+    // learns the version count; unknown slugs fall through to the existing
+    // not-found landing redirect.
+    const docHeadMatch = p.match(/^\/d\/([^/]+)\/?$/);
+    if (docHeadMatch && (method === 'GET' || method === 'HEAD')) {
+      const slug = docHeadMatch[1];
+      // No version was requested, so none is passed: a denial's retry link
+      // is this same head URL, and an unauthorized probe learns nothing —
+      // not even the version count. On success the gate's own meta yields
+      // the redirect target (one KV read, not two).
+      const gate = await enforceDocAccess(env, req, slug, null);
+      if (!gate.ok) return gate.response;
+      const latest = latestVersionNumber(gate.meta);
+      if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}`);
+      // Unknown slug → the existing not-found landing redirect below.
+    }
+
     // ---- doc view ----
     const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
     if (docMatch && (method === 'GET' || method === 'HEAD')) {
@@ -4595,8 +5008,8 @@ export default {
       // the signed-in viewer's /me Recent tab. Only successful reads count
       // (the access gate already passed), HEAD probes and anonymous readers
       // don't, and the KV write never blocks the response.
-      if (res.ok && method === 'GET' && sessionLogin(res.session)) {
-        const record = recordDocVisit(env, res.session.login, slug).catch(() => {});
+      if (res.ok && method === 'GET' && actorKey(res.session)) {
+        const record = recordDocVisit(env, actorKey(res.session), slug).catch(() => {});
         if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(record);
         else await record;
       }
@@ -4723,7 +5136,7 @@ export default {
     // mode could only ever change one that already existed.
     if (p === '/api/doc/create' && method === 'POST') {
       const session = await getSession(env, req);
-      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
       const ownerCreate = isOwnerSession(env, session);
       let actor = { kind: 'owner_session' };
       if (!ownerCreate) {
@@ -4737,9 +5150,15 @@ export default {
         }
         // Not a precondition — this mints the account on first use. A null here
         // means the account store itself is unreachable.
-        const acct = await hostedAccountForGithub(env, session.login, session && session.email);
+        const acct = sessionLogin(session)
+        ? await hostedAccountForGithub(env, session.login, session && session.email,
+            session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+        : await hostedAccountForEmail(env, session && session.email, session && session.idp);
         if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
-        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login,
+          // Without this an email-born account's browser-created doc had no
+          // routable owner — the very path most email users take first.
+          email: normalizeEmail((acct && acct.email) || (session && session.email)) };
       }
 
       const html = blankDocHtml();
@@ -4782,8 +5201,11 @@ export default {
 
       const now = new Date().toISOString();
       let incoming = {
-        // Renamed by the first save that finds a heading in the document.
+        // Renamed by the first save that finds a heading in the document, and
+        // by every save after it — see _saveVersion. This is the only kind of
+        // document whose heading is authoritative for its title.
         title: 'Untitled',
+        created_from: 'blank',
         slug: newSlug,
         created: now,
         // The mark the first save consumes: this v1 is scaffolding, not
@@ -4811,7 +5233,7 @@ export default {
 
     if (p === '/api/doc/duplicate' && method === 'POST') {
       const session = await getSession(env, req);
-      if (!sessionLogin(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const slug = body && body.slug;
@@ -4841,9 +5263,15 @@ export default {
 
       let actor = { kind: 'owner_session' };
       if (!ownerCopy) {
-        const acct = await hostedAccountForGithub(env, session.login, session && session.email);
+        const acct = sessionLogin(session)
+        ? await hostedAccountForGithub(env, session.login, session && session.email,
+            session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+        : await hostedAccountForEmail(env, session && session.email, session && session.idp);
         if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
-        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login,
+          // Without this an email-born account's browser-created doc had no
+          // routable owner — the very path most email users take first.
+          email: normalizeEmail((acct && acct.email) || (session && session.email)) };
       }
       if (actor.kind === 'hosted') {
         const maxBytes = hostedMaxUploadBytes(env);
@@ -4925,7 +5353,7 @@ export default {
     if (p === '/api/auth/me' && method === 'GET') {
       const s = await getSession(env, req);
       return json({
-        identity: s ? { login: s.login, avatar_url: s.avatar_url, name: s.name } : null,
+        identity: sessionPrincipal(s) ? { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) } : null,
         isOwner: isOwnerSession(env, s), // worker operator; overlay must not clobber per-doc isOwner
         canSeeMyDocs: canSeeMyDocs(env, s, url.origin),
         authConfigured: true,
@@ -5008,7 +5436,7 @@ export default {
       // replayed poll (or a second reader of the code) collects nothing.
       await env.META.delete(`pair:${code}`);
       const approved = record.approved || {};
-      const issued = await issueHostedToken(env, { login: approved.login, label: record.label }, approved.email);
+      const issued = await issueHostedToken(env, { login: approved.login, label: record.label }, approved.email, approved.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       productEvent(env, 'token_minted', { auth_path: 'pair' });
       return json({
@@ -5063,6 +5491,7 @@ export default {
       record.status = 'approved';
       record.approved = {
         login: session.login || null,
+        idp: session.idp || null,
         name: session.name || session.login || (session.email ? String(session.email).split('@')[0] : ''),
         email: session.email || null,
       };
@@ -5087,6 +5516,12 @@ export default {
       auth.searchParams.set('response_type', 'code');
       auth.searchParams.set('scope', 'openid email profile');
       auth.searchParams.set('state', nonce);
+      // The provider remembers its own session, so a returning visitor is
+      // signed straight through — correct as a default, bewildering when you
+      // meant to pick a different method. prompt=login is the standard OIDC
+      // lever that forces the chooser; whitelisted so the param can't smuggle
+      // anything else.
+      if (url.searchParams.get('prompt') === 'login') auth.searchParams.set('prompt', 'login');
       return redirectTo(auth.toString(), [
         `tdoc_oidcst=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
@@ -5133,14 +5568,75 @@ export default {
           return authStatusResponse('This sign-in did not come with a verified email, so it cannot be used here.', { error: true, status: 403 });
         }
         // Resolve-don't-mint, same as GitHub sign-in: an account exists only
-        // once something is published. The issuer's own user id ("sub") is
-        // deliberately NOT stored — email is the merge key, sub would be a
-        // second identity to migrate off some day.
-        let account_id = null;
-        try {
-          const idx = JSON.parse(await env.META.get(`account-email:${email}`));
-          if (idx && typeof idx.account_id === 'string') account_id = idx.account_id;
-        } catch {}
+        // once something is published.
+        //
+        // The issuer's `sub` IS stored, and is checked first. An earlier
+        // version deliberately refused to, reasoning that storing a vendor's
+        // id is lock-in — which had it backwards. Lock-in is about who owns
+        // the ACCOUNT, and account_id is ours; `sub` is just the one
+        // identifier a provider guarantees never changes and never reuses,
+        // which is exactly what an address does not guarantee. Without it,
+        // a mailbox handed to a new person hands them the old owner's docs.
+        const sub = user && user.sub ? String(user.sub) : null;
+        const idpRec = sub ? await accountIdpRecord(env, 'oidc', sub) : null;
+        let account_id = idpRec ? idpRec.account_id : null;
+        // No idp link yet: this provider is new to an existing account, so
+        // the verified address is the merge hint that connects them. Used
+        // once — the link written at mint time makes later sign-ins exact.
+        if (!account_id) account_id = await accountIdByEmail(env, email);
+        // Still nothing, and the visitor may be a legacy GitHub publisher
+        // whose account predates the email index. Ask the provider which
+        // GitHub identity they connected and resolve through that.
+        let bridged = null;
+        if (!account_id && sub) {
+          bridged = await clerkExternalGithub(env, sub);
+          if (bridged) {
+            // The numeric id, and only the numeric id — the claim-by-handle
+            // window for records with no recorded id is retired (records were
+            // backfilled), same as the direct GitHub flow.
+            if (bridged.ghId) account_id = await accountIdByIdp(env, 'github', bridged.ghId);
+            if (account_id) {
+              // Write the links NOW, not at mint: the whole point is that the
+              // very next sign-in resolves exactly, and this person may read
+              // and comment for weeks before they ever mint a token.
+              let rec = bridged.handle ? await lookupHostedAccount(env, bridged.handle) : null;
+              if (!rec || rec.account_id !== account_id) rec = { account_id, created: new Date().toISOString() };
+              if (bridged.ghId) rec = await linkIdentity(env, rec, { provider: 'github', sub: bridged.ghId, email, handle: bridged.handle || undefined });
+              rec = await linkIdentity(env, rec, { provider: 'oidc', sub, email });
+              // The verified handle rides on the oidc link so every LATER
+              // sign-in (which resolves by sub and never re-runs the bridge)
+              // can restore it into the session.
+              await env.META.put(idpKey('oidc', sub), JSON.stringify({
+                account_id, created: new Date().toISOString(), handle: bridged.handle || undefined,
+              }));
+              if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
+            }
+          }
+        }
+        // Self-heal: a linkIdentity rewrite used to strip the handle off the
+        // idp record (fixed there), and any record damaged while that bug was
+        // live would strand its owner in login-less sessions forever — legacy
+        // docs gone from /me, old comments no longer theirs. A record that
+        // resolves but carries no handle gets one more question to the
+        // provider, and the answer is written back so the heal is permanent.
+        // For an account with no GitHub connected this asks once per sign-in
+        // and learns nothing — a sign-in is rare enough for that to be fine.
+        if (idpRec && account_id && !normalizeGithubLogin(idpRec.handle)) {
+          const gh = await clerkExternalGithub(env, sub);
+          if (gh && gh.handle) {
+            // Restore only what this account already owns: the handle must
+            // resolve to THIS account, and if the account records a stable
+            // GitHub owner it must be the id the provider just attested — a
+            // recycled name pointing anywhere else stays where it is.
+            const named = await lookupHostedAccount(env, gh.handle);
+            const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
+            if (named && named.account_id === account_id
+                && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
+              idpRec.handle = gh.handle;
+              await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
+            }
+          }
+        }
         const sid = rand(24);
         const session = {
           name: (user.name || user.given_name || email.split('@')[0]),
@@ -5149,6 +5645,14 @@ export default {
           oidc: true,
           created: new Date().toISOString(),
           ...(account_id ? { account_id } : {}),
+          ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
+          // A bridged legacy user gets their verified handle as the session
+          // login, so their actor key stays handle-shaped: old comments stay
+          // editable, handle invites keep matching, @handle still reaches
+          // them. Truthful — the provider attested which GitHub account this
+          // person connected.
+          ...((account_id && ((bridged && bridged.handle) || (idpRec && normalizeGithubLogin(idpRec.handle))))
+            ? { login: (bridged && bridged.handle) || normalizeGithubLogin(idpRec.handle) } : {}),
         };
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
         return redirectTo(ret, [
@@ -5209,8 +5713,10 @@ export default {
         debug(env, '[poll] gh /user response keys:', Object.keys(user).join(','), 'login:', user.login || 'none');
         if (!user.login) return json({ error: 'no_user', message: user.message || 'GitHub /user returned no login' }, { status: 500 });
         const email = await ghVerifiedEmail(r.access_token);
-        const existing = await lookupHostedAccount(env, user.login);
-        const account = existing ? await hostedAccountForGithub(env, user.login, email) : null;
+        const ghId = user.id ? String(user.id) : null;
+        // Id only, same as the web callback: the handle fallback is retired.
+        const existing = !!(ghId && await accountIdByIdp(env, 'github', ghId));
+        const account = existing ? await hostedAccountForGithub(env, user.login, email, ghId) : null;
         const sid = rand(24);
         // Store only the identity we actually use. The GitHub access token is
         // intentionally NOT persisted: nothing downstream reads session.token,
@@ -5224,6 +5730,9 @@ export default {
           created: new Date().toISOString(),
           ...(account ? { account_id: account.account_id } : {}),
           ...(email ? { email } : {}),
+          // Kept so a later token mint can link the identity even when this
+          // sign-in found no account to attach it to yet.
+          ...(ghId ? { idp: { provider: 'github', sub: ghId } } : {}),
         };
         // 30 day TTL
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
@@ -5246,7 +5755,7 @@ export default {
     if (p === '/api/notifications' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(s.login);
+      const key = inboxKey(actorKey(s));
       if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
       let inbox = emptyInbox();
       try {
@@ -5259,7 +5768,7 @@ export default {
     if (p === '/api/notifications/unread' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(s.login);
+      const key = inboxKey(actorKey(s));
       if (!key) return json({ unread: 0 });
       let inbox = emptyInbox();
       try {
@@ -5271,7 +5780,7 @@ export default {
     if (p === '/api/notifications/read' && method === 'POST') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(s.login);
+      const key = inboxKey(actorKey(s));
       if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
@@ -5292,7 +5801,7 @@ export default {
     // stars:<login> / folders:<login> KV value.
     if (p === '/api/star' && method === 'POST') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const slug = body.slug;
@@ -5304,18 +5813,18 @@ export default {
         const meta = await loadDocMeta(env, slug);
         if (!meta || !docReadableBy(env, s, meta)) return json({ error: 'not_found' }, { status: 404 });
       }
-      await setDocStar(env, s.login, slug, starred);
+      await setDocStar(env, actorKey(s), slug, starred);
       return json({ ok: true, slug, starred });
     }
 
     if (p === '/api/folders' && method === 'POST') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const name = validFolderName(body.name);
       if (!name) return json({ error: 'invalid_name' }, { status: 400 });
-      const state = await loadFolderState(env, s.login);
+      const state = await loadFolderState(env, actorKey(s));
       if (state.folders.length >= FOLDERS_MAX) return json({ error: 'too_many_folders' }, { status: 400 });
       const parentId = body.parent == null || body.parent === '' ? null : String(body.parent);
       if (parentId) {
@@ -5329,33 +5838,33 @@ export default {
       }
       const folder = { id: `f_${Date.now()}_${rand(4)}`, name, created: new Date().toISOString(), ...(parentId ? { parent: parentId } : {}) };
       state.folders.push(folder);
-      await saveFolderState(env, s.login, state);
+      await saveFolderState(env, actorKey(s), state);
       return json({ ok: true, folder: { id: folder.id, name: folder.name, parent: parentId } });
     }
 
     if (p === '/api/folders' && method === 'PATCH') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const name = validFolderName(body.name);
       if (!name) return json({ error: 'invalid_name' }, { status: 400 });
-      const state = await loadFolderState(env, s.login);
+      const state = await loadFolderState(env, actorKey(s));
       const folder = state.folders.find((f) => f.id === body.id);
       if (!folder) return json({ error: 'not_found' }, { status: 404 });
       if (state.folders.some((f) => f !== folder && (f.parent || null) === (folder.parent || null) && f.name.toLowerCase() === name.toLowerCase())) {
         return json({ error: 'duplicate_name' }, { status: 400 });
       }
       folder.name = name;
-      await saveFolderState(env, s.login, state);
+      await saveFolderState(env, actorKey(s), state);
       return json({ ok: true, folder: { id: folder.id, name: folder.name } });
     }
 
     if (p === '/api/folders' && method === 'DELETE') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       const id = url.searchParams.get('id');
-      const state = await loadFolderState(env, s.login);
+      const state = await loadFolderState(env, actorKey(s));
       const gone = state.folders.find((f) => f.id === id);
       if (!gone) return json({ error: 'not_found' }, { status: 404 });
       // Contents move UP ONE LEVEL — docs and subfolders reparent to the
@@ -5375,13 +5884,13 @@ export default {
         }
       }
       state.folders = state.folders.filter((f) => f.id !== id);
-      await saveFolderState(env, s.login, state);
+      await saveFolderState(env, actorKey(s), state);
       return json({ ok: true });
     }
 
     if (p === '/api/folders/move' && method === 'POST') {
       const s = await getSession(env, req);
-      if (!sessionLogin(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
       const folderId = body.folder == null ? null : String(body.folder);
@@ -5389,7 +5898,7 @@ export default {
       if (!slugs.length || slugs.length > 100 || !slugs.every((x) => typeof x === 'string' && isValidSlug(x))) {
         return json({ error: 'invalid_slugs' }, { status: 400 });
       }
-      const state = await loadFolderState(env, s.login);
+      const state = await loadFolderState(env, actorKey(s));
       if (folderId && !state.folders.some((f) => f.id === folderId)) {
         return json({ error: 'folder_not_found' }, { status: 404 });
       }
@@ -5405,7 +5914,7 @@ export default {
         if (folderId) state.docs[slug] = folderId;
         else delete state.docs[slug];
       }
-      await saveFolderState(env, s.login, state);
+      await saveFolderState(env, actorKey(s), state);
       return json({ ok: true, moved: slugs.length, folder: folderId });
     }
 
@@ -5429,7 +5938,7 @@ export default {
       // rejection, just a clearer 401.
       if (!principal) return json({
         error: 'sign_in_required',
-        hint: 'Hosted publish needs a GitHub sign-in. If your tdoc CLI did not show a device code to approve, it is out of date — run: /tdoc update --yes',
+        hint: 'Hosted publish needs a sign-in. If your tdoc CLI did not show a code to approve, it is out of date — run: /tdoc update --yes',
       }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
@@ -5437,7 +5946,7 @@ export default {
       // passed as its own argument so nothing in the client-controlled body
       // can pose as it. This is what gives a brand-new publisher their email
       // merge key at the moment their account is minted.
-      const issued = await issueHostedToken(env, { ...body, login }, session && session.email);
+      const issued = await issueHostedToken(env, { ...body, login }, session && session.email, session && session.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       productEvent(env, 'token_minted', { auth_path: 'session' });
       return json({
@@ -5480,9 +5989,9 @@ export default {
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
       const list = await readComments(env, slug);
-      const me = sessionLogin(s);
+      const me = actorKey(s);
       const users = mentionableUsers({
-        ownerLogin: hostedGithubLogin(meta) || env.TDOC_OWNER,
+        ownerLogin: ownerActorKey(meta, env),
         allowedUsers: access.allowed_users,
         participants: commentParticipants(list),
         includeAllowed: isAllowlisted(access, s, env, meta),
@@ -5502,19 +6011,28 @@ export default {
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
-      const author = { login: s.login, avatar_url: s.avatar_url, name: s.name };
+      // login carries the actor key (a handle, or email:<addr>); name is what
+      // readers see, and for an email identity that is the local part only —
+      // the address itself never renders in a thread.
+      const author = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       const created = new Date().toISOString();
       const V = coerceBodyVersion(version);
-      const ownerLogin = hostedGithubLogin(meta) || env.TDOC_OWNER;
+      const ownerLogin = ownerActorKey(meta, env);
       // Resolve @mentions BEFORE the write: the delivered list is stamped onto
       // the event, so a chip on the card is exactly the set that was notified.
       // Named logins come from the text, never from the request body.
       const priorList = await readComments(env, slug);
       const isDocOwner = isDocOwnerSession(env, s, meta);
       const outcome = classifyMentions(
-        mentionCandidates(commentText).filter((login) => login !== sessionLogin(s)),
+        mentionCandidates(commentText).filter((login) => login !== actorKey(s)),
         {
-          canRead: (login) => canReadDoc(access, { login }, env, meta),
+          // The key is an actor key; canReadDoc expects a session. An email
+          // key posing as a login never matches a bare-address invite, which
+          // both mis-blocked the already-invited and burned allowlist slots
+          // on a prefixed string no session could ever match.
+          canRead: (key) => canReadDoc(access,
+            String(key).startsWith('email:') ? { email: String(key).slice(6) } : { login: key },
+            env, meta),
           canInvite: isDocOwner,
           inviteBudget: Math.max(0, MENTION_INVITE_ALLOWLIST_MAX - access.allowed_users.length),
         },
@@ -5536,7 +6054,8 @@ export default {
       // notification whose link 403s is worse than no notification.
       if (outcome.invited.length) {
         const patched = applyAccessPatch(meta, {
-          allowed_users: access.allowed_users.concat(outcome.invited),
+          allowed_users: access.allowed_users.concat(outcome.invited.map((k) =>
+            String(k).startsWith('email:') ? String(k).slice(6) : k)),
         });
         if (patched.error) return json(patched, { status: 400 });
         await env.META.put(`meta:${slug}`, JSON.stringify(patched.meta));
@@ -5601,6 +6120,24 @@ export default {
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, id, anchor, version } = body;
+      if (typeof body.resolved === 'boolean') {
+        // Marking a thread handled, and taking it back. Same gate as delete and
+        // move-anchor: the doc's owner, or whoever wrote the comment — the
+        // person who asked is the person who gets to say it is answered.
+        if (!slug || !id) return json({ error: 'slug, id required' }, { status: 400 });
+        if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+        const list = await readComments(env, slug);
+        ensureMigrated(list);
+        const target = list.find(c => c.id === id);
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        const docMeta = await loadDocMeta(env, slug);
+        if (!canMutate(target, s, env, docMeta)) return json({ error: 'not_author' }, { status: 403 });
+        const V = coerceBodyVersion(version, target.created_in || 1);
+        const res = await mutateComments(env, slug, {
+          kind: 'set_status', slug, id, resolved: body.resolved, version: V, actor: { login: s.login },
+        });
+        return json(res.body, { status: res.status });
+      }
       if (typeof body.text === 'string') {
         const text = body.text.trim();
         if (!slug || !id || !text) return json({ error: 'slug, id, text required' }, { status: 400 });
@@ -5617,7 +6154,7 @@ export default {
         if (!isRecordAuthor(target, s)) return json({ error: 'not_author' }, { status: 403 });
         const V = coerceBodyVersion(version);
         const res = await mutateComments(env, slug, {
-          kind: 'edit_text', slug, id, text, version: V, actor: { login: s.login },
+          kind: 'edit_text', slug, id, text, version: V, actor: { login: actorKey(s) },
         });
         return json(res.body, { status: res.status });
       }
@@ -5633,7 +6170,7 @@ export default {
       if (!canMutate(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const V = coerceBodyVersion(version, target.created_in || 1);
       const res = await mutateComments(env, slug, {
-        kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: s.login },
+        kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: actorKey(s) },
       });
       return json(res.body, { status: res.status });
     }
@@ -5688,7 +6225,7 @@ export default {
       const meta = await loadDocMeta(env, slug);
       if (!mayDelete(target, s, env, meta)) return json({ error: 'not_author' }, { status: 403 });
       const res = await mutateComments(env, slug, {
-        kind: 'delete', slug, id, version: stampVersion, actor: { login: s.login },
+        kind: 'delete', slug, id, version: stampVersion, actor: { login: actorKey(s) },
       });
       return json(res.body, { status: res.status });
     }
@@ -5715,7 +6252,7 @@ export default {
       // serialized write so concurrent toggles can't both add. Any signed-in
       // user may react, so there's no author check to do here.
       const res = await mutateComments(env, slug, {
-        kind: 'react', slug, comment_id, emoji, by: s.login, version: V,
+        kind: 'react', slug, comment_id, emoji, by: actorKey(s), version: V,
       });
       if (res.status === 200 && res.body && res.body.added) {
         const list = await readComments(env, slug);
@@ -5725,7 +6262,7 @@ export default {
         await deliverInbox(env, target && target.login, {
           kind: 'reaction', slug, version: V, comment_id,
           thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
-          actor: { login: s.login, avatar_url: s.avatar_url, name: s.name },
+          actor: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
           title: (meta && meta.title) || slug, emoji,
         });
       }
@@ -6125,6 +6662,39 @@ export default {
       }
       await env.META.put(`meta:${slug}`, JSON.stringify(next.meta));
       return json({ ok: true, slug, access: next.access });
+    }
+
+    // ---- rename ----
+    // A title is a property of the document, not of its text: renaming edits
+    // the meta record and leaves the body and the version history alone. The
+    // alternative — rewriting the document's heading — mangles documents whose
+    // first h1 is not their title (tdoc-start's is a tagline), and turns
+    // changing a display name into publishing a new version (#383).
+    if (p === '/api/doc/title' && method === 'PATCH') {
+      const TITLE_PATCH_MAX_BYTES = 4 * 1024;
+      const clRaw = req.headers.get('content-length');
+      if (clRaw != null && clRaw !== '') {
+        const cl = Number(clRaw);
+        if (!Number.isFinite(cl) || cl < 0 || cl > TITLE_PATCH_MAX_BYTES) {
+          return json({ error: 'payload_too_large' }, { status: 413 });
+        }
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const unknownTop = Object.keys(body || {}).filter((k) => k !== 'slug' && k !== 'title');
+      if (unknownTop.length) return json({ error: 'invalid_field', fields: unknownTop }, { status: 400 });
+      const { slug, title } = body || {};
+      if (!slug) return json({ error: 'slug required' }, { status: 400 });
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const clean = typeof title === 'string' ? title.trim() : '';
+      if (!clean) return json({ error: 'title_required' }, { status: 400 });
+      if (clean.length > 120) return json({ error: 'title_too_long', limit: 120 }, { status: 400 });
+      const auth = await authorizeOwnerMutation(req, env, slug);
+      if (!auth.ok) return auth.response;
+      const meta = auth.meta || await loadDocMeta(env, slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      await env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, title: clean }));
+      return json({ ok: true, slug, title: clean });
     }
 
     // ---- admin delete ----

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
-import { duplicateDocument, setDocumentStar } from './document/api.js';
+import { AppSwitch } from './ui/switch.jsx';
+import { duplicateDocument, renameDocument, setDocumentStar } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
   DesktopCommentLayer,
@@ -101,6 +102,10 @@ function OldVersionNotice({ value }) {
   );
 }
 
+// Whether resolved threads are shown, per browser. Not per document: a reader
+// who wants the margin quiet wants it quiet everywhere.
+const RESOLVED_KEY = 'tdoc-show-resolved';
+
 export function DocumentShell({ boot, config }) {
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
@@ -112,6 +117,9 @@ export function DocumentShell({ boot, config }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [reanchorId, setReanchorId] = useState(null);
   const [saveNoticeOpen, setSaveNoticeOpen] = useState(false);
+  // The bar's copy of the name, so a rename shows immediately instead of
+  // waiting for a reload. The boot config stays the source it starts from.
+  const [title, setTitle] = useState(config.title || '');
   const [dialog, setDialog] = useState(null);
   const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
@@ -126,16 +134,36 @@ export function DocumentShell({ boot, config }) {
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
   ));
+  // Resolved threads leave the margin. The choice is the reader's and is
+  // remembered per browser; storage that throws (private mode) simply means
+  // the margin starts quiet again next visit.
+  const [showResolved, setShowResolved] = useState(() => {
+    try { return localStorage.getItem(RESOLVED_KEY) === '1'; } catch { return false; }
+  });
+  const toggleResolved = useCallback(() => {
+    setShowResolved((on) => {
+      const next = !on;
+      try { localStorage.setItem(RESOLVED_KEY, next ? '1' : '0'); } catch {}
+      return next;
+    });
+  }, []);
 
   const signIn = useCallback(() => {
+    const returnUrl = location.pathname + location.search + location.hash;
+    // One door: the provider seat first (every method lives in its modal),
+    // the first-party GitHub redirect only where the seat is absent, the
+    // device-code dialog only where neither is configured.
+    if (config.oidcAuth) {
+      location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;
+      return undefined;
+    }
     if (config.webAuth) {
-      const returnUrl = location.pathname + location.search + location.hash;
       location.href = `/api/auth/web/login?return=${encodeURIComponent(returnUrl)}`;
       return undefined;
     }
     setSignInOpen(true);
     return undefined;
-  }, [config.webAuth]);
+  }, [config.oidcAuth, config.webAuth]);
 
   const completeSignIn = useCallback(() => {
     location.reload();
@@ -238,8 +266,11 @@ export function DocumentShell({ boot, config }) {
   // the shell has something open. While it does, the next click anywhere in the
   // document only closes it — no hit-testing, no opening the comment underneath.
   useEffect(() => {
-    bridge.send({ type: 'tdoc:uiOpen', open: Boolean(openCommentId || openClusterKey || composer) });
-  }, [bridge.send, composer, openClusterKey, openCommentId]);
+    // Re-anchoring is the exception: the card stays open precisely so the author
+    // can click the new spot, and treating that click as a dismissal ate it.
+    const open = Boolean((openCommentId || openClusterKey || composer) && !reanchorId);
+    bridge.send({ type: 'tdoc:uiOpen', open });
+  }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId]);
 
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
@@ -248,10 +279,30 @@ export function DocumentShell({ boot, config }) {
     bridge.send({ type: 'tdoc:focusAnchor', id, scroll });
   }, [bridge.send]);
 
+  // Everything, always: an id has to resolve to its comment even when that
+  // comment is hidden, or a deep link would open nothing.
   const commentsById = useMemo(
     () => new Map(comments.comments.map((comment) => [comment.id, comment])),
     [comments.comments],
   );
+  const resolvedCount = useMemo(
+    () => comments.comments.filter((comment) => comment.status === 'applied').length,
+    [comments.comments],
+  );
+  // What the margin shows. A resolved thread is out of the way until asked for
+  // — except the one being looked at. A deep link opens its card before
+  // deepTarget is consumed, so without the openCommentId clause the card would
+  // sit there with no pin under it the moment the target cleared.
+  const shownComments = useMemo(() => (
+    showResolved
+      ? comments.comments
+      : comments.comments.filter((comment) => (
+        comment.status !== 'applied'
+        || comment.id === openCommentId
+        || comment.id === deepTarget
+        || comment.replies?.some((reply) => reply.id === deepTarget)
+      ))
+  ), [comments.comments, deepTarget, openCommentId, showResolved]);
   const pinIds = useMemo(
     () => new Set(bridge.layout.pins.map((pin) => pin.id)),
     [bridge.layout.pins],
@@ -262,9 +313,9 @@ export function DocumentShell({ boot, config }) {
   );
 
   useEffect(() => {
-    bridge.send({ type: 'tdoc:anchors', comments: comments.comments });
+    bridge.send({ type: 'tdoc:anchors', comments: shownComments });
     if (!comments.loading) document.body.dataset.tdocReady = '1';
-  }, [bridge.send, comments.comments, comments.loading]);
+  }, [bridge.send, shownComments, comments.loading]);
 
   useEffect(() => {
     bridgeRef.current = bridge.send;
@@ -391,6 +442,13 @@ export function DocumentShell({ boot, config }) {
   const editComment = async (id, text) => (await attempt(() => comments.edit(id, text))).ok;
 
   const reactTo = (commentId, emoji) => attempt(() => comments.react(commentId, emoji));
+  // Resolving takes the thread out of the margin, so the card that owns the
+  // button goes with it — close it rather than leaving a card pinned to
+  // nothing.
+  const resolveComment = async (commentId, resolved) => {
+    if (!await attempt(() => comments.setResolved(commentId, resolved))) return;
+    if (resolved && !showResolved) setOpenCommentId(null);
+  };
 
   // Closing the card was unconditional, which hid the two cases where there is
   // still something to look at: deleting a comment that holds replies leaves a
@@ -412,6 +470,22 @@ export function DocumentShell({ boot, config }) {
     if (!(await attempt(() => comments.moveAnchor(reanchorId, { kind: 'none' }))).ok) return;
     setReanchorId(null);
     setOpenCommentId(null);
+  };
+
+  // Optimistic: the name in the bar changes as you commit it and rolls back if
+  // the server refuses, because a rename that appears to work and silently did
+  // not is worse than a slow one.
+  const renameDoc = async (next) => {
+    const previous = title;
+    setTitle(next);
+    document.title = next;
+    try {
+      await renameDocument(config.slug, next);
+    } catch (error) {
+      setTitle(previous);
+      document.title = previous;
+      showToast(error.message || 'Could not rename', true);
+    }
   };
 
   const toggleStar = async () => {
@@ -509,6 +583,19 @@ export function DocumentShell({ boot, config }) {
         theme={theme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
           <>
+            {/* Resolved threads are out of the margin by default. The switch is
+                the way back, in the bar where it can be seen — it folds into
+                the ⋯ menu with everything else when the bar runs out of room.
+                Absent entirely when nothing is resolved: a control that can
+                only do nothing is worse than no control. */}
+            {resolvedCount ? (
+              <AppSwitch
+                id="tdoc-show-resolved"
+                checked={showResolved}
+                onCheckedChange={toggleResolved}
+                label={`Resolved (${resolvedCount})`}
+              />
+            ) : null}
             <DocumentModeControl
               mode={editor.mode}
               canComment={config.canComment}
@@ -534,6 +621,9 @@ export function DocumentShell({ boot, config }) {
             onDownload={download}
             onPrint={printPdf}
             onDelete={() => setDialog({ type: 'delete' })}
+            resolvedCount={resolvedCount}
+            showResolved={showResolved}
+            onToggleResolved={toggleResolved}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -553,8 +643,18 @@ export function DocumentShell({ boot, config }) {
         }}
         authConfigured={config.authConfigured !== false}
         onSignIn={signIn}
+        onSwitchAccount={config.oidcAuth ? () => {
+          const returnUrl = location.pathname + location.search + location.hash;
+          location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;
+        } : null}
       >
-        <DocumentBreadcrumbs config={config} starred={starred} onToggleStar={toggleStar} />
+        <DocumentBreadcrumbs
+          config={config}
+          title={title}
+          starred={starred}
+          onRename={renameDoc}
+          onToggleStar={toggleStar}
+        />
       </TopBar>
 
       <OldVersionNotice value={boot.oldVersion} />
@@ -592,7 +692,11 @@ export function DocumentShell({ boot, config }) {
       {narrow ? (
         <MobileCommentDrawer
           open={drawerOpen}
-          comments={comments.comments}
+          // shownComments, not the raw list: hiding resolved threads took the
+          // pins out of the document but left every one of them in the drawer,
+          // which on a phone IS the comment list. "Hide resolved" appeared to
+          // do nothing at all.
+          comments={shownComments}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
           isOwner={Boolean(config.isOwner)}
@@ -604,6 +708,7 @@ export function DocumentShell({ boot, config }) {
           onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
+          onResolve={resolveComment}
           onReanchor={setReanchorId}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
@@ -632,6 +737,7 @@ export function DocumentShell({ boot, config }) {
           onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
+          onResolve={resolveComment}
           onReanchor={setReanchorId}
         />
       )}

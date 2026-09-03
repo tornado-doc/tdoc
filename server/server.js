@@ -177,6 +177,9 @@ function localDeliver(recipient, ev) {
 // whoever is at the keyboard — so every name here is simply delivered.
 const MENTION_MAX_PER_COMMENT = 10;
 const MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g;
+// Mirrors the worker: "@dana@example.com" is a deliberate email tag, a bare
+// address in prose is not.
+const EMAIL_MENTION_RE = /(^|[^A-Za-z0-9_@\/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 
 function normalizeGithubLogin(v) {
   if (typeof v !== 'string') return null;
@@ -193,14 +196,22 @@ function parseMentionLogins(text) {
   if (typeof text !== 'string' || !text) return [];
   const out = [];
   const seen = new Set();
-  const re = new RegExp(MENTION_RE.source, 'g');
+  const add = (key) => { if (key && !seen.has(key)) { seen.add(key); out.push(key); } };
+  // Email tags first, and blank their spans so the handle pass cannot re-read
+  // the local part of an address as a handle.
+  let source = text;
+  const er = new RegExp(EMAIL_MENTION_RE.source, 'g');
   let m;
-  while ((m = re.exec(text))) {
+  while ((m = er.exec(source))) {
+    const addr = String(m[2]).replace(/[.,;:!?)]+$/, '').toLowerCase();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) add(`email:${addr}`);
+  }
+  source = source.replace(new RegExp(EMAIL_MENTION_RE.source, 'g'), '$1');
+  const re = new RegExp(MENTION_RE.source, 'g');
+  while ((m = re.exec(source))) {
     // A GitHub login never ends in a hyphen, so `@dana-` names dana.
     const login = String(m[2]).replace(/-+$/, '').toLowerCase();
-    if (!login || seen.has(login)) continue;
-    seen.add(login);
-    out.push(login);
+    add(login);
   }
   return out;
 }
@@ -619,6 +630,19 @@ function frameCspHeader(nonce) {
 }
 
 // Reader CSS remains provider-enforced inside the isolated author frame.
+// A table only scrolls sideways when it sits inside .tdoc-table-scroll, and
+// adding that wrapper is the author's job. A document whose agent skipped it
+// pushes the WHOLE page sideways on a phone — 482px of it on a real doc, with
+// five tables and none of them wrapped. A table cannot be its own scroll
+// container while it lays out as a table, so on narrow viewports it becomes a
+// block that scrolls itself; wrapped tables keep the wrapper's behaviour.
+//
+// This rides in at serve time rather than living only in reader.css because
+// documents bake their reader CSS at creation: changing that file alone fixes
+// nothing that is already published. Kept byte-identical in server.js —
+// test/reader-patch-drift.test.js holds the two together.
+const READER_PATCH_CSS = 'body table:not(.tdoc-table-scroll>table){display:block!important;min-width:0!important;max-width:100%!important;overflow-x:auto;-webkit-overflow-scrolling:touch}body table:not(.tdoc-table-scroll>table)>thead,body table:not(.tdoc-table-scroll>table)>tbody,body table:not(.tdoc-table-scroll>table)>tfoot{display:table!important;width:max-content!important;min-width:100%!important}';
+
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {
   try { return fs.readFileSync(READER_CSS_PATH, 'utf8'); } catch { return ''; }
@@ -1071,6 +1095,15 @@ const server = http.createServer(async (req, res) => {
           body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
         }
       }
+      if (body.indexOf('id="tdoc-reader-patch"') === -1) {
+        const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
+        // Anchor on the OPENING tag — see the matching comment in worker.js:
+        // the baked reader CSS quotes `</head>` in a comment, and a first-match
+        // replace on the closing tag buries the style inside it.
+        body = /<head[^>]*>/i.test(body)
+          ? body.replace(/<head[^>]*>/i, (open) => `${open}${ptag}`)
+          : ptag + body;
+      }
       // Inject the anchoring probe — the only tdoc code allowed into the author
       // DOM. Nonced so it runs under the frame CSP while author <script> stays
       // inert (same guarantee as the single-origin path).
@@ -1106,6 +1139,31 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // A title is a property of the document, not of its text: renaming edits the
+  // meta record and leaves the body and the version history alone (#383).
+  if (p === '/api/doc/title' && req.method === 'PATCH') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const slug = safeSlug(body.slug);
+    const clean = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
+    if (!clean) return json(res, 400, { error: 'title_required' });
+    if (clean.length > 120) return json(res, 400, { error: 'title_too_long', limit: 120 });
+    const metaFile = path.join(ROOT, slug, 'meta.json');
+    const meta = readJson(metaFile, null);
+    if (!meta || typeof meta !== 'object') return json(res, 404, { error: 'not_found' });
+    const stage = `${metaFile}.title-${crypto.randomBytes(6).toString('hex')}`;
+    try {
+      fs.writeFileSync(stage, JSON.stringify({ ...meta, title: clean }, null, 2) + '\n');
+      fs.renameSync(stage, metaFile);
+    } catch (error) {
+      try { fs.rmSync(stage, { force: true }); } catch {}
+      console.error('[rename] meta write failed:', error && error.message ? error.message : error);
+      return json(res, 500, { error: 'rename_failed' });
+    }
+    return json(res, 200, { ok: true, slug, title: clean });
+  }
+
   // Start from scratch: the local twin of the worker's /api/doc/create. The
   // document is staged under a dot-prefixed directory (which the hub listing
   // skips, since safeSlug rejects a dot) and renamed into place, so a half
@@ -1130,8 +1188,11 @@ const server = http.createServer(async (req, res) => {
       fs.mkdirSync(path.join(stageDir, 'v1'), { recursive: true });
       fs.writeFileSync(path.join(stageDir, 'v1', 'index.html'), blankDocHtml());
       fs.writeFileSync(path.join(stageDir, 'meta.json'), JSON.stringify({
-        // Renamed by the first save that finds a heading in the document.
+        // Renamed by the first save that finds a heading in the document, and
+        // by every save after it. This is the only kind of document whose
+        // heading is authoritative for its title.
         title: 'Untitled',
+        created_from: 'blank',
         slug,
         created: now,
         versions: [{
@@ -1219,10 +1280,12 @@ const server = http.createServer(async (req, res) => {
       const widgetFrom = `/d/${slug}/v/${baseVersion}/widget/`;
       const widgetTo = `/d/${slug}/v/${nextVersion}/widget/`;
       const rewritten = doc.split(widgetFrom).join(widgetTo);
-      // The author renames a doc by editing its heading, which is the only
-      // title they can actually reach from the editor. An empty or missing h1
-      // leaves the stored title alone rather than blanking it.
-      nextTitle = titleFromDocument(rewritten);
+      // A document created blank IS its heading — that is where its author
+      // typed the title, and it keeps following the heading. Every other
+      // document has a title of its own, which renaming changes; its first h1
+      // may not even be a title, so a save must never re-read it. An empty or
+      // missing h1 leaves the stored title alone rather than blanking it.
+      nextTitle = meta.created_from === 'blank' ? titleFromDocument(rewritten) : '';
       fs.writeFileSync(path.join(stageDir, 'index.html'),
         nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
       const baseWidgets = path.join(docRoot, `v${baseVersion}`, 'widgets');
@@ -1414,6 +1477,29 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const slug = safeSlug(body.slug);
     const { id, anchor } = body;
+    // Marking a thread handled, and taking it back. The local store is the flat
+    // comment list rather than an event log, so this writes the folded fields
+    // the worker's marked_applied/marked_open events produce; legacyToEvents
+    // replays them when the doc is published.
+    if (typeof body.resolved === 'boolean') {
+      if (!slug || !id) return json(res, 400, { error: 'invalid slug or missing id' });
+      const file = path.join(ROOT, slug, 'comments.json');
+      const all = readCommentFile(file);
+      const top = all.find(c => c.id === id);
+      if (!top) return json(res, 404, { error: 'not_found' });
+      if (body.resolved) {
+        top.status = 'applied';
+        top.applied_in = Number(body.version) || top.version || 1;
+        top.resolved_by = e2eIdentity() ? e2eIdentity().login : '';
+      } else {
+        top.status = 'open';
+        delete top.applied_in;
+        delete top.resolved_by;
+      }
+      writeJson(file, all);
+      return json(res, 200, top);
+    }
+
     // Editing a comment's text. Local preview is anonymous — there is no
     // session to check the author against, the way the worker does — so the
     // affordance the shell shows is the gate. `edited` is what the card reads

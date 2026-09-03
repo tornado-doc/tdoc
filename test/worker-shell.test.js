@@ -74,7 +74,9 @@ const bundler = read('bin/tdoc-bundle');
 
   await t('author frame stays destination-gated, access-gated, probed, and sandboxed', async () => {
     const start = worker.indexOf('const frameMatch = p.match(/^\\/d\\/([^/]+)\\/v\\/(\\d+)\\/frame');
-    const block = worker.slice(start, start + 2400);
+    // Window, not a boundary: the route legitimately grows (the serve-time
+    // reader patch added ~500 chars), and a tight slice fails for that alone.
+    const block = worker.slice(start, start + 3200);
     for (const needle of ['isWidgetFrameRequest', 'enforceDocAccess(', '${PROBE_JS}', 'frameCspHeader(nonce)']) {
       if (!block.includes(needle)) throw new Error(`/frame missing ${needle}`);
     }
