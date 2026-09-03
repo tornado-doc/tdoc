@@ -288,6 +288,14 @@ async function chooseMode(page, label) {
         };
       });
       const openCount = () => page.locator('.tdoc-popup, .tdoc-margin-comment.active').count();
+      // The frame, not the shell, decides whether a click dismisses or acts, and
+      // it decides from its own copy of the open state — which arrives one
+      // effect and one postMessage after the shell has already mounted or
+      // unmounted the card. openCount() is the shell's half of that; a click
+      // sent between the two halves is read as a dismissal and never opens the
+      // composer, which is what made this test fail one run in four.
+      const frameKnows = (open) => frame.waitForFunction(
+        (want) => document.documentElement.hasAttribute('data-tdoc-ui-open') === want, open);
       const clickAt = async (point) => {
         await page.mouse.click(box.x + point.x, box.y + point.y);
         await page.waitForTimeout(250);
@@ -296,8 +304,10 @@ async function chooseMode(page, label) {
       // 1. A drag while something is open is a selection, not a dismissal.
       //    Clearing on mousedown unmounted the focused composer, and losing
       //    that focus wiped the selection mid-drag.
+      await frameKnows(false);
       await clickAt(geometry.first);
       assert(await openCount() > 0, 'precondition: a word click did not open the composer');
+      await frameKnows(true);
       await page.mouse.move(box.x + geometry.drag.x1, box.y + geometry.drag.y);
       await page.mouse.down();
       await page.mouse.move(box.x + geometry.drag.x2, box.y + geometry.drag.y, { steps: 12 });
@@ -305,13 +315,14 @@ async function chooseMode(page, label) {
       await page.waitForTimeout(400);
       assert(await openCount() > 0, 'a drag while something was open reported no selection');
       await page.locator('.tdoc-popup button.x').click().catch(() => {});
-      await page.waitForTimeout(200);
+      await frameKnows(false);
 
       // 2. The artifact pill is our own UI, but while a card is open it is
       //    outside that card like anything else: it dismisses, it does not
       //    open an element comment.
       await clickAt(geometry.first);
       assert(await openCount() > 0, 'precondition: composer did not reopen');
+      await frameKnows(true);
       // Dispatch the hover inside the frame: Playwright's own hover() checks
       // actionability against the top document, where the open composer sits
       // over the artifact and the check never settles.
@@ -323,9 +334,13 @@ async function chooseMode(page, label) {
         }));
       });
       await frame.locator('.tdoc-comment-pill').waitFor({ state: 'visible' });
+      // boundingBox() is already in main-frame coordinates for an element inside
+      // an iframe. Adding the doc-frame offset a second time put this click 48px
+      // below the pill, on plain prose — which also dismisses, so the assertion
+      // passed without ever touching the pill it is named after.
       const pill = await frame.locator('.tdoc-comment-pill').boundingBox();
       assert(pill, 'hovering the artifact did not show the comment pill');
-      await page.mouse.click(box.x + pill.x + pill.width / 2, box.y + pill.y + pill.height / 2);
+      await page.mouse.click(pill.x + pill.width / 2, pill.y + pill.height / 2);
       await page.waitForTimeout(400);
       assert(await openCount() === 0, 'clicking the artifact pill opened a comment instead of dismissing');
 
