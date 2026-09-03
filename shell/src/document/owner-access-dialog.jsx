@@ -35,7 +35,9 @@ function InviteField({ users, onChange }) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   // Same GitHub search the @ picker uses — see github-user-search.js.
-  const suggestions = useGithubUserSearch(value);
+  // An address is not a GitHub query — stop hitting the search API the moment
+  // one is being typed.
+  const suggestions = useGithubUserSearch(value, { enabled: !value.includes('@') });
 
   const add = (rawValue) => {
     const login = normalizeInvitee(rawValue);

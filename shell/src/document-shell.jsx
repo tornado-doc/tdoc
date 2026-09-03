@@ -582,6 +582,10 @@ export function DocumentShell({ boot, config }) {
         }}
         authConfigured={config.authConfigured !== false}
         onSignIn={signIn}
+        onSwitchAccount={config.oidcAuth ? () => {
+          const returnUrl = location.pathname + location.search + location.hash;
+          location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;
+        } : null}
       >
         <DocumentBreadcrumbs
           config={config}

@@ -203,6 +203,137 @@ const em = { email: 'Alice@Example.com', name: 'Alice A' };
     assert(key === 'stars:email:reader@example.com', `star key: ${key}`);
   });
 
+  await t('the OIDC-shaped session is a first-class citizen on every keyed route', async () => {
+    // The scan's headline: after the single door landed, EVERY hosted session
+    // is OIDC-shaped (no login) — so any surviving sessionLogin gate was dead
+    // for all users, not an edge case. This drives each rescued route once.
+    const env = makeEnv(mod.CommentsStore);
+    await publishDoc(env, 'everything', { visibility: 'public', commenting: 'signed_in' });
+    const cookie = await emailSession(env, 'citizen@example.com', 'Citizen');
+
+    // reactions: toggled under the actor key, and toggle-off works
+    const posted = await (await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie,
+      body: { slug: 'everything', version: 1, text: 'hi', anchor: { kind: 'text', text: 'doc' } },
+    }), env, {})).json();
+    const r1 = await worker.fetch(req('/api/reactions', {
+      method: 'POST', cookie, body: { slug: 'everything', comment_id: posted.id, emoji: '👍' },
+    }), env, {});
+    assert(r1.status === 200, `react: ${r1.status} ${await r1.clone().text()}`);
+    const r2 = await (await worker.fetch(req('/api/reactions', {
+      method: 'POST', cookie, body: { slug: 'everything', comment_id: posted.id, emoji: '👍' },
+    }), env, {})).json();
+    const count = ((r2.comment || r2).reactions || {})['👍'];
+    assert(!count || (Array.isArray(count) ? count.length : count) === 0,
+      `second toggle did not remove the reaction: ${JSON.stringify(r2).slice(0, 200)}`);
+
+    // folders: gate passes and state lands under the actor key
+    const f = await worker.fetch(req('/api/folders', {
+      method: 'POST', cookie, body: { name: '研究' },
+    }), env, {});
+    assert(f.status === 200, `folder create: ${f.status} ${await f.clone().text()}`);
+    assert(env.META.map.has('folders:email:citizen@example.com'),
+      `folder state keyed wrong: ${[...env.META.map.keys()].filter(k => k.startsWith('folders'))}`);
+
+    // recents: recorded on a plain doc read
+    await worker.fetch(req('/d/everything/v/1', { cookie }), env, {});
+    assert(env.META.map.has('recents:email:citizen@example.com'),
+      'a visit was not recorded for the email actor');
+
+    // create-from-scratch: reachable and lands on an email account
+    const c = await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie, body: { title: 'Fresh Doc' },
+    }), env, {});
+    assert(c.status === 200, `create: ${c.status} ${await c.clone().text()}`);
+  });
+
+  await t("an email-owned doc's comments notify its owner, not the operator", async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'operator' });
+    // Mint an email-account token through the real flow, then publish with it.
+    const owner = await emailSession(env, 'owner2@example.com', 'Owner2');
+    const sid = owner.split('=')[1];
+    const sess = JSON.parse(env.META.map.get(`session:${sid}`));
+    env.META.map.set(`session:${sid}`, JSON.stringify({ ...sess, idp: { provider: 'oidc', sub: 'user_owner2' } }));
+    const start = await (await worker.fetch(req('/api/cli/pair/start', { method: 'POST', body: {} }), env, {})).json();
+    await worker.fetch(req('/api/cli/pair/approve', { method: 'POST', cookie: owner, body: { user_code: start.user_code } }), env, {});
+    const poll = await (await worker.fetch(req('/api/cli/pair/poll', {
+      method: 'POST', body: { user_code: start.user_code, pair_secret: start.pair_secret },
+    }), env, {})).json();
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: poll.token,
+      body: { slug: 'email-owned', version: 1, html: '<h1>mine</h1>' },
+    }), env, {});
+    assert(up.status === 200, `upload: ${up.status}`);
+    // A different signed-in person comments.
+    const guest = await emailSession(env, 'guest2@example.com', 'Guest2');
+    const post = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: guest,
+      body: { slug: 'email-owned', version: 1, text: 'nice doc', anchor: { kind: 'text', text: 'mine' } },
+    }), env, {});
+    assert(post.status === 200, `comment: ${post.status} ${await post.clone().text()}`);
+    assert(env.META.map.has('inbox:email:owner2@example.com'),
+      `owner inbox missing: ${[...env.META.map.keys()].filter(k => k.startsWith('inbox'))}`);
+    assert(!env.META.map.has('inbox:operator'),
+      'the comment notified the worker operator instead of the doc owner');
+  });
+
+  await t('a browser-created doc by an email user routes comments to them', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'operator' });
+    const cookie = await emailSession(env, 'creator@example.com', 'Creator');
+    const made = await (await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie, body: { title: 'Browser Born' },
+    }), env, {})).json();
+    assert(made && made.slug, `create: ${JSON.stringify(made)}`);
+    const guest = await emailSession(env, 'passerby@example.com', 'Passerby');
+    const post = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: guest,
+      body: { slug: made.slug, version: 1, text: 'hello', anchor: { kind: 'text', text: 'Browser' } },
+    }), env, {});
+    assert(post.status === 200, `comment: ${post.status} ${await post.clone().text()}`);
+    assert(env.META.map.has('inbox:email:creator@example.com'),
+      'the browser-created doc did not route to its email owner');
+    assert(!env.META.map.has('inbox:operator'), 'operator was notified instead of the owner');
+  });
+
+  await t('mentioning an address on a private doc invites the bare address, readably', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await publishDoc(env, 'club', {
+      visibility: 'private', commenting: 'invited', allowed_users: ['host@example.com'],
+    });
+    // Inviting-by-mention is an owner power; make host the doc's owner the
+    // way the worker records one (canonical id on both sides).
+    const meta = JSON.parse(env.META.map.get('meta:club'));
+    meta.hosted = { account_id: 'acct_host0000', owner_key: 'email:host@example.com' };
+    env.META.map.set('meta:club', JSON.stringify(meta));
+    const host = await emailSession(env, 'host@example.com', 'Host');
+    const hostSid = host.split('=')[1];
+    const hs = JSON.parse(env.META.map.get(`session:${hostSid}`));
+    env.META.map.set(`session:${hostSid}`, JSON.stringify({ ...hs, account_id: 'acct_host0000' }));
+    const post = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: host,
+      body: { slug: 'club', version: 1, text: 'come look @newbie@example.com', anchor: { kind: 'text', text: 'doc' } },
+    }), env, {});
+    assert(post.status === 200, `comment: ${post.status} ${await post.clone().text()}`);
+    const after1 = JSON.parse(env.META.map.get('meta:club'));
+    const allowed = (after1.access && after1.access.allowed_users) || [];
+    assert(allowed.includes('newbie@example.com'),
+      `invite not stored bare: ${JSON.stringify(allowed)}`);
+    assert(!allowed.some((a) => String(a).startsWith('email:')),
+      `a prefixed key leaked into the allowlist: ${JSON.stringify(allowed)}`);
+    // The invited address can actually read the doc.
+    const newbie = await emailSession(env, 'newbie@example.com', 'Newbie');
+    const read = await worker.fetch(req('/d/club/v/1', { cookie: newbie }), env, {});
+    assert(read.status === 200, `invited reader got ${read.status}`);
+    // And mentioning them AGAIN does not burn another slot or block them.
+    await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: host,
+      body: { slug: 'club', version: 1, text: 'again @newbie@example.com', anchor: { kind: 'text', text: 'doc' } },
+    }), env, {});
+    const after = JSON.parse(env.META.map.get('meta:club')).access.allowed_users;
+    assert(after.filter((a) => a === 'newbie@example.com').length === 1,
+      `re-mention duplicated the invite: ${JSON.stringify(after)}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
