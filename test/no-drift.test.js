@@ -76,9 +76,15 @@ t('GITHUB_CLIENT_ID has a single SoT (shared/github-oauth.js)', () => {
     'vercel still hardcodes the retired personal OAuth client id');
   assert(template.includes('[observability]') && /enabled\s*=\s*true/.test(template),
     'wrangler.toml.template must keep Workers Logs on — without it a live 500 can only be chased by reproducing it');
+  assert(template.includes('binding = "PRODUCT_ANALYTICS"') &&
+    template.includes('dataset = "tdoc_product_events"'),
+    'production must keep aggregate product events in Analytics Engine');
   const preview = read('worker/wrangler.preview.toml.template');
   assert(preview.includes('[observability]') && /enabled\s*=\s*true/.test(preview),
     'the preview worker needs logs too — PR previews are where a break is cheapest to catch');
+  assert(preview.includes('binding = "PRODUCT_ANALYTICS"') &&
+    preview.includes('dataset = "tdoc_preview_product_events"'),
+    'preview product events must stay out of the production dataset');
   assert(!template.includes('Ov23liZ1UAGOchvKPmlS'),
     'wrangler.toml.template still hardcodes the retired personal OAuth client id');
   assert(read('bin/tdoc-publish').includes('shared/github-oauth.js'),

@@ -17,7 +17,10 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   console.log('provider observability');
 
   await t('the hosted funnel is observable without logging identities or content', async () => {
-    const env = makeEnv(mod.CommentsStore);
+    const points = [];
+    const env = makeEnv(mod.CommentsStore, {
+      PRODUCT_ANALYTICS: { writeDataPoint: (point) => points.push(point) },
+    });
     const lines = [];
     const originalLog = console.log;
     console.log = (...args) => lines.push(args.join(' '));
@@ -65,6 +68,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     `wrong funnel: ${JSON.stringify(events)}`);
     assert(events[3].first_publish === true && events[3].client_version === '1.2.3',
       `publish dimensions missing: ${JSON.stringify(events[3])}`);
+    assert(points.length === 4, `wrong Analytics Engine point count: ${points.length}`);
+    assert(points.map((point) => point.blobs[0]).join(',') ===
+      'onboarding_started,onboarding_approved,token_minted,publish_succeeded',
+    `wrong Analytics Engine funnel: ${JSON.stringify(points)}`);
+    assert(points[3].indexes[0] === 'publish_succeeded' &&
+      points[3].blobs.join(',') === 'publish_succeeded,,1.2.3' &&
+      points[3].doubles.join(',') === '1,1',
+    `wrong Analytics Engine dimensions: ${JSON.stringify(points[3])}`);
 
     const allowed = new Set(['type', 'schema', 'event', 'auth_path', 'first_publish', 'client_version']);
     for (const event of events) {
@@ -76,6 +87,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       token.account_id, 'alice-private-login', 'private-observability-doc',
       'secret document text', 'private-doc-title']) {
       assert(!serialized.includes(secret), `product events leaked ${secret}`);
+      assert(!JSON.stringify(points).includes(secret), `analytics points leaked ${secret}`);
     }
   });
 
@@ -91,6 +103,24 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       'cookie', 'session_id', 'installation_id']) {
       assert(!new RegExp(`event\\.${forbidden}\\s*=`).test(helper),
         `productEvent can persist ${forbidden}`);
+    }
+  });
+
+  await t('analytics storage failure never interrupts onboarding', async () => {
+    const env = makeEnv(mod.CommentsStore, {
+      PRODUCT_ANALYTICS: { writeDataPoint: () => { throw new Error('analytics unavailable'); } },
+    });
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const response = await worker.fetch(req('/api/cli/pair/start', {
+        method: 'POST', body: { label: 'still-private' },
+      }), env, {});
+      assert(response.status === 200, `analytics failure changed response to ${response.status}`);
+      const body = await response.json();
+      assert(body.user_code && body.pair_secret, 'onboarding result was lost');
+    } finally {
+      console.log = originalLog;
     }
   });
 

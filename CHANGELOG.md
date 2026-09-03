@@ -37,8 +37,9 @@ file and `.claude-plugin/plugin.json`.
   or sends events to the retired Supabase project. The hosted Worker instead
   emits a four-stage, identifier-free funnel (`onboarding_started`,
   `onboarding_approved`, `token_minted`, `publish_succeeded`) into the
-  persisted Workers Logs enabled for production and previews. Product-event
-  fields are allowlisted in Worker code and exercised end to end so document
+  persisted Workers Logs and identifier-free Workers Analytics Engine counters
+  (with preview traffic isolated from production). Product-event fields are
+  allowlisted in Worker code and exercised end to end so document
   content, slugs, accounts, logins, tokens, and pairing secrets cannot enter
   the structured payload. `#397`.
 
