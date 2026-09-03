@@ -607,13 +607,17 @@
   body.tdoc-narrow .tdoc-modal .code { font-size: 20px; }
   body.tdoc-narrow .tdoc-hover-outline, body.tdoc-narrow .tdoc-comment-pill, body.tdoc-narrow .tdoc-drag-marquee { display: none; }
   body.tdoc-narrow .tdoc-emoji-picker { grid-template-columns: repeat(6, 36px); }
-  body.tdoc-narrow .tdoc-emoji-picker button { width: 36px; height: 36px; font-size: 20px; }
+  /* :not(.tdoc-emoji-text) — these metrics are for single glyphs. Without the
+     exclusion LGTM came out as 22px of text in a 40px box on a phone, which is
+     where "why is LGTM so big" actually came from: the desktop rule had it at
+     12px all along. */
+  body.tdoc-narrow .tdoc-emoji-picker button:not(.tdoc-emoji-text) { width: 36px; height: 36px; font-size: 20px; }
   @media (max-width: 480px) {
     .tdoc-bar { padding: 0 10px; gap: 8px; }
     .tdoc-bar button, .tdoc-bar .tdoc-menu-wrap > button { padding: 4px 8px; font-size: 12px; }
     .tdoc-icon-btn span { display: none; }
     .tdoc-emoji-picker { grid-template-columns: repeat(5, 40px); padding: 8px; }
-    .tdoc-emoji-picker button { width: 40px; height: 40px; font-size: 22px; }
+    .tdoc-emoji-picker button:not(.tdoc-emoji-text) { width: 40px; height: 40px; font-size: 22px; }
     .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 5; }
   }
 
