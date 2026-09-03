@@ -27,7 +27,7 @@ export function NeutralLanding({ boot }) {
         <button
           type="button"
           className="primary"
-          onClick={() => { location.href = '/api/auth/oidc/login?return=%2Fme'; }}
+          onClick={() => { location.href = '/api/auth/oidc/login?prompt=login&return=%2Fme'; }}
         >
           Sign in
         </button>

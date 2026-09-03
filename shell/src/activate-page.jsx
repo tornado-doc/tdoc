@@ -118,7 +118,7 @@ export function ActivatePage({ boot }) {
               className="primary"
               onClick={() => {
                 const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
-                location.href = `/api/auth/oidc/login?return=${encodeURIComponent(back)}`;
+                location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(back)}`;
               }}
             >
               Sign in

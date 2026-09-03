@@ -1455,6 +1455,29 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const slug = safeSlug(body.slug);
     const { id, anchor } = body;
+    // Marking a thread handled, and taking it back. The local store is the flat
+    // comment list rather than an event log, so this writes the folded fields
+    // the worker's marked_applied/marked_open events produce; legacyToEvents
+    // replays them when the doc is published.
+    if (typeof body.resolved === 'boolean') {
+      if (!slug || !id) return json(res, 400, { error: 'invalid slug or missing id' });
+      const file = path.join(ROOT, slug, 'comments.json');
+      const all = readCommentFile(file);
+      const top = all.find(c => c.id === id);
+      if (!top) return json(res, 404, { error: 'not_found' });
+      if (body.resolved) {
+        top.status = 'applied';
+        top.applied_in = Number(body.version) || top.version || 1;
+        top.resolved_by = e2eIdentity() ? e2eIdentity().login : '';
+      } else {
+        top.status = 'open';
+        delete top.applied_in;
+        delete top.resolved_by;
+      }
+      writeJson(file, all);
+      return json(res, 200, top);
+    }
+
     // Editing a comment's text. Local preview is anonymous — there is no
     // session to check the author against, the way the worker does — so the
     // affordance the shell shows is the gate. `edited` is what the card reads

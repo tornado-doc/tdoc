@@ -83,6 +83,7 @@ export function DesktopCommentLayer({
   onReply,
   onReact,
   onDelete,
+  onResolve,
   onEdit,
   onReanchor,
 }) {
@@ -132,6 +133,7 @@ export function DesktopCommentLayer({
           onReply={onReply}
           onReact={onReact}
           onDelete={onDelete}
+          onResolve={onResolve}
           onEdit={onEdit}
           onReanchor={onReanchor}
         />
@@ -153,6 +155,7 @@ export function MobileCommentDrawer({
   onReply,
   onReact,
   onDelete,
+  onResolve,
   onEdit,
   onReanchor,
   onNavigate,
@@ -195,6 +198,7 @@ export function MobileCommentDrawer({
                   onReply={onReply}
                   onReact={onReact}
                   onDelete={onDelete}
+                  onResolve={onResolve}
                   onEdit={onEdit}
                   onReanchor={onReanchor}
                 />

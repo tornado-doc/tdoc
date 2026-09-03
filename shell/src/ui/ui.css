@@ -42,6 +42,7 @@
    spans): keep the semantics, drop the UA button box. */
 .tdoc-margin-comment button.del,
 .tdoc-margin-comment button.tdoc-reply-toggle,
+.tdoc-margin-comment button.tdoc-resolve-toggle,
 .tdoc-margin-comment button.tdoc-edit-toggle,
 .tdoc-margin-comment button.tdoc-replies-toggle,
 .tdoc-margin-comment button.tdoc-thread-more,
@@ -79,6 +80,9 @@ button.tdoc-cluster-row {
    own comment — so it reads the same, not as a second colour. */
 .tdoc-margin-comment button.tdoc-reply-toggle,
 .tdoc-margin-comment button.tdoc-edit-toggle { color: var(--td-accent); }
+/* resolve is the one action that changes the thread's state rather than its
+   content, and it carries the same green the resolved chip and pin ring use. */
+.tdoc-margin-comment button.tdoc-resolve-toggle { color: #1a7340; }
 .tdoc-margin-comment button.tdoc-replies-toggle {
   margin-top: 10px;
   padding-top: 10px;
