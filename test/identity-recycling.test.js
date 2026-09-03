@@ -254,6 +254,77 @@ async function claimAccount(worker, env, cookie) {
       `bridged session lost the handle: ${JSON.stringify(second)}`);
   });
 
+  await t('a token mint on a handle-less session does not erase the bridged handle', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    env.META.map.set('hosted-account:gina', JSON.stringify({
+      account_id: 'acct_gina00000', github_login: 'gina', created: '2026-01-01T00:00:00Z',
+    }));
+    stubProviders({ oidcSub: 'user_gina', oidcEmail: 'gina@new-mail.com', clerkExternal: { id: 555, username: 'gina' } });
+    await oidcSignIn(worker, env);
+
+    // A session from before the door learned to restore handles: same
+    // person, same sub, no login. Its token mint resolves through the email
+    // path, which rewrites the idp link — and must not strip the handle the
+    // bridge just stored there.
+    env.META.map.set('session:feedcafe01', JSON.stringify({
+      email: 'gina@new-mail.com', oidc: true, created: new Date().toISOString(),
+      account_id: 'acct_gina00000', idp: { provider: 'oidc', sub: 'user_gina' },
+    }));
+    const claim = await claimAccount(worker, env, 'tdoc_sid=feedcafe01');
+    assert(claim.account_id === 'acct_gina00000', `mint left the account: ${JSON.stringify(claim)}`);
+
+    const link = JSON.parse(env.META.map.get('account-idp:oidc:user_gina') || 'null');
+    assert(link && link.handle === 'gina', `mint erased the bridged handle: ${JSON.stringify(link)}`);
+    // And the sign-in AFTER that mint still restores the handle as login.
+    const next = await oidcSignIn(worker, env);
+    assert(next.login === 'gina', `sign-in after mint lost the login: ${JSON.stringify(next)}`);
+  });
+
+  await t('a sign-in heals an idp link whose handle was stripped', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    // The damage the old rewrite left behind: the link still resolves, but
+    // the handle the bridge stored is gone.
+    env.META.map.set('hosted-account:gina', JSON.stringify({
+      account_id: 'acct_gina00000', github_login: 'gina', created: '2026-01-01T00:00:00Z',
+      identities: [
+        { provider: 'github', sub: '555', handle: 'gina' },
+        { provider: 'oidc', sub: 'user_gina' },
+      ],
+    }));
+    env.META.map.set('account-idp:oidc:user_gina', JSON.stringify({
+      account_id: 'acct_gina00000', created: '2026-01-01T00:00:00Z',
+    }));
+    const calls = {};
+    stubProviders({ oidcSub: 'user_gina', oidcEmail: 'gina@new-mail.com', clerkExternal: { id: 555, username: 'gina' }, calls });
+    const healed = await oidcSignIn(worker, env);
+    assert(healed.login === 'gina', `sign-in did not heal the login: ${JSON.stringify(healed)}`);
+    const link = JSON.parse(env.META.map.get('account-idp:oidc:user_gina') || 'null');
+    assert(link && link.handle === 'gina', `handle not written back: ${JSON.stringify(link)}`);
+    // Written back means healed for good: the next sign-in asks nobody.
+    const next = await oidcSignIn(worker, env);
+    assert(next.login === 'gina', 'healed login did not survive the next sign-in');
+    assert(calls.clerkApi === 1, `heal did not persist: ${calls.clerkApi} backend calls`);
+  });
+
+  await t('healing never hands a handle to a GitHub id the account does not record', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    // gina's account says GitHub id 555 owns the handle; the provider
+    // attests this visitor connected a DIFFERENT GitHub account (999)
+    // wearing the freed name. The heal must refuse.
+    env.META.map.set('hosted-account:gina', JSON.stringify({
+      account_id: 'acct_gina00000', github_login: 'gina', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '555', handle: 'gina' }],
+    }));
+    env.META.map.set('account-idp:oidc:user_gina', JSON.stringify({
+      account_id: 'acct_gina00000', created: '2026-01-01T00:00:00Z',
+    }));
+    stubProviders({ oidcSub: 'user_gina', oidcEmail: 'gina@new-mail.com', clerkExternal: { id: 999, username: 'gina' } });
+    const s = await oidcSignIn(worker, env);
+    assert(!s.login, `a recycled handle was healed onto the session: ${JSON.stringify(s)}`);
+    const link = JSON.parse(env.META.map.get('account-idp:oidc:user_gina') || 'null');
+    assert(link && !link.handle, `a recycled handle was written back: ${JSON.stringify(link)}`);
+  });
+
   await t('the bridge cannot hand over a handle that a stable id already owns', async () => {
     const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
     // Alice's account, already upgraded: github id 111 owns the handle.
