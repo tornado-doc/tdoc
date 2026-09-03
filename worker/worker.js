@@ -1552,6 +1552,19 @@ function readerCssSource() {
 // unbaked document is skipped. Every bake/skip decision uses this one test so
 // the write side and the read side cannot disagree.
 const READER_BLOCK_RE = /<style[^>]*\bid="tdoc-reader"/i;
+
+// A table only scrolls sideways when it sits inside .tdoc-table-scroll, and
+// adding that wrapper is the author's job. A document whose agent skipped it
+// pushes the WHOLE page sideways on a phone — 482px of it on a real doc, with
+// five tables and none of them wrapped. A table cannot be its own scroll
+// container while it lays out as a table, so on narrow viewports it becomes a
+// block that scrolls itself; wrapped tables keep the wrapper's behaviour.
+//
+// This rides in at serve time rather than living only in reader.css because
+// documents bake their reader CSS at creation: changing that file alone fixes
+// nothing that is already published. Kept byte-identical in server.js —
+// test/reader-patch-drift.test.js holds the two together.
+const READER_PATCH_CSS = '@media (max-width:700px){body table:not(.tdoc-table-scroll>table){display:block!important;min-width:0!important;max-width:100%!important;overflow-x:auto;-webkit-overflow-scrolling:touch}}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
 }
@@ -4883,6 +4896,17 @@ export default {
             // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
             body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
           }
+        }
+        if (body.indexOf('id="tdoc-reader-patch"') === -1) {
+          const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
+          // Anchor on the OPENING tag. The baked reader CSS carries a comment
+          // that quotes `</head>` literally, so a first-match replace on the
+          // closing tag drops the style inside that comment, where it is inert
+          // and invisible — it took a byte-level look at the response to see.
+          // A document's real <head> necessarily precedes any prose quoting it.
+          body = /<head[^>]*>/i.test(body)
+            ? body.replace(/<head[^>]*>/i, (open) => `${open}${ptag}`)
+            : ptag + body;
         }
         const tag = `<script id="tdoc-frame-probe" data-tdoc-provider nonce="${nonce}">${PROBE_JS}</script>`;
         body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;

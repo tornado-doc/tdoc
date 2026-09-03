@@ -129,6 +129,20 @@
   :where(body table) { max-width: 100%; }
   .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .tdoc-table-scroll > table { max-width: none; }
+
+  /* An unwrapped table cannot shrink below its content, so max-width alone
+     leaves it pushing the page sideways on a phone. On narrow viewports it
+     becomes a block that scrolls itself. Mirrored as READER_PATCH_CSS at serve
+     time, which is what reaches documents baked before this existed.
+
+     Not :where() and not overridable, unlike the rest of this file: the thing
+     that breaks the phone IS the author's own rule (a real doc ships
+     `table{min-width:880px}`), so a zero-specificity version loses to exactly
+     the declaration it exists to defeat. Same reasoning as the canvas/img
+     `max-width:100% !important` above. Desktop is untouched. */
+  @media (max-width: 700px) {
+    body table:not(.tdoc-table-scroll > table) { display: block !important; min-width: 0 !important; max-width: 100% !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  }
   /* Pre/code blocks scroll horizontally instead of breaking the layout. */
   :where(body pre) { max-width: 100%; overflow-x: auto; }
   @media print {

@@ -86,6 +86,7 @@ const OFFLINE = [
   'publish-signin.test.js',   // device code reaches the publish modal (expiry/pid/slug guards)
   'resume-signin.test.js',    // dead process ≠ dead sign-in: device_code resumes on re-run
   'onboarding-terminal-recovery.test.js', // provider retry flags + honest SIGINT recovery
+  'reader-patch-drift.test.js', // the phone table rule reaches both runtimes
   'dismiss-rule.test.js',     // the dismiss-first rule keeps its three exceptions
 ];
 

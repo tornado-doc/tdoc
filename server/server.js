@@ -630,6 +630,19 @@ function frameCspHeader(nonce) {
 }
 
 // Reader CSS remains provider-enforced inside the isolated author frame.
+// A table only scrolls sideways when it sits inside .tdoc-table-scroll, and
+// adding that wrapper is the author's job. A document whose agent skipped it
+// pushes the WHOLE page sideways on a phone — 482px of it on a real doc, with
+// five tables and none of them wrapped. A table cannot be its own scroll
+// container while it lays out as a table, so on narrow viewports it becomes a
+// block that scrolls itself; wrapped tables keep the wrapper's behaviour.
+//
+// This rides in at serve time rather than living only in reader.css because
+// documents bake their reader CSS at creation: changing that file alone fixes
+// nothing that is already published. Kept byte-identical in server.js —
+// test/reader-patch-drift.test.js holds the two together.
+const READER_PATCH_CSS = '@media (max-width:700px){body table:not(.tdoc-table-scroll>table){display:block!important;min-width:0!important;max-width:100%!important;overflow-x:auto;-webkit-overflow-scrolling:touch}}';
+
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {
   try { return fs.readFileSync(READER_CSS_PATH, 'utf8'); } catch { return ''; }
@@ -1081,6 +1094,15 @@ const server = http.createServer(async (req, res) => {
           // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
           body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
         }
+      }
+      if (body.indexOf('id="tdoc-reader-patch"') === -1) {
+        const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
+        // Anchor on the OPENING tag — see the matching comment in worker.js:
+        // the baked reader CSS quotes `</head>` in a comment, and a first-match
+        // replace on the closing tag buries the style inside it.
+        body = /<head[^>]*>/i.test(body)
+          ? body.replace(/<head[^>]*>/i, (open) => `${open}${ptag}`)
+          : ptag + body;
       }
       // Inject the anchoring probe — the only tdoc code allowed into the author
       // DOM. Nonced so it runs under the frame CSP while author <script> stays
