@@ -5573,6 +5573,30 @@ export default {
             }
           }
         }
+        // Self-heal: a linkIdentity rewrite used to strip the handle off the
+        // idp record (fixed there), and any record damaged while that bug was
+        // live would strand its owner in login-less sessions forever — legacy
+        // docs gone from /me, old comments no longer theirs. A record that
+        // resolves but carries no handle gets one more question to the
+        // provider, and the answer is written back so the heal is permanent.
+        // For an account with no GitHub connected this asks once per sign-in
+        // and learns nothing — a sign-in is rare enough for that to be fine.
+        if (idpRec && account_id && !normalizeGithubLogin(idpRec.handle)) {
+          const gh = await clerkExternalGithub(env, sub);
+          if (gh && gh.handle) {
+            // Restore only what this account already owns: the handle must
+            // resolve to THIS account, and if the account records a stable
+            // GitHub owner it must be the id the provider just attested — a
+            // recycled name pointing anywhere else stays where it is.
+            const named = await lookupHostedAccount(env, gh.handle);
+            const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
+            if (named && named.account_id === account_id
+                && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
+              idpRec.handle = gh.handle;
+              await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
+            }
+          }
+        }
         const sid = rand(24);
         const session = {
           name: (user.name || user.given_name || email.split('@')[0]),
