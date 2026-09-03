@@ -29,11 +29,10 @@ export function NeutralLanding({ boot }) {
           className="primary"
           onClick={() => { location.href = '/api/auth/oidc/login?return=%2Fme'; }}
         >
-          Continue with {boot.oidcLabel || 'Email'}
+          Sign in
         </button>
-      ) : null}
-      {boot.authConfigured ? (
-        <button type="button" className={boot.oidcAuth ? '' : 'primary'} onClick={signIn}>Sign in with GitHub</button>
+      ) : boot.authConfigured ? (
+        <button type="button" className="primary" onClick={signIn}>Sign in with GitHub</button>
       ) : null}
       <a href="https://github.com/tornado-doc/tdoc">
         github.com/tornado-doc/tdoc <ExternalLink size={14} />

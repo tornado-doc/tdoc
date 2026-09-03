@@ -34,7 +34,7 @@ const OIDC_ENV = {
 
 const realFetch = globalThis.fetch;
 // Stubs both providers: GitHub (/user, /user/emails) and the OIDC issuer.
-function stubProviders({ ghLogin, ghId, ghEmail, oidcSub, oidcEmail }) {
+function stubProviders({ ghLogin, ghId, ghEmail, oidcSub, oidcEmail, clerkExternal, calls }) {
   globalThis.fetch = async (input, init) => {
     const url = String(input && input.url ? input.url : input);
     if (url.includes('github.com/login/oauth/access_token')) return Response.json({ access_token: 'gho' });
@@ -52,6 +52,13 @@ function stubProviders({ ghLogin, ghId, ghEmail, oidcSub, oidcEmail }) {
     if (url === `${ISSUER}/t`) return Response.json({ access_token: 'at' });
     if (url === `${ISSUER}/u`) {
       return Response.json({ sub: oidcSub, email: oidcEmail, email_verified: true, name: 'Person' });
+    }
+    if (url.startsWith('https://api.clerk.com/v1/users/')) {
+      if (calls) calls.clerkApi = (calls.clerkApi || 0) + 1;
+      if (!clerkExternal) return Response.json({ external_accounts: [] });
+      return Response.json({ external_accounts: [
+        { provider: 'oauth_github', provider_user_id: String(clerkExternal.id), username: clerkExternal.username },
+      ] });
     }
     return realFetch(input, init);
   };
@@ -216,6 +223,57 @@ async function claimAccount(worker, env, cookie) {
     const link = JSON.parse(env.META.map.get('account-idp:github:444') || 'null');
     assert(link && link.account_id === 'acct_frank0000',
       `legacy account was not upgraded: ${JSON.stringify(link)}`);
+  });
+
+  await t('a legacy GitHub publisher lands on their account through the provider, no second button', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    // The legacy shape: handle index only — published before phase 1, so no
+    // email index and no stable id anywhere.
+    env.META.map.set('hosted-account:gina', JSON.stringify({
+      account_id: 'acct_gina00000', github_login: 'gina', created: '2026-01-01T00:00:00Z',
+    }));
+    const calls = {};
+    stubProviders({ oidcSub: 'user_gina', oidcEmail: 'gina@new-mail.com', clerkExternal: { id: 555, username: 'gina' }, calls });
+    const first = await oidcSignIn(worker, env);
+    assert(first.account_id === 'acct_gina00000',
+      `legacy account not bridged: ${JSON.stringify(first)}`);
+    assert(calls.clerkApi === 1, `backend api calls: ${calls.clerkApi}`);
+    // The bridge writes the links immediately: the next sign-in must resolve
+    // by sub with no backend call at all.
+    const second = await oidcSignIn(worker, env);
+    assert(second.account_id === 'acct_gina00000', 'second sign-in lost the account');
+    assert(calls.clerkApi === 1, `bridge was consulted again: ${calls.clerkApi}`);
+    const rec = JSON.parse(env.META.map.get('hosted-account:gina'));
+    const provs = (rec.identities || []).map((i) => i.provider).sort();
+    assert(JSON.stringify(provs) === JSON.stringify(['github', 'oidc']),
+      `both identities should be linked: ${JSON.stringify(rec.identities)}`);
+  });
+
+  await t('the bridge cannot hand over a handle that a stable id already owns', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    // Alice's account, already upgraded: github id 111 owns the handle.
+    env.META.map.set('hosted-account:alice', JSON.stringify({
+      account_id: 'acct_alice0000', github_login: 'alice', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '111', handle: 'alice' }],
+    }));
+    // Bob renamed his GitHub to the freed "alice" and connected THAT to the
+    // provider — the bridge reports handle alice but id 999.
+    stubProviders({ oidcSub: 'user_bob', oidcEmail: 'bob@example.com', clerkExternal: { id: 999, username: 'alice' } });
+    const bob = await oidcSignIn(worker, env);
+    assert(bob.account_id !== 'acct_alice0000',
+      'the bridge handed a recycled handle to a different GitHub id');
+  });
+
+  await t('without the backend key the bridge stays quiet and nothing breaks', async () => {
+    const env = makeEnv(mod.CommentsStore, OIDC_ENV); // no CLERK_SECRET_KEY
+    env.META.map.set('hosted-account:hank', JSON.stringify({
+      account_id: 'acct_hank00000', github_login: 'hank', created: '2026-01-01T00:00:00Z',
+    }));
+    const calls = {};
+    stubProviders({ oidcSub: 'user_hank', oidcEmail: 'hank@x.com', clerkExternal: { id: 777, username: 'hank' }, calls });
+    const s1 = await oidcSignIn(worker, env);
+    assert(!s1.account_id, 'ungated bridge resolved an account without the key');
+    assert(!calls.clerkApi, `backend api was called without a key: ${calls.clerkApi}`);
   });
 
   globalThis.fetch = realFetch;
