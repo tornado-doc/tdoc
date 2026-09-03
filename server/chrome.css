@@ -355,7 +355,11 @@
   .tdoc-emoji-picker { position: absolute; background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 6px; display: grid; grid-template-columns: repeat(6, 32px); gap: 2px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 1000001; }
   .tdoc-emoji-picker button { background: transparent; border: none; padding: 0; cursor: pointer; border-radius: 4px; width: 32px; height: 32px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
   .tdoc-emoji-picker button:hover { background: #f5f6f8; }
-  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: var(--td-accent); }
+  /* width:auto matters: the rule above pins every picker button to 32px, so
+     LGTM was handed a cell six columns wide and drew itself one emoji wide,
+     with the word spilling out of a 32px box. It is the only text entry in a
+     grid built for single glyphs. */
+  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; width: auto; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: var(--td-accent); }
   .tdoc-emoji-picker button.tdoc-emoji-text:hover { background: var(--td-accent-tint); }
 
   /* Replies + reply form */
@@ -466,6 +470,18 @@
   .tdoc-popup .head .h { color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
   .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
+  /* iOS Safari zooms the page whenever a focused field's text is smaller than
+     16px, and every comment input was 13px — tapping one threw the reader out
+     of place and left them pinch-zoomed to get back. 16px on touch pointers is
+     the whole fix; a maximum-scale meta tag would also stop it and would take
+     pinch-zoom away from people who need it. Desktop keeps 13px. */
+  @media (pointer: coarse) {
+    .tdoc-popup textarea,
+    .tdoc-popup input[type="text"],
+    .tdoc-reply-form textarea,
+    .tdoc-edit-form textarea,
+    .tdoc-margin-comment input[type="text"] { font-size: 16px; }
+  }
   .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
   .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
@@ -580,6 +596,12 @@
     .tdoc-bar button.tdoc-bar-mark { width: 44px; height: 44px; }
     .tdoc-version-wrap, .tdoc-bar #tdoc-version-toggle { display: none; }
     .tdoc-bar .doc-title { flex: 1 1 auto; font-size: 13px; }
+    /* The 44px touch-target rule above centres every button in the bar, which
+       is right for icons and wrong for the title: the title is a button too
+       (it is editable in place), so it drifted to the middle of the bar and
+       read as a centred page header. text-align cannot fix it — the button is
+       a flex box, so justify-content is what places the text. */
+    .tdoc-bar button.doc-title-edit { justify-content: flex-start; }
     .tdoc-bar #tdoc-star-btn,
     .tdoc-bar .tdoc-document-primary,
     .tdoc-bar #tdoc-theme-btn,
@@ -613,13 +635,17 @@
   body.tdoc-narrow .tdoc-modal .code { font-size: 20px; }
   body.tdoc-narrow .tdoc-hover-outline, body.tdoc-narrow .tdoc-comment-pill, body.tdoc-narrow .tdoc-drag-marquee { display: none; }
   body.tdoc-narrow .tdoc-emoji-picker { grid-template-columns: repeat(6, 36px); }
-  body.tdoc-narrow .tdoc-emoji-picker button { width: 36px; height: 36px; font-size: 20px; }
+  /* :not(.tdoc-emoji-text) — these metrics are for single glyphs. Without the
+     exclusion LGTM came out as 22px of text in a 40px box on a phone, which is
+     where "why is LGTM so big" actually came from: the desktop rule had it at
+     12px all along. */
+  body.tdoc-narrow .tdoc-emoji-picker button:not(.tdoc-emoji-text) { width: 36px; height: 36px; font-size: 20px; }
   @media (max-width: 480px) {
     .tdoc-bar { padding: 0 10px; gap: 8px; }
     .tdoc-bar button, .tdoc-bar .tdoc-menu-wrap > button { padding: 4px 8px; font-size: 12px; }
     .tdoc-icon-btn span { display: none; }
     .tdoc-emoji-picker { grid-template-columns: repeat(5, 40px); padding: 8px; }
-    .tdoc-emoji-picker button { width: 40px; height: 40px; font-size: 22px; }
+    .tdoc-emoji-picker button:not(.tdoc-emoji-text) { width: 40px; height: 40px; font-size: 22px; }
     .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 5; }
   }
 

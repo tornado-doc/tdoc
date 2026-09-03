@@ -962,6 +962,45 @@ function debug(env, ...args) {
   if (env && env.TDOC_DEBUG) console.log(...args);
 }
 
+// Privacy-minimized product events for the hosted onboarding funnel. Workers
+// Logs supplies request diagnostics and Analytics Engine supplies aggregate
+// counters; neither product payload carries an account, login, email, IP,
+// slug, token, cookie, session or installation identifier. Keep the allowlists
+// here at the provider boundary so a caller cannot smuggle arbitrary request
+// fields into persisted telemetry.
+const PRODUCT_EVENTS = new Set([
+  'onboarding_started',
+  'onboarding_approved',
+  'token_minted',
+  'publish_succeeded',
+]);
+const PRODUCT_AUTH_PATHS = new Set(['pair', 'session']);
+function productEvent(env, name, fields = {}) {
+  if (!PRODUCT_EVENTS.has(name)) return;
+  const event = { type: 'tdoc_product_event', schema: 1, event: name };
+  if (PRODUCT_AUTH_PATHS.has(fields.auth_path)) event.auth_path = fields.auth_path;
+  if (typeof fields.first_publish === 'boolean') event.first_publish = fields.first_publish;
+  if (
+    typeof fields.client_version === 'string'
+    && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(fields.client_version)
+  ) event.client_version = fields.client_version;
+  console.log(JSON.stringify(event));
+  // Ordered Analytics Engine schema:
+  //   blob1 event, blob2 auth path, blob3 client version
+  //   double1 count, double2 first-publish count
+  // Writes are non-blocking. Observability must never make a user operation
+  // fail, including in a BYOK deployment whose binding is absent or broken.
+  try {
+    if (env && env.PRODUCT_ANALYTICS) {
+      env.PRODUCT_ANALYTICS.writeDataPoint({
+        indexes: [event.event],
+        blobs: [event.event, event.auth_path || '', event.client_version || ''],
+        doubles: [1, event.first_publish === true ? 1 : 0],
+      });
+    }
+  } catch (_) {}
+}
+
 // Escape `</script>` and HTML comment terminators so a malicious or stray value
 // inside the JSON payload can't break out of the surrounding <script> block.
 function safeJsonForScript(obj) {
@@ -3131,10 +3170,12 @@ function syncDocumentTitle(html, title) {
 //   account-idp:<provider>:<sub>  → account_id   authoritative. `sub` is the
 //       provider's own immutable id (GitHub's numeric user id, Clerk's
 //       user_xxx). It is never reused and never edited by the user.
-//   hosted-account:<login>        → account_id   legacy, and unsafe alone: a
-//       GitHub login can be RENAMED and the old name becomes available for
-//       anyone to register. Kept so existing accounts resolve, and upgraded
-//       to an idp index the first time their owner signs in.
+//   hosted-account:<login>        → account_id   the CURRENT holder's record,
+//       never proof by itself: a GitHub login can be RENAMED and the old name
+//       becomes available for anyone to register. Every live record carries
+//       its numeric id (backfilled via scripts/backfill-github-identities.mjs
+//       for the ones that predated the index), so resolution never rests on
+//       the handle alone.
 //   account-email:<email>         → account_id   a merge hint, used only when
 //       no idp index exists yet. Addresses change hands (a company reassigns
 //       a departed employee's mailbox), so treating one as proof of identity
@@ -3192,7 +3233,20 @@ async function linkIdentity(env, account, { provider, sub, email, handle }) {
   const now = new Date().toISOString();
 
   if (key) {
-    await env.META.put(key, JSON.stringify({ account_id: account.account_id, created: now }));
+    // Merge, never rewrite: the bridge stores the verified GitHub handle on
+    // this record so later sign-ins can restore session.login, and a
+    // fixed-two-field rewrite here erased it on the next token mint — at
+    // which point every legacy doc quietly vanished from that person's /me.
+    // Same lesson the hosted-account record already learned above.
+    let prev = null;
+    try { prev = JSON.parse(await env.META.get(key)); } catch {}
+    const keep = prev && prev.account_id === account.account_id ? prev : null;
+    await env.META.put(key, JSON.stringify({
+      ...(keep || {}),
+      account_id: account.account_id,
+      created: (keep && keep.created) || now,
+      ...(handle ? { handle } : {}),
+    }));
   }
 
   const identities = Array.isArray(account.identities) ? account.identities.slice() : [];
@@ -3256,19 +3310,14 @@ async function hostedAccountForGithub(env, login, verifiedEmail = null, githubId
       // Known id: that account, whatever handle it wears today.
       try { rec = JSON.parse(await env.META.get(`hosted-account:${norm}`)); } catch {}
       if (!rec || rec.account_id !== id) rec = { account_id: id, github_login: norm, created: new Date().toISOString() };
-    } else {
-      // Unknown id. The handle index may still name an account — but it was
-      // written for whoever held this handle BEFORE, and a freed GitHub name
-      // can be registered by anyone. Claim it only if it has no stable owner
-      // yet (a legacy account, upgraded here); if it already belongs to a
-      // different id, this is a different person wearing a recycled name and
-      // they start clean.
-      const legacy = await lookupHostedAccount(env, login);
-      if (legacy) {
-        const owner = (legacy.identities || []).find((i) => i && i.provider === 'github');
-        if (!owner) rec = legacy;
-      }
     }
+    // Unknown id: they start clean. The handle index may still name an
+    // account, but it was written for whoever held this handle BEFORE, and a
+    // freed GitHub name can be registered by anyone. There used to be a
+    // claim-by-handle window here for legacy records with no recorded id —
+    // retired once every live record was backfilled with its numeric id
+    // (scripts/backfill-github-identities.mjs), because the window could not
+    // tell a returning owner from a squatter wearing the freed name.
   }
   if (!rec && !githubId) rec = await lookupHostedAccount(env, login);
   if (!rec) {
@@ -4729,11 +4778,12 @@ export default {
         const email = await ghVerifiedEmail(r.access_token);
         // user.id is GitHub's immutable identifier; user.login is a display
         // name the owner can change — and whose old value anyone may then
-        // register. Resolve on the id, falling back to the handle for
-        // accounts that predate it.
+        // register. Resolve on the id, and ONLY the id — the handle fallback
+        // for pre-index accounts is retired (records were backfilled with
+        // their numeric ids), because it handed a freed handle's account to
+        // whoever registered the name next.
         const ghId = user.id ? String(user.id) : null;
-        const existing = (ghId && await accountIdByIdp(env, 'github', ghId))
-          ? true : await lookupHostedAccount(env, user.login);
+        const existing = !!(ghId && await accountIdByIdp(env, 'github', ghId));
         const account = existing ? await hostedAccountForGithub(env, user.login, email, ghId) : null;
         const sid = rand(24);
         const session = {
@@ -5347,6 +5397,9 @@ export default {
         created: new Date().toISOString(),
       };
       await env.META.put(`pair:${user_code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS + 60 });
+      if (hostedRegistrationEnabled(env, url.origin)) {
+        productEvent(env, 'onboarding_started', { auth_path: 'pair' });
+      }
       return json({
         user_code,
         pair_secret,
@@ -5385,6 +5438,7 @@ export default {
       const approved = record.approved || {};
       const issued = await issueHostedToken(env, { login: approved.login, label: record.label }, approved.email, approved.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
+      productEvent(env, 'token_minted', { auth_path: 'pair' });
       return json({
         ok: true,
         token: issued.token,
@@ -5442,6 +5496,9 @@ export default {
         email: session.email || null,
       };
       await env.META.put(`pair:${code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS });
+      if (hostedRegistrationEnabled(env, url.origin)) {
+        productEvent(env, 'onboarding_approved', { auth_path: 'pair' });
+      }
       return json({ ok: true, label: record.label || '' });
     }
 
@@ -5534,14 +5591,10 @@ export default {
         if (!account_id && sub) {
           bridged = await clerkExternalGithub(env, sub);
           if (bridged) {
+            // The numeric id, and only the numeric id — the claim-by-handle
+            // window for records with no recorded id is retired (records were
+            // backfilled), same as the direct GitHub flow.
             if (bridged.ghId) account_id = await accountIdByIdp(env, 'github', bridged.ghId);
-            if (!account_id && bridged.handle) {
-              const legacy = await lookupHostedAccount(env, bridged.handle);
-              // Same guard as the direct flow: a handle whose account already
-              // has a stable GitHub owner is not claimable through a name.
-              const owned = legacy && (legacy.identities || []).some((i) => i && i.provider === 'github');
-              if (legacy && !owned) account_id = legacy.account_id;
-            }
             if (account_id) {
               // Write the links NOW, not at mint: the whole point is that the
               // very next sign-in resolves exactly, and this person may read
@@ -5557,6 +5610,30 @@ export default {
                 account_id, created: new Date().toISOString(), handle: bridged.handle || undefined,
               }));
               if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
+            }
+          }
+        }
+        // Self-heal: a linkIdentity rewrite used to strip the handle off the
+        // idp record (fixed there), and any record damaged while that bug was
+        // live would strand its owner in login-less sessions forever — legacy
+        // docs gone from /me, old comments no longer theirs. A record that
+        // resolves but carries no handle gets one more question to the
+        // provider, and the answer is written back so the heal is permanent.
+        // For an account with no GitHub connected this asks once per sign-in
+        // and learns nothing — a sign-in is rare enough for that to be fine.
+        if (idpRec && account_id && !normalizeGithubLogin(idpRec.handle)) {
+          const gh = await clerkExternalGithub(env, sub);
+          if (gh && gh.handle) {
+            // Restore only what this account already owns: the handle must
+            // resolve to THIS account, and if the account records a stable
+            // GitHub owner it must be the id the provider just attested — a
+            // recycled name pointing anywhere else stays where it is.
+            const named = await lookupHostedAccount(env, gh.handle);
+            const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
+            if (named && named.account_id === account_id
+                && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
+              idpRec.handle = gh.handle;
+              await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
             }
           }
         }
@@ -5637,8 +5714,8 @@ export default {
         if (!user.login) return json({ error: 'no_user', message: user.message || 'GitHub /user returned no login' }, { status: 500 });
         const email = await ghVerifiedEmail(r.access_token);
         const ghId = user.id ? String(user.id) : null;
-        const existing = (ghId && await accountIdByIdp(env, 'github', ghId))
-          ? true : await lookupHostedAccount(env, user.login);
+        // Id only, same as the web callback: the handle fallback is retired.
+        const existing = !!(ghId && await accountIdByIdp(env, 'github', ghId));
         const account = existing ? await hostedAccountForGithub(env, user.login, email, ghId) : null;
         const sid = rand(24);
         // Store only the identity we actually use. The GitHub access token is
@@ -5871,6 +5948,7 @@ export default {
       // merge key at the moment their account is minted.
       const issued = await issueHostedToken(env, { ...body, login }, session && session.email, session && session.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
+      productEvent(env, 'token_minted', { auth_path: 'session' });
       return json({
         ok: true,
         token: issued.token,
@@ -6315,6 +6393,9 @@ export default {
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
+      const firstHostedPublish = !!(
+        auth.actor && auth.actor.kind === 'hosted' && !writeGate.meta && verNum === 1
+      );
       if (auth.actor && auth.actor.kind === 'hosted') {
         const maxBytes = hostedMaxUploadBytes(env);
         const size = utf8ByteLength(doc);
@@ -6535,6 +6616,12 @@ export default {
       // `sha` is the hash of the exact stored bytes (post-bake, post-stamp). The
       // client records it so a later edit can ask "has remote moved since I
       // published?" with one HEAD request instead of re-downloading the doc.
+      if (auth.actor && auth.actor.kind === 'hosted') {
+        productEvent(env, 'publish_succeeded', {
+          first_publish: firstHostedPublish,
+          client_version: clientVersion,
+        });
+      }
       return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal });
     }
 

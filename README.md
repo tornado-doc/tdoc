@@ -68,7 +68,7 @@ Or via the plugin marketplace: `/plugin marketplace add tornado-doc/tdoc`
 tdoc is authored as a Claude Code skill but is host-aware, so it works under Codex too:
 
 - **Install location**: clone (or symlink) the repo into `~/.codex/skills/tdoc` (Codex reads `~/.codex/skills/`), the same way Claude Code uses `~/.claude/skills/tdoc`. The setup snippet resolves whichever location exists, and you can override with `TDOC_SKILL_DIR`.
-- **Prompts**: where the skill would use Claude Code's `AskUserQuestion` picker (only the first-run telemetry consent), under Codex it falls back to asking the same question as plain text and reading your typed reply. No functionality is lost.
+- **Prompts**: tdoc does not add an analytics-consent prompt on either host. Product choices use the interaction surface the active host provides.
 - **What's the same**: the worker, the CLI (`bin/tdoc-*`), comments, versions, publish — all host-independent.
 
 What is *not* yet first-class on Codex: native slash-command registration (`/tdoc …`) — you invoke tdoc by pointing Codex at `SKILL.md` and asking it to run the workflow. That's the one rough edge versus Claude Code.
@@ -211,50 +211,52 @@ Browser suites default to a committed local fixture (so they test the working-tr
 overlay, offline). Point them at a live doc with `TDOC_TEST_URL=<url>`. Install the
 optional browser dep with `npm i -D playwright && npx playwright install chromium`.
 
-## Telemetry
+## Observability
 
-tdoc records when it runs, how it went (success / error / abandoned),
-how long it took, and a random UUID for your machine, and sends those
-events to the tdoc maintainer's Supabase. **It does NOT record your
-tdoc content, your prompts, file paths, or anything else.** Nothing is
-sent to Anthropic.
+tdoc does not run client-side usage telemetry and never asks for analytics
+consent during skill onboarding. The former Supabase sender and its persistent
+installation/session identifiers were removed after that backend was retired.
 
-The maintainer uses this to figure out which features people use,
-what breaks, and what to fix next — without guessing.
+Hosted operations are observed where they actually happen: the tdoc.dev
+Cloudflare Worker. Workers Logs is enabled for production and PR previews,
+and the Worker emits a small structured onboarding funnel to both logs and a
+Workers Analytics Engine dataset:
 
-### What's collected (the full list)
+| Event | Meaning |
+|---|---|
+| `onboarding_started` | the CLI successfully created a pairing flow |
+| `onboarding_approved` | the signed-in user approved that CLI |
+| `token_minted` | the provider issued an account-scoped publish token |
+| `publish_succeeded` | a hosted upload committed successfully |
 
-| Field             | Example                              |
-|-------------------|--------------------------------------|
-| `ts`              | `2026-05-22T16:32:11Z`               |
-| `skill`           | `tdoc`                               |
-| `skill_version`   | `0.7.6`                              |
-| `event_type`      | `skill_run` / `upgrade_prompted`     |
-| `outcome`         | `success` / `error` / `abandoned`    |
-| `duration_s`      | `87`                                 |
-| `step`            | which tdoc command — `new` / `edit` / `publish` / … |
-| `error_class`     | short error tag, e.g. `publish_timeout` |
-| `error_message`   | longer error context, ≤400 chars     |
-| `session_id`      | Claude Code session ID               |
-| `installation_id` | random UUID per machine              |
-| `os` / `arch`     | `darwin` / `arm64`                   |
-| `sessions`        | count of concurrent active sessions  |
+These product events contain only the event name and bounded operational
+dimensions such as auth path, first-publish boolean, and validated client
+version. They deliberately exclude document content, prompts, slug, account,
+login, email, IP, cookies, tokens, session IDs, and installation IDs. Normal
+provider request logs remain subject to the hosting provider’s logging and
+retention controls.
 
-It does **not** record your tdoc content, your prompts, file paths,
-or which git repo you were in. The full schema and edge-function code
-live in `telemetry/` — read the code if you want to verify.
+The production dataset is `tdoc_product_events` (previews use a separate
+`tdoc_preview_product_events` dataset). Its ordered columns are `blob1` event,
+`blob2` auth path, `blob3` client version, `double1` count, and `double2`
+first-publish count. For example, this Analytics Engine SQL query gives the
+last seven days of aggregate funnel counts:
 
-### Three opt-out paths
+```sql
+SELECT blob1 AS event, SUM(_sample_interval * double1) AS events
+FROM tdoc_product_events
+WHERE timestamp > NOW() - INTERVAL '7' DAY
+GROUP BY event
+ORDER BY events DESC
+```
 
-1. **On first run**: pick "Off" in the consent prompt.
-2. **Persistent**: `echo off > ~/.tdoc/.telemetry-mode`
-3. **Ephemeral** (one shell): `export SKILL_TELEMETRY=off`
+This supports a Cloudflare/Grafana dashboard without manufacturing a GA4
+`client_id` or adding an analytics prompt to CLI onboarding. Public-site
+traffic and acquisition analytics are a separate concern and may use a web
+analytics tag without joining browser identity to these provider counters.
 
-### How to delete your data
-
-Your installation_id is at `~/.tdoc/telemetry/installation-id`. Send it
-to the maintainer and ask them to delete rows matching it (one SQL
-line — no excuse not to).
+BYOK deployments receive the same Worker logging configuration in their own
+Cloudflare account. Purely local skill operations are not tracked.
 
 ## Credit
 

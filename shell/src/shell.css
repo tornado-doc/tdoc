@@ -1,9 +1,17 @@
+/* dvh, not vh. On iOS 100vh is the LARGE viewport — the height the page would
+   have if Safari's toolbars were collapsed — so while a toolbar is showing the
+   shell is taller than the screen and the PAGE itself scrolls. The bar is
+   position:relative, so that scroll carried it off the top and took the first
+   lines of the document with it. dvh is the height actually on screen, which
+   leaves the page unscrollable and the frame the only thing that moves.
+   The vh line stays as the fallback for browsers without dvh. */
 html,
 body,
 #tdoc-shell-root {
   margin: 0;
   padding: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background: #fff;
 }
 
@@ -15,6 +23,7 @@ body,
 .tdoc-document-app {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
   flex-direction: column;
 }
 
