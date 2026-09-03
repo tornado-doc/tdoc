@@ -254,6 +254,32 @@ async function claimAccount(worker, env, cookie) {
       `bridged session lost the handle: ${JSON.stringify(second)}`);
   });
 
+  await t('a token mint on a handle-less session does not erase the bridged handle', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    env.META.map.set('hosted-account:gina', JSON.stringify({
+      account_id: 'acct_gina00000', github_login: 'gina', created: '2026-01-01T00:00:00Z',
+    }));
+    stubProviders({ oidcSub: 'user_gina', oidcEmail: 'gina@new-mail.com', clerkExternal: { id: 555, username: 'gina' } });
+    await oidcSignIn(worker, env);
+
+    // A session from before the door learned to restore handles: same
+    // person, same sub, no login. Its token mint resolves through the email
+    // path, which rewrites the idp link — and must not strip the handle the
+    // bridge just stored there.
+    env.META.map.set('session:feedcafe01', JSON.stringify({
+      email: 'gina@new-mail.com', oidc: true, created: new Date().toISOString(),
+      account_id: 'acct_gina00000', idp: { provider: 'oidc', sub: 'user_gina' },
+    }));
+    const claim = await claimAccount(worker, env, 'tdoc_sid=feedcafe01');
+    assert(claim.account_id === 'acct_gina00000', `mint left the account: ${JSON.stringify(claim)}`);
+
+    const link = JSON.parse(env.META.map.get('account-idp:oidc:user_gina') || 'null');
+    assert(link && link.handle === 'gina', `mint erased the bridged handle: ${JSON.stringify(link)}`);
+    // And the sign-in AFTER that mint still restores the handle as login.
+    const next = await oidcSignIn(worker, env);
+    assert(next.login === 'gina', `sign-in after mint lost the login: ${JSON.stringify(next)}`);
+  });
+
   await t('the bridge cannot hand over a handle that a stable id already owns', async () => {
     const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
     // Alice's account, already upgraded: github id 111 owns the handle.

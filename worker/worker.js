@@ -3192,7 +3192,20 @@ async function linkIdentity(env, account, { provider, sub, email, handle }) {
   const now = new Date().toISOString();
 
   if (key) {
-    await env.META.put(key, JSON.stringify({ account_id: account.account_id, created: now }));
+    // Merge, never rewrite: the bridge stores the verified GitHub handle on
+    // this record so later sign-ins can restore session.login, and a
+    // fixed-two-field rewrite here erased it on the next token mint — at
+    // which point every legacy doc quietly vanished from that person's /me.
+    // Same lesson the hosted-account record already learned above.
+    let prev = null;
+    try { prev = JSON.parse(await env.META.get(key)); } catch {}
+    const keep = prev && prev.account_id === account.account_id ? prev : null;
+    await env.META.put(key, JSON.stringify({
+      ...(keep || {}),
+      account_id: account.account_id,
+      created: (keep && keep.created) || now,
+      ...(handle ? { handle } : {}),
+    }));
   }
 
   const identities = Array.isArray(account.identities) ? account.identities.slice() : [];
