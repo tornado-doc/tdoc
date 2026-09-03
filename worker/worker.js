@@ -309,7 +309,13 @@ async function loadDocMeta(env, slug) {
 }
 
 function accessDeniedHtml({ status, title, body, slug, version }) {
-  const next = slug && version ? `/d/${encodeURIComponent(slug)}/v/${version}` : '/';
+  // The retry link points back at what was requested: a versioned URL when
+  // the caller was asked for one, the doc's head URL (which resolves to the
+  // latest version only after this same gate passes) when it wasn't. The
+  // head form is what keeps a denial from disclosing any version number.
+  const next = !slug ? '/'
+    : version ? `/d/${encodeURIComponent(slug)}/v/${version}`
+    : `/d/${encodeURIComponent(slug)}`;
   return html(`<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} · tdoc</title>
@@ -4561,11 +4567,11 @@ export default {
     const docHeadMatch = p.match(/^\/d\/([^/]+)\/?$/);
     if (docHeadMatch && (method === 'GET' || method === 'HEAD')) {
       const slug = docHeadMatch[1];
-      // Gate with a falsy version: the denial page only embeds a versioned
-      // retry link when it has a version, so an unauthorized probe learns
-      // nothing here — not even the version count. On success the gate's own
-      // meta yields the redirect target (one KV read, not two).
-      const gate = await enforceDocAccess(env, req, slug, 0);
+      // No version was requested, so none is passed: a denial's retry link
+      // is this same head URL, and an unauthorized probe learns nothing —
+      // not even the version count. On success the gate's own meta yields
+      // the redirect target (one KV read, not two).
+      const gate = await enforceDocAccess(env, req, slug, null);
       if (!gate.ok) return gate.response;
       const latest = latestVersionNumber(gate.meta);
       if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}`);

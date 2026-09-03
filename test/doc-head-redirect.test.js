@@ -63,9 +63,11 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const r = await worker.fetch(req('/d/secret-plan'), env, {});
     assert(r.status !== 302, `must not redirect, got 302 → ${r.headers.get('Location')}`);
     assert(r.status === 401 || r.status === 403, `expected 401/403, got ${r.status}`);
-    // The denial page's retry link must not reveal any version number either.
+    // The denial page's retry link points back at the head URL — the same
+    // gated route — and must not reveal any version number.
     const body = await r.text();
     assert(!/\/v\/\d/.test(body), 'denial HTML leaks a version number');
+    assert(body.includes('href="/d/secret-plan"'), 'denial retry link should be the head URL');
   });
 
   await t('versioned routes are untouched by the head route', async () => {
