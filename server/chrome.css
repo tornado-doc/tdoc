@@ -456,6 +456,18 @@
   .tdoc-popup .head .h { color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
   .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
+  /* iOS Safari zooms the page whenever a focused field's text is smaller than
+     16px, and every comment input was 13px — tapping one threw the reader out
+     of place and left them pinch-zoomed to get back. 16px on touch pointers is
+     the whole fix; a maximum-scale meta tag would also stop it and would take
+     pinch-zoom away from people who need it. Desktop keeps 13px. */
+  @media (pointer: coarse) {
+    .tdoc-popup textarea,
+    .tdoc-popup input[type="text"],
+    .tdoc-reply-form textarea,
+    .tdoc-edit-form textarea,
+    .tdoc-margin-comment input[type="text"] { font-size: 16px; }
+  }
   .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
   .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
