@@ -29,7 +29,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 // in phase 1 — reads /user/emails. Everything else falls through to the
 // real fetch (none of these tests need it).
 const realFetch = globalThis.fetch;
-function stubGitHub({ login, emails }) {
+function stubGitHub({ login, id, emails }) {
   globalThis.fetch = async (input, init) => {
     const url = String(input && input.url ? input.url : input);
     if (url.includes('github.com/login/oauth/access_token')) {
@@ -39,7 +39,7 @@ function stubGitHub({ login, emails }) {
       return Response.json(emails);
     }
     if (url.includes('api.github.com/user')) {
-      return Response.json({ login, avatar_url: '', name: login });
+      return Response.json({ login, id, avatar_url: '', name: login });
     }
     return realFetch(input, init);
   };
@@ -87,9 +87,14 @@ function sessionFromCookie(env, r) {
     const env = makeEnv(mod.CommentsStore);
     env.META.map.set('hosted-account:alice', JSON.stringify({
       account_id: 'acct_alice0000', github_login: 'alice', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '101', handle: 'alice' }],
+    }));
+    env.META.map.set('account-idp:github:101', JSON.stringify({
+      account_id: 'acct_alice0000', created: '2026-01-01T00:00:00Z',
     }));
     stubGitHub({
       login: 'Alice',
+      id: 101,
       emails: [
         { email: 'old@example.com', primary: false, verified: true },
         { email: 'Alice@Example.COM', primary: true, verified: true },
@@ -111,8 +116,12 @@ function sessionFromCookie(env, r) {
     const env = makeEnv(mod.CommentsStore);
     env.META.map.set('hosted-account:mallory', JSON.stringify({
       account_id: 'acct_mallory00', github_login: 'mallory', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '102', handle: 'mallory' }],
     }));
-    stubGitHub({ login: 'mallory', emails: [{ email: 'victim@example.com', primary: true, verified: false }] });
+    env.META.map.set('account-idp:github:102', JSON.stringify({
+      account_id: 'acct_mallory00', created: '2026-01-01T00:00:00Z',
+    }));
+    stubGitHub({ login: 'mallory', id: 102, emails: [{ email: 'victim@example.com', primary: true, verified: false }] });
     const { data } = await devicePoll(worker, env);
     assert(data.ok === true, `poll failed: ${JSON.stringify(data)}`);
     assert(!env.META.map.has('account-email:victim@example.com'),
@@ -127,8 +136,12 @@ function sessionFromCookie(env, r) {
     }));
     env.META.map.set('hosted-account:second', JSON.stringify({
       account_id: 'acct_second000', github_login: 'second', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '103', handle: 'second' }],
     }));
-    stubGitHub({ login: 'second', emails: [{ email: 'shared@example.com', primary: true, verified: true }] });
+    env.META.map.set('account-idp:github:103', JSON.stringify({
+      account_id: 'acct_second000', created: '2026-01-01T00:00:00Z',
+    }));
+    stubGitHub({ login: 'second', id: 103, emails: [{ email: 'shared@example.com', primary: true, verified: true }] });
     const { data } = await devicePoll(worker, env);
     assert(data.ok === true, `poll failed: ${JSON.stringify(data)}`);
     const idx = kvJson(env, 'account-email:shared@example.com');
@@ -174,9 +187,15 @@ function sessionFromCookie(env, r) {
     const env = makeEnv(mod.CommentsStore);
     env.META.map.set('hosted-account:keeper', JSON.stringify({
       account_id: 'acct_keeper000', github_login: 'keeper', created: '2026-01-01T00:00:00Z',
-      email: 'keeper@example.com', identities: [{ provider: 'google', sub: 'g-123' }],
+      email: 'keeper@example.com', identities: [
+        { provider: 'google', sub: 'g-123' },
+        { provider: 'github', sub: '104', handle: 'keeper' },
+      ],
     }));
-    stubGitHub({ login: 'keeper', emails: [] }); // no scope yet → no email this time
+    env.META.map.set('account-idp:github:104', JSON.stringify({
+      account_id: 'acct_keeper000', created: '2026-01-01T00:00:00Z',
+    }));
+    stubGitHub({ login: 'keeper', id: 104, emails: [] }); // no scope yet → no email this time
     const { data } = await devicePoll(worker, env);
     assert(data.ok === true, `poll failed: ${JSON.stringify(data)}`);
     const rec = kvJson(env, 'hosted-account:keeper');

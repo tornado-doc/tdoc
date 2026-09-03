@@ -43,15 +43,14 @@ tdoc has three components worth thinking about as an attacker would:
   and avatar URLs — so a comment can't inject script into the page. (If you
   find a case where it can, that's exactly the kind of report this policy is
   for.)
-- **Telemetry never includes your doc content, prompts, or file paths.** See
-  the Telemetry section of the README for the full field list and opt-out.
+- **No client-side usage telemetry runs from the skill.** Hosted operational
+  events are emitted by the provider and exclude document/user identifiers;
+  see the Observability section of the README.
 
 ## Out of scope
 
 - Vulnerabilities in Cloudflare, GitHub, Node, or other upstream dependencies —
   report those to the respective project.
-- The `telemetry/` directory's Supabase edge functions (operational tooling,
-  not part of the installed skill).
 - Social-engineering, physical access, or anything requiring a
   already-compromised machine.
 

@@ -94,5 +94,13 @@ t('Node and wrangler match production CD pins', () => {
   assert(wf.includes('wrangler@4.90.1'), 'pin wrangler 4.90.1 like tdoc.dev CD');
 });
 
+t('a failed upload prints Wrangler diagnostics before exiting', () => {
+  const upload = wf.slice(wf.indexOf('- name: Upload version with pr-N alias'));
+  assert(upload.includes('set +e') && upload.includes('STATUS=$?'),
+    'upload must capture failure instead of exiting inside command substitution');
+  assert(upload.indexOf('echo "$OUT"') < upload.indexOf('exit "$STATUS"'),
+    'captured Wrangler output must be printed before the failing exit');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

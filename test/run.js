@@ -34,6 +34,7 @@ const OFFLINE = [
   'hosted-oob-behavior.test.js', // hosted token ownership behavior with fake bindings
   'account-email-groundwork.test.js', // phase-1 identity: email merge key, no mint-on-signin, field-preserving rewrite
   'pairing-flow.test.js',     // phase-2: tdoc-owned pair codes — strikes, single redemption, origin/session gates
+  'provider-observability.test.js', // privacy-minimized hosted onboarding funnel in Worker logs (#397)
   'pair-signin-cli.test.js',  // phase-2 CLI: pairing-first, 404 fallback, probe-first resume
   'oidc-provider-seat.test.js', // phase-3: OIDC seat — verified-email sessions, email-born accounts, sub never a key
   'email-identity-surface.test.js', // phase-4: actor keys — email identities comment, are invited, own their words
