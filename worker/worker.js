@@ -2410,16 +2410,24 @@ function snapshotAt(c, V) {
         // Re-anchor resets the agent verdict (matches prior PATCH behavior).
         if (e.reset_status) { snap.status = 'open'; snap.applied_in = undefined; }
         break;
+      // A person and an agent both write these events, and they mean different
+      // things. An agent's carries a verdict, which the fold turns into the
+      // ✅/🟡/❓ reaction below; a person's is a decision, so it must not put an
+      // emoji in their name. `human` is what tells them apart — absent on every
+      // event written before people could resolve, which is why the agent path
+      // stays the default.
       case 'marked_applied':
         snap.status = 'applied';
         snap.applied_in = e.applied_in || e.at_version;
-        snap._agentVerdict = e.agent_status || 'applied';
+        snap.resolved_by = e.human ? (e.by || '') : '';
+        snap._agentVerdict = e.human ? null : (e.agent_status || 'applied');
         snap._agentActor = e.by || 'tdoc-agent';
         break;
       case 'marked_open':
         snap.status = 'open';
         snap.applied_in = undefined;
-        snap._agentVerdict = e.agent_status || null;
+        snap.resolved_by = '';
+        snap._agentVerdict = e.human ? null : (e.agent_status || null);
         snap._agentActor = e.by || 'tdoc-agent';
         break;
       case 'deleted':
@@ -3964,6 +3972,19 @@ function applyCommentOp(list, op) {
       const target = list.find(c => c.id === op.id);
       if (!target) return { status: 404, body: { error: 'not_found' } };
       appendEvent(target, { kind: 'anchor_changed', at_version: op.version, at: now, reset_status: op.reset_status, anchor: op.anchor, by: op.actor && op.actor.login });
+      return { status: 200, body: snapshotAt(target, op.version) };
+    }
+    case 'set_status': {
+      // Authorization is enforced UPSTREAM (canMutate needs session+env); the
+      // DO only serializes the write. The event id for both status kinds is
+      // `status:<version>`, so a thread has exactly one status per version and
+      // resolve/reopen converge no matter how they interleave.
+      const target = list.find(c => c.id === op.id);
+      if (!target) return { status: 404, body: { error: 'not_found' } };
+      const by = (op.actor && op.actor.login) || '';
+      appendEvent(target, op.resolved
+        ? { kind: 'marked_applied', at_version: op.version, at: now, applied_in: op.version, by, human: true }
+        : { kind: 'marked_open', at_version: op.version, at: now, by, human: true });
       return { status: 200, body: snapshotAt(target, op.version) };
     }
     case 'react': {
@@ -5969,6 +5990,24 @@ export default {
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, id, anchor, version } = body;
+      if (typeof body.resolved === 'boolean') {
+        // Marking a thread handled, and taking it back. Same gate as delete and
+        // move-anchor: the doc's owner, or whoever wrote the comment — the
+        // person who asked is the person who gets to say it is answered.
+        if (!slug || !id) return json({ error: 'slug, id required' }, { status: 400 });
+        if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+        const list = await readComments(env, slug);
+        ensureMigrated(list);
+        const target = list.find(c => c.id === id);
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        const docMeta = await loadDocMeta(env, slug);
+        if (!canMutate(target, s, env, docMeta)) return json({ error: 'not_author' }, { status: 403 });
+        const V = coerceBodyVersion(version, target.created_in || 1);
+        const res = await mutateComments(env, slug, {
+          kind: 'set_status', slug, id, resolved: body.resolved, version: V, actor: { login: s.login },
+        });
+        return json(res.body, { status: res.status });
+      }
       if (typeof body.text === 'string') {
         const text = body.text.trim();
         if (!slug || !id || !text) return json({ error: 'slug, id, text required' }, { status: 400 });

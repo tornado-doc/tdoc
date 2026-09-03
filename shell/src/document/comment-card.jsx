@@ -434,6 +434,7 @@ export function CommentCard({
   onReply,
   onReact,
   onDelete,
+  onResolve,
   onEdit,
   onReanchor,
 }) {
@@ -576,7 +577,9 @@ export function CommentCard({
 
       {comment.status === 'applied' ? (
         <span className="tdoc-resolved-chip">
-          ✓ fixed{comment.applied_in ? ` · v${comment.applied_in}` : ''}
+          {comment.resolved_by
+            ? `✓ resolved by @${comment.resolved_by}`
+            : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
         </span>
       ) : null}
 
@@ -610,6 +613,15 @@ export function CommentCard({
               onClick={() => setEditTarget(editTarget === comment.id ? null : comment.id)}
             >
               edit
+            </button>
+          ) : null}
+          {canMutate ? (
+            <button
+              type="button"
+              className="tdoc-resolve-toggle"
+              onClick={() => onResolve(comment.id, comment.status !== 'applied')}
+            >
+              {comment.status === 'applied' ? 'reopen' : 'resolve'}
             </button>
           ) : null}
           {canDelete ? (
