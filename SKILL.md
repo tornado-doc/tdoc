@@ -750,8 +750,12 @@ uploads). Published pages expose runtime provenance at `/api/runtime` and in
 keeps working (nothing in the CLI re-authenticates until the token is lost),
 and in the browser they pick GitHub inside the sign-in page — the worker
 recognises the connected GitHub identity and lands them on their existing
-account, docs intact. There is nothing for the local skill to detect or
-convert; the pending-signin/pairing machinery is the same file either way.
+account, docs intact — and the session keeps their verified handle, so old
+comments stay editable and handle-shaped invites keep matching. (The bridge
+needs CLERK_SECRET_KEY on the worker; without it a legacy user should pick
+GitHub via the legacy device flow instead.) There is nothing for the local
+skill to detect or convert; the pending-signin/pairing machinery is the same
+file either way.
 
 Local preview (`tdoc serve`) does not need any sign-in. Published docs —
 hosted (`tdoc.dev`) and BYOK remote (your Cloudflare/Vercel worker) — gate

@@ -277,6 +277,63 @@ const em = { email: 'Alice@Example.com', name: 'Alice A' };
       'the comment notified the worker operator instead of the doc owner');
   });
 
+  await t('a browser-created doc by an email user routes comments to them', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'operator' });
+    const cookie = await emailSession(env, 'creator@example.com', 'Creator');
+    const made = await (await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie, body: { title: 'Browser Born' },
+    }), env, {})).json();
+    assert(made && made.slug, `create: ${JSON.stringify(made)}`);
+    const guest = await emailSession(env, 'passerby@example.com', 'Passerby');
+    const post = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: guest,
+      body: { slug: made.slug, version: 1, text: 'hello', anchor: { kind: 'text', text: 'Browser' } },
+    }), env, {});
+    assert(post.status === 200, `comment: ${post.status} ${await post.clone().text()}`);
+    assert(env.META.map.has('inbox:email:creator@example.com'),
+      'the browser-created doc did not route to its email owner');
+    assert(!env.META.map.has('inbox:operator'), 'operator was notified instead of the owner');
+  });
+
+  await t('mentioning an address on a private doc invites the bare address, readably', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await publishDoc(env, 'club', {
+      visibility: 'private', commenting: 'invited', allowed_users: ['host@example.com'],
+    });
+    // Inviting-by-mention is an owner power; make host the doc's owner the
+    // way the worker records one (canonical id on both sides).
+    const meta = JSON.parse(env.META.map.get('meta:club'));
+    meta.hosted = { account_id: 'acct_host0000', owner_key: 'email:host@example.com' };
+    env.META.map.set('meta:club', JSON.stringify(meta));
+    const host = await emailSession(env, 'host@example.com', 'Host');
+    const hostSid = host.split('=')[1];
+    const hs = JSON.parse(env.META.map.get(`session:${hostSid}`));
+    env.META.map.set(`session:${hostSid}`, JSON.stringify({ ...hs, account_id: 'acct_host0000' }));
+    const post = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: host,
+      body: { slug: 'club', version: 1, text: 'come look @newbie@example.com', anchor: { kind: 'text', text: 'doc' } },
+    }), env, {});
+    assert(post.status === 200, `comment: ${post.status} ${await post.clone().text()}`);
+    const after1 = JSON.parse(env.META.map.get('meta:club'));
+    const allowed = (after1.access && after1.access.allowed_users) || [];
+    assert(allowed.includes('newbie@example.com'),
+      `invite not stored bare: ${JSON.stringify(allowed)}`);
+    assert(!allowed.some((a) => String(a).startsWith('email:')),
+      `a prefixed key leaked into the allowlist: ${JSON.stringify(allowed)}`);
+    // The invited address can actually read the doc.
+    const newbie = await emailSession(env, 'newbie@example.com', 'Newbie');
+    const read = await worker.fetch(req('/d/club/v/1', { cookie: newbie }), env, {});
+    assert(read.status === 200, `invited reader got ${read.status}`);
+    // And mentioning them AGAIN does not burn another slot or block them.
+    await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: host,
+      body: { slug: 'club', version: 1, text: 'again @newbie@example.com', anchor: { kind: 'text', text: 'doc' } },
+    }), env, {});
+    const after = JSON.parse(env.META.map.get('meta:club')).access.allowed_users;
+    assert(after.filter((a) => a === 'newbie@example.com').length === 1,
+      `re-mention duplicated the invite: ${JSON.stringify(after)}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

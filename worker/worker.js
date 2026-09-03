@@ -3124,6 +3124,16 @@ function idpKey(provider, sub) {
   return `account-idp:${p}:${id}`;
 }
 
+async function accountIdpRecord(env, provider, sub) {
+  const key = idpKey(provider, sub);
+  if (!key || !env || !env.META) return null;
+  try {
+    const rec = JSON.parse(await env.META.get(key));
+    if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
+  } catch {}
+  return null;
+}
+
 async function accountIdByIdp(env, provider, sub) {
   const key = idpKey(provider, sub);
   if (!key || !env || !env.META) return null;
@@ -3486,6 +3496,9 @@ function stampHostedOwnership(meta, actor) {
   // comment notification fell through to the worker operator.
   const key = actor.github_login || (actor.email ? `email:${actor.email}` : null);
   if (key) hosted.owner_key = key;
+  // Authoritative either way: a client-supplied meta.hosted.owner_key must
+  // not survive a token that cannot vouch for one.
+  else delete hosted.owner_key;
   return {
     ...(meta || {}),
     hosted,
@@ -3896,7 +3909,7 @@ function classifyMentions(logins, { canRead, canInvite = false, inviteBudget = 0
 // never wrong, only sometimes unnecessary.
 const PRESENCE_PREFIXES = ['recents', 'stars', 'hosted-account', 'hosted-github'];
 async function hasUsedTdoc(env, login) {
-  const n = normalizeGithubLogin(login);
+  const n = normalizeActorKey(login);
   if (!n || !env || !env.META) return false;
   for (const prefix of PRESENCE_PREFIXES) {
     if (await env.META.get(`${prefix}:${n}`)) return true;
@@ -3910,7 +3923,7 @@ async function hasUsedTdoc(env, login) {
 // reason to come back. Each carries whether they have ever used tdoc, because
 // that decides whether the mention can find them on its own.
 async function describeNewcomers(env, { notified = [], invited = [], insiders = [] } = {}) {
-  const inside = new Set(insiders.map(normalizeGithubLogin).filter(Boolean));
+  const inside = new Set(insiders.map(normalizeActorKey).filter(Boolean));
   const out = [];
   for (const login of notified) {
     if (inside.has(login)) continue;
@@ -5019,7 +5032,10 @@ export default {
             session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
         : await hostedAccountForEmail(env, session && session.email, session && session.idp);
         if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
-        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login,
+          // Without this an email-born account's browser-created doc had no
+          // routable owner — the very path most email users take first.
+          email: normalizeEmail((acct && acct.email) || (session && session.email)) };
       }
 
       const html = blankDocHtml();
@@ -5129,7 +5145,10 @@ export default {
             session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
         : await hostedAccountForEmail(env, session && session.email, session && session.idp);
         if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
-        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login };
+        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login,
+          // Without this an email-born account's browser-created doc had no
+          // routable owner — the very path most email users take first.
+          email: normalizeEmail((acct && acct.email) || (session && session.email)) };
       }
       if (actor.kind === 'hosted') {
         const maxBytes = hostedMaxUploadBytes(env);
@@ -5429,7 +5448,8 @@ export default {
         // which is exactly what an address does not guarantee. Without it,
         // a mailbox handed to a new person hands them the old owner's docs.
         const sub = user && user.sub ? String(user.sub) : null;
-        let account_id = sub ? await accountIdByIdp(env, 'oidc', sub) : null;
+        const idpRec = sub ? await accountIdpRecord(env, 'oidc', sub) : null;
+        let account_id = idpRec ? idpRec.account_id : null;
         // No idp link yet: this provider is new to an existing account, so
         // the verified address is the merge hint that connects them. Used
         // once — the link written at mint time makes later sign-ins exact.
@@ -5457,6 +5477,12 @@ export default {
               if (!rec || rec.account_id !== account_id) rec = { account_id, created: new Date().toISOString() };
               if (bridged.ghId) rec = await linkIdentity(env, rec, { provider: 'github', sub: bridged.ghId, email, handle: bridged.handle || undefined });
               rec = await linkIdentity(env, rec, { provider: 'oidc', sub, email });
+              // The verified handle rides on the oidc link so every LATER
+              // sign-in (which resolves by sub and never re-runs the bridge)
+              // can restore it into the session.
+              await env.META.put(idpKey('oidc', sub), JSON.stringify({
+                account_id, created: new Date().toISOString(), handle: bridged.handle || undefined,
+              }));
               if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
             }
           }
@@ -5470,6 +5496,13 @@ export default {
           created: new Date().toISOString(),
           ...(account_id ? { account_id } : {}),
           ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
+          // A bridged legacy user gets their verified handle as the session
+          // login, so their actor key stays handle-shaped: old comments stay
+          // editable, handle invites keep matching, @handle still reaches
+          // them. Truthful — the provider attested which GitHub account this
+          // person connected.
+          ...((account_id && ((bridged && bridged.handle) || (idpRec && normalizeGithubLogin(idpRec.handle))))
+            ? { login: (bridged && bridged.handle) || normalizeGithubLogin(idpRec.handle) } : {}),
         };
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
         return redirectTo(ret, [
@@ -5805,7 +5838,7 @@ export default {
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
       const list = await readComments(env, slug);
-      const me = sessionLogin(s);
+      const me = actorKey(s);
       const users = mentionableUsers({
         ownerLogin: ownerActorKey(meta, env),
         allowedUsers: access.allowed_users,
@@ -5842,7 +5875,13 @@ export default {
       const outcome = classifyMentions(
         mentionCandidates(commentText).filter((login) => login !== actorKey(s)),
         {
-          canRead: (login) => canReadDoc(access, { login }, env, meta),
+          // The key is an actor key; canReadDoc expects a session. An email
+          // key posing as a login never matches a bare-address invite, which
+          // both mis-blocked the already-invited and burned allowlist slots
+          // on a prefixed string no session could ever match.
+          canRead: (key) => canReadDoc(access,
+            String(key).startsWith('email:') ? { email: String(key).slice(6) } : { login: key },
+            env, meta),
           canInvite: isDocOwner,
           inviteBudget: Math.max(0, MENTION_INVITE_ALLOWLIST_MAX - access.allowed_users.length),
         },
@@ -5864,7 +5903,8 @@ export default {
       // notification whose link 403s is worse than no notification.
       if (outcome.invited.length) {
         const patched = applyAccessPatch(meta, {
-          allowed_users: access.allowed_users.concat(outcome.invited),
+          allowed_users: access.allowed_users.concat(outcome.invited.map((k) =>
+            String(k).startsWith('email:') ? String(k).slice(6) : k)),
         });
         if (patched.error) return json(patched, { status: 400 });
         await env.META.put(`meta:${slug}`, JSON.stringify(patched.meta));

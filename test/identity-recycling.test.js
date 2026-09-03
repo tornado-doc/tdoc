@@ -247,6 +247,11 @@ async function claimAccount(worker, env, cookie) {
     const provs = (rec.identities || []).map((i) => i.provider).sort();
     assert(JSON.stringify(provs) === JSON.stringify(['github', 'oidc']),
       `both identities should be linked: ${JSON.stringify(rec.identities)}`);
+    // The bridged session keeps the verified handle as its login, so the
+    // legacy actor key survives: old comments stay hers to edit, handle
+    // invites keep matching, @gina still reaches her.
+    assert(second.login === 'gina',
+      `bridged session lost the handle: ${JSON.stringify(second)}`);
   });
 
   await t('the bridge cannot hand over a handle that a stable id already owns', async () => {
