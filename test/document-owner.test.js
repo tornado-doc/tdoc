@@ -39,8 +39,8 @@ t('the worker hands the shell an owner, from the one field that records one', ()
 });
 
 t('the whole meta record is passed, not one field at a time', () => {
-  assert(/commentWritesEnabled, docMeta\)/.test(worker), 'the shell builder should take the meta record');
-  assert(/canCommentOnDoc\(gate\.access, session, env, gate\.meta\), gate\.meta\)/.test(worker),
+  assert(/commentWritesEnabled, docMeta, oidc\)/.test(worker), 'the shell builder should take the meta record');
+  assert(/canCommentOnDoc\(gate\.access, session, env, gate\.meta\), gate\.meta, /.test(worker),
     'the call site should hand over the record it already loaded');
 });
 

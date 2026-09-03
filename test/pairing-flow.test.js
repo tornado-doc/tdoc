@@ -77,6 +77,8 @@ async function approve(worker, env, cookie, user_code) {
     await approve(worker, env, cookie, data.user_code);
     const p = await poll(worker, env, data.user_code, data.pair_secret);
     assert(p.data.ok === true, JSON.stringify(p.data));
+    assert(env.META.map.has(`account-terminal:${p.data.account_id}`),
+      'minting a terminal token should stamp the has-a-terminal record');
     const idx = JSON.parse(env.META.map.get('account-email:carol@example.com') || 'null');
     assert(idx && idx.account_id === p.data.account_id, 'pairing mint skipped the email key');
   });
@@ -167,6 +169,23 @@ async function approve(worker, env, cookie, user_code) {
     assert(junk.status === 200, 'junk code must not error');
     assert(!jhtml.includes('<script>alert'), 'unsanitized code echoed');
     assert(jhtml.includes('"code":""'), 'junk code should normalize to empty');
+  });
+
+  await t('the doc shell advertises the seat too — no surface left on the old door', async () => {
+    const env = makeEnv(mod.CommentsStore, {
+      OIDC_ISSUER: 'https://issuer.example', OIDC_CLIENT_ID: 'cid',
+      OIDC_CLIENT_SECRET: 'sec', OIDC_LABEL: 'Email',
+    });
+    env.TDOC_UPLOAD_TOKEN = 'tdoc_admin';
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: 'tdoc_admin',
+      body: { slug: 'shell-door', version: 1, html: '<h1>d</h1>' },
+    }), env, {});
+    const page = await worker.fetch(req('/d/shell-door/v/1'), env, {});
+    const html = await page.text();
+    assert(page.status === 200, `doc page: ${page.status}`);
+    assert(html.includes('"oidcAuth":true'), 'doc shell boot lacks the seat flag');
+    assert(html.includes('"oidcLabel":"Email"'), 'doc shell boot lacks the label');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

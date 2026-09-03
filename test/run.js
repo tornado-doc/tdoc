@@ -36,6 +36,8 @@ const OFFLINE = [
   'pairing-flow.test.js',     // phase-2: tdoc-owned pair codes — strikes, single redemption, origin/session gates
   'pair-signin-cli.test.js',  // phase-2 CLI: pairing-first, 404 fallback, probe-first resume
   'oidc-provider-seat.test.js', // phase-3: OIDC seat — verified-email sessions, email-born accounts, sub never a key
+  'email-identity-surface.test.js', // phase-4: actor keys — email identities comment, are invited, own their words
+  'identity-recycling.test.js', // renamed handles and recycled addresses must not inherit an account
   'duplicate-download.test.js', // #146 Duplicate vs Download chrome + route contract
   'deploy-tdoc-dev.test.js',  // tdoc.dev hosted CD: main-only, not BYOK
   'oldver-strip.test.js',     // old-version banner predicate
@@ -50,6 +52,7 @@ const OFFLINE = [
   'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
   'document-owner.test.js',   // #395 the bar and the lists name the document's owner
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
+  'resolve-a-thread.test.js', // #357 a person can resolve; resolved threads leave the margin
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
@@ -84,6 +87,7 @@ const OFFLINE = [
   'publish-signin.test.js',   // device code reaches the publish modal (expiry/pid/slug guards)
   'resume-signin.test.js',    // dead process ≠ dead sign-in: device_code resumes on re-run
   'onboarding-terminal-recovery.test.js', // provider retry flags + honest SIGINT recovery
+  'reader-patch-drift.test.js', // the phone table rule reaches both runtimes
   'dismiss-rule.test.js',     // the dismiss-first rule keeps its three exceptions
 ];
 

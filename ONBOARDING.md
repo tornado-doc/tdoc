@@ -7,8 +7,8 @@
 `tdoc` is a Claude Code skill that gives the user prompt-native HTML documents with text- and artifact-anchored comments. After install + onboarding, the user can:
 
 - `/tdoc new <prompt>` → generate a commentable HTML doc
-- `/tdoc publish <slug>` → publish to **hosted tdoc.dev**; the first publish signs in with GitHub once
-- Share the live URL; commenters sign in with GitHub
+- `/tdoc publish <slug>` → publish to **hosted tdoc.dev**; the first publish signs in once via a short code approved in the browser (email, Google, or GitHub)
+- Share the live URL; commenters sign in with email, Google, or GitHub
 
 **Publishing is hosted by default and needs no Cloudflare account, no card, and nothing to click in a dashboard.** On a machine that already has Node, there is usually nothing to install at all. Self-hosting on your own Cloudflare or Vercel is still fully supported — it is at the end of this file, and you only go there if the user asks for it.
 

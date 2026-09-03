@@ -36,6 +36,9 @@ tag = "v1-comments-do"
 new_sqlite_classes = ["CommentsStore"]
 
 [vars]
+OIDC_ISSUER = "https://relative-cowbird-4750.clerk.accounts.dev"
+OIDC_CLIENT_ID = "rrULjVdxA77yt1Fc"
+OIDC_LABEL = "Email"
 # Filled from shared/github-oauth.js (single source of truth). Keep in sync —
 # test/no-drift.test.js fails if this drifts from the SoT module.
 GITHUB_CLIENT_ID = "Ov23li1jJiBkS23x4O07"
@@ -53,11 +56,10 @@ TDOC_OWNER = "PLACEHOLDER_OWNER"
 #   Leave unset to keep the device-code flow (no browser redirect).
 # TDOC_HOSTED_REGISTRATION — leave unset on BYOK so /me stays single-owner.
 # Unset + hostname https://tdoc.dev enables hosted signup; set to "0" to force off.
-# The OIDC provider seat (Clerk on hosted tdoc.dev; any spec-compliant issuer
-# fits). All three unset → the "Continue with …" buttons simply do not render
-# and GitHub carries sign-in exactly as before.
-#   [vars] OIDC_ISSUER    = "https://<instance>.clerk.accounts.dev"  (issuer base URL)
-#   [vars] OIDC_CLIENT_ID = "<oauth application client id>"
-#   [vars] OIDC_LABEL     = "Clerk"            (button text; default "Email")
-# Secret: OIDC_CLIENT_SECRET — set via `wrangler secret put OIDC_CLIENT_SECRET`.
-#   Register the callback as https://<host>/auth/oidc/callback on the issuer.
+# The OIDC provider seat. Values below are hosted tdoc.dev's (Clerk, used
+# strictly as an OIDC provider — never as a session layer, so replacing it is
+# three values and no data migration). A BYOK deploy that wants its own
+# provider swaps them; leaving them empty is also fine, and GitHub carries
+# sign-in exactly as before.
+# Secret: OIDC_CLIENT_SECRET — `wrangler secret put OIDC_CLIENT_SECRET`.
+#   The issuer must accept https://<host>/auth/oidc/callback as a redirect URI.

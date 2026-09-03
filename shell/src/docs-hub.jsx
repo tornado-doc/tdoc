@@ -55,6 +55,7 @@ function NameDialog({ title, confirmLabel, initialName, maxLength = 60, onSave, 
 // published before hosted accounts, or living on a self-hosted worker — says
 // nothing rather than guessing.
 function ownerLabel(doc, viewer) {
+  if (doc.mine) return 'me';
   if (!doc.owner) return null;
   return viewer && doc.owner === viewer ? 'me' : doc.owner;
 }
@@ -95,7 +96,7 @@ export function DocsHub({ boot }) {
   const openCreateHelp = () => setModal({ type: 'create-help' });
 
   const docMenu = (slugs, doc) => [
-    doc && (!doc.owner || doc.owner === viewer) ? {
+    doc && (doc.mine || !doc.owner || doc.owner === viewer) ? {
       label: 'Rename',
       className: 'row-rename',
       onSelect: () => setModal({ type: 'rename-doc', doc }),

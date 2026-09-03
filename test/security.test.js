@@ -42,6 +42,11 @@ vm.runInContext([
   sliceFn(workerSrc, 'forHtmlComment'),
   sliceFn(workerSrc, 'sessionLogin'),
   sliceFn(workerSrc, 'normalizeGithubLogin'),
+  // Identity widening: the authorship gates now compare actor keys, so an
+  // email-only identity can own its own words.
+  sliceFn(workerSrc, 'normalizeEmail'),
+  sliceFn(workerSrc, 'sessionPrincipal'),
+  sliceFn(workerSrc, 'actorKey'),
   sliceFn(workerSrc, 'hostedGithubLogin'),
   sliceFn(workerSrc, 'isOwnerSession'),
   sliceFn(workerSrc, 'isDocOwnerSession'),

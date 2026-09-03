@@ -4,6 +4,18 @@ import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { deleteDocument, updateDocumentAccess } from './api.js';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
+
+// Mirrors normalizeInvitee in the worker: a handle reading first (so "@Bob"
+// stays a handle, not an address), email only when what is left cannot be a
+// handle. Divergence here is invisible until someone's invite silently fails
+// server-side, so keep the two in step.
+function normalizeInvitee(raw) {
+  const login = normalizeLogin(raw);
+  if (login) return login;
+  const email = String(raw || '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+const isEmailInvite = (entry) => String(entry).includes('@');
 import { copyText } from './model.js';
 
 const COMMENTING_OPTIONS = [
@@ -23,10 +35,12 @@ function InviteField({ users, onChange }) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   // Same GitHub search the @ picker uses — see github-user-search.js.
-  const suggestions = useGithubUserSearch(value);
+  // An address is not a GitHub query — stop hitting the search API the moment
+  // one is being typed.
+  const suggestions = useGithubUserSearch(value, { enabled: !value.includes('@') });
 
   const add = (rawValue) => {
-    const login = normalizeLogin(rawValue);
+    const login = normalizeInvitee(rawValue);
     if (!login || users.some((user) => user.toLowerCase() === login.toLowerCase())) return;
     onChange([...users, login]);
     setValue('');
@@ -37,7 +51,11 @@ function InviteField({ users, onChange }) {
       <div className={`tdoc-token-field${focused ? ' focus' : ''}`}>
         {users.map((login) => (
           <span key={login} className="tdoc-token">
-            <img src={`https://github.com/${encodeURIComponent(login)}.png?size=48`} alt="" />
+            {isEmailInvite(login) ? (
+              <span className="tdoc-token-initial" aria-hidden="true">{login.slice(0, 1).toUpperCase()}</span>
+            ) : (
+              <img src={`https://github.com/${encodeURIComponent(login)}.png?size=48`} alt="" />
+            )}
             <span>{login}</span>
             <button
               type="button"
@@ -54,7 +72,7 @@ function InviteField({ users, onChange }) {
           value={value}
           autoComplete="off"
           spellCheck="false"
-          placeholder="Add a GitHub username…"
+          placeholder="Add an email or GitHub username…"
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onChange={(event) => setValue(event.target.value)}

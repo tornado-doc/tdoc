@@ -107,10 +107,11 @@ switch — the CLI rewrites the config via full re-setup (previous file kept as
 Worker are two hostnames, not two platforms.
 
 - **Hosted (default)** — `/tdoc publish <slug>` uploads to a tdoc-managed host
-  such as `tdoc.dev`. First use signs in with GitHub (Device Flow); the host
+  such as `tdoc.dev`. First use signs in once — email, Google, or GitHub,
+  all through one door — and the host
   issues an account-scoped upload token bound to that login and stores it in
   `~/.tdoc/published.json`. That token can only mutate docs it owns. `/me` on
-  the hosted worker lists that GitHub user's docs. If hosted signup is not
+  the hosted worker lists that account's docs. If hosted signup is not
   open, the CLI says so and points at `--platform cloudflare` or
   `--platform vercel`.
 - **Cloudflare** — `/tdoc publish --platform cloudflare <slug>` deploys a
@@ -150,7 +151,7 @@ wired to your agent:
 - **Artifacts** (img / canvas / svg / video / `<pre>`): hover → comment icon → click
 - **Threads**: emoji reactions (👍 ❤️ 🔥 ✅ ❓ + `LGTM`) and replies; hover a reaction to see who reacted
 - **Move / remove anchor**: drag a comment to new text, or detach it entirely — it stays in the thread
-- **Multiplayer**: anyone with the link signs in once with GitHub and comments. Every comment is attributed to its real author, and concurrent commenters never clobber each other (writes are serialized per-doc — see Reliability below).
+- **Multiplayer**: anyone with the link signs in once — email, Google, or GitHub — and comments. Every comment is attributed to its real author, and concurrent commenters never clobber each other (writes are serialized per-doc — see Reliability below).
 - **Status sync**: comments carry a resolved-style status that stays in sync between the web view and your agent — the acting agent stamps each with ✅ applied / 🟡 partial / ❓ needs clarification when it regenerates, so "what's been addressed" is visible to everyone, live, without re-pinging.
 
 ## Version history
@@ -168,12 +169,12 @@ This is the "edit history" half of the Google-Docs feeling: nothing you write �
 - **Concurrent comments never lost.** Per-doc comment writes are serialized through a Cloudflare Durable Object, so two people commenting at the same instant both land — no last-write-wins clobber.
 - **Comments survive every regenerate.** When a new version reshuffles the doc, comments re-anchor to their artifact by content identity; if a target genuinely disappears, the comment is shown unanchored ("click to re-anchor") rather than attached to the wrong place.
 - **Untrusted input is escaped.** Comment text, author names, and avatars are HTML-escaped on render — a comment can't inject script into the page.
-- **Auth**: local docs comment anonymously with zero setup. Published docs require a one-time GitHub sign-in (Device Flow, scope `read:user`) before commenting.
+- **Auth**: local docs comment anonymously with zero setup. Published docs require a one-time sign-in (email, Google, or GitHub) before commenting. No GitHub account needed.
 
 ## Requirements
 
 - Node 18+ and `curl`. That is the whole list for publishing to tdoc.dev, which
-  is the default — the first publish signs you in with GitHub and needs no
+  is the default — the first publish signs you in (any method) and needs no
   other CLI, no account to create, and no cloud dashboard.
 - Self-hosting instead? Then also `jq`, plus ONE of:
   - `wrangler` + a free Cloudflare account with R2 enabled

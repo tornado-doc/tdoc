@@ -61,7 +61,7 @@ t('CLI mint and Duplicate share one hosted-account registry', () => {
   assert(acct.includes('hosted-account:'), 'canonical account key is hosted-account:<login>');
   assert(acct.includes('hosted-github:'), 'must still read leftover hosted-github records');
   assert(!acct.includes("source: 'duplicate'"), 'must not mint a second registry just for Duplicate');
-  assert(issue.includes('hostedAccountForGithub(env, github_login, verifiedEmail)'),
+  assert(issue.includes('hostedAccountForGithub(env, github_login, verifiedEmail,'),
     'token mint must reuse hostedAccountForGithub');
   assert(!issue.includes('hosted-github:'), 'token mint must not write a second registry');
 });

@@ -91,7 +91,7 @@ t('the list can rename too, through the same route', () => {
   const hub = read('shell/src/docs-hub.jsx');
   const hook = read('shell/src/hooks/use-docs-hub.js');
   assert(/label: 'Rename',/.test(hub), 'Rename is missing from the row menu');
-  assert(/doc && \(!doc\.owner \|\| doc\.owner === viewer\) \?/.test(hub),
+  assert(/doc && \(doc\.mine \|\| !doc\.owner \|\| doc\.owner === viewer\) \?/.test(hub),
     'only offer Rename where the server would allow it, rather than serving a 403');
   assert(/initialName=\{modal\.doc\.title \|\| ''\}/.test(hub), 'the dialog should start from the current name');
   assert(/maxLength=\{120\}/.test(hub), 'the list dialog must accept as long a title as the route does');
