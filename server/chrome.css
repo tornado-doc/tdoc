@@ -345,7 +345,11 @@
   .tdoc-emoji-picker { position: absolute; background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 6px; display: grid; grid-template-columns: repeat(6, 32px); gap: 2px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 1000001; }
   .tdoc-emoji-picker button { background: transparent; border: none; padding: 0; cursor: pointer; border-radius: 4px; width: 32px; height: 32px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
   .tdoc-emoji-picker button:hover { background: #f5f6f8; }
-  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: var(--td-accent); }
+  /* width:auto matters: the rule above pins every picker button to 32px, so
+     LGTM was handed a cell six columns wide and drew itself one emoji wide,
+     with the word spilling out of a 32px box. It is the only text entry in a
+     grid built for single glyphs. */
+  .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 6; width: auto; height: auto; padding: 6px 8px; font-size: 12px; font-weight: 600; color: var(--td-accent); }
   .tdoc-emoji-picker button.tdoc-emoji-text:hover { background: var(--td-accent-tint); }
 
   /* Replies + reply form */
