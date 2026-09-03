@@ -570,6 +570,12 @@
     .tdoc-bar button.tdoc-bar-mark { width: 44px; height: 44px; }
     .tdoc-version-wrap, .tdoc-bar #tdoc-version-toggle { display: none; }
     .tdoc-bar .doc-title { flex: 1 1 auto; font-size: 13px; }
+    /* The 44px touch-target rule above centres every button in the bar, which
+       is right for icons and wrong for the title: the title is a button too
+       (it is editable in place), so it drifted to the middle of the bar and
+       read as a centred page header. text-align cannot fix it — the button is
+       a flex box, so justify-content is what places the text. */
+    .tdoc-bar button.doc-title-edit { justify-content: flex-start; }
     .tdoc-bar #tdoc-star-btn,
     .tdoc-bar .tdoc-document-primary,
     .tdoc-bar #tdoc-theme-btn,
