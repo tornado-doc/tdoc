@@ -233,7 +233,12 @@
   .tdoc-margin-comment .meta > span:first-child { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tdoc-margin-comment .del { cursor: pointer; color: #c33; }
   .tdoc-margin-comment .del:hover { text-decoration: underline; }
-  .tdoc-margin-comment .actions { display: inline-flex; gap: 8px; align-items: center; flex-shrink: 0; }
+  /* Delete is pushed off the end of the run so it is not the fifth word in a
+     list of five equal ones — a gap is the cheapest way to say "this one is
+     not like the others" without another colour. The row wraps on a narrow
+     card, and the gap survives the wrap. */
+  .tdoc-margin-comment .actions { display: inline-flex; gap: 10px; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
+  .tdoc-margin-comment .actions button.del { margin-left: 6px; }
   .tdoc-margin-comment .copy-md { cursor: pointer; color: #888; display: inline-flex; align-items: center; }
   .tdoc-margin-comment .copy-md:hover { color: var(--td-accent); }
   .tdoc-margin-comment .copy-md svg { width: 14px; height: 14px; display: block; }

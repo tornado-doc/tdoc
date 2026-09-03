@@ -52,6 +52,7 @@ const OFFLINE = [
   'document-owner.test.js',   // #395 the bar and the lists name the document's owner
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'resolve-a-thread.test.js', // #357 a person can resolve; resolved threads leave the margin
+  'comment-actions-row.test.js', // #416 one voice in the card's action row, colour kept for delete
   'tornado-doc-landing.test.js',
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',

@@ -74,15 +74,35 @@ button.tdoc-cluster-row {
   width: 100%;
 }
 
-/* Re-apply the legacy per-control colours the reset above would swallow. */
-.tdoc-margin-comment button.del { color: #c33; }
-/* edit sits next to Reply and is the same kind of thing — a control on your
-   own comment — so it reads the same, not as a second colour. */
-.tdoc-margin-comment button.tdoc-reply-toggle,
-.tdoc-margin-comment button.tdoc-edit-toggle { color: var(--td-accent); }
-/* resolve is the one action that changes the thread's state rather than its
-   content, and it carries the same green the resolved chip and pin ring use. */
-.tdoc-margin-comment button.tdoc-resolve-toggle { color: #1a7340; }
+/* The row under a comment. It grew one control at a time and ended up five
+   coloured words in a line — blue for reply and edit because the legacy overlay
+   made them links, green for reopen because it matched the resolved chip, red
+   for delete. Only the red was ever saying anything.
+   
+   So: one quiet weight for everything you can do to a thread, and colour kept
+   for the one action that does not come back. They darken on hover, which is
+   where a control should announce itself — a card is mostly text, and the row
+   should stay out of the way until it is looked at. */
+.tdoc-margin-comment .actions button {
+  color: #8a8a8f;
+  transition: color .12s;
+  /* 11px words are a small thing to hit. The padding grows the target and the
+     negative margin gives the space back, so the row is easier to press
+     without looking any different. */
+  padding: 5px 3px;
+  margin: -5px -3px;
+}
+
+.tdoc-margin-comment .actions button:hover,
+.tdoc-margin-comment .actions button:focus-visible {
+  color: #1a1a1a;
+}
+
+/* Delete is the one that does not come back, so it keeps its colour — and it
+   only deepens on hover rather than turning into a different word. */
+.tdoc-margin-comment .actions button.del { color: #c9776f; }
+.tdoc-margin-comment .actions button.del:hover,
+.tdoc-margin-comment .actions button.del:focus-visible { color: #c33; }
 .tdoc-margin-comment button.tdoc-replies-toggle {
   margin-top: 10px;
   padding-top: 10px;
