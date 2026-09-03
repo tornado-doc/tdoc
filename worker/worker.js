@@ -1601,7 +1601,7 @@ function injectReaderCss(html, css) {
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta, oidc) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
@@ -1634,6 +1634,11 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     ownerManage: isOwner ? (ownerManage || null) : null,
     authConfigured: true,
     webAuth: !!webAuth,
+    // The provider seat, so the doc shell's sign-in goes through the same
+    // single door as /activate and the landing — this was the last surface
+    // still steering people to the first-party GitHub flow.
+    oidcAuth: !!(oidc && oidc.enabled),
+    oidcLabel: (oidc && oidc.label) || '',
     mode: 'published',
     versions: vlist,
     stars: stars || null,
@@ -1769,7 +1774,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '' }), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -3328,6 +3333,16 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
     record.label = body.label.trim().slice(0, 80);
   }
   await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record));
+  // "Has this account ever connected a terminal?" — one key, so the future
+  // browser-side gate (pairing is a sideshow at sign-in, enforced only when
+  // a feature actually needs a terminal) has something O(1) to ask.
+  try {
+    let t = null;
+    try { t = JSON.parse(await env.META.get(`account-terminal:${account.account_id}`)); } catch {}
+    await env.META.put(`account-terminal:${account.account_id}`, JSON.stringify({
+      first: (t && t.first) || record.created, last: record.created,
+    }));
+  } catch {}
   return { token, record };
 }
 

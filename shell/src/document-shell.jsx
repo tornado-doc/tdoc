@@ -131,14 +131,21 @@ export function DocumentShell({ boot, config }) {
   ));
 
   const signIn = useCallback(() => {
+    const returnUrl = location.pathname + location.search + location.hash;
+    // One door: the provider seat first (every method lives in its modal),
+    // the first-party GitHub redirect only where the seat is absent, the
+    // device-code dialog only where neither is configured.
+    if (config.oidcAuth) {
+      location.href = `/api/auth/oidc/login?return=${encodeURIComponent(returnUrl)}`;
+      return undefined;
+    }
     if (config.webAuth) {
-      const returnUrl = location.pathname + location.search + location.hash;
       location.href = `/api/auth/web/login?return=${encodeURIComponent(returnUrl)}`;
       return undefined;
     }
     setSignInOpen(true);
     return undefined;
-  }, [config.webAuth]);
+  }, [config.oidcAuth, config.webAuth]);
 
   const completeSignIn = useCallback(() => {
     location.reload();
