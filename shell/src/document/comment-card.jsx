@@ -618,14 +618,17 @@ export function CommentCard({
                   Edit
                 </AppMenuItem>
               ) : null}
+              {/* Plain text, not the two toggled spans the inline button used:
+                  their visibility was written as `.tdoc-margin-comment …`
+                  descendant rules, and a menu renders through a portal OUTSIDE
+                  the card, so both spans stayed display:none and the row came
+                  out empty — an invisible item reads as a gap in the menu. */}
               {canMutate ? (
                 <AppMenuItem
                   className="tdoc-reanchor-btn"
                   onClick={() => onReanchor(comment.id)}
                 >
-                  <span className={unanchored ? 'tdoc-reanchor-unanchored' : 'tdoc-reanchor-anchored'}>
-                    {unanchored ? 'Re-anchor' : 'Move anchor'}
-                  </span>
+                  {unanchored ? 'Re-anchor' : 'Move anchor'}
                 </AppMenuItem>
               ) : null}
               {canDelete ? (

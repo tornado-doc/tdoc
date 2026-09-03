@@ -168,22 +168,13 @@
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
-  .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored .tdoc-reanchor-btn { display: none; }
   /* Parent-level resolved chip (distinct from the per-reply status chip). */
   .tdoc-resolved-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #e8f5ed; color: #1a7340; }
-  .tdoc-reanchor-btn { display: none; font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 6px; cursor: pointer; background: none; border: none; padding: 0; text-align: left; }
-  .tdoc-margin-comment.tdoc-unanchored .tdoc-reanchor-btn { display: block; }
-  /* Anchored cards also expose a "move anchor" action when they're active. */
-  .tdoc-margin-comment.active .tdoc-reanchor-btn { display: block; }
-  .tdoc-reanchor-btn:hover { color: var(--td-accent); }
-  /* Label swap: "unanchored" wording on unanchored cards, "move anchor" on
-     active anchored cards. */
-  .tdoc-reanchor-btn .tdoc-reanchor-unanchored,
-  .tdoc-reanchor-btn .tdoc-reanchor-anchored { display: none; }
-  .tdoc-margin-comment.tdoc-unanchored .tdoc-reanchor-btn .tdoc-reanchor-unanchored { display: inline; }
-  .tdoc-margin-comment:not(.tdoc-unanchored).active .tdoc-reanchor-btn .tdoc-reanchor-anchored { display: inline; }
-  /* Container for the anchor action buttons. */
-  .tdoc-anchor-actions { display: flex; gap: 12px; align-items: center; margin: 0 0 6px; }
+  /* Re-anchor is a ⋯ menu item now. Its old inline-button dress — 10px, grey,
+     uppercase, and display:none until the card was active — followed it into
+     the menu and made one row shout while the others whispered. The menu item
+     styling is the whole of it; the label is chosen in JS because card-scoped
+     rules cannot reach a menu, which renders through a portal. */
   /* While re-anchor mode is active, dim the rest of the UI and prompt the
      user to select. */
   /* Re-anchor banner: pinned below the bar with three actions. Visible
