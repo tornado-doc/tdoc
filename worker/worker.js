@@ -962,6 +962,45 @@ function debug(env, ...args) {
   if (env && env.TDOC_DEBUG) console.log(...args);
 }
 
+// Privacy-minimized product events for the hosted onboarding funnel. Workers
+// Logs supplies request diagnostics and Analytics Engine supplies aggregate
+// counters; neither product payload carries an account, login, email, IP,
+// slug, token, cookie, session or installation identifier. Keep the allowlists
+// here at the provider boundary so a caller cannot smuggle arbitrary request
+// fields into persisted telemetry.
+const PRODUCT_EVENTS = new Set([
+  'onboarding_started',
+  'onboarding_approved',
+  'token_minted',
+  'publish_succeeded',
+]);
+const PRODUCT_AUTH_PATHS = new Set(['pair', 'session']);
+function productEvent(env, name, fields = {}) {
+  if (!PRODUCT_EVENTS.has(name)) return;
+  const event = { type: 'tdoc_product_event', schema: 1, event: name };
+  if (PRODUCT_AUTH_PATHS.has(fields.auth_path)) event.auth_path = fields.auth_path;
+  if (typeof fields.first_publish === 'boolean') event.first_publish = fields.first_publish;
+  if (
+    typeof fields.client_version === 'string'
+    && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(fields.client_version)
+  ) event.client_version = fields.client_version;
+  console.log(JSON.stringify(event));
+  // Ordered Analytics Engine schema:
+  //   blob1 event, blob2 auth path, blob3 client version
+  //   double1 count, double2 first-publish count
+  // Writes are non-blocking. Observability must never make a user operation
+  // fail, including in a BYOK deployment whose binding is absent or broken.
+  try {
+    if (env && env.PRODUCT_ANALYTICS) {
+      env.PRODUCT_ANALYTICS.writeDataPoint({
+        indexes: [event.event],
+        blobs: [event.event, event.auth_path || '', event.client_version || ''],
+        doubles: [1, event.first_publish === true ? 1 : 0],
+      });
+    }
+  } catch (_) {}
+}
+
 // Escape `</script>` and HTML comment terminators so a malicious or stray value
 // inside the JSON payload can't break out of the surrounding <script> block.
 function safeJsonForScript(obj) {
@@ -5358,6 +5397,9 @@ export default {
         created: new Date().toISOString(),
       };
       await env.META.put(`pair:${user_code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS + 60 });
+      if (hostedRegistrationEnabled(env, url.origin)) {
+        productEvent(env, 'onboarding_started', { auth_path: 'pair' });
+      }
       return json({
         user_code,
         pair_secret,
@@ -5396,6 +5438,7 @@ export default {
       const approved = record.approved || {};
       const issued = await issueHostedToken(env, { login: approved.login, label: record.label }, approved.email, approved.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
+      productEvent(env, 'token_minted', { auth_path: 'pair' });
       return json({
         ok: true,
         token: issued.token,
@@ -5453,6 +5496,9 @@ export default {
         email: session.email || null,
       };
       await env.META.put(`pair:${code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS });
+      if (hostedRegistrationEnabled(env, url.origin)) {
+        productEvent(env, 'onboarding_approved', { auth_path: 'pair' });
+      }
       return json({ ok: true, label: record.label || '' });
     }
 
@@ -5902,6 +5948,7 @@ export default {
       // merge key at the moment their account is minted.
       const issued = await issueHostedToken(env, { ...body, login }, session && session.email, session && session.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
+      productEvent(env, 'token_minted', { auth_path: 'session' });
       return json({
         ok: true,
         token: issued.token,
@@ -6346,6 +6393,9 @@ export default {
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
+      const firstHostedPublish = !!(
+        auth.actor && auth.actor.kind === 'hosted' && !writeGate.meta && verNum === 1
+      );
       if (auth.actor && auth.actor.kind === 'hosted') {
         const maxBytes = hostedMaxUploadBytes(env);
         const size = utf8ByteLength(doc);
@@ -6566,6 +6616,12 @@ export default {
       // `sha` is the hash of the exact stored bytes (post-bake, post-stamp). The
       // client records it so a later edit can ask "has remote moved since I
       // published?" with one HEAD request instead of re-downloading the doc.
+      if (auth.actor && auth.actor.kind === 'hosted') {
+        productEvent(env, 'publish_succeeded', {
+          first_publish: firstHostedPublish,
+          client_version: clientVersion,
+        });
+      }
       return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal });
     }
 

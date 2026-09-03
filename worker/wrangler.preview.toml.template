@@ -24,6 +24,11 @@ preview_urls = true
 enabled = true
 head_sampling_rate = 1
 
+# Keep preview traffic out of the production product counters.
+[[analytics_engine_datasets]]
+binding = "PRODUCT_ANALYTICS"
+dataset = "tdoc_preview_product_events"
+
 [[r2_buckets]]
 binding = "DOCS"
 bucket_name = "tdoc-preview-docs"
