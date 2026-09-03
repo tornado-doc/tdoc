@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  CircleCheck,
   Copy,
   CopyPlus,
   Download,
@@ -143,6 +144,9 @@ export function DocumentOverflowActions({
   onDownload,
   onPrint,
   onDelete,
+  resolvedCount,
+  showResolved,
+  onToggleResolved,
 }) {
   return (
     <>
@@ -183,6 +187,16 @@ export function DocumentOverflowActions({
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="star" onClick={onToggleStar}>
           <Star size={15} fill={starred ? 'currentColor' : 'none'} />
           {starred ? 'Remove from starred' : 'Add to starred'}
+        </AppMenuItem>
+      ) : null}
+      {resolvedCount ? (
+        <AppMenuItem
+          className="tdoc-action-menu-item"
+          data-action="show-resolved"
+          onClick={onToggleResolved}
+        >
+          <CircleCheck size={15} />
+          {showResolved ? 'Hide resolved' : `Show resolved (${resolvedCount})`}
         </AppMenuItem>
       ) : null}
       <AppMenuItem className="tdoc-action-menu-item" data-action="copy" onClick={onCopyMarkdown}>
