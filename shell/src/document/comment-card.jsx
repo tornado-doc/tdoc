@@ -1,19 +1,30 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronRight, SmilePlus } from 'lucide-react';
+import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
+import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 
-function Author({ author }) {
+function Author({ author, timestamp }) {
   if (!author) {
-    return <div className="author"><span className="anon">anonymous</span></div>;
+    return (
+      <div className="author">
+        <span className="tdoc-cc-who">
+          <span className="anon">anonymous</span>
+          {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
+        </span>
+      </div>
+    );
   }
 
   const avatar = avatarFor(author);
   return (
     <div className={`author${author.kind === 'agent' ? ' tdoc-agent-author' : ''}`}>
       {avatar ? <img src={avatar} alt="" /> : null}
-      <span className="login">{author.name || author.login || 'anonymous'}</span>
+      <span className="tdoc-cc-who">
+        <span className="login">{author.name || author.login || 'anonymous'}</span>
+        {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
+      </span>
     </div>
   );
 }
@@ -565,16 +576,6 @@ export function CommentCard({
         onActivate(comment.id);
       }}
     >
-      {canMutate ? (
-        <div className="tdoc-anchor-actions">
-          <button className="tdoc-reanchor-btn" type="button" onClick={() => onReanchor(comment.id)}>
-            <span className={unanchored ? 'tdoc-reanchor-unanchored' : 'tdoc-reanchor-anchored'}>
-              {unanchored ? 'unanchored - click to re-anchor' : '↻ move anchor'}
-            </span>
-          </button>
-        </div>
-      ) : null}
-
       {comment.status === 'applied' ? (
         <span className="tdoc-resolved-chip">
           {comment.resolved_by
@@ -583,7 +584,59 @@ export function CommentCard({
         </span>
       ) : null}
 
-      <Author author={comment.author} />
+      <header className="tdoc-cc-head">
+        <Author
+          author={comment.author}
+          timestamp={`${createdAt || `v${comment.version || 1}`}${editedSuffix(comment)}`}
+        />
+        <div className="tdoc-cc-head-actions">
+          {canMutate ? (
+            <button
+              type="button"
+              className="tdoc-resolve-toggle"
+              data-resolved={comment.status === 'applied' ? '' : undefined}
+              title={comment.status === 'applied' ? 'Reopen' : 'Resolve'}
+              aria-label={comment.status === 'applied' ? 'Reopen' : 'Resolve'}
+              onClick={() => onResolve(comment.id, comment.status !== 'applied')}
+            >
+              <Check size={16} />
+            </button>
+          ) : null}
+          {isMine || canDelete || canMutate ? (
+            <AppMenu
+              trigger={(
+                <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
+                  <MoreVertical size={16} />
+                </button>
+              )}
+            >
+              {isMine ? (
+                <AppMenuItem
+                  className="tdoc-edit-toggle"
+                  onClick={() => setEditTarget(editTarget === comment.id ? null : comment.id)}
+                >
+                  Edit
+                </AppMenuItem>
+              ) : null}
+              {canMutate ? (
+                <AppMenuItem
+                  className="tdoc-reanchor-btn"
+                  onClick={() => onReanchor(comment.id)}
+                >
+                  <span className={unanchored ? 'tdoc-reanchor-unanchored' : 'tdoc-reanchor-anchored'}>
+                    {unanchored ? 'Re-anchor' : 'Move anchor'}
+                  </span>
+                </AppMenuItem>
+              ) : null}
+              {canDelete ? (
+                <AppMenuItem className="del" onClick={() => onDelete(comment.id)}>
+                  Delete
+                </AppMenuItem>
+              ) : null}
+            </AppMenu>
+          ) : null}
+        </div>
+      </header>
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
       ) : (
@@ -593,8 +646,11 @@ export function CommentCard({
         <Reactions item={comment} me={currentUser} onReact={onReact} />
       ) : null}
 
+      {/* Resolve, edit, delete and the anchor moved to the header — the two
+          controls a reader needs are ✓ and ⋯, and the rest belong behind them.
+          Reply keeps its own affordance and its own show/hide rule: this change
+          is the card's dress, not when anything appears. */}
       <div className="meta">
-        <span>v{comment.version || 1}{createdAt ? ` · ${createdAt}` : ''}{editedSuffix(comment)}</span>
         <span className="actions">
           {!reactionCount ? (
             <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
@@ -604,31 +660,8 @@ export function CommentCard({
             className="tdoc-reply-toggle"
             onClick={() => setReplyTarget((open) => (open === comment.id ? null : comment.id))}
           >
-            reply
+            Reply
           </button>
-          {isMine ? (
-            <button
-              type="button"
-              className="tdoc-edit-toggle"
-              onClick={() => setEditTarget(editTarget === comment.id ? null : comment.id)}
-            >
-              edit
-            </button>
-          ) : null}
-          {canMutate ? (
-            <button
-              type="button"
-              className="tdoc-resolve-toggle"
-              onClick={() => onResolve(comment.id, comment.status !== 'applied')}
-            >
-              {comment.status === 'applied' ? 'reopen' : 'resolve'}
-            </button>
-          ) : null}
-          {canDelete ? (
-            <button type="button" className="del" onClick={() => onDelete(comment.id)}>
-              delete
-            </button>
-          ) : null}
         </span>
       </div>
 

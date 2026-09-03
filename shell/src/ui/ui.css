@@ -82,7 +82,10 @@ button.tdoc-cluster-row {
 .tdoc-margin-comment button.tdoc-edit-toggle { color: var(--td-accent); }
 /* resolve is the one action that changes the thread's state rather than its
    content, and it carries the same green the resolved chip and pin ring use. */
-.tdoc-margin-comment button.tdoc-resolve-toggle { color: #1a7340; }
+/* Green now means resolved, not "here is the resolve control". As an icon in
+   the header the button is neutral until the thread is actually closed. */
+.tdoc-margin-comment button.tdoc-resolve-toggle { color: #5f6368; }
+.tdoc-margin-comment button.tdoc-resolve-toggle[data-resolved] { color: #1a7340; }
 .tdoc-margin-comment button.tdoc-replies-toggle {
   margin-top: 10px;
   padding-top: 10px;

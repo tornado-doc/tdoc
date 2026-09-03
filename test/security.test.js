@@ -264,13 +264,16 @@ t('comment card renders edit only for the author, on the comment and on replies'
   assert(cardSrc.includes('const isMine = authoredBy(comment, currentUser);'),
     'the root comment no longer runs through authoredBy');
 });
+// The re-anchor control moved into the card's ⋯ menu when the card took the
+// Google Docs shape; it is the same control behind the same gate, so what is
+// asserted is unchanged — only where to look for it.
 t('the re-anchor gate is the only thing left that the doc owner unlocks', () => {
-  assert(gatedByCanMutate(cardSrc, 'tdoc-anchor-actions'), 're-anchor action is not gated by canMutate');
+  assert(gatedByCanMutate(cardSrc, 'tdoc-reanchor-btn'), 're-anchor action is not gated by canMutate');
   assert(cardSrc.split('mayMutate(').length === 3,
     'mayMutate should be declared once and called once — for the re-anchor only');
 });
 t('comment card renders the re-anchor button only for the author or the doc owner', () => {
-  assert(gatedByCanMutate(cardSrc, 'tdoc-anchor-actions'), 're-anchor action is not gated by canMutate');
+  assert(gatedByCanMutate(cardSrc, 'tdoc-reanchor-btn'), 're-anchor action is not gated by canMutate');
 });
 t('both comment layers forward isOwner to the card', () => {
   assert(layerSrc.split('isOwner={isOwner}').length === 3,
