@@ -1864,5 +1864,74 @@ t('tdoc-pull still works against a config that has no token', () => {
 });
 
 
+// #420 — a class written for numerals, applied to the whole cell. The column it
+// styles ends up a different size from its neighbours, and `nowrap` on a
+// sentence gives the table a width no viewport can hold. Judged on BOTH paths:
+// the document that showed this brought its own design system.
+t('validator rejects a numeral cell class that lands on prose', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cells-'));
+  const run = (name, css, rows, args = []) => {
+    const html = path.join(dir, name);
+    fs.writeFileSync(html, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } th, td { background: none; border-radius: 0 }
+      ${css}</style>
+      </head><body><div class="wrap"><h1>T</h1><table><thead><tr><th>a</th><th>b</th></tr></thead>
+      <tbody>${rows}</tbody></table></div></body></html>`);
+    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [html, ...args], { encoding: 'utf8' });
+  };
+  const PROSE = 'Bootstrap, profitable throughout, then caught the accounts the other one lost';
+  try {
+    const bad = run('bad.html',
+      'table { font-size: 13.2px } .num { font-family: Menlo, monospace; font-size: 12.6px; white-space: nowrap }',
+      `<tr><td class="k">Surge</td><td class="num">${PROSE}</td></tr>`,
+      ['--custom-template']);
+    assert(bad.status !== 0, 'a numeral class on a sentence should be rejected');
+    assert(/different size from its neighbours/.test(bad.stderr), bad.stderr);
+    assert(/no viewport can hold/.test(bad.stderr), bad.stderr);
+
+    // The same class is correct on the values it was written for.
+    const numbers = run('numbers.html',
+      'table { font-size: 13.2px } .num { font-family: Menlo, monospace; font-size: 12.6px; white-space: nowrap }',
+      '<tr><td class="k">Surge</td><td class="num">$1.4B ARR</td></tr>',
+      ['--custom-template']);
+    assert(numbers.status === 0, `a numeral class on numerals rejected: ${numbers.stderr}`);
+
+    // A cell class that agrees with the table's size changes nothing, whatever
+    // else it sets, and a deliberately large figure is not the narrowing this
+    // check is about.
+    const agrees = run('agrees.html',
+      'table { font-size: 14px } .lbl { font-size: 14px; font-weight: 600 } .big { font-size: 26px }',
+      `<tr><td class="lbl">${PROSE}</td><td class="big">42</td></tr>`,
+      ['--custom-template']);
+    assert(agrees.status === 0, `a matching size was rejected: ${agrees.stderr}`);
+
+    // Reaching only some cells is not a claim about the table: which cells
+    // :first-child picks cannot be read off the markup by class.
+    const subset = run('subset.html',
+      'table { font-size: 14px } td:first-child { white-space: nowrap; font-weight: 600 }',
+      `<tr><td>short</td><td>${PROSE}</td></tr>`,
+      ['--custom-template']);
+    assert(subset.status === 0, `a :first-child rule was judged: ${subset.stderr}`);
+
+    // A size inside @media is a different layout, not a second size in one.
+    const responsive = run('responsive.html',
+      'table { font-size: 14px } .lbl { font-size: 14px } '
+      + '@media (max-width: 700px) { td { font-size: 12.5px } }',
+      `<tr><td class="lbl">${PROSE}</td><td>x</td></tr>`,
+      ['--custom-template']);
+    assert(responsive.status === 0, `a media-scoped size was judged: ${responsive.stderr}`);
+
+    // House-style documents are judged by the same rule, not a different one.
+    const house = run('house.html',
+      'table { font-size: 13.2px } .num { font-size: 12.6px }',
+      `<tr><td class="num">${PROSE}</td><td>x</td></tr>`);
+    assert(house.status !== 0, 'the house-style path should apply the same rule');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

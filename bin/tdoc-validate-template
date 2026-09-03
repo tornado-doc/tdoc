@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -345,6 +346,219 @@ def check_table_cells(html, styles):
             " or ".join(faults)]
 
 
+# A cell that refuses to wrap is a promise about its own length. Past this
+# many characters it is prose, and the promise is a table that cannot fit.
+CELL_PROSE_LIMIT = 32
+
+
+# A rule styling generated content is not styling the cell.
+PSEUDO_ELEMENT = re.compile(r"::|:(?:before|after|first-line|first-letter)\b", re.I)
+
+
+def _cell_target(selector):
+    """What a rule finally styles: (classes worn by that element, its tag).
+
+    Only the last compound counts. `.tablewrap td.lbl` styles a cell wearing
+    `.lbl`; `.tablewrap td` styles cells generally and `.tablewrap` is an
+    ancestor, not something a cell wears. A class inside `:not()` is the
+    opposite of worn, so pseudo-class arguments are dropped before the classes
+    are read, and a `::before` rule is dropped entirely.
+    """
+    selector = re.sub(r"\s+", " ", selector.strip().lower())
+    if PSEUDO_ELEMENT.search(selector):
+        return None
+    # Collapse arguments so a space inside :not(...) cannot split a compound.
+    last = _last_compound(re.sub(r"\([^()]*\)", "()", selector))
+    if ":" in last:
+        # A structural pseudo-class picks a subset of the cells - :first-child
+        # is the first column, not the table. Which cells that is cannot be
+        # read off the markup by class, and a check that stops a publish must
+        # not guess, so the rule is left unjudged.
+        return None
+    tag = re.match(r"^([a-z][-\w]*)", last)
+    return re.findall(r"\.([A-Za-z_][-\w]*)", last), (tag.group(1) if tag else "")
+
+
+def _attr_classes(attrs):
+    found = re.search(r"""class\s*=\s*("([^"]*)"|'([^']*)')""", attrs, re.I)
+    if not found:
+        return []
+    return (found.group(2) or found.group(3) or "").split()
+
+
+def _last_compound(selector):
+    parts = re.split(r"[\s>+~]+", re.sub(r"\s+", " ", selector.strip().lower()))
+    return parts[-1] if parts else ""
+
+
+def _unconditional_css(css):
+    """The rules that always apply — every at-rule block removed, braces balanced.
+
+    A size inside `@media` is a different layout, not a second size in the same
+    one: a table that becomes a stack of cards on a phone is entitled to set
+    its label apart. Only what the document says unconditionally is judged.
+    """
+    out, i, length = [], 0, len(css)
+    while i < length:
+        at = css.find("@", i)
+        if at < 0:
+            out.append(css[i:])
+            break
+        brace = css.find("{", at)
+        semi = css.find(";", at)
+        if brace < 0 or (0 <= semi < brace):
+            # A statement at-rule (@import, @charset) ends at the semicolon.
+            out.append(css[i:at])
+            i = (semi + 1) if semi >= 0 else length
+            continue
+        out.append(css[i:at])
+        depth, j = 0, brace
+        while j < length:
+            if css[j] == "{":
+                depth += 1
+            elif css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        i = j + 1
+    return "".join(out)
+
+
+def _cell_type_sizes(styles):
+    """What size the document gives a body cell, and by which class.
+
+    `base` is the size the document states for its BODY cells — the last
+    declaration whose selector ends in a bare table or td. A bare `th` is
+    excluded on purpose: `thead th` carries the label register by design, and
+    reading it as the body size would compare every cell against the header. `by_class` is every
+    size a class puts on top of it. A document that states no base is not
+    judged: the reader owns the table's size and the document has not claimed
+    otherwise.
+    """
+    base = None
+    by_class = {}
+    refuses_to_wrap = set()
+    for raw_css in styles:
+        css = _unconditional_css(re.sub(r"/\*.*?\*/", "", raw_css, flags=re.S))
+        for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css, flags=re.S):
+            selector_group, body = match.groups()
+            declarations = split_declarations(body)
+            size = next(
+                (compact_css_value(value) for prop, value in declarations
+                 if prop == "font-size"),
+                None,
+            )
+            nowrap = any(
+                prop == "white-space" and "nowrap" in value
+                for prop, value in declarations
+            )
+            if size is None and not nowrap:
+                continue
+            for selector in selector_group.split(","):
+                target = _cell_target(selector)
+                if target is None:
+                    continue
+                names, tag = target
+                if names:
+                    if size is not None:
+                        for name in names:
+                            by_class[name] = size
+                    if nowrap:
+                        refuses_to_wrap.update(names)
+                elif tag in {"table", "td"}:
+                    if size is not None:
+                        base = size
+                    if nowrap:
+                        # An unqualified nowrap on every cell is the same
+                        # promise, made about the whole table.
+                        refuses_to_wrap.add("")
+    return base, by_class, refuses_to_wrap
+
+
+def _longest_cell_per_class(html):
+    """class -> (length, text) of the longest th/td wearing it.
+
+    "" holds the longest cell in the document whatever it wears, which is what
+    an unqualified th/td rule is making its promise about.
+    """
+    longest = {}
+    for match in re.finditer(r"<(t[hd])\b([^>]*)>(.*?)</\1\s*>", html, re.I | re.S):
+        text = unescape(re.sub(r"<[^>]+>", "", match.group(3)))
+        text = re.sub(r"\s+", " ", text).strip()
+        for name in _attr_classes(match.group(2)) + [""]:
+            if len(text) > longest.get(name, (-1, ""))[0]:
+                longest[name] = (len(text), text)
+    return longest
+
+
+def check_table_cell_type(html, styles):
+    """A table's body is one type size, and only a short value refuses to wrap.
+
+    Both failures come from one habit: a class written for numerals — smaller,
+    monospaced, `white-space: nowrap` — applied to the whole `<td>` rather than
+    to the numerals inside it. When the cells it lands on hold sentences, two
+    things break at once.
+
+    The column it styles is set in a different size from its neighbours, so a
+    reader scanning across sees the type change size mid-row; and if the face
+    is monospaced it carries no CJK, so the same script renders at two sizes
+    one column apart. That is not a house-style preference — nothing in the
+    document says a table should have two type sizes, and the author reading
+    the source cannot see that it does.
+
+    `nowrap` on prose is worse than untidy: the cell can never break, so the
+    table takes a width no viewport can give it and pushes the whole page
+    sideways. `READER_PATCH_CSS` rescues that from the reader's side below
+    700px by making the table scroll itself; the cause is here.
+
+    A numeric column set in mono is a real convention and stays legal — put it
+    on the numerals (`<span>`), or change only what tabular figures need
+    (`font-variant-numeric`), which costs no size and no glyph coverage.
+
+    Judged on both paths. A table too wide to read is broken whoever wrote it,
+    and the document that showed this brings its own design system.
+    """
+    if not re.search(r"<table[\s>]", html, re.I):
+        return []
+    base, by_class, refuses_to_wrap = _cell_type_sizes(styles)
+    longest = _longest_cell_per_class(html)
+    errors = []
+
+    def offender(name):
+        """The longest cell wearing this class, if it is prose."""
+        length, text = longest.get(name, (0, ""))
+        return (length, text) if length > CELL_PROSE_LIMIT else None
+
+    for name in sorted(by_class):
+        size = by_class[name]
+        if base is None or size == base:
+            continue
+        prose = offender(name)
+        if not prose:
+            continue
+        errors.append(
+            "'.%s' sets %s where the table's cells are %s, and it sits on a "
+            "%d-character cell (\"%s…\") — a size on a cell class is a claim "
+            "that the cell is short; on prose it gives one column a different "
+            "size from its neighbours"
+            % (name, size, base, prose[0], prose[1][:40])
+        )
+
+    for name in sorted(refuses_to_wrap):
+        prose = offender(name)
+        if not prose:
+            continue
+        errors.append(
+            "%s sets white-space: nowrap but sits on a %d-character cell "
+            "(\"%s…\") — nowrap says a cell is short; on prose it gives the "
+            "table a width no viewport can hold"
+            % ("a th/td rule" if name == "" else "'.%s'" % name,
+               prose[0], prose[1][:40])
+        )
+    return errors
+
+
 def check_figure_width(html, styles):
     """A figure that never states its width is sized by the page, not the doc.
 
@@ -451,6 +665,10 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
     raw_html = path.read_text(encoding="utf-8", errors="replace")
     clipping, inset = _svg_faults(raw_html)
     errors.extend(clipping)
+    # Measured on both paths, for the same reason clipping is: a table
+    # wider than any viewport is broken whoever designed it, and the house
+    # style has no opinion about how many sizes a table's body has.
+    errors.extend(check_table_cell_type(raw_html, parser.styles))
 
     if custom_template:
         return errors, notes
