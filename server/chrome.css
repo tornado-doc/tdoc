@@ -207,8 +207,12 @@
   .tdoc-cc-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
   .tdoc-cc-when { color: #80868b; font-size: 11px; margin-top: 1px; }
   .tdoc-cc-head-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin: -2px -4px 0 0; }
+  /* Shape only — no colour. This selector is more specific than the per-control
+     rules in ui.css, so a colour here would decide for both of them and the
+     tick could never be the accent. */
   .tdoc-margin-comment .tdoc-cc-head-actions .tdoc-resolve-toggle,
-  .tdoc-cc-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 50%; background: transparent; color: #5f6368; cursor: pointer; transition: background .12s, color .12s; }
+  .tdoc-cc-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 50%; background: transparent; cursor: pointer; transition: background .12s, color .12s; }
+  .tdoc-cc-icon { color: #5f6368; }
   .tdoc-margin-comment .tdoc-cc-head-actions .tdoc-resolve-toggle:hover,
   .tdoc-cc-icon:hover { background: #f1f3f4; }
   .tdoc-cc-icon:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 1px; }
