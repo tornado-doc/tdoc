@@ -1906,6 +1906,38 @@ function sameOrigin(req, url) {
 // (userinfo's email + email_verified), the issuer's user IDs never become
 // keys, and the GitHub button stays direct — if this vendor vanishes, sign-in
 // degrades to GitHub while the seat is re-filled, and no account moves.
+// One sign-in surface. GitHub lives INSIDE the provider's modal like every
+// other method — there is no parallel first-party GitHub path on a host that
+// has this seat configured. What made the parallel path tempting was
+// migration: a legacy account is found by GitHub handle, and the OIDC
+// userinfo carries neither handle nor GitHub id. This call is the bridge —
+// the provider's backend API knows which GitHub account the user connected,
+// so a double-miss (no sub index, no email index) resolves through the
+// GitHub identity instead of minting a stranger account. Config-gated on
+// CLERK_SECRET_KEY; absent, the lookup quietly answers null and only
+// genuinely new users are affected (they were getting fresh accounts anyway).
+async function clerkExternalGithub(env, sub) {
+  const key = String(env && env.CLERK_SECRET_KEY || '').trim();
+  const id = String(sub || '').trim();
+  if (!key || !id || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null;
+  try {
+    const r = await fetch(`https://api.clerk.com/v1/users/${id}`, {
+      headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
+    });
+    if (!r.ok) return null;
+    const u = await r.json();
+    const gh = (u && Array.isArray(u.external_accounts) ? u.external_accounts : [])
+      .find((a) => a && /github/i.test(String(a.provider || '')));
+    if (!gh) return null;
+    const ghId = gh.provider_user_id ? String(gh.provider_user_id) : null;
+    const handle = normalizeGithubLogin(gh.username);
+    if (!ghId && !handle) return null;
+    return { ghId, handle };
+  } catch {
+    return null;
+  }
+}
+
 function oidcConfig(env) {
   const issuer = String(env && env.OIDC_ISSUER || '').trim().replace(/\/$/, '');
   const clientId = String(env && env.OIDC_CLIENT_ID || '').trim();
@@ -5337,6 +5369,33 @@ export default {
         // the verified address is the merge hint that connects them. Used
         // once — the link written at mint time makes later sign-ins exact.
         if (!account_id) account_id = await accountIdByEmail(env, email);
+        // Still nothing, and the visitor may be a legacy GitHub publisher
+        // whose account predates the email index. Ask the provider which
+        // GitHub identity they connected and resolve through that.
+        let bridged = null;
+        if (!account_id && sub) {
+          bridged = await clerkExternalGithub(env, sub);
+          if (bridged) {
+            if (bridged.ghId) account_id = await accountIdByIdp(env, 'github', bridged.ghId);
+            if (!account_id && bridged.handle) {
+              const legacy = await lookupHostedAccount(env, bridged.handle);
+              // Same guard as the direct flow: a handle whose account already
+              // has a stable GitHub owner is not claimable through a name.
+              const owned = legacy && (legacy.identities || []).some((i) => i && i.provider === 'github');
+              if (legacy && !owned) account_id = legacy.account_id;
+            }
+            if (account_id) {
+              // Write the links NOW, not at mint: the whole point is that the
+              // very next sign-in resolves exactly, and this person may read
+              // and comment for weeks before they ever mint a token.
+              let rec = bridged.handle ? await lookupHostedAccount(env, bridged.handle) : null;
+              if (!rec || rec.account_id !== account_id) rec = { account_id, created: new Date().toISOString() };
+              if (bridged.ghId) rec = await linkIdentity(env, rec, { provider: 'github', sub: bridged.ghId, email, handle: bridged.handle || undefined });
+              rec = await linkIdentity(env, rec, { provider: 'oidc', sub, email });
+              if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
+            }
+          }
+        }
         const sid = rand(24);
         const session = {
           name: (user.name || user.given_name || email.split('@')[0]),

@@ -108,11 +108,11 @@ export function ActivatePage({ boot }) {
             ? 'A terminal wants to publish to your tdoc account. Sign in, then approve the code it showed you.'
             : 'Sign in to connect a terminal to your tdoc account.'}</p>
           {boot.oidcAuth ? (
-            // One action, not a quiz: every sign-in method lives on the next
-            // page. The GitHub line below is not an alternative — it is the
-            // migration door for people who published with GitHub before the
-            // provider seat existed, whose account is found by handle, not
-            // yet by email.
+            // One action, one surface: every sign-in method — GitHub
+            // included — lives in the provider's own modal. Legacy GitHub
+            // accounts are reconnected server-side through the provider's
+            // record of which GitHub identity the visitor connected, so no
+            // second button has to exist for their sake.
             <button
               type="button"
               className="primary"
@@ -128,13 +128,6 @@ export function ActivatePage({ boot }) {
           ) : (
             <p>Sign-in is not configured on this host.</p>
           )}
-          {boot.oidcAuth && boot.authConfigured ? (
-            <p className="tdoc-activate-alt">
-              Published with GitHub before?{' '}
-              <button type="button" className="tdoc-linklike" onClick={signIn}>Sign in with GitHub</button>
-              {' '}so your docs follow you.
-            </p>
-          ) : null}
         </>
       ) : !pending ? (
         <>
