@@ -13,6 +13,13 @@ workers_dev = true
 enabled = true
 head_sampling_rate = 1
 
+# Aggregate product counters live separately from request logs so they can be
+# queried over time without parsing log lines. The dataset is created on the
+# first write; no per-user or per-document identifier is written to it.
+[[analytics_engine_datasets]]
+binding = "PRODUCT_ANALYTICS"
+dataset = "tdoc_product_events"
+
 [[r2_buckets]]
 binding = "DOCS"
 bucket_name = "tdoc-docs"
