@@ -677,21 +677,35 @@
     _lastComments = comments || [];
     _anchorTargets = {};
     var pins = [], hl = HL ? new Highlight() : null;
+    // An anchor that cannot be placed still deserves a seat. Without a pin the
+    // desktop rail has no coordinate to draw the card at, so the comment sits in
+    // the data and nowhere on screen — while the phone drawer, which renders the
+    // list directly, shows it. Park it at the top of the document, flagged, and
+    // everything downstream keeps working unchanged: clustering, the rail, the
+    // dashed unanchored card, and the "move anchor" that puts it back.
+    function seat(c, extra) {
+      var pin = { id: c.id, docY: 0, lost: true, login: (c.author && c.author.login) || null,
+        avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null,
+        resolved: c.status === 'applied', deleted: !!c.deleted };
+      if (extra) for (var k in extra) pin[k] = extra[k];
+      pins.push(pin);
+    }
     (comments || []).forEach(function (c) {
-      if (!c || !c.anchor) return;
+      if (!c) return;
+      if (!c.anchor) return seat(c);
       if (c.anchor.kind === 'element' && c.anchor.selector) {
         var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
         if (eel) {
           _anchorTargets[c.id] = { element: eel };
           var er = eel.getBoundingClientRect();
           pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
-        }
+        } else seat(c);
         return;
       }
-      if (c.anchor.kind !== 'text') return;
+      if (c.anchor.kind !== 'text') return seat(c);
       var key = (c.anchor.text || '') + '\u0000' + (c.anchor.context_before || '') + '\u0000' + (c.anchor.context_after || '');
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
-      if (!r) return;
+      if (!r) return seat(c);
       _anchorTargets[c.id] = { range: r };
       if (hl && !c.deleted) hl.add(r);
       var rect = r.getBoundingClientRect();

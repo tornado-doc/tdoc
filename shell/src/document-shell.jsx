@@ -303,8 +303,10 @@ export function DocumentShell({ boot, config }) {
         || comment.replies?.some((reply) => reply.id === deepTarget)
       ))
   ), [comments.comments, deepTarget, openCommentId, showResolved]);
+  // Lost pins are seats, not anchors: they give the card somewhere to be drawn
+  // while it still reads — and styles — as unanchored, with the way back.
   const pinIds = useMemo(
-    () => new Set(bridge.layout.pins.map((pin) => pin.id)),
+    () => new Set(bridge.layout.pins.filter((pin) => !pin.lost).map((pin) => pin.id)),
     [bridge.layout.pins],
   );
   const clusters = useMemo(
