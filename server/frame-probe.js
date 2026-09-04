@@ -680,11 +680,20 @@
     // An anchor that cannot be placed still deserves a seat. Without a pin the
     // desktop rail has no coordinate to draw the card at, so the comment sits in
     // the data and nowhere on screen — while the phone drawer, which renders the
-    // list directly, shows it. Park it at the top of the document, flagged, and
-    // everything downstream keeps working unchanged: clustering, the rail, the
-    // dashed unanchored card, and the "move anchor" that puts it back.
+    // list directly, shows it.
+    //
+    // The seat goes at the END of the document, not the top. At the top a stack
+    // of comments from an older version is the first thing beside the title,
+    // which reads as "these matter most"; at the end it reads as what it is —
+    // what the last revision left behind. Everything downstream is unchanged:
+    // clustering, the rail, the dashed unanchored card, and the Re-anchor that
+    // puts one back where it belongs.
+    // Not the very last pixel: the rail culls a pin that falls outside the
+    // viewport, and a seat pinned to the document's final row is never on
+    // screen even when you scroll all the way down. Sit just above the end.
+    var seatY = Math.max(0, document.documentElement.scrollHeight - 160);
     function seat(c, extra) {
-      var pin = { id: c.id, docY: 0, lost: true, login: (c.author && c.author.login) || null,
+      var pin = { id: c.id, docY: seatY, lost: true, login: (c.author && c.author.login) || null,
         avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null,
         resolved: c.status === 'applied', deleted: !!c.deleted };
       if (extra) for (var k in extra) pin[k] = extra[k];
