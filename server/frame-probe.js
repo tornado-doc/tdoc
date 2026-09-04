@@ -316,7 +316,13 @@
     } catch (x) {}
   }, true);
   document.addEventListener('mousedown', function (e) {
-    if (interactionMode === 'edit') return;
+    // Edit mode opts out of comment behaviour, but not out of dismissal: a card
+    // opened from a pin stayed open there while every other mode closed it on
+    // a click outside. Everything below is already mode-agnostic, so letting
+    // edit through while something is open is the whole change — the selection
+    // painting further down is still gated on comment mode, and the swallow
+    // only preventDefaults our own pill and links, so a caret still lands.
+    if (interactionMode === 'edit' && !shellUiOpen) return;
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
     // The pill is our own UI, so a click on it normally opens the composer
@@ -671,21 +677,35 @@
     _lastComments = comments || [];
     _anchorTargets = {};
     var pins = [], hl = HL ? new Highlight() : null;
+    // An anchor that cannot be placed still deserves a seat. Without a pin the
+    // desktop rail has no coordinate to draw the card at, so the comment sits in
+    // the data and nowhere on screen — while the phone drawer, which renders the
+    // list directly, shows it. Park it at the top of the document, flagged, and
+    // everything downstream keeps working unchanged: clustering, the rail, the
+    // dashed unanchored card, and the "move anchor" that puts it back.
+    function seat(c, extra) {
+      var pin = { id: c.id, docY: 0, lost: true, login: (c.author && c.author.login) || null,
+        avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null,
+        resolved: c.status === 'applied', deleted: !!c.deleted };
+      if (extra) for (var k in extra) pin[k] = extra[k];
+      pins.push(pin);
+    }
     (comments || []).forEach(function (c) {
-      if (!c || !c.anchor) return;
+      if (!c) return;
+      if (!c.anchor) return seat(c);
       if (c.anchor.kind === 'element' && c.anchor.selector) {
         var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
         if (eel) {
           _anchorTargets[c.id] = { element: eel };
           var er = eel.getBoundingClientRect();
           pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
-        }
+        } else seat(c);
         return;
       }
-      if (c.anchor.kind !== 'text') return;
+      if (c.anchor.kind !== 'text') return seat(c);
       var key = (c.anchor.text || '') + '\u0000' + (c.anchor.context_before || '') + '\u0000' + (c.anchor.context_after || '');
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
-      if (!r) return;
+      if (!r) return seat(c);
       _anchorTargets[c.id] = { range: r };
       if (hl && !c.deleted) hl.add(r);
       var rect = r.getBoundingClientRect();

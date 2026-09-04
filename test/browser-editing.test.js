@@ -602,7 +602,9 @@ async function chooseMode(page, label) {
       await page.getByRole('button', { name: 'More actions' }).click();
       await page.locator('.ui-menu-popup').waitFor();
       const moreLabels = await page.locator('.ui-menu-popup .ui-menu-item').allTextContents();
-      for (const label of ['Publish', 'Copy as Markdown', 'My docs', 'Sign out']) {
+      // Copy as Markdown lives in "Download & copy" and Sign out in "My account"
+      // since the ⋯ menu was grouped (#443); the top level carries the groups.
+      for (const label of ['Publish', 'Download & copy', 'My docs', 'My account']) {
         assert(moreLabels.some((value) => value.trim() === label), `${label} missing from mobile More: ${moreLabels.join(', ')}`);
       }
       assert(moreLabels.some((value) => /^Versionsv\d+$/.test(value.trim())), `version submenu missing from mobile More: ${moreLabels.join(', ')}`);
