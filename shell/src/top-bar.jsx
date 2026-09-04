@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import {
   Bell,
+  ChevronRight,
   Library,
   LogIn,
   LogOut,
-  MoreHorizontal,
   Moon,
+  MoreHorizontal,
   Sun,
+  UserRound,
 } from 'lucide-react';
-import { AppMenu, AppMenuItem, AppMenuSeparator } from './ui/menu.jsx';
+import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from './ui/menu.jsx';
 import { useNotifications } from './hooks/use-notifications.js';
 import { NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 
@@ -100,14 +102,29 @@ export function TopBar({
               <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={() => { location.href = '/me'; }}>
                 <Library size={15} /> My docs
               </AppMenuItem>
-              <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={signOut}>
-                <LogOut size={15} /> Sign out
-              </AppMenuItem>
-              {onSwitchAccount ? (
-                <AppMenuItem className="tdoc-action-menu-item" onClick={onSwitchAccount}>
-                  <LogIn size={15} /> Switch account
+              {/* Both of these are "the account", and neither is something you
+                  reach for often. Mobile-only like the rows above: on a desktop
+                  the account chip beside this menu already carries them, and
+                  Switch account used to appear in both. */}
+              <AppSubmenu
+                className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-account-submenu-trigger"
+                trigger={(
+                  <>
+                    <UserRound size={15} />
+                    <span>My account</span>
+                    <ChevronRight className="tdoc-submenu-chevron" size={14} />
+                  </>
+                )}
+              >
+                <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
+                  <LogOut size={15} /> Sign out
                 </AppMenuItem>
-              ) : null}
+                {onSwitchAccount ? (
+                  <AppMenuItem className="tdoc-action-menu-item" onClick={onSwitchAccount}>
+                    <LogIn size={15} /> Switch account
+                  </AppMenuItem>
+                ) : null}
+              </AppSubmenu>
             </>
           ) : authConfigured ? (
             <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={onSignIn}>
