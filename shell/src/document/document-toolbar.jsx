@@ -205,20 +205,35 @@ export function DocumentOverflowActions({
           it does — on a desktop that group is not rendered, and a rule floating
           at the top of the menu would be the only thing left of it. */}
       <AppMenuSeparator className="tdoc-mobile-overflow-only" />
-      <AppMenuItem className="tdoc-action-menu-item" data-action="copy" onClick={onCopyMarkdown}>
-        <Copy size={15} /> Copy as Markdown
-      </AppMenuItem>
+      {/* One row instead of three. Taking a copy of the document is a single
+          intent; which format is a detail that belongs one level down.
+          Duplicate stays out here — it makes a new document on tdoc, which is
+          not "take this one away". */}
+      <AppSubmenu
+        className="tdoc-action-menu-item tdoc-export-submenu-trigger"
+        trigger={(
+          <>
+            <Download size={15} />
+            <span>Download &amp; copy</span>
+            <ChevronRight className="tdoc-submenu-chevron" size={14} />
+          </>
+        )}
+      >
+        <AppMenuItem className="tdoc-action-menu-item" data-action="copy" onClick={onCopyMarkdown}>
+          <Copy size={15} /> Copy as Markdown
+        </AppMenuItem>
+        <AppMenuItem className="tdoc-action-menu-item" data-action="download" onClick={onDownload}>
+          <Download size={15} /> Download HTML
+        </AppMenuItem>
+        <AppMenuItem className="tdoc-action-menu-item" data-action="download-pdf" onClick={onPrint}>
+          <FileDown size={15} /> Download PDF
+        </AppMenuItem>
+      </AppSubmenu>
       {config.mode === 'published' ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="duplicate" onClick={onDuplicate}>
           <CopyPlus size={15} /> Duplicate
         </AppMenuItem>
       ) : null}
-      <AppMenuItem className="tdoc-action-menu-item" data-action="download" onClick={onDownload}>
-        <Download size={15} /> Download HTML
-      </AppMenuItem>
-      <AppMenuItem className="tdoc-action-menu-item" data-action="download-pdf" onClick={onPrint}>
-        <FileDown size={15} /> Download PDF
-      </AppMenuItem>
       {config.ownerManage ? <AppMenuSeparator /> : null}
       {config.ownerManage ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="delete" tone="danger" onClick={onDelete}>
