@@ -6426,6 +6426,16 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      // `replace: true` asks to rewrite the doc's LATEST version in place
+      // instead of appending one. It is the landing-doc contract (#458): the
+      // homepage, /start and /templates are each a single v1 that
+      // publish-landing.yml re-ships on every deploy. Provider token only — a
+      // hosted account's history is append-only, and the browser editor's
+      // conflict detection relies on that.
+      const replace = body.replace === true;
+      if (replace && !(auth.actor && auth.actor.kind === 'admin')) {
+        return json({ error: 'replace_forbidden', message: 'replace is accepted from the provider upload token only' }, { status: 403 });
+      }
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
       const firstHostedPublish = !!(
@@ -6489,8 +6499,22 @@ export default {
         // Old-version uploads are best-effort repairs, never rewrites. This is
         // what prevents a stale local v8 from replacing a browser-created v8
         // while the CLI walks its historical versions before uploading v9.
+        //
+        // The one sanctioned rewrite is `replace` on the LATEST version. The
+        // landing docs need it: the repo HTML carries no baked reader block,
+        // so every upload re-stamps it with the current template and the bytes
+        // differ after any reader.css change — and a landing edit changes them
+        // outright. Bumping the version instead would grow the homepage's
+        // history by one per push to main, which the release script exists to
+        // avoid. A historical version is never replaced, flag or not: readers
+        // may be on it, and nothing above it was derived from the new bytes.
         if (existingHtml != null && existingHtml !== stampedHtml) {
-          return json({ error: 'version_conflict', baseVersion: verNum - 1, latestVersion: remoteLatest }, { status: 409 });
+          if (replace && verNum < remoteLatest) {
+            return json({ error: 'replace_not_latest', version: verNum, latestVersion: remoteLatest }, { status: 409 });
+          }
+          if (!replace) {
+            return json({ error: 'version_conflict', baseVersion: verNum - 1, latestVersion: remoteLatest }, { status: 409 });
+          }
         }
       }
       if (writesLatestMeta && writeGate.meta && env.COMMENTS && verNum > remoteLatest) {
