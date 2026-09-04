@@ -448,6 +448,9 @@ export function CommentCard({
   onResolve,
   onEdit,
   onReanchor,
+  // Bridge 2, on the owner's own doc: { line, state, onCopy }. Shown under
+  // every thread the agent has not answered yet — one paste covers them all.
+  handoff = null,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
   const [replyTarget, setReplyTarget] = useState(null);
@@ -653,6 +656,28 @@ export function CommentCard({
       {reactionCount ? (
         <Reactions item={comment} me={currentUser} onReact={onReact} />
       ) : null}
+
+      {handoff && comment.status !== 'applied'
+        && !replies.some((reply) => reply.author?.kind === 'agent') ? (
+          <div className="tdoc-handoff">
+            <div className="tdoc-handoff-line">
+              <code>{handoff.line}</code>
+              <button
+                type="button"
+                className={handoff.state !== 'idle' ? 'done' : undefined}
+                onClick={handoff.onCopy}
+              >
+                {handoff.state !== 'idle' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <div className="tdoc-handoff-status" role="status" aria-live="polite">
+              {handoff.state === 'idle' ? 'Paste this into your agent. It reads the comments, replies to each, and publishes the next version.' : null}
+              {handoff.state === 'waiting' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
+              {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading this</> : null}
+              {handoff.state === 'stuck' ? 'Still waiting — did you paste it into your agent?' : null}
+            </div>
+          </div>
+        ) : null}
 
       {/* Resolve, edit, delete and the anchor moved to the header — the two
           controls a reader needs are ✓ and ⋯, and the rest belong behind them.
