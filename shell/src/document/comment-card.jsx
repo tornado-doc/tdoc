@@ -571,8 +571,13 @@ export function CommentCard({
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         if (!onActivate) return;
+        // [role="menuitem"] belongs on this list: the card's ⋯ menu renders
+        // through a portal, and React bubbles portal events along the COMPONENT
+        // tree, so choosing Edit or Delete arrived here as a click on the card.
+        // In the phone drawer that meant "focus this comment", which closes the
+        // drawer — the card appeared to jump away instead of opening an editor.
         if (event.target instanceof Element
-          && event.target.closest('button, a, input, textarea, select, [role="button"]')) return;
+          && event.target.closest('button, a, input, textarea, select, [role="button"], [role="menuitem"]')) return;
         onActivate(comment.id);
       }}
     >
