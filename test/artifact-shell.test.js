@@ -22,6 +22,20 @@ const path = require('path');
 const { requirePlaywrightOrSkip, resolveTarget, isPublishedTarget } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('artifact-shell.test.js');
 
+// Edit, delete and move-anchor live in the card's ⋯ menu since #432, and a
+// menu renders through a portal — they are no longer descendants of the card.
+// Every check for them has to open that menu first.
+async function openCardMenu(page, cardSel) {
+  const trigger = `${cardSel} [aria-label="More actions"]`;
+  await page.waitForSelector(trigger, { timeout: 4000 });
+  await page.click(trigger);
+  await page.waitForSelector('.ui-menu-popup', { timeout: 2000 });
+}
+async function closeCardMenu(page) {
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+}
+
 const COMMENTS_FIXTURE = path.join(__dirname, 'fixtures/tdocs/hostile-body-css/comments.json');
 
 let pass = 0, fail = 0;
@@ -285,7 +299,9 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-margin-comment .tdoc-reply-toggle', { timeout: 2000 });
       await page.click('.tdoc-margin-comment .tdoc-reply-toggle');
       await page.waitForSelector('.tdoc-margin-comment .tdoc-reply-form.open textarea', { timeout: 2000 });
-      const hasDelete = await page.evaluate(() => !!document.querySelector('.tdoc-margin-comment .del'));
+      await openCardMenu(page, '.tdoc-margin-comment');
+      const hasDelete = await page.evaluate(() => !!document.querySelector('.ui-menu-popup .del'));
+      await closeCardMenu(page);
       if (!hasDelete) throw new Error('card missing delete control');
     });
 
@@ -876,29 +892,35 @@ const SLUG = 'hostile-body-css';
           try {
             await page.setViewportSize({ width: 1400, height: 900 });
             await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
-            await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
-            await page.waitForSelector(`${card} .del`, { timeout: 2000 });
+            await openCardMenu(page, card);
+            await page.waitForSelector('.ui-menu-popup .tdoc-edit-toggle', { timeout: 4000 });
+            await page.waitForSelector('.ui-menu-popup .del', { timeout: 2000 });
+            await closeCardMenu(page);
             // …and c_fixture_4 belongs to reviewer-a. The viewer owns this
             // doc, and still gets neither of them on somebody else's comment —
             // only the re-anchor, which is about where a comment points, not
             // about what it says.
             await page.goto(`${authedUrl}&comment=c_fixture_4`, { waitUntil: 'networkidle' });
             const other = '.tdoc-margin-comment[data-comment-id="c_fixture_4"]';
-            await page.waitForSelector(`${other} .tdoc-reanchor-btn`, { timeout: 4000 });
-            if (await page.$(`${other} .tdoc-edit-toggle`)) {
+            await openCardMenu(page, other);
+            await page.waitForSelector('.ui-menu-popup .tdoc-reanchor-btn', { timeout: 4000 });
+            if (await page.$('.ui-menu-popup .tdoc-edit-toggle')) {
               throw new Error('the doc owner was offered an edit on someone else\'s comment');
             }
-            if (await page.$(`${other} .del`)) {
+            if (await page.$('.ui-menu-popup .del')) {
               throw new Error('the doc owner was offered a delete on someone else\'s comment');
             }
+            await closeCardMenu(page);
             // …but c_fixture_3 is Claude's, and an agent writes with the doc's
             // own upload token. The owner reaches that one, and only that one.
             await page.goto(`${authedUrl}&comment=c_fixture_3`, { waitUntil: 'networkidle' });
             const agentCard = '.tdoc-margin-comment[data-comment-id="c_fixture_3"]';
-            await page.waitForSelector(`${agentCard} .del`, { timeout: 4000 });
-            if (await page.$(`${agentCard} .tdoc-edit-toggle`)) {
+            await openCardMenu(page, agentCard);
+            await page.waitForSelector('.ui-menu-popup .del', { timeout: 4000 });
+            if (await page.$('.ui-menu-popup .tdoc-edit-toggle')) {
               throw new Error('nobody rewrites what the agent said — not even the owner');
             }
+            await closeCardMenu(page);
           } finally {
             fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
           }
@@ -910,25 +932,35 @@ const SLUG = 'hostile-body-css';
           // the UA button box — a grey chip sitting between two text links.
           await page.setViewportSize({ width: 1400, height: 900 });
           await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
-          await page.waitForSelector(`${card} .tdoc-edit-toggle`, { timeout: 4000 });
-          const [reply, edit] = await page.evaluate((sel) => {
+          // Edit no longer sits beside reply — it moved into the card's ⋯ menu
+          // (#432), so "reads like the control next to it" now means the other
+          // rows of that menu. The point is unchanged: edit must not be dressed
+          // as something rarer or more dangerous than what it sits with.
+          await openCardMenu(page, card);
+          await page.waitForSelector('.ui-menu-popup .tdoc-edit-toggle', { timeout: 4000 });
+          const [neighbour, edit] = await page.evaluate(() => {
             const read = (el) => {
               const c = getComputedStyle(el);
               return [c.color, c.font, c.padding, c.backgroundColor, c.borderStyle, c.borderWidth].join('|');
             };
             return [
-              read(document.querySelector(`${sel} .tdoc-reply-toggle`)),
-              read(document.querySelector(`${sel} .tdoc-edit-toggle`)),
+              read(document.querySelector('.ui-menu-popup .tdoc-reanchor-btn')),
+              read(document.querySelector('.ui-menu-popup .tdoc-edit-toggle')),
             ];
-          }, card);
-          if (reply !== edit) {
-            throw new Error(`edit does not read like reply:\n  reply: ${reply}\n  edit:  ${edit}`);
+          });
+          await closeCardMenu(page);
+          if (neighbour !== edit) {
+            throw new Error(`edit does not read like the row beside it:\n  neighbour: ${neighbour}\n  edit:      ${edit}`);
           }
-          // …and they are one row of controls, so they are written one way.
-          const labels = await page.evaluate((sel) => [...document.querySelectorAll(`${sel} > .meta .actions button`)]
-            .map((b) => b.textContent.trim()).filter(Boolean), card);
-          const shouty = labels.filter((label) => label !== label.toLowerCase());
-          if (shouty.length) throw new Error(`the action row is not written one way: ${JSON.stringify(labels)}`);
+          // The footer is one control now — the rest moved into the ⋯ menu — so
+          // "written one way" is a statement about that menu. Sentence case
+          // throughout, no lowercase stragglers left over from the old row.
+          await openCardMenu(page, card);
+          const labels = await page.evaluate(() => [...document.querySelectorAll('.ui-menu-popup .ui-menu-item')]
+            .map((item) => item.textContent.trim()).filter(Boolean));
+          await closeCardMenu(page);
+          const shouty = labels.filter((label) => label && label[0] !== label[0].toUpperCase());
+          if (shouty.length) throw new Error(`the menu is not written one way: ${JSON.stringify(labels)}`);
         });
 
         await t('editing rewrites the comment in place and marks it edited (#349)', async () => {
@@ -936,7 +968,8 @@ const SLUG = 'hostile-body-css';
           try {
             await page.setViewportSize({ width: 1400, height: 900 });
             await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
-            await page.click(`${card} .tdoc-edit-toggle`);
+            await openCardMenu(page, card);
+            await page.click('.ui-menu-popup .tdoc-edit-toggle');
             await page.waitForSelector(`${card} .tdoc-edit-form textarea`, { timeout: 2000 });
             // the box opens on the current text — an edit is a correction
             const seeded = await page.$eval(`${card} .tdoc-edit-form textarea`, (el) => el.value);
@@ -960,7 +993,9 @@ const SLUG = 'hostile-body-css';
               card,
               { timeout: 4000 },
             );
-            const meta = await page.$eval(`${card} .meta > span`, (el) => el.textContent);
+            // The "edited" mark rides with the timestamp, which moved under the
+            // author's name in the card header (#432).
+            const meta = await page.$eval(`${card} .tdoc-cc-when`, (el) => el.textContent);
             if (!/edited/.test(meta)) throw new Error(`edited comment is not marked: "${meta}"`);
             const stored = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'))
               .find((c) => c.id === 'c_fixture_1');
@@ -976,8 +1011,9 @@ const SLUG = 'hostile-body-css';
           try {
             await page.setViewportSize({ width: 1400, height: 900 });
             await page.goto(`${authedUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
-            await page.waitForSelector(`${card} > .meta .del`, { timeout: 4000 });
-            await page.click(`${card} > .meta .del`);
+            await openCardMenu(page, card);
+            await page.waitForSelector('.ui-menu-popup .del', { timeout: 4000 });
+            await page.click('.ui-menu-popup .del');
             // The card used to close on any delete, so the tombstone you just
             // made — and the reply still under it — went off screen with it.
             await page.waitForSelector(`${card}.tdoc-deleted`, { timeout: 4000 });
