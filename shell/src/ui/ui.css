@@ -675,19 +675,23 @@ button.tdoc-pin {
   font-weight: 600;
 }
 
-/* "agent", underlined, its definition on hover. */
+/* "agent", underlined, its definition on hover. The tip is positioned
+   against the DOOR, not the word: from the word it ran rightwards over the
+   other door and read as that door's description. */
+.tdoc-modal .tdoc-doors button.tdoc-door { position: relative; }
+
 .tdoc-term {
-  position: relative;
   border-bottom: 1px dotted currentColor;
   cursor: help;
 }
 
 .tdoc-term-tip {
   position: absolute;
-  left: 0;
-  top: calc(100% + 6px);
+  left: 12px;
+  right: 12px;
+  top: 40px;
   z-index: 5;
-  width: 260px;
+  width: auto;
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--td-ink);
@@ -708,6 +712,20 @@ button.tdoc-pin {
 .tdoc-term:focus-within .tdoc-term-tip {
   opacity: 1;
   visibility: visible;
+}
+
+/* The tooltip needs a pointer; on a phone the definition is inline instead. */
+.tdoc-door .tdoc-agent-def { display: none; }
+
+@media (max-width: 560px), (hover: none) {
+  .tdoc-term { border-bottom: 0; cursor: default; }
+  .tdoc-term-tip { display: none; }
+  .tdoc-door .tdoc-agent-def {
+    display: block;
+    color: var(--td-ink-soft, #6b6b73);
+    font-size: 12px;
+    line-height: 1.45;
+  }
 }
 
 .tdoc-doors-example {

@@ -175,6 +175,9 @@ export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initial
           <div className="tdoc-doors">
             <button type="button" className="tdoc-door" onClick={chooseOwn}>
               <strong>Use my own <AgentTerm /></strong>
+              {/* A phone has no hover, so the definition sits under the title
+                  there — one line, where the tooltip would have been. */}
+              <span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>
               <span>Copy one line into it. It publishes something you wrote recently.</span>
               <em>{signedIn ? 'Get the line' : 'Sign in to start'}</em>
             </button>
