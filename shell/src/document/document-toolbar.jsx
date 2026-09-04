@@ -13,7 +13,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { AppMenu, AppMenuItem, AppSubmenu } from '../ui/menu.jsx';
+import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
 
 // The bar names the document, and the document's name is its title. The slug
 // used to sit here because an agent-picked one reads like a name, but it is a
@@ -199,6 +199,12 @@ export function DocumentOverflowActions({
           {showResolved ? 'Hide resolved' : `Show resolved (${resolvedCount})`}
         </AppMenuItem>
       ) : null}
+      {/* Four groups: what this doc is, how to take a copy of it, the app, the
+          account. Thirteen flat rows made every one of them cost a read. The
+          separator carries tdoc-mobile-overflow-only because everything above
+          it does — on a desktop that group is not rendered, and a rule floating
+          at the top of the menu would be the only thing left of it. */}
+      <AppMenuSeparator className="tdoc-mobile-overflow-only" />
       <AppMenuItem className="tdoc-action-menu-item" data-action="copy" onClick={onCopyMarkdown}>
         <Copy size={15} /> Copy as Markdown
       </AppMenuItem>
@@ -213,6 +219,7 @@ export function DocumentOverflowActions({
       <AppMenuItem className="tdoc-action-menu-item" data-action="download-pdf" onClick={onPrint}>
         <FileDown size={15} /> Download PDF
       </AppMenuItem>
+      {config.ownerManage ? <AppMenuSeparator /> : null}
       {config.ownerManage ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="delete" tone="danger" onClick={onDelete}>
           <Trash2 size={15} /> Delete doc…
