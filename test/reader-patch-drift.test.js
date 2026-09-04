@@ -32,31 +32,19 @@ t('the two literals are byte-identical', () => {
     `worker and local server disagree:\n  worker: ${literal(worker)}\n  server: ${literal(server)}`);
 });
 
-t('it is the narrow-viewport table rule, and it spares wrapped tables', () => {
+t('it defines the scroll wrapper, and the wrapper is what tables get put in', () => {
+  // The patch used to make the table its own scroller with display:block. That
+  // let thead and tbody size independently and the header stopped lining up
+  // with the body — on the landing page, visibly. Tables are wrapped at serve
+  // time now and the patch only has to define the wrapper, for documents baked
+  // before .tdoc-table-scroll existed.
   const css = literal(worker) || '';
-  // Deliberately NOT scoped to a phone width: a table wider than its container
-  // breaks a 768px tablet and a narrowed desktop too. Measured on a real doc,
-  // still 171px over at 701px and 20px over at 1024 while it was behind
-  // @media(max-width:700px).
-  assert(!/@media/.test(css), 'the patch went back behind a media query; 701px and up regress');
-  assert(/overflow-x:\s*auto/.test(css), 'the patch no longer makes the table scrollable');
-  // The author's own `table{min-width:880px}` is what breaks the phone, so this
-  // rule has to outrank it — a :where() version loses to the declaration it
-  // exists to defeat.
-  assert(/min-width:\s*0\s*!important/.test(css), 'the patch no longer overrides an author min-width');
-  assert(!/:where\(/.test(css), 'the patch went back to zero specificity');
-  // Zeroing min-width also lets the table collapse below what the author
-  // designed for: a doc built for 880px squeezed its prose column to 62px.
-  assert(/width:\s*max-content/.test(css) && /tbody/.test(css),
-    'the patch no longer keeps the rows at max-content, so columns collapse again');
-  assert(/not\(\.tdoc-table-scroll\s*>\s*table\)/.test(css),
-    'the patch no longer spares tables the author already wrapped');
-});
-
-t('both injection sites guard against a second copy', () => {
+  assert(/\.tdoc-table-scroll\{/.test(css), 'the patch no longer defines the scroll wrapper');
+  assert(/overflow-x:\s*auto/.test(css), 'the wrapper no longer scrolls');
+  assert(!/display:\s*block/.test(css), 'the display:block table hack is back; it breaks header alignment');
   for (const [name, source] of [['worker/worker.js', worker], ['server/server.js', server]]) {
-    assert(source.includes(`id="tdoc-reader-patch"`) && /indexOf\('id="tdoc-reader-patch"'\) === -1/.test(source),
-      `${name} injects the patch without checking for one already there`);
+    assert(/function wrapBareTables\(/.test(source), `${name} does not wrap bare tables`);
+    assert(/body = wrapBareTables\(body\);/.test(source), `${name} never calls wrapBareTables`);
   }
 });
 
@@ -72,11 +60,9 @@ t('the patch anchors on the opening <head>, not the closing one', () => {
   }
 });
 
-t('newly baked documents get the same rule from reader.css', () => {
-  // The patch reaches documents baked before it existed; reader.css is what
-  // downloads and self-contained copies carry.
-  assert(/table:not\(\.tdoc-table-scroll > table\) \{ display: block/.test(reader), 'reader.css lost the table rule');
-  assert(/not\(\.tdoc-table-scroll > table\)/.test(reader), 'reader.css no longer spares wrapped tables');
+t('reader.css keeps the wrapper rules and none of the table hack', () => {
+  assert(/\.tdoc-table-scroll \{[^}]*overflow-x: auto/.test(reader), 'reader.css lost the scroll wrapper');
+  assert(!/display: block !important/.test(reader), 'the display:block table hack is back in reader.css');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
