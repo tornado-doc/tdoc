@@ -1739,6 +1739,11 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   };
   const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
   cfg.onboarding = slug === LANDING_SLUG || slug === START_SLUG || hasCta;
+  // The doc takes comments and this visitor has none of the sessions that may
+  // leave one. The Comment option still shows and opens the sign-in: the door
+  // is where the person looks for it, not a button in the corner.
+  cfg.signInToComment = !identity && !isLanding && !!versionWritesEnabled
+    && accessFromMeta(docMeta || {}).commenting !== 'off';
 
   let oldVersion = null;
   const latestVersion = vlist.length ? Math.max(...vlist.map(v => Number(v.n) || 0)) : version;
@@ -1761,6 +1766,104 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     runtimeJsPath: SHELL_RUNTIME_JS_PATH,
     runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
   });
+}
+
+// ---- onboarding (shared with server.js; test/no-drift.test.js pins these) ----
+// A step is a timestamp, never a boolean: resuming reads the first one that is
+// empty, the checklist renders from the same object, and the funnel is read
+// off the stamps rather than from a second set of counters.
+function stampOnboarding(record, step, at, extra) {
+  const out = record && typeof record === 'object' ? { ...record } : {};
+  if (step && !out[step]) out[step] = at;
+  if (extra && typeof extra === 'object') {
+    for (const key of Object.keys(extra)) if (out[key] == null) out[key] = extra[key];
+  }
+  return out;
+}
+// Which actions the page may report, and which step (if any) each one stamps.
+// Anything else is rejected: the log is what the funnel is read from, so a
+// page cannot invent a step.
+function onboardingActionStep(action) {
+  switch (action) {
+    case 'door_own_agent': return 'started';
+    case 'waitlist': return 'waitlist';
+    case 'tour_seen': return 'tour_seen';
+    case 'share_link_copied': return 'shared';
+    case 'example_opened':
+    case 'copy_clicked':
+    case 'fix_copy_clicked':
+    case 'timeout_shown':
+      return null;
+    default:
+      return undefined;
+  }
+}
+// The first comment on somebody's first doc, from tdoc and signed as tdoc —
+// not a person pretending to be one. Anchored to the first paragraph so it
+// lands on text the reader can see, and worded to ask for the one gesture the
+// page exists to teach.
+const SEED_COMMENT_TEXT = 'First reader here. Which claim on this page would you defend least? Highlight it and say so.';
+const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '', kind: 'system' };
+function seedCommentAnchor(html) {
+  const m = String(html || '').match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
+  if (!m) return null;
+  const text = m[1]
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length < 8) return null;
+  return { kind: 'text', text: text.slice(0, 200), context_before: '', context_after: '' };
+}
+
+async function sessionAccountId(env, session) {
+  if (!session) return null;
+  if (typeof session.account_id === 'string' && session.account_id) return session.account_id;
+  const login = sessionLogin(session);
+  if (!login) return null;
+  const rec = await lookupHostedAccount(env, login);
+  return rec && rec.account_id ? rec.account_id : null;
+}
+async function loadOnboarding(env, accountId) {
+  try {
+    const rec = JSON.parse(await env.META.get(`account-onboarding:${accountId}`));
+    return rec && typeof rec === 'object' ? rec : {};
+  } catch { return {}; }
+}
+async function stampOnboardingFor(env, accountId, step, extra) {
+  if (!env || !env.META || !accountId) return null;
+  const at = new Date().toISOString();
+  const next = stampOnboarding(await loadOnboarding(env, accountId), step, at, extra);
+  await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+  return next;
+}
+// Every action the page saw, one row each. The funnel and each step's
+// drop-off are derived from these; nothing else counts anything.
+async function logOnboardingEvent(env, accountId, action, meta) {
+  if (!env || !env.META) return;
+  const at = new Date().toISOString();
+  await env.META.put(
+    `onboarding-event:${accountId || 'anon'}:${at}:${rand(4)}`,
+    JSON.stringify({ account_id: accountId || null, action, at, ...(meta || {}) }),
+    { expirationTtl: 60 * 60 * 24 * 90 },
+  );
+}
+// Bridge 2 reads this: the owner's agent pulling the comments is the first
+// thing it does after the person pastes the line, and the card is waiting to
+// hear exactly that.
+async function markAgentRead(env, slug) {
+  if (!env || !env.META || !slug) return;
+  await env.META.put(`doc-agent-read:${slug}`, JSON.stringify({ at: new Date().toISOString() }));
+}
+async function readAgentStatus(env, slug) {
+  let rec = null;
+  try { rec = JSON.parse(await env.META.get(`doc-agent-read:${slug}`)); } catch {}
+  return { read_at: (rec && rec.at) || null };
 }
 
 // The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
@@ -3475,6 +3578,7 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
       first: (t && t.first) || record.created, last: record.created,
     }));
   } catch {}
+  try { await stampOnboardingFor(env, account.account_id, 'agent_connected'); } catch {}
   return { token, record };
 }
 
@@ -5993,6 +6097,45 @@ export default {
       });
     }
 
+    // ---- onboarding ----
+    if (p === '/api/onboarding' && method === 'GET') {
+      const session = await getSession(env, req);
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ anonymous: true, record: null });
+      return json({ record: await loadOnboarding(env, accountId) });
+    }
+    if (p === '/api/onboarding/event' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const action = typeof body.action === 'string' ? body.action : '';
+      const step = onboardingActionStep(action);
+      if (step === undefined) return json({ error: 'unknown_action' }, { status: 400 });
+      const session = await getSession(env, req);
+      const accountId = await sessionAccountId(env, session);
+      const doc = typeof body.doc === 'string' && isValidSlug(body.doc) ? body.doc : null;
+      // Two actions mean something before there is an account: joining the
+      // waitlist and opening the example. Everything else is a step on a
+      // journey that belongs to somebody.
+      if (!accountId && action !== 'waitlist' && action !== 'example_opened') {
+        return json({ error: 'sign_in_required' }, { status: 401 });
+      }
+      await logOnboardingEvent(env, accountId, action, doc ? { doc } : null);
+      let record = null;
+      if (accountId && step) {
+        record = await stampOnboardingFor(env, accountId, step,
+          step === 'waitlist' ? { started: new Date().toISOString() } : null);
+      }
+      return json({ ok: true, record });
+    }
+    if (p === '/api/doc/agent-status' && method === 'GET') {
+      const slug = url.searchParams.get('slug');
+      if (!slug || !isValidSlug(slug)) return json({ error: 'slug required' }, { status: 400 });
+      const gate = await enforceDocAccess(env, req, slug, 1);
+      if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
+      const status = await readAgentStatus(env, slug);
+      return json({ ...status, latest_version: latestVersionNumber(gate.meta) || null });
+    }
+
     // ---- comments ----
     if (p === '/api/comments' && method === 'GET') {
       const slug = url.searchParams.get('slug');
@@ -6000,6 +6143,18 @@ export default {
       // Same read gate as the HTML routes: private docs don't leak comments.
       const gate = await enforceDocAccess(env, req, slug, parseVersionParam(url) || 1);
       if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
+      // The agent reading the comments is what bridge 2 waits for. A Bearer
+      // token names the agent; `version=all` is the shape only tdoc-pull asks
+      // for. Neither ever fails the read.
+      const agentAuth = req.headers.get('authorization') ? await requireUploadAuth(req, env) : null;
+      if ((agentAuth && agentAuth.ok) || url.searchParams.get('version') === 'all') {
+        try {
+          await markAgentRead(env, slug);
+          if (agentAuth && agentAuth.ok && agentAuth.actor && agentAuth.actor.kind === 'hosted') {
+            await stampOnboardingFor(env, agentAuth.actor.account_id, 'comments_read');
+          }
+        } catch {}
+      }
       // Read from the DO (source of truth; it lazily migrates from KV on first
       // touch). Migrate-in-memory for this response only — never persist from a
       // read (writes go through the DO).
@@ -6132,6 +6287,15 @@ export default {
             });
           }
         }
+      }
+      // The owner's own first comment, and the first person they tagged, are
+      // steps on their journey. Never fail the post for a stamp.
+      if (res.status === 200 && isDocOwner) {
+        try {
+          const accountId = await sessionAccountId(env, s);
+          if (!parent_id) await stampOnboardingFor(env, accountId, 'commented');
+          if (mentions.length) await stampOnboardingFor(env, accountId, 'tagged');
+        } catch {}
       }
       // The composer needs to know what became of each name: an invite is
       // worth telling the owner about (they still have to send the link), and
@@ -6680,6 +6844,30 @@ export default {
           first_publish: firstHostedPublish,
           client_version: clientVersion,
         });
+        // The journey's two publish stamps. The first doc also gets its first
+        // comment — from tdoc, signed as tdoc — so the margin is not empty
+        // when the person arrives, and there is something for their agent to
+        // answer even before they have written a word. Never fails the upload.
+        try {
+          if (firstHostedPublish) {
+            const record = await stampOnboardingFor(env, auth.actor.account_id, 'published_first', { first_doc: slug });
+            // Only for somebody who came through the door. A CLI-first
+            // publisher never asked to be onboarded, and a comment from tdoc
+            // on their first doc would be an uninvited guest.
+            if (record && record.started && !record.seeded_comment) {
+              const seeded = await mutateComments(env, slug, {
+                kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author: SEED_COMMENT_AUTHOR,
+                text: SEED_COMMENT_TEXT, mentions: [], anchor: seedCommentAnchor(doc), version: verNum,
+                at: new Date().toISOString(),
+              });
+              if (seeded.status === 200) await stampOnboardingFor(env, auth.actor.account_id, 'seeded_comment');
+            }
+          } else if (verNum >= 2) {
+            await stampOnboardingFor(env, auth.actor.account_id, 'revised');
+          }
+        } catch (e) {
+          console.error('[onboarding] publish stamp failed (non-fatal):', e && e.message ? e.message : String(e));
+        }
       }
       return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal });
     }

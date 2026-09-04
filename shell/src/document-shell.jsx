@@ -1,7 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
 import { AppSwitch } from './ui/switch.jsx';
-import { duplicateDocument, renameDocument, setDocumentStar } from './document/api.js';
+import {
+  duplicateDocument,
+  getAgentStatus,
+  getOnboarding,
+  postOnboardingEvent,
+  renameDocument,
+  setDocumentStar,
+} from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
   DesktopCommentLayer,
@@ -106,6 +113,18 @@ function OldVersionNotice({ value }) {
 // who wants the margin quiet wants it quiet everywhere.
 const RESOLVED_KEY = 'tdoc-show-resolved';
 
+// Bridge 2. The only instruction in the journey: the line the owner pastes
+// into their agent after leaving a comment. What follows is read off the
+// server — the agent pulling the comments, then publishing — so the card can
+// say "your agent is reading this" because it is, not because a timer ran.
+const HANDOFF_LINE = 'Read my tdoc comments and fix them';
+const HANDOFF_POLL_MS = 3000;
+// Past this the wait reads as stuck, and the line asks the one question that
+// resolves it.
+const HANDOFF_STUCK_MS = 5 * 60 * 1000;
+// The exit. On a revised doc, once, until the person has copied the link.
+const EXIT_LINE = 'Now get a real one. Tag someone and send them the link.';
+
 export function DocumentShell({ boot, config }) {
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
@@ -130,7 +149,15 @@ export function DocumentShell({ boot, config }) {
   ));
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  // `?onboard=own` is how the sign-in redirect returns a person to the door
+  // they picked; the dialog opens straight into it.
+  const [onboardingDoor, setOnboardingDoor] = useState(() => (
+    new URLSearchParams(location.search).get('onboard')
+  ));
+  const [onboardingOpen, setOnboardingOpen] = useState(() => (
+    Boolean(config.onboarding && config.identity
+      && new URLSearchParams(location.search).get('onboard') === 'own')
+  ));
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
   ));
@@ -148,8 +175,12 @@ export function DocumentShell({ boot, config }) {
     });
   }, []);
 
-  const signIn = useCallback(() => {
-    const returnUrl = location.pathname + location.search + location.hash;
+  // `returnTo` lets a caller land the person somewhere specific after the
+  // sign-in — the onboarding door they chose — instead of back where they were.
+  const signIn = useCallback((returnTo) => {
+    const returnUrl = typeof returnTo === 'string' && returnTo.startsWith('/')
+      ? returnTo
+      : location.pathname + location.search + location.hash;
     // One door: the provider seat first (every method lives in its modal),
     // the first-party GitHub redirect only where the seat is absent, the
     // device-code dialog only where neither is configured.
@@ -176,6 +207,44 @@ export function DocumentShell({ boot, config }) {
   });
 
   const [invited, setInvited] = useState(null);
+
+  // The journey record, for a signed-in reader on a doc of their own: it says
+  // whether the exit line is still owed. Nothing is read for a visitor.
+  const [onboardingRecord, setOnboardingRecord] = useState(null);
+  useEffect(() => {
+    if (!config.identity) return;
+    getOnboarding()
+      .then((result) => setOnboardingRecord(result?.record || null))
+      .catch(() => {});
+  }, [config.identity]);
+
+  // Resume. A person who chose "Use my own agent" and never got a doc lands
+  // back inside that door on their next visit to the landing page — the
+  // record says which step is empty, and the page goes there.
+  useEffect(() => {
+    if (!config.onboarding || !config.identity) return;
+    if (new URLSearchParams(location.search).get('onboard')) return;
+    getOnboarding().then((result) => {
+      const record = result?.record;
+      if (record?.started && !record?.published_first && !record?.waitlist) {
+        setOnboardingDoor('own');
+        setOnboardingOpen(true);
+      }
+    }).catch(() => {});
+    // Once, at boot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Bridge 2 state lives on the doc, not on a card: one paste covers every
+  // comment, and the card that shows it can close and reopen.
+  const [handoff, setHandoff] = useState({ state: 'idle', copiedAt: null });
+  const handoffEnabled = Boolean(config.isOwner && !config.isLanding);
+  const handoffCopy = useCallback(async () => {
+    const ok = await copyText(HANDOFF_LINE);
+    if (!ok) { showToast('Could not copy', true); return; }
+    setHandoff({ state: 'waiting', copiedAt: Date.now() });
+    postOnboardingEvent('fix_copy_clicked', config.slug).catch(() => {});
+  }, [config.slug, showToast]);
 
   const mentionable = useMentionable(
     config.slug,
@@ -540,7 +609,55 @@ export function DocumentShell({ boot, config }) {
   const shareUrl = config.isLanding
     ? `${location.origin}/`
     : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
-  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (editor.mode === 'edit' ? 46 : 0);
+
+  // While the owner waits on their agent, ask the server every few seconds
+  // what it has done: read the comments (the card flips to "reading"),
+  // replied (the refresh brings the reply in), published (the page moves to
+  // the new version). Stops on its own past HANDOFF_STUCK_MS.
+  const commentsRefresh = comments.refresh;
+  useEffect(() => {
+    if (handoff.state !== 'waiting' && handoff.state !== 'reading') return undefined;
+    let cancelled = false;
+    let timer = null;
+    const tick = async () => {
+      try {
+        const status = await getAgentStatus(config.slug);
+        if (cancelled) return;
+        const latest = Number(status?.latest_version) || 0;
+        if (latest > Number(config.version)) {
+          location.href = `/d/${encodeURIComponent(config.slug)}/v/${latest}`;
+          return;
+        }
+        const readAt = status?.read_at ? new Date(status.read_at).getTime() : 0;
+        if (readAt && readAt >= handoff.copiedAt - 5000) {
+          setHandoff((current) => (current.state === 'waiting' ? { ...current, state: 'reading' } : current));
+        }
+        await commentsRefresh();
+      } catch {}
+      if (cancelled) return;
+      if (Date.now() - handoff.copiedAt > HANDOFF_STUCK_MS) {
+        setHandoff((current) => ({ ...current, state: 'stuck' }));
+        postOnboardingEvent('timeout_shown', config.slug).catch(() => {});
+        return;
+      }
+      timer = window.setTimeout(tick, HANDOFF_POLL_MS);
+    };
+    tick();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [handoff.state, handoff.copiedAt, config.slug, config.version, commentsRefresh]);
+
+  const showExitBanner = Boolean(
+    handoffEnabled && Number(config.version) >= 2
+    && onboardingRecord && onboardingRecord.started && !onboardingRecord.shared,
+  );
+  const copyExitLink = async () => {
+    if (!await copyText(shareUrl)) { showToast('Could not copy', true); return; }
+    showToast('Link copied');
+    setOnboardingRecord((current) => ({ ...(current || {}), shared: new Date().toISOString() }));
+    postOnboardingEvent('share_link_copied', config.slug).catch(() => {});
+  };
+
+  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? 36 : 0) + (editor.mode === 'edit' ? 46 : 0);
   const pinLeft = Math.min(
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
     window.innerWidth - 34,
@@ -602,6 +719,8 @@ export function DocumentShell({ boot, config }) {
               mode={editor.mode}
               canComment={config.canComment}
               canEdit={config.canEdit}
+              signInToComment={Boolean(config.signInToComment)}
+              onSignIn={signIn}
               onChange={editor.changeMode}
             />
             <DocumentPrimaryAction
@@ -661,6 +780,13 @@ export function DocumentShell({ boot, config }) {
 
       <OldVersionNotice value={boot.oldVersion} />
 
+      {showExitBanner ? (
+        <div className="tdoc-onboard-banner" style={{ top: TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) }} role="status">
+          <span>{EXIT_LINE}</span>
+          <button type="button" onClick={copyExitLink}>Copy link</button>
+        </div>
+      ) : null}
+
       {editor.mode === 'edit' ? (
         <EditorToolbar
           dirty={editor.dirty}
@@ -712,6 +838,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
+          handoff={handoffEnabled ? { line: HANDOFF_LINE, state: handoff.state, onCopy: handoffCopy } : null}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -741,6 +868,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
+          handoff={handoffEnabled ? { line: HANDOFF_LINE, state: handoff.state, onCopy: handoffCopy } : null}
         />
       )}
 
@@ -813,7 +941,13 @@ export function DocumentShell({ boot, config }) {
         onOpenChange={setSignInOpen}
         onSuccess={completeSignIn}
       />
-      <OnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
+      <OnboardingDialog
+        open={onboardingOpen}
+        onOpenChange={setOnboardingOpen}
+        config={config}
+        onSignIn={signIn}
+        initialDoor={onboardingDoor}
+      />
 
       {toast ? (
         <div className={`tdoc-shell-toast${toast.error ? ' error' : ''}`} role="status">

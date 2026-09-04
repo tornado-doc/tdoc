@@ -624,3 +624,180 @@ button.tdoc-pin {
   background: none; border: none; padding: 0; font: inherit;
   color: inherit; text-decoration: underline; cursor: pointer;
 }
+
+/* Onboarding: one screen, two doors. They stack below the narrow breakpoint. */
+.tdoc-doors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 560px) {
+  .tdoc-doors { grid-template-columns: 1fr; }
+}
+
+.tdoc-modal .tdoc-doors button.tdoc-door {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  height: 100%;
+  padding: 16px;
+  border: 1px solid var(--td-line);
+  border-radius: 12px;
+  background: var(--td-ground);
+  color: var(--td-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+
+.tdoc-modal .tdoc-doors button.tdoc-door:hover {
+  border-color: var(--td-accent);
+  background: var(--td-surface-2);
+}
+
+.tdoc-door strong { font-size: 14px; }
+
+.tdoc-door span {
+  color: var(--td-ink-soft, #6b6b73);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.tdoc-door em {
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--td-accent);
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* "agent", underlined, its definition on hover. The tip is positioned
+   against the DOOR, not the word: from the word it ran rightwards over the
+   other door and read as that door's description. */
+.tdoc-modal .tdoc-doors button.tdoc-door { position: relative; }
+
+.tdoc-term {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+
+.tdoc-term-tip {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 40px;
+  z-index: 5;
+  width: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--td-ink);
+  color: var(--td-ground);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .12s;
+}
+
+.tdoc-term-tip b { display: block; margin-top: 4px; }
+
+.tdoc-term:hover .tdoc-term-tip,
+.tdoc-term:focus-within .tdoc-term-tip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* The tooltip needs a pointer; on a phone the definition is inline instead. */
+.tdoc-door .tdoc-agent-def { display: none; }
+
+@media (max-width: 560px), (hover: none) {
+  .tdoc-term { border-bottom: 0; cursor: default; }
+  .tdoc-term-tip { display: none; }
+  .tdoc-door .tdoc-agent-def {
+    display: block;
+    color: var(--td-ink-soft, #6b6b73);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+}
+
+.tdoc-doors-example {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.tdoc-two-windows { margin: 0 0 12px; font-weight: 600; }
+
+.tdoc-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 6px;
+  font-size: 13px;
+  color: var(--td-ink-soft, #6b6b73);
+}
+
+.tdoc-wait.live { color: var(--td-ink); }
+
+.tdoc-wait-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--td-accent);
+  animation: tdoc-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tdoc-pulse {
+  0%, 100% { opacity: .35; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tdoc-wait-dot { animation: none; }
+}
+
+.tdoc-waitlist-done { margin: 0 0 8px; font-weight: 600; }
+
+.tdoc-modal button.tdoc-door-back { margin-top: 12px; }
+
+/* The line under the top bar on a revised doc: the journey's exit. */
+.tdoc-onboard-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--td-accent);
+  color: #fff;
+  font-size: 13px;
+}
+
+.tdoc-onboard-banner button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, .6);
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tdoc-onboard-banner button:hover { background: rgba(255, 255, 255, .15); }

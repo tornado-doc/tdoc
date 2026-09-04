@@ -100,7 +100,7 @@ t('safeJsonForScript is identical in worker.js and server.js', () => {
 
 // (cyrb53 lives only in worker.js now — its overlay twin died with the monolith.)
 
-for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAgentLogin', 'detectAgentRuntime', 'agentIdentity', 'isValidWidgetName', 'widgetCspHeader', 'isWidgetFrameRequest', 'forceWidgetSandbox', 'blankDocSlug', 'blankDocHtml', 'titleFromDocument', 'syncDocumentTitle']) {
+for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAgentLogin', 'detectAgentRuntime', 'agentIdentity', 'isValidWidgetName', 'widgetCspHeader', 'isWidgetFrameRequest', 'forceWidgetSandbox', 'blankDocSlug', 'blankDocHtml', 'titleFromDocument', 'syncDocumentTitle', 'stampOnboarding', 'onboardingActionStep', 'seedCommentAnchor']) {
   t(`${name} is identical in worker.js and server.js`, () => {
     const a = norm(fnBody(worker, name));
     const b = norm(fnBody(server, name));

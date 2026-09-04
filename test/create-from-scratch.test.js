@@ -194,11 +194,15 @@ t('the onboarding dialog is onboarding, not a doc launcher (#371)', () => {
   // first-time visitor has not asked yet.
   assert(!onboarding.includes('CreateChoice'), 'the onboarding dialog must not offer the cards');
   assert(!onboarding.includes('createDocument'), 'the onboarding dialog must not create documents');
-  assert(onboarding.includes('<FirstDocRecipe />'), 'the recipe is the whole of this dialog');
-  // TopBar still takes an identity; the dialog does not.
-  assert(/<OnboardingDialog open=\{onboardingOpen\} onOpenChange=\{setOnboardingOpen\} \/>/
-    .test(read('shell/src/document-shell.jsx')),
-    'the dialog no longer needs an identity, so the shell should stop passing one');
+  // The recipe lives behind the "Use my own agent" door now — still the one
+  // rendering, still the whole of what that door hands over.
+  assert(onboarding.includes('<FirstDocRecipe onCopied='), 'the recipe is what the own-agent door hands over');
+  // The dialog takes the config (its left door needs to know whether there
+  // is a session) and the shell's sign-in, and nothing else.
+  const mount = read('shell/src/document-shell.jsx').match(/<OnboardingDialog[\s\S]*?\/>/);
+  assert(mount && /config=\{config\}/.test(mount[0]) && /onSignIn=\{signIn\}/.test(mount[0]),
+    'the dialog needs the config and the sign-in');
+  assert(!/identity=/.test(mount[0]), 'the dialog reads identity off config, not as its own prop');
   // The hub's own card still respects the host capability.
   assert(form.includes('canCreate ? ('), 'the recipe card must survive canCreate=false');
 });

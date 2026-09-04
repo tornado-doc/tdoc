@@ -34,6 +34,121 @@ const SHELL_RUNTIME = loadRuntimeAssets();
 // Slugs that carry the onboarding modal. Product UI, injected under the same
 // nonce as the overlay, because a doc's own <script> never runs.
 const ONBOARD_SLUGS = new Set(['tornado-doc', 'tdoc-start']);
+// ---- onboarding (shared with server.js; test/no-drift.test.js pins these) ----
+// A step is a timestamp, never a boolean: resuming reads the first one that is
+// empty, the checklist renders from the same object, and the funnel is read
+// off the stamps rather than from a second set of counters.
+function stampOnboarding(record, step, at, extra) {
+  const out = record && typeof record === 'object' ? { ...record } : {};
+  if (step && !out[step]) out[step] = at;
+  if (extra && typeof extra === 'object') {
+    for (const key of Object.keys(extra)) if (out[key] == null) out[key] = extra[key];
+  }
+  return out;
+}
+// Which actions the page may report, and which step (if any) each one stamps.
+// Anything else is rejected: the log is what the funnel is read from, so a
+// page cannot invent a step.
+function onboardingActionStep(action) {
+  switch (action) {
+    case 'door_own_agent': return 'started';
+    case 'waitlist': return 'waitlist';
+    case 'tour_seen': return 'tour_seen';
+    case 'share_link_copied': return 'shared';
+    case 'example_opened':
+    case 'copy_clicked':
+    case 'fix_copy_clicked':
+    case 'timeout_shown':
+      return null;
+    default:
+      return undefined;
+  }
+}
+// The first comment on somebody's first doc, from tdoc and signed as tdoc —
+// not a person pretending to be one. Anchored to the first paragraph so it
+// lands on text the reader can see, and worded to ask for the one gesture the
+// page exists to teach.
+const SEED_COMMENT_TEXT = 'First reader here. Which claim on this page would you defend least? Highlight it and say so.';
+const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '', kind: 'system' };
+function seedCommentAnchor(html) {
+  const m = String(html || '').match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
+  if (!m) return null;
+  const text = m[1]
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length < 8) return null;
+  return { kind: 'text', text: text.slice(0, 200), context_before: '', context_after: '' };
+}
+
+// Local twin of the worker's KV records: one file for the one local account,
+// one for what the agent last read. The local server cannot see tdoc-new
+// write a doc, so "first doc published" is discovered on read instead.
+const ONBOARDING_FILE = path.join(ROOT, '.onboarding.json');
+const AGENT_READ_FILE = path.join(ROOT, '.agent-read.json');
+function loadOnboardingLocal() {
+  const v = readJson(ONBOARDING_FILE, {});
+  return v && typeof v === 'object' ? v : {};
+}
+function stampOnboardingLocal(step, extra) {
+  const all = loadOnboardingLocal();
+  all.record = stampOnboarding(all.record || {}, step, new Date().toISOString(), extra);
+  writeJson(ONBOARDING_FILE, all);
+  return all.record;
+}
+function logOnboardingEventLocal(action, meta) {
+  const all = loadOnboardingLocal();
+  all.events = Array.isArray(all.events) ? all.events : [];
+  all.events.push({ action, at: new Date().toISOString(), ...(meta || {}) });
+  writeJson(ONBOARDING_FILE, all);
+}
+function markAgentReadLocal(slug) {
+  const m = readJson(AGENT_READ_FILE, {});
+  m[slug] = { at: new Date().toISOString() };
+  writeJson(AGENT_READ_FILE, m);
+}
+function readAgentStatusLocal(slug) {
+  const m = readJson(AGENT_READ_FILE, {});
+  return { read_at: (m[slug] && m[slug].at) || null };
+}
+function discoverFirstDocLocal(record) {
+  if (!record || !record.started) return record;
+  let rec = record;
+  if (!rec.published_first) {
+    let found = null;
+    for (const name of fs.readdirSync(ROOT)) {
+      if (name.startsWith('.') || ONBOARD_SLUGS.has(name) || name === 'tdoc-templates') continue;
+      const meta = readJson(path.join(ROOT, name, 'meta.json'), null);
+      if (!meta || !meta.created || meta.created < rec.started) continue;
+      if (!found || meta.created < found.created) found = { slug: name, created: meta.created };
+    }
+    if (!found) return rec;
+    rec = stampOnboardingLocal('published_first', { first_doc: found.slug });
+    let html = '';
+    try { html = fs.readFileSync(path.join(ROOT, found.slug, 'v1', 'index.html'), 'utf8'); } catch {}
+    const file = path.join(ROOT, found.slug, 'comments.json');
+    const comments = readCommentFile(file);
+    comments.push({
+      id: `c_${Date.now()}`, version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
+      mentions: [], author: SEED_COMMENT_AUTHOR, status: 'open', created: new Date().toISOString(),
+      replies: [], reactions: {},
+    });
+    writeJson(file, comments);
+    rec = stampOnboardingLocal('seeded_comment');
+  }
+  if (rec.first_doc && !rec.revised) {
+    const meta = readJson(path.join(ROOT, rec.first_doc, 'meta.json'), null);
+    if (meta && Array.isArray(meta.versions) && meta.versions.length >= 2) rec = stampOnboardingLocal('revised');
+  }
+  return rec;
+}
+
 // Optional two-person local inbox (browser e2e). Off unless TDOC_E2E_USER is set.
 const E2E_USER = String(process.env.TDOC_E2E_USER || '').trim();
 const E2E_OWNER = String(process.env.TDOC_E2E_OWNER || E2E_USER || '').trim();
@@ -729,6 +844,8 @@ function shellDocument(slug, version, nonce) {
     webAuth: false,
     isLanding,
     onboarding: ONBOARD_SLUGS.has(slug),
+    // Local preview is anonymous by design and always may comment.
+    signInToComment: false,
     stars: cachedStars,
   });
   return SHELL.shellHtml({
@@ -1370,9 +1487,37 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- COMMENTS (anonymous) ---
+  // ---- onboarding (local twin of the worker's routes) ----
+  if (p === '/api/onboarding' && req.method === 'GET') {
+    const all = loadOnboardingLocal();
+    return json(res, 200, { record: discoverFirstDocLocal(all.record || {}) });
+  }
+  if (p === '/api/onboarding/event' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const action = typeof body.action === 'string' ? body.action : '';
+    const step = onboardingActionStep(action);
+    if (step === undefined) return json(res, 400, { error: 'unknown_action' });
+    const doc = safeSlug(body.doc);
+    logOnboardingEventLocal(action, doc ? { doc } : null);
+    const record = step
+      ? stampOnboardingLocal(step, step === 'waitlist' ? { started: new Date().toISOString() } : null)
+      : null;
+    return json(res, 200, { ok: true, record });
+  }
+  if (p === '/api/doc/agent-status' && req.method === 'GET') {
+    const slug = safeSlug(url.searchParams.get('slug'));
+    if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
+    const meta = readJson(path.join(ROOT, slug, 'meta.json'), null);
+    const latest = meta ? latestLocalVersion(slug, meta) : null;
+    return json(res, 200, { ...readAgentStatusLocal(slug), latest_version: latest || null });
+  }
+
   if (p === '/api/comments' && req.method === 'GET') {
     const slug = safeSlug(url.searchParams.get('slug'));
     if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
+    // `version=all` is the shape only tdoc-pull asks for: the agent is reading.
+    if (url.searchParams.get('version') === 'all') { try { markAgentReadLocal(slug); } catch {} }
     const all = readCommentFile(path.join(ROOT, slug, 'comments.json'));
     // Fold to the requested version's snapshot so past versions keep their
     // historical status (matches the worker). Missing version → latest state.
@@ -1434,6 +1579,10 @@ const server = http.createServer(async (req, res) => {
     };
     comments.push(entry);
     writeJson(file, comments);
+    try {
+      stampOnboardingLocal('commented');
+      if (mentions.length) stampOnboardingLocal('tagged');
+    } catch {}
     if (E2E_USER && E2E_OWNER) {
       let title = slug;
       try { title = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8')).title || slug; } catch {}

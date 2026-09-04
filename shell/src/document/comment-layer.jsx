@@ -86,6 +86,7 @@ export function DesktopCommentLayer({
   onResolve,
   onEdit,
   onReanchor,
+  handoff = null,
 }) {
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
 
@@ -136,6 +137,7 @@ export function DesktopCommentLayer({
           onResolve={onResolve}
           onEdit={onEdit}
           onReanchor={onReanchor}
+          handoff={handoff}
         />
       ) : null}
     </>
@@ -159,6 +161,7 @@ export function MobileCommentDrawer({
   onEdit,
   onReanchor,
   onNavigate,
+  handoff = null,
 }) {
   const drawerRef = useRef(null);
 
@@ -201,6 +204,7 @@ export function MobileCommentDrawer({
                   onResolve={onResolve}
                   onEdit={onEdit}
                   onReanchor={onReanchor}
+                  handoff={handoff}
                 />
               ))}
             </Drawer.Content>

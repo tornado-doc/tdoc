@@ -30,10 +30,14 @@ const MODES = [
   { value: 'edit', label: 'Edit', Icon: Pencil },
 ];
 
-export function DocumentModeControl({ mode, canComment, canEdit, onChange }) {
+// `signInToComment`: the doc takes comments, this visitor has no session. The
+// Comment option still shows — the door has to be where the person looks for
+// it, not hidden behind a Sign in button in the corner — and choosing it opens
+// the sign-in instead of the mode.
+export function DocumentModeControl({ mode, canComment, canEdit, onChange, signInToComment = false, onSignIn }) {
   const options = MODES.filter((option) => (
     option.value === 'read'
-    || (option.value === 'comment' && canComment)
+    || (option.value === 'comment' && (canComment || signInToComment))
     || (option.value === 'edit' && canEdit)
   ));
   if (options.length < 2) return null;
@@ -65,10 +69,14 @@ export function DocumentModeControl({ mode, canComment, canEdit, onChange }) {
             className={`tdoc-mode-item${selected ? ' current' : ''}`}
             role="menuitemradio"
             aria-checked={selected}
-            onClick={() => onChange(option.value)}
+            onClick={() => (
+              option.value === 'comment' && !canComment && signInToComment
+                ? onSignIn?.()
+                : onChange(option.value)
+            )}
           >
             <Icon size={15} />
-            <span>{option.label}</span>
+            <span>{option.value === 'comment' && !canComment && signInToComment ? 'Sign in to comment' : option.label}</span>
             {selected ? <Check className="tdoc-mode-check" size={14} /> : null}
           </AppMenuItem>
         );
