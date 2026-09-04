@@ -55,6 +55,7 @@ const OFFLINE = [
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'resolve-a-thread.test.js', // #357 a person can resolve; resolved threads leave the margin
   'tornado-doc-landing.test.js',
+  'landing-republish.test.js', // #458 the homepage is one v1, re-shipped in place with `replace`
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
   'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader

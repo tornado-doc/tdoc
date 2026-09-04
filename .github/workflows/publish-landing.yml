@@ -141,15 +141,21 @@ jobs:
               done
             fi
 
-            # Same shape tdoc-publish sends. comments is omitted on purpose:
-            # the payload's comments.json is empty and the worker merges rather
-            # than replaces, so sending an empty list would read as intent to
-            # clear a thread it must not touch.
+            # Same shape tdoc-publish sends, plus `replace`. Each landing doc is
+            # one version re-shipped in place on every deploy; without the
+            # flag the worker treats a v1 that already exists as history and
+            # refuses to rewrite it (#458). It is honoured for the provider
+            # token only and only for the doc's latest version.
+            #
+            # comments is omitted on purpose: the payload's comments.json is
+            # empty and the worker merges rather than replaces, so sending an
+            # empty list would read as intent to clear a thread it must not
+            # touch.
             jq -n --arg slug "$slug" --argjson version "$ver" \
               --rawfile html "$dir/v$ver/index.html" \
               --slurpfile meta "$dir/meta.json" \
               --argjson widgets "$widgets" \
-              '{slug:$slug, version:$version, html:$html, meta:$meta[0]}
+              '{slug:$slug, version:$version, html:$html, meta:$meta[0], replace:true}
                + (if $widgets == {} then {} else {widgets:$widgets} end)' > payload.json
 
             code=$(curl -sS -o resp.json -w '%{http_code}' -X POST https://tdoc.dev/api/upload \
