@@ -641,7 +641,41 @@ function frameCspHeader(nonce) {
 // documents bake their reader CSS at creation: changing that file alone fixes
 // nothing that is already published. Kept byte-identical in server.js —
 // test/reader-patch-drift.test.js holds the two together.
-const READER_PATCH_CSS = 'body table:not(.tdoc-table-scroll>table){display:block!important;min-width:0!important;max-width:100%!important;overflow-x:auto;-webkit-overflow-scrolling:touch}body table:not(.tdoc-table-scroll>table)>thead,body table:not(.tdoc-table-scroll>table)>tbody,body table:not(.tdoc-table-scroll>table)>tfoot{display:table!important;width:max-content!important;min-width:100%!important}';
+// A table only scrolls when it sits in .tdoc-table-scroll, and adding that
+// wrapper was the author's job — a doc whose agent skipped it pushed the whole
+// page sideways. CSS alone cannot fix that: making the table itself the scroller
+// (display:block) leaves its row groups to size independently, and the header
+// stops lining up with the body. Wrapping is the only thing that keeps all
+// three — no page overflow, columns at their natural width, header aligned.
+// Kept byte-identical in server.js; test/reader-patch-drift.test.js holds them
+// together.
+function wrapBareTables(html) {
+  if (typeof html !== 'string' || html.indexOf('<table') === -1) return html;
+  var out = '', i = 0;
+  while (i < html.length) {
+    var at = html.toLowerCase().indexOf('<table', i);
+    if (at === -1) { out += html.slice(i); break; }
+    var before = html.slice(i, at);
+    var already = /<div[^>]*class="[^"]*tdoc-table-scroll[^"]*"[^>]*>\s*$/i.test(out + before);
+    var depth = 0, j = at, end = -1;
+    while (j < html.length) {
+      var open = html.toLowerCase().indexOf('<table', j);
+      var close = html.toLowerCase().indexOf('</table', j);
+      if (close === -1) break;
+      if (open !== -1 && open < close) { depth++; j = open + 6; continue; }
+      depth--;
+      if (depth === 0) { end = html.indexOf('>', close); break; }
+      j = close + 7;
+    }
+    if (end === -1) { out += html.slice(i); break; }
+    var table = html.slice(at, end + 1);
+    out += before + (already ? table : '<div class="tdoc-table-scroll">' + table + '</div>');
+    i = end + 1;
+  }
+  return out;
+}
+
+const READER_PATCH_CSS = '.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {
@@ -1095,6 +1129,7 @@ const server = http.createServer(async (req, res) => {
           body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
         }
       }
+      body = wrapBareTables(body);
       if (body.indexOf('id="tdoc-reader-patch"') === -1) {
         const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
         // Anchor on the OPENING tag — see the matching comment in worker.js:
