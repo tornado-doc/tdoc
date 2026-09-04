@@ -448,6 +448,11 @@ t('shipping the homepage ships content, not just worker code', () => {
   assert(/node bin\/tdoc-landing-release/.test(content),
     'publish workflow must build the release payload, not upload the working copy');
   assert(/https:\/\/tdoc\.dev\/api\/upload/.test(content), 'publish workflow does not POST to /api/upload');
+  // #458: each landing doc is one v1 re-shipped in place on every deploy. The
+  // worker refuses to rewrite an existing version unless asked in so many
+  // words, so a payload without `replace` 409s on every run after the first.
+  assert(/replace:\s*true/.test(content),
+    'publish workflow must send replace:true, or the homepage can never be republished');
   // The upload can succeed while the page still is not readable (access
   // gate, wrong slug). Green must mean the homepage actually renders.
   assert(/is still serving the neutral fallback/.test(content),
