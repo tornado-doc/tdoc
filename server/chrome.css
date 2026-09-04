@@ -396,6 +396,9 @@
   .tdoc-reply-form.open { display: block; }
   .tdoc-reply-form textarea,
   .tdoc-edit-form textarea { width: 100%; min-height: 48px; box-sizing: border-box; padding: 6px 8px; font: 13px system-ui; border: 1px solid #ccc; border-radius: 6px; resize: vertical; outline: none; }
+  /* An edit opens on words that already exist; 48px shows two lines of them and
+     hides the rest behind a scrollbar. A reply starts empty and can stay small. */
+  .tdoc-edit-form textarea { min-height: 96px; }
   .tdoc-reply-form textarea:focus,
   .tdoc-edit-form textarea:focus { border-color: var(--td-accent); }
   .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
