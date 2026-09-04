@@ -581,6 +581,68 @@
     if (!s || !e) return null;
     try { var r = document.createRange(); r.setStart(s.node, s.offset); r.setEnd(e.node, e.offset); return r; } catch (x) { return null; }
   }
+  // The anchor's own words are gone, but its neighbours may not be. Every field
+  // needed for this is already saved — context_before and context_after — and
+  // findTextRange only ever used them to break ties between several copies of
+  // the anchor text. When the text itself has been rewritten it returns null
+  // before it ever looks at them, and the comment loses its place entirely.
+  //
+  // The tail of context_before and the head of context_after are the parts that
+  // touched the anchor, so the longest surviving run of either is the closest
+  // thing to where the words used to be. Measured on a real document: five
+  // comments whose text was rewritten still had 9–59 characters of neighbouring
+  // context alive in the new version.
+  //
+  // Approximate on purpose. The caller marks these unanchored, so the card is
+  // dashed and offers Re-anchor — a guess that admits it is a guess, rather than
+  // a pin that claims to point at somebody else's sentence.
+  var NEAR_CONTEXT_MIN = 12;
+  function findNearContext(anchor, view) {
+    if (!anchor || !view || !view.norm) return null;
+    var before = normalizeContext(anchor.context_before).trim();
+    var after = normalizeContext(anchor.context_after).trim();
+    var best = null; // { at, len }
+
+    // Suffixes of context_before: the end of it sat against the anchor.
+    for (var lb = before.length; lb >= NEAR_CONTEXT_MIN; lb--) {
+      var tail = before.slice(before.length - lb);
+      var i = view.norm.indexOf(tail);
+      if (i !== -1 && view.norm.indexOf(tail, i + 1) === -1) { best = { at: i + lb, len: lb }; break; }
+    }
+    // Prefixes of context_after: the start of it sat against the anchor. Only
+    // taken when it beats what the other side found — longer surviving run wins.
+    for (var la = after.length; la >= NEAR_CONTEXT_MIN; la--) {
+      if (best && la <= best.len) break;
+      var head = after.slice(0, la);
+      var j = view.norm.indexOf(head);
+      if (j !== -1 && view.norm.indexOf(head, j + 1) === -1) { best = { at: j, len: la }; break; }
+    }
+    if (!best) return null;
+    // Land ON the surviving context, not on the position just past it. For a
+    // before-match that position is where the anchor used to begin, which after a
+    // rewrite is often the whitespace between two blocks — a text node with no
+    // layout, whose rect is 0x0 at the top of the document.
+    //
+    // Prefer the single character adjacent to where the anchor sat; if that one
+    // cannot be measured either, widen to the whole surviving run, which spans
+    // real rendered text by construction. Only give up when neither can be
+    // measured — a spot with no rect is not a spot, and pinning to it would drop
+    // the comment at the top of the page.
+    var start = best.side === 'before' ? best.at - best.len : best.at;
+    var adjacent = best.side === 'before' ? best.at - 1 : best.at;
+    var tries = [
+      [Math.max(0, Math.min(adjacent, view.norm.length - 1)), 1],
+      [Math.max(0, start), best.len]
+    ];
+    for (var t = 0; t < tries.length; t++) {
+      var candidate = rangeFromNorm(view, tries[t][0], tries[t][1]);
+      if (!candidate) continue;
+      var box = candidate.getBoundingClientRect();
+      if (box.width || box.height) return candidate;
+    }
+    return null;
+  }
+
   function findTextRange(anchor, view) {
     // No length floor. A one-character anchor used to be refused outright,
     // which in CJK is an ordinary thing to want to comment on — and the
@@ -680,11 +742,20 @@
     // An anchor that cannot be placed still deserves a seat. Without a pin the
     // desktop rail has no coordinate to draw the card at, so the comment sits in
     // the data and nowhere on screen — while the phone drawer, which renders the
-    // list directly, shows it. Park it at the top of the document, flagged, and
-    // everything downstream keeps working unchanged: clustering, the rail, the
-    // dashed unanchored card, and the "move anchor" that puts it back.
+    // list directly, shows it.
+    //
+    // The seat goes at the END of the document, not the top. At the top a stack
+    // of comments from an older version is the first thing beside the title,
+    // which reads as "these matter most"; at the end it reads as what it is —
+    // what the last revision left behind. Everything downstream is unchanged:
+    // clustering, the rail, the dashed unanchored card, and the Re-anchor that
+    // puts one back where it belongs.
+    // Not the very last pixel: the rail culls a pin that falls outside the
+    // viewport, and a seat pinned to the document's final row is never on
+    // screen even when you scroll all the way down. Sit just above the end.
+    var seatY = Math.max(0, document.documentElement.scrollHeight - 160);
     function seat(c, extra) {
-      var pin = { id: c.id, docY: 0, lost: true, login: (c.author && c.author.login) || null,
+      var pin = { id: c.id, docY: seatY, lost: true, login: (c.author && c.author.login) || null,
         avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null,
         resolved: c.status === 'applied', deleted: !!c.deleted };
       if (extra) for (var k in extra) pin[k] = extra[k];
@@ -705,11 +776,22 @@
       if (c.anchor.kind !== 'text') return seat(c);
       var key = (c.anchor.text || '') + '\u0000' + (c.anchor.context_before || '') + '\u0000' + (c.anchor.context_after || '');
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
+      // Exact first, then the neighbourhood, then a seat at the end. The middle
+      // one is approximate, so it is NOT painted as a highlight and its pin is
+      // flagged: the card reads unanchored and offers Re-anchor.
+      var approximate = false;
+      if (!r) {
+        r = findNearContext(c.anchor, docView());
+        approximate = !!r;
+      }
       if (!r) return seat(c);
       _anchorTargets[c.id] = { range: r };
-      if (hl && !c.deleted) hl.add(r);
+      if (hl && !c.deleted && !approximate) hl.add(r);
       var rect = r.getBoundingClientRect();
-      pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
+      // Second line of defence: findNearContext already measures its candidates,
+      // but an exact hit can be invisible too (a rule moved into a hidden block).
+      if (approximate && !rect.width && !rect.height) return seat(c);
+      pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
     setActiveAnchor(_activeAnchorId, false);
