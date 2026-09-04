@@ -51,15 +51,25 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
 
   await t('Base UI overflow menu exposes document actions and closes on Escape', async () => {
     await page.click('#tdoc-more-btn');
-    await page.waitForSelector('.ui-menu-popup [data-action="copy"]');
+    // The menu is open once its export submenu trigger is there; Copy as
+    // Markdown now lives one level down, inside "Download & copy".
+    await page.waitForSelector('.ui-menu-popup .tdoc-export-submenu-trigger');
+    // Top level only, and Escape stays the subject of this test: opening the
+    // submenu first would make the first Escape close THAT, leaving the menu up
+    // and the assertion below waiting forever. What is inside the group is
+    // covered by the copy test that follows.
     const labels = await page.$$eval('.ui-menu-popup .ui-menu-item', (items) => items.map((item) => item.textContent.trim()));
-    if (!labels.includes('Copy as Markdown') || !labels.includes('Download HTML')) throw new Error(`actions missing: ${labels.join(', ')}`);
+    for (const wanted of ['Download & copy']) {
+      if (!labels.includes(wanted)) throw new Error(`actions missing: ${labels.join(', ')}`);
+    }
     await page.keyboard.press('Escape');
     await page.waitForSelector('.ui-menu-popup', { state: 'detached' });
   });
 
   await t('Copy as Markdown bridges from the frame and reports a toast', async () => {
     await page.click('#tdoc-more-btn');
+    await page.click('.ui-menu-popup .tdoc-export-submenu-trigger');
+    await page.waitForSelector('.ui-menu-popup [data-action="copy"]');
     await page.click('.ui-menu-popup [data-action="copy"]');
     await page.waitForSelector('.tdoc-shell-toast');
     const toast = await page.textContent('.tdoc-shell-toast');
@@ -125,7 +135,9 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
       throw new Error(`mobile More does not fit/scroll on a short screen: ${JSON.stringify(popupLayout)}`);
     }
     const menuLabels = await page.$$eval('.ui-menu-popup .ui-menu-item', (items) => items.map((item) => item.textContent.trim()));
-    for (const label of ['Publish', 'Copy as Markdown']) {
+    // Copy as Markdown is inside "Download & copy" now; the top level carries
+    // the group, and My account carries sign-out.
+    for (const label of ['Publish', 'Download & copy']) {
       if (!menuLabels.includes(label)) throw new Error(`${label} missing from mobile More: ${menuLabels.join(', ')}`);
     }
     if (!menuLabels.some((label) => /^(Dark|Light) mode$/.test(label))) throw new Error(`theme missing from mobile More: ${menuLabels.join(', ')}`);

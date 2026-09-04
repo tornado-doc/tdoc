@@ -211,6 +211,8 @@ const SLUG = 'hostile-body-css';
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       await page.click('#tdoc-more-btn');
       await page.waitForSelector('.ui-menu-popup', { timeout: 2000 });
+      await page.click('.ui-menu-popup .tdoc-export-submenu-trigger');
+      await page.waitForSelector('.ui-menu-popup [data-action="copy"]');
       await page.click('.ui-menu-popup [data-action="copy"]');
       await page.waitForFunction(
         () => [...document.querySelectorAll('div')].some(d => d.textContent === 'Copied as Markdown'),

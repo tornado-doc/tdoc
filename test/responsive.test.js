@@ -158,7 +158,9 @@ async function tPub(name, fn) {
         await t('narrow mode: More opens the secondary menu', async () => {
           await page.evaluate(() => document.querySelector('#tdoc-more-btn').click());
           await page.waitForTimeout(150);
-          const open = await page.evaluate(() => document.querySelector('.ui-menu-popup [data-action="copy"]') !== null);
+          // Probe for the export submenu trigger, not for Copy as Markdown:
+          // that row moved one level down when the menu was grouped.
+          const open = await page.evaluate(() => document.querySelector('.ui-menu-popup .tdoc-export-submenu-trigger') !== null);
           await page.keyboard.press('Escape');
           if (!open) throw new Error('secondary menu did not open');
         });
@@ -190,7 +192,7 @@ async function tPub(name, fn) {
     await t('⋯ menu carries a Copy as Markdown action', async () => {
       await page.evaluate(() => document.querySelector('#tdoc-more-btn').click());
       await page.waitForTimeout(120);
-      const hasCopy = await page.evaluate(() => !!document.querySelector('.ui-menu-popup [data-action="copy"]'));
+      const hasCopy = await page.evaluate(() => !!document.querySelector('.ui-menu-popup .tdoc-export-submenu-trigger'));
       await page.keyboard.press('Escape');
       if (!hasCopy) throw new Error('no Copy action in the ⋯ menu');
     });
