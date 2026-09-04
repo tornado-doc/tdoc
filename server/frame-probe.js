@@ -316,7 +316,13 @@
     } catch (x) {}
   }, true);
   document.addEventListener('mousedown', function (e) {
-    if (interactionMode === 'edit') return;
+    // Edit mode opts out of comment behaviour, but not out of dismissal: a card
+    // opened from a pin stayed open there while every other mode closed it on
+    // a click outside. Everything below is already mode-agnostic, so letting
+    // edit through while something is open is the whole change — the selection
+    // painting further down is still gated on comment mode, and the swallow
+    // only preventDefaults our own pill and links, so a caret still lands.
+    if (interactionMode === 'edit' && !shellUiOpen) return;
     // Clicking our own comment pill must not fire the clear (it opens the
     // composer) — everything else in the doc clears the shell's open UI.
     // The pill is our own UI, so a click on it normally opens the composer
