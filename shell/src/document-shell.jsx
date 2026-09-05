@@ -45,7 +45,7 @@ import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
-import { OnboardingDialog } from './onboarding-dialog.jsx';
+import { OnboardingDialog, selectContents } from './onboarding-dialog.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -122,8 +122,11 @@ const HANDOFF_POLL_MS = 3000;
 // Past this the wait reads as stuck, and the line asks the one question that
 // resolves it.
 const HANDOFF_STUCK_MS = 5 * 60 * 1000;
-// The exit. On a revised doc, once, until the person has copied the link.
-const EXIT_LINE = 'Now get a real one. Tag someone and send them the link.';
+// The exit. On a revised doc, until the person has copied the link. Says
+// what just happened and what to do with it; nothing a stranger has to decode.
+const exitLine = (answered, version) => (
+  `Your agent answered ${answered} ${answered === 1 ? 'comment' : 'comments'} in v${version}. Send it to a real reader:`
+);
 
 export function DocumentShell({ boot, config }) {
   const narrow = useNarrowViewport();
@@ -161,10 +164,25 @@ export function DocumentShell({ boot, config }) {
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
   ));
+  // Two arrivals the journey makes on its own: the first doc (`welcome`) and
+  // a version the agent just published (`revised`). Read once and taken off
+  // the URL, so a reload is an ordinary visit.
+  const [arrival] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    const kind = params.get('welcome') ? 'welcome' : params.get('revised') ? 'revised' : null;
+    if (kind) {
+      params.delete('welcome');
+      params.delete('revised');
+      const rest = params.toString();
+      try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
+    }
+    return kind;
+  });
   // Resolved threads leave the margin. The choice is the reader's and is
   // remembered per browser; storage that throws (private mode) simply means
   // the margin starts quiet again next visit.
   const [showResolved, setShowResolved] = useState(() => {
+    if (new URLSearchParams(location.search).get('revised')) return true;
     try { return localStorage.getItem(RESOLVED_KEY) === '1'; } catch { return false; }
   });
   const toggleResolved = useCallback(() => {
@@ -235,16 +253,58 @@ export function DocumentShell({ boot, config }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // On the landing page a signed-in person with a doc gets a way back to it.
+  const [yourDoc, setYourDoc] = useState(null);
+  useEffect(() => {
+    if (!config.isLanding || !onboardingRecord?.first_doc) return;
+    const slug = onboardingRecord.first_doc;
+    getAgentStatus(slug)
+      .then((status) => setYourDoc({
+        title: status?.title || slug,
+        url: `/d/${encodeURIComponent(slug)}/v/${Number(status?.latest_version) || 1}`,
+      }))
+      .catch(() => setYourDoc({ title: slug, url: `/d/${encodeURIComponent(slug)}/v/1` }));
+  }, [config.isLanding, onboardingRecord]);
+
+  // The two arrivals the journey makes on its own. Both open the card the
+  // person should be looking at, and say in one line what just happened.
+  const arrivedRef = useRef(false);
+  useEffect(() => {
+    if (!arrival || arrivedRef.current || comments.loading) return;
+    arrivedRef.current = true;
+    const list = comments.comments;
+    if (arrival === 'welcome') {
+      const seed = list.find((c) => c.author?.login === 'tdoc') || list[0];
+      if (seed) setOpenCommentId(seed.id);
+      showToast(`${config.title} v${config.version} is live.`);
+    } else if (arrival === 'revised') {
+      // Their own answered thread first — that is the reply they are waiting
+      // for — then whatever else the agent resolved.
+      const mine = config.identity?.login || '';
+      const resolved = list.find((c) => c.status === 'applied' && mine && c.author?.login === mine)
+        || list.find((c) => c.status === 'applied');
+      if (resolved) setOpenCommentId(resolved.id);
+      const n = list.filter((c) => c.status === 'applied').length;
+      showToast(`Your agent answered ${n} ${n === 1 ? 'comment' : 'comments'} and published v${config.version}.`);
+    }
+  }, [arrival, comments.loading, comments.comments, config.identity, config.title, config.version, showToast]);
+
   // Bridge 2 state lives on the doc, not on a card: one paste covers every
   // comment, and the card that shows it can close and reopen.
   const [handoff, setHandoff] = useState({ state: 'idle', copiedAt: null });
-  const handoffEnabled = Boolean(config.isOwner && !config.isLanding);
+  // Only on the latest version: a handoff on v1 while v2 exists asks for work
+  // the agent already did.
+  const latestVersion = Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), Number(config.version) || 0);
+  const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion);
   const handoffCopy = useCallback(async () => {
     const ok = await copyText(HANDOFF_LINE);
-    if (!ok) { showToast('Could not copy', true); return; }
-    setHandoff({ state: 'waiting', copiedAt: Date.now() });
+    // A refused clipboard is not a dead end: the line is left selected for a
+    // manual copy, the card says so, and the wait starts anyway — the person
+    // may well paste it by hand.
+    if (!ok) selectContents(document.querySelector('.tdoc-handoff-line code'));
+    setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });
     postOnboardingEvent('fix_copy_clicked', config.slug).catch(() => {});
-  }, [config.slug, showToast]);
+  }, [config.slug]);
 
   const mentionable = useMentionable(
     config.slug,
@@ -499,6 +559,8 @@ export function DocumentShell({ boot, config }) {
     if (!ok) return;
     closeComposer();
     reportMentions(value);
+    // The new card opens: it is where the next instruction lives.
+    if (value?.id) setOpenCommentId(value.id);
   };
 
   const replyTo = async (parentId, text) => {
@@ -616,7 +678,7 @@ export function DocumentShell({ boot, config }) {
   // the new version). Stops on its own past HANDOFF_STUCK_MS.
   const commentsRefresh = comments.refresh;
   useEffect(() => {
-    if (handoff.state !== 'waiting' && handoff.state !== 'reading') return undefined;
+    if (!['waiting', 'reading', 'replied'].includes(handoff.state)) return undefined;
     let cancelled = false;
     let timer = null;
     const tick = async () => {
@@ -625,11 +687,14 @@ export function DocumentShell({ boot, config }) {
         if (cancelled) return;
         const latest = Number(status?.latest_version) || 0;
         if (latest > Number(config.version)) {
-          location.href = `/d/${encodeURIComponent(config.slug)}/v/${latest}`;
+          location.href = `/d/${encodeURIComponent(config.slug)}/v/${latest}?revised=1`;
           return;
         }
         const readAt = status?.read_at ? new Date(status.read_at).getTime() : 0;
-        if (readAt && readAt >= handoff.copiedAt - 5000) {
+        const repliedAt = status?.replied_at ? new Date(status.replied_at).getTime() : 0;
+        if (repliedAt && repliedAt >= handoff.copiedAt - 5000) {
+          setHandoff((current) => (current.state !== 'replied' ? { ...current, state: 'replied' } : current));
+        } else if (readAt && readAt >= handoff.copiedAt - 5000) {
           setHandoff((current) => (current.state === 'waiting' ? { ...current, state: 'reading' } : current));
         }
         await commentsRefresh();
@@ -646,13 +711,24 @@ export function DocumentShell({ boot, config }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [handoff.state, handoff.copiedAt, config.slug, config.version, commentsRefresh]);
 
+  const answered = comments.comments.filter((c) => c.status === 'applied').length;
+  // Copied in this session: the banner stays, as the confirmation, so the
+  // frame does not jump and the pins and the open card stay where they are.
+  const [sharedNow, setSharedNow] = useState(false);
   const showExitBanner = Boolean(
     handoffEnabled && Number(config.version) >= 2
-    && onboardingRecord && onboardingRecord.started && !onboardingRecord.shared,
+    && onboardingRecord && onboardingRecord.started && (!onboardingRecord.shared || sharedNow),
   );
+  // The owner's own first words are the gesture — a comment of their own, or
+  // the reply the seeded card asks for. The handoff appears once they exist,
+  // not on an untouched seeded card.
+  const me = config.identity?.login || '';
+  const ownerCommented = Boolean(me) && comments.comments.some((c) => (
+    c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
+  ));
   const copyExitLink = async () => {
     if (!await copyText(shareUrl)) { showToast('Could not copy', true); return; }
-    showToast('Link copied');
+    setSharedNow(true);
     setOnboardingRecord((current) => ({ ...(current || {}), shared: new Date().toISOString() }));
     postOnboardingEvent('share_link_copied', config.slug).catch(() => {});
   };
@@ -685,7 +761,7 @@ export function DocumentShell({ boot, config }) {
     openComment
     && new URLSearchParams(location.search).get('comment')
     && new URLSearchParams(location.search).get('comment') !== openComment.id
-  );
+  ) || (arrival === 'revised' && Boolean(openComment));
 
   return (
     <div
@@ -700,7 +776,7 @@ export function DocumentShell({ boot, config }) {
       <TopBar
         identity={config.identity}
         theme={theme}
-        actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
+        actions={config.isLanding ? <LandingActions stars={config.stars} yourDoc={yourDoc} /> : (
           <>
             {/* Resolved threads are out of the margin by default. The switch is
                 the way back, in the bar where it can be seen — it folds into
@@ -781,9 +857,9 @@ export function DocumentShell({ boot, config }) {
       <OldVersionNotice value={boot.oldVersion} />
 
       {showExitBanner ? (
-        <div className="tdoc-onboard-banner" style={{ top: TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) }} role="status">
-          <span>{EXIT_LINE}</span>
-          <button type="button" onClick={copyExitLink}>Copy link</button>
+        <div className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
+          <span>{sharedNow ? 'Link copied — send it to someone.' : exitLine(answered, config.version)}</span>
+          {sharedNow ? null : <button type="button" onClick={copyExitLink}>Copy link</button>}
         </div>
       ) : null}
 
@@ -838,7 +914,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled ? { line: HANDOFF_LINE, state: handoff.state, onCopy: handoffCopy } : null}
+          handoff={handoffEnabled && ownerCommented ? { line: HANDOFF_LINE, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -868,7 +944,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled ? { line: HANDOFF_LINE, state: handoff.state, onCopy: handoffCopy } : null}
+          handoff={handoffEnabled && ownerCommented ? { line: HANDOFF_LINE, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
         />
       )}
 

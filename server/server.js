@@ -113,9 +113,14 @@ function markAgentReadLocal(slug) {
   m[slug] = { at: new Date().toISOString() };
   writeJson(AGENT_READ_FILE, m);
 }
+function markAgentRepliedLocal(slug) {
+  const m = readJson(AGENT_READ_FILE, {});
+  m[slug] = { ...(m[slug] || {}), replied: new Date().toISOString() };
+  writeJson(AGENT_READ_FILE, m);
+}
 function readAgentStatusLocal(slug) {
   const m = readJson(AGENT_READ_FILE, {});
-  return { read_at: (m[slug] && m[slug].at) || null };
+  return { read_at: (m[slug] && m[slug].at) || null, replied_at: (m[slug] && m[slug].replied) || null };
 }
 function discoverFirstDocLocal(record) {
   if (!record || !record.started) return record;
@@ -852,7 +857,15 @@ function shellDocument(slug, version, nonce) {
     title,
     nonceAttr,
     cfgJson,
-    bootJson: safeJsonForScript({ frameSrc, oldVersion: null }),
+    // The same "you're viewing v<n>" strip the worker shows: a doc with a
+    // newer version says so here too, so an agent's v2 is never mistaken
+    // for silence on v1.
+    bootJson: safeJsonForScript({
+      frameSrc,
+      oldVersion: (!isLanding && Number(version) < Number(latestVersion))
+        ? { current: Number(version), latest: Number(latestVersion), latestUrl: `/d/${encodeURIComponent(slug)}/v/${latestVersion}` }
+        : null,
+    }),
     runtimeJsPath: SHELL_RUNTIME.js.path,
     runtimeCssPath: SHELL_RUNTIME.css.path,
   });
@@ -1510,7 +1523,7 @@ const server = http.createServer(async (req, res) => {
     if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
     const meta = readJson(path.join(ROOT, slug, 'meta.json'), null);
     const latest = meta ? latestLocalVersion(slug, meta) : null;
-    return json(res, 200, { ...readAgentStatusLocal(slug), latest_version: latest || null });
+    return json(res, 200, { ...readAgentStatusLocal(slug), latest_version: latest || null, title: (meta && meta.title) || null });
   }
 
   if (p === '/api/comments' && req.method === 'GET') {
@@ -1648,6 +1661,7 @@ const server = http.createServer(async (req, res) => {
     }
     setAgentReaction(parent, agentStatus, agent.login);
     writeJson(file, all);
+    try { markAgentRepliedLocal(slug); } catch {}
     return json(res, 200, reply);
   }
 

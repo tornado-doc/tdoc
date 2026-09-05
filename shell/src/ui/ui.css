@@ -675,57 +675,14 @@ button.tdoc-pin {
   font-weight: 600;
 }
 
-/* "agent", underlined, its definition on hover. The tip is positioned
-   against the DOOR, not the word: from the word it ran rightwards over the
-   other door and read as that door's description. */
-.tdoc-modal .tdoc-doors button.tdoc-door { position: relative; }
-
-.tdoc-term {
-  border-bottom: 1px dotted currentColor;
-  cursor: help;
-}
-
-.tdoc-term-tip {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 40px;
-  z-index: 5;
-  width: auto;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--td-ink);
-  color: var(--td-ground);
+/* The definition of "agent", under the door's title, always. */
+.tdoc-door .tdoc-agent-def,
+.mk-card .tdoc-agent-def {
+  display: block;
+  margin-top: -2px;
+  color: var(--td-ink, #111);
   font-size: 12px;
-  font-weight: 400;
   line-height: 1.45;
-  white-space: normal;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity .12s;
-}
-
-.tdoc-term-tip b { display: block; margin-top: 4px; }
-
-.tdoc-term:hover .tdoc-term-tip,
-.tdoc-term:focus-within .tdoc-term-tip {
-  opacity: 1;
-  visibility: visible;
-}
-
-/* The tooltip needs a pointer; on a phone the definition is inline instead. */
-.tdoc-door .tdoc-agent-def { display: none; }
-
-@media (max-width: 560px), (hover: none) {
-  .tdoc-term { border-bottom: 0; cursor: default; }
-  .tdoc-term-tip { display: none; }
-  .tdoc-door .tdoc-agent-def {
-    display: block;
-    color: var(--td-ink-soft, #6b6b73);
-    font-size: 12px;
-    line-height: 1.45;
-  }
 }
 
 .tdoc-doors-example {
@@ -771,12 +728,34 @@ button.tdoc-pin {
 
 .tdoc-modal button.tdoc-door-back { margin-top: 12px; }
 
-/* The line under the top bar on a revised doc: the journey's exit. */
+.tdoc-open-doc {
+  display: inline-block;
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+
+/* On the landing page, a way back to the doc you already have. */
+.tdoc-your-doc {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--td-accent);
+  border-radius: 999px;
+  color: var(--td-accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* The strip under the top bar on a revised doc: the journey's exit. In the
+   flow, like the old-version strip — a floating bar sat over the comment
+   card and took clicks meant for it. */
 .tdoc-onboard-banner {
-  position: fixed;
-  left: 0;
-  right: 0;
-  z-index: 60;
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;

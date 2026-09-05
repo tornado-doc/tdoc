@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { COPY_FALLBACK } from '../onboarding-dialog.jsx';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
@@ -667,13 +668,15 @@ export function CommentCard({
                 className={handoff.state !== 'idle' ? 'done' : undefined}
                 onClick={handoff.onCopy}
               >
-                {handoff.state !== 'idle' ? 'Copied' : 'Copy'}
+                {handoff.state === 'idle' ? 'Copy' : handoff.copyFailed ? 'Select & copy' : 'Copied'}
               </button>
             </div>
             <div className="tdoc-handoff-status" role="status" aria-live="polite">
               {handoff.state === 'idle' ? 'Paste this into your agent. It reads the comments, replies to each, and publishes the next version.' : null}
-              {handoff.state === 'waiting' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
+              {handoff.state === 'waiting' && handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />{COPY_FALLBACK}</> : null}
+              {handoff.state === 'waiting' && !handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
               {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading this</> : null}
+              {handoff.state === 'replied' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Replied ✓ — publishing the next version…</> : null}
               {handoff.state === 'stuck' ? 'Still waiting — did you paste it into your agent?' : null}
             </div>
           </div>

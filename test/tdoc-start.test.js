@@ -60,7 +60,7 @@ t('the dialog is one reusable Base UI screen, not a paged state machine', () => 
   assert(!/PAGES|stepSignIn|device\/start|device\/poll/.test(dialog), 'old paged or sign-in flow returned');
   // The explanatory <details> block is gone on purpose: the screen is two
   // doors and a definition on hover, and nothing depends on prose being read.
-  assert(/Use my own <AgentTerm \/>/.test(dialog) && /Use tdoc's agent — coming soon/.test(dialog), 'the two doors are missing');
+  assert(/Use my own agent/.test(dialog) && /Use tdoc's agent — coming soon/.test(dialog), 'the two doors are missing');
   assert(/Read the full tutorial/.test(dialog), 'tutorial handoff missing');
 });
 
@@ -92,7 +92,7 @@ t('the own-agent door reads the journey record, not a capability probe', () => {
   assert(!/fetch\('\/api\/hosted\/token'/.test(dialog), 'the old capability probe is back');
   assert(/getOnboarding\(\)/.test(dialog), 'the door does not read the journey record');
   assert(/next\?\.published_first && next\?\.first_doc/.test(dialog), 'the door does not watch for the first doc');
-  assert(/location\.href = `\/d\/\$\{encodeURIComponent\(next\.first_doc\)\}\/v\/1`/.test(dialog), 'the door does not leave for the doc');
+  assert(/location\.href = `\/d\/\$\{encodeURIComponent\(next\.first_doc\)\}\/v\/1\?welcome=1`/.test(dialog), 'the door does not leave for the doc');
 });
 
 t('self-hosting remains an explicit alternate sentence', () => {

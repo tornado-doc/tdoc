@@ -1860,10 +1860,15 @@ async function markAgentRead(env, slug) {
   if (!env || !env.META || !slug) return;
   await env.META.put(`doc-agent-read:${slug}`, JSON.stringify({ at: new Date().toISOString() }));
 }
+async function markAgentReplied(env, slug) {
+  if (!env || !env.META || !slug) return;
+  await env.META.put(`doc-agent-reply:${slug}`, JSON.stringify({ at: new Date().toISOString() }));
+}
 async function readAgentStatus(env, slug) {
-  let rec = null;
-  try { rec = JSON.parse(await env.META.get(`doc-agent-read:${slug}`)); } catch {}
-  return { read_at: (rec && rec.at) || null };
+  let read = null, replied = null;
+  try { read = JSON.parse(await env.META.get(`doc-agent-read:${slug}`)); } catch {}
+  try { replied = JSON.parse(await env.META.get(`doc-agent-reply:${slug}`)); } catch {}
+  return { read_at: (read && read.at) || null, replied_at: (replied && replied.at) || null };
 }
 
 // The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
@@ -6133,7 +6138,11 @@ export default {
       const gate = await enforceDocAccess(env, req, slug, 1);
       if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
       const status = await readAgentStatus(env, slug);
-      return json({ ...status, latest_version: latestVersionNumber(gate.meta) || null });
+      return json({
+        ...status,
+        latest_version: latestVersionNumber(gate.meta) || null,
+        title: (gate.meta && typeof gate.meta.title === 'string' && gate.meta.title) || null,
+      });
     }
 
     // ---- comments ----
@@ -6536,6 +6545,8 @@ export default {
         kind: 'raw_events', slug, id: parent.id, events,
         responseBody: { id: replyId, parent_id, thread_id: parent.id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
       });
+      // Bridge 2's "Replied ✓": the card sees this before the next version lands.
+      if (res.status === 200) { try { await markAgentReplied(env, slug); } catch {} }
       return json(res.body, { status: res.status });
     }
 

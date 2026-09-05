@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { ChevronLeft, FilePlus2, Sparkles } from 'lucide-react';
-import { FirstDocRecipe } from './onboarding-dialog.jsx';
+import { FilePlus2, Sparkles } from 'lucide-react';
+import { AGENT_DEFINITION, AGENT_NAMES, OwnAgentDoor } from './onboarding-dialog.jsx';
 
 // "Create a doc" is a fork, not a form: write it yourself, or have your agent
 // write it. Two cards, one per answer — the blank doc opens immediately (you
@@ -27,13 +27,10 @@ export function CreateChoice({ create, canCreate = true }) {
   if (view === 'recipe') {
     return (
       <div className="mk-recipe">
-        {canCreate ? (
-          <button type="button" className="mk-back" onClick={() => setView('choice')}>
-            <ChevronLeft size={14} /> Back
-          </button>
-        ) : null}
-        <p>Paste this into your AI. It installs tdoc, builds your personal AI portrait, publishes it privately, and gives you the link.</p>
-        <FirstDocRecipe />
+        {/* The same door the landing opens: the line, the wait read off the
+            server, and the move to the doc when it lands. Its close button is
+            this view's Back. */}
+        <OwnAgentDoor onOpenChange={(open) => { if (!open) setView('choice'); }} closeLabel="Back" />
       </div>
     );
   }
@@ -50,8 +47,9 @@ export function CreateChoice({ create, canCreate = true }) {
       ) : null}
       <button type="button" className="mk-card" onClick={() => setView('recipe')}>
         <Sparkles className="mk-card-icon" size={22} />
-        <strong>Build it with your AI</strong>
-        <span>Copy one line into your agent. It writes the doc, publishes it, and hands back the link.</span>
+        <strong>Build it with your agent</strong>
+        <span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>
+        <span>Copy one line into it. It builds a page about you from traces you choose to share, and publishes it.</span>
         <em>Get the prompt</em>
       </button>
     </div>

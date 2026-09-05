@@ -127,14 +127,17 @@ t('a visitor with no session still sees a way to comment, and it is the sign-in'
   assert(shell.includes('signInToComment={Boolean(config.signInToComment)}') && shell.includes('onSignIn={signIn}'), 'the shell wires it');
 });
 
-t('one screen, two doors, the definition on hover, the example beside them', () => {
+t('one screen, two doors, the definition under the title, the example beside them', () => {
   assert(dialog.includes('title="Create a free doc"'), 'the screen is named after the button that opened it');
-  assert(dialog.includes('<strong>Use my own <AgentTerm /></strong>'), 'left door');
+  assert(dialog.includes('<strong>Use my own agent</strong>'), 'left door');
   assert(dialog.includes("<strong>Use tdoc's agent — coming soon</strong>"), 'right door');
   assert(!/coding agent/.test(dialog) || !/(no|without|don.t have) coding agent/i.test(dialog), 'the right door never says "no coding agent"');
   assert(dialog.includes("export const AGENT_NAMES = 'Claude Code · Codex · Claude Cowork · ChatGPT Work'"), 'all four names');
   assert(dialog.includes("export const AGENT_DEFINITION = 'An AI that runs on your computer and can read and write files.'"), 'the definition');
-  assert(dialog.includes('className="tdoc-term-tip" role="tooltip"'), 'shown as a tooltip, on demand');
+  // A tooltip needed a pointer, covered the door's own text while open, and
+  // on a phone the word was a tap target inside a tap target. Inline, always.
+  assert(dialog.includes('<span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>'), 'the definition sits under the title');
+  assert(!/tdoc-term-tip|role="tooltip"/.test(dialog), 'no tooltip');
   assert(dialog.includes("export const EXAMPLE_URL = '/d/what-ai-knows/v/12'") && dialog.includes('See an example'), 'See an example');
   assert(dialog.includes("postOnboardingEvent('waitlist')"), 'the right door records the waitlist');
   assert(dialog.includes("onSignIn?.('/?onboard=own')"), 'the left door signs in and returns to itself');
@@ -145,11 +148,29 @@ t('bridge 1 is read off the server and leaves for the doc on its own', () => {
   assert(dialog.includes("export const TWO_WINDOWS = 'Two windows: you read and comment here. Your agent writes and fixes.'"), 'the one concept, once');
   assert(dialog.includes("postOnboardingEvent('door_own_agent')"), 'reaching the door is the first stamp');
   assert(dialog.includes('const POLL_MS = 3000'), '3s while waiting');
-  assert(/next\?\.published_first && next\?\.first_doc[\s\S]*location\.href = `\/d\/\$\{encodeURIComponent\(next\.first_doc\)\}\/v\/1`/.test(dialog), 'the page goes to the first doc when it arrives');
-  assert(dialog.includes("export const WAITING = 'Waiting for your agent…'"), 'copy flips to waiting');
+  assert(/next\?\.published_first && next\?\.first_doc[\s\S]*location\.href = `\/d\/\$\{encodeURIComponent\(next\.first_doc\)\}\/v\/1\?welcome=1`/.test(dialog), 'the page goes to the first doc when it arrives, and says so on arrival');
+  assert(dialog.includes("export const WAITING = 'Waiting for your agent… this usually takes 1–3 minutes.'"), 'copy flips to waiting, with an expectation');
+  assert(dialog.includes("export const NOTHING_YET = 'Taking a while? Check whether your agent asked you a question in its own window.'"), 'a nudge before the timeout');
   assert(dialog.includes("export const STILL_WAITING = 'Still waiting — did you paste it into your agent?'"), 'the timeout asks the one question');
+  assert(dialog.includes('COPY_FALLBACK') && dialog.includes('selectContents(codeRef.current)'), 'a refused clipboard leaves the line selected and says so');
+  assert(dialog.includes('You already have a doc.') && dialog.includes('Want another? Paste the line into your agent again.'), 'a person with a doc is not made to wait for one');
   assert(dialog.includes("'Your agent is connected. Publishing your first doc…'"), 'agent_connected has its own line');
   assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
+});
+
+t('the hub has the same door as the landing, not a bare recipe', () => {
+  // Round-3 tester came in through /me: the "Build it with your agent" card
+  // showed the line and nothing after it — no wait, no arrival, no seed.
+  const cards = read('shell/src/create-from-scratch.jsx');
+  assert(cards.includes('<OwnAgentDoor onOpenChange={(open) => { if (!open) setView(\'choice\'); }} closeLabel="Back" />'), 'the card opens the shared door');
+  assert(!cards.includes('FirstDocRecipe'), 'no second rendering of the recipe');
+  assert(cards.includes('<span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>'), 'the card defines "agent" where the word is');
+  assert(dialog.includes("export function OwnAgentDoor({ onOpenChange, closeLabel = 'Close' })"), 'the door is exported with a labelled close');
+  assert(/\.tdoc-door \.tdoc-agent-def,\s*\.mk-card \.tdoc-agent-def \{/.test(read('shell/src/ui/ui.css')), 'the definition reads the same on both');
+  // A refused clipboard on the fix line: selected, said, and still waiting.
+  assert(shell.includes("if (!ok) selectContents(document.querySelector('.tdoc-handoff-line code'));"), 'the line is left selected');
+  assert(shell.includes("setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });"), 'the wait starts either way');
+  assert(card.includes("handoff.copyFailed ? 'Select & copy' : 'Copied'") && card.includes('{COPY_FALLBACK}'), 'the card says what to do');
 });
 
 t('bridge 2 lives on the card: the line, the copy, then what the server saw', () => {
@@ -157,19 +178,51 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes('const HANDOFF_POLL_MS = 3000'), '3s while waiting');
   assert(shell.includes("postOnboardingEvent('fix_copy_clicked', config.slug)"), 'copy is an event');
   assert(/setHandoff\(\(current\) => \(current\.state === 'waiting' \? \{ \.\.\.current, state: 'reading' \} : current\)\)/.test(shell), 'the read stamp flips waiting → reading');
-  assert(/latest > Number\(config\.version\)[\s\S]*location\.href = `\/d\/\$\{encodeURIComponent\(config\.slug\)\}\/v\/\$\{latest\}`/.test(shell), 'a new version moves the page');
+  assert(/latest > Number\(config\.version\)[\s\S]*location\.href = `\/d\/\$\{encodeURIComponent\(config\.slug\)\}\/v\/\$\{latest\}\?revised=1`/.test(shell), 'a new version moves the page, and says why it arrived');
   assert(shell.includes("postOnboardingEvent('timeout_shown', config.slug)"), 'the timeout is logged');
-  assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding)'), "only on the owner's own doc");
+  assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion)'), "only on the owner's own doc, and only its latest version");
   assert(card.includes("handoff = null,") && card.includes('className="tdoc-handoff"'), 'the card renders it');
-  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && card.includes('Still waiting — did you paste it into your agent?'), 'the four states');
+  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && card.includes('Replied ✓ — publishing the next version…') && card.includes('Still waiting — did you paste it into your agent?'), 'the five states');
+  assert(/repliedAt && repliedAt >= handoff\.copiedAt - 5000[\s\S]*state: 'replied'/.test(shell), 'the reply stamp flips to replied before the next version lands');
+  assert(shell.includes('handoffEnabled && ownerCommented ?'), 'the handoff appears after the owner has commented, not on the seeded card that asks for it');
+  assert(shell.includes('Number(config.version) === latestVersion'), 'only on the latest version');
+  assert(shell.includes("if (value?.id) setOpenCommentId(value.id);"), 'a posted comment opens its card — the next instruction lives there');
+  assert(shell.includes("v/${latest}?revised=1"), 'a new version is arrived at as one');
   assert((layer.match(/handoff=\{handoff\}/g) || []).length === 2, 'threaded through both the desktop layer and the phone drawer');
 });
 
 t('the exit is a line on a revised doc, owed until the link is copied', () => {
-  assert(shell.includes("const EXIT_LINE = 'Now get a real one. Tag someone and send them the link.'"), 'the line');
-  assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started && !onboardingRecord\.shared/.test(shell), 'v2+, journey started, not yet shared');
+  assert(/`Your agent answered \$\{answered\} \$\{answered === 1 \? 'comment' : 'comments'\} in v\$\{version\}\. Send it to a real reader:`/.test(shell), 'the line says what happened and what to do');
+  assert(!shell.includes('Now get a real one'), 'no line a stranger has to decode');
+  assert(/\.tdoc-onboard-banner \{\s*position: relative;/.test(read('shell/src/ui/ui.css')), 'in the flow, never floating over the card');
+  assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started && \(!onboardingRecord\.shared \|\| sharedNow\)/.test(shell), 'v2+, journey started, not yet shared (or shared just now)');
   assert(shell.includes("postOnboardingEvent('share_link_copied', config.slug)"), 'copying is the stamp');
   assert(shell.includes('(showExitBanner ? 36 : 0)'), 'the frame moves down under it');
+  // Round-4: copying the link used to unmount the banner, shift the frame and
+  // close the card — the doc looked comment-free the moment it was shared.
+  assert(shell.includes("(!onboardingRecord.shared || sharedNow)") && shell.includes("'Link copied — send it to someone.'"), 'the banner stays as the confirmation');
+  assert(shell.includes('className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}'), 'the banner does not close the card');
+  // A reply on the seeded card is the gesture too; the answered thread that
+  // opens on v2 is the person's own.
+  assert(shell.includes("(c.replies || []).some((r) => r.author?.login === me)"), 'replying to the seed counts as commenting');
+  assert(shell.includes("list.find((c) => c.status === 'applied' && mine && c.author?.login === mine)"), 'v2 opens their own answered thread first');
+});
+
+t('the two arrivals open the right card and say what happened', () => {
+  assert(/params\.get\('welcome'\) \? 'welcome' : params\.get\('revised'\) \? 'revised' : null/.test(shell), 'welcome and revised are read once');
+  assert(shell.includes('history.replaceState('), 'and taken off the URL');
+  assert(/c\.author\?\.login === 'tdoc'\)[\s\S]*setOpenCommentId\(seed\.id\)/.test(shell), 'welcome opens the seeded card');
+  assert(shell.includes('is live.`'), 'and says the doc is live');
+  assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
+  assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
+  const landingBar = read('shell/src/document/document-toolbar.jsx');
+  assert(landingBar.includes('className="tdoc-your-doc"') && shell.includes('<LandingActions stars={config.stars} yourDoc={yourDoc} />'),
+    'the landing page shows a way back to your doc');
+  assert(server.includes('oldVersion: (!isLanding && Number(version) < Number(latestVersion))'), 'local preview shows the newer-version strip too');
+  for (const [src, label] of [[worker, 'worker'], [server, 'server']]) {
+    assert(src.includes('replied_at'), `${label}: agent-status carries replied_at`);
+    assert(src.includes('title:'), `${label}: agent-status carries the title`);
+  }
 });
 
 t('resuming reads the record, not localStorage', () => {

@@ -169,13 +169,13 @@ t('a host that would refuse the create never offers the form', () => {
 
 t('the choice is two cards, and neither path is a form', () => {
   assert(shellApi.includes("request('/api/doc/create'"), 'createDocument missing from the shell API');
-  assert(form.includes('Start from scratch') && form.includes('Build it with your AI'),
+  assert(form.includes('Start from scratch') && form.includes('Build it with your agent'),
     'both cards must exist');
   assert(form.includes('className="mk-card"'), 'the cards need a stable hook');
   // The blank doc opens on the click. A title field here is the thing this
   // design replaced — the title is typed into the page instead.
   assert(!/<input/.test(form), 'the scratch card must not ask for a title');
-  assert(form.includes('<FirstDocRecipe />'), 'the recipe lives behind the second card');
+  assert(form.includes('<OwnAgentDoor onOpenChange='), 'the own-agent door lives behind the second card');
 });
 
 t('the cards live in the Docs Hub, and the recipe has one implementation', () => {
@@ -183,7 +183,7 @@ t('the cards live in the Docs Hub, and the recipe has one implementation', () =>
     'the hub must wire the cards to its hook');
   // A second hand-written copy is how the two drift apart.
   assert(!hub.includes('className="mk-card"'), 'the Docs Hub should render the shared component');
-  assert(form.includes('<FirstDocRecipe />'), 'the AI card should render the shared recipe, not its own copy');
+  assert(form.includes('<OwnAgentDoor onOpenChange=') && !form.includes('FirstDocRecipe'), 'the AI card should open the shared door, not a bare recipe of its own');
   assert(!form.includes('tdoc-recipe-wrap'), 'the recipe markup belongs to one component');
   assert(onboarding.includes('export function FirstDocRecipe('), 'the shared recipe lost its home');
 });
