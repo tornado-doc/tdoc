@@ -183,8 +183,7 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes("postOnboardingEvent('timeout_shown', config.slug)"), 'the timeout is logged');
   assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion)'), "only on the owner's own doc, and only its latest version");
   assert(card.includes("handoff = null,") && card.includes('className="tdoc-handoff"'), 'the card renders it');
-  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && card.includes('Your agent is replying — the next version is on its way…') && card.includes('Still waiting — did you paste it into your agent?'), 'the five states');
-  assert(/repliedAt && repliedAt >= handoff\.copiedAt - 5000[\s\S]*state: 'replied'/.test(shell), 'the reply stamp flips to replied before the next version lands');
+  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && !card.includes("handoff.state === 'replied'") && card.includes('Still waiting — did you paste it into your agent?'), 'the four states — no doc-level "replied" on a thread');
   assert(shell.includes('handoffEnabled && ownerCommented ?'), 'the handoff appears after the owner has commented, not on the seeded card that asks for it');
   assert(shell.includes('Number(config.version) === latestVersion'), 'only on the latest version');
   assert(shell.includes("if (value?.id) setOpenCommentId(value.id);"), 'a posted comment opens its card — the next instruction lives there');
@@ -221,7 +220,7 @@ t('the two arrivals open the right card and say what happened', () => {
     'the landing page shows a way back to your doc');
   assert(server.includes('oldVersion: (!isLanding && Number(version) < Number(latestVersion))'), 'local preview shows the newer-version strip too');
   for (const [src, label] of [[worker, 'worker'], [server, 'server']]) {
-    assert(src.includes('replied_at'), `${label}: agent-status carries replied_at`);
+    assert(!src.includes('replied_at'), `${label}: agent-status carries no doc-level replied stamp`);
     assert(src.includes('title:'), `${label}: agent-status carries the title`);
   }
 });

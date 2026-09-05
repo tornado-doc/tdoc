@@ -113,14 +113,9 @@ function markAgentReadLocal(slug) {
   m[slug] = { at: new Date().toISOString() };
   writeJson(AGENT_READ_FILE, m);
 }
-function markAgentRepliedLocal(slug) {
-  const m = readJson(AGENT_READ_FILE, {});
-  m[slug] = { ...(m[slug] || {}), replied: new Date().toISOString() };
-  writeJson(AGENT_READ_FILE, m);
-}
 function readAgentStatusLocal(slug) {
   const m = readJson(AGENT_READ_FILE, {});
-  return { read_at: (m[slug] && m[slug].at) || null, replied_at: (m[slug] && m[slug].replied) || null };
+  return { read_at: (m[slug] && m[slug].at) || null };
 }
 function discoverFirstDocLocal(record) {
   if (!record || !record.started) return record;
@@ -1661,7 +1656,6 @@ const server = http.createServer(async (req, res) => {
     }
     setAgentReaction(parent, agentStatus, agent.login);
     writeJson(file, all);
-    try { markAgentRepliedLocal(slug); } catch {}
     return json(res, 200, reply);
   }
 

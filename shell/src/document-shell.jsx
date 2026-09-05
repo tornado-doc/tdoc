@@ -673,12 +673,16 @@ export function DocumentShell({ boot, config }) {
     : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
 
   // While the owner waits on their agent, ask the server every few seconds
-  // what it has done: read the comments (the card flips to "reading"),
-  // replied (the refresh brings the reply in), published (the page moves to
-  // the new version). Stops on its own past HANDOFF_STUCK_MS.
+  // what it has done: read the comments (the card flips to "reading"), then
+  // published (the page moves to the new version). There is no "replied"
+  // step between them: the agent answers thread by thread and publishes
+  // seconds later, and a doc-level stamp lit "Replied ✓" on a thread it had
+  // not answered yet. A reply without a new version (a question) shows up in
+  // the thread itself on the next refresh. Stops on its own past
+  // HANDOFF_STUCK_MS.
   const commentsRefresh = comments.refresh;
   useEffect(() => {
-    if (!['waiting', 'reading', 'replied'].includes(handoff.state)) return undefined;
+    if (!['waiting', 'reading'].includes(handoff.state)) return undefined;
     let cancelled = false;
     let timer = null;
     const tick = async () => {
@@ -691,10 +695,7 @@ export function DocumentShell({ boot, config }) {
           return;
         }
         const readAt = status?.read_at ? new Date(status.read_at).getTime() : 0;
-        const repliedAt = status?.replied_at ? new Date(status.replied_at).getTime() : 0;
-        if (repliedAt && repliedAt >= handoff.copiedAt - 5000) {
-          setHandoff((current) => (current.state !== 'replied' ? { ...current, state: 'replied' } : current));
-        } else if (readAt && readAt >= handoff.copiedAt - 5000) {
+        if (readAt && readAt >= handoff.copiedAt - 5000) {
           setHandoff((current) => (current.state === 'waiting' ? { ...current, state: 'reading' } : current));
         }
         await commentsRefresh();
