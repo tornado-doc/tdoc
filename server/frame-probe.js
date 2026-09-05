@@ -27,6 +27,16 @@
   // While something is open, the next click anywhere in the document only
   // dismisses it — it must not open a different comment or start a new one.
   var shellUiOpen = false;
+  // Mirrored onto <html> alongside the other frame state. The shell unmounts a
+  // card at commit and only tells us one effect + one postMessage later, so
+  // "the popup is gone from the shell" and "the frame will act on the next
+  // click again" are two different moments. Anything waiting on the second one
+  // has to be able to see it.
+  function setShellUiOpen(open) {
+    shellUiOpen = open;
+    if (open) document.documentElement.setAttribute('data-tdoc-ui-open', '');
+    else document.documentElement.removeAttribute('data-tdoc-ui-open');
+  }
   var swallowClick = false;
   var dismissDownX = 0, dismissDownY = 0;
   var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
@@ -1166,7 +1176,7 @@
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode);
-    else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
+    else if (d.type === 'tdoc:uiOpen') setShellUiOpen(!!d.open);
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
     else if (d.type === 'tdoc:editRestore') {
       var restoreRoot = findEditRoot();
