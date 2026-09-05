@@ -74,7 +74,7 @@ t('mobile onboarding actions keep names and 44px touch targets', () => {
 t('the short prompt points to FIRST-DOC and never embeds a credential', () => {
   assert(/FIRST-DOC\.md/.test(dialog), 'FIRST-DOC link missing');
   assert(!/token\s*(is|=)|Authorization|Bearer/.test(dialog), 'credential leaked into the prompt');
-  assert(/copyText\(FIRST_DOC_RECIPE\)/.test(dialog), 'copy action is not wired to the recipe');
+  assert(/copyText\(line\)/.test(dialog) && /line = FIRST_DOC_RECIPE/.test(dialog), 'copy action is not wired to the recipe');
 });
 
 t('the tutorial promises the same private personal AI portrait as FIRST-DOC', () => {

@@ -53,5 +53,13 @@ t('the artifact pill is inside the rule, not exempt from it', () => {
     'a swallowed click no longer stops the pill from opening an element comment');
 });
 
+t('a multi-click selection while a card is open is a comment, not only a dismissal', () => {
+  // Round-4 tester: a triple-click on a sentence beside an open card only
+  // closed the card, and the sentence had to be selected again.
+  const mouseup = probe.slice(probe.indexOf("addEventListener('mouseup'"), probe.indexOf("addEventListener('touchend'"));
+  assert(/var multi = e\.detail >= 2 && interactionMode === 'comment';/.test(mouseup), 'the click count no longer distinguishes a selection from a dismissal');
+  assert(/if \(multi && live && !live\.isCollapsed && live\.rangeCount\) \{\s*post\(\{ type: 'tdoc:cleared' \}\);\s*setTimeout\(reportSelection, 0\);/.test(mouseup), 'the multi-click selection is no longer reported after the card closes');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

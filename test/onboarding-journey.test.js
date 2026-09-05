@@ -153,7 +153,8 @@ t('bridge 1 is read off the server and leaves for the doc on its own', () => {
   assert(dialog.includes("export const NOTHING_YET = 'Taking a while? Check whether your agent asked you a question in its own window.'"), 'a nudge before the timeout');
   assert(dialog.includes("export const STILL_WAITING = 'Still waiting — did you paste it into your agent?'"), 'the timeout asks the one question');
   assert(dialog.includes('COPY_FALLBACK') && dialog.includes('selectContents(codeRef.current)'), 'a refused clipboard leaves the line selected and says so');
-  assert(dialog.includes('You already have a doc.') && dialog.includes('Want another? Paste the line into your agent again.'), 'a person with a doc is not made to wait for one');
+  assert(dialog.includes('{live ? <div className="tdoc-wait-bar" aria-hidden="true" /> : null}') && /@keyframes tdoc-sweep/.test(read('shell/src/ui/ui.css')), 'the wait moves while the page is listening');
+  assert(dialog.includes('You already have a doc.') && dialog.includes('Want another? Fill in the blank, then paste the line into your agent.') && dialog.includes('<FirstDocRecipe line={ANOTHER_DOC_RECIPE} onCopied={onCopied} />') && dialog.includes('export const ANOTHER_DOC_RECIPE = \'/tdoc new "<what it is about>" — then publish it and give me the link\';'), 'a person with a doc is not made to wait for one');
   assert(dialog.includes("'Your agent is connected. Publishing your first doc…'"), 'agent_connected has its own line');
   assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
 });
@@ -182,7 +183,7 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes("postOnboardingEvent('timeout_shown', config.slug)"), 'the timeout is logged');
   assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion)'), "only on the owner's own doc, and only its latest version");
   assert(card.includes("handoff = null,") && card.includes('className="tdoc-handoff"'), 'the card renders it');
-  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && card.includes('Replied ✓ — publishing the next version…') && card.includes('Still waiting — did you paste it into your agent?'), 'the five states');
+  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && card.includes('Your agent is replying — the next version is on its way…') && card.includes('Still waiting — did you paste it into your agent?'), 'the five states');
   assert(/repliedAt && repliedAt >= handoff\.copiedAt - 5000[\s\S]*state: 'replied'/.test(shell), 'the reply stamp flips to replied before the next version lands');
   assert(shell.includes('handoffEnabled && ownerCommented ?'), 'the handoff appears after the owner has commented, not on the seeded card that asks for it');
   assert(shell.includes('Number(config.version) === latestVersion'), 'only on the latest version');

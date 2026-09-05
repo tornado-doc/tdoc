@@ -56,7 +56,7 @@ t('Create a doc is a two-card fork rendered by the shared component', () => {
   assert(/import \{ CreateChoice \}/.test(docsHub), 'the Create dialog should render the shared component');
   assert(/<CreateChoice create=\{hub\.createDoc\} canCreate=\{capabilities\.create\} \/>/.test(docsHub),
     'the cards must be wired to the hub hook and its capability');
-  assert(/copyText\(FIRST_DOC_RECIPE\)/.test(choice), 'the recipe is not copyable');
+  assert(/copyText\(line\)/.test(choice) && /line = FIRST_DOC_RECIPE/.test(choice), 'the recipe is not copyable');
   assert(/className="tdoc-recipe-wrap"/.test(choice), 'shared recipe treatment missing');
   assert(/copied === true \? 'Copied' : copied === false \? 'Select & copy' : 'Copy'/.test(choice), 'Copy feedback state missing (three states: idle, copied, clipboard refused)');
   // The dialog now carries its own actions — the cards themselves (#356) — so

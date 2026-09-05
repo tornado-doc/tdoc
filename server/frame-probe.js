@@ -290,6 +290,17 @@
     // still a selection, so only a pointer that stayed put is suppressed.
     var moved = Math.abs(e.clientX - dismissDownX) > 4 || Math.abs(e.clientY - dismissDownY) > 4;
     if (swallowClick && !moved) {
+      // A double- or triple-click selected a word or a sentence on purpose. The
+      // card it landed beside closes, and the selection is the next comment —
+      // it is not made to be selected twice. (`detail` counts the clicks; a
+      // single click on `user-select: all` content stays a dismissal.)
+      var multi = e.detail >= 2 && interactionMode === 'comment';
+      var live = multi ? window.getSelection() : null;
+      if (multi && live && !live.isCollapsed && live.rangeCount) {
+        post({ type: 'tdoc:cleared' });
+        setTimeout(reportSelection, 0);
+        return;
+      }
       // A click whose only job is to dismiss. Content styled `user-select: all`
       // selects its whole block on one click, which came back as a composer on
       // the very click that closed a card, so no selection is reported either.

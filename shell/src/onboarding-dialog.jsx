@@ -6,6 +6,10 @@ import { getAgentStatus, getOnboarding, postOnboardingEvent } from './document/a
 
 const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
 export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
+// The line for a person who already has one. tdoc is installed by then, and
+// FIRST-DOC.md would only build the same portrait again, so this one is the
+// ordinary way to make a doc, with a blank for what it is about.
+export const ANOTHER_DOC_RECIPE = '/tdoc new "<what it is about>" — then publish it and give me the link';
 // The document behind "See an example": a portrait with its threads resolved,
 // so a stranger can see what a commented, revised doc looks like before they
 // have one of their own.
@@ -50,12 +54,12 @@ export function selectContents(element) {
 // nothing after it ever happened).
 // `onCopied(ok)` reports whether the clipboard took it; on failure the line is
 // left selected so a manual copy is one keystroke away, and the button says so.
-export function FirstDocRecipe({ onCopied }) {
+export function FirstDocRecipe({ line = FIRST_DOC_RECIPE, onCopied }) {
   const [copied, setCopied] = useState(null); // null | true | false
   const codeRef = useRef(null);
 
   const copy = async () => {
-    const ok = await copyText(FIRST_DOC_RECIPE);
+    const ok = await copyText(line);
     if (!ok && codeRef.current) selectContents(codeRef.current);
     setCopied(ok);
     onCopied?.(ok);
@@ -63,7 +67,7 @@ export function FirstDocRecipe({ onCopied }) {
 
   return (
     <div className="tdoc-recipe-wrap">
-      <code ref={codeRef}>{FIRST_DOC_RECIPE}</code>
+      <code ref={codeRef}>{line}</code>
       <button type="button" className={copied ? 'done' : undefined} onClick={copy}>
         {copied === true ? 'Copied' : copied === false ? 'Select & copy' : 'Copy'}
       </button>
@@ -139,8 +143,8 @@ export function OwnAgentDoor({ onOpenChange, closeLabel = 'Close' }) {
         <a className="tdoc-open-doc" href={url}>
           Open {existing.title} · v{existing.version}
         </a>
-        <p className="muted">Want another? Paste the line into your agent again.</p>
-        <FirstDocRecipe onCopied={onCopied} />
+        <p className="muted">Want another? Fill in the blank, then paste the line into your agent.</p>
+        <FirstDocRecipe line={ANOTHER_DOC_RECIPE} onCopied={onCopied} />
         <button type="button" className="tdoc-door-back" onClick={() => onOpenChange(false)}>{closeLabel}</button>
       </div>
     );
@@ -172,6 +176,7 @@ export function OwnAgentDoor({ onOpenChange, closeLabel = 'Close' }) {
         {live ? <span className="tdoc-wait-dot" aria-hidden="true" /> : null}
         {status}
       </p>
+      {live ? <div className="tdoc-wait-bar" aria-hidden="true" /> : null}
       <p className="muted">This page opens your doc the moment it is published. Keep it open, or come back later — it remembers where you were.</p>
       <details className="tdoc-onboarding-details">
         <summary>Advanced</summary>

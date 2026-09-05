@@ -15,6 +15,15 @@ import {
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
 
+// The label after a version number. "current" read as "latest" from an old
+// version (round-4 tester), so the two facts get their own words: where you
+// are, and which one is newest.
+function versionLabel(n, config) {
+  const latest = Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), 0);
+  if (n === config.version) return n === latest ? ' · viewing · latest' : ' · viewing';
+  return n === latest ? ' · latest' : '';
+}
+
 // The bar names the document, and the document's name is its title. The slug
 // used to sit here because an agent-picked one reads like a name, but it is a
 // URL detail — already in the address bar — and a browser-created doc's slug
@@ -92,7 +101,7 @@ export function DocumentBreadcrumbs({ config, title, starred, onRename, onToggle
               location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`;
             }}
           >
-            v{version.n}{version.n === config.version ? ' · current' : ''}
+            v{version.n}{versionLabel(version.n, config)}
           </AppMenuItem>
         ))}
       </AppMenu>
@@ -178,7 +187,7 @@ export function DocumentOverflowActions({
               className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
               onClick={() => { location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`; }}
             >
-              v{version.n}{version.n === config.version ? ' · current' : ''}
+              v{version.n}{versionLabel(version.n, config)}
             </AppMenuItem>
           ))}
         </AppSubmenu>

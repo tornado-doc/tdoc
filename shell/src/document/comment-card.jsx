@@ -676,7 +676,7 @@ export function CommentCard({
               {handoff.state === 'waiting' && handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />{COPY_FALLBACK}</> : null}
               {handoff.state === 'waiting' && !handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
               {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading this</> : null}
-              {handoff.state === 'replied' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Replied ✓ — publishing the next version…</> : null}
+              {handoff.state === 'replied' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is replying — the next version is on its way…</> : null}
               {handoff.state === 'stuck' ? 'Still waiting — did you paste it into your agent?' : null}
             </div>
           </div>

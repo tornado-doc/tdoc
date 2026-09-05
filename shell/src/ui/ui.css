@@ -720,8 +720,35 @@ button.tdoc-pin {
   50% { opacity: 1; transform: scale(1); }
 }
 
+.tdoc-wait-bar {
+  position: relative;
+  height: 2px;
+  margin: 0 0 8px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--td-accent) 18%, transparent);
+  overflow: hidden;
+}
+
+.tdoc-wait-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--td-accent);
+  animation: tdoc-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes tdoc-sweep {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tdoc-wait-dot { animation: none; }
+  .tdoc-wait-bar::after { animation: none; left: 0; width: 100%; opacity: .5; }
 }
 
 .tdoc-waitlist-done { margin: 0 0 8px; font-weight: 600; }
