@@ -140,7 +140,8 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   assert(dialog.includes("onSignIn?.('/?onboard=paste')") && !dialog.includes("'tdoc-signin'"), 'sign-in is the existing one, not a second');
   assert(shell.includes("&& new URLSearchParams(location.search).get('onboard'))"), 'the shell reopens the wizard after the redirect, at any step');
   // Every step can be left.
-  assert(dialog.includes("{step === 'done' ? 'Done' : 'Skip for now'}"), 'every step has a skip');
+  assert(dialog.includes("{step === 'done' ? 'Done' : 'Skip'}"), 'every step has a skip');
+  assert(!/tdoc-wiz-sub/.test(dialog), 'no subtitles: a headline, a button, and a status line at most');
   // Every wizard button rule outranks chrome.css's `.tdoc-modal button`, which
   // painted them white on white (round-5 screenshots: blank buttons).
   const css = read('shell/src/ui/ui.css');
@@ -152,15 +153,15 @@ t('bridge 1 is read off the server, and the code from the terminal is its own st
   assert(dialog.includes('const POLL_MS = 3000'), '3s while waiting');
   assert(dialog.includes('export function stepFromRecord(record)') && /if \(record\.revised\) return 'done';\s*if \(record\.commented\) return 'sendback';\s*if \(record\.published_first\) return 'doc';\s*if \(record\.agent_connected\) return 'doc';\s*return 'paste';/.test(dialog), 'the step is the record, forward only');
   assert(dialog.includes("export const WAITING = 'Listening for your agent…'"), 'copy flips to listening');
-  assert(dialog.includes("export const NOTHING_YET = 'Taking a while? Check whether your agent asked you a question in its own window.'"), 'a nudge before the timeout');
-  assert(dialog.includes("export const STILL_WAITING = 'Still waiting — did you paste it into your agent?'"), 'the timeout asks the one question');
+  assert(dialog.includes("export const NOTHING_YET = 'Taking a while? Check your agent’s window.'"), 'a nudge before the timeout');
+  assert(dialog.includes("export const STILL_WAITING = 'Still waiting. Did you paste it?'"), 'the timeout asks the one question');
   assert(dialog.includes('COPY_FALLBACK') && dialog.includes('selectContents(codeRef.current)'), 'a refused clipboard leaves the line selected and says so');
   // The pairing code a terminal shows is typed in this window, against the
   // same two routes /activate uses — lookup names the terminal, approve binds it.
   assert(dialog.includes("postJson('/api/cli/pair/lookup', { user_code: code })") && dialog.includes("postJson('/api/cli/pair/approve', { user_code: code })"), 'pairing reuses the activate routes');
   assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
   assert(dialog.includes('Type the code your agent shows.'), 'the code step says what it is for');
-  assert(dialog.includes('Now comment on it.') && dialog.includes("openDoc(1, 'welcome')"), 'the doc step is the comment, and the doc opens in a new tab');
+  assert(dialog.includes('Highlight a sentence.<br />Say what you think.') && dialog.includes("openDoc(1, 'welcome')"), 'the doc step is the comment, and the doc opens in a new tab');
   assert(dialog.includes("openDoc(latest || 2, 'revised')"), 'v2 opens and says why it arrived');
   assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
 });

@@ -12,6 +12,8 @@ import { OnboardingScene } from './onboarding-scene.jsx';
 //
 //   1 welcome   what tdoc is, drawn
 //   2 paste     the line for the agent (sign-in first, if there is none)
+//   Each screen is one headline and one button; the status line under a
+//   waiting step is the only other text.
 //   3 code      the code the agent shows, typed here
 //   4 doc       the doc is up: open it, comment on it
 //   5 sendback  the second line; the agent reads, writes, publishes v2
@@ -30,9 +32,9 @@ export const EXAMPLE_URL = '/d/what-ai-knows/v/12';
 export const AGENT_DEFINITION = 'An AI that runs on your computer and can read and write files.';
 export const AGENT_NAMES = 'Claude Code · Codex · Claude Cowork · ChatGPT Work';
 export const WAITING = 'Listening for your agent…';
-export const NOTHING_YET = 'Taking a while? Check whether your agent asked you a question in its own window.';
-export const STILL_WAITING = 'Still waiting — did you paste it into your agent?';
-export const COPY_FALLBACK = "Couldn't copy — the line is selected. Copy it by hand.";
+export const NOTHING_YET = 'Taking a while? Check your agent’s window.';
+export const STILL_WAITING = 'Still waiting. Did you paste it?';
+export const COPY_FALLBACK = 'Copy the selected line by hand.';
 
 const POLL_MS = 3000;
 const NOTHING_YET_MS = 90 * 1000;
@@ -96,7 +98,7 @@ export function FirstDocRecipe({ line = FIRST_DOC_RECIPE, onCopied }) {
     <div className="tdoc-wiz-copy">
       <code ref={codeRef} className="tdoc-wiz-line">{line}</code>
       <button type="button" className={`tdoc-wiz-primary${copied ? ' done' : ''}`} onClick={copy}>
-        {copied === true ? 'Copied — now paste it into your agent' : copied === false ? 'Select & copy' : 'Copy the line'}
+        {copied === true ? 'Copied. Now paste it.' : copied === false ? 'Select & copy' : 'Copy'}
       </button>
     </div>
   );
@@ -226,7 +228,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const waitLine = copyFailed ? COPY_FALLBACK
     : elapsed > STILL_WAITING_MS ? STILL_WAITING
       : elapsed > NOTHING_YET_MS ? NOTHING_YET : WAITING;
-  const skip = onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>{step === 'done' ? 'Done' : 'Skip for now'}</button> : null;
+  const skip = onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>{step === 'done' ? 'Done' : 'Skip'}</button> : null;
 
   return (
     <div className={`tdoc-wiz${embedded ? ' embedded' : ''}`} data-step={step}>
@@ -240,7 +242,6 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       {step === 'welcome' ? (
         <>
           <h2 className="tdoc-wiz-h1">Your agent writes it.<br />You comment. It fixes.</h2>
-          <p className="tdoc-wiz-sub">A doc that lives between you and your coding agent.</p>
           <OnboardingScene />
           <div className="tdoc-wiz-actions">
             <button type="button" className="tdoc-wiz-primary" onClick={start}>Get started</button>
@@ -251,8 +252,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
 
       {step === 'paste' ? (
         <>
-          <h2 className="tdoc-wiz-h1">Paste one line into your agent.</h2>
-          <p className="tdoc-wiz-sub">Claude Code, Codex, Cursor — any coding agent on your computer.</p>
+          <h2 className="tdoc-wiz-h1">Paste this into your agent.</h2>
           <FirstDocRecipe onCopied={onCopiedLine} />
           <div className="tdoc-wiz-actions">
             {copyFailed ? <Listening>{COPY_FALLBACK}</Listening> : null}
@@ -264,7 +264,6 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       {step === 'code' ? (
         <>
           <h2 className="tdoc-wiz-h1">Type the code your agent shows.</h2>
-          <p className="tdoc-wiz-sub">It appears in the agent’s window in a moment.</p>
           {pair.state === 'confirm' ? (
             <div className="tdoc-wiz-actions">
               <p className="tdoc-wiz-confirm">Connect {pair.label ? <strong>{pair.label}</strong> : 'this terminal'} to your account?</p>
@@ -297,8 +296,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       {step === 'doc' ? (
         record?.published_first ? (
           <>
-            <h2 className="tdoc-wiz-h1">Now comment on it.</h2>
-            <p className="tdoc-wiz-sub">Open your doc, highlight any sentence, and say what you think.</p>
+            <h2 className="tdoc-wiz-h1">Highlight a sentence.<br />Say what you think.</h2>
             <div className="tdoc-wiz-actions">
               <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(1, 'welcome')}>Open your doc</button>
               <Listening>Waiting for your first comment…</Listening>
@@ -307,8 +305,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
           </>
         ) : (
           <>
-            <h2 className="tdoc-wiz-h1">Your agent is writing your doc.</h2>
-            <p className="tdoc-wiz-sub">Usually a couple of minutes. This window opens it when it’s up.</p>
+            <h2 className="tdoc-wiz-h1">Your agent is writing.</h2>
             <div className="tdoc-wiz-actions">
               <Row state="done">Agent connected</Row>
               <Row state="live">Writing your doc</Row>
@@ -321,8 +318,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
 
       {step === 'sendback' ? (
         <>
-          <h2 className="tdoc-wiz-h1">Send your comments back.</h2>
-          <p className="tdoc-wiz-sub">Your agent replies to each one and publishes v2.</p>
+          <h2 className="tdoc-wiz-h1">Now let your agent fix it.</h2>
           <FirstDocRecipe line={HANDOFF_LINE} onCopied={onCopiedFix} />
           <div className="tdoc-wiz-actions">
             {copiedAt !== null && !copyFailed ? (
@@ -341,11 +337,10 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       {step === 'done' ? (
         <>
           <h2 className="tdoc-wiz-h1">That’s the loop.</h2>
-          <p className="tdoc-wiz-sub">v{latest || 2} is up. Every round works the same way.</p>
           <OnboardingScene done />
           <div className="tdoc-wiz-actions">
             <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(latest || 2, 'revised')}>Open v{latest || 2}</button>
-            <button type="button" className={`tdoc-wiz-secondary${linkCopied ? ' done' : ''}`} onClick={copyShareLink}>{linkCopied ? 'Link copied' : 'Copy the link to share'}</button>
+            <button type="button" className={`tdoc-wiz-secondary${linkCopied ? ' done' : ''}`} onClick={copyShareLink}>{linkCopied ? 'Link copied' : 'Copy link'}</button>
             {skip}
           </div>
         </>
