@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { copyText } from './document/model.js';
 import { getAgentStatus, getOnboarding, postOnboardingEvent } from './document/api.js';
@@ -142,6 +142,10 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
 
   const slug = record?.first_doc || null;
   const latest = Number(status?.latest_version) || 0;
+
+  // Each copy is its own wait: the send-back step must not inherit the
+  // paste step's copy and show its rows before the person has pressed Copy.
+  useEffect(() => { setCopiedAt(null); setCopyFailed(false); setElapsed(0); }, [step]);
   const connected = Boolean(record?.agent_connected || record?.published_first || pair.state === 'connected');
 
   // The record decides the step, on the first answer and on every later one

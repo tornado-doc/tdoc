@@ -43,3 +43,5 @@ telemetry/supabase/.temp/
 # Local marketing assets (Twitter cover + Remotion demo video project) — kept
 # local, not version-controlled. NOTE: not backed up to GitHub.
 marketing/
+worker/wrangler.local.toml
+worker/.dev.vars
