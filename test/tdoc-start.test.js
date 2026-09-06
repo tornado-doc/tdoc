@@ -58,8 +58,7 @@ t('the tutorial can open the provider-owned onboarding dialog', () => {
 t('the dialog is one reusable Base UI screen with six steps read off the record', () => {
   assert(/<AppDialog/.test(dialog), 'shared dialog primitive missing');
   assert(!/PAGES|stepSignIn|device\/start|device\/poll/.test(dialog), 'old paged or sign-in flow returned');
-  assert(/const STEPS = \['welcome', 'signin', 'connect', 'doc', 'sendback', 'done'\];/.test(dialog), 'the six steps are missing');
-  assert(/Read the full tutorial/.test(dialog), 'tutorial handoff missing');
+  assert(/const STEPS = \['welcome', 'paste', 'code', 'doc', 'sendback', 'done'\];/.test(dialog), 'the six steps are missing');
 });
 
 t('mobile onboarding actions keep names and 44px touch targets', () => {
@@ -89,8 +88,9 @@ t('the wizard reads the journey record, not a capability probe', () => {
   assert(/openDoc\(1, 'welcome'\)/.test(dialog), 'the wizard does not open the first doc');
 });
 
-t('self-hosting remains an explicit alternate sentence', () => {
-  assert(/Publish it to my own Cloudflare/.test(dialog), 'self-host alternative missing');
+t('self-hosting remains an explicit alternate in the recipe and the tutorial', () => {
+  // The pop-up carries no reading; the alternative lives where the agent and
+  // the curious look — FIRST-DOC.md and /start.
   assert(/own Cloudflare/i.test(recipe) && /wrangler login/.test(recipe), 'recipe no longer covers self-hosting');
 });
 
