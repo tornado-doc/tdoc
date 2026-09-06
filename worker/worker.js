@@ -1807,14 +1807,19 @@ const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '', kind:
 function seedCommentAnchor(html) {
   const m = String(html || '').match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
   if (!m) return null;
-  const text = m[1]
-    .replace(/<[^>]+>/g, '')
+  // Tags go first, repeated until none are left (a tag split by another tag
+  // must not survive one pass), and `&amp;` is decoded last so a literal
+  // `&amp;lt;` becomes `&lt;` and not `<`. The result is anchor text, never
+  // markup, but the order is what makes that true.
+  let text = m[1];
+  for (let previous = null; previous !== text;) { previous = text; text = text.replace(/<[^>]*>/g, ''); }
+  text = text
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ')
     .trim();
   if (text.length < 8) return null;
