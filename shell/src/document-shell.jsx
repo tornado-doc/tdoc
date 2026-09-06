@@ -159,7 +159,7 @@ export function DocumentShell({ boot, config }) {
   ));
   const [onboardingOpen, setOnboardingOpen] = useState(() => (
     Boolean(config.onboarding && config.identity
-      && new URLSearchParams(location.search).get('onboard') === 'own')
+      && new URLSearchParams(location.search).get('onboard'))
   ));
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
@@ -244,7 +244,9 @@ export function DocumentShell({ boot, config }) {
     if (new URLSearchParams(location.search).get('onboard')) return;
     getOnboarding().then((result) => {
       const record = result?.record;
-      if (record?.started && !record?.published_first && !record?.waitlist) {
+      // A journey that has started and not reached its exit reopens where
+      // it stopped — the wizard reads the step off the record.
+      if (record?.started && !record?.shared && !record?.waitlist) {
         setOnboardingDoor('own');
         setOnboardingOpen(true);
       }

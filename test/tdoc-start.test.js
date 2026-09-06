@@ -55,12 +55,10 @@ t('the tutorial can open the provider-owned onboarding dialog', () => {
   assert(/<OnboardingDialog/.test(documentShell), 'React onboarding dialog is not mounted in the shell');
 });
 
-t('the dialog is one reusable Base UI screen, not a paged state machine', () => {
+t('the dialog is one reusable Base UI screen with six steps read off the record', () => {
   assert(/<AppDialog/.test(dialog), 'shared dialog primitive missing');
   assert(!/PAGES|stepSignIn|device\/start|device\/poll/.test(dialog), 'old paged or sign-in flow returned');
-  // The explanatory <details> block is gone on purpose: the screen is two
-  // doors and a definition on hover, and nothing depends on prose being read.
-  assert(/Use my own agent/.test(dialog) && /Use tdoc's agent — coming soon/.test(dialog), 'the two doors are missing');
+  assert(/const STEPS = \['welcome', 'signin', 'connect', 'doc', 'sendback', 'done'\];/.test(dialog), 'the six steps are missing');
   assert(/Read the full tutorial/.test(dialog), 'tutorial handoff missing');
 });
 
@@ -84,15 +82,11 @@ t('the tutorial promises the same private personal AI portrait as FIRST-DOC', ()
   assert(!/You get a Game of Life/i.test(text), 'tutorial still promises the old first doc');
 });
 
-t('the own-agent door reads the journey record, not a capability probe', () => {
-  // The hosted-token probe and the capability-gated hub mention went with the
-  // details block. What the door needs to know — has the agent connected, has
-  // the first doc landed — is on the account record the server stamps, and
-  // the door leaves for that doc on its own.
+t('the wizard reads the journey record, not a capability probe', () => {
   assert(!/fetch\('\/api\/hosted\/token'/.test(dialog), 'the old capability probe is back');
-  assert(/getOnboarding\(\)/.test(dialog), 'the door does not read the journey record');
-  assert(/next\?\.published_first && next\?\.first_doc/.test(dialog), 'the door does not watch for the first doc');
-  assert(/location\.href = `\/d\/\$\{encodeURIComponent\(next\.first_doc\)\}\/v\/1\?welcome=1`/.test(dialog), 'the door does not leave for the doc');
+  assert(/getOnboarding\(\)/.test(dialog), 'the wizard does not read the journey record');
+  assert(/stepFromRecord\(next\)/.test(dialog), 'the wizard does not move with the record');
+  assert(/openDoc\(1, 'welcome'\)/.test(dialog), 'the wizard does not open the first doc');
 });
 
 t('self-hosting remains an explicit alternate sentence', () => {

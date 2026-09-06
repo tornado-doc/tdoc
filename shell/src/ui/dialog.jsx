@@ -12,14 +12,18 @@ export function AppDialog({
   description,
   children,
   actions,
+  // A surface with its own header (the onboarding) keeps the title for
+  // assistive tech and hides it from view; `className` widens the sheet.
+  hideTitle = false,
+  className = '',
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Backdrop className="ui-dialog-backdrop" />
         <Dialog.Viewport className="ui-dialog-viewport">
-          <Dialog.Popup className="ui-dialog-popup tdoc-modal">
-            <Dialog.Title className="ui-dialog-title" render={<h3 />}>{title}</Dialog.Title>
+          <Dialog.Popup className={`ui-dialog-popup tdoc-modal${className ? ` ${className}` : ''}`}>
+            <Dialog.Title className={`ui-dialog-title${hideTitle ? ' ui-sr-only' : ''}`} render={<h3 />}>{title}</Dialog.Title>
             {description ? (
               <Dialog.Description className="muted ui-dialog-description">
                 {description}

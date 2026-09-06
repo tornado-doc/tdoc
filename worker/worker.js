@@ -2163,7 +2163,7 @@ async function oidcDiscovery(cfg) {
   return doc;
 }
 
-function authStatusResponse(message, { error = false, status = 200 } = {}) {
+function authStatusResponse(message, { error = false, status = 200, popup = false } = {}) {
   const nonce = rand(16);
   return html(SHELL.appHtml({
     title: error ? 'tdoc - sign-in failed' : 'tdoc - signed in',
@@ -2175,6 +2175,7 @@ function authStatusResponse(message, { error = false, status = 200 } = {}) {
       title: error ? 'Sign-in failed' : "You're signed in",
       message,
       error,
+      popup,
     }),
   }), {
     status,
@@ -4946,7 +4947,9 @@ export default {
     }
     // Static soft landing (device flow, or the OAuth App's callback URL).
     if (p === '/auth/done' && method === 'GET') {
-      return authStatusResponse('You can close this tab and return to tdoc.');
+      // `popup=1`: the sign-in ran in a small window the onboarding opened;
+      // the page tells its opener and closes itself.
+      return authStatusResponse('You can close this tab and return to tdoc.', { popup: url.searchParams.get('popup') === '1' });
     }
 
     // ---- owner catalog ----

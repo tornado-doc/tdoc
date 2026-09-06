@@ -626,75 +626,6 @@ button.tdoc-pin {
 }
 
 /* Onboarding: one screen, two doors. They stack below the narrow breakpoint. */
-.tdoc-doors {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-@media (max-width: 560px) {
-  .tdoc-doors { grid-template-columns: 1fr; }
-}
-
-.tdoc-modal .tdoc-doors button.tdoc-door {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  height: 100%;
-  padding: 16px;
-  border: 1px solid var(--td-line);
-  border-radius: 12px;
-  background: var(--td-ground);
-  color: var(--td-ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color .12s, background .12s;
-}
-
-.tdoc-modal .tdoc-doors button.tdoc-door:hover {
-  border-color: var(--td-accent);
-  background: var(--td-surface-2);
-}
-
-.tdoc-door strong { font-size: 14px; }
-
-.tdoc-door span {
-  color: var(--td-ink-soft, #6b6b73);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.tdoc-door em {
-  margin-top: auto;
-  padding-top: 8px;
-  color: var(--td-accent);
-  font-style: normal;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-/* The definition of "agent", under the door's title, always. */
-.tdoc-door .tdoc-agent-def,
-.mk-card .tdoc-agent-def {
-  display: block;
-  margin-top: -2px;
-  color: var(--td-ink, #111);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.tdoc-doors-example {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 14px;
-  font-size: 13px;
-}
-
-.tdoc-two-windows { margin: 0 0 12px; font-weight: 600; }
-
 .tdoc-wait {
   display: flex;
   align-items: center;
@@ -807,3 +738,62 @@ button.tdoc-pin {
 }
 
 .tdoc-onboard-banner button:hover { background: rgba(255, 255, 255, .15); }
+
+/* The hub card's one-line definition of "agent", under its title. */
+.mk-card .tdoc-agent-def { display: block; margin-top: -2px; color: var(--td-ink, #111); font-size: 12px; line-height: 1.45; }
+
+/* ---- onboarding wizard: one pop-up, six steps ------------------------- */
+.ui-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.ui-dialog-popup.tdoc-wiz-modal {
+  width: min(540px, calc(100vw - 32px));
+  border-radius: 22px;
+  padding: 28px 40px 36px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .18), 0 1px 0 rgba(0, 0, 0, .04);
+}
+.ui-dialog-popup.tdoc-wiz-modal .ui-dialog-body { margin: 0; }
+
+.tdoc-wiz { position: relative; display: flex; flex-direction: column; gap: 18px; font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif; color: var(--td-ink, #1a1a1a); }
+.tdoc-wiz-head { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
+.tdoc-wiz-mark-word { font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
+.tdoc-wiz-dots { display: flex; gap: 6px; align-items: center; }
+.tdoc-wiz-dots span { width: 6px; height: 6px; border-radius: 50%; background: #d9d9d6; }
+.tdoc-wiz-dots span.past { background: var(--td-accent); opacity: .35; }
+.tdoc-wiz-dots span.now { background: var(--td-accent); }
+.tdoc-wiz-h1 { margin: 4px 0 0; font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; text-wrap: pretty; }
+.tdoc-wiz-sub { margin: -10px 0 0; font-size: 16px; line-height: 1.45; color: var(--td-ink-soft, #6b6a66); text-wrap: pretty; }
+.tdoc-wiz-scene { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+.tdoc-wiz-actions { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.tdoc-wiz-copy { display: flex; flex-direction: column; gap: 12px; }
+.tdoc-wiz-line { display: block; box-sizing: border-box; width: 100%; background: #f4f4f2; border: 1px solid var(--td-line, #e8e7e3); border-radius: 14px; padding: 16px 18px; font: 500 15px/1.4 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -0.01em; overflow-wrap: anywhere; user-select: all; }
+.tdoc-wiz-primary { display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 999px; border: 0; background: var(--td-accent); color: #fff; font: 600 16px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; padding: 0 24px; width: 100%; }
+.tdoc-wiz-primary:hover { background: var(--td-accent-hover, #1245d0); }
+.tdoc-wiz-primary:disabled { opacity: .45; cursor: default; }
+.tdoc-wiz-primary.done { background: #1a7340; }
+.tdoc-wiz-primary.small { height: 40px; width: auto; padding: 0 18px; font-size: 14px; }
+.tdoc-wiz-secondary { display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 999px; border: 1px solid var(--td-line, #e8e7e3); background: #fff; color: var(--td-ink, #1a1a1a); font: 500 15px -apple-system, system-ui, sans-serif; cursor: pointer; padding: 0 20px; width: 100%; }
+.tdoc-wiz-secondary.done { border-color: #1a7340; color: #1a7340; }
+.tdoc-wiz-link { align-self: center; background: none; border: 0; padding: 4px; font: 500 15px -apple-system, system-ui, sans-serif; color: var(--td-accent); text-decoration: none; cursor: pointer; }
+.tdoc-wiz-note { margin: 0; font-size: 13px; line-height: 1.45; color: #a3a29d; text-align: center; }
+.tdoc-wiz-rows { display: flex; flex-direction: column; gap: 12px; padding-top: 14px; border-top: 1px solid var(--td-line, #e8e7e3); }
+.tdoc-wiz-row { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 500; }
+.tdoc-wiz-row.todo { color: #a3a29d; }
+.tdoc-wiz-mark { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1.5px solid #d9d9d6; }
+.tdoc-wiz-row.done .tdoc-wiz-mark { background: var(--td-accent); border-color: var(--td-accent); }
+.tdoc-wiz-row.live .tdoc-wiz-mark { border: 2px solid var(--td-accent); }
+.tdoc-wiz-listen { display: flex; align-items: center; gap: 10px; font-size: 14px; line-height: 1.4; color: var(--td-ink-soft, #6b6a66); }
+.tdoc-wiz-pair { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--td-line, #e8e7e3); }
+.tdoc-wiz-pair-title { margin: 0; font-size: 14px; color: var(--td-ink-soft, #6b6a66); }
+.tdoc-wiz-pair-title strong { color: var(--td-ink, #1a1a1a); }
+.tdoc-wiz-pair-actions { display: flex; gap: 10px; align-items: center; }
+.tdoc-wiz-code { flex: 1 1 auto; min-width: 0; height: 40px; box-sizing: border-box; border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 0 14px; font: 500 16px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; background: #fff; color: var(--td-ink, #1a1a1a); }
+.tdoc-wiz-code:focus { outline: none; border-color: var(--td-accent); box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff); }
+.tdoc-wiz-error { margin: 0; font-size: 13px; color: var(--td-danger, #b42318); }
+.tdoc-wiz-close { position: absolute; top: -8px; right: -18px; width: 32px; height: 32px; border-radius: 50%; border: 0; background: transparent; color: #a3a29d; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.tdoc-wiz-close:hover { background: #f4f4f2; color: var(--td-ink, #1a1a1a); }
+.tdoc-wiz.embedded { gap: 16px; }
+.tdoc-wiz.embedded .tdoc-wiz-h1 { font-size: 22px; }
+.tdoc-wiz.embedded .tdoc-wiz-sub { font-size: 14px; }
+.tdoc-own-door { display: flex; flex-direction: column; gap: 12px; }
+body.tdoc-narrow .ui-dialog-popup.tdoc-wiz-modal { padding: 22px 22px 26px; }
+body.tdoc-narrow .tdoc-wiz-h1 { font-size: 24px; }
