@@ -684,7 +684,7 @@ export function DocumentShell({ boot, config }) {
       <iframe
         ref={bridge.frameRef}
         className="tdoc-doc-frame"
-        title="Document content"
+        aria-label="Document content"
         sandbox="allow-scripts"
         src={boot.frameSrc}
       />
