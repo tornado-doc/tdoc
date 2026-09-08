@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
@@ -102,10 +102,15 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
   const manage = config.ownerManage;
   const [access, setAccess] = useState(manage?.access || {});
   const [status, setStatus] = useState('');
+  // The boot config never learns about saves, so resetting from it on reopen
+  // silently reverted every change the server had already accepted — add an
+  // invitee, close, reopen, and the list looked like the invite never
+  // happened. The latest SAVED value is the baseline the dialog reopens to.
+  const savedRef = useRef(manage?.access || {});
 
   useEffect(() => {
-    if (open) setAccess(manage?.access || {});
-  }, [manage?.access, open]);
+    if (open) setAccess(savedRef.current);
+  }, [open]);
 
   const normalized = useMemo(() => ({
     visibility: 'unlisted',
@@ -123,8 +128,12 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
     setAccess(next);
     setStatus('Saving…');
     try {
-      await updateDocumentAccess(config.slug, patch);
-      setStatus('Saved.');
+      const saved = await updateDocumentAccess(config.slug, patch);
+      savedRef.current = saved?.access || next;
+      // "Saved" and "they were told" are different promises — surface the
+      // second one when the server actually mailed someone.
+      const emailed = Array.isArray(saved?.emailed) ? saved.emailed : [];
+      setStatus(emailed.length ? `Saved. Invitation emailed to ${emailed.join(', ')}.` : 'Saved.');
     } catch (error) {
       setAccess(previous);
       setStatus(`Failed: ${error.message}`);

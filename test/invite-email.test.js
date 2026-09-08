@@ -65,6 +65,60 @@ async function patchAccess(worker, env, cookie, slug, access) {
     assert(sent[0].text.includes('/email/optout?t='), 'opt-out link missing');
   });
 
+  await t('the patch response says who was actually emailed', async () => {
+    const { binding } = fakeEmail();
+    const env = makeEnv(mod.CommentsStore, { EMAIL: binding });
+    const cookie = seedOwnedDoc(env, 'plan');
+    const { data } = await patchAccess(worker, env, cookie, 'plan', {
+      visibility: 'private', allowed_users: ['dana@example.com', 'stranger-handle'],
+    });
+    assert(Array.isArray(data.emailed) && data.emailed.length === 1 && data.emailed[0] === 'dana@example.com',
+      `emailed: ${JSON.stringify(data.emailed)}`);
+  });
+
+  await t('request access lands one notification in the owner inbox, deduped', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    seedOwnedDoc(env, 'plan');
+    const meta = JSON.parse(env.META.map.get('meta:plan'));
+    meta.access = { visibility: 'private', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] };
+    env.META.map.set('meta:plan', JSON.stringify(meta));
+    env.META.map.set('session:cafebabe01', JSON.stringify({
+      login: 'petra', name: 'Petra', email: 'petra@example.com', created: new Date().toISOString(),
+    }));
+    const ask = () => worker.fetch(req('/api/doc/request-access', {
+      method: 'POST', cookie: 'tdoc_sid=cafebabe01', body: { slug: 'plan' },
+    }), env, {});
+    const r1 = await ask();
+    const d1 = await r1.json();
+    assert(r1.status === 200 && d1.requested === true, `ask: ${r1.status} ${JSON.stringify(d1)}`);
+    const inbox = JSON.parse(env.META.map.get('inbox:olivia') || '{"items":[]}');
+    assert(inbox.items.length === 1 && inbox.items[0].kind === 'access_request'
+      && inbox.items[0].actor.login === 'petra',
+      `owner inbox: ${JSON.stringify(inbox.items)}`);
+    // Asking twice is one row and one honest answer.
+    const d2 = await (await ask()).json();
+    assert(d2.requested === true, `re-ask: ${JSON.stringify(d2)}`);
+    const again = JSON.parse(env.META.map.get('inbox:olivia'));
+    assert(again.items.length === 1 && (Number(again.items[0].count) || 1) === 1,
+      `dedupe failed: ${JSON.stringify(again.items)}`);
+  });
+
+  await t('request access requires a session and an existing doc', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    seedOwnedDoc(env, 'plan');
+    const anon = await worker.fetch(req('/api/doc/request-access', {
+      method: 'POST', body: { slug: 'plan' },
+    }), env, {});
+    assert(anon.status === 401, `anonymous ask: ${anon.status}`);
+    env.META.map.set('session:cafebabe02', JSON.stringify({
+      login: 'petra', name: 'Petra', email: 'petra@example.com', created: new Date().toISOString(),
+    }));
+    const missing = await worker.fetch(req('/api/doc/request-access', {
+      method: 'POST', cookie: 'tdoc_sid=cafebabe02', body: { slug: 'no-such-doc' },
+    }), env, {});
+    assert(missing.status === 404, `missing doc: ${missing.status}`);
+  });
+
   await t('saving the same list again sends nothing', async () => {
     const { sent, binding } = fakeEmail();
     const env = makeEnv(mod.CommentsStore, { EMAIL: binding });

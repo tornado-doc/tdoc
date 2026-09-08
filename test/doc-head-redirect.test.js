@@ -67,7 +67,11 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     // gated route — and must not reveal any version number.
     const body = await r.text();
     assert(!/\/v\/\d/.test(body), 'denial HTML leaks a version number');
-    assert(body.includes('href="/d/secret-plan"'), 'denial retry link should be the head URL');
+    // The retry target rides the status page's boot JSON (shell renders it as
+    // the link); a shell-less worker renders a literal href. Either way it is
+    // the HEAD url — the same gated route, no version number.
+    assert(body.includes('"retry":"/d/secret-plan"') || body.includes('href="/d/secret-plan"'),
+      'denial retry link should be the head URL');
   });
 
   await t('versioned routes are untouched by the head route', async () => {

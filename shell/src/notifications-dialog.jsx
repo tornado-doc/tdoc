@@ -23,6 +23,9 @@ function notificationLabel(item) {
   if (item.kind === 'reply') {
     return `${actor} replied${count > 1 ? ` and ${count - 1} more replied` : ''}`;
   }
+  if (item.kind === 'access_request') {
+    return `${actor} requested access${count > 1 ? ` and ${count - 1} more asked` : ''} — open Share to invite`;
+  }
   return `${actor} commented${count > 1 ? ` and ${count - 1} more commented` : ''}`;
 }
 
