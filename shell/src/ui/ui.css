@@ -490,6 +490,15 @@ button.tdoc-pin {
     min-height: 44px;
   }
 
+  /* The wizard's step dots are buttons too; at 44px each they were six
+     coins across the header. A dot stays a dot, with a 24px tap area. */
+  .tdoc-modal .tdoc-wiz .tdoc-wiz-dots button {
+    min-width: 0;
+    min-height: 0;
+    padding: 9px;
+    margin: -9px;
+  }
+
   .tdoc-onboarding-details summary,
   .tdoc-onboarding-link {
     min-height: 44px;
