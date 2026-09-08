@@ -130,6 +130,11 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const signedIn = Boolean(config?.identity);
   const [record, setRecord] = useState(null);
   const [step, setStep] = useState(() => (initialStep && STEPS.includes(initialStep) ? initialStep : 'welcome'));
+  // Looking back. `step` is where the journey IS (the record moves it); `view`
+  // is a past step the person asked to see again. Null means "show the live
+  // step". Going forward past the live step, or reaching it, clears the view,
+  // so the record's next move is seen the moment it happens.
+  const [view, setView] = useState(null);
   const [status, setStatus] = useState(null); // agent-status of the first doc
   const [copiedAt, setCopiedAt] = useState(null);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -146,6 +151,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // Each copy is its own wait: the send-back step must not inherit the
   // paste step's copy and show its rows before the person has pressed Copy.
   useEffect(() => { setCopiedAt(null); setCopyFailed(false); setElapsed(0); }, [step]);
+  useEffect(() => { setView(null); }, [step]);
   const connected = Boolean(record?.agent_connected || record?.published_first || pair.state === 'connected');
 
   // The record decides the step, on the first answer and on every later one
@@ -228,22 +234,44 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     if (ok) postOnboardingEvent('share_link_copied', slug).catch(() => {});
   };
 
-  const index = STEPS.indexOf(step) + 1;
+  const shown = view && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;
+  const index = STEPS.indexOf(shown) + 1;
+  const liveIndex = STEPS.indexOf(step) + 1;
+  const back = () => { if (index > 1) setView(STEPS[index - 2]); };
+  const forward = () => { const next = STEPS[index]; setView(next && STEPS.indexOf(next) < STEPS.indexOf(step) ? next : null); };
   const waitLine = copyFailed ? COPY_FALLBACK
     : elapsed > STILL_WAITING_MS ? STILL_WAITING
       : elapsed > NOTHING_YET_MS ? NOTHING_YET : WAITING;
-  const skip = onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>{step === 'done' ? 'Done' : 'Skip'}</button> : null;
+  const skip = onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>{shown === 'done' ? 'Done' : 'Skip'}</button> : null;
 
   return (
-    <div className={`tdoc-wiz${embedded ? ' embedded' : ''}`} data-step={step}>
+    <div className={`tdoc-wiz${embedded ? ' embedded' : ''}`} data-step={shown} data-live-step={step}>
       <div className="tdoc-wiz-head">
-        {embedded ? <span /> : <span className="tdoc-wiz-mark-word">tdoc</span>}
-        <div className="tdoc-wiz-dots" aria-label={`Step ${index} of ${STEPS.length}`}>
-          {STEPS.map((s, i) => <span key={s} className={i + 1 < index ? 'past' : i + 1 === index ? 'now' : ''} />)}
+        <div className="tdoc-wiz-head-left">
+          {index > 1 ? (
+            <button type="button" className="tdoc-wiz-nav" onClick={back} aria-label="Previous step">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
+            </button>
+          ) : null}
+          {embedded ? null : <span className="tdoc-wiz-mark-word">tdoc</span>}
+        </div>
+        <div className="tdoc-wiz-head-right">
+          <div className="tdoc-wiz-dots" role="tablist" aria-label={`Step ${index} of ${STEPS.length}`}>
+            {STEPS.map((s, i) => (
+              i + 1 <= liveIndex
+                ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead'} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
+                : <span key={s} />
+            ))}
+          </div>
+          {index < liveIndex ? (
+            <button type="button" className="tdoc-wiz-nav" onClick={forward} aria-label="Next step">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg>
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {step === 'welcome' ? (
+      {shown === 'welcome' ? (
         <>
           <h2 className="tdoc-wiz-h1">Your agent writes it.<br />You comment. It fixes.</h2>
           <OnboardingScene />
@@ -254,7 +282,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         </>
       ) : null}
 
-      {step === 'paste' ? (
+      {shown === 'paste' ? (
         <>
           <h2 className="tdoc-wiz-h1">Paste this into your agent.</h2>
           <FirstDocRecipe onCopied={onCopiedLine} />
@@ -265,7 +293,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         </>
       ) : null}
 
-      {step === 'code' ? (
+      {shown === 'code' ? (
         <>
           <h2 className="tdoc-wiz-h1">Type the code your agent shows.</h2>
           {pair.state === 'confirm' ? (
@@ -297,7 +325,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         </>
       ) : null}
 
-      {step === 'doc' ? (
+      {shown === 'doc' ? (
         record?.published_first ? (
           <>
             <h2 className="tdoc-wiz-h1">Highlight a sentence.<br />Say what you think.</h2>
@@ -320,7 +348,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         )
       ) : null}
 
-      {step === 'sendback' ? (
+      {shown === 'sendback' ? (
         <>
           <h2 className="tdoc-wiz-h1">Now let your agent fix it.</h2>
           <FirstDocRecipe line={HANDOFF_LINE} onCopied={onCopiedFix} />
@@ -338,7 +366,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         </>
       ) : null}
 
-      {step === 'done' ? (
+      {shown === 'done' ? (
         <>
           <h2 className="tdoc-wiz-h1">That’s the loop.</h2>
           <OnboardingScene done />

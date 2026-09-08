@@ -490,6 +490,15 @@ button.tdoc-pin {
     min-height: 44px;
   }
 
+  /* The wizard's step dots are buttons too; at 44px each they were six
+     coins across the header. A dot stays a dot, with a 24px tap area. */
+  .tdoc-modal .tdoc-wiz .tdoc-wiz-dots button {
+    min-width: 0;
+    min-height: 0;
+    padding: 9px;
+    margin: -9px;
+  }
+
   .tdoc-onboarding-details summary,
   .tdoc-onboarding-link {
     min-height: 44px;
@@ -758,10 +767,15 @@ button.tdoc-pin {
 .tdoc-wiz { position: relative; display: flex; flex-direction: column; gap: 18px; font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz-head { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
 .tdoc-wiz-mark-word { font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
+.tdoc-wiz-head-left, .tdoc-wiz-head-right { display: flex; align-items: center; gap: 8px; }
 .tdoc-wiz-dots { display: flex; gap: 6px; align-items: center; }
-.tdoc-wiz-dots span { width: 6px; height: 6px; border-radius: 50%; background: #d9d9d6; }
-.tdoc-wiz-dots span.past { background: var(--td-accent); opacity: .35; }
-.tdoc-wiz-dots span.now { background: var(--td-accent); }
+.tdoc-wiz-dots span, .tdoc-wiz .tdoc-wiz-dots button { width: 6px; height: 6px; padding: 0; border: 0; border-radius: 50%; background: #d9d9d6; }
+.tdoc-wiz .tdoc-wiz-dots button { cursor: pointer; box-sizing: content-box; background-clip: content-box; padding: 5px; margin: -5px; }
+.tdoc-wiz .tdoc-wiz-dots button.past { background-color: var(--td-accent); opacity: .35; }
+.tdoc-wiz .tdoc-wiz-dots button.now { background-color: var(--td-accent); }
+.tdoc-wiz .tdoc-wiz-dots button.ahead { background-color: var(--td-accent); opacity: .35; }
+.tdoc-wiz button.tdoc-wiz-nav { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #a3a29d; cursor: pointer; display: flex; align-items: center; justify-content: center; margin: 0 -6px; }
+.tdoc-wiz button.tdoc-wiz-nav:hover { background: #f4f4f2; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz .tdoc-wiz-h1 { margin: 4px 0 0; font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; text-wrap: pretty; }
 .tdoc-wiz .tdoc-wiz-sub { margin: -10px 0 0; font-size: 16px; line-height: 1.45; color: var(--td-ink-soft, #6b6a66); text-wrap: pretty; }
 .tdoc-wiz-scene { display: block; margin: 0 auto; max-width: 100%; height: auto; }
