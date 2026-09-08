@@ -3726,6 +3726,125 @@ function stampHostedOwnership(meta, actor) {
 
 // Combined write gate for browser-facing admin routes (DELETE /api/doc,
 // PATCH /api/doc/access). One of:
+// ---- invite emails --------------------------------------------------------
+// Adding someone to a doc's allowed_users is an invitation, and an invitation
+// nobody hears about is not one: the in-app inbox only shows after the person
+// signs in, which is exactly what they do not know to do. Each NEWLY added
+// invitee gets one message. Delivery is pluggable and both plugs are
+// OPTIONAL — a Cloudflare Email Sending binding when the worker has one,
+// else Resend over HTTPS when RESEND_API_KEY is set, else nothing — and
+// "nothing" is a supported configuration, not an error: same posture as the
+// OIDC provider seat.
+//
+// The sending domain's reputation is shared by everything tdoc will ever
+// send, so this path is deliberately stingy:
+//   - only the diff sends — an address already on the list never re-sends
+//   - a per-doc+address cooldown (KV TTL) absorbs remove/re-add churn
+//   - a per-inviter daily cap bounds the worst case
+//   - an opt-out is honored before anything else, and it is permanent
+const INVITE_EMAIL_COOLDOWN_S = 7 * 24 * 60 * 60;
+const INVITE_EMAIL_DAILY_CAP = 50;
+
+function emailSenderAvailable(env) {
+  return !!(env && ((env.EMAIL && typeof env.EMAIL.send === 'function')
+    || String(env.RESEND_API_KEY || '').trim()));
+}
+
+async function deliverEmail(env, msg) {
+  if (env.EMAIL && typeof env.EMAIL.send === 'function') return env.EMAIL.send(msg);
+  const key = String(env.RESEND_API_KEY || '').trim();
+  if (!key) throw new Error('no email sender configured');
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: `${msg.from.name} <${msg.from.email}>`,
+      to: [msg.to],
+      subject: msg.subject,
+      text: msg.text,
+      html: msg.html,
+    }),
+  });
+  if (!r.ok) throw new Error(`resend ${r.status}`);
+}
+
+// allowed_users holds two shapes (see isAllowlisted): a bare address is its
+// own destination; a handle reaches the email its account has on record, and
+// a handle with no account — or none recorded — simply cannot be mailed.
+async function resolveInviteeAddress(env, invitee) {
+  if (typeof invitee !== 'string' || !invitee) return null;
+  if (invitee.includes('@')) return normalizeEmail(invitee);
+  const rec = await lookupHostedAccount(env, invitee);
+  return rec ? normalizeEmail(rec.email) : null;
+}
+
+function inviteEmailBodies({ inviterName, title, docUrl, optoutUrl }) {
+  const text = [
+    `${inviterName} invited you to the document "${title}".`,
+    '',
+    `Open it here: ${docUrl}`,
+    '',
+    'Sign in with this email address and the invitation is already yours —',
+    'access is granted to the address itself, nothing to set up.',
+    '',
+    '—',
+    'tdoc · prompt-native documents',
+    `No more emails like this: ${optoutUrl}`,
+  ].join('\n');
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const html = [
+    '<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;color:#1a1a1a;max-width:34em;margin:2em auto;padding:0 1em">',
+    `<p><strong>${esc(inviterName)}</strong> invited you to the document &ldquo;${esc(title)}&rdquo;.</p>`,
+    `<p><a href="${esc(docUrl)}">Open the document</a></p>`,
+    '<p style="color:#555">Sign in with this email address and the invitation is already yours — access is granted to the address itself, nothing to set up.</p>',
+    `<p style="color:#999;font-size:0.85em;border-top:1px solid #eee;padding-top:1em">tdoc · prompt-native documents · <a href="${esc(optoutUrl)}" style="color:#999">No more emails like this</a></p>`,
+    '</body></html>',
+  ].join('');
+  return { text, html };
+}
+
+async function sendInviteEmails(env, { added, inviterName, inviterId, slug, title, origin }) {
+  if (!emailSenderAvailable(env)) return;
+  if (!Array.isArray(added) || !added.length) return;
+  let host = 'tdoc.dev';
+  try { host = new URL(origin).hostname; } catch {}
+  const from = { email: String(env.TDOC_EMAIL_FROM || '').trim() || `invites@${host}`, name: 'tdoc' };
+  const day = new Date().toISOString().slice(0, 10);
+  const capKey = `invite-cap:${inviterId || 'unknown'}:${day}`;
+  let sentToday = Number(await env.META.get(capKey)) || 0;
+  for (const invitee of added) {
+    if (sentToday >= INVITE_EMAIL_DAILY_CAP) return;
+    let addr = null;
+    try { addr = await resolveInviteeAddress(env, invitee); } catch {}
+    if (!addr) continue;
+    if (await env.META.get(`email-optout:${addr}`)) continue;
+    const coolKey = `invite-sent:${slug}:${addr}`;
+    if (await env.META.get(coolKey)) continue;
+    const tok = rand(16);
+    const { text, html: htmlBody } = inviteEmailBodies({
+      inviterName, title,
+      docUrl: `${origin}/d/${slug}`,
+      optoutUrl: `${origin}/email/optout?t=${tok}`,
+    });
+    try {
+      await env.META.put(`email-optout-token:${tok}`, addr, { expirationTtl: 60 * 60 * 24 * 30 });
+      await deliverEmail(env, {
+        to: addr,
+        from,
+        subject: `${inviterName} invited you to "${title}" on tdoc`,
+        text,
+        html: htmlBody,
+      });
+      sentToday += 1;
+      await env.META.put(capKey, String(sentToday), { expirationTtl: 60 * 60 * 24 * 2 });
+      await env.META.put(coolKey, '1', { expirationTtl: INVITE_EMAIL_COOLDOWN_S });
+    } catch {
+      // One address failing must not sink the access patch or the rest of
+      // the batch — the invitation still exists in the list either way.
+    }
+  }
+}
+
 //   - signed in as the doc publisher (hosted.github_login, or TDOC_OWNER on
 //     unhosted/legacy docs; CSP makes the cookie path safe);
 //   - provider-wide upload token (self-host CLI, global admin);
@@ -6910,6 +7029,31 @@ export default {
     // authorizeOwnerMutation: the owner's session (browser, doc-page Share
     // panel / /me) OR the upload token (CLI) — see its doc comment for why
     // the session path is safe (CSP blocks author scripts on every response).
+    // Opt-out for invitation emails. The token is a single-use KV pointer
+    // written at send time — possession of the emailed link IS the proof, so
+    // nobody can unsubscribe an address whose mail they cannot read.
+    if (p === '/email/optout' && method === 'GET') {
+      const t = String(url.searchParams.get('t') || '');
+      let done = false;
+      if (/^[a-f0-9]{16,64}$/.test(t)) {
+        const addr = await env.META.get(`email-optout-token:${t}`);
+        if (addr) {
+          await env.META.put(`email-optout:${addr}`, JSON.stringify({ at: new Date().toISOString() }));
+          await env.META.delete(`email-optout-token:${t}`);
+          done = true;
+        }
+      }
+      return new Response([
+        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tdoc email preferences</title></head>',
+        '<body style="font-family:-apple-system,system-ui,sans-serif;max-width:34em;margin:15vh auto;padding:0 1em;color:#1a1a1a">',
+        `<h1 style="font-size:1.3em">${done ? 'You are unsubscribed' : 'This link has expired'}</h1>`,
+        `<p style="color:#555">${done
+          ? 'This address will not receive invitation emails from this site again.'
+          : 'The unsubscribe link is single-use and time-limited. If you still receive unwanted email, reply to it and the operator will remove you.'}</p>`,
+        '</body></html>',
+      ].join(''), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+
     if (p === '/api/doc/access' && method === 'PATCH') {
       // Body is parsed before auth so we can pass slug into the hosted ACL
       // gate. Cap Content-Length first — an access patch is always tiny; do
@@ -6935,11 +7079,29 @@ export default {
       if (!auth.ok) return auth.response;
       const meta = auth.meta || await loadDocMeta(env, slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      const prevAllowed = accessFromMeta(meta).allowed_users;
       const next = applyAccessPatch(meta, access);
       if (next.error) {
         return json({ error: next.error, ...(next.field ? { field: next.field } : {}), ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
       }
       await env.META.put(`meta:${slug}`, JSON.stringify(next.meta));
+      // The one moment an invitation exists as an event rather than a list
+      // entry: mail the people the owner just added, never the ones who were
+      // already there.
+      const added = (next.access.allowed_users || []).filter((x) => !prevAllowed.includes(x));
+      if (added.length) {
+        const inviterName = auth.session ? actorDisplayName(auth.session)
+          : ((auth.actor && (auth.actor.github_login || (auth.actor.email || '').split('@')[0])) || 'Someone');
+        const inviterId = auth.session ? actorKey(auth.session)
+          : ((auth.actor && (auth.actor.account_id || auth.actor.kind)) || 'unknown');
+        try {
+          await sendInviteEmails(env, {
+            added, inviterName, inviterId, slug,
+            title: (next.meta && next.meta.title) || slug,
+            origin: url.origin,
+          });
+        } catch {}
+      }
       return json({ ok: true, slug, access: next.access });
     }
 
