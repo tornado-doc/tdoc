@@ -351,7 +351,49 @@ async function loadDocMeta(env, slug) {
   }
 }
 
-function accessDeniedHtml({ status, title, body, slug, version }) {
+// One renderer for every edge page — sign-in status, access denial, email
+// opt-out. They all ride the SHELL status page so a visitor never falls off
+// the brand onto a bare browser-styled card, and the boot JSON is the entire
+// contract: title, message, optional link-shaped actions, optional
+// request-access affordance.
+function statusPageResponse({ docTitle, title, message, error = false, status = 200, actions = null, requestAccess = null, retry = null }) {
+  // A worker with no shell runtime (Vercel shim, stripped test builds) still
+  // owes the visitor a working page: same content, plain HTML, the actions
+  // as links. Request-access needs the shell's fetch and is simply absent.
+  if (!SHELL || typeof SHELL.appHtml !== 'function') {
+    const actionHtml = (actions || [])
+      .map((a) => `<p><a href="${escapeHtml(a.href)}">${escapeHtml(a.label)}</a></p>`)
+      .join('');
+    return html(`<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(docTitle || 'tdoc')}</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;color:#111}
+.box{max-width:420px;padding:28px 24px;border:1px solid #e5e7eb;border-radius:12px;text-align:center}
+h1{font-size:18px;margin:0 0 8px}p{margin:0 0 12px;color:#444}a{color:#1652f0}</style>
+</head><body><div class="box"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${actionHtml}${retry ? `<p><a href="${escapeHtml(retry)}">Retry this link</a></p>` : ''}</div></body></html>`, { status });
+  }
+  const nonce = rand(16);
+  return html(SHELL.appHtml({
+    title: docTitle || `tdoc - ${error ? 'error' : 'status'}`,
+    nonceAttr: ` nonce="${nonce}"`,
+    runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+    runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+    bootJson: safeJsonForScript({
+      page: 'status',
+      title,
+      message,
+      error,
+      ...(actions ? { actions } : {}),
+      ...(requestAccess ? { requestAccess } : {}),
+      ...(retry ? { retry } : {}),
+    }),
+  }), {
+    status,
+    headers: { 'Content-Security-Policy': cspHeader(nonce) },
+  });
+}
+
+function accessDeniedHtml({ status, title, body, slug, version, signin }) {
   // The retry link points back at what was requested: a versioned URL when
   // the caller was asked for one, the doc's head URL (which resolves to the
   // latest version only after this same gate passes) when it wasn't. The
@@ -359,23 +401,29 @@ function accessDeniedHtml({ status, title, body, slug, version }) {
   const next = !slug ? '/'
     : version ? `/d/${encodeURIComponent(slug)}/v/${version}`
     : `/d/${encodeURIComponent(slug)}`;
-  return html(`<!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)} · tdoc</title>
-<style>
-  body{font:15px/1.5 system-ui,-apple-system,sans-serif;margin:0;min-height:100vh;
-    display:flex;align-items:center;justify-content:center;background:#fff;color:#111}
-  .box{max-width:420px;padding:28px 24px;border:1px solid #e5e7eb;border-radius:12px}
-  h1{font-size:18px;margin:0 0 8px}
-  p{margin:0 0 14px;color:#444}
-  a{color:#1652f0}
-  .meta{font-size:12px;color:#888;margin-top:18px}
-</style></head><body><div class="box">
-  <h1>${escapeHtml(title)}</h1>
-  <p>${escapeHtml(body)}</p>
-  <p><a href="${escapeHtml(next)}">Retry this link</a> after signing in from any page on this host that shows the tdoc bar.</p>
-  <p class="meta">tdoc access control</p>
-</div></body></html>`, { status });
+  // A denial is where an invitation LANDS: the emailed link opens here for
+  // anyone not yet signed in, so the page must carry the door itself — a
+  // dead end that says "go sign in somewhere" loses the invitee. The sign-in
+  // round-trips straight back to this URL. `switch` is the 403 flavor:
+  // signed in as the wrong person, so force the account chooser — and a 403
+  // can also ASK: request access drops a notification in the owner's inbox.
+  const actions = signin === 'signin'
+    ? [{ label: 'Sign in', href: `/api/auth/oidc/login?return=${encodeURIComponent(next)}`, primary: true }]
+    : signin === 'switch'
+      ? [{ label: 'Switch account', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
+      : null;
+  return statusPageResponse({
+    docTitle: `${title} · tdoc`,
+    title,
+    message: signin === 'signin'
+      ? `${body} You’ll come straight back to this document.`
+      : body,
+    error: true,
+    status,
+    actions,
+    ...(signin === 'switch' && slug ? { requestAccess: { slug } } : {}),
+    retry: next,
+  });
 }
 
 // A CLI request proves who it is with the account token from
@@ -424,8 +472,9 @@ async function enforceDocAccess(env, req, slug, version) {
       response: accessDeniedHtml({
         status: 401,
         title: 'Sign in required',
-        body: 'This document is private. Sign in, then open the link again. Only invited accounts can read it.',
+        body: 'This document is private. Only invited accounts can read it.',
         slug, version,
+        signin: oidcConfig(env) ? 'signin' : null,
       }),
     };
   }
@@ -436,6 +485,7 @@ async function enforceDocAccess(env, req, slug, version) {
       title: 'Access denied',
       body: `Signed in as ${actorDisplayName(session)}, but this private document does not include you on the allowlist.`,
       slug, version,
+      signin: oidcConfig(env) ? 'switch' : null,
     }),
   };
 }
@@ -2169,21 +2219,12 @@ async function oidcDiscovery(cfg) {
 }
 
 function authStatusResponse(message, { error = false, status = 200 } = {}) {
-  const nonce = rand(16);
-  return html(SHELL.appHtml({
-    title: error ? 'tdoc - sign-in failed' : 'tdoc - signed in',
-    nonceAttr: ` nonce="${nonce}"`,
-    runtimeJsPath: SHELL_RUNTIME_JS_PATH,
-    runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
-    bootJson: safeJsonForScript({
-      page: 'status',
-      title: error ? 'Sign-in failed' : "You're signed in",
-      message,
-      error,
-    }),
-  }), {
+  return statusPageResponse({
+    docTitle: error ? 'tdoc - sign-in failed' : 'tdoc - signed in',
+    title: error ? 'Sign-in failed' : "You're signed in",
+    message,
+    error,
     status,
-    headers: { 'Content-Security-Policy': cspHeader(nonce) },
   });
 }
 
@@ -3804,8 +3845,9 @@ function inviteEmailBodies({ inviterName, title, docUrl, optoutUrl }) {
 }
 
 async function sendInviteEmails(env, { added, inviterName, inviterId, slug, title, origin }) {
-  if (!emailSenderAvailable(env)) return;
-  if (!Array.isArray(added) || !added.length) return;
+  const emailed = [];
+  if (!emailSenderAvailable(env)) return emailed;
+  if (!Array.isArray(added) || !added.length) return emailed;
   let host = 'tdoc.dev';
   try { host = new URL(origin).hostname; } catch {}
   const from = { email: String(env.TDOC_EMAIL_FROM || '').trim() || `invites@${host}`, name: 'tdoc' };
@@ -3813,7 +3855,7 @@ async function sendInviteEmails(env, { added, inviterName, inviterId, slug, titl
   const capKey = `invite-cap:${inviterId || 'unknown'}:${day}`;
   let sentToday = Number(await env.META.get(capKey)) || 0;
   for (const invitee of added) {
-    if (sentToday >= INVITE_EMAIL_DAILY_CAP) return;
+    if (sentToday >= INVITE_EMAIL_DAILY_CAP) return emailed;
     let addr = null;
     try { addr = await resolveInviteeAddress(env, invitee); } catch {}
     if (!addr) continue;
@@ -3836,6 +3878,7 @@ async function sendInviteEmails(env, { added, inviterName, inviterId, slug, titl
         html: htmlBody,
       });
       sentToday += 1;
+      emailed.push(addr);
       await env.META.put(capKey, String(sentToday), { expirationTtl: 60 * 60 * 24 * 2 });
       await env.META.put(coolKey, '1', { expirationTtl: INVITE_EMAIL_COOLDOWN_S });
     } catch {
@@ -3843,6 +3886,7 @@ async function sendInviteEmails(env, { added, inviterName, inviterId, slug, titl
       // the batch — the invitation still exists in the list either way.
     }
   }
+  return emailed;
 }
 
 //   - signed in as the doc publisher (hosted.github_login, or TDOC_OWNER on
@@ -3994,6 +4038,7 @@ function inboxGroupKey(kind, slug, targetId) {
   if (kind === 'comment') return `comment:${slug}`;
   if (kind === 'reply') return `reply:${targetId}`;
   if (kind === 'reaction') return `reaction:${targetId}`;
+  if (kind === 'access_request') return `access_request:${slug}`;
   return `other:${slug || 'x'}`;
 }
 
@@ -7029,6 +7074,45 @@ export default {
     // authorizeOwnerMutation: the owner's session (browser, doc-page Share
     // panel / /me) OR the upload token (CLI) — see its doc comment for why
     // the session path is safe (CSP blocks author scripts on every response).
+    // The other half of the 403 page: a signed-in visitor who is not on the
+    // allowlist can ask, and the ask lands in the owner's inbox as a
+    // notification. Session-only (an ask is attributable or it is spam),
+    // deduped per doc+asker so a double-click is one row, and it answers the
+    // same shape whether it delivered or was deduplicated — the visitor's
+    // side of the story is "the owner has been notified" either way.
+    if (p === '/api/doc/request-access' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body && body.slug;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'slug required' }, { status: 400 });
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      const meta = await loadDocMeta(env, slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      if (canReadDoc(accessFromMeta(meta), session, env, meta)) {
+        return json({ ok: true, already: true });
+      }
+      const asker = actorKey(session);
+      const dedupeKey = `access-req:${slug}:${asker}`;
+      if (await env.META.get(dedupeKey)) return json({ ok: true, requested: true });
+      const owner = ownerActorKey(meta, env);
+      if (owner && owner !== asker) {
+        const { key, inbox } = await loadInbox(env, owner);
+        if (key) {
+          const next = applyInboxEvent(inbox, {
+            id: `n_${Date.now()}_${rand(4)}`,
+            kind: 'access_request',
+            slug,
+            at: new Date().toISOString(),
+            actor: { login: asker, name: actorDisplayName(session) },
+          });
+          await env.META.put(key, JSON.stringify(next));
+        }
+      }
+      await env.META.put(dedupeKey, '1', { expirationTtl: 7 * 24 * 60 * 60 });
+      return json({ ok: true, requested: true });
+    }
+
     // Opt-out for invitation emails. The token is a single-use KV pointer
     // written at send time — possession of the emailed link IS the proof, so
     // nobody can unsubscribe an address whose mail they cannot read.
@@ -7043,15 +7127,14 @@ export default {
           done = true;
         }
       }
-      return new Response([
-        '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>tdoc email preferences</title></head>',
-        '<body style="font-family:-apple-system,system-ui,sans-serif;max-width:34em;margin:15vh auto;padding:0 1em;color:#1a1a1a">',
-        `<h1 style="font-size:1.3em">${done ? 'You are unsubscribed' : 'This link has expired'}</h1>`,
-        `<p style="color:#555">${done
+      return statusPageResponse({
+        docTitle: 'tdoc - email preferences',
+        title: done ? 'You are unsubscribed' : 'This link has expired',
+        message: done
           ? 'This address will not receive invitation emails from this site again.'
-          : 'The unsubscribe link is single-use and time-limited. If you still receive unwanted email, reply to it and the operator will remove you.'}</p>`,
-        '</body></html>',
-      ].join(''), { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+          : 'The unsubscribe link is single-use and time-limited. If you still receive unwanted email, reply to it and the operator will remove you.',
+        error: !done,
+      });
     }
 
     if (p === '/api/doc/access' && method === 'PATCH') {
@@ -7089,20 +7172,23 @@ export default {
       // entry: mail the people the owner just added, never the ones who were
       // already there.
       const added = (next.access.allowed_users || []).filter((x) => !prevAllowed.includes(x));
+      let emailed = [];
       if (added.length) {
         const inviterName = auth.session ? actorDisplayName(auth.session)
           : ((auth.actor && (auth.actor.github_login || (auth.actor.email || '').split('@')[0])) || 'Someone');
         const inviterId = auth.session ? actorKey(auth.session)
           : ((auth.actor && (auth.actor.account_id || auth.actor.kind)) || 'unknown');
         try {
-          await sendInviteEmails(env, {
+          emailed = await sendInviteEmails(env, {
             added, inviterName, inviterId, slug,
             title: (next.meta && next.meta.title) || slug,
             origin: url.origin,
           });
         } catch {}
       }
-      return json({ ok: true, slug, access: next.access });
+      // The Share panel tells the owner what actually went out — "saved"
+      // and "they were told" are different promises.
+      return json({ ok: true, slug, access: next.access, emailed });
     }
 
     // ---- rename ----

@@ -600,6 +600,44 @@ button.tdoc-pin {
   color: var(--td-accent);
 }
 
+/* Edge-page actions: the sign-in / switch-account / request-access row on a
+   denial. Same button language as the rest of the app, sized for a phone. */
+.tdoc-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.tdoc-status-actions a,
+.tdoc-status-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 20px;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  margin-top: 0;
+}
+.tdoc-status-actions .primary {
+  background: var(--td-ink);
+  color: var(--td-ground);
+  border: 1px solid var(--td-ink);
+}
+.tdoc-status-actions .secondary {
+  background: transparent;
+  color: var(--td-ink);
+  border: 1px solid var(--tdoc-rule, #d9d9d9);
+}
+.tdoc-status-actions button[disabled] { opacity: 0.6; cursor: default; }
+.tdoc-status-note { color: var(--td-muted); font-size: 13px; }
+.tdoc-status-note a { color: var(--td-accent); margin-top: 0; }
+
 /* /activate — the pairing approval page. Inherits the status-page frame. */
 .tdoc-activate-page .tdoc-activate-code {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
