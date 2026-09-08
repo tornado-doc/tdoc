@@ -613,7 +613,7 @@ async function chooseMode(page, label) {
       await page.locator('.tdoc-version-submenu-trigger').click();
       const versionPopup = page.locator('.tdoc-version-submenu');
       await versionPopup.waitFor();
-      assert(/v2 · current/.test(await versionPopup.locator('.tdoc-version-item.current').textContent()),
+      assert(/v2 · viewing/.test(await versionPopup.locator('.tdoc-version-item.current').textContent()),
         'current version missing from mobile version submenu');
       assert(await versionPopup.evaluate((popup) => getComputedStyle(popup).overflowY) === 'auto',
         'mobile version submenu is not scrollable');

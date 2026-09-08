@@ -159,7 +159,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     }
     if (!versionLayout.maxHeight || versionLayout.maxHeight === 'none') throw new Error('version submenu has no max height');
     const currentVersion = await page.textContent('.tdoc-version-submenu .tdoc-version-item.current');
-    if (!/v2 · current/.test(currentVersion)) throw new Error(`current version missing from submenu: ${currentVersion}`);
+    if (!/v2 · viewing/.test(currentVersion)) throw new Error(`current version missing from submenu: ${currentVersion}`);
     await page.keyboard.press('Escape');
     await page.click('.ui-menu-popup [data-action="publish"]');
     const actionHeight = await page.$eval('.ui-dialog-popup .actions button', (button) => button.getBoundingClientRect().height);

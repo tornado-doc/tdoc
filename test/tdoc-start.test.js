@@ -55,11 +55,10 @@ t('the tutorial can open the provider-owned onboarding dialog', () => {
   assert(/<OnboardingDialog/.test(documentShell), 'React onboarding dialog is not mounted in the shell');
 });
 
-t('the dialog is one reusable Base UI screen, not a paged state machine', () => {
+t('the dialog is one reusable Base UI screen with six steps read off the record', () => {
   assert(/<AppDialog/.test(dialog), 'shared dialog primitive missing');
   assert(!/PAGES|stepSignIn|device\/start|device\/poll/.test(dialog), 'old paged or sign-in flow returned');
-  assert(/What does it do\?/.test(dialog), 'collapsed detail missing');
-  assert(/Read the full tutorial/.test(dialog), 'tutorial handoff missing');
+  assert(/const STEPS = \['welcome', 'paste', 'code', 'doc', 'sendback', 'done'\];/.test(dialog), 'the six steps are missing');
 });
 
 t('mobile onboarding actions keep names and 44px touch targets', () => {
@@ -72,7 +71,7 @@ t('mobile onboarding actions keep names and 44px touch targets', () => {
 t('the short prompt points to FIRST-DOC and never embeds a credential', () => {
   assert(/FIRST-DOC\.md/.test(dialog), 'FIRST-DOC link missing');
   assert(!/token\s*(is|=)|Authorization|Bearer/.test(dialog), 'credential leaked into the prompt');
-  assert(/copyText\(FIRST_DOC_RECIPE\)/.test(dialog), 'copy action is not wired to the recipe');
+  assert(/copyText\(line\)/.test(dialog) && /line = FIRST_DOC_RECIPE/.test(dialog), 'copy action is not wired to the recipe');
 });
 
 t('the tutorial promises the same private personal AI portrait as FIRST-DOC', () => {
@@ -82,14 +81,16 @@ t('the tutorial promises the same private personal AI portrait as FIRST-DOC', ()
   assert(!/You get a Game of Life/i.test(text), 'tutorial still promises the old first doc');
 });
 
-t('hosted availability only controls whether the hub is mentioned', () => {
-  assert(/fetch\('\/api\/hosted\/token'/.test(dialog), 'hosted capability probe missing');
-  assert(/result\?\.token \|\| result\?\.error === 'sign_in_required'/.test(dialog), 'hosted probe semantics changed');
-  assert(/hosted \? <li>Published docs appear in your hub at tdoc\.dev\/me/.test(dialog), 'hub mention is not capability-gated');
+t('the wizard reads the journey record, not a capability probe', () => {
+  assert(!/fetch\('\/api\/hosted\/token'/.test(dialog), 'the old capability probe is back');
+  assert(/getOnboarding\(\)/.test(dialog), 'the wizard does not read the journey record');
+  assert(/stepFromRecord\(next\)/.test(dialog), 'the wizard does not move with the record');
+  assert(/openDoc\(1, 'welcome'\)/.test(dialog), 'the wizard does not open the first doc');
 });
 
-t('self-hosting remains an explicit alternate sentence', () => {
-  assert(/Publish it to my own Cloudflare/.test(dialog), 'self-host alternative missing');
+t('self-hosting remains an explicit alternate in the recipe and the tutorial', () => {
+  // The pop-up carries no reading; the alternative lives where the agent and
+  // the curious look — FIRST-DOC.md and /start.
   assert(/own Cloudflare/i.test(recipe) && /wrangler login/.test(recipe), 'recipe no longer covers self-hosting');
 });
 

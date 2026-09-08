@@ -624,3 +624,173 @@ button.tdoc-pin {
   background: none; border: none; padding: 0; font: inherit;
   color: inherit; text-decoration: underline; cursor: pointer;
 }
+
+/* Onboarding: one screen, two doors. They stack below the narrow breakpoint. */
+.tdoc-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 6px;
+  font-size: 13px;
+  color: var(--td-ink-soft, #6b6b73);
+}
+
+.tdoc-wait.live { color: var(--td-ink); }
+
+.tdoc-wait-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--td-accent);
+  animation: tdoc-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tdoc-pulse {
+  0%, 100% { opacity: .35; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.tdoc-wait-bar {
+  position: relative;
+  height: 2px;
+  margin: 0 0 8px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--td-accent) 18%, transparent);
+  overflow: hidden;
+}
+
+.tdoc-wait-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--td-accent);
+  animation: tdoc-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes tdoc-sweep {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tdoc-wait-dot { animation: none; }
+  .tdoc-wait-bar::after { animation: none; left: 0; width: 100%; opacity: .5; }
+}
+
+.tdoc-waitlist-done { margin: 0 0 8px; font-weight: 600; }
+
+.tdoc-modal button.tdoc-door-back { margin-top: 12px; }
+
+.tdoc-open-doc {
+  display: inline-block;
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+
+/* On the landing page, a way back to the doc you already have. */
+.tdoc-your-doc {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--td-accent);
+  border-radius: 999px;
+  color: var(--td-accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* The strip under the top bar on a revised doc: the journey's exit. In the
+   flow, like the old-version strip — a floating bar sat over the comment
+   card and took clicks meant for it. */
+.tdoc-onboard-banner {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--td-accent);
+  color: #fff;
+  font-size: 13px;
+}
+
+.tdoc-onboard-banner button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, .6);
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tdoc-onboard-banner button:hover { background: rgba(255, 255, 255, .15); }
+
+/* The hub card's one-line definition of "agent", under its title. */
+.mk-card .tdoc-agent-def { display: block; margin-top: -2px; color: var(--td-ink, #111); font-size: 12px; line-height: 1.45; }
+
+/* ---- onboarding wizard: one pop-up, six steps ------------------------- */
+/* Every button rule carries `.tdoc-wiz` + the element so it outranks
+   chrome.css's `.tdoc-modal button` (which paints white with a grey border). */
+.ui-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.ui-dialog-popup.tdoc-wiz-modal {
+  width: min(540px, calc(100vw - 32px));
+  border-radius: 22px;
+  padding: 28px 40px 36px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .18), 0 1px 0 rgba(0, 0, 0, .04);
+}
+.ui-dialog-popup.tdoc-wiz-modal .ui-dialog-body { margin: 0; }
+
+.tdoc-wiz { position: relative; display: flex; flex-direction: column; gap: 18px; font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif; color: var(--td-ink, #1a1a1a); }
+.tdoc-wiz-head { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
+.tdoc-wiz-mark-word { font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
+.tdoc-wiz-dots { display: flex; gap: 6px; align-items: center; }
+.tdoc-wiz-dots span { width: 6px; height: 6px; border-radius: 50%; background: #d9d9d6; }
+.tdoc-wiz-dots span.past { background: var(--td-accent); opacity: .35; }
+.tdoc-wiz-dots span.now { background: var(--td-accent); }
+.tdoc-wiz .tdoc-wiz-h1 { margin: 4px 0 0; font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; text-wrap: pretty; }
+.tdoc-wiz .tdoc-wiz-sub { margin: -10px 0 0; font-size: 16px; line-height: 1.45; color: var(--td-ink-soft, #6b6a66); text-wrap: pretty; }
+.tdoc-wiz-scene { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+.tdoc-wiz-actions { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.tdoc-wiz-copy { display: flex; flex-direction: column; gap: 12px; }
+.tdoc-wiz .tdoc-wiz-line { display: block; box-sizing: border-box; width: 100%; background: #f4f4f2; border: 1px solid var(--td-line, #e8e7e3); border-radius: 14px; padding: 16px 18px; font: 500 15px/1.4 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -0.01em; overflow-wrap: anywhere; user-select: all; }
+.tdoc-wiz button.tdoc-wiz-primary { display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 999px; border: 0; background: var(--td-accent); color: #fff; font: 600 16px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; padding: 0 24px; width: 100%; }
+.tdoc-wiz button.tdoc-wiz-primary:hover { background: var(--td-accent-hover, #1245d0); }
+.tdoc-wiz button.tdoc-wiz-primary:disabled { opacity: .4; cursor: default; }
+.tdoc-wiz button.tdoc-wiz-primary.done { background: #1a7340; }
+.tdoc-wiz button.tdoc-wiz-secondary { display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 999px; border: 1px solid var(--td-line, #e8e7e3); background: #fff; color: var(--td-ink, #1a1a1a); font: 500 15px -apple-system, system-ui, sans-serif; cursor: pointer; padding: 0 20px; width: 100%; }
+.tdoc-wiz button.tdoc-wiz-secondary.done { border-color: #1a7340; color: #1a7340; }
+.tdoc-wiz button.tdoc-wiz-link, .tdoc-wiz a.tdoc-wiz-link { align-self: center; background: none; border: 0; padding: 6px 8px; border-radius: 8px; font: 500 15px -apple-system, system-ui, sans-serif; color: var(--td-accent); text-decoration: none; cursor: pointer; }
+.tdoc-wiz button.tdoc-wiz-link:hover, .tdoc-wiz a.tdoc-wiz-link:hover { background: #f4f4f2; }
+.tdoc-wiz .tdoc-wiz-confirm { margin: 0; font-size: 16px; color: var(--td-ink, #1a1a1a); text-align: center; }
+.tdoc-wiz-rows { display: flex; flex-direction: column; gap: 12px; }
+.tdoc-wiz-row { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 500; }
+.tdoc-wiz-row.todo { color: #a3a29d; }
+.tdoc-wiz-mark { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1.5px solid #d9d9d6; }
+.tdoc-wiz-row.done .tdoc-wiz-mark { background: var(--td-accent); border-color: var(--td-accent); }
+.tdoc-wiz-row.live .tdoc-wiz-mark { border: 2px solid var(--td-accent); }
+.tdoc-wiz-listen { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14px; line-height: 1.4; color: var(--td-ink-soft, #6b6a66); }
+.tdoc-wiz input.tdoc-wiz-code { width: 100%; box-sizing: border-box; height: 56px; border: 1.5px solid var(--td-line, #e8e7e3); border-radius: 14px; padding: 0 18px; font: 500 24px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .18em; text-align: center; text-transform: uppercase; background: #fff; color: var(--td-ink, #1a1a1a); }
+.tdoc-wiz input.tdoc-wiz-code:focus { outline: none; border-color: var(--td-accent); box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff); }
+.tdoc-wiz input.tdoc-wiz-code::placeholder { color: #c4c3be; letter-spacing: .18em; }
+.tdoc-wiz .tdoc-wiz-error { margin: 0; font-size: 14px; text-align: center; color: var(--td-danger, #b42318); }
+.tdoc-wiz.embedded { gap: 16px; }
+.tdoc-wiz.embedded .tdoc-wiz-h1 { font-size: 22px; }
+.tdoc-wiz.embedded .tdoc-wiz-sub { font-size: 14px; }
+.tdoc-own-door { display: flex; flex-direction: column; gap: 12px; }
+body.tdoc-narrow .ui-dialog-popup.tdoc-wiz-modal { padding: 22px 22px 26px; }
+body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }

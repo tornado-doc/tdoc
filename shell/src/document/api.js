@@ -20,6 +20,30 @@ export function listComments(slug, version) {
 }
 
 // The people this session may name after `@` on this doc.
+// Onboarding. The record is a set of timestamps the server stamps as the
+// person and their agent move through the journey; the events are every
+// action the page saw. Both live on the account, never in localStorage, so a
+// second device resumes where the first one stopped.
+export function getOnboarding() {
+  return request('/api/onboarding');
+}
+
+export function postOnboardingEvent(action, doc) {
+  return request('/api/onboarding/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(doc ? { action, doc } : { action }),
+  });
+}
+
+// What the owner's agent has done to this doc lately: when it last read the
+// comments, and the latest version it published. The bridge-2 card polls this
+// while it waits.
+export function getAgentStatus(slug) {
+  const query = new URLSearchParams({ slug });
+  return request(`/api/doc/agent-status?${query}`);
+}
+
 export function listMentionableUsers(slug) {
   const query = new URLSearchParams({ slug });
   return request(`/api/mentions?${query}`);

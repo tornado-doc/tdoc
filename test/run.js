@@ -53,7 +53,8 @@ const OFFLINE = [
   'first-save-replaces-scaffold.test.js', // #380 the first save becomes v1 instead of appending v2
   'document-owner.test.js',   // #395 the bar and the lists name the document's owner
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
-  'resolve-a-thread.test.js', // #357 a person can resolve; resolved threads leave the margin
+  'resolve-a-thread.test.js',
+  'onboarding-journey.test.js', // the journey: two doors, three server-driven bridges, no daemon // #357 a person can resolve; resolved threads leave the margin
   'tornado-doc-landing.test.js',
   'landing-republish.test.js', // #458 the homepage is one v1, re-shipped in place with `replace`
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
