@@ -796,32 +796,42 @@ button.tdoc-pin {
 
 .ui-dialog-popup.tdoc-wiz-modal {
   width: min(540px, calc(100vw - 32px));
+  height: min(640px, calc(100vh - 32px));
+  box-sizing: border-box;
   border-radius: 22px;
-  padding: 28px 40px 36px;
+  padding: 28px 40px 32px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, .18), 0 1px 0 rgba(0, 0, 0, .04);
+  display: flex;
+  flex-direction: column;
 }
-.ui-dialog-popup.tdoc-wiz-modal .ui-dialog-body { margin: 0; }
+.ui-dialog-popup.tdoc-wiz-modal .ui-dialog-body { margin: 0; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* The frame never moves between steps: header, a two-line headline slot, the
+   middle for this step's one thing, and the buttons on the floor. */
+.tdoc-wiz-modal .tdoc-wiz { flex: 1 1 auto; min-height: 0; }
+.tdoc-wiz .tdoc-wiz-h1 { min-height: 2.3em; }
+.tdoc-wiz-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 14px; overflow: auto; }
+.tdoc-wiz-foot { display: flex; flex-direction: column; gap: 12px; }
+.tdoc-wiz-primary-ghost { height: 48px; }
+.tdoc-wiz-nav-row { display: flex; align-items: center; justify-content: space-between; min-height: 36px; }
+.tdoc-wiz-nav-row .tdoc-wiz-link { align-self: auto; }
+.tdoc-wiz.embedded { height: 520px; }
 
 .tdoc-wiz { position: relative; display: flex; flex-direction: column; gap: 18px; font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz-head { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
 .tdoc-wiz-mark-word { font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
-.tdoc-wiz-head-left, .tdoc-wiz-head-right { display: flex; align-items: center; gap: 8px; }
 .tdoc-wiz-dots { display: flex; gap: 6px; align-items: center; }
 .tdoc-wiz-dots span, .tdoc-wiz .tdoc-wiz-dots button { width: 6px; height: 6px; padding: 0; border: 0; border-radius: 50%; background: #d9d9d6; }
 .tdoc-wiz .tdoc-wiz-dots button { cursor: pointer; box-sizing: content-box; background-clip: content-box; padding: 5px; margin: -5px; }
 .tdoc-wiz .tdoc-wiz-dots button.past { background-color: var(--td-accent); opacity: .35; }
 .tdoc-wiz .tdoc-wiz-dots button.now { background-color: var(--td-accent); }
 .tdoc-wiz .tdoc-wiz-dots button.ahead { background-color: var(--td-accent); opacity: .35; }
-.tdoc-wiz button.tdoc-wiz-nav { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #a3a29d; cursor: pointer; display: flex; align-items: center; justify-content: center; margin: 0 -6px; }
-.tdoc-wiz button.tdoc-wiz-nav:hover { background: #f4f4f2; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz .tdoc-wiz-h1 { margin: 4px 0 0; font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; text-wrap: pretty; }
 .tdoc-wiz .tdoc-wiz-sub { margin: -10px 0 0; font-size: 16px; line-height: 1.45; color: var(--td-ink-soft, #6b6a66); text-wrap: pretty; }
 .tdoc-wiz-scene { display: block; margin: 0 auto; max-width: 100%; height: auto; }
-.tdoc-wiz-actions { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
 .tdoc-wiz-copy { display: flex; flex-direction: column; gap: 12px; }
 .tdoc-wiz .tdoc-wiz-line { display: block; box-sizing: border-box; width: 100%; background: #f4f4f2; border: 1px solid var(--td-line, #e8e7e3); border-radius: 14px; padding: 16px 18px; font: 500 15px/1.4 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -0.01em; overflow-wrap: anywhere; user-select: all; }
-.tdoc-wiz button.tdoc-wiz-primary { display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 999px; border: 0; background: var(--td-accent); color: #fff; font: 600 16px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; padding: 0 24px; width: 100%; }
-.tdoc-wiz button.tdoc-wiz-primary:hover { background: var(--td-accent-hover, #1245d0); }
+.tdoc-wiz button.tdoc-wiz-primary, .tdoc-wiz a.tdoc-wiz-primary { display: flex; text-decoration: none; box-sizing: border-box; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 999px; border: 0; background: var(--td-accent); color: #fff; font: 600 16px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; padding: 0 24px; width: 100%; }
+.tdoc-wiz button.tdoc-wiz-primary:hover, .tdoc-wiz a.tdoc-wiz-primary:hover { background: var(--td-accent-hover, #1245d0); }
 .tdoc-wiz button.tdoc-wiz-primary:disabled { opacity: .4; cursor: default; }
 .tdoc-wiz button.tdoc-wiz-primary.done { background: #1a7340; }
 .tdoc-wiz button.tdoc-wiz-secondary { display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 999px; border: 1px solid var(--td-line, #e8e7e3); background: #fff; color: var(--td-ink, #1a1a1a); font: 500 15px -apple-system, system-ui, sans-serif; cursor: pointer; padding: 0 20px; width: 100%; }

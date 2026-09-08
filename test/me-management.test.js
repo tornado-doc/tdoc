@@ -58,7 +58,7 @@ t('Create a doc is a two-card fork rendered by the shared component', () => {
     'the cards must be wired to the hub hook and its capability');
   assert(/copyText\(line\)/.test(choice) && /line = FIRST_DOC_RECIPE/.test(choice), 'the recipe is not copyable');
   assert(/className="tdoc-wiz-copy"/.test(choice) && /className="tdoc-wiz-line"/.test(choice), 'shared recipe treatment missing');
-  assert(/copied === true \? 'Copied\. Now paste it\.' : copied === false \? 'Select & copy' : 'Copy'/.test(choice), 'Copy feedback state missing (three states: idle, copied, clipboard refused)');
+  assert(/copied === true \? 'Copied\. Now paste it\.' : copied === false \? 'Select & copy' : 'Copy'/.test(choice) && /function useCopyLine\(/.test(choice), 'Copy feedback state missing (three states: idle, copied, clipboard refused), shared by every line');
   // The dialog now carries its own actions — the cards themselves (#356) — so
   // the footer is a plain dismiss. Two primaries in one dialog is the thing to
   // guard against, not the missing "Done".
