@@ -145,6 +145,9 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   // the person's, and the record's next move clears the view.
   assert(dialog.includes("const shown = view && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;") && dialog.includes('aria-label="Previous step"') && dialog.includes('aria-label="Next step"'), 'a step can be looked at again, and left again');
   assert(dialog.includes('useEffect(() => { setView(null); }, [step]);'), 'a step that moves on is shown the moment it does');
+  // Under 700px every modal button grows to 44px; the dots are buttons and
+  // became coins (seen on tdoc.dev in a 560px pane). They stay dots.
+  assert(/\.tdoc-modal \.tdoc-wiz \.tdoc-wiz-dots button \{\s*min-width: 0;\s*min-height: 0;/.test(read('shell/src/ui/ui.css')), 'the dots are exempt from the 44px floor');
   assert(!/tdoc-wiz-sub/.test(dialog), 'no subtitles: a headline, a button, and a status line at most');
   // Every wizard button rule outranks chrome.css's `.tdoc-modal button`, which
   // painted them white on white (round-5 screenshots: blank buttons).
