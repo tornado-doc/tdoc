@@ -246,7 +246,7 @@ export function DocumentShell({ boot, config }) {
       const record = result?.record;
       // A journey that has started and not reached its exit reopens where
       // it stopped — the wizard reads the step off the record.
-      if (record?.started && !record?.shared && !record?.waitlist) {
+      if (record?.started && !record?.shared && !record?.tour_seen && !record?.waitlist) {
         setOnboardingDoor('own');
         setOnboardingOpen(true);
       }

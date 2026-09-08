@@ -246,7 +246,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     if (ok) postOnboardingEvent('share_link_copied', slug).catch(() => {});
   };
 
-  const shown = view && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;
+  const shown = view && STEPS.includes(view) && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;
   const index = STEPS.indexOf(shown) + 1;
   const liveIndex = STEPS.indexOf(step) + 1;
   const back = () => { if (index > 1) setView(STEPS[index - 2]); };
@@ -255,9 +255,18 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     : elapsed > STILL_WAITING_MS ? STILL_WAITING
       : elapsed > NOTHING_YET_MS ? NOTHING_YET : WAITING;
 
+  // Skip is not leaving: it goes to the last screen — their docs, or the walk
+  // again — and stamps the record so the landing stops reopening the pop-up.
+  // Leaving is the × in the corner.
+  const skipToEnd = () => {
+    setView('end');
+    postOnboardingEvent('tour_seen').catch(() => {});
+  };
+
   // The frame never moves: the headline sits under the header, the middle
-  // holds this step's one thing, and the buttons sit on the floor. Looking
-  // back and skipping share the bottom row, so no step grows a control.
+  // holds this step's one thing, and the buttons sit on the floor. The bottom
+  // row is for moving between screens — Back; Continue while looking back;
+  // Skip, to the end.
   const foot = (primary, extra = null) => (
     <div className="tdoc-wiz-foot">
       {extra}
@@ -266,7 +275,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         {index > 1 ? <button type="button" className="tdoc-wiz-link" onClick={back}>Back</button> : <span />}
         {index < liveIndex
           ? <button type="button" className="tdoc-wiz-link" onClick={forward}>Continue</button>
-          : onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>{shown === 'done' ? 'Done' : 'Skip'}</button> : <span />}
+          : <button type="button" className="tdoc-wiz-link" onClick={skipToEnd}>Skip</button>}
       </div>
     </div>
   );
@@ -275,22 +284,21 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   let body = null;
   let footer = null;
 
-  // The loop is closed and the link was copied: this person is done. The
-  // pop-up says so and offers the two things left to do — their docs, or the
-  // walk again as a tour (views only; the record does not move).
-  const finished = step === 'done' && Boolean(record?.shared) && view === null;
+  // The last screen. Reached by finishing (the loop closed, the link copied)
+  // or by Skip. It offers the two things left to do — their docs, or the walk
+  // again as a tour (views only; the record does not move).
+  const shared = Boolean(record?.shared);
+  const finished = step === 'done' && shared && view === null;
+  const atEnd = finished || view === 'end';
 
-  if (finished) {
-    title = <>You’ve done the loop.<br />Every doc works this way.</>;
-    body = <OnboardingScene done />;
+  if (atEnd) {
+    title = shared ? <>You’ve done the loop.<br />Every doc works this way.</> : <>Skipped for now.<br />Come back any time.</>;
+    body = <OnboardingScene done={shared} />;
     footer = (
       <div className="tdoc-wiz-foot">
-        <button type="button" className="tdoc-wiz-secondary" onClick={() => setView('welcome')}>Walk through it again</button>
+        <button type="button" className="tdoc-wiz-secondary" onClick={() => setView(shared ? 'welcome' : null)}>{shared ? 'Walk through it again' : 'Back to the walk-through'}</button>
         <a className="tdoc-wiz-primary" href="/me">Go to my docs</a>
-        <div className="tdoc-wiz-nav-row">
-          <span />
-          {onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>Done</button> : <span />}
-        </div>
+        <div className="tdoc-wiz-nav-row"><span /><span /></div>
       </div>
     );
   } else if (shown === 'welcome') {
@@ -380,12 +388,19 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     <div className={`tdoc-wiz${embedded ? ' embedded' : ''}`} data-step={shown} data-live-step={step}>
       <div className="tdoc-wiz-head">
         {embedded ? <span /> : <span className="tdoc-wiz-mark-word">tdoc</span>}
-        <div className="tdoc-wiz-dots" role="tablist" aria-label={`Step ${index} of ${STEPS.length}`}>
-          {STEPS.map((s, i) => (
-            i + 1 <= liveIndex
-              ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead'} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
-              : <span key={s} />
-          ))}
+        <div className="tdoc-wiz-head-right">
+          <div className="tdoc-wiz-dots" role="tablist" aria-label={`Step ${index} of ${STEPS.length}`}>
+            {STEPS.map((s, i) => (
+              i + 1 <= liveIndex
+                ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead'} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
+                : <span key={s} />
+            ))}
+          </div>
+          {onClose ? (
+            <button type="button" className="tdoc-wiz-close" onClick={onClose} aria-label="Close">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+          ) : null}
         </div>
       </div>
       <h2 className="tdoc-wiz-h1">{title}</h2>

@@ -819,6 +819,9 @@ button.tdoc-pin {
 .tdoc-wiz { position: relative; display: flex; flex-direction: column; gap: 18px; font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz-head { display: flex; align-items: center; justify-content: space-between; min-height: 20px; }
 .tdoc-wiz-mark-word { font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
+.tdoc-wiz-head-right { display: flex; align-items: center; gap: 14px; }
+.tdoc-wiz button.tdoc-wiz-close { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: #f4f4f2; color: #6b6a66; cursor: pointer; display: flex; align-items: center; justify-content: center; margin-right: -6px; }
+.tdoc-wiz button.tdoc-wiz-close:hover { background: #e8e7e3; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz-dots { display: flex; gap: 6px; align-items: center; }
 .tdoc-wiz-dots span, .tdoc-wiz .tdoc-wiz-dots button { width: 6px; height: 6px; padding: 0; border: 0; border-radius: 50%; background: #d9d9d6; }
 .tdoc-wiz .tdoc-wiz-dots button { cursor: pointer; box-sizing: content-box; background-clip: content-box; padding: 5px; margin: -5px; }
