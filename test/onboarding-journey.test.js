@@ -140,10 +140,17 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   assert(dialog.includes("onSignIn?.('/?onboard=paste')") && !dialog.includes("'tdoc-signin'"), 'sign-in is the existing one, not a second');
   assert(shell.includes("&& new URLSearchParams(location.search).get('onboard'))"), 'the shell reopens the wizard after the redirect, at any step');
   // Every step can be left.
-  assert(dialog.includes("{shown === 'done' ? 'Done' : 'Skip'}"), 'every step has a skip');
+  // Leaving is the × in the corner. Nothing on the floor says Skip or Done:
+  // beside Back, with no Next, a Skip read as "next" and quietly closed the
+  // whole thing.
+  assert(dialog.includes('className="tdoc-wiz-close" onClick={onClose} aria-label="Close"') && !/>Done</.test(dialog), 'leaving is the corner ×');
+  // Skip is not leaving: it goes to the last screen and stamps tour_seen so
+  // the landing stops reopening the pop-up.
+  assert(dialog.includes("onClick={skipToEnd}>Skip</button>") && dialog.includes("setView('end');") && dialog.includes("postOnboardingEvent('tour_seen')"), 'Skip goes to the end, and is remembered');
+  assert(dialog.includes('Skipped for now.<br />Come back any time.') && dialog.includes('Back to the walk-through'), 'the end screen knows a skipper from a finisher');
   // Looking back never moves the journey: `step` is the record's, `view` is
   // the person's, and the record's next move clears the view.
-  assert(dialog.includes("const shown = view && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;") && dialog.includes("onClick={back}>Back</button>") && dialog.includes("onClick={forward}>Continue</button>"), 'a step can be looked at again, and left again, from the bottom row');
+  assert(dialog.includes("const shown = view && STEPS.includes(view) && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;") && dialog.includes("onClick={back}>Back</button>") && dialog.includes("onClick={forward}>Continue</button>"), 'a step can be looked at again, and left again, from the bottom row');
   // The frame never moves: a fixed-height sheet, a two-line headline slot, the
   // body in the middle, the buttons on the floor — and a step with no primary
   // keeps the floor where it is.
@@ -151,7 +158,7 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   assert(dialog.includes('{primary || <div className="tdoc-wiz-primary-ghost" aria-hidden="true" />}'), 'a step without a primary keeps the floor');
   assert(dialog.includes('<div className="tdoc-wiz-body">{body}</div>') && dialog.includes('className="tdoc-wiz-nav-row"'), 'headline, body, floor');
   // A person who is done sees that they are, and gets their docs or the walk again.
-  assert(dialog.includes("const finished = step === 'done' && Boolean(record?.shared) && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes("onClick={() => setView('welcome')}>Walk through it again</button>"), 'the finished screen');
+  assert(dialog.includes("const finished = step === 'done' && shared && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes("{shared ? 'Walk through it again' : 'Back to the walk-through'}"), 'the finished screen');
   assert(dialog.includes('useEffect(() => { setView(null); }, [step]);'), 'a step that moves on is shown the moment it does');
   // Under 700px every modal button grows to 44px; the dots are buttons and
   // became coins (seen on tdoc.dev in a 560px pane). They stay dots.
@@ -248,7 +255,7 @@ t('the two arrivals open the right card and say what happened', () => {
 });
 
 t('resuming reads the record, not localStorage', () => {
-  assert(/record\?\.started && !record\?\.shared && !record\?\.waitlist[\s\S]*setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell),
+  assert(/record\?\.started && !record\?\.shared && !record\?\.tour_seen && !record\?\.waitlist[\s\S]*setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell),
     'a started, unfinished journey reopens the wizard on the landing page');
   assert(!dialog.includes('localStorage'), 'the dialog keeps no local state');
 });
