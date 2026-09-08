@@ -155,6 +155,47 @@ async function patchAccess(worker, env, cookie, slug, access) {
     assert(sent.length === 1, `suppressed address was mailed again: ${sent.length}`);
   });
 
+  await t('with only RESEND_API_KEY the send goes over HTTPS to Resend', async () => {
+    const realFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ url: String(input && input.url ? input.url : input), init });
+      return new Response('{"id":"re_1"}', { status: 200 });
+    };
+    try {
+      const env = makeEnv(mod.CommentsStore, { RESEND_API_KEY: 're_test_key' });
+      const cookie = seedOwnedDoc(env, 'plan');
+      const { r } = await patchAccess(worker, env, cookie, 'plan', {
+        visibility: 'private', allowed_users: ['dana@example.com'],
+      });
+      assert(r.status === 200, `patch: ${r.status}`);
+      assert(calls.length === 1 && calls[0].url === 'https://api.resend.com/emails',
+        `resend calls: ${JSON.stringify(calls.map((c) => c.url))}`);
+      assert(calls[0].init.headers.Authorization === 'Bearer re_test_key', 'key not sent as bearer');
+      const body = JSON.parse(calls[0].init.body);
+      assert(body.to[0] === 'dana@example.com', JSON.stringify(body.to));
+      assert(/invites@tdoc\.dev/.test(body.from), body.from);
+      assert(body.text && body.html && /Quarterly plan/.test(body.subject), 'payload incomplete');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  await t('a Resend error does not fail the access patch', async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('{"message":"nope"}', { status: 422 });
+    try {
+      const env = makeEnv(mod.CommentsStore, { RESEND_API_KEY: 're_test_key' });
+      const cookie = seedOwnedDoc(env, 'plan');
+      const { r, data } = await patchAccess(worker, env, cookie, 'plan', {
+        visibility: 'private', allowed_users: ['dana@example.com'],
+      });
+      assert(r.status === 200 && data.ok === true, `patch failed with broken resend: ${r.status}`);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   await t('the daily cap stops a bulk blast', async () => {
     const { sent, binding } = fakeEmail();
     const env = makeEnv(mod.CommentsStore, { EMAIL: binding });

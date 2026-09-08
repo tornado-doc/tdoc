@@ -28,14 +28,17 @@ bucket_name = "tdoc-docs"
 binding = "META"
 id = "PLACEHOLDER_KV_ID"
 
-# Invitation emails ride Cloudflare Email Sending — a binding, not an API
-# key. OPTIONAL: without it the worker sends nothing and invitations stay
-# in-app only (worker.js checks env.EMAIL before every send). To turn it on,
-# onboard your domain first (`wrangler email sending enable <your-domain>`,
-# which writes the SPF/DKIM records), then keep this block; the from address
-# defaults to invites@<request host>, overridable via TDOC_EMAIL_FROM.
-[[send_email]]
-name = "EMAIL"
+# Invitation emails need ONE of two delivery plugs, and BOTH are optional —
+# with neither, the worker sends nothing and invitations stay in-app only:
+#   - Secret: RESEND_API_KEY (`wrangler secret put RESEND_API_KEY`) sends
+#     through Resend's HTTPS API; verify your sending domain there first.
+#   - Or Cloudflare Email Sending (Workers Paid + `wrangler email sending
+#     enable <your-domain>`): uncomment the binding below; it wins over the
+#     Resend key when both exist.
+# The from address defaults to invites@<request host>; override with
+# TDOC_EMAIL_FROM.
+# [[send_email]]
+# name = "EMAIL"
 
 # Per-slug write serialization (#34). All comment mutations for one slug funnel
 # through one CommentsStore instance (idFromName(slug)), which Cloudflare runs

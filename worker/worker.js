@@ -3729,11 +3729,12 @@ function stampHostedOwnership(meta, actor) {
 // ---- invite emails --------------------------------------------------------
 // Adding someone to a doc's allowed_users is an invitation, and an invitation
 // nobody hears about is not one: the in-app inbox only shows after the person
-// signs in, which is exactly what they do not know to do. When the worker
-// holds an Email Sending binding (hosted tdoc.dev; a BYOK deploy opts in by
-// adding `send_email` to its wrangler config and onboarding its domain), each
-// NEWLY added invitee gets one message. No binding → the feature quietly does
-// not exist, the same posture as the OIDC provider seat.
+// signs in, which is exactly what they do not know to do. Each NEWLY added
+// invitee gets one message. Delivery is pluggable and both plugs are
+// OPTIONAL — a Cloudflare Email Sending binding when the worker has one,
+// else Resend over HTTPS when RESEND_API_KEY is set, else nothing — and
+// "nothing" is a supported configuration, not an error: same posture as the
+// OIDC provider seat.
 //
 // The sending domain's reputation is shared by everything tdoc will ever
 // send, so this path is deliberately stingy:
@@ -3743,6 +3744,29 @@ function stampHostedOwnership(meta, actor) {
 //   - an opt-out is honored before anything else, and it is permanent
 const INVITE_EMAIL_COOLDOWN_S = 7 * 24 * 60 * 60;
 const INVITE_EMAIL_DAILY_CAP = 50;
+
+function emailSenderAvailable(env) {
+  return !!(env && ((env.EMAIL && typeof env.EMAIL.send === 'function')
+    || String(env.RESEND_API_KEY || '').trim()));
+}
+
+async function deliverEmail(env, msg) {
+  if (env.EMAIL && typeof env.EMAIL.send === 'function') return env.EMAIL.send(msg);
+  const key = String(env.RESEND_API_KEY || '').trim();
+  if (!key) throw new Error('no email sender configured');
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: `${msg.from.name} <${msg.from.email}>`,
+      to: [msg.to],
+      subject: msg.subject,
+      text: msg.text,
+      html: msg.html,
+    }),
+  });
+  if (!r.ok) throw new Error(`resend ${r.status}`);
+}
 
 // allowed_users holds two shapes (see isAllowlisted): a bare address is its
 // own destination; a handle reaches the email its account has on record, and
@@ -3780,7 +3804,7 @@ function inviteEmailBodies({ inviterName, title, docUrl, optoutUrl }) {
 }
 
 async function sendInviteEmails(env, { added, inviterName, inviterId, slug, title, origin }) {
-  if (!env || !env.EMAIL || typeof env.EMAIL.send !== 'function') return;
+  if (!emailSenderAvailable(env)) return;
   if (!Array.isArray(added) || !added.length) return;
   let host = 'tdoc.dev';
   try { host = new URL(origin).hostname; } catch {}
@@ -3804,7 +3828,7 @@ async function sendInviteEmails(env, { added, inviterName, inviterId, slug, titl
     });
     try {
       await env.META.put(`email-optout-token:${tok}`, addr, { expirationTtl: 60 * 60 * 24 * 30 });
-      await env.EMAIL.send({
+      await deliverEmail(env, {
         to: addr,
         from,
         subject: `${inviterName} invited you to "${title}" on tdoc`,
