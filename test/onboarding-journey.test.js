@@ -140,7 +140,11 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   assert(dialog.includes("onSignIn?.('/?onboard=paste')") && !dialog.includes("'tdoc-signin'"), 'sign-in is the existing one, not a second');
   assert(shell.includes("&& new URLSearchParams(location.search).get('onboard'))"), 'the shell reopens the wizard after the redirect, at any step');
   // Every step can be left.
-  assert(dialog.includes("{step === 'done' ? 'Done' : 'Skip'}"), 'every step has a skip');
+  assert(dialog.includes("{shown === 'done' ? 'Done' : 'Skip'}"), 'every step has a skip');
+  // Looking back never moves the journey: `step` is the record's, `view` is
+  // the person's, and the record's next move clears the view.
+  assert(dialog.includes("const shown = view && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;") && dialog.includes('aria-label="Previous step"') && dialog.includes('aria-label="Next step"'), 'a step can be looked at again, and left again');
+  assert(dialog.includes('useEffect(() => { setView(null); }, [step]);'), 'a step that moves on is shown the moment it does');
   assert(!/tdoc-wiz-sub/.test(dialog), 'no subtitles: a headline, a button, and a status line at most');
   // Every wizard button rule outranks chrome.css's `.tdoc-modal button`, which
   // painted them white on white (round-5 screenshots: blank buttons).
