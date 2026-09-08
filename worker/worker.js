@@ -5731,9 +5731,16 @@ export default {
         // Still nothing, and the visitor may be a legacy GitHub publisher
         // whose account predates the email index. Ask the provider which
         // GitHub identity they connected and resolve through that.
+        // The provider is asked about a connected GitHub identity at most
+        // once per sign-in, whichever of the consumers below needs it first.
+        let ghProbe;
+        const probeGithub = async () => {
+          if (ghProbe === undefined) ghProbe = sub ? await clerkExternalGithub(env, sub) : null;
+          return ghProbe;
+        };
         let bridged = null;
         if (!account_id && sub) {
-          bridged = await clerkExternalGithub(env, sub);
+          bridged = await probeGithub();
           if (bridged) {
             // The numeric id, and only the numeric id — the claim-by-handle
             // window for records with no recorded id is retired (records were
@@ -5757,27 +5764,45 @@ export default {
             }
           }
         }
-        // Self-heal: a linkIdentity rewrite used to strip the handle off the
-        // idp record (fixed there), and any record damaged while that bug was
-        // live would strand its owner in login-less sessions forever — legacy
-        // docs gone from /me, old comments no longer theirs. A record that
-        // resolves but carries no handle gets one more question to the
-        // provider, and the answer is written back so the heal is permanent.
-        // For an account with no GitHub connected this asks once per sign-in
-        // and learns nothing — a sign-in is rare enough for that to be fine.
-        if (idpRec && account_id && !normalizeGithubLogin(idpRec.handle)) {
-          const gh = await clerkExternalGithub(env, sub);
+        // The session's GitHub handle, from the strongest source available.
+        // This is identity for WORDS, not for documents — comments, @mention
+        // routing and handle invites key on it, while account resolution
+        // above never rests on it (numeric ids only). It must survive the
+        // provider door for commenters exactly as it does for publishers: a
+        // commenter is not a publisher, but their words are still theirs,
+        // and the first-party GitHub flow always carried the handle.
+        let ghHandle = (bridged && bridged.handle)
+          || (account_id && idpRec && normalizeGithubLogin(idpRec.handle))
+          || null;
+        if (!ghHandle && sub) {
+          const gh = await probeGithub();
           if (gh && gh.handle) {
-            // Restore only what this account already owns: the handle must
-            // resolve to THIS account, and if the account records a stable
-            // GitHub owner it must be the id the provider just attested — a
-            // recycled name pointing anywhere else stays where it is.
-            const named = await lookupHostedAccount(env, gh.handle);
-            const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
-            if (named && named.account_id === account_id
-                && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
-              idpRec.handle = gh.handle;
-              await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
+            if (!account_id) {
+              // No account in play: the provider attested which GitHub
+              // account this person connected, and that is exactly the trust
+              // the old first-party flow extended to GitHub's /user.
+              ghHandle = gh.handle;
+            } else {
+              // An account resolved by email or by a link that predates the
+              // bridge (or was written by a mint) carries no handle. Restore
+              // only what this account already owns: the handle must resolve
+              // to THIS account, and if the account records a stable GitHub
+              // owner it must be the id the provider just attested — a
+              // recycled name pointing anywhere else stays where it is.
+              const named = await lookupHostedAccount(env, gh.handle);
+              const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
+              if (named && named.account_id === account_id
+                  && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
+                ghHandle = gh.handle;
+                // Written back so the heal is permanent — but only onto a
+                // link that already exists. An email-resolved sign-in stays
+                // resolve-don't-mint: its durable link is written at mint,
+                // not smuggled in here.
+                if (idpRec) {
+                  idpRec.handle = gh.handle;
+                  await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
+                }
+              }
             }
           }
         }
@@ -5790,13 +5815,11 @@ export default {
           created: new Date().toISOString(),
           ...(account_id ? { account_id } : {}),
           ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
-          // A bridged legacy user gets their verified handle as the session
-          // login, so their actor key stays handle-shaped: old comments stay
-          // editable, handle invites keep matching, @handle still reaches
-          // them. Truthful — the provider attested which GitHub account this
-          // person connected.
-          ...((account_id && ((bridged && bridged.handle) || (idpRec && normalizeGithubLogin(idpRec.handle))))
-            ? { login: (bridged && bridged.handle) || normalizeGithubLogin(idpRec.handle) } : {}),
+          // The verified handle becomes the session login, so the actor key
+          // stays handle-shaped: old comments stay editable, handle invites
+          // keep matching, @handle still reaches them. Truthful — the
+          // provider attested which GitHub account this person connected.
+          ...(ghHandle ? { login: ghHandle } : {}),
         };
         await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
         return redirectTo(ret, [
