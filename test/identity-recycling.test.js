@@ -350,6 +350,37 @@ async function claimAccount(worker, env, cookie) {
     assert(link && !link.handle, `a recycled handle was written back: ${JSON.stringify(link)}`);
   });
 
+  await t('a commenter with no account keeps their GitHub handle through the door', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    // No hosted-account anywhere: this person has only ever commented. Their
+    // words are keyed on the handle, so the handle must come through.
+    stubProviders({ oidcSub: 'user_casey', oidcEmail: 'casey@example.com', clerkExternal: { id: 777, username: 'casey' } });
+    const s = await oidcSignIn(worker, env);
+    assert(s.login === 'casey', `commenter lost the handle: ${JSON.stringify(s)}`);
+    assert(!s.account_id, 'a mere sign-in resolved an account that does not exist');
+    assert(!env.META.map.has('hosted-account:casey'), 'sign-in minted an account for a commenter');
+  });
+
+  await t('an email-resolved account gets its handle without minting a link', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    // Backfilled account reachable by the email hint; the oidc sub has no
+    // link yet — the prod-instance-switch shape.
+    env.META.map.set('hosted-account:gina', JSON.stringify({
+      account_id: 'acct_gina00000', github_login: 'gina', created: '2026-01-01T00:00:00Z',
+      identities: [{ provider: 'github', sub: '555', handle: 'gina' }],
+    }));
+    env.META.map.set('account-email:gina@new-mail.com', JSON.stringify({
+      account_id: 'acct_gina00000', created: '2026-01-01T00:00:00Z',
+    }));
+    stubProviders({ oidcSub: 'user_gina2', oidcEmail: 'gina@new-mail.com', clerkExternal: { id: 555, username: 'gina' } });
+    const s = await oidcSignIn(worker, env);
+    assert(s.account_id === 'acct_gina00000', `email hint missed: ${JSON.stringify(s)}`);
+    assert(s.login === 'gina', `email-resolved session lost the handle: ${JSON.stringify(s)}`);
+    // Resolve-don't-mint holds: the durable link is written at mint, and a
+    // sign-in that resolved through the hint must not smuggle one in.
+    assert(!env.META.map.has('account-idp:oidc:user_gina2'), 'sign-in minted the idp link');
+  });
+
   await t('the bridge cannot hand over a handle that a stable id already owns', async () => {
     const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
     // Alice's account, already upgraded: github id 111 owns the handle.
