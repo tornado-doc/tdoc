@@ -83,22 +83,33 @@ function cleanCode(raw) {
   return v.length > 4 ? `${v.slice(0, 4)}-${v.slice(4)}` : v;
 }
 
-// One line and its Copy. On a refused clipboard the line is left selected so
-// a manual copy is one keystroke away, and the button says so.
-export function FirstDocRecipe({ line = FIRST_DOC_RECIPE, onCopied }) {
-  const [copied, setCopied] = useState(null); // null | true | false
+// One copy behaviour for every line the journey hands over. On a refused
+// clipboard the line is left selected so a manual copy is one keystroke away,
+// and the button says so. `copied` is null | true | false.
+function useCopyLine(onCopied) {
+  const [copied, setCopied] = useState(null);
   const codeRef = useRef(null);
-  const copy = async () => {
+  const copy = async (line) => {
     const ok = await copyText(line);
     if (!ok && codeRef.current) selectContents(codeRef.current);
     setCopied(ok);
     onCopied?.(ok);
   };
+  const reset = () => setCopied(null);
+  return { copied, codeRef, copy, reset };
+}
+function copyLabel(copied) {
+  return copied === true ? 'Copied. Now paste it.' : copied === false ? 'Select & copy' : 'Copy';
+}
+
+// The line and its Copy as one block, for surfaces without a fixed floor.
+export function FirstDocRecipe({ line = FIRST_DOC_RECIPE, onCopied }) {
+  const { copied, codeRef, copy } = useCopyLine(onCopied);
   return (
     <div className="tdoc-wiz-copy">
       <code ref={codeRef} className="tdoc-wiz-line">{line}</code>
-      <button type="button" className={`tdoc-wiz-primary${copied ? ' done' : ''}`} onClick={copy}>
-        {copied === true ? 'Copied. Now paste it.' : copied === false ? 'Select & copy' : 'Copy'}
+      <button type="button" className={`tdoc-wiz-primary${copied ? ' done' : ''}`} onClick={() => copy(line)}>
+        {copyLabel(copied)}
       </button>
     </div>
   );
@@ -144,6 +155,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const [code, setCode] = useState('');
   const [pair, setPair] = useState({ state: 'idle', label: '', error: '' });
   const resumed = useRef(false);
+  const lineCopy = useCopyLine((ok) => { setCopiedAt(Date.now()); setCopyFailed(!ok); });
 
   const slug = record?.first_doc || null;
   const latest = Number(status?.latest_version) || 0;
@@ -151,6 +163,8 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // Each copy is its own wait: the send-back step must not inherit the
   // paste step's copy and show its rows before the person has pressed Copy.
   useEffect(() => { setCopiedAt(null); setCopyFailed(false); setElapsed(0); }, [step]);
+  const lineReset = lineCopy.reset;
+  useEffect(() => { lineReset(); }, [step, view, lineReset]);
   useEffect(() => { setView(null); }, [step]);
   const connected = Boolean(record?.agent_connected || record?.published_first || pair.state === 'connected');
 
@@ -197,15 +211,13 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     if (step === 'paste' && signedIn && record && !record.started) postOnboardingEvent('door_own_agent').catch(() => {});
   }, [step, signedIn, record]);
 
-  const onCopiedLine = (ok) => {
-    setCopiedAt(Date.now());
-    setCopyFailed(!ok);
+  const copyFirstLine = async () => {
+    await lineCopy.copy(FIRST_DOC_RECIPE);
     postOnboardingEvent('copy_clicked').catch(() => {});
-    if (ok) window.setTimeout(() => setStep((current) => (current === 'paste' ? 'code' : current)), 900);
+    window.setTimeout(() => setStep((current) => (current === 'paste' ? 'code' : current)), 900);
   };
-  const onCopiedFix = (ok) => {
-    setCopiedAt(Date.now());
-    setCopyFailed(!ok);
+  const copyFixLine = async () => {
+    await lineCopy.copy(HANDOFF_LINE);
     postOnboardingEvent('fix_copy_clicked', slug).catch(() => {});
   };
 
@@ -242,141 +254,143 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const waitLine = copyFailed ? COPY_FALLBACK
     : elapsed > STILL_WAITING_MS ? STILL_WAITING
       : elapsed > NOTHING_YET_MS ? NOTHING_YET : WAITING;
-  const skip = onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>{shown === 'done' ? 'Done' : 'Skip'}</button> : null;
+
+  // The frame never moves: the headline sits under the header, the middle
+  // holds this step's one thing, and the buttons sit on the floor. Looking
+  // back and skipping share the bottom row, so no step grows a control.
+  const foot = (primary, extra = null) => (
+    <div className="tdoc-wiz-foot">
+      {extra}
+      {primary || <div className="tdoc-wiz-primary-ghost" aria-hidden="true" />}
+      <div className="tdoc-wiz-nav-row">
+        {index > 1 ? <button type="button" className="tdoc-wiz-link" onClick={back}>Back</button> : <span />}
+        {index < liveIndex
+          ? <button type="button" className="tdoc-wiz-link" onClick={forward}>Continue</button>
+          : onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>{shown === 'done' ? 'Done' : 'Skip'}</button> : <span />}
+      </div>
+    </div>
+  );
+
+  let title = null;
+  let body = null;
+  let footer = null;
+
+  // The loop is closed and the link was copied: this person is done. The
+  // pop-up says so and offers the two things left to do — their docs, or the
+  // walk again as a tour (views only; the record does not move).
+  const finished = step === 'done' && Boolean(record?.shared) && view === null;
+
+  if (finished) {
+    title = <>You’ve done the loop.<br />Every doc works this way.</>;
+    body = <OnboardingScene done />;
+    footer = (
+      <div className="tdoc-wiz-foot">
+        <button type="button" className="tdoc-wiz-secondary" onClick={() => setView('welcome')}>Walk through it again</button>
+        <a className="tdoc-wiz-primary" href="/me">Go to my docs</a>
+        <div className="tdoc-wiz-nav-row">
+          <span />
+          {onClose ? <button type="button" className="tdoc-wiz-link" onClick={onClose}>Done</button> : <span />}
+        </div>
+      </div>
+    );
+  } else if (shown === 'welcome') {
+    title = <>Your agent writes it.<br />You comment. It fixes.</>;
+    body = <OnboardingScene />;
+    footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={start}>Get started</button>);
+  } else if (shown === 'paste') {
+    title = 'Paste this into your agent.';
+    body = <code ref={lineCopy.codeRef} className="tdoc-wiz-line">{FIRST_DOC_RECIPE}</code>;
+    footer = foot(
+      <button type="button" className={`tdoc-wiz-primary${lineCopy.copied ? ' done' : ''}`} onClick={copyFirstLine}>{copyLabel(lineCopy.copied)}</button>,
+      lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null,
+    );
+  } else if (shown === 'code') {
+    title = 'Type the code your agent shows.';
+    if (pair.state === 'confirm') {
+      body = <p className="tdoc-wiz-confirm">Connect {pair.label ? <strong>{pair.label}</strong> : 'this terminal'} to your account?</p>;
+      footer = foot(
+        <button type="button" className="tdoc-wiz-primary" onClick={approveCode}>Connect</button>,
+        <button type="button" className="tdoc-wiz-link" onClick={() => setPair({ state: 'idle', label: '', error: '' })}>Not mine</button>,
+      );
+    } else {
+      body = (
+        <input
+          className="tdoc-wiz-code"
+          value={code}
+          onChange={(event) => { setCode(cleanCode(event.target.value)); if (pair.state === 'error') setPair({ state: 'idle', label: '', error: '' }); }}
+          onKeyDown={(event) => { if (event.key === 'Enter' && code.length === 9) lookupCode(); }}
+          placeholder="XXXX-XXXX"
+          spellCheck="false"
+          autoCapitalize="characters"
+          autoComplete="off"
+          aria-label="Pairing code from your agent"
+        />
+      );
+      footer = foot(
+        <button type="button" className="tdoc-wiz-primary" disabled={code.length !== 9 || pair.state === 'looking' || pair.state === 'approving'} onClick={lookupCode}>
+          {pair.state === 'looking' ? 'Checking…' : 'Connect'}
+        </button>,
+        pair.state === 'error' ? <p className="tdoc-wiz-error" role="alert">{pair.error}</p> : <Listening>{waitLine}</Listening>,
+      );
+    }
+  } else if (shown === 'doc') {
+    if (record?.published_first) {
+      title = <>Highlight a sentence.<br />Say what you think.</>;
+      body = <Listening>Waiting for your first comment…</Listening>;
+      footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(1, 'welcome')}>Open your doc</button>);
+    } else {
+      title = 'Your agent is writing.';
+      body = (
+        <div className="tdoc-wiz-rows">
+          <Row state="done">Agent connected</Row>
+          <Row state="live">Writing your doc</Row>
+          <Row state="todo">Published</Row>
+        </div>
+      );
+      footer = foot(null);
+    }
+  } else if (shown === 'sendback') {
+    title = 'Now let your agent fix it.';
+    body = (
+      <>
+        <code ref={lineCopy.codeRef} className="tdoc-wiz-line">{HANDOFF_LINE}</code>
+        {lineCopy.copied ? (
+          <div className="tdoc-wiz-rows">
+            <Row state={status?.read_at ? 'done' : 'live'}>Reading your comments</Row>
+            <Row state={latest >= 2 ? 'done' : status?.read_at ? 'live' : 'todo'}>Writing v2</Row>
+            <Row state={latest >= 2 ? 'done' : 'todo'}>Published</Row>
+          </div>
+        ) : null}
+      </>
+    );
+    footer = foot(
+      <button type="button" className={`tdoc-wiz-primary${lineCopy.copied ? ' done' : ''}`} onClick={copyFixLine}>{copyLabel(lineCopy.copied)}</button>,
+      lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null,
+    );
+  } else if (shown === 'done') {
+    title = 'That’s the loop.';
+    body = <OnboardingScene done />;
+    footer = foot(
+      <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(latest || 2, 'revised')}>Open v{latest || 2}</button>,
+      <button type="button" className={`tdoc-wiz-secondary${linkCopied ? ' done' : ''}`} onClick={copyShareLink}>{linkCopied ? 'Link copied' : 'Copy link'}</button>,
+    );
+  }
 
   return (
     <div className={`tdoc-wiz${embedded ? ' embedded' : ''}`} data-step={shown} data-live-step={step}>
       <div className="tdoc-wiz-head">
-        <div className="tdoc-wiz-head-left">
-          {index > 1 ? (
-            <button type="button" className="tdoc-wiz-nav" onClick={back} aria-label="Previous step">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
-            </button>
-          ) : null}
-          {embedded ? null : <span className="tdoc-wiz-mark-word">tdoc</span>}
-        </div>
-        <div className="tdoc-wiz-head-right">
-          <div className="tdoc-wiz-dots" role="tablist" aria-label={`Step ${index} of ${STEPS.length}`}>
-            {STEPS.map((s, i) => (
-              i + 1 <= liveIndex
-                ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead'} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
-                : <span key={s} />
-            ))}
-          </div>
-          {index < liveIndex ? (
-            <button type="button" className="tdoc-wiz-nav" onClick={forward} aria-label="Next step">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg>
-            </button>
-          ) : null}
+        {embedded ? <span /> : <span className="tdoc-wiz-mark-word">tdoc</span>}
+        <div className="tdoc-wiz-dots" role="tablist" aria-label={`Step ${index} of ${STEPS.length}`}>
+          {STEPS.map((s, i) => (
+            i + 1 <= liveIndex
+              ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead'} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
+              : <span key={s} />
+          ))}
         </div>
       </div>
-
-      {shown === 'welcome' ? (
-        <>
-          <h2 className="tdoc-wiz-h1">Your agent writes it.<br />You comment. It fixes.</h2>
-          <OnboardingScene />
-          <div className="tdoc-wiz-actions">
-            <button type="button" className="tdoc-wiz-primary" onClick={start}>Get started</button>
-            {skip}
-          </div>
-        </>
-      ) : null}
-
-      {shown === 'paste' ? (
-        <>
-          <h2 className="tdoc-wiz-h1">Paste this into your agent.</h2>
-          <FirstDocRecipe onCopied={onCopiedLine} />
-          <div className="tdoc-wiz-actions">
-            {copyFailed ? <Listening>{COPY_FALLBACK}</Listening> : null}
-            {skip}
-          </div>
-        </>
-      ) : null}
-
-      {shown === 'code' ? (
-        <>
-          <h2 className="tdoc-wiz-h1">Type the code your agent shows.</h2>
-          {pair.state === 'confirm' ? (
-            <div className="tdoc-wiz-actions">
-              <p className="tdoc-wiz-confirm">Connect {pair.label ? <strong>{pair.label}</strong> : 'this terminal'} to your account?</p>
-              <button type="button" className="tdoc-wiz-primary" onClick={approveCode}>Connect</button>
-              <button type="button" className="tdoc-wiz-link" onClick={() => setPair({ state: 'idle', label: '', error: '' })}>Not mine</button>
-            </div>
-          ) : (
-            <div className="tdoc-wiz-actions">
-              <input
-                className="tdoc-wiz-code"
-                value={code}
-                onChange={(event) => { setCode(cleanCode(event.target.value)); if (pair.state === 'error') setPair({ state: 'idle', label: '', error: '' }); }}
-                onKeyDown={(event) => { if (event.key === 'Enter' && code.length === 9) lookupCode(); }}
-                placeholder="XXXX-XXXX"
-                spellCheck="false"
-                autoCapitalize="characters"
-                autoComplete="off"
-                aria-label="Pairing code from your agent"
-              />
-              <button type="button" className="tdoc-wiz-primary" disabled={code.length !== 9 || pair.state === 'looking' || pair.state === 'approving'} onClick={lookupCode}>
-                {pair.state === 'looking' ? 'Checking…' : 'Connect'}
-              </button>
-              {pair.state === 'error' ? <p className="tdoc-wiz-error" role="alert">{pair.error}</p> : <Listening>{waitLine}</Listening>}
-              {skip}
-            </div>
-          )}
-        </>
-      ) : null}
-
-      {shown === 'doc' ? (
-        record?.published_first ? (
-          <>
-            <h2 className="tdoc-wiz-h1">Highlight a sentence.<br />Say what you think.</h2>
-            <div className="tdoc-wiz-actions">
-              <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(1, 'welcome')}>Open your doc</button>
-              <Listening>Waiting for your first comment…</Listening>
-              {skip}
-            </div>
-          </>
-        ) : (
-          <>
-            <h2 className="tdoc-wiz-h1">Your agent is writing.</h2>
-            <div className="tdoc-wiz-actions">
-              <Row state="done">Agent connected</Row>
-              <Row state="live">Writing your doc</Row>
-              <Row state="todo">Published</Row>
-              {skip}
-            </div>
-          </>
-        )
-      ) : null}
-
-      {shown === 'sendback' ? (
-        <>
-          <h2 className="tdoc-wiz-h1">Now let your agent fix it.</h2>
-          <FirstDocRecipe line={HANDOFF_LINE} onCopied={onCopiedFix} />
-          <div className="tdoc-wiz-actions">
-            {copiedAt !== null && !copyFailed ? (
-              <div className="tdoc-wiz-rows">
-                <Row state={status?.read_at ? 'done' : 'live'}>Reading your comments</Row>
-                <Row state={latest >= 2 ? 'done' : status?.read_at ? 'live' : 'todo'}>Writing v2</Row>
-                <Row state={latest >= 2 ? 'done' : 'todo'}>Published</Row>
-              </div>
-            ) : null}
-            {copyFailed ? <Listening>{COPY_FALLBACK}</Listening> : null}
-            {skip}
-          </div>
-        </>
-      ) : null}
-
-      {shown === 'done' ? (
-        <>
-          <h2 className="tdoc-wiz-h1">That’s the loop.</h2>
-          <OnboardingScene done />
-          <div className="tdoc-wiz-actions">
-            <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(latest || 2, 'revised')}>Open v{latest || 2}</button>
-            <button type="button" className={`tdoc-wiz-secondary${linkCopied ? ' done' : ''}`} onClick={copyShareLink}>{linkCopied ? 'Link copied' : 'Copy link'}</button>
-            {skip}
-          </div>
-        </>
-      ) : null}
+      <h2 className="tdoc-wiz-h1">{title}</h2>
+      <div className="tdoc-wiz-body">{body}</div>
+      {footer}
     </div>
   );
 }

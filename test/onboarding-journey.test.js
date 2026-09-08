@@ -143,7 +143,15 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   assert(dialog.includes("{shown === 'done' ? 'Done' : 'Skip'}"), 'every step has a skip');
   // Looking back never moves the journey: `step` is the record's, `view` is
   // the person's, and the record's next move clears the view.
-  assert(dialog.includes("const shown = view && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;") && dialog.includes('aria-label="Previous step"') && dialog.includes('aria-label="Next step"'), 'a step can be looked at again, and left again');
+  assert(dialog.includes("const shown = view && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;") && dialog.includes("onClick={back}>Back</button>") && dialog.includes("onClick={forward}>Continue</button>"), 'a step can be looked at again, and left again, from the bottom row');
+  // The frame never moves: a fixed-height sheet, a two-line headline slot, the
+  // body in the middle, the buttons on the floor — and a step with no primary
+  // keeps the floor where it is.
+  assert(/\.ui-dialog-popup\.tdoc-wiz-modal \{[^}]*height: min\(640px, calc\(100vh - 32px\)\);/.test(read('shell/src/ui/ui.css')) && read('shell/src/ui/ui.css').includes('.tdoc-wiz .tdoc-wiz-h1 { min-height: 2.3em; }') && read('shell/src/ui/ui.css').includes('.tdoc-wiz-primary-ghost { height: 48px; }'), 'the sheet, the headline slot and the floor are fixed');
+  assert(dialog.includes('{primary || <div className="tdoc-wiz-primary-ghost" aria-hidden="true" />}'), 'a step without a primary keeps the floor');
+  assert(dialog.includes('<div className="tdoc-wiz-body">{body}</div>') && dialog.includes('className="tdoc-wiz-nav-row"'), 'headline, body, floor');
+  // A person who is done sees that they are, and gets their docs or the walk again.
+  assert(dialog.includes("const finished = step === 'done' && Boolean(record?.shared) && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes("onClick={() => setView('welcome')}>Walk through it again</button>"), 'the finished screen');
   assert(dialog.includes('useEffect(() => { setView(null); }, [step]);'), 'a step that moves on is shown the moment it does');
   // Under 700px every modal button grows to 44px; the dots are buttons and
   // became coins (seen on tdoc.dev in a 560px pane). They stay dots.
@@ -152,7 +160,7 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   // Every wizard button rule outranks chrome.css's `.tdoc-modal button`, which
   // painted them white on white (round-5 screenshots: blank buttons).
   const css = read('shell/src/ui/ui.css');
-  assert(css.includes('.tdoc-wiz button.tdoc-wiz-primary {') && css.includes('.tdoc-wiz button.tdoc-wiz-secondary {') && css.includes('.tdoc-wiz button.tdoc-wiz-link, .tdoc-wiz a.tdoc-wiz-link {'), 'wizard buttons outrank the modal button rule');
+  assert(css.includes('.tdoc-wiz button.tdoc-wiz-primary, .tdoc-wiz a.tdoc-wiz-primary {') && css.includes('.tdoc-wiz button.tdoc-wiz-secondary {') && css.includes('.tdoc-wiz button.tdoc-wiz-link, .tdoc-wiz a.tdoc-wiz-link {'), 'wizard buttons outrank the modal button rule');
 });
 
 t('bridge 1 is read off the server, and the code from the terminal is its own step', () => {
