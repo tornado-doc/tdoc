@@ -117,7 +117,13 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(tdocNew.includes('--first-doc)  FIRST_DOC=1; shift ;;') && tdocNew.includes('out["origin"] = "first-doc"') && tdocNew.includes('meta.get("origin") == "first-doc"'), 'tdoc-write --first-doc marks the meta, and the mark survives later versions');
   const firstDocRecipe = read('FIRST-DOC.md');
   assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name>'), 'FIRST-DOC.md tells the agent to mark it');
-  assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-publish" what-ai-knows-<name>') && !/tdoc-publish --visibility private --history owner/.test(firstDocRecipe), 'the first doc publishes with no access flags — a locked first doc cannot be shown to anyone');
+  // Provably public, not public-by-default: access is sticky on both sides, so
+  // a flagless publish over a doc an earlier run locked stays locked.
+  assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-publish" --visibility public --history public what-ai-knows-<name>'), 'the first doc names public out loud');
+  assert(!/private/.test(firstDocRecipe.slice(firstDocRecipe.indexOf('## Step 7'), firstDocRecipe.indexOf('## If there is no history')).replace('`tdoc-publish --visibility private <slug>` makes it theirs alone', '')), 'step 7 mentions private only as the way to lock it');
+  assert(!/publish (it )?privately/i.test(firstDocRecipe), 'and no leftover instruction to publish privately');
+  assert(!/--visibility private --history owner/.test(read('bin/tdoc-publish')), 'the CLI comment no longer claims first docs publish private');
+  assert(read('SKILL.md').includes('**Access only ever tightens by omission.**'), 'the access policy says why a publish that opens a doc must say so');
   assert(server.includes('function isFirstDocProductMeta(meta)') && server.includes('function adoptFirstDocLocal(slug)') && server.includes('if (marked && rec.first_doc !== marked.slug && !rec.shared) {'), 'the local twin adopts the marked doc too');
   assert(upload.indexOf("'published_first'") > upload.indexOf("productEvent(env, 'publish_succeeded'"), 'stamps happen after the write succeeded, never before');
   const post = worker.slice(worker.indexOf("if (p === '/api/comments' && method === 'POST')"), worker.indexOf("if (p === '/api/comments' && method === 'PATCH')"));

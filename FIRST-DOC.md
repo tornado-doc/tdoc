@@ -68,7 +68,7 @@ The whole to-do list, in order. Nothing else is work:
    layer 3. Budget: fifteen seconds.
 2. Copy **the template below** into `v1/index.html`. Fill its numbers and its
    three lines. Do not restyle it, do not add a figure, do not add a section.
-3. Pick the slug (Step 6d) and publish privately (Step 7). Hand over the link.
+3. Pick the slug (Step 6d) and publish it open (Step 7). Hand over the link.
 
 That is the doc. **Steps 3 to 6 describe the shape the template already has**
 — they are the reasoning behind it, not a checklist to work through. Do not
@@ -690,7 +690,7 @@ Write it with the flag that marks it as this journey's doc, then publish it:
 bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name> \
   --title "What does AI know about <Name>?" --style <style> \
   --prompt "<the line the human pasted>" --html-file /tmp/what-ai-knows-<name>.html
-bash "$SKILL_DIR/bin/tdoc-publish" what-ai-knows-<name>
+bash "$SKILL_DIR/bin/tdoc-publish" --visibility public --history public what-ai-knows-<name>
 ```
 
 `--first-doc` is how tdoc.dev knows this is the doc the onboarding was waiting
@@ -698,11 +698,17 @@ for, whatever slug it ends up on — a second run, or a `-2` after a collision,
 takes over from the earlier one. Without the flag the journey can keep
 watching an older doc and never move.
 
-**No access flags.** A first doc publishes the way every other doc does:
-readable by anyone with the link, listed nowhere. Do not pass `--visibility`,
-`--history`, or `--allow-user` — a first doc that arrives locked cannot be
-shown to anybody, and the whole point of the link is that it works when they
-send it to someone.
+**Say `public` out loud.** A first doc that arrives locked cannot be shown to
+anybody, and the whole point of the link is that it works when they send it to
+someone. Passing nothing is not the same as passing `public`: access is sticky
+on both sides — the CLI leaves an existing `access` block in `meta.json` alone,
+and the worker carries the stored one forward when an upload names none — so a
+flagless publish over a doc an earlier run locked stays locked. That case is
+not rare; it is every re-run, and every `-2` after a slug collision. Name the
+policy and the doc is open whatever came before it.
+
+Never pass `--allow-user` here. An allow-list on a first doc is a restriction
+nobody asked for.
 
 Then say, in one line each:
 
@@ -737,6 +743,6 @@ first doc something a static tutorial never has — a reason to come back.
 - Do not comment on the person's life, mood, or circumstances. The subject is
   the work, not them.
 - Do not end on a `localhost` URL, and do not ask for permission before the
-  page exists. Publish it privately and let them open it up from there.
+  page exists. Publish it open and let closing it be their decision.
 - Do not build a fixture, a template, or a starter repo. This page is written
   fresh each time, by you, from this file.
