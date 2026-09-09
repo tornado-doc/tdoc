@@ -163,6 +163,8 @@ export function DocumentShell({ boot, config }) {
     Boolean(config.onboarding && config.identity
       && new URLSearchParams(location.search).get('onboard'))
   ));
+  // Reopened for a person coming back: the wizard asks before it resumes.
+  const [onboardingResume, setOnboardingResume] = useState(false);
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
   ));
@@ -250,6 +252,7 @@ export function DocumentShell({ boot, config }) {
       // it stopped — the wizard reads the step off the record.
       if (record?.started && !record?.shared && !record?.tour_seen && !record?.waitlist) {
         setOnboardingDoor('own');
+        setOnboardingResume(true);
         setOnboardingOpen(true);
       }
     }).catch(() => {});
@@ -1052,6 +1055,7 @@ export function DocumentShell({ boot, config }) {
         config={config}
         onSignIn={signIn}
         initialDoor={onboardingDoor}
+        resume={onboardingResume}
       />
 
       {toast ? (

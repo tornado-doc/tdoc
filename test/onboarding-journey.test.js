@@ -165,7 +165,7 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   assert(/index < liveIndex\s*\? <button type="button" className="tdoc-wiz-link" onClick=\{forward\}>Continue<\/button>\s*: shown === 'done' \? <span \/>\s*: <button type="button" className="tdoc-wiz-link" onClick=\{skipToEnd\}>Skip<\/button>/.test(dialog), 'Continue while looking back, Skip on the live step, nothing to skip on the last one');
   assert(dialog.includes("onClick={() => setView(i + 1 === liveIndex ? null : s)}") && dialog.includes("i + 1 <= liveIndex"), 'reached dots are clickable; the live dot returns to the live step');
   assert(dialog.includes("const finished = step === 'done' && shared && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes(">Walk through it again</button>"), 'the finished screen');
-  assert(dialog.includes('useEffect(() => { setView(null); }, [step]);'), 'a step that moves on is shown the moment it does');
+  assert(dialog.includes("useEffect(() => { setView((current) => (current === 'resume' ? current : null)); }, [step]);"), 'a step that moves on is shown the moment it does — unless the person is still being asked whether to resume');
   assert(dialog.includes('useEffect(() => { lineReset(); }, [step, lineReset]);'), 'a copy survives looking back and the skip question');
   // Under 700px every modal button grows to 44px; the dots are buttons and
   // became coins (seen on tdoc.dev in a 560px pane). They stay dots.
@@ -279,8 +279,14 @@ t('the two arrivals open the right card and say what happened', () => {
 });
 
 t('resuming reads the record, not localStorage', () => {
-  assert(/record\?\.started && !record\?\.shared && !record\?\.tour_seen && !record\?\.waitlist[\s\S]*setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell),
-    'a started, unfinished journey reopens the wizard on the landing page');
+  assert(/record\?\.started && !record\?\.shared && !record\?\.tour_seen && !record\?\.waitlist[\s\S]*setOnboardingDoor\('own'\);\s*setOnboardingResume\(true\);\s*setOnboardingOpen\(true\)/.test(shell),
+    'a started, unfinished journey reopens the wizard on the landing page, asking first');
+  // Coming back is a question, not a jump: where they stopped, and four ways on.
+  assert(dialog.includes("const [view, setView] = useState(resume ? 'resume' : null);") && dialog.includes("setView((current) => (current === 'resume' ? current : null))"), 'the resume view survives the record setting the step');
+  assert(dialog.includes("if (view === 'resume') {") && dialog.includes('Last time you stopped at step {liveIndex} of {STEPS.length}: {STEP_LABELS[step]}.'), 'it says where they stopped');
+  assert(dialog.includes('Continue from step {liveIndex}') && dialog.includes('Start the tour over') && dialog.includes('onClick={confirmSkip}>Go to my docs') && dialog.includes('onClick={dismissForGood}>I know tdoc, don’t ask again'), 'continue, start over, my docs, or never again');
+  assert(/const dismissForGood = \(\) => \{\s*postOnboardingEvent\('tour_seen'\)[\s\S]*onClose\?\.\(\);/.test(dialog), '"I know tdoc" stamps the same flag as Skip and closes in place');
+  assert(dialog.includes('<a className="tdoc-wiz-link" href="/me">Already have a doc? Go to my docs</a>'), 'the writing wait has a door out');
   assert(!dialog.includes('localStorage'), 'the dialog keeps no local state');
 });
 

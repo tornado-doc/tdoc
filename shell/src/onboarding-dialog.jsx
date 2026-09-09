@@ -49,6 +49,15 @@ const POLL_MS = 3000;
 const NOTHING_YET_MS = 90 * 1000;
 const STILL_WAITING_MS = 5 * 60 * 1000;
 const STEPS = ['welcome', 'paste', 'doc', 'sendback', 'done'];
+// What each step is, said to a person coming back: "you stopped at step 3
+// of 5, your agent writing your first doc".
+const STEP_LABELS = {
+  welcome: 'the welcome',
+  paste: 'pasting the line into your agent',
+  doc: 'your agent writing your first doc',
+  sendback: 'letting your agent fix it',
+  done: 'sharing the loop',
+};
 
 // Select the text of an element, for the person to copy by hand when the
 // clipboard refused. Never throws.
@@ -148,7 +157,7 @@ function Listening({ children }) {
   );
 }
 
-export function OnboardingWizard({ config, initialStep = null, embedded = false, onClose, onSignIn }) {
+export function OnboardingWizard({ config, initialStep = null, embedded = false, resume = false, onClose, onSignIn }) {
   const signedIn = Boolean(config?.identity);
   const [record, setRecord] = useState(null);
   const [paired, setPaired] = useState(false);
@@ -157,7 +166,10 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // is a past step the person asked to see again. Null means "show the live
   // step". Going forward past the live step, or reaching it, clears the view,
   // so the record's next move is seen the moment it happens.
-  const [view, setView] = useState(null);
+  // A person coming back to an unfinished journey is asked first — 'resume'
+  // is a view over the live step, not a step: the record still decides where
+  // the journey is, and the screen says so before showing it.
+  const [view, setView] = useState(resume ? 'resume' : null);
   const [status, setStatus] = useState(null); // agent-status of the first doc
   const [copiedAt, setCopiedAt] = useState(null);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -181,7 +193,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // still there. Only the record moving on clears it.
   const lineReset = lineCopy.reset;
   useEffect(() => { lineReset(); }, [step, lineReset]);
-  useEffect(() => { setView(null); }, [step]);
+  useEffect(() => { setView((current) => (current === 'resume' ? current : null)); }, [step]);
   const connected = Boolean(record?.agent_connected || record?.published_first || pair.state === 'connected');
 
   // The record decides the step, on the first answer and on every later one
@@ -294,6 +306,12 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     postOnboardingEvent('tour_seen').catch(() => {});
     location.href = '/me';
   };
+  // "I know tdoc": the same stamp, so the landing stops asking, and the
+  // pop-up closes on the page they were on.
+  const dismissForGood = () => {
+    postOnboardingEvent('tour_seen').catch(() => {});
+    onClose?.();
+  };
 
   // The frame never moves: the headline sits under the header, the middle
   // holds this step's one thing, and the buttons sit on the floor. The bottom
@@ -320,7 +338,25 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // The last screen. Reached by finishing (the loop closed, the link copied)
   // or by Skip. It offers the two things left to do — their docs, or the walk
   // again as a tour (views only; the record does not move).
-  if (atEnd && shared) {
+  if (view === 'resume') {
+    // Coming back. Say where they stopped and ask, instead of dropping them
+    // into step three with no memory of steps one and two.
+    title = <>Welcome back.<br />Pick up where you left off?</>;
+    body = record ? (
+      <div className="tdoc-wiz-resume">
+        <p>Last time you stopped at step {liveIndex} of {STEPS.length}: {STEP_LABELS[step]}.</p>
+        <p className="tdoc-wiz-resume-hint">Already know tdoc? Skip this and tell your agent: <code>build it with tdoc</code></p>
+      </div>
+    ) : <Listening>Finding where you stopped…</Listening>;
+    footer = (
+      <div className="tdoc-wiz-foot">
+        <button type="button" className="tdoc-wiz-primary" onClick={() => setView(null)}>Continue from step {liveIndex}</button>
+        <button type="button" className="tdoc-wiz-secondary" onClick={() => setView('welcome')}>Start the tour over</button>
+        <button type="button" className="tdoc-wiz-secondary" onClick={confirmSkip}>Go to my docs</button>
+        <div className="tdoc-wiz-nav-row"><span /><button type="button" className="tdoc-wiz-link" onClick={dismissForGood}>I know tdoc, don’t ask again</button></div>
+      </div>
+    );
+  } else if (atEnd && shared) {
     title = <>You’ve done the loop.<br />Every doc works this way.</>;
     body = <OnboardingScene done />;
     footer = (
@@ -435,7 +471,9 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
           <Row state="todo">Published</Row>
         </div>
       );
-      footer = foot(null);
+      // The wait is not a wall: a person whose doc exists but was never
+      // matched to the journey still has a door.
+      footer = foot(null, <a className="tdoc-wiz-link" href="/me">Already have a doc? Go to my docs</a>);
     }
   } else if (shown === 'sendback') {
     title = 'Now let your agent fix it.';
@@ -504,8 +542,8 @@ export function OwnAgentDoor({ onOpenChange, closeLabel = 'Back', config = null 
 // First-time onboarding, and only that. Behind the landing page's own CTA —
 // the page itself is unchanged. `initialDoor` is the step a redirect returns
 // to (`?onboard=paste` after the sign-in); the old `own` value lands there too.
-export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initialDoor = null }) {
-  const initialStep = initialDoor === 'own' ? 'paste' : initialDoor;
+export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initialDoor = null, resume = false }) {
+  const initialStep = initialDoor === 'own' || initialDoor === 'resume' ? 'paste' : initialDoor;
   return (
     <AppDialog
       open={open}
@@ -519,6 +557,7 @@ export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initial
         <OnboardingWizard
           config={config}
           initialStep={initialStep}
+          resume={resume || initialDoor === 'resume'}
           onSignIn={onSignIn}
           onClose={() => onOpenChange(false)}
         />
