@@ -168,6 +168,15 @@ async function resolveTarget({ port, e2eUser } = {}) {
   // the whole browser suite at somebody else's server.
   if (port === undefined) port = await reservePort();
   else await assertPortFree(port);
+  // The server writes journey state into the fixture root and never clears it,
+  // so one suite's run changes what the next one sees: a stamped `commented`
+  // sends the onboarding wizard to its welcome-back screen, and a suite that
+  // expects the paste step waits for markup that will never come. Clear the
+  // scratch files every boot so each run starts where the committed fixture
+  // says it starts.
+  for (const scratch of ['.onboarding.json', '.agent-read.json']) {
+    try { fs.rmSync(path.join(FIXTURE_ROOT, scratch), { force: true }); } catch {}
+  }
   // Default: boot the local server against the committed fixture.
   const serverPath = path.join(__dirname, '..', '..', 'server', 'server.js');
   const child = spawn('node', [serverPath], {
