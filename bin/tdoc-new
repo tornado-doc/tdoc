@@ -41,6 +41,10 @@
 #                              scoped to document-specific widgets.
 #   --force                    overwrite an existing slug directory. Without
 #                              this, an existing slug is a hard error.
+#   --first-doc                mark this as the doc FIRST-DOC.md produced
+#                              (meta.json origin: "first-doc"). tdoc.dev reads
+#                              the mark on publish and points the person's
+#                              onboarding at this doc, whatever its slug.
 #   --no-server                scaffold only: skip starting/pinging the local
 #                              server (CI, or programmatic callers that serve
 #                              elsewhere). Prints the doc path instead of a URL.
@@ -65,6 +69,7 @@ PUBLISH=0
 OPEN_URL=0
 QUIET=0
 FORCE=0
+FIRST_DOC=0
 CUSTOM_TEMPLATE=0
 STYLE="default"
 # Which version this call writes. "1" creates the document; "next" (or an
@@ -93,6 +98,7 @@ while [ $# -gt 0 ]; do
     --version)    VERSION_ARG="${2:-}"; [ -n "$VERSION_ARG" ] || usage; shift 2 ;;
     --version=*)  VERSION_ARG="${1#--version=}"; [ -n "$VERSION_ARG" ] || usage; shift ;;
     --force)      FORCE=1; shift ;;
+    --first-doc)  FIRST_DOC=1; shift ;;
     --no-server)  NO_SERVER=1; shift ;;   # scaffold only — skip serving (CI / programmatic callers)
     -h|--help)
       sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
@@ -277,7 +283,7 @@ PROMPT_RECORDED="${PROMPT:-$DEFAULT_PROMPT}"
 # file from Python keeps the escaping correct for titles and prompts.
 META_JSON=$(python3 -c '
 import json, os, sys
-title, slug, created, prompt, n, path = sys.argv[1:7]
+title, slug, created, prompt, n, path, first_doc = sys.argv[1:8]
 n = int(n)
 meta = {}
 if n > 1 and os.path.exists(path):
@@ -288,13 +294,17 @@ if n > 1 and os.path.exists(path):
 versions = [v for v in meta.get("versions", []) if isinstance(v, dict) and v.get("n") != n]
 versions.append({"n": n, "created": created, "prompt": prompt})
 versions.sort(key=lambda v: v.get("n", 0))
-print(json.dumps({
+out = {
   "title": meta.get("title") or title,
   "slug": slug,
   "created": meta.get("created") or created,
   "versions": versions,
-}, indent=2))
-' "$TITLE" "$SLUG" "$CREATED" "$PROMPT_RECORDED" "$VERSION_N" "$DOC_DIR/meta.json")
+}
+# The mark belongs to the document: once a first doc, every version of it.
+if first_doc == "1" or meta.get("origin") == "first-doc":
+    out["origin"] = "first-doc"
+print(json.dumps(out, indent=2))
+' "$TITLE" "$SLUG" "$CREATED" "$PROMPT_RECORDED" "$VERSION_N" "$DOC_DIR/meta.json" "${FIRST_DOC:-0}")
 
 printf '%s\n' "$META_JSON" > "$DOC_DIR/meta.json"
 # Never reset an existing thread — a new version keeps the comments it is

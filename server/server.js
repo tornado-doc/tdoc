@@ -122,30 +122,59 @@ function readAgentStatusLocal(slug) {
   const m = readJson(AGENT_READ_FILE, {});
   return { read_at: (m[slug] && m[slug].at) || null };
 }
+// Local twin of the worker's isFirstDocProduct: the meta carries the mark
+// tdoc-write --first-doc leaves, or the pasted line as its prompt of record.
+function isFirstDocProductMeta(meta) {
+  if (!meta || typeof meta !== 'object') return false;
+  if (meta.origin === 'first-doc') return true;
+  const prompts = Array.isArray(meta.versions) ? meta.versions.map((v) => v && v.prompt) : [];
+  return prompts.some((p) => typeof p === 'string' && (/FIRST-DOC\.md/i.test(p) || /make my first doc/i.test(p)));
+}
+// Local twin of adoptFirstDocFor: the journey follows the marked doc, and the
+// doc's own steps start over with it.
+function adoptFirstDocLocal(slug) {
+  const all = loadOnboardingLocal();
+  const next = { ...(all.record || {}), first_doc: slug, published_first: new Date().toISOString() };
+  for (const key of ['commented', 'revised', 'seeded_comment', 'comments_read']) delete next[key];
+  all.record = next;
+  writeJson(ONBOARDING_FILE, all);
+  return next;
+}
+function seedFirstCommentLocal(slug) {
+  let html = '';
+  try { html = fs.readFileSync(path.join(ROOT, slug, 'v1', 'index.html'), 'utf8'); } catch {}
+  const file = path.join(ROOT, slug, 'comments.json');
+  const comments = readCommentFile(file);
+  comments.push({
+    id: `c_${Date.now()}`, version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
+    mentions: [], author: SEED_COMMENT_AUTHOR, status: 'open', created: new Date().toISOString(),
+    replies: [], reactions: {},
+  });
+  writeJson(file, comments);
+  return stampOnboardingLocal('seeded_comment');
+}
 function discoverFirstDocLocal(record) {
   if (!record || !record.started) return record;
   let rec = record;
-  if (!rec.published_first) {
-    let found = null;
-    for (const name of fs.readdirSync(ROOT)) {
-      if (name.startsWith('.') || ONBOARD_SLUGS.has(name) || name === 'tdoc-templates') continue;
-      const meta = readJson(path.join(ROOT, name, 'meta.json'), null);
-      if (!meta || !meta.created || meta.created < rec.started) continue;
-      if (!found || meta.created < found.created) found = { slug: name, created: meta.created };
-    }
+  // A doc marked as FIRST-DOC.md's product, written since the journey
+  // started, is the journey's doc — even if the record already points at an
+  // older one. The newest marked doc wins: a re-run replaces its predecessor.
+  let marked = null;
+  let found = null;
+  for (const name of fs.readdirSync(ROOT)) {
+    if (name.startsWith('.') || ONBOARD_SLUGS.has(name) || name === 'tdoc-templates') continue;
+    const meta = readJson(path.join(ROOT, name, 'meta.json'), null);
+    if (!meta || !meta.created || meta.created < rec.started) continue;
+    if (isFirstDocProductMeta(meta) && (!marked || meta.created > marked.created)) marked = { slug: name, created: meta.created };
+    if (!found || meta.created < found.created) found = { slug: name, created: meta.created };
+  }
+  if (marked && rec.first_doc !== marked.slug && !rec.shared) {
+    adoptFirstDocLocal(marked.slug);
+    rec = seedFirstCommentLocal(marked.slug);
+  } else if (!rec.published_first) {
     if (!found) return rec;
-    rec = stampOnboardingLocal('published_first', { first_doc: found.slug });
-    let html = '';
-    try { html = fs.readFileSync(path.join(ROOT, found.slug, 'v1', 'index.html'), 'utf8'); } catch {}
-    const file = path.join(ROOT, found.slug, 'comments.json');
-    const comments = readCommentFile(file);
-    comments.push({
-      id: `c_${Date.now()}`, version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
-      mentions: [], author: SEED_COMMENT_AUTHOR, status: 'open', created: new Date().toISOString(),
-      replies: [], reactions: {},
-    });
-    writeJson(file, comments);
-    rec = stampOnboardingLocal('seeded_comment');
+    stampOnboardingLocal('published_first', { first_doc: found.slug });
+    rec = seedFirstCommentLocal(found.slug);
   }
   if (rec.first_doc && !rec.revised) {
     const meta = readJson(path.join(ROOT, rec.first_doc, 'meta.json'), null);
@@ -1595,7 +1624,9 @@ const server = http.createServer(async (req, res) => {
     comments.push(entry);
     writeJson(file, comments);
     try {
-      stampOnboardingLocal('commented');
+      // Only a comment on the journey's own doc moves the journey.
+      const journey = loadOnboardingLocal().record || {};
+      if (!journey.first_doc || journey.first_doc === slug) stampOnboardingLocal('commented');
       if (mentions.length) stampOnboardingLocal('tagged');
     } catch {}
     if (E2E_USER && E2E_OWNER) {
