@@ -64,6 +64,30 @@ function onboardingActionStep(action) {
       return undefined;
   }
 }
+// A second POST of the same words, from the same person, on the same spot,
+// within seconds of the first — a double ⌘+Enter, a click after the key, a
+// retry on a slow write — is the same comment, not a second one. Returns the
+// record it duplicates, or null. Identical on both hosts (no-drift).
+function duplicateComment(comments, { author, text, anchor, parent_id, at }, windowMs = 15000) {
+  const now = Date.parse(at || '') || Date.now();
+  const login = author && author.login;
+  const words = String(text || '').trim();
+  const same = (r) => Boolean(r && r.author && login && r.author.login === login)
+    && String(r.text || '').trim() === words
+    && now - (Date.parse(r.created || '') || 0) < windowMs;
+  if (parent_id) {
+    for (const c of comments || []) {
+      for (const r of c.replies || []) if (r.parent_id === parent_id && same(r)) return r;
+    }
+    return null;
+  }
+  const spot = (a) => (a && (a.text || a.aid || a.selector)) || '';
+  for (const c of comments || []) {
+    if (same(c) && spot(c.anchor) === spot(anchor)) return c;
+  }
+  return null;
+}
+
 // The first comment on somebody's first doc, from tdoc and signed as tdoc —
 // not a person pretending to be one. Anchored to the first paragraph so it
 // lands on text the reader can see, and worded to ask for the one gesture the
@@ -1582,6 +1606,9 @@ const server = http.createServer(async (req, res) => {
     // names that were notified.
     const me = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
     const mentions = mentionCandidates(text).filter((login) => login !== me);
+    // The same words twice within seconds is one comment (see the worker).
+    const dup = duplicateComment(comments, { author: e2eIdentity(), text, anchor, parent_id, at: created });
+    if (dup) return json(res, 200, { ...dup, duplicate_of: dup.id, mention_outcome: localMentionOutcome(comments, []) });
     if (parent_id) {
       const thread = comments.find(c => c.id === parent_id)
         || comments.find(c => (c.replies || []).some(r => r.id === parent_id));

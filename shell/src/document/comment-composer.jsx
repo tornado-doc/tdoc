@@ -80,8 +80,13 @@ export function CommentComposer({ selection, onSubmit, onClose, mentionable = []
     ? selection.label || 'Selected element'
     : `"${quoted.slice(0, 80)}${quoted.length > 80 ? '…' : ''}"`;
 
-  const submit = () => {
-    if (text.trim()) onSubmit(text);
+  // One submit at a time. ⌘+Enter and the button both land here, and a second
+  // press while the first post is still in flight used to post a twin.
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (busy || !text.trim()) return;
+    setBusy(true);
+    try { await onSubmit(text); } finally { setBusy(false); }
   };
 
   return (
@@ -104,7 +109,7 @@ export function CommentComposer({ selection, onSubmit, onClose, mentionable = []
       />
       <div className="foot">
         <span className="hint">⌘+Enter to submit</span>
-        <button className="submit" type="button" onClick={submit}>Comment</button>
+        <button className="submit" type="button" onClick={submit} disabled={busy}>{busy ? 'Posting…' : 'Comment'}</button>
       </div>
     </div>
   );

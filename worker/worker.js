@@ -1848,6 +1848,30 @@ function onboardingActionStep(action) {
       return undefined;
   }
 }
+// A second POST of the same words, from the same person, on the same spot,
+// within seconds of the first — a double ⌘+Enter, a click after the key, a
+// retry on a slow write — is the same comment, not a second one. Returns the
+// record it duplicates, or null. Identical on both hosts (no-drift).
+function duplicateComment(comments, { author, text, anchor, parent_id, at }, windowMs = 15000) {
+  const now = Date.parse(at || '') || Date.now();
+  const login = author && author.login;
+  const words = String(text || '').trim();
+  const same = (r) => Boolean(r && r.author && login && r.author.login === login)
+    && String(r.text || '').trim() === words
+    && now - (Date.parse(r.created || '') || 0) < windowMs;
+  if (parent_id) {
+    for (const c of comments || []) {
+      for (const r of c.replies || []) if (r.parent_id === parent_id && same(r)) return r;
+    }
+    return null;
+  }
+  const spot = (a) => (a && (a.text || a.aid || a.selector)) || '';
+  for (const c of comments || []) {
+    if (same(c) && spot(c.anchor) === spot(anchor)) return c;
+  }
+  return null;
+}
+
 // The first comment on somebody's first doc, from tdoc and signed as tdoc —
 // not a person pretending to be one. Anchored to the first paragraph so it
 // lands on text the reader can see, and worded to ask for the one gesture the
@@ -6470,6 +6494,10 @@ export default {
         if (patched.error) return json(patched, { status: 400 });
         await env.META.put(`meta:${slug}`, JSON.stringify(patched.meta));
       }
+      // The same words twice within seconds is one comment: answer with the
+      // one already there instead of writing a twin.
+      const dup = duplicateComment(priorList, { author, text: commentText, anchor, parent_id, at: created });
+      if (dup) return json({ ...dup, duplicate_of: dup.id, mention_outcome: outcome });
       // Serialized through the per-slug DO (mutation logic lives once in
       // applyCommentOp). create + reply are both id-stamped here so the
       // response is deterministic regardless of where the write runs.
