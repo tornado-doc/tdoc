@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
-import { copyText } from './document/model.js';
+import { avatarFor, copyText } from './document/model.js';
 import { getAgentStatus, getOnboarding, postOnboardingEvent } from './document/api.js';
 import { OnboardingScene } from './onboarding-scene.jsx';
 
@@ -400,12 +400,15 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   } else if (shown === 'paste') {
     // One screen: the line, then — once it is copied — the code the agent
     // shows, typed underneath. Nothing the person has seen goes away.
-    // The step says what to open, by name — the four agents are the one list
-    // the page keeps — and then what to do there.
+    // The step says what to open, then what to do there. Which agents: two
+    // rows, a brand mark anchoring each, the coding one and the work one as
+    // labels beside it — names to recognise, not a sentence to read, and
+    // nothing that looks clickable.
     title = <>Open your agent.<br />Paste this in.</>;
     const agents = (
-      <div className="tdoc-wiz-agents" aria-label="Agents this works with">
-        {AGENT_NAMES.split(' · ').map((name) => <span key={name}>{name}</span>)}
+      <div className="tdoc-wiz-agents" aria-label={`Works with ${AGENT_NAMES.replace(/ · /g, ', ')}`}>
+        <div><img src={avatarFor({ login: 'claude' })} alt="Claude" /><span>Claude Code · Claude Cowork</span></div>
+        <div><img src={avatarFor({ login: 'codex' })} alt="OpenAI" /><span>Codex · ChatGPT Work</span></div>
       </div>
     );
     const copiedLine = (
