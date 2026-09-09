@@ -825,9 +825,10 @@ button.tdoc-pin {
 .tdoc-wiz-dots { display: flex; gap: 6px; align-items: center; }
 .tdoc-wiz-dots span, .tdoc-wiz .tdoc-wiz-dots button { width: 6px; height: 6px; padding: 0; border: 0; border-radius: 50%; background: #d9d9d6; }
 .tdoc-wiz .tdoc-wiz-dots button { cursor: pointer; box-sizing: content-box; background-clip: content-box; padding: 5px; margin: -5px; }
-.tdoc-wiz .tdoc-wiz-dots button.past { background-color: var(--td-accent); opacity: .35; }
-.tdoc-wiz .tdoc-wiz-dots button.now { background-color: var(--td-accent); }
+.tdoc-wiz .tdoc-wiz-dots button.past, .tdoc-wiz-dots span.past { background-color: var(--td-accent); opacity: .35; }
+.tdoc-wiz .tdoc-wiz-dots button.now, .tdoc-wiz-dots span.now { background-color: var(--td-accent); }
 .tdoc-wiz .tdoc-wiz-dots button.ahead { background-color: var(--td-accent); opacity: .35; }
+.tdoc-wiz-dots span.ahead { background-color: #d9d9d6; }
 .tdoc-wiz .tdoc-wiz-h1 { margin: 4px 0 0; font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; text-wrap: pretty; }
 .tdoc-wiz .tdoc-wiz-sub { margin: -10px 0 0; font-size: 16px; line-height: 1.45; color: var(--td-ink-soft, #6b6a66); text-wrap: pretty; }
 .tdoc-wiz-scene { display: block; margin: 0 auto; max-width: 100%; height: auto; }
@@ -849,9 +850,12 @@ button.tdoc-pin {
 .tdoc-wiz-row.done .tdoc-wiz-mark { background: var(--td-accent); border-color: var(--td-accent); }
 .tdoc-wiz-row.live .tdoc-wiz-mark { border: 2px solid var(--td-accent); }
 .tdoc-wiz-listen { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14px; line-height: 1.4; color: var(--td-ink-soft, #6b6a66); }
-.tdoc-wiz input.tdoc-wiz-code { width: 100%; box-sizing: border-box; height: 56px; border: 1.5px solid var(--td-line, #e8e7e3); border-radius: 14px; padding: 0 18px; font: 500 24px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .18em; text-align: center; text-transform: uppercase; background: #fff; color: var(--td-ink, #1a1a1a); }
+.tdoc-wiz .tdoc-wiz-line { position: relative; }
+.tdoc-wiz .tdoc-wiz-line.copied { padding-right: 78px; }
+.tdoc-wiz-copied { position: absolute; right: 12px; top: 12px; font: 600 12px -apple-system, system-ui, sans-serif; color: #1a7340; background: #e6f4ea; border-radius: 999px; padding: 3px 9px; }
+.tdoc-wiz input.tdoc-wiz-code { width: 100%; box-sizing: border-box; height: 52px; border: 1.5px solid var(--td-line, #e8e7e3); border-radius: 14px; padding: 0 18px; font: 500 20px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .14em; text-align: center; text-transform: uppercase; background: #fff; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz input.tdoc-wiz-code:focus { outline: none; border-color: var(--td-accent); box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff); }
-.tdoc-wiz input.tdoc-wiz-code::placeholder { color: #c4c3be; letter-spacing: .18em; }
+.tdoc-wiz input.tdoc-wiz-code::placeholder { color: #c4c3be; letter-spacing: 0; font: 400 15px -apple-system, system-ui, sans-serif; text-transform: none; }
 .tdoc-wiz .tdoc-wiz-error { margin: 0; font-size: 14px; text-align: center; color: var(--td-danger, #b42318); }
 .tdoc-wiz.embedded { gap: 16px; }
 .tdoc-wiz.embedded .tdoc-wiz-h1 { font-size: 22px; }

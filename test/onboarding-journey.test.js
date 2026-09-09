@@ -127,9 +127,9 @@ t('a visitor with no session still sees a way to comment, and it is the sign-in'
   assert(shell.includes('signInToComment={Boolean(config.signInToComment)}') && shell.includes('onSignIn={signIn}'), 'the shell wires it');
 });
 
-t('one pop-up, six steps, and the first one is a drawing', () => {
+t('one pop-up, five steps, and the first one is a drawing', () => {
   assert(dialog.includes('title="Create a free doc"') && dialog.includes('hideTitle'), 'the screen is named after the button that opened it, for assistive tech');
-  assert(dialog.includes("const STEPS = ['welcome', 'paste', 'code', 'doc', 'sendback', 'done'];"), 'six steps, in order');
+  assert(dialog.includes("const STEPS = ['welcome', 'paste', 'doc', 'sendback', 'done'];"), 'five steps, in order');
   assert(dialog.includes("<OnboardingScene />") && read('shell/src/onboarding-scene.jsx').includes('Your agent') && read('shell/src/onboarding-scene.jsx').includes('Your browser'), 'the loop is drawn as two windows, not written');
   assert(dialog.includes("export const AGENT_NAMES = 'Claude Code · Codex · Claude Cowork · ChatGPT Work'"), 'all four names');
   assert(dialog.includes("export const AGENT_DEFINITION = 'An AI that runs on your computer and can read and write files.'"), 'the definition');
@@ -146,8 +146,9 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   assert(dialog.includes('className="tdoc-wiz-close" onClick={onClose} aria-label="Close"') && !/>Done</.test(dialog), 'leaving is the corner ×');
   // Skip is not leaving: it goes to the last screen and stamps tour_seen so
   // the landing stops reopening the pop-up.
-  assert(dialog.includes("onClick={skipToEnd}>Skip</button>") && dialog.includes("setView('end');") && dialog.includes("postOnboardingEvent('tour_seen')"), 'Skip goes to the end, and is remembered');
-  assert(dialog.includes('Skipped for now.<br />Come back any time.') && dialog.includes('Back to the walk-through'), 'the end screen knows a skipper from a finisher');
+  assert(dialog.includes("onClick={skipToEnd}>Skip</button>") && dialog.includes("const skipToEnd = () => setView('end');"), 'Skip goes to the question');
+  assert(dialog.includes('Skip the walk-through?<br />You can come back any time.') && dialog.includes('onClick={confirmSkip}>Skip it, go to my docs</button>') && dialog.includes('onClick={() => setView(null)}>Keep going</button>'), 'the question, with its two answers');
+  assert(/const confirmSkip = \(\) => \{\s*postOnboardingEvent\('tour_seen'\)[\s\S]*location\.href = '\/me';/.test(dialog), 'only a yes is remembered, and goes to their docs');
   // Looking back never moves the journey: `step` is the record's, `view` is
   // the person's, and the record's next move clears the view.
   assert(dialog.includes("const shown = view && STEPS.includes(view) && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;") && dialog.includes("onClick={back}>Back</button>") && dialog.includes("onClick={forward}>Continue</button>"), 'a step can be looked at again, and left again, from the bottom row');
@@ -158,8 +159,14 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   assert(dialog.includes('{primary || <div className="tdoc-wiz-primary-ghost" aria-hidden="true" />}'), 'a step without a primary keeps the floor');
   assert(dialog.includes('<div className="tdoc-wiz-body">{body}</div>') && dialog.includes('className="tdoc-wiz-nav-row"'), 'headline, body, floor');
   // A person who is done sees that they are, and gets their docs or the walk again.
-  assert(dialog.includes("const finished = step === 'done' && shared && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes("{shared ? 'Walk through it again' : 'Back to the walk-through'}"), 'the finished screen');
+  // The floor and the dots, as rules — one place, pinned:
+  assert(dialog.includes("const index = atEnd ? STEPS.length : STEPS.indexOf(shown) + 1;"), 'the end screen is the last dot, whatever the record says');
+  assert(dialog.includes("{index > 1 ? <button type=\"button\" className=\"tdoc-wiz-link\" onClick={back}>Back</button> : <span />}"), 'Back on every screen after the first');
+  assert(/index < liveIndex\s*\? <button type="button" className="tdoc-wiz-link" onClick=\{forward\}>Continue<\/button>\s*: <button type="button" className="tdoc-wiz-link" onClick=\{skipToEnd\}>Skip<\/button>/.test(dialog), 'Continue while looking back, Skip on the live step');
+  assert(dialog.includes("onClick={() => setView(i + 1 === liveIndex ? null : s)}") && dialog.includes("i + 1 <= liveIndex"), 'reached dots are clickable; the live dot returns to the live step');
+  assert(dialog.includes("const finished = step === 'done' && shared && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes(">Walk through it again</button>"), 'the finished screen');
   assert(dialog.includes('useEffect(() => { setView(null); }, [step]);'), 'a step that moves on is shown the moment it does');
+  assert(dialog.includes('useEffect(() => { lineReset(); }, [step, lineReset]);'), 'a copy survives looking back and the skip question');
   // Under 700px every modal button grows to 44px; the dots are buttons and
   // became coins (seen on tdoc.dev in a 560px pane). They stay dots.
   assert(/\.tdoc-modal \.tdoc-wiz \.tdoc-wiz-dots button \{\s*min-width: 0;\s*min-height: 0;/.test(read('shell/src/ui/ui.css')), 'the dots are exempt from the 44px floor');
@@ -170,7 +177,7 @@ t('one pop-up, six steps, and the first one is a drawing', () => {
   assert(css.includes('.tdoc-wiz button.tdoc-wiz-primary, .tdoc-wiz a.tdoc-wiz-primary {') && css.includes('.tdoc-wiz button.tdoc-wiz-secondary {') && css.includes('.tdoc-wiz button.tdoc-wiz-link, .tdoc-wiz a.tdoc-wiz-link {'), 'wizard buttons outrank the modal button rule');
 });
 
-t('bridge 1 is read off the server, and the code from the terminal is its own step', () => {
+t('bridge 1 is read off the server, and the code from the terminal is typed under the line', () => {
   assert(dialog.includes("postOnboardingEvent('door_own_agent')"), 'reaching the paste step is the first stamp');
   assert(dialog.includes('const POLL_MS = 3000'), '3s while waiting');
   assert(dialog.includes('export function stepFromRecord(record)') && /if \(record\.revised\) return 'done';\s*if \(record\.commented\) return 'sendback';\s*if \(record\.published_first\) return 'doc';\s*if \(record\.agent_connected\) return 'doc';\s*return 'paste';/.test(dialog), 'the step is the record, forward only');
@@ -182,7 +189,7 @@ t('bridge 1 is read off the server, and the code from the terminal is its own st
   // same two routes /activate uses — lookup names the terminal, approve binds it.
   assert(dialog.includes("postJson('/api/cli/pair/lookup', { user_code: code })") && dialog.includes("postJson('/api/cli/pair/approve', { user_code: code })"), 'pairing reuses the activate routes');
   assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
-  assert(dialog.includes('Type the code your agent shows.'), 'the code step says what it is for');
+  assert(dialog.includes('placeholder="Code your agent shows"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
   assert(dialog.includes('Highlight a sentence.<br />Say what you think.') && dialog.includes("openDoc(1, 'welcome')"), 'the doc step is the comment, and the doc opens in a new tab');
   assert(dialog.includes("openDoc(latest || 2, 'revised')"), 'v2 opens and says why it arrived');
   assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');

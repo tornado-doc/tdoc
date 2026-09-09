@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { copyText } from './document/model.js';
 import { getAgentStatus, getOnboarding, postOnboardingEvent } from './document/api.js';
@@ -11,13 +11,13 @@ import { OnboardingScene } from './onboarding-scene.jsx';
 // step is a headline, one line, and one button — nothing to read.
 //
 //   1 welcome   what tdoc is, drawn
-//   2 paste     the line for the agent (sign-in first, if there is none)
+//   2 paste     the line for the agent (sign-in first, if there is none);
+//               once copied, the code the agent shows is typed right here
+//   3 doc       the doc is up: open it, comment on it
+//   4 sendback  the second line; the agent reads, writes, publishes v2
+//   5 done      the loop, closed; the link to share
 //   Each screen is one headline and one button; the status line under a
 //   waiting step is the only other text.
-//   3 code      the code the agent shows, typed here
-//   4 doc       the doc is up: open it, comment on it
-//   5 sendback  the second line; the agent reads, writes, publishes v2
-//   6 done      the loop, closed; the link to share
 //
 // Every step is read off the account's onboarding record, never this browser,
 // so a second device — or a reload — resumes where the first one stopped.
@@ -39,7 +39,7 @@ export const COPY_FALLBACK = 'Copy the selected line by hand.';
 const POLL_MS = 3000;
 const NOTHING_YET_MS = 90 * 1000;
 const STILL_WAITING_MS = 5 * 60 * 1000;
-const STEPS = ['welcome', 'paste', 'code', 'doc', 'sendback', 'done'];
+const STEPS = ['welcome', 'paste', 'doc', 'sendback', 'done'];
 
 // Select the text of an element, for the person to copy by hand when the
 // clipboard refused. Never throws.
@@ -95,7 +95,9 @@ function useCopyLine(onCopied) {
     setCopied(ok);
     onCopied?.(ok);
   };
-  const reset = () => setCopied(null);
+  // Stable, so an effect keyed on it runs when a step changes — not on
+  // every render, which reset the copy the moment it happened.
+  const reset = useCallback(() => setCopied(null), []);
   return { copied, codeRef, copy, reset };
 }
 function copyLabel(copied) {
@@ -163,8 +165,11 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // Each copy is its own wait: the send-back step must not inherit the
   // paste step's copy and show its rows before the person has pressed Copy.
   useEffect(() => { setCopiedAt(null); setCopyFailed(false); setElapsed(0); }, [step]);
+  // A copy belongs to its step, not to the view: looking back, or the skip
+  // question, and returning finds the line still copied and the code field
+  // still there. Only the record moving on clears it.
   const lineReset = lineCopy.reset;
-  useEffect(() => { lineReset(); }, [step, view, lineReset]);
+  useEffect(() => { lineReset(); }, [step, lineReset]);
   useEffect(() => { setView(null); }, [step]);
   const connected = Boolean(record?.agent_connected || record?.published_first || pair.state === 'connected');
 
@@ -214,7 +219,6 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const copyFirstLine = async () => {
     await lineCopy.copy(FIRST_DOC_RECIPE);
     postOnboardingEvent('copy_clicked').catch(() => {});
-    window.setTimeout(() => setStep((current) => (current === 'paste' ? 'code' : current)), 900);
   };
   const copyFixLine = async () => {
     await lineCopy.copy(HANDOFF_LINE);
@@ -246,21 +250,37 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     if (ok) postOnboardingEvent('share_link_copied', slug).catch(() => {});
   };
 
+  // What is on screen, and the rules the floor and the dots follow:
+  //   step   — where the record says the journey IS (forward only)
+  //   view   — null (the live step), a past step being looked at, or 'end'
+  //   shown  — the step rendered: `view` when it is a past step, else `step`
+  //   index  — the dot: the end screen is always the last dot
+  // Floor, left:  Back on every screen after the first (to the previous shown step)
+  // Floor, right: Continue while looking at a past step (toward the live step);
+  //               Skip on the live step (to the end screen, stamping tour_seen)
+  // Corner ×:     leave. Nothing on the floor closes the pop-up.
+  // Dots:         one per step; those already reached are clickable — the live
+  //               dot returns to the live step, an earlier one looks back.
   const shown = view && STEPS.includes(view) && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;
-  const index = STEPS.indexOf(shown) + 1;
   const liveIndex = STEPS.indexOf(step) + 1;
+  const shared = Boolean(record?.shared);
+  const finished = step === 'done' && shared && view === null;
+  const atEnd = finished || view === 'end';
+  const index = atEnd ? STEPS.length : STEPS.indexOf(shown) + 1;
   const back = () => { if (index > 1) setView(STEPS[index - 2]); };
   const forward = () => { const next = STEPS[index]; setView(next && STEPS.indexOf(next) < STEPS.indexOf(step) ? next : null); };
   const waitLine = copyFailed ? COPY_FALLBACK
     : elapsed > STILL_WAITING_MS ? STILL_WAITING
       : elapsed > NOTHING_YET_MS ? NOTHING_YET : WAITING;
 
-  // Skip is not leaving: it goes to the last screen — their docs, or the walk
-  // again — and stamps the record so the landing stops reopening the pop-up.
-  // Leaving is the × in the corner.
-  const skipToEnd = () => {
-    setView('end');
+  // Skip is not leaving: it asks. The last screen puts the question — skip
+  // the walk-through? — and only a yes stamps the record (so the landing
+  // stops reopening the pop-up) and goes to their docs. Leaving is the × in
+  // the corner.
+  const skipToEnd = () => setView('end');
+  const confirmSkip = () => {
     postOnboardingEvent('tour_seen').catch(() => {});
+    location.href = '/me';
   };
 
   // The frame never moves: the headline sits under the header, the middle
@@ -287,17 +307,23 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // The last screen. Reached by finishing (the loop closed, the link copied)
   // or by Skip. It offers the two things left to do — their docs, or the walk
   // again as a tour (views only; the record does not move).
-  const shared = Boolean(record?.shared);
-  const finished = step === 'done' && shared && view === null;
-  const atEnd = finished || view === 'end';
-
-  if (atEnd) {
-    title = shared ? <>You’ve done the loop.<br />Every doc works this way.</> : <>Skipped for now.<br />Come back any time.</>;
-    body = <OnboardingScene done={shared} />;
+  if (atEnd && shared) {
+    title = <>You’ve done the loop.<br />Every doc works this way.</>;
+    body = <OnboardingScene done />;
     footer = (
       <div className="tdoc-wiz-foot">
-        <button type="button" className="tdoc-wiz-secondary" onClick={() => setView(shared ? 'welcome' : null)}>{shared ? 'Walk through it again' : 'Back to the walk-through'}</button>
+        <button type="button" className="tdoc-wiz-secondary" onClick={() => setView('welcome')}>Walk through it again</button>
         <a className="tdoc-wiz-primary" href="/me">Go to my docs</a>
+        <div className="tdoc-wiz-nav-row"><span /><span /></div>
+      </div>
+    );
+  } else if (atEnd) {
+    title = <>Skip the walk-through?<br />You can come back any time.</>;
+    body = <OnboardingScene />;
+    footer = (
+      <div className="tdoc-wiz-foot">
+        <button type="button" className="tdoc-wiz-secondary" onClick={() => setView(null)}>Keep going</button>
+        <button type="button" className="tdoc-wiz-primary" onClick={confirmSkip}>Skip it, go to my docs</button>
         <div className="tdoc-wiz-nav-row"><span /><span /></div>
       </div>
     );
@@ -306,40 +332,53 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     body = <OnboardingScene />;
     footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={start}>Get started</button>);
   } else if (shown === 'paste') {
+    // One screen: the line, then — once it is copied — the code the agent
+    // shows, typed underneath. Nothing the person has seen goes away.
     title = 'Paste this into your agent.';
-    body = <code ref={lineCopy.codeRef} className="tdoc-wiz-line">{FIRST_DOC_RECIPE}</code>;
-    footer = foot(
-      <button type="button" className={`tdoc-wiz-primary${lineCopy.copied ? ' done' : ''}`} onClick={copyFirstLine}>{copyLabel(lineCopy.copied)}</button>,
-      lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null,
+    const copiedLine = (
+      <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>
+        {FIRST_DOC_RECIPE}
+        {lineCopy.copied ? <span className="tdoc-wiz-copied" aria-label="Copied">Copied</span> : null}
+      </code>
     );
-  } else if (shown === 'code') {
-    title = 'Type the code your agent shows.';
     if (pair.state === 'confirm') {
-      body = <p className="tdoc-wiz-confirm">Connect {pair.label ? <strong>{pair.label}</strong> : 'this terminal'} to your account?</p>;
+      body = (
+        <>
+          {copiedLine}
+          <p className="tdoc-wiz-confirm">Connect {pair.label ? <strong>{pair.label}</strong> : 'this terminal'} to your account?</p>
+        </>
+      );
       footer = foot(
         <button type="button" className="tdoc-wiz-primary" onClick={approveCode}>Connect</button>,
         <button type="button" className="tdoc-wiz-link" onClick={() => setPair({ state: 'idle', label: '', error: '' })}>Not mine</button>,
       );
-    } else {
+    } else if (lineCopy.copied !== null) {
       body = (
-        <input
-          className="tdoc-wiz-code"
-          value={code}
-          onChange={(event) => { setCode(cleanCode(event.target.value)); if (pair.state === 'error') setPair({ state: 'idle', label: '', error: '' }); }}
-          onKeyDown={(event) => { if (event.key === 'Enter' && code.length === 9) lookupCode(); }}
-          placeholder="XXXX-XXXX"
-          spellCheck="false"
-          autoCapitalize="characters"
-          autoComplete="off"
-          aria-label="Pairing code from your agent"
-        />
+        <>
+          {copiedLine}
+          <input
+            className="tdoc-wiz-code"
+            value={code}
+            onChange={(event) => { setCode(cleanCode(event.target.value)); if (pair.state === 'error') setPair({ state: 'idle', label: '', error: '' }); }}
+            onKeyDown={(event) => { if (event.key === 'Enter' && code.length === 9) lookupCode(); }}
+            placeholder="Code your agent shows"
+            spellCheck="false"
+            autoCapitalize="characters"
+            autoComplete="off"
+            aria-label="Pairing code from your agent"
+          />
+          {pair.state === 'error' ? <p className="tdoc-wiz-error" role="alert">{pair.error}</p> : <Listening>{waitLine}</Listening>}
+        </>
       );
       footer = foot(
         <button type="button" className="tdoc-wiz-primary" disabled={code.length !== 9 || pair.state === 'looking' || pair.state === 'approving'} onClick={lookupCode}>
           {pair.state === 'looking' ? 'Checking…' : 'Connect'}
         </button>,
-        pair.state === 'error' ? <p className="tdoc-wiz-error" role="alert">{pair.error}</p> : <Listening>{waitLine}</Listening>,
+        lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null,
       );
+    } else {
+      body = copiedLine;
+      footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={copyFirstLine}>Copy</button>);
     }
   } else if (shown === 'doc') {
     if (record?.published_first) {
@@ -390,11 +429,12 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         {embedded ? <span /> : <span className="tdoc-wiz-mark-word">tdoc</span>}
         <div className="tdoc-wiz-head-right">
           <div className="tdoc-wiz-dots" role="tablist" aria-label={`Step ${index} of ${STEPS.length}`}>
-            {STEPS.map((s, i) => (
-              i + 1 <= liveIndex
-                ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead'} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
-                : <span key={s} />
-            ))}
+            {STEPS.map((s, i) => {
+              const cls = i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead';
+              return i + 1 <= liveIndex
+                ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={cls} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
+                : <span key={s} className={cls} />;
+            })}
           </div>
           {onClose ? (
             <button type="button" className="tdoc-wiz-close" onClick={onClose} aria-label="Close">

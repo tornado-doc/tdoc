@@ -55,10 +55,10 @@ t('the tutorial can open the provider-owned onboarding dialog', () => {
   assert(/<OnboardingDialog/.test(documentShell), 'React onboarding dialog is not mounted in the shell');
 });
 
-t('the dialog is one reusable Base UI screen with six steps read off the record', () => {
+t('the dialog is one reusable Base UI screen with five steps read off the record', () => {
   assert(/<AppDialog/.test(dialog), 'shared dialog primitive missing');
   assert(!/PAGES|stepSignIn|device\/start|device\/poll/.test(dialog), 'old paged or sign-in flow returned');
-  assert(/const STEPS = \['welcome', 'paste', 'code', 'doc', 'sendback', 'done'\];/.test(dialog), 'the six steps are missing');
+  assert(/const STEPS = \['welcome', 'paste', 'doc', 'sendback', 'done'\];/.test(dialog), 'the five steps are missing');
 });
 
 t('mobile onboarding actions keep names and 44px touch targets', () => {
