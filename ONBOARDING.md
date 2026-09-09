@@ -150,7 +150,10 @@ output** — the user already has a published doc and onboarding is done. Tell
 them so and proceed to Step 6.
 
 Otherwise, when `ready_to_publish` is `true`, **read
-[FIRST-DOC.md](FIRST-DOC.md) end to end and follow it.** It is the whole
+[FIRST-DOC.md](FIRST-DOC.md) end to end and follow it.** Its first move on the
+hosted default is the connection — `bin/tdoc-publish --signin-only` when
+`~/.tdoc/published.json` is absent — before anything is read, so the code the
+human has to approve arrives first, not after the longest wait. It is the whole
 specification for what the first doc is, how much of the machine to read,
 what the page says, and what happens before it is published. Do not improvise
 a placeholder here.

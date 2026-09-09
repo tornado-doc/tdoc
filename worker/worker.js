@@ -6294,7 +6294,11 @@ export default {
       const session = await getSession(env, req);
       const accountId = await sessionAccountId(env, session);
       if (!accountId) return json({ anonymous: true, record: null });
-      return json({ record: await loadOnboarding(env, accountId) });
+      // `paired`: has a terminal ever connected to this account. A paired
+      // agent never shows a code again, so the page must not wait for one.
+      let paired = false;
+      try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
+      return json({ record: await loadOnboarding(env, accountId), paired });
     }
     if (p === '/api/onboarding/event' && method === 'POST') {
       let body = {};

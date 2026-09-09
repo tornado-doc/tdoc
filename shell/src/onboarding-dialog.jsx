@@ -12,7 +12,14 @@ import { OnboardingScene } from './onboarding-scene.jsx';
 //
 //   1 welcome   what tdoc is, drawn
 //   2 paste     the line for the agent (sign-in first, if there is none);
-//               once copied, the code the agent shows is typed right here
+//               once copied, the page waits for the agent. The agent's first
+//               move is to connect: FIRST-DOC.md has it run
+//               `tdoc-publish --signin-only` before reading anything, which
+//               prints a code and opens tdoc.dev/activate with it filled in.
+//               A first-time account can also type that code here. An account
+//               that has connected a terminal before (`paired`) never sees a
+//               code again — the CLI keeps its credential — so the page shows
+//               the agent writing instead.
 //   3 doc       the doc is up: open it, comment on it
 //   4 sendback  the second line; the agent reads, writes, publishes v2
 //   5 done      the loop, closed; the link to share
@@ -142,6 +149,7 @@ function Listening({ children }) {
 export function OnboardingWizard({ config, initialStep = null, embedded = false, onClose, onSignIn }) {
   const signedIn = Boolean(config?.identity);
   const [record, setRecord] = useState(null);
+  const [paired, setPaired] = useState(false);
   const [step, setStep] = useState(() => (initialStep && STEPS.includes(initialStep) ? initialStep : 'welcome'));
   // Looking back. `step` is where the journey IS (the record moves it); `view`
   // is a past step the person asked to see again. Null means "show the live
@@ -185,6 +193,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         if (cancelled) return;
         const next = result?.record || {};
         setRecord(next);
+        setPaired(Boolean(result?.paired));
         const target = stepFromRecord(next);
         if (!resumed.current) {
           resumed.current = true;
@@ -352,22 +361,40 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         <button type="button" className="tdoc-wiz-primary" onClick={approveCode}>Connect</button>,
         <button type="button" className="tdoc-wiz-link" onClick={() => setPair({ state: 'idle', label: '', error: '' })}>Not mine</button>,
       );
-    } else if (lineCopy.copied !== null) {
+    } else if (lineCopy.copied !== null && (connected || paired)) {
+      // A terminal already connected to this account never shows a code
+      // again (the CLI keeps its credential), so there is nothing to type:
+      // the agent is installing and writing, and the page says so.
       body = (
         <>
           {copiedLine}
+          <div className="tdoc-wiz-rows">
+            <Row state="done">Agent connected</Row>
+            <Row state="live">Writing your doc — about 5 minutes</Row>
+            <Row state="todo">Published</Row>
+          </div>
+        </>
+      );
+      footer = foot(null, lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null);
+    } else if (lineCopy.copied !== null) {
+      // First time: the agent's first move is to connect. It opens tdoc.dev's
+      // activate page with the code filled in — approving it there is the
+      // usual path — and the code can be typed here instead.
+      body = (
+        <>
+          {copiedLine}
+          <Listening>{pair.state === 'error' ? pair.error : 'Your agent will ask to connect — approve it in the tab it opens, or type its code here.'}</Listening>
           <input
             className="tdoc-wiz-code"
             value={code}
             onChange={(event) => { setCode(cleanCode(event.target.value)); if (pair.state === 'error') setPair({ state: 'idle', label: '', error: '' }); }}
             onKeyDown={(event) => { if (event.key === 'Enter' && code.length === 9) lookupCode(); }}
-            placeholder="Code your agent shows"
+            placeholder="Code from your agent"
             spellCheck="false"
             autoCapitalize="characters"
             autoComplete="off"
             aria-label="Pairing code from your agent"
           />
-          {pair.state === 'error' ? <p className="tdoc-wiz-error" role="alert">{pair.error}</p> : <Listening>{waitLine}</Listening>}
         </>
       );
       footer = foot(
@@ -390,7 +417,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       body = (
         <div className="tdoc-wiz-rows">
           <Row state="done">Agent connected</Row>
-          <Row state="live">Writing your doc</Row>
+          <Row state="live">Writing your doc — about 5 minutes</Row>
           <Row state="todo">Published</Row>
         </div>
       );
