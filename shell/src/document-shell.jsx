@@ -127,7 +127,12 @@ const HANDOFF_STUCK_MS = 5 * 60 * 1000;
 // The exit. On a revised doc, until the person has copied the link. Says
 // what just happened and what to do with it; nothing a stranger has to decode.
 const exitLine = (answered, version) => (
-  `Your agent answered ${answered} ${answered === 1 ? 'comment' : 'comments'} in v${version}. Send it to a real reader:`
+  // An agent that published a version without resolving anything leaves this
+  // at zero, and "answered 0 comments" reads as a report that the product
+  // failed. The version is still real and still worth sending; say that.
+  answered
+    ? `Your agent answered ${answered} ${answered === 1 ? 'comment' : 'comments'} in v${version}. Send it to a real reader:`
+    : `v${version} is published. Send it to a real reader:`
 );
 
 export function DocumentShell({ boot, config }) {
@@ -171,8 +176,6 @@ export function DocumentShell({ boot, config }) {
   const [onboardingOpen, setOnboardingOpen] = useState(() => (
     Boolean(config.onboarding && config.identity && onboardingDoor)
   ));
-  // Reopened for a person coming back: the wizard asks before it resumes.
-  const [onboardingResume, setOnboardingResume] = useState(false);
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
   ));
@@ -259,8 +262,11 @@ export function DocumentShell({ boot, config }) {
       // A journey that has started and not reached its exit reopens where
       // it stopped — the wizard reads the step off the record.
       if (record?.started && !record?.shared && !record?.tour_seen && !record?.waitlist) {
+        // Opened at the paste step. Whether that is where the journey stays,
+        // or whether it has moved on and the person should be asked first, is
+        // the wizard's own rule — forcing the question here asked it of
+        // somebody parked on step 2, who has seen nothing to come back to.
         setOnboardingDoor('own');
-        setOnboardingResume(true);
         setOnboardingOpen(true);
       }
     }).catch(() => {});
@@ -287,7 +293,9 @@ export function DocumentShell({ boot, config }) {
         || list.find((c) => c.status === 'applied');
       if (resolved) setOpenCommentId(resolved.id);
       const n = list.filter((c) => c.status === 'applied').length;
-      showToast(`Your agent answered ${n} ${n === 1 ? 'comment' : 'comments'} and published v${config.version}.`);
+      showToast(n
+        ? `Your agent answered ${n} ${n === 1 ? 'comment' : 'comments'} and published v${config.version}.`
+        : `Your agent published v${config.version}.`);
     }
   }, [arrival, comments.loading, comments.comments, config.identity, config.title, config.version, showToast]);
 
@@ -1053,7 +1061,6 @@ export function DocumentShell({ boot, config }) {
         config={config}
         onSignIn={signIn}
         initialDoor={onboardingDoor}
-        resume={onboardingResume}
       />
 
       {toast ? (
