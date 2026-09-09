@@ -423,26 +423,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     // bar names the terminal. Nothing extra to read, nothing that looks
     // clickable; the Copied badge lives in the same bar.
     title = <>Open your agent.<br />Paste this in.</>;
-<<<<<<< HEAD
     const copiedLine = terminal(FIRST_DOC_RECIPE, AGENT_NAMES);
-=======
-    // A plain line, not chips: a row of pills reads as four buttons, and a
-    // person taps one expecting it to do something.
-    const agents = (
-      <p className="tdoc-wiz-agents">Works with {AGENT_NAMES.split(' · ').join(' / ')}</p>
-    );
-    const copiedLine = (
-      <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>
-        {FIRST_DOC_RECIPE}
-        {lineCopy.copied ? (
-          <span className="tdoc-wiz-copied" aria-label="Copied">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
-            Copied
-          </span>
-        ) : null}
-      </code>
-    );
->>>>>>> origin/main
     if (pair.state === 'confirm') {
       body = (
         <>
