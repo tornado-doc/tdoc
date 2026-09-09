@@ -404,7 +404,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     // One last screen, three things to do: open the doc the loop produced,
     // walk the tour again, or go to the hub. No link to copy — the doc page
     // has its own share.
-    title = <>You’ve done the loop.<br />Every doc works this way.</>;
+    title = <>Congratulations.<br />You’ve done the loop.</>;
     body = <OnboardingScene done />;
     footer = (
       <div className="tdoc-wiz-foot">
