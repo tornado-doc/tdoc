@@ -323,9 +323,6 @@ button.tdoc-pin {
 .tdoc-modal .tds-status { color: #767c8b; font-size: 13px; }
 .tdoc-modal .tds-err { color: var(--td-danger); }
 
-.tdoc-recipe-wrap {
-  position: relative;
-}
 
 /* The "don't show this again" line in the save notice. */
 .tdoc-save-remember {
@@ -444,28 +441,8 @@ button.tdoc-pin {
   border-top: 1px solid var(--td-line);
 }
 
-.tdoc-recipe-wrap code {
-  display: block;
-  min-height: 72px;
-  padding: 12px 12px 42px;
-  border: 1px solid var(--td-line);
-  border-radius: 6px;
-  background: var(--td-surface-2);
-  font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
-  word-break: break-word;
-}
 
-.tdoc-modal .tdoc-recipe-wrap button {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-}
 
-.tdoc-modal .tdoc-recipe-wrap button.done {
-  border-color: #1a7340;
-  background: #1a7340;
-  color: #fff;
-}
 
 .tdoc-onboarding-details {
   margin: 12px 0;

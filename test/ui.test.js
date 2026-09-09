@@ -188,11 +188,19 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     await page.waitForSelector('.ui-dialog-popup');
     const title = await page.textContent('.ui-dialog-title');
     if (title !== 'Create a doc') throw new Error(`unexpected dialog title: ${title}`);
-    await page.click('.tdoc-recipe-wrap button');
-    await page.waitForFunction(() => document.querySelector('.tdoc-recipe-wrap button')?.textContent.trim() === 'Copied');
+    // The dialog offers two doors; the agent one opens the same wizard the
+    // landing does, at its paste step, where the line lives in the terminal.
+    await page.click('.mk-card:has-text("Build it with your agent")');
+    await page.waitForSelector('.tdoc-wiz-term .tdoc-wiz-line');
+    await page.click('.tdoc-wiz-foot button.tdoc-wiz-primary');
+    await page.waitForSelector('.tdoc-wiz-term.copied .tdoc-wiz-copied');
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
     if (!clipboard.includes('/FIRST-DOC.md')) throw new Error(`unexpected recipe: ${clipboard}`);
-    await page.click('.ui-dialog-popup .actions .primary');
+    // Inside the hub the wizard's corner button is this view's Back — it
+    // returns to the two doors rather than closing the dialog around it.
+    await page.click('.tdoc-wiz-close');
+    await page.waitForSelector('.mk-cards .mk-card');
+    await page.keyboard.press('Escape');
     await page.waitForSelector('.ui-dialog-popup', { state: 'detached' });
   });
 
