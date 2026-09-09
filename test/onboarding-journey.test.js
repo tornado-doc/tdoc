@@ -168,6 +168,12 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   assert(dialog.includes("{index > 1 ? <button type=\"button\" className=\"tdoc-wiz-link\" onClick={back}>Back</button> : <span />}"), 'Back on every screen after the first');
   assert(/index < liveIndex\s*\? <button type="button" className="tdoc-wiz-link" onClick=\{forward\}>Continue<\/button>\s*: shown === 'done' \? <span \/>\s*: <button type="button" className="tdoc-wiz-link" onClick=\{skipToEnd\}>Skip<\/button>/.test(dialog), 'Continue while looking back, Skip on the live step, nothing to skip on the last one');
   assert(dialog.includes("onClick={() => setView(i + 1 === liveIndex ? null : s)}") && dialog.includes("i + 1 <= liveIndex"), 'reached dots are clickable; the live dot returns to the live step');
+  // The page control sits on the floor, centred between Back and Skip; the
+  // top of the sheet is the headline and the corner × only.
+  assert(/<div className="tdoc-wiz-nav-row">\s*\{index > 1 \? [^\n]*\n\s*\{dots\}/.test(dialog) && !dialog.includes('tdoc-wiz-head') && !dialog.includes('tdoc-wiz-mark-word'), 'the dots are the floor\'s page control, and the header is gone');
+  // After Copy the button does not turn into a sentence: the line carries a
+  // Copied badge and the floor shows the next thing to do.
+  assert(!/Copied\. Now paste it/.test(dialog) && dialog.includes("lineCopy.copied ? null : <button type=\"button\" className=\"tdoc-wiz-primary\" onClick={copyFixLine}>"), 'Copy is a button, Copied is a badge');
   assert(dialog.includes("const finished = step === 'done' && shared && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes(">Walk through it again</button>"), 'the finished screen');
   assert(dialog.includes('useEffect(() => { setView(null); }, [step]);'), 'a step that moves on is shown the moment it does');
   assert(dialog.includes('useEffect(() => { lineReset(); }, [step, lineReset]);'), 'a copy survives looking back and the skip question');
@@ -193,10 +199,10 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   // same two routes /activate uses — lookup names the terminal, approve binds it.
   assert(dialog.includes("postJson('/api/cli/pair/lookup', { user_code: code })") && dialog.includes("postJson('/api/cli/pair/approve', { user_code: code })"), 'pairing reuses the activate routes');
   assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
-  // The paste step names what to open — the four agents, as chips — then
+  // The paste step names what to open — the four agents, in a sentence — then
   // what to do there.
   assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes('<p className="tdoc-wiz-agents">Works with {AGENT_NAMES.split(\' · \').join(\' / \')}</p>') && !/\.tdoc-wiz-agents span \{/.test(read('shell/src/ui/ui.css')), 'the step says what to open, by name');
-  assert(dialog.includes('placeholder="Code from your agent"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
+  assert(dialog.includes('placeholder="Or type its code here"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
   // The page follows the CLI's pairing: a terminal that has connected before
   // keeps its credential and never shows a code, so the page waits for the
   // doc instead; a first-time agent connects FIRST, before reading anything.
