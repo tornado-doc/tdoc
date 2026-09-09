@@ -272,9 +272,9 @@ t('the two arrivals open the right card and say what happened', () => {
   assert(shell.includes('is live.`'), 'and says the doc is live');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
   assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
-  const landingBar = read('shell/src/document/document-toolbar.jsx');
-  assert(landingBar.includes('className="tdoc-your-doc"') && shell.includes('<LandingActions stars={config.stars} yourDoc={yourDoc} />'),
-    'the landing page shows a way back to your doc');
+  // No "Your doc →" pill in the landing's top bar: the way back is the hub
+  // and the wizard's last screen (the owner asked for it gone).
+  assert(!shell.includes('yourDoc') && !read('shell/src/document/document-toolbar.jsx').includes('tdoc-your-doc'), 'the top bar carries no doc pill');
   assert(server.includes('oldVersion: (!isLanding && Number(version) < Number(latestVersion))'), 'local preview shows the newer-version strip too');
   for (const [src, label] of [[worker, 'worker'], [server, 'server']]) {
     assert(!src.includes('replied_at'), `${label}: agent-status carries no doc-level replied stamp`);
