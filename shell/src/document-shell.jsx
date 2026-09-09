@@ -257,19 +257,6 @@ export function DocumentShell({ boot, config }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // On the landing page a signed-in person with a doc gets a way back to it.
-  const [yourDoc, setYourDoc] = useState(null);
-  useEffect(() => {
-    if (!config.isLanding || !onboardingRecord?.first_doc) return;
-    const slug = onboardingRecord.first_doc;
-    getAgentStatus(slug)
-      .then((status) => setYourDoc({
-        title: status?.title || slug,
-        url: `/d/${encodeURIComponent(slug)}/v/${Number(status?.latest_version) || 1}`,
-      }))
-      .catch(() => setYourDoc({ title: slug, url: `/d/${encodeURIComponent(slug)}/v/1` }));
-  }, [config.isLanding, onboardingRecord]);
-
   // The two arrivals the journey makes on its own. Both open the card the
   // person should be looking at, and say in one line what just happened.
   const arrivedRef = useRef(false);
@@ -805,7 +792,7 @@ export function DocumentShell({ boot, config }) {
       <TopBar
         identity={config.identity}
         theme={theme}
-        actions={config.isLanding ? <LandingActions stars={config.stars} yourDoc={yourDoc} /> : (
+        actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
           <>
             {/* Resolved threads are out of the margin by default. The switch is
                 the way back, in the bar where it can be seen — it folds into

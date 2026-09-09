@@ -341,7 +341,7 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage bar must draw the GitHub mark itself');
   assert(/className="tdoc-gh-stars"/.test(toolbar) && /function starCount/.test(toolbar),
     'homepage bar must show the star count beside the mark');
-  assert(/config\.isLanding \? <LandingActions stars=\{config\.stars\} yourDoc=\{yourDoc\} \/> : \(/.test(documentShell),
+  assert(/config\.isLanding \? <LandingActions stars=\{config\.stars\} \/> : \(/.test(documentShell),
     'homepage must not receive the document Share/Copy/Download actions');
 });
 
