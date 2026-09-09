@@ -33,6 +33,39 @@ confirm before re-probing with `bin/tdoc-doctor --platform cloudflare`. About
 five minutes the first time, and free — their account, their bill, no card.
 </details>
 
+## Step 1b — connect first, before reading anything
+
+On the hosted default, if `~/.tdoc/published.json` does not exist yet, run this
+now — before the scan line, before a single file is read:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-publish" --signin-only
+```
+
+It prints a short code and opens `tdoc.dev/activate` in their browser with the
+code filled in; they approve it there, or type the code into the tdoc.dev
+window they already have open. Relay the code and the URL in one line and wait
+for `Signed in as …`. Do not scan while waiting.
+
+Why first: the human is watching a page that says "listening for your agent".
+The connection is the first thing it can see happen, and it is the one step
+that needs their hand. Left to the end, it arrives after the longest silence
+of the whole setup. If `published.json` already exists, there is no code and
+nothing to relay — skip to Step 2.
+
+## The clock
+
+**From the paste to the link: five minutes.** The human is watching a page
+that says the doc is on its way. Twenty minutes is abandonment. The budget:
+
+- Reading the machine: about 15 seconds (Step 2 says how).
+- Writing: one page, at most four sections, at most four figures.
+- One pass. Draw, check the five things in Step 5b once while drawing, publish.
+  No second draft, no re-reading the machine, no question to the human that a
+  default can answer.
+
+If the clock is running out, cut sections, not the publish.
+
 ## Step 2 — the doc is **What does AI know about me?**
 
 The first doc is about the human, built from the traces the AI tools on their
@@ -228,9 +261,9 @@ blurred out and still learn most of what it says.
 
 **The budget:**
 
-- **A visual every screenful, minimum.** Aim for eight or more distinct
-  figures on a full history. Fewer than five means you left information on the
-  floor.
+- **A visual every screenful, minimum — and four figures at most.** The clock
+  (above) beats completeness: pick the four that carry the most, and let each
+  one do a whole section's work.
 - **No explanatory paragraphs.** The only prose allowed is the section claim,
   a one-line caption above each figure, and the closing questions. If you are
   writing a paragraph to describe what a chart shows, delete the paragraph —
@@ -378,7 +411,9 @@ and the reader template owns the rest.
 
 Every rule below came from handing a single figure, with its heading removed,
 to a reader who had never seen the document and asking what it said. Each one
-was a real defect that looked fine to the person who drew it.
+was a real defect that looked fine to the person who drew it. Check them once,
+while drawing each figure — not as a review loop afterwards; the clock does
+not allow a second pass.
 
 **A fill that touches the page ground must be readable against the ground.**
 Check the contrast against white, not against the fill's own outline. A style's

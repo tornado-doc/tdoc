@@ -189,7 +189,15 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   // same two routes /activate uses — lookup names the terminal, approve binds it.
   assert(dialog.includes("postJson('/api/cli/pair/lookup', { user_code: code })") && dialog.includes("postJson('/api/cli/pair/approve', { user_code: code })"), 'pairing reuses the activate routes');
   assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
-  assert(dialog.includes('placeholder="Code your agent shows"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
+  assert(dialog.includes('placeholder="Code from your agent"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
+  // The page follows the CLI's pairing: a terminal that has connected before
+  // keeps its credential and never shows a code, so the page waits for the
+  // doc instead; a first-time agent connects FIRST, before reading anything.
+  assert(dialog.includes("} else if (lineCopy.copied !== null && (connected || paired)) {") && dialog.includes('setPaired(Boolean(result?.paired));'), 'a paired account is not asked for a code');
+  assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));") && server.includes('paired: Boolean(process.env.TDOC_E2E_PAIRED)'), 'both hosts say whether a terminal has connected');
+  const firstDoc = read('FIRST-DOC.md');
+  assert(firstDoc.includes('## Step 1b — connect first, before reading anything') && firstDoc.includes('bash "$SKILL_DIR/bin/tdoc-publish" --signin-only'), 'the agent connects before it reads');
+  assert(firstDoc.includes('**From the paste to the link: five minutes.**') && firstDoc.includes('at most four figures'), 'the first doc has a clock');
   assert(dialog.includes('Highlight a sentence.<br />Say what you think.') && dialog.includes("openDoc(1, 'welcome')"), 'the doc step is the comment, and the doc opens in a new tab');
   assert(dialog.includes("openDoc(latest || 2, 'revised')"), 'v2 opens and says why it arrived');
   assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');

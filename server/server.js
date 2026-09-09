@@ -1503,7 +1503,9 @@ const server = http.createServer(async (req, res) => {
   // ---- onboarding (local twin of the worker's routes) ----
   if (p === '/api/onboarding' && req.method === 'GET') {
     const all = loadOnboardingLocal();
-    return json(res, 200, { record: discoverFirstDocLocal(all.record || {}) });
+    // Local twin of the worker's `paired`: the local server has no pairing, so
+    // an env flag stands in for "this account has connected a terminal".
+    return json(res, 200, { record: discoverFirstDocLocal(all.record || {}), paired: Boolean(process.env.TDOC_E2E_PAIRED) });
   }
   if (p === '/api/onboarding/event' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
