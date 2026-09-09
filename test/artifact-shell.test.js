@@ -301,10 +301,12 @@ const SLUG = 'hostile-body-css';
       await page.waitForSelector('.tdoc-margin-comment .tdoc-reply-toggle', { timeout: 2000 });
       await page.click('.tdoc-margin-comment .tdoc-reply-toggle');
       await page.waitForSelector('.tdoc-margin-comment .tdoc-reply-form.open textarea', { timeout: 2000 });
-      await openCardMenu(page, '.tdoc-margin-comment');
-      const hasDelete = await page.evaluate(() => !!document.querySelector('.ui-menu-popup .del'));
-      await closeCardMenu(page);
-      if (!hasDelete) throw new Error('card missing delete control');
+      // No menu assertion here. Every control in the ⋯ menu is gated on the
+      // viewer being somebody — author, owner, or both — and this rig browses
+      // anonymously, so the trigger correctly never renders. Delete is proved
+      // where it can be: the authed block below.
+      const menu = await page.evaluate(() => !!document.querySelector('.tdoc-margin-comment [aria-label="More actions"]'));
+      if (menu) throw new Error('an anonymous viewer was offered the card menu');
     });
 
     await t('a submitted reply closes its composer and lands visibly in the thread (#349)', async () => {
@@ -536,7 +538,12 @@ const SLUG = 'hostile-body-css';
 
     await t('agent comment: pin shows the agent mark, card shows a resolved chip', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
+      // c_fixture_3 is resolved, and resolved threads are out of the margin
+      // until the reader asks for them (the switch defaults off, #617). Ask
+      // through the same key the switch writes, before the shell reads it.
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
+      await page.evaluate(() => localStorage.setItem('tdoc-show-resolved', '1'));
+      await page.reload({ waitUntil: 'networkidle' });
       await page.waitForSelector('.tdoc-pin[data-id="c_fixture_3"]', { timeout: 3000 });
       // the agent's pin carries the resolved state + an agent logo (not an anon dot)
       const pinInfo = await page.evaluate(() => {
@@ -550,6 +557,7 @@ const SLUG = 'hostile-body-css';
       const chip = await page.$eval('.tdoc-margin-comment .tdoc-resolved-chip', el => el.textContent).catch(() => null);
       if (!chip || !/fixed/.test(chip)) throw new Error('card missing resolved chip: ' + chip);
       const agentAuthor = await page.evaluate(() => !!document.querySelector('.tdoc-margin-comment .author.tdoc-agent-author img'));
+      await page.evaluate(() => localStorage.removeItem('tdoc-show-resolved'));
       if (!agentAuthor) throw new Error('card did not render the agent author with a logo');
     });
 
@@ -571,53 +579,6 @@ const SLUG = 'hostile-body-css';
       // picking a row opens that comment's card
       await page.click('.tdoc-cluster-pop.open .tdoc-cluster-row[data-id="c_fixture_4"]');
       await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_4"]', { timeout: 2000 });
-    });
-
-    await t('re-anchor: "move anchor" rebinds a comment to a new frame selection', async () => {
-      const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
-      try {
-        await page.setViewportSize({ width: 1400, height: 900 });
-        await page.goto(shellUrl, { waitUntil: 'networkidle' });
-        await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 3000 });
-        await page.click('.tdoc-pin[data-id="c_fixture_1"]');
-        await page.waitForSelector('.tdoc-margin-comment.active .tdoc-reanchor-btn', { timeout: 2000 });
-        // the "move anchor" affordance is visible on the active card
-        const btnVisible = await page.evaluate(() => {
-          const b = document.querySelector('.tdoc-margin-comment.active .tdoc-reanchor-btn');
-          return b && getComputedStyle(b).display !== 'none';
-        });
-        if (!btnVisible) throw new Error('move-anchor button not visible on active card');
-        await page.click('.tdoc-margin-comment.active .tdoc-reanchor-btn');
-        // banner appears; body enters re-anchoring mode
-        const remode = await page.evaluate(() => document.body.classList.contains('tdoc-reanchoring') &&
-          getComputedStyle(document.querySelector('.tdoc-reanchor-banner')).display !== 'none');
-        if (!remode) throw new Error('re-anchor banner/mode did not engage');
-        // select para-2 in the frame → shell PATCHes the anchor instead of opening a composer
-        const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
-        await frame.evaluate(() => {
-          const p = document.getElementById('para-2');
-          const r = document.createRange(); r.selectNodeContents(p);
-          const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-          const rect = p.getBoundingClientRect();
-          document.dispatchEvent(new MouseEvent('mouseup', { clientX: rect.left + 20, clientY: rect.top + 8, bubbles: true, cancelable: true, view: window, button: 0 }));
-        });
-        // wait for the PATCH to land in the fixture
-        let anchored = null;
-        for (let i = 0; i < 40; i++) {
-          try {
-            const parsed = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'));
-            const c = parsed.find(x => x.id === 'c_fixture_1');
-            if (c && c.anchor && /second paragraph/.test(c.anchor.text || '')) { anchored = c; break; }
-          } catch (e) { /* server mid-write; retry */ }
-          await page.waitForTimeout(50);
-        }
-        if (!anchored) throw new Error('comment was not re-anchored to the new selection');
-        // re-anchoring exits the mode and does NOT open a composer
-        const composerOpen = await page.evaluate(() => !!document.querySelector('.tdoc-popup'));
-        if (composerOpen) throw new Error('re-anchor selection wrongly opened the composer');
-      } finally {
-        fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
-      }
     });
 
     await t('?comment= deep-link opens the target comment card on load', async () => {
@@ -811,6 +772,10 @@ const SLUG = 'hostile-body-css';
     });
 
     await t('dark mode keeps text highlights visibly painted', async () => {
+      // The narrow tests above leave the window at phone width, and the theme
+      // control is in the overflow menu there. Come back to the wide bar.
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.goto(shellUrl, { waitUntil: 'networkidle' });
       await page.evaluate(() => localStorage.setItem('tdoc-theme', 'light'));
       await page.reload({ waitUntil: 'networkidle' });
       await page.click('#tdoc-theme-btn');
@@ -963,6 +928,55 @@ const SLUG = 'hostile-body-css';
           await closeCardMenu(page);
           const shouty = labels.filter((label) => label && label[0] !== label[0].toUpperCase());
           if (shouty.length) throw new Error(`the menu is not written one way: ${JSON.stringify(labels)}`);
+        });
+
+        await t('re-anchor: "move anchor" rebinds a comment to a new frame selection', async () => {
+          const snapshot = fs.readFileSync(COMMENTS_FIXTURE, 'utf8');
+          try {
+            await page.setViewportSize({ width: 1400, height: 900 });
+            await page.goto(authedUrl, { waitUntil: 'networkidle' });
+            await page.waitForSelector('.tdoc-pin[data-id="c_fixture_1"]', { timeout: 3000 });
+            await page.click('.tdoc-pin[data-id="c_fixture_1"]');
+            await page.waitForSelector('.tdoc-margin-comment.active', { timeout: 2000 });
+            // Move anchor lives in the card's ⋯ menu since #432, and a menu renders
+            // through a portal — it is not a descendant of the card.
+            await openCardMenu(page, '.tdoc-margin-comment.active');
+            const btnVisible = await page.evaluate(() => {
+              const b = document.querySelector('.ui-menu-popup .tdoc-reanchor-btn');
+              return !!b && getComputedStyle(b).display !== 'none';
+            });
+            if (!btnVisible) throw new Error('move-anchor not offered in the card menu');
+            await page.click('.ui-menu-popup .tdoc-reanchor-btn');
+            // banner appears; body enters re-anchoring mode
+            const remode = await page.evaluate(() => document.body.classList.contains('tdoc-reanchoring') &&
+              getComputedStyle(document.querySelector('.tdoc-reanchor-banner')).display !== 'none');
+            if (!remode) throw new Error('re-anchor banner/mode did not engage');
+            // select para-2 in the frame → shell PATCHes the anchor instead of opening a composer
+            const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+            await frame.evaluate(() => {
+              const p = document.getElementById('para-2');
+              const r = document.createRange(); r.selectNodeContents(p);
+              const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+              const rect = p.getBoundingClientRect();
+              document.dispatchEvent(new MouseEvent('mouseup', { clientX: rect.left + 20, clientY: rect.top + 8, bubbles: true, cancelable: true, view: window, button: 0 }));
+            });
+            // wait for the PATCH to land in the fixture
+            let anchored = null;
+            for (let i = 0; i < 40; i++) {
+              try {
+                const parsed = JSON.parse(fs.readFileSync(COMMENTS_FIXTURE, 'utf8'));
+                const c = parsed.find(x => x.id === 'c_fixture_1');
+                if (c && c.anchor && /second paragraph/.test(c.anchor.text || '')) { anchored = c; break; }
+              } catch (e) { /* server mid-write; retry */ }
+              await page.waitForTimeout(50);
+            }
+            if (!anchored) throw new Error('comment was not re-anchored to the new selection');
+            // re-anchoring exits the mode and does NOT open a composer
+            const composerOpen = await page.evaluate(() => !!document.querySelector('.tdoc-popup'));
+            if (composerOpen) throw new Error('re-anchor selection wrongly opened the composer');
+          } finally {
+            fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
+          }
         });
 
         await t('editing rewrites the comment in place and marks it edited (#349)', async () => {
