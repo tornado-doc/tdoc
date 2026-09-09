@@ -302,6 +302,7 @@ t('resuming reads the record, not localStorage', () => {
     'a started, unfinished journey reopens the wizard on the landing page, asking first');
   // Coming back is a question, not a jump: where they stopped, and four ways on.
   assert(dialog.includes("const [view, setView] = useState(resume ? 'resume' : null);") && dialog.includes("setView((current) => (current === 'resume' ? current : null))"), 'the resume view survives the record setting the step');
+  assert(dialog.includes("if (STEPS.indexOf(target) > STEPS.indexOf('paste') && !next.shared) setView('resume');"), 'any door that would land past the paste step asks first');
   assert(dialog.includes("if (view === 'resume') {") && dialog.includes('Last time you stopped at step {liveIndex} of {STEPS.length}: {STEP_LABELS[step]}.'), 'it says where they stopped');
   assert(dialog.includes('Continue from step {liveIndex}') && dialog.includes('Start the tour over') && dialog.includes('onClick={confirmSkip}>Go to my docs') && dialog.includes('onClick={dismissForGood}>I know tdoc, don’t ask again'), 'continue, start over, my docs, or never again');
   assert(/const dismissForGood = \(\) => \{\s*postOnboardingEvent\('tour_seen'\)[\s\S]*onClose\?\.\(\);/.test(dialog), '"I know tdoc" stamps the same flag as Skip and closes in place');

@@ -215,7 +215,13 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
           // Opened by the top bar's sign-in return for an account that has
           // already finished or skipped: nothing to show — close, quietly.
           if (initialStep === 'welcome' && (next.shared || next.tour_seen)) { onClose?.(); return; }
-          if (next.started && (!initialStep || STEPS.indexOf(target) > STEPS.indexOf(initialStep))) setStep(target);
+          if (next.started && (!initialStep || STEPS.indexOf(target) > STEPS.indexOf(initialStep))) {
+            setStep(target);
+            // Moving a person past the paste step on their first look — from
+            // any door: the landing's button, the hub's card, a sign-in
+            // return — is a jump into the middle of something. Ask first.
+            if (STEPS.indexOf(target) > STEPS.indexOf('paste') && !next.shared) setView('resume');
+          }
         } else {
           setStep((current) => (current !== 'welcome' && STEPS.indexOf(target) > STEPS.indexOf(current) ? target : current));
         }
