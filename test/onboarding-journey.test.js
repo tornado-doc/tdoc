@@ -220,7 +220,8 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));") && server.includes('paired: Boolean(process.env.TDOC_E2E_PAIRED)'), 'both hosts say whether a terminal has connected');
   const firstDoc = read('FIRST-DOC.md');
   assert(firstDoc.includes('## Step 1b — connect first, before reading anything') && firstDoc.includes('bash "$SKILL_DIR/bin/tdoc-publish" --signin-only'), 'the agent connects before it reads');
-  assert(firstDoc.includes('**From the paste to the link: five minutes.**') && firstDoc.includes('at most four figures'), 'the first doc has a clock');
+  assert(firstDoc.includes('**From the paste to the link: three minutes of your work; five at the very') && firstDoc.includes('## The page, as a template') && firstDoc.includes('Copy **the template below** into `v1/index.html`') && firstDoc.includes('<div class="wrap">'), 'the first doc has a clock and a template — fill, not design');
+  assert(/do not\s+run the Step 5b checks: the template/.test(firstDoc) && firstDoc.includes('Steps 3 to 6 describe the shape the template already has'), 'the long steps are the reasoning, not the to-do list');
   assert(dialog.includes('Highlight a sentence.<br />Say what you think.') && dialog.includes("openDoc(1, 'welcome')"), 'the doc step is the comment, and the doc opens in a new tab');
   // Looking back at a finished step shows what was done there, never a wait that is over.
   assert(dialog.includes('const lookingBack = !atEnd && index < liveIndex;'), 'a past step is finished by definition');
