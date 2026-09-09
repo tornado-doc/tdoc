@@ -1170,6 +1170,11 @@ Remote storage holds optional `meta.access`:
 - **private**: the doc publisher (hosted `github_login`, or `TDOC_OWNER` on BYOK/legacy) + `allowed_users`. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
 - **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
 - Legacy meta without `access` stays world-readable + full history (back-compat).
+- **Access only ever tightens by omission.** A flag left out keeps what is
+  already stored — the CLI leaves an existing `meta.access` alone, and the
+  worker carries the stored block forward when an upload names none. A publish
+  that means to OPEN a doc must say so (`--visibility public`); this is why
+  FIRST-DOC.md names the policy instead of publishing flagless.
 - Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
 - After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
 - `/me` on hosted tdoc.dev lists the signed-in account's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
