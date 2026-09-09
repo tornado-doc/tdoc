@@ -307,6 +307,10 @@ t('the two arrivals open the right card and say what happened', () => {
   assert(shell.includes('is live.`'), 'and says the doc is live');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
   assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
+  // A version published without a resolved thread still arrived; the count
+  // going to zero must not turn the arrival into a report of failure.
+  assert(shell.includes('`v${version} is published. Send it to a real reader:`'), 'the exit line drops the count rather than printing zero');
+  assert(shell.includes('`Your agent published v${config.version}.`'), 'and so does the arrival toast');
   // No "Your doc →" pill in the landing's top bar: the way back is the hub
   // and the wizard's last screen (the owner asked for it gone).
   assert(!shell.includes('yourDoc') && !read('shell/src/document/document-toolbar.jsx').includes('tdoc-your-doc'), 'the top bar carries no doc pill');
