@@ -350,10 +350,10 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     // The step says what to open, by name — the four agents are the one list
     // the page keeps — and then what to do there.
     title = <>Open your agent.<br />Paste this in.</>;
+    // A plain line, not chips: a row of pills reads as four buttons, and a
+    // person taps one expecting it to do something.
     const agents = (
-      <div className="tdoc-wiz-agents" aria-label="Agents this works with">
-        {AGENT_NAMES.split(' · ').map((name) => <span key={name}>{name}</span>)}
-      </div>
+      <p className="tdoc-wiz-agents">Works with {AGENT_NAMES.split(' · ').join(' / ')}</p>
     );
     const copiedLine = (
       <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>

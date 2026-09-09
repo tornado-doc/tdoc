@@ -850,8 +850,7 @@ button.tdoc-pin {
 .tdoc-wiz-row.done .tdoc-wiz-mark { background: var(--td-accent); border-color: var(--td-accent); }
 .tdoc-wiz-row.live .tdoc-wiz-mark { border: 2px solid var(--td-accent); }
 .tdoc-wiz-listen { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14px; line-height: 1.4; color: var(--td-ink-soft, #6b6a66); }
-.tdoc-wiz-agents { display: flex; flex-wrap: wrap; gap: 8px; }
-.tdoc-wiz-agents span { font: 500 13px -apple-system, system-ui, sans-serif; color: var(--td-ink, #1a1a1a); background: #f4f4f2; border: 1px solid var(--td-line, #e8e7e3); border-radius: 999px; padding: 5px 11px; }
+.tdoc-wiz-agents { margin: 0; font: 13px/1.5 -apple-system, system-ui, sans-serif; color: var(--td-muted, #666); }
 .tdoc-wiz .tdoc-wiz-line { position: relative; }
 .tdoc-wiz .tdoc-wiz-line.copied { padding-right: 78px; }
 .tdoc-wiz-copied { position: absolute; right: 12px; top: 12px; font: 600 12px -apple-system, system-ui, sans-serif; color: #1a7340; background: #e6f4ea; border-radius: 999px; padding: 3px 9px; }
