@@ -318,8 +318,13 @@ t('the two arrivals open the right card and say what happened', () => {
 });
 
 t('resuming reads the record, not localStorage', () => {
-  assert(/record\?\.started && !record\?\.shared && !record\?\.tour_seen && !record\?\.waitlist[\s\S]*setOnboardingDoor\('own'\);\s*setOnboardingResume\(true\);\s*setOnboardingOpen\(true\)/.test(shell),
-    'a started, unfinished journey reopens the wizard on the landing page, asking first');
+  assert(/record\?\.started && !record\?\.shared && !record\?\.tour_seen && !record\?\.waitlist[\s\S]*setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell),
+    'a started, unfinished journey reopens the wizard on the landing page');
+  // Merely opening the door stamps `started`, so "unfinished" includes a person
+  // parked on the paste step. They are not asked to come back to a step they
+  // never left — that judgement belongs to the wizard's first-tick rule alone.
+  assert(!shell.includes('setOnboardingResume') && !shell.includes('resume={onboardingResume}'), 'the shell never forces the question');
+  assert(dialog.includes("resume={initialDoor === 'resume'}"), 'only ?onboard=resume forces it');
   // Coming back is a question, not a jump: where they stopped, and four ways on.
   assert(dialog.includes("const [view, setView] = useState(resume ? 'resume' : null);") && dialog.includes("setView((current) => (current === 'resume' ? current : null))"), 'the resume view survives the record setting the step');
   assert(dialog.includes("if (STEPS.indexOf(target) > STEPS.indexOf('paste') && !next.shared) setView('resume');"), 'any door that would land past the paste step asks first');

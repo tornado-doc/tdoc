@@ -158,6 +158,9 @@ function Listening({ children }) {
 }
 
 export function OnboardingWizard({ config, initialStep = null, embedded = false, resume = false, onClose, onSignIn }) {
+  // `resume` is the explicit override (`?onboard=resume`). Every other door
+  // leaves the question to the first-tick rule below, which asks only when the
+  // journey has actually moved past the step the door opened on.
   const signedIn = Boolean(config?.identity);
   const [record, setRecord] = useState(null);
   const [paired, setPaired] = useState(false);
@@ -600,7 +603,7 @@ export function OwnAgentDoor({ onOpenChange, closeLabel = 'Back', config = null 
 // First-time onboarding, and only that. Behind the landing page's own CTA —
 // the page itself is unchanged. `initialDoor` is the step a redirect returns
 // to (`?onboard=paste` after the sign-in); the old `own` value lands there too.
-export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initialDoor = null, resume = false }) {
+export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initialDoor = null }) {
   const initialStep = initialDoor === 'own' || initialDoor === 'resume' ? 'paste' : initialDoor;
   return (
     <AppDialog
@@ -615,7 +618,7 @@ export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initial
         <OnboardingWizard
           config={config}
           initialStep={initialStep}
-          resume={resume || initialDoor === 'resume'}
+          resume={initialDoor === 'resume'}
           onSignIn={onSignIn}
           onClose={() => onOpenChange(false)}
         />

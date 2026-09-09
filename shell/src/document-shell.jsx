@@ -171,8 +171,6 @@ export function DocumentShell({ boot, config }) {
   const [onboardingOpen, setOnboardingOpen] = useState(() => (
     Boolean(config.onboarding && config.identity && onboardingDoor)
   ));
-  // Reopened for a person coming back: the wizard asks before it resumes.
-  const [onboardingResume, setOnboardingResume] = useState(false);
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
   ));
@@ -259,8 +257,11 @@ export function DocumentShell({ boot, config }) {
       // A journey that has started and not reached its exit reopens where
       // it stopped — the wizard reads the step off the record.
       if (record?.started && !record?.shared && !record?.tour_seen && !record?.waitlist) {
+        // Opened at the paste step. Whether that is where the journey stays,
+        // or whether it has moved on and the person should be asked first, is
+        // the wizard's own rule — forcing the question here asked it of
+        // somebody parked on step 2, who has seen nothing to come back to.
         setOnboardingDoor('own');
-        setOnboardingResume(true);
         setOnboardingOpen(true);
       }
     }).catch(() => {});
@@ -1053,7 +1054,6 @@ export function DocumentShell({ boot, config }) {
         config={config}
         onSignIn={signIn}
         initialDoor={onboardingDoor}
-        resume={onboardingResume}
       />
 
       {toast ? (
