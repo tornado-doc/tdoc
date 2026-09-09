@@ -566,16 +566,12 @@ failure to the user.** Append a numeric suffix and retry once
 (`what-ai-knows-serena-2`). They are watching their first doc appear; a
 collision is your problem to solve, not a message for them to read.
 
-## Step 7 — publish it privately, then hand over the link
+## Step 7 — publish it, then hand over the link
 
 **Publish it. Do not end at localhost.** The rest of tdoc has a hard rule
 against handing back a `http://localhost` URL when the human did not ask for
 one, and it applies here: a first doc that lives only on their machine has not
 shown them what tdoc is. The shareable link *is* the product working.
-
-The tension is real — this page is about them, it carries their project names
-and their working hours, and the default visibility makes the link the
-credential. Resolve it with access, not with localhost:
 
 Write it with the flag that marks it as this journey's doc, then publish it:
 
@@ -583,7 +579,7 @@ Write it with the flag that marks it as this journey's doc, then publish it:
 bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name> \
   --title "What does AI know about <Name>?" --style <style> \
   --prompt "<the line the human pasted>" --html-file /tmp/what-ai-knows-<name>.html
-bash "$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner what-ai-knows-<name>
+bash "$SKILL_DIR/bin/tdoc-publish" what-ai-knows-<name>
 ```
 
 `--first-doc` is how tdoc.dev knows this is the doc the onboarding was waiting
@@ -591,22 +587,23 @@ for, whatever slug it ends up on — a second run, or a `-2` after a collision,
 takes over from the earlier one. Without the flag the journey can keep
 watching an older doc and never move.
 
-`private` means the doc is readable by them and by accounts they explicitly
-allow, and by nobody holding the link. They get a real `https://tdoc.dev/d/...`
-URL, on their account, listed at their hub — and none of it is exposed.
+**No access flags.** A first doc publishes the way every other doc does:
+readable by anyone with the link, listed nowhere. Do not pass `--visibility`,
+`--history`, or `--allow-user` — a first doc that arrives locked cannot be
+shown to anybody, and the whole point of the link is that it works when they
+send it to someone.
 
 Then say, in one line each:
 
 - the URL, on its own line
-- that it is private to them right now, and nobody with the link can open it
-- how to open it up when they want to:
-  `tdoc-publish --visibility unlisted <slug>` for link-readable, or
-  `--allow-user <email-or-github-login>` to add one person
+- that anyone they send it to can read it, and that it is not listed anywhere
+- how to close it if they want to:
+  `tdoc-publish --visibility private <slug>` makes it theirs alone
 
 **Do not ask first and publish second.** Asking "shall I publish this?" before
 they have seen anything asks them to consent to a page that does not exist yet.
-Publish privately — which exposes nothing — show them the page at its real URL,
-and let opening it up be their decision, made while looking at it.
+Publish, show them the page at its real URL, and let closing it be their
+decision, made while looking at it.
 
 The only case that ends locally is the one the human asked for: they said keep
 it local, or they are self-hosting and their own worker is not ready.

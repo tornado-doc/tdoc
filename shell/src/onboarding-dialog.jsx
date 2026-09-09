@@ -557,9 +557,12 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         ) : null}
       </>
     );
+    // Copied, and nothing has come back yet: the rows say which stage is
+    // live, and this says how long that has been true. Without it a slow
+    // agent and a dead one look identical.
     footer = foot(
       lineCopy.copied ? null : <button type="button" className="tdoc-wiz-primary" onClick={copyFixLine}>{copyLabel(lineCopy.copied)}</button>,
-      lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null,
+      lineCopy.copied !== null && !status?.read_at ? <Listening>{waitLine}</Listening> : null,
     );
   } else if (shown === 'done') {
     title = 'That’s the loop.';
