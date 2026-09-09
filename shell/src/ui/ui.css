@@ -847,6 +847,7 @@ button.tdoc-pin {
 .tdoc-wiz button.tdoc-wiz-link, .tdoc-wiz a.tdoc-wiz-link { align-self: center; background: none; border: 0; padding: 6px 8px; border-radius: 8px; font: 500 15px -apple-system, system-ui, sans-serif; color: var(--td-accent); text-decoration: none; cursor: pointer; }
 .tdoc-wiz button.tdoc-wiz-link:hover, .tdoc-wiz a.tdoc-wiz-link:hover { background: #f4f4f2; }
 .tdoc-wiz .tdoc-wiz-confirm { margin: 0; font-size: 16px; color: var(--td-ink, #1a1a1a); text-align: center; }
+.tdoc-wiz .tdoc-wiz-guide { margin: 0; font-size: 15px; line-height: 1.5; color: var(--td-ink-soft, #6b6a66); text-align: center; text-wrap: pretty; }
 .tdoc-wiz-rows { display: flex; flex-direction: column; gap: 12px; }
 .tdoc-wiz-resume p { margin: 0 0 10px; font: 15px/1.5 -apple-system, system-ui, sans-serif; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz-resume .tdoc-wiz-resume-hint { margin: 0; font-size: 13px; color: var(--td-muted, #666); }
