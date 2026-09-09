@@ -138,7 +138,11 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   assert(!/Start from scratch|Advanced|Read the full tutorial/.test(dialog), 'the onboarding never offers a blank doc, and carries no reading');
   // Sign-in is the site's own; the page leaves for it and returns to the paste step.
   assert(dialog.includes("onSignIn?.('/?onboard=paste')") && !dialog.includes("'tdoc-signin'"), 'sign-in is the existing one, not a second');
-  assert(shell.includes("&& new URLSearchParams(location.search).get('onboard'))"), 'the shell reopens the wizard after the redirect, at any step');
+  assert(shell.includes('Boolean(config.onboarding && config.identity && onboardingDoor)') && shell.includes("params.delete('onboard');"), 'the shell reopens the wizard after the redirect, at any step, and takes the parameter off the URL');
+  // The top bar's Sign in on the landing returns into the onboarding; an
+  // account that has finished or skipped is let straight through.
+  assert(shell.includes("onSignIn={() => signIn(config.onboarding ? '/?onboard=welcome' : undefined)}"), 'the top bar sign-in returns to the first screen');
+  assert(dialog.includes("if (initialStep === 'welcome' && (next.shared || next.tour_seen)) { onClose?.(); return; }"), 'a finished or skipped account is not shown the wizard again');
   // Every step can be left.
   // Leaving is the × in the corner. Nothing on the floor says Skip or Done:
   // beside Back, with no Next, a Skip read as "next" and quietly closed the
@@ -268,9 +272,9 @@ t('the two arrivals open the right card and say what happened', () => {
   assert(shell.includes('is live.`'), 'and says the doc is live');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
   assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
-  const landingBar = read('shell/src/document/document-toolbar.jsx');
-  assert(landingBar.includes('className="tdoc-your-doc"') && shell.includes('<LandingActions stars={config.stars} yourDoc={yourDoc} />'),
-    'the landing page shows a way back to your doc');
+  // No "Your doc →" pill in the landing's top bar: the way back is the hub
+  // and the wizard's last screen (the owner asked for it gone).
+  assert(!shell.includes('yourDoc') && !read('shell/src/document/document-toolbar.jsx').includes('tdoc-your-doc'), 'the top bar carries no doc pill');
   assert(server.includes('oldVersion: (!isLanding && Number(version) < Number(latestVersion))'), 'local preview shows the newer-version strip too');
   for (const [src, label] of [[worker, 'worker'], [server, 'server']]) {
     assert(!src.includes('replied_at'), `${label}: agent-status carries no doc-level replied stamp`);

@@ -154,14 +154,22 @@ export function DocumentShell({ boot, config }) {
   ));
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
-  // `?onboard=own` is how the sign-in redirect returns a person to the door
-  // they picked; the dialog opens straight into it.
-  const [onboardingDoor, setOnboardingDoor] = useState(() => (
-    new URLSearchParams(location.search).get('onboard')
-  ));
+  // `?onboard=<step>` is how a sign-in redirect returns a person into the
+  // onboarding — `welcome` from the top bar, `paste` (or the old `own`) from
+  // the wizard's own Get started. Read once and taken off the URL, so a
+  // reload is an ordinary visit.
+  const [onboardingDoor, setOnboardingDoor] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    const door = params.get('onboard');
+    if (door) {
+      params.delete('onboard');
+      const rest = params.toString();
+      try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
+    }
+    return door;
+  });
   const [onboardingOpen, setOnboardingOpen] = useState(() => (
-    Boolean(config.onboarding && config.identity
-      && new URLSearchParams(location.search).get('onboard'))
+    Boolean(config.onboarding && config.identity && onboardingDoor)
   ));
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
@@ -256,19 +264,6 @@ export function DocumentShell({ boot, config }) {
     // Once, at boot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // On the landing page a signed-in person with a doc gets a way back to it.
-  const [yourDoc, setYourDoc] = useState(null);
-  useEffect(() => {
-    if (!config.isLanding || !onboardingRecord?.first_doc) return;
-    const slug = onboardingRecord.first_doc;
-    getAgentStatus(slug)
-      .then((status) => setYourDoc({
-        title: status?.title || slug,
-        url: `/d/${encodeURIComponent(slug)}/v/${Number(status?.latest_version) || 1}`,
-      }))
-      .catch(() => setYourDoc({ title: slug, url: `/d/${encodeURIComponent(slug)}/v/1` }));
-  }, [config.isLanding, onboardingRecord]);
 
   // The two arrivals the journey makes on its own. Both open the card the
   // person should be looking at, and say in one line what just happened.
@@ -805,7 +800,7 @@ export function DocumentShell({ boot, config }) {
       <TopBar
         identity={config.identity}
         theme={theme}
-        actions={config.isLanding ? <LandingActions stars={config.stars} yourDoc={yourDoc} /> : (
+        actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
           <>
             {/* Resolved threads are out of the margin by default. The switch is
                 the way back, in the bar where it can be seen — it folds into
@@ -868,7 +863,10 @@ export function DocumentShell({ boot, config }) {
           setDeepTarget(commentId);
         }}
         authConfigured={config.authConfigured !== false}
-        onSignIn={signIn}
+        // The top bar's Sign in on the landing returns into the onboarding:
+        // a new account lands on the first screen; one that has finished or
+        // skipped is let straight through (the wizard closes itself).
+        onSignIn={() => signIn(config.onboarding ? '/?onboard=welcome' : undefined)}
         onSwitchAccount={config.oidcAuth ? () => {
           const returnUrl = location.pathname + location.search + location.hash;
           location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;
