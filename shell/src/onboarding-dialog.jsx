@@ -197,6 +197,9 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         const target = stepFromRecord(next);
         if (!resumed.current) {
           resumed.current = true;
+          // Opened by the top bar's sign-in return for an account that has
+          // already finished or skipped: nothing to show — close, quietly.
+          if (initialStep === 'welcome' && (next.shared || next.tour_seen)) { onClose?.(); return; }
           if (next.started && (!initialStep || STEPS.indexOf(target) > STEPS.indexOf(initialStep))) setStep(target);
         } else {
           setStep((current) => (current !== 'welcome' && STEPS.indexOf(target) > STEPS.indexOf(current) ? target : current));
