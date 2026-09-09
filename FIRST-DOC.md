@@ -80,10 +80,36 @@ than skip the publish.
 
 ## The page, as a template
 
-Three sections — Volume, Rhythm-as-tools, Now — two figures, one claim, one
-button. Replace the name, the claim, the eight bars, the three shares, the
+Three sections — Volume, Rhythm-as-tools, Now — two figures, one verdict, one
+button. Replace the name, the verdict, the eight bars, the three shares, the
 three project lines. Keep the rest byte for byte; it is what passes the reader
 template's validator and the cold-reader checks.
+
+### The opening is a verdict
+
+The first line under the title is not a summary and not a claim about the
+figures. It is a judgment about the person — the kind a sharp friend would
+make after one look at their desk. It is the line the seeded comment asks them
+to argue with, so it has to be arguable.
+
+- **One sentence, second person, no hedge.** Not "it seems", "perhaps",
+  "might". You saw the numbers; say what they say.
+- **Specific enough to be wrong.** "You use AI a lot" is not a verdict. "You
+  start a new project every eleven days and finish none of them" is. Pick the
+  one thing in layer 1 that stands out — the burst, the switch, the gap, the
+  hour — and name it as who they are.
+- **Mean is allowed. Vague is not.** Do not soften it to be kind; the page
+  earns its reader by being right, not by being nice. The only rule is that
+  the data has to be able to show it. "Your nights belong to Claude Code and
+  your mornings to nobody" — yes. "Forty sessions last week and not one
+  project you came back to" — yes, and mean. "You are lazy" — no, only
+  because no timestamp can prove it.
+- **The figures are the evidence for it**, in that order: verdict first, then
+  the two figures that let them check it.
+
+Shapes that work: *You switched from Codex to Claude Code in August and never
+looked back.* — *Forty sessions in one week, eight the next: you work in
+storms.* — *Every project you touched this month is under two weeks old.*
 
 ```html
 <!doctype html>
@@ -97,7 +123,7 @@ template's validator and the cold-reader checks.
   h1 { font-size: 34px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8px; }
   h2 { font-size: 22px; letter-spacing: -0.01em; margin: 40px 0 6px; }
   p { margin: 0 0 12px; }
-  .lead { font-size: 19px; color: #444; }
+  .verdict { font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -0.01em; color: #1a1a1a; margin: 0 0 20px; }
   .caption { font-size: 14px; color: #6b6a66; margin: 0 0 10px; }
   .bars { display: grid; grid-template-columns: 6em 1fr 3em; gap: 6px 10px; align-items: center; margin: 12px 0 4px; }
   .bars .label { font-size: 14px; color: #444; text-align: right; }
@@ -114,7 +140,7 @@ template's validator and the cold-reader checks.
 <body>
 <div class="wrap">
   <h1>What does AI know about Serena?</h1>
-  <p class="lead">One claim, in one sentence, that the two figures below support.</p>
+  <p class="verdict">The verdict: one sentence about them, second person, something they could argue with.</p>
 
   <h2>Volume</h2>
   <p class="caption">Sessions per week, last eight weeks.</p>
