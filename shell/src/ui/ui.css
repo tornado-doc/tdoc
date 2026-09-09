@@ -818,8 +818,8 @@ button.tdoc-pin {
 .tdoc-wiz button.tdoc-wiz-primary:hover, .tdoc-wiz a.tdoc-wiz-primary:hover { background: var(--td-accent-hover, #1245d0); }
 .tdoc-wiz button.tdoc-wiz-primary:disabled { opacity: .4; cursor: default; }
 .tdoc-wiz button.tdoc-wiz-primary.done { background: #1a7340; }
-.tdoc-wiz button.tdoc-wiz-secondary { display: flex; align-items: center; justify-content: center; height: 48px; border-radius: 999px; border: 0; background: #efeff4; color: var(--td-accent); font: 600 16px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; padding: 0 24px; width: 100%; }
-.tdoc-wiz button.tdoc-wiz-secondary:hover { background: #e3e3e8; }
+.tdoc-wiz button.tdoc-wiz-secondary, .tdoc-wiz a.tdoc-wiz-secondary { display: flex; text-decoration: none; box-sizing: border-box; align-items: center; justify-content: center; height: 48px; border-radius: 999px; border: 0; background: #efeff4; color: var(--td-accent); font: 600 16px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; padding: 0 24px; width: 100%; }
+.tdoc-wiz button.tdoc-wiz-secondary:hover, .tdoc-wiz a.tdoc-wiz-secondary:hover { background: #e3e3e8; }
 .tdoc-wiz button.tdoc-wiz-secondary.done { color: #1a7340; }
 .tdoc-wiz button.tdoc-wiz-link, .tdoc-wiz a.tdoc-wiz-link { align-self: center; background: none; border: 0; padding: 6px 8px; border-radius: 8px; font: 500 15px -apple-system, system-ui, sans-serif; color: var(--td-accent); text-decoration: none; cursor: pointer; }
 .tdoc-wiz button.tdoc-wiz-link:hover, .tdoc-wiz a.tdoc-wiz-link:hover { background: #f4f4f2; }

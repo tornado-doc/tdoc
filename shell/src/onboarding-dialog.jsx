@@ -177,7 +177,6 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const [copiedAt, setCopiedAt] = useState(null);
   const [copyFailed, setCopyFailed] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [linkCopied, setLinkCopied] = useState(false);
   // pairing: idle → looking → confirm → approving → connected | error
   const [code, setCode] = useState('');
   const [pair, setPair] = useState({ state: 'idle', label: '', error: '' });
@@ -217,13 +216,13 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
           resumed.current = true;
           // Opened by the top bar's sign-in return for an account that has
           // already finished or skipped: nothing to show — close, quietly.
-          if (initialStep === 'welcome' && (next.shared || next.tour_seen)) { onClose?.(); return; }
+          if (initialStep === 'welcome' && (next.revised || next.shared || next.tour_seen)) { onClose?.(); return; }
           if (next.started && (!initialStep || STEPS.indexOf(target) > STEPS.indexOf(initialStep))) {
             setStep(target);
             // Moving a person past the paste step on their first look — from
             // any door: the landing's button, the hub's card, a sign-in
             // return — is a jump into the middle of something. Ask first.
-            if (STEPS.indexOf(target) > STEPS.indexOf('paste') && !next.shared) setView('resume');
+            if (STEPS.indexOf(target) > STEPS.indexOf('paste') && !next.revised && !next.shared) setView('resume');
           }
         } else {
           setStep((current) => (current !== 'welcome' && STEPS.indexOf(target) > STEPS.indexOf(current) ? target : current));
@@ -284,12 +283,6 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     if (!slug) return;
     window.open(`/d/${encodeURIComponent(slug)}/v/${n}?${arrival}=1`, '_blank', 'noopener');
   };
-  const copyShareLink = async () => {
-    if (!slug) return;
-    const ok = await copyText(`${location.origin}/d/${encodeURIComponent(slug)}/v/${latest || 2}`);
-    setLinkCopied(ok);
-    if (ok) postOnboardingEvent('share_link_copied', slug).catch(() => {});
-  };
 
   // What is on screen, and the rules the floor and the dots follow:
   //   step   — where the record says the journey IS (forward only)
@@ -304,8 +297,8 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   //               dot returns to the live step, an earlier one looks back.
   const shown = view && STEPS.includes(view) && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;
   const liveIndex = STEPS.indexOf(step) + 1;
-  const shared = Boolean(record?.shared);
-  const finished = step === 'done' && shared && view === null;
+  // The loop is closed the moment v2 lands: the last step IS the last screen.
+  const finished = step === 'done' && view === null;
   const atEnd = finished || view === 'end';
   const index = atEnd ? STEPS.length : STEPS.indexOf(shown) + 1;
   // A past step, looked at again, is finished by definition — the record has
@@ -407,13 +400,17 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         <div className="tdoc-wiz-nav-row"><span /><button type="button" className="tdoc-wiz-link" onClick={dismissForGood}>I know tdoc, don’t ask again</button></div>
       </div>
     );
-  } else if (atEnd && shared) {
+  } else if (finished) {
+    // One last screen, three things to do: open the doc the loop produced,
+    // walk the tour again, or go to the hub. No link to copy — the doc page
+    // has its own share.
     title = <>You’ve done the loop.<br />Every doc works this way.</>;
     body = <OnboardingScene done />;
     footer = (
       <div className="tdoc-wiz-foot">
+        <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(latest || 2, 'revised')}>Open your doc</button>
         <button type="button" className="tdoc-wiz-secondary" onClick={() => setView('welcome')}>Walk through it again</button>
-        <a className="tdoc-wiz-primary" href="/me">Go to my docs</a>
+        <a className="tdoc-wiz-secondary" href="/me">Go to my docs</a>
         <div className="tdoc-wiz-nav-row"><span />{dots}<span /></div>
       </div>
     );
@@ -571,13 +568,6 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     footer = foot(
       lineCopy.copied ? null : <button type="button" className="tdoc-wiz-primary" onClick={copyFixLine}>{copyLabel(lineCopy.copied)}</button>,
       lineCopy.copied !== null && !status?.read_at ? <Listening>{waitLine}</Listening> : null,
-    );
-  } else if (shown === 'done') {
-    title = 'That’s the loop.';
-    body = <OnboardingScene done />;
-    footer = foot(
-      <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(latest || 2, 'revised')}>Open v{latest || 2}</button>,
-      <button type="button" className={`tdoc-wiz-secondary${linkCopied ? ' done' : ''}`} onClick={copyShareLink}>{linkCopied ? 'Link copied' : 'Copy link'}</button>,
     );
   }
 
