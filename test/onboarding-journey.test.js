@@ -189,6 +189,9 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   // same two routes /activate uses — lookup names the terminal, approve binds it.
   assert(dialog.includes("postJson('/api/cli/pair/lookup', { user_code: code })") && dialog.includes("postJson('/api/cli/pair/approve', { user_code: code })"), 'pairing reuses the activate routes');
   assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
+  // The paste step names what to open — the four agents, as chips — then
+  // what to do there.
+  assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes("AGENT_NAMES.split(' · ').map((name) => <span key={name}>{name}</span>)"), 'the step says what to open, by name');
   assert(dialog.includes('placeholder="Code from your agent"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
   // The page follows the CLI's pairing: a terminal that has connected before
   // keeps its credential and never shows a code, so the page waits for the
