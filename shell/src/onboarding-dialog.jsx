@@ -304,7 +304,8 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         {index > 1 ? <button type="button" className="tdoc-wiz-link" onClick={back}>Back</button> : <span />}
         {index < liveIndex
           ? <button type="button" className="tdoc-wiz-link" onClick={forward}>Continue</button>
-          : <button type="button" className="tdoc-wiz-link" onClick={skipToEnd}>Skip</button>}
+          : shown === 'done' ? <span />
+            : <button type="button" className="tdoc-wiz-link" onClick={skipToEnd}>Skip</button>}
       </div>
     </div>
   );
