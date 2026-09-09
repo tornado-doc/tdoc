@@ -193,6 +193,9 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   // Copied badge and the floor shows the next thing to do.
   assert(!/Copied\. Now paste it/.test(dialog) && dialog.includes("lineCopy.copied ? null : <button type=\"button\" className=\"tdoc-wiz-primary\" onClick={copyFixLine}>"), 'Copy is a button, Copied is a badge');
   assert(dialog.includes("const finished = step === 'done' && shared && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes(">Walk through it again</button>"), 'the finished screen');
+  // Walking the tour again never drags the live step backwards — the record
+  // would only yank it forward again on the next tick, three seconds later.
+  assert(dialog.includes("if (STEPS.indexOf(step) > STEPS.indexOf('paste')) { setView('paste'); return; }"), 'a re-walk moves the view, not the journey');
   assert(dialog.includes("useEffect(() => { setView((current) => (current === 'resume' ? current : null)); }, [step]);"), 'a step that moves on is shown the moment it does — unless the person is still being asked whether to resume');
   assert(dialog.includes('useEffect(() => { lineReset(); }, [step, lineReset]);'), 'a copy survives looking back and the skip question');
   // Under 700px every modal button grows to 44px; the dots are buttons and
