@@ -229,7 +229,7 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion)'), "only on the owner's own doc, and only its latest version");
   assert(card.includes("handoff = null,") && card.includes("className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}"), 'the card renders it, open or closed');
   // Closed is one row — the name and Copy; the line and the sentence are behind the chevron.
-  assert(card.includes('Let your agent fix it') && card.includes("{handoff.open ? (\n              <div className=\"tdoc-handoff-line\"><code>{handoff.line}</code></div>"), 'the line shows only when open');
+  assert(card.includes('Let your agent fix it') && card.includes("{handoff.open ? (\n              <div className=\"tdoc-handoff-line\">\n                <code>{handoff.line}</code>\n                {copyButton}") && card.includes('{!handoff.open ? copyButton : null}'), 'the line shows only when open');
   assert(card.includes("{handoff.open || handoff.state !== 'idle' ? (") && card.includes('Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.'), 'the sentence shows when open; the wait shows either way');
   assert(shell.includes("const onboardingDoc = Boolean(onboardingRecord?.first_doc && onboardingRecord.first_doc === config.slug && !onboardingRecord.shared);") && shell.includes('const handoffOpen = handoffTouched ? handoffPref : (onboardingDoc || handoffPref);'), 'open on the onboarding doc; elsewhere the last choice holds');
   assert(shell.includes("localStorage.setItem(HANDOFF_OPEN_KEY, next ? '1' : '0')"), 'the choice is remembered');

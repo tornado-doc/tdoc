@@ -659,7 +659,17 @@ export function CommentCard({
       ) : null}
 
       {handoff && comment.status !== 'applied'
-        && !replies.some((reply) => reply.author?.kind === 'agent') ? (
+        && !replies.some((reply) => reply.author?.kind === 'agent') ? (() => {
+          const copyButton = (
+            <button
+              type="button"
+              className={handoff.state !== 'idle' ? 'tdoc-handoff-copy done' : 'tdoc-handoff-copy'}
+              onClick={handoff.onCopy}
+            >
+              {handoff.state === 'idle' ? 'Copy' : handoff.copyFailed ? 'Select & copy' : 'Copied'}
+            </button>
+          );
+          return (
           <div className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}>
             {/* One row when closed: the name of the thing and Copy. The line
                 with the doc's address and the sentence saying what happens
@@ -675,16 +685,15 @@ export function CommentCard({
                 <ChevronRight size={14} className="chev" aria-hidden="true" />
                 Let your agent fix it
               </button>
-              <button
-                type="button"
-                className={handoff.state !== 'idle' ? 'tdoc-handoff-copy done' : 'tdoc-handoff-copy'}
-                onClick={handoff.onCopy}
-              >
-                {handoff.state === 'idle' ? 'Copy' : handoff.copyFailed ? 'Select & copy' : 'Copied'}
-              </button>
+              {!handoff.open ? copyButton : null}
             </div>
+            {/* Open, Copy sits on the prompt itself, so what gets copied is
+                the box it is attached to and nothing else on the card. */}
             {handoff.open ? (
-              <div className="tdoc-handoff-line"><code>{handoff.line}</code></div>
+              <div className="tdoc-handoff-line">
+                <code>{handoff.line}</code>
+                {copyButton}
+              </div>
             ) : null}
             {handoff.open || handoff.state !== 'idle' ? (
               <div className="tdoc-handoff-status" role="status" aria-live="polite">
@@ -696,7 +705,8 @@ export function CommentCard({
               </div>
             ) : null}
           </div>
-        ) : null}
+          );
+        })() : null}
 
       {/* Resolve, edit, delete and the anchor moved to the header — the two
           controls a reader needs are ✓ and ⋯, and the rest belong behind them.

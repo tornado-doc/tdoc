@@ -386,8 +386,10 @@
   .tdoc-handoff.open .tdoc-handoff-toggle .chev { transform: rotate(90deg); }
   .tdoc-handoff-copy { flex: 0 0 auto; appearance: none; border: 1px solid #d0d0d6; border-radius: 6px; padding: 3px 9px; background: #fff; font: 600 12px system-ui, -apple-system, sans-serif; color: #111; cursor: pointer; }
   .tdoc-handoff-copy.done { border-color: #1a7340; background: #1a7340; color: #fff; }
-  .tdoc-handoff-line { margin: 8px 0 0; }
-  .tdoc-handoff-line code { display: block; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; word-break: break-word; }
+  /* The prompt is its own box, white on the block's grey, with Copy on it —
+     what the button copies is exactly what the box holds. */
+  .tdoc-handoff-line { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid #d0d0d6; border-radius: 6px; background: #fff; }
+  .tdoc-handoff-line code { flex: 1 1 auto; min-width: 0; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: #111; word-break: break-word; }
   .tdoc-handoff-status { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; color: #555; }
   .tdoc-handoff-status .tdoc-wait-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--td-accent); animation: tdoc-pulse 1.2s ease-in-out infinite; }
   .tdoc-reply-to { color: #888; font-weight: 500; font-size: 11px; margin: 0 0 4px; }
