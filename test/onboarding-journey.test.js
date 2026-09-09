@@ -222,6 +222,10 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   assert(firstDoc.includes('## Step 1b — connect first, before reading anything') && firstDoc.includes('bash "$SKILL_DIR/bin/tdoc-publish" --signin-only'), 'the agent connects before it reads');
   assert(firstDoc.includes('**From the paste to the link: five minutes.**') && firstDoc.includes('at most four figures'), 'the first doc has a clock');
   assert(dialog.includes('Highlight a sentence.<br />Say what you think.') && dialog.includes("openDoc(1, 'welcome')"), 'the doc step is the comment, and the doc opens in a new tab');
+  // Looking back at a finished step shows what was done there, never a wait that is over.
+  assert(dialog.includes('const lookingBack = !atEnd && index < liveIndex;'), 'a past step is finished by definition');
+  assert(dialog.includes('<Row state="done">You commented on your doc</Row>') && dialog.includes("{record?.published_first ? 'Your doc was written and published' : 'Writing your doc'}") && dialog.includes("} else if (shown === 'sendback' && lookingBack) {") && dialog.includes('<Row state="done">Wrote v{latest || 2}</Row>'), 'paste, doc and fix each have a done face');
+  assert(dialog.includes('<p className="tdoc-wiz-guide">Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.</p>'), 'the fix step says what pasting the line makes happen');
   assert(dialog.includes("openDoc(latest || 2, 'revised')"), 'v2 opens and says why it arrived');
   assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
 });

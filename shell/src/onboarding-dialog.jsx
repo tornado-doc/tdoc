@@ -300,6 +300,9 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const finished = step === 'done' && shared && view === null;
   const atEnd = finished || view === 'end';
   const index = atEnd ? STEPS.length : STEPS.indexOf(shown) + 1;
+  // A past step, looked at again, is finished by definition — the record has
+  // moved past it. It shows what was done there, never a wait that is over.
+  const lookingBack = !atEnd && index < liveIndex;
   const back = () => { if (index > 1) setView(STEPS[index - 2]); };
   const forward = () => { const next = STEPS[index]; setView(next && STEPS.indexOf(next) < STEPS.indexOf(step) ? next : null); };
   const waitLine = copyFailed ? COPY_FALLBACK
@@ -430,7 +433,18 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     // clickable; the Copied badge lives in the same bar.
     title = <>Open your agent.<br />Paste this in.</>;
     const copiedLine = terminal(FIRST_DOC_RECIPE, AGENT_NAMES);
-    if (pair.state === 'confirm') {
+    if (lookingBack) {
+      body = (
+        <>
+          {copiedLine}
+          <div className="tdoc-wiz-rows">
+            <Row state="done">Agent connected</Row>
+            <Row state={record?.published_first ? 'done' : 'live'}>{record?.published_first ? 'Your doc was written and published' : 'Writing your doc'}</Row>
+          </div>
+        </>
+      );
+      footer = foot(null);
+    } else if (pair.state === 'confirm') {
       body = (
         <>
           {copiedLine}
@@ -488,7 +502,15 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={copyFirstLine}>Copy</button>);
     }
   } else if (shown === 'doc') {
-    if (record?.published_first) {
+    if (lookingBack) {
+      title = <>Highlight a sentence.<br />Say what you think.</>;
+      body = (
+        <div className="tdoc-wiz-rows">
+          <Row state="done">You commented on your doc</Row>
+        </div>
+      );
+      footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(1, 'welcome')}>Open your doc</button>);
+    } else if (record?.published_first) {
       title = <>Highlight a sentence.<br />Say what you think.</>;
       body = <Listening>Waiting for your first comment…</Listening>;
       footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(1, 'welcome')}>Open your doc</button>);
@@ -505,11 +527,27 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       // matched to the journey still has a door.
       footer = foot(null, <a className="tdoc-wiz-link" href="/me">Already have a doc? Go to my docs</a>);
     }
+  } else if (shown === 'sendback' && lookingBack) {
+    title = 'Now let your agent fix it.';
+    body = (
+      <>
+        {terminal(fixLine, 'Your agent')}
+        <div className="tdoc-wiz-rows">
+          <Row state="done">Read your comments</Row>
+          <Row state="done">Wrote v{latest || 2}</Row>
+          <Row state="done">Published</Row>
+        </div>
+      </>
+    );
+    footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(latest || 2, 'revised')}>Open v{latest || 2}</button>);
   } else if (shown === 'sendback') {
     title = 'Now let your agent fix it.';
     body = (
       <>
         {terminal(fixLine, 'Your agent')}
+        {/* The same sentence the comment card shows: what pasting the line
+            makes happen. Without it the step is a line and a button. */}
+        {!lineCopy.copied ? <p className="tdoc-wiz-guide">Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.</p> : null}
         {lineCopy.copied ? (
           <div className="tdoc-wiz-rows">
             <Row state={status?.read_at ? 'done' : 'live'}>{status?.read_at ? 'Read your comments' : 'Paste it into your agent — it reads the comments'}</Row>
