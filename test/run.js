@@ -19,6 +19,7 @@ const OFFLINE = [
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
   'comment-history.test.js',  // event-log fold + cross-version pull
+  'comment-dedupe.test.js',   // the same words twice within seconds is one comment
   'event-convergence.test.js',// eid dedup convergence + fold ordering
   'reconcile.test.js',        // anchor reconcile branches + compaction
   'agent-status-emoji.test.js',// agent verdict emoji constant must exist (v>=2 folds)
