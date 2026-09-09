@@ -816,6 +816,7 @@ button.tdoc-pin {
 .tdoc-wiz .tdoc-wiz-line { display: block; box-sizing: border-box; width: 100%; background: #f4f4f2; border: 1px solid var(--td-line, #e8e7e3); border-radius: 14px; padding: 16px 18px; font: 500 15px/1.4 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -0.01em; overflow-wrap: anywhere; user-select: all; }
 .tdoc-wiz button.tdoc-wiz-primary, .tdoc-wiz a.tdoc-wiz-primary { display: flex; text-decoration: none; box-sizing: border-box; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 999px; border: 0; background: var(--td-accent); color: #fff; font: 600 16px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; padding: 0 24px; width: 100%; }
 .tdoc-wiz button.tdoc-wiz-primary:hover, .tdoc-wiz a.tdoc-wiz-primary:hover { background: var(--td-accent-hover, #1245d0); }
+.tdoc-wiz-ellipsis { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tdoc-wiz button.tdoc-wiz-primary:disabled { opacity: .4; cursor: default; }
 .tdoc-wiz button.tdoc-wiz-primary.done { background: #1a7340; }
 .tdoc-wiz button.tdoc-wiz-secondary, .tdoc-wiz a.tdoc-wiz-secondary { display: flex; text-decoration: none; box-sizing: border-box; align-items: center; justify-content: center; height: 48px; border-radius: 999px; border: 0; background: #efeff4; color: var(--td-accent); font: 600 16px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; padding: 0 24px; width: 100%; }

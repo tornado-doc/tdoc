@@ -408,7 +408,9 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     body = <OnboardingScene done />;
     footer = (
       <div className="tdoc-wiz-foot">
-        <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(latest || 2, 'revised')}>Open your doc</button>
+        <button type="button" className="tdoc-wiz-primary" onClick={() => openDoc(latest || 2, 'revised')}>
+          <span className="tdoc-wiz-ellipsis">{status?.title ? `Open “${status.title}”` : 'Open your tutorial doc'}</span>
+        </button>
         <button type="button" className="tdoc-wiz-secondary" onClick={() => setView('welcome')}>Walk through it again</button>
         <a className="tdoc-wiz-secondary" href="/me">Go to my docs</a>
         <div className="tdoc-wiz-nav-row"><span />{dots}<span /></div>

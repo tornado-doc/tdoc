@@ -192,7 +192,7 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   // After Copy the button does not turn into a sentence: the line carries a
   // Copied badge and the floor shows the next thing to do.
   assert(!/Copied\. Now paste it/.test(dialog) && dialog.includes("lineCopy.copied ? null : <button type=\"button\" className=\"tdoc-wiz-primary\" onClick={copyFixLine}>"), 'Copy is a button, Copied is a badge');
-  assert(dialog.includes("const finished = step === 'done' && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes(">Walk through it again</button>") && dialog.includes(">Open your doc</button>") && !dialog.includes('Copy link'), 'one last screen: open the doc, walk again, go to the hub — no link to copy');
+  assert(dialog.includes("const finished = step === 'done' && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes(">Walk through it again</button>") && dialog.includes("{status?.title ? `Open “${status.title}”` : 'Open your tutorial doc'}") && !dialog.includes('Copy link'), 'one last screen: open the doc, walk again, go to the hub — no link to copy');
   // Walking the tour again never drags the live step backwards — the record
   // would only yank it forward again on the next tick, three seconds later.
   assert(dialog.includes("if (STEPS.indexOf(step) > STEPS.indexOf('paste')) { setView('paste'); return; }"), 'a re-walk moves the view, not the journey');
