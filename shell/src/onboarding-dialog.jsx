@@ -365,13 +365,10 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     // One screen: the line, then — once it is copied — the code the agent
     // shows, typed underneath. Nothing the person has seen goes away.
     // The step says what to open, by name — the four agents are the one list
-    // the page keeps — and then what to do there.
+    // the page keeps — and then what to do there. A plain line, not chips:
+    // chips read as choices to click, and there is nothing to choose.
     title = <>Open your agent.<br />Paste this in.</>;
-    const agents = (
-      <div className="tdoc-wiz-agents" aria-label="Agents this works with">
-        {AGENT_NAMES.split(' · ').map((name) => <span key={name}>{name}</span>)}
-      </div>
-    );
+    const agents = <p className="tdoc-wiz-agents">Works with {AGENT_NAMES.replace(/ · /g, ', ').replace(/, ([^,]*)$/, ' or $1')}.</p>;
     const copiedLine = (
       <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>
         {FIRST_DOC_RECIPE}
