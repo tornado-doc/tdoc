@@ -659,27 +659,54 @@ export function CommentCard({
       ) : null}
 
       {handoff && comment.status !== 'applied'
-        && !replies.some((reply) => reply.author?.kind === 'agent') ? (
-          <div className="tdoc-handoff">
-            <div className="tdoc-handoff-line">
-              <code>{handoff.line}</code>
+        && !replies.some((reply) => reply.author?.kind === 'agent') ? (() => {
+          const copyButton = (
+            <button
+              type="button"
+              className={handoff.state !== 'idle' ? 'tdoc-handoff-copy done' : 'tdoc-handoff-copy'}
+              onClick={handoff.onCopy}
+            >
+              {handoff.state === 'idle' ? 'Copy' : handoff.copyFailed ? 'Select & copy' : 'Copied'}
+            </button>
+          );
+          return (
+          <div className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}>
+            {/* One row when closed: the name of the thing and Copy. The line
+                with the doc's address and the sentence saying what happens
+                open under it — pinned open on the onboarding doc, and
+                otherwise remembered the way the reader last left it. */}
+            <div className="tdoc-handoff-head">
               <button
                 type="button"
-                className={handoff.state !== 'idle' ? 'done' : undefined}
-                onClick={handoff.onCopy}
+                className="tdoc-handoff-toggle"
+                aria-expanded={handoff.open}
+                onClick={handoff.onToggle}
               >
-                {handoff.state === 'idle' ? 'Copy' : handoff.copyFailed ? 'Select & copy' : 'Copied'}
+                <ChevronRight size={14} className="chev" aria-hidden="true" />
+                Let your agent fix it
               </button>
+              {!handoff.open ? copyButton : null}
             </div>
-            <div className="tdoc-handoff-status" role="status" aria-live="polite">
-              {handoff.state === 'idle' ? 'Paste this into your agent. It reads the comments, replies to each, and publishes the next version.' : null}
-              {handoff.state === 'waiting' && handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />{COPY_FALLBACK}</> : null}
-              {handoff.state === 'waiting' && !handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
-              {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading this</> : null}
-              {handoff.state === 'stuck' ? 'Still waiting — did you paste it into your agent?' : null}
-            </div>
+            {/* Open, Copy sits on the prompt itself, so what gets copied is
+                the box it is attached to and nothing else on the card. */}
+            {handoff.open ? (
+              <div className="tdoc-handoff-line">
+                <code>{handoff.line}</code>
+                {copyButton}
+              </div>
+            ) : null}
+            {handoff.open || handoff.state !== 'idle' ? (
+              <div className="tdoc-handoff-status" role="status" aria-live="polite">
+                {handoff.state === 'idle' ? 'Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.' : null}
+                {handoff.state === 'waiting' && handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />{COPY_FALLBACK}</> : null}
+                {handoff.state === 'waiting' && !handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
+                {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading this</> : null}
+                {handoff.state === 'stuck' ? 'Still waiting — did you paste it into your agent?' : null}
+              </div>
+            ) : null}
           </div>
-        ) : null}
+          );
+        })() : null}
 
       {/* Resolve, edit, delete and the anchor moved to the header — the two
           controls a reader needs are ✓ and ⋯, and the rest belong behind them.

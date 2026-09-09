@@ -220,20 +220,26 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
   assert(dialog.includes("export function OwnAgentDoor({ onOpenChange, closeLabel = 'Back', config = null })") && dialog.includes('initialStep="paste" embedded'), 'the hub opens the wizard at the paste step');
   assert(/\.mk-card \.tdoc-agent-def \{/.test(read('shell/src/ui/ui.css')), 'the hub card defines the word where it is');
   // A refused clipboard on the fix line: selected, said, and still waiting.
-  assert(shell.includes("if (!ok) selectContents(document.querySelector('.tdoc-handoff-line code'));"), 'the line is left selected');
+  assert(shell.includes("requestAnimationFrame(() => selectContents(document.querySelector('.tdoc-handoff-line code')));") && shell.includes("      setHandoffPref(true);\n      requestAnimationFrame"), 'the block opens, then the line is left selected');
   assert(shell.includes("setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });"), 'the wait starts either way');
   assert(card.includes("handoff.copyFailed ? 'Select & copy' : 'Copied'") && card.includes('{COPY_FALLBACK}'), 'the card says what to do');
 });
 
 t('bridge 2 lives on the card: the line, the copy, then what the server saw', () => {
-  assert(shell.includes("const HANDOFF_LINE = 'Read my tdoc comments and fix them'"), 'the one instruction');
+  assert(dialog.includes("export const handoffLine = (docUrl) => `Read all comments on ${docUrl} and fix them`;"), 'the one instruction, addressed to a doc');
+  assert(shell.includes("const handoffText = handoffLine(`${location.origin}/d/${encodeURIComponent(config.slug)}`);"), 'the card line names this doc');
   assert(shell.includes('const HANDOFF_POLL_MS = 3000'), '3s while waiting');
   assert(shell.includes("postOnboardingEvent('fix_copy_clicked', config.slug)"), 'copy is an event');
   assert(/setHandoff\(\(current\) => \(current\.state === 'waiting' \? \{ \.\.\.current, state: 'reading' \} : current\)\)/.test(shell), 'the read stamp flips waiting → reading');
   assert(/latest > Number\(config\.version\)[\s\S]*location\.href = `\/d\/\$\{encodeURIComponent\(config\.slug\)\}\/v\/\$\{latest\}\?revised=1`/.test(shell), 'a new version moves the page, and says why it arrived');
   assert(shell.includes("postOnboardingEvent('timeout_shown', config.slug)"), 'the timeout is logged');
   assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion)'), "only on the owner's own doc, and only its latest version");
-  assert(card.includes("handoff = null,") && card.includes('className="tdoc-handoff"'), 'the card renders it');
+  assert(card.includes("handoff = null,") && card.includes("className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}"), 'the card renders it, open or closed');
+  // Closed is one row — the name and Copy; the line and the sentence are behind the chevron.
+  assert(card.includes('Let your agent fix it') && card.includes("{handoff.open ? (\n              <div className=\"tdoc-handoff-line\">\n                <code>{handoff.line}</code>\n                {copyButton}") && card.includes('{!handoff.open ? copyButton : null}'), 'the line shows only when open');
+  assert(card.includes("{handoff.open || handoff.state !== 'idle' ? (") && card.includes('Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.'), 'the sentence shows when open; the wait shows either way');
+  assert(shell.includes("const onboardingDoc = Boolean(onboardingRecord?.first_doc && onboardingRecord.first_doc === config.slug && !onboardingRecord.shared);") && shell.includes('const handoffOpen = handoffTouched ? handoffPref : (onboardingDoc || handoffPref);'), 'open on the onboarding doc; elsewhere the last choice holds');
+  assert(shell.includes("localStorage.setItem(HANDOFF_OPEN_KEY, next ? '1' : '0')"), 'the choice is remembered');
   assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && !card.includes("handoff.state === 'replied'") && card.includes('Still waiting — did you paste it into your agent?'), 'the four states — no doc-level "replied" on a thread');
   assert(shell.includes('handoffEnabled && ownerCommented ?'), 'the handoff appears after the owner has commented, not on the seeded card that asks for it');
   assert(shell.includes('Number(config.version) === latestVersion'), 'only on the latest version');
