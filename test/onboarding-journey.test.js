@@ -221,6 +221,7 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   const firstDoc = read('FIRST-DOC.md');
   assert(firstDoc.includes('## Step 1b — connect first, before reading anything') && firstDoc.includes('bash "$SKILL_DIR/bin/tdoc-publish" --signin-only'), 'the agent connects before it reads');
   assert(firstDoc.includes('**From the paste to the link: three minutes of your work; five at the very') && firstDoc.includes('## The page, as a template') && firstDoc.includes('Copy **the template below** into `v1/index.html`') && firstDoc.includes('<div class="wrap">'), 'the first doc has a clock and a template — fill, not design');
+  assert(firstDoc.includes('### The opening is a verdict') && firstDoc.includes('<p class="verdict">') && firstDoc.includes('**One sentence, second person, no hedge.**') && firstDoc.includes('**Mean is allowed. Vague is not.**'), 'the page opens with a verdict about the person, arguable on purpose, mean if the data says so');
   assert(/do not\s+run the Step 5b checks: the template/.test(firstDoc) && firstDoc.includes('Steps 3 to 6 describe the shape the template already has'), 'the long steps are the reasoning, not the to-do list');
   assert(dialog.includes('Highlight a sentence.<br />Say what you think.') && dialog.includes("openDoc(1, 'welcome')"), 'the doc step is the comment, and the doc opens in a new tab');
   // Looking back at a finished step shows what was done there, never a wait that is over.
