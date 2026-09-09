@@ -238,7 +238,11 @@
   .tdoc-margin-comment.tdoc-deleted .author .login,
   .tdoc-reply.tdoc-deleted .author .login { color: #777; font-weight: 500; }
   .tdoc-margin-comment .meta { font-size: 12px; color: #5f6368; margin-top: 10px; display: flex; align-items: center; justify-content: flex-start; gap: 8px; flex-wrap: wrap; }
-  .tdoc-margin-comment .meta .tdoc-reply-toggle { font-weight: 500; color: #1a73e8; padding: 4px 8px; border-radius: 6px; }
+  /* The one interactive colour, from the token every other control reads.
+     A second blue three points off the accent is not a second meaning; it is
+     the same meaning rendered wrong, in the one card where both are visible
+     at once (the card's own focus ring is the accent). */
+  .tdoc-margin-comment .meta .tdoc-reply-toggle { font-weight: 500; color: var(--td-accent); padding: 4px 8px; border-radius: 6px; }
   .tdoc-margin-comment .meta .tdoc-reply-toggle:hover { background: #f1f3f4; }
   .tdoc-margin-comment .meta > span:first-child { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tdoc-margin-comment .del { cursor: pointer; color: #c33; }
