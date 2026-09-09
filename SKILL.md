@@ -38,6 +38,18 @@ description: |
     - any /tdoc command: new, edit, fork, list, publish, onboard, update,
       doctor, pull, unpublish
 
+  THE HANDOFF LINE — the one a reader copies off a published doc:
+
+    Read all comments on https://tdoc.dev/d/<slug> and fix them
+
+  That line (in any wording that names a tdoc URL and asks for its comments)
+  is a `/tdoc edit <slug>` request, where `<slug>` is the last path segment
+  of the URL. Run the edit flow below — it starts with `bin/tdoc-pull`, and
+  that pull is what tells the page an agent picked the work up. Do NOT fetch
+  the URL in a browser and read the comments off the rendered page: nothing
+  is recorded, so the reader watches a progress row that never moves while
+  you work.
+
   When a request mentions an existing doc/site by name (e.g. "update the
   plaud explainer", "fix the comment on the X writeup"), that is a tdoc
   EDIT request — use this skill, run /tdoc edit-style flow.

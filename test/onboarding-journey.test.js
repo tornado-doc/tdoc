@@ -115,7 +115,9 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(upload.includes("if (verNum === 1 && isFirstDocProduct(body.meta) && journey.started && !journey.shared && journey.first_doc !== slug) {") && upload.includes('await seedFirstComment(await adoptFirstDocFor(env, auth.actor.account_id, slug));'), 'a marked v1 on a started, unfinished journey becomes its doc, and gets the seed comment');
   const tdocNew = read('bin/tdoc-new');
   assert(tdocNew.includes('--first-doc)  FIRST_DOC=1; shift ;;') && tdocNew.includes('out["origin"] = "first-doc"') && tdocNew.includes('meta.get("origin") == "first-doc"'), 'tdoc-write --first-doc marks the meta, and the mark survives later versions');
-  assert(read('FIRST-DOC.md').includes('bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name>'), 'FIRST-DOC.md tells the agent to mark it');
+  const firstDocRecipe = read('FIRST-DOC.md');
+  assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name>'), 'FIRST-DOC.md tells the agent to mark it');
+  assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-publish" what-ai-knows-<name>') && !/tdoc-publish --visibility private --history owner/.test(firstDocRecipe), 'the first doc publishes with no access flags — a locked first doc cannot be shown to anyone');
   assert(server.includes('function isFirstDocProductMeta(meta)') && server.includes('function adoptFirstDocLocal(slug)') && server.includes('if (marked && rec.first_doc !== marked.slug && !rec.shared) {'), 'the local twin adopts the marked doc too');
   assert(upload.indexOf("'published_first'") > upload.indexOf("productEvent(env, 'publish_succeeded'"), 'stamps happen after the write succeeded, never before');
   const post = worker.slice(worker.indexOf("if (p === '/api/comments' && method === 'POST')"), worker.indexOf("if (p === '/api/comments' && method === 'PATCH')"));
@@ -228,6 +230,11 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   assert(dialog.includes('const lookingBack = !atEnd && index < liveIndex;'), 'a past step is finished by definition');
   assert(dialog.includes('<Row state="done">You commented on your doc</Row>') && dialog.includes("{record?.published_first ? 'Your doc was written and published' : 'Writing your doc'}") && dialog.includes("} else if (shown === 'sendback' && lookingBack) {") && dialog.includes('<Row state="done">Wrote v{latest || 2}</Row>'), 'paste, doc and fix each have a done face');
   assert(dialog.includes('<p className="tdoc-wiz-guide">Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.</p>'), 'the fix step says what pasting the line makes happen');
+  assert(dialog.includes("lineCopy.copied !== null && !status?.read_at ? <Listening>{waitLine}</Listening> : null,"), 'a wait with nothing back yet says how long it has been waiting');
+  // The pasted line is what makes an agent pull, and the pull is what the page watches.
+  const skill = read('SKILL.md');
+  assert(skill.includes('Read all comments on https://tdoc.dev/d/<slug> and fix them') && skill.includes('is a `/tdoc edit <slug>` request'), 'the handoff line is a trigger, not something to improvise on');
+  assert(/Do NOT fetch\s*\n?\s*the URL in a browser/.test(skill), 'and reading it off the page instead records nothing');
   assert(dialog.includes("openDoc(latest || 2, 'revised')"), 'v2 opens and says why it arrived');
   assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
 });
