@@ -261,7 +261,7 @@ export function DocumentShell({ boot, config }) {
       const record = result?.record;
       // A journey that has started and not reached its exit reopens where
       // it stopped — the wizard reads the step off the record.
-      if (record?.started && !record?.shared && !record?.tour_seen && !record?.waitlist) {
+      if (record?.started && !record?.revised && !record?.shared && !record?.tour_seen && !record?.waitlist) {
         // Opened at the paste step. Whether that is where the journey stays,
         // or whether it has moved on and the person should be asked first, is
         // the wizard's own rule — forcing the question here asked it of
