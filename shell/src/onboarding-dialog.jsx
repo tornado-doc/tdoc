@@ -307,7 +307,8 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         {index > 1 ? <button type="button" className="tdoc-wiz-link" onClick={back}>Back</button> : <span />}
         {index < liveIndex
           ? <button type="button" className="tdoc-wiz-link" onClick={forward}>Continue</button>
-          : <button type="button" className="tdoc-wiz-link" onClick={skipToEnd}>Skip</button>}
+          : shown === 'done' ? <span />
+            : <button type="button" className="tdoc-wiz-link" onClick={skipToEnd}>Skip</button>}
       </div>
     </div>
   );
@@ -346,7 +347,14 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   } else if (shown === 'paste') {
     // One screen: the line, then — once it is copied — the code the agent
     // shows, typed underneath. Nothing the person has seen goes away.
-    title = 'Paste this into your agent.';
+    // The step says what to open, by name — the four agents are the one list
+    // the page keeps — and then what to do there.
+    title = <>Open your agent.<br />Paste this in.</>;
+    const agents = (
+      <div className="tdoc-wiz-agents" aria-label="Agents this works with">
+        {AGENT_NAMES.split(' · ').map((name) => <span key={name}>{name}</span>)}
+      </div>
+    );
     const copiedLine = (
       <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>
         {FIRST_DOC_RECIPE}
@@ -356,6 +364,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     if (pair.state === 'confirm') {
       body = (
         <>
+          {agents}
           {copiedLine}
           <p className="tdoc-wiz-confirm">Connect {pair.label ? <strong>{pair.label}</strong> : 'this terminal'} to your account?</p>
         </>
@@ -370,6 +379,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       // the agent is installing and writing, and the page says so.
       body = (
         <>
+          {agents}
           {copiedLine}
           <div className="tdoc-wiz-rows">
             <Row state="done">Agent connected</Row>
@@ -385,6 +395,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       // usual path — and the code can be typed here instead.
       body = (
         <>
+          {agents}
           {copiedLine}
           <Listening>{pair.state === 'error' ? pair.error : 'Your agent will ask to connect — approve it in the tab it opens, or type its code here.'}</Listening>
           <input
@@ -407,7 +418,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null,
       );
     } else {
-      body = copiedLine;
+      body = <>{agents}{copiedLine}</>;
       footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={copyFirstLine}>Copy</button>);
     }
   } else if (shown === 'doc') {
