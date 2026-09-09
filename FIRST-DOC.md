@@ -577,9 +577,19 @@ The tension is real — this page is about them, it carries their project names
 and their working hours, and the default visibility makes the link the
 credential. Resolve it with access, not with localhost:
 
+Write it with the flag that marks it as this journey's doc, then publish it:
+
 ```bash
+bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name> \
+  --title "What does AI know about <Name>?" --style <style> \
+  --prompt "<the line the human pasted>" --html-file /tmp/what-ai-knows-<name>.html
 bash "$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner what-ai-knows-<name>
 ```
+
+`--first-doc` is how tdoc.dev knows this is the doc the onboarding was waiting
+for, whatever slug it ends up on — a second run, or a `-2` after a collision,
+takes over from the earlier one. Without the flag the journey can keep
+watching an older doc and never move.
 
 `private` means the doc is readable by them and by accounts they explicitly
 allow, and by nobody holding the link. They get a real `https://tdoc.dev/d/...`
