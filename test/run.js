@@ -94,6 +94,7 @@ const OFFLINE = [
   'composer-position.test.js', // where the card goes when a keyboard is up
   'reader-patch-drift.test.js', // the phone table rule reaches both runtimes
   'dismiss-rule.test.js',     // the dismiss-first rule keeps its three exceptions
+  'resolved-anchors.test.js', // a resolved thread still marks its sentence
 ];
 
 // Require network (live Cloudflare) or a browser (playwright). Not run in the

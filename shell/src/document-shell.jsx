@@ -477,10 +477,18 @@ export function DocumentShell({ boot, config }) {
     [bridge.layout.docHeight, bridge.layout.pins],
   );
 
+  // Every thread goes to the frame. The ones the margin is not showing —
+  // resolved, with the switch off — go flagged `hidden`: no pin, a lighter
+  // mark on their sentence, and a click on it opens the thread (the open
+  // card is always shown, whatever the switch says).
+  const anchorsForFrame = useMemo(() => {
+    const shown = new Set(shownComments.map((comment) => comment.id));
+    return comments.comments.map((comment) => (shown.has(comment.id) ? comment : { ...comment, hidden: true }));
+  }, [comments.comments, shownComments]);
   useEffect(() => {
-    bridge.send({ type: 'tdoc:anchors', comments: shownComments });
+    bridge.send({ type: 'tdoc:anchors', comments: anchorsForFrame });
     if (!comments.loading) document.body.dataset.tdocReady = '1';
-  }, [bridge.send, shownComments, comments.loading]);
+  }, [bridge.send, anchorsForFrame, comments.loading]);
 
   useEffect(() => {
     bridgeRef.current = bridge.send;

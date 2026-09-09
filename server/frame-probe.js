@@ -34,10 +34,14 @@
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
   function highlightCss(dark) {
     var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
+    // A resolved thread the margin is not showing still marks its sentence,
+    // lightly — there is history here, and a click opens it.
+    var resolved = dark ? 'rgba(255,214,0,.34)' : 'rgba(255,214,0,.16)';
     var pending = dark ? 'rgba(255,214,0,.88)' : 'rgba(255,214,0,.55)';
     var selecting = dark ? 'rgba(76,137,255,.72)' : 'rgba(22,82,240,.32)';
     return '::highlight(tdoc-anchor){background:' + anchor + ';text-decoration:underline solid rgba(184,134,11,.7);text-decoration-thickness:2px;}' +
       '::highlight(tdoc-anchor-active){background:rgba(255,216,77,.94);text-decoration:underline solid #b8860b;text-decoration-thickness:3px;}' +
+      '::highlight(tdoc-anchor-resolved){background:' + resolved + ';text-decoration:underline dotted rgba(184,134,11,.55);text-decoration-thickness:1.5px;}' +
       '::highlight(tdoc-selecting){background:' + selecting + ';}' +
       '::highlight(tdoc-pending){background:' + pending + ';}';
   }
@@ -749,7 +753,7 @@
   function reportPins(comments) {
     _lastComments = comments || [];
     _anchorTargets = {};
-    var pins = [], hl = HL ? new Highlight() : null;
+    var pins = [], hl = HL ? new Highlight() : null, hlResolved = HL ? new Highlight() : null;
     // An anchor that cannot be placed still deserves a seat. Without a pin the
     // desktop rail has no coordinate to draw the card at, so the comment sits in
     // the data and nowhere on screen — while the phone drawer, which renders the
@@ -774,17 +778,20 @@
     }
     (comments || []).forEach(function (c) {
       if (!c) return;
-      if (!c.anchor) return seat(c);
+      // A hidden thread (resolved, switch off) gets a mark and a click target,
+      // never a pin and never a seat.
+      if (!c.anchor) return c.hidden ? undefined : seat(c);
       if (c.anchor.kind === 'element' && c.anchor.selector) {
         var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
         if (eel) {
           _anchorTargets[c.id] = { element: eel };
+          if (c.hidden) return;
           var er = eel.getBoundingClientRect();
           pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
         } else seat(c);
         return;
       }
-      if (c.anchor.kind !== 'text') return seat(c);
+      if (c.anchor.kind !== 'text') return c.hidden ? undefined : seat(c);
       var key = (c.anchor.text || '') + '\u0000' + (c.anchor.context_before || '') + '\u0000' + (c.anchor.context_after || '');
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
       // Exact first, then the neighbourhood, then a seat at the end. The middle
@@ -795,8 +802,9 @@
         r = findNearContext(c.anchor, docView());
         approximate = !!r;
       }
-      if (!r) return seat(c);
+      if (!r) return c.hidden ? undefined : seat(c);
       _anchorTargets[c.id] = { range: r };
+      if (c.hidden) { if (hlResolved && !c.deleted && !approximate) hlResolved.add(r); return; }
       if (hl && !c.deleted && !approximate) hl.add(r);
       var rect = r.getBoundingClientRect();
       // Second line of defence: findNearContext already measures its candidates,
@@ -805,6 +813,7 @@
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
+    if (HL) CSS.highlights.set('tdoc-anchor-resolved', hlResolved);
     setActiveAnchor(_activeAnchorId, false);
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
