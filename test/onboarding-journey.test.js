@@ -170,6 +170,7 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   // keeps the floor where it is.
   assert(/\.ui-dialog-popup\.tdoc-wiz-modal \{[^}]*height: min\(640px, calc\(100vh - 32px\)\);/.test(read('shell/src/ui/ui.css')) && read('shell/src/ui/ui.css').includes('.tdoc-wiz .tdoc-wiz-h1 { min-height: 2.3em; }') && read('shell/src/ui/ui.css').includes('.tdoc-wiz-primary-ghost { height: 48px; }'), 'the sheet, the headline slot and the floor are fixed');
   assert(dialog.includes('{primary || <div className="tdoc-wiz-primary-ghost" aria-hidden="true" />}'), 'a step without a primary keeps the floor');
+  assert(/\.tdoc-wiz-body \{[^}]*justify-content: flex-start;/.test(read('shell/src/ui/ui.css')), 'the body is top-aligned, so what appears after Copy lands under the window and the window does not move');
   assert(dialog.includes('<div className="tdoc-wiz-body">{body}</div>') && dialog.includes('className="tdoc-wiz-nav-row"'), 'headline, body, floor');
   // A person who is done sees that they are, and gets their docs or the walk again.
   // The floor and the dots, as rules — one place, pinned:
@@ -210,7 +211,7 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
   // The paste step names what to open — the four agents, in a sentence — then
   // what to do there.
-  assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes('<p className="tdoc-wiz-agents">Works with {AGENT_NAMES.split(\' · \').join(\' / \')}</p>') && !/\.tdoc-wiz-agents span \{/.test(read('shell/src/ui/ui.css')), 'the step says what to open, by name');
+  assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes('const copiedLine = terminal(FIRST_DOC_RECIPE, AGENT_NAMES);') && dialog.includes('<span className="tdoc-wiz-term-title">{bar}</span>') && !dialog.includes('tdoc-wiz-agents'), 'the line sits in a window whose title bar names the agents — nothing extra to read, nothing that looks clickable');
   assert(dialog.includes('placeholder="Or type its code here"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
   // The page follows the CLI's pairing: a terminal that has connected before
   // keeps its credential and never shows a code, so the page waits for the

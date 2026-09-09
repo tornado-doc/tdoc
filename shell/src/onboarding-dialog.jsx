@@ -335,6 +335,23 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     </div>
   );
 
+  // A line to hand over, in its own small window: a title bar, the line, and
+  // the Copied badge in the bar once the clipboard has it.
+  const terminal = (line, bar) => (
+    <div className={`tdoc-wiz-term${lineCopy.copied ? ' copied' : ''}`}>
+      <div className="tdoc-wiz-term-bar">
+        <span className="tdoc-wiz-term-title">{bar}</span>
+        {lineCopy.copied ? (
+          <span className="tdoc-wiz-copied" aria-label="Copied">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
+            Copied
+          </span>
+        ) : null}
+      </div>
+      <code ref={lineCopy.codeRef} className="tdoc-wiz-line">{line}</code>
+    </div>
+  );
+
   // The frame never moves: the headline sits under the header, the middle
   // holds this step's one thing, and the buttons sit on the floor. The bottom
   // row is for moving between screens — Back; Continue while looking back;
@@ -406,29 +423,16 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   } else if (shown === 'paste') {
     // One screen: the line, then — once it is copied — the code the agent
     // shows, typed underneath. Nothing the person has seen goes away.
-    // The step says what to open, by name — the four agents are the one list
-    // the page keeps — and then what to do there.
+    // The step says what to open, then what to do there. The line sits in a
+    // small window of its own, and the window's title bar names the agents it
+    // is for — the coding ones and the work ones — the way a terminal's title
+    // bar names the terminal. Nothing extra to read, nothing that looks
+    // clickable; the Copied badge lives in the same bar.
     title = <>Open your agent.<br />Paste this in.</>;
-    // A plain line, not chips: a row of pills reads as four buttons, and a
-    // person taps one expecting it to do something.
-    const agents = (
-      <p className="tdoc-wiz-agents">Works with {AGENT_NAMES.split(' · ').join(' / ')}</p>
-    );
-    const copiedLine = (
-      <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>
-        {FIRST_DOC_RECIPE}
-        {lineCopy.copied ? (
-          <span className="tdoc-wiz-copied" aria-label="Copied">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
-            Copied
-          </span>
-        ) : null}
-      </code>
-    );
+    const copiedLine = terminal(FIRST_DOC_RECIPE, AGENT_NAMES);
     if (pair.state === 'confirm') {
       body = (
         <>
-          {agents}
           {copiedLine}
           <p className="tdoc-wiz-confirm">Connect {pair.label ? <strong>{pair.label}</strong> : 'this terminal'} to your account?</p>
         </>
@@ -443,7 +447,6 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       // the agent is installing and writing, and the page says so.
       body = (
         <>
-          {agents}
           {copiedLine}
           <div className="tdoc-wiz-rows">
             <Row state="done">Agent connected</Row>
@@ -459,7 +462,6 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       // usual path — and the code can be typed here instead.
       body = (
         <>
-          {agents}
           {copiedLine}
           <Listening>{pair.state === 'error' ? pair.error : 'Paste it into your agent. It will ask to connect — approve it in the tab it opens.'}</Listening>
           <input
@@ -482,7 +484,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null,
       );
     } else {
-      body = <>{agents}{copiedLine}</>;
+      body = copiedLine;
       footer = foot(<button type="button" className="tdoc-wiz-primary" onClick={copyFirstLine}>Copy</button>);
     }
   } else if (shown === 'doc') {
@@ -507,15 +509,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     title = 'Now let your agent fix it.';
     body = (
       <>
-        <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>
-          {fixLine}
-          {lineCopy.copied ? (
-            <span className="tdoc-wiz-copied" aria-label="Copied">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
-              Copied
-            </span>
-          ) : null}
-        </code>
+        {terminal(fixLine, 'Your agent')}
         {lineCopy.copied ? (
           <div className="tdoc-wiz-rows">
             <Row state={status?.read_at ? 'done' : 'live'}>{status?.read_at ? 'Read your comments' : 'Paste it into your agent — it reads the comments'}</Row>
