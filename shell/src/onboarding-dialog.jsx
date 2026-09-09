@@ -243,6 +243,11 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const start = () => {
     if (!signedIn) { onSignIn?.('/?onboard=paste'); return; }
     postOnboardingEvent('door_own_agent').catch(() => {});
+    // Walking the tour again from a journey that is already past the paste
+    // step: the walk goes through `view`. Setting the live step here dragged
+    // it backwards, and the next record tick — three seconds later — yanked
+    // it forward again, so the step flashed and vanished under the reader.
+    if (STEPS.indexOf(step) > STEPS.indexOf('paste')) { setView('paste'); return; }
     setStep('paste');
   };
   useEffect(() => {
