@@ -119,7 +119,7 @@ function useCopyLine(onCopied) {
   return { copied, codeRef, copy, reset };
 }
 function copyLabel(copied) {
-  return copied === true ? 'Copied. Now paste it.' : copied === false ? 'Select & copy' : 'Copy';
+  return copied === true ? 'Copied ✓' : copied === false ? 'Select & copy' : 'Copy';
 }
 
 // The line and its Copy as one block, for surfaces without a fixed floor.
@@ -212,6 +212,9 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         const target = stepFromRecord(next);
         if (!resumed.current) {
           resumed.current = true;
+          // Opened by the top bar's sign-in return for an account that has
+          // already finished or skipped: nothing to show — close, quietly.
+          if (initialStep === 'welcome' && (next.shared || next.tour_seen)) { onClose?.(); return; }
           if (next.started && (!initialStep || STEPS.indexOf(target) > STEPS.indexOf(initialStep))) setStep(target);
         } else {
           setStep((current) => (current !== 'welcome' && STEPS.indexOf(target) > STEPS.indexOf(current) ? target : current));
@@ -313,6 +316,19 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     onClose?.();
   };
 
+  // The page control: one dot per step, centred on the floor between Back
+  // and Skip — where a hand expects it, and off the headline's line.
+  const dots = (
+    <div className="tdoc-wiz-dots" role="tablist" aria-label={`Step ${index} of ${STEPS.length}`}>
+      {STEPS.map((s, i) => {
+        const cls = i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead';
+        return i + 1 <= liveIndex
+          ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={cls} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
+          : <span key={s} className={cls} />;
+      })}
+    </div>
+  );
+
   // The frame never moves: the headline sits under the header, the middle
   // holds this step's one thing, and the buttons sit on the floor. The bottom
   // row is for moving between screens — Back; Continue while looking back;
@@ -323,6 +339,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       {primary || <div className="tdoc-wiz-primary-ghost" aria-hidden="true" />}
       <div className="tdoc-wiz-nav-row">
         {index > 1 ? <button type="button" className="tdoc-wiz-link" onClick={back}>Back</button> : <span />}
+        {dots}
         {index < liveIndex
           ? <button type="button" className="tdoc-wiz-link" onClick={forward}>Continue</button>
           : shown === 'done' ? <span />
@@ -363,7 +380,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       <div className="tdoc-wiz-foot">
         <button type="button" className="tdoc-wiz-secondary" onClick={() => setView('welcome')}>Walk through it again</button>
         <a className="tdoc-wiz-primary" href="/me">Go to my docs</a>
-        <div className="tdoc-wiz-nav-row"><span /><span /></div>
+        <div className="tdoc-wiz-nav-row"><span />{dots}<span /></div>
       </div>
     );
   } else if (atEnd) {
@@ -373,7 +390,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       <div className="tdoc-wiz-foot">
         <button type="button" className="tdoc-wiz-secondary" onClick={() => setView(null)}>Keep going</button>
         <button type="button" className="tdoc-wiz-primary" onClick={confirmSkip}>Skip it, go to my docs</button>
-        <div className="tdoc-wiz-nav-row"><span /><span /></div>
+        <div className="tdoc-wiz-nav-row"><span />{dots}<span /></div>
       </div>
     );
   } else if (shown === 'welcome') {
@@ -394,7 +411,12 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     const copiedLine = (
       <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>
         {FIRST_DOC_RECIPE}
-        {lineCopy.copied ? <span className="tdoc-wiz-copied" aria-label="Copied">Copied</span> : null}
+        {lineCopy.copied ? (
+          <span className="tdoc-wiz-copied" aria-label="Copied">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
+            Copied
+          </span>
+        ) : null}
       </code>
     );
     if (pair.state === 'confirm') {
@@ -419,7 +441,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
           {copiedLine}
           <div className="tdoc-wiz-rows">
             <Row state="done">Agent connected</Row>
-            <Row state="live">Writing your doc — about 5 minutes</Row>
+            <Row state="live">Paste it into your agent — your doc takes about 5 minutes</Row>
             <Row state="todo">Published</Row>
           </div>
         </>
@@ -433,13 +455,13 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         <>
           {agents}
           {copiedLine}
-          <Listening>{pair.state === 'error' ? pair.error : 'Your agent will ask to connect — approve it in the tab it opens, or type its code here.'}</Listening>
+          <Listening>{pair.state === 'error' ? pair.error : 'Paste it into your agent. It will ask to connect — approve it in the tab it opens.'}</Listening>
           <input
             className="tdoc-wiz-code"
             value={code}
             onChange={(event) => { setCode(cleanCode(event.target.value)); if (pair.state === 'error') setPair({ state: 'idle', label: '', error: '' }); }}
             onKeyDown={(event) => { if (event.key === 'Enter' && code.length === 9) lookupCode(); }}
-            placeholder="Code from your agent"
+            placeholder="Or type its code here"
             spellCheck="false"
             autoCapitalize="characters"
             autoComplete="off"
@@ -479,10 +501,18 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     title = 'Now let your agent fix it.';
     body = (
       <>
-        <code ref={lineCopy.codeRef} className="tdoc-wiz-line">{fixLine}</code>
+        <code ref={lineCopy.codeRef} className={`tdoc-wiz-line${lineCopy.copied ? ' copied' : ''}`}>
+          {fixLine}
+          {lineCopy.copied ? (
+            <span className="tdoc-wiz-copied" aria-label="Copied">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>
+              Copied
+            </span>
+          ) : null}
+        </code>
         {lineCopy.copied ? (
           <div className="tdoc-wiz-rows">
-            <Row state={status?.read_at ? 'done' : 'live'}>Reading your comments</Row>
+            <Row state={status?.read_at ? 'done' : 'live'}>{status?.read_at ? 'Read your comments' : 'Paste it into your agent — it reads the comments'}</Row>
             <Row state={latest >= 2 ? 'done' : status?.read_at ? 'live' : 'todo'}>Writing v2</Row>
             <Row state={latest >= 2 ? 'done' : 'todo'}>Published</Row>
           </div>
@@ -490,7 +520,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
       </>
     );
     footer = foot(
-      <button type="button" className={`tdoc-wiz-primary${lineCopy.copied ? ' done' : ''}`} onClick={copyFixLine}>{copyLabel(lineCopy.copied)}</button>,
+      lineCopy.copied ? null : <button type="button" className="tdoc-wiz-primary" onClick={copyFixLine}>{copyLabel(lineCopy.copied)}</button>,
       lineCopy.copied === false ? <Listening>{COPY_FALLBACK}</Listening> : null,
     );
   } else if (shown === 'done') {
@@ -504,24 +534,11 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
 
   return (
     <div className={`tdoc-wiz${embedded ? ' embedded' : ''}`} data-step={shown} data-live-step={step}>
-      <div className="tdoc-wiz-head">
-        {embedded ? <span /> : <span className="tdoc-wiz-mark-word">tdoc</span>}
-        <div className="tdoc-wiz-head-right">
-          <div className="tdoc-wiz-dots" role="tablist" aria-label={`Step ${index} of ${STEPS.length}`}>
-            {STEPS.map((s, i) => {
-              const cls = i + 1 < index ? 'past' : i + 1 === index ? 'now' : 'ahead';
-              return i + 1 <= liveIndex
-                ? <button key={s} type="button" role="tab" aria-selected={i + 1 === index} aria-label={`Step ${i + 1}`} className={cls} onClick={() => setView(i + 1 === liveIndex ? null : s)} />
-                : <span key={s} className={cls} />;
-            })}
-          </div>
-          {onClose ? (
-            <button type="button" className="tdoc-wiz-close" onClick={onClose} aria-label="Close">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-            </button>
-          ) : null}
-        </div>
-      </div>
+      {onClose ? (
+        <button type="button" className="tdoc-wiz-close" onClick={onClose} aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      ) : null}
       <h2 className="tdoc-wiz-h1">{title}</h2>
       <div className="tdoc-wiz-body">{body}</div>
       {footer}

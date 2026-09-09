@@ -266,15 +266,10 @@ function starCount(stars) {
   return stars >= 1000 ? `${(stars / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(stars);
 }
 
-export function LandingActions({ stars, yourDoc = null }) {
+export function LandingActions({ stars }) {
   const count = starCount(stars);
   return (
     <>
-    {yourDoc ? (
-      <a className="tdoc-your-doc" href={yourDoc.url} title={yourDoc.title}>
-        Your doc →
-      </a>
-    ) : null}
     <a
       id="tdoc-github-btn"
       className="tdoc-github-btn"

@@ -138,7 +138,11 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   assert(!/Start from scratch|Advanced|Read the full tutorial/.test(dialog), 'the onboarding never offers a blank doc, and carries no reading');
   // Sign-in is the site's own; the page leaves for it and returns to the paste step.
   assert(dialog.includes("onSignIn?.('/?onboard=paste')") && !dialog.includes("'tdoc-signin'"), 'sign-in is the existing one, not a second');
-  assert(shell.includes("&& new URLSearchParams(location.search).get('onboard'))"), 'the shell reopens the wizard after the redirect, at any step');
+  assert(shell.includes('Boolean(config.onboarding && config.identity && onboardingDoor)') && shell.includes("params.delete('onboard');"), 'the shell reopens the wizard after the redirect, at any step, and takes the parameter off the URL');
+  // The top bar's Sign in on the landing returns into the onboarding; an
+  // account that has finished or skipped is let straight through.
+  assert(shell.includes("onSignIn={() => signIn(config.onboarding ? '/?onboard=welcome' : undefined)}"), 'the top bar sign-in returns to the first screen');
+  assert(dialog.includes("if (initialStep === 'welcome' && (next.shared || next.tour_seen)) { onClose?.(); return; }"), 'a finished or skipped account is not shown the wizard again');
   // Every step can be left.
   // Leaving is the × in the corner. Nothing on the floor says Skip or Done:
   // beside Back, with no Next, a Skip read as "next" and quietly closed the
@@ -164,6 +168,12 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   assert(dialog.includes("{index > 1 ? <button type=\"button\" className=\"tdoc-wiz-link\" onClick={back}>Back</button> : <span />}"), 'Back on every screen after the first');
   assert(/index < liveIndex\s*\? <button type="button" className="tdoc-wiz-link" onClick=\{forward\}>Continue<\/button>\s*: shown === 'done' \? <span \/>\s*: <button type="button" className="tdoc-wiz-link" onClick=\{skipToEnd\}>Skip<\/button>/.test(dialog), 'Continue while looking back, Skip on the live step, nothing to skip on the last one');
   assert(dialog.includes("onClick={() => setView(i + 1 === liveIndex ? null : s)}") && dialog.includes("i + 1 <= liveIndex"), 'reached dots are clickable; the live dot returns to the live step');
+  // The page control sits on the floor, centred between Back and Skip; the
+  // top of the sheet is the headline and the corner × only.
+  assert(/<div className="tdoc-wiz-nav-row">\s*\{index > 1 \? [^\n]*\n\s*\{dots\}/.test(dialog) && !dialog.includes('tdoc-wiz-head') && !dialog.includes('tdoc-wiz-mark-word'), 'the dots are the floor\'s page control, and the header is gone');
+  // After Copy the button does not turn into a sentence: the line carries a
+  // Copied badge and the floor shows the next thing to do.
+  assert(!/Copied\. Now paste it/.test(dialog) && dialog.includes("lineCopy.copied ? null : <button type=\"button\" className=\"tdoc-wiz-primary\" onClick={copyFixLine}>"), 'Copy is a button, Copied is a badge');
   assert(dialog.includes("const finished = step === 'done' && shared && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes(">Walk through it again</button>"), 'the finished screen');
   assert(dialog.includes("useEffect(() => { setView((current) => (current === 'resume' ? current : null)); }, [step]);"), 'a step that moves on is shown the moment it does — unless the person is still being asked whether to resume');
   assert(dialog.includes('useEffect(() => { lineReset(); }, [step, lineReset]);'), 'a copy survives looking back and the skip question');
@@ -192,7 +202,7 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   // The paste step names what to open — the four agents, as chips — then
   // what to do there.
   assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes("AGENT_NAMES.split(' · ').map((name) => <span key={name}>{name}</span>)"), 'the step says what to open, by name');
-  assert(dialog.includes('placeholder="Code from your agent"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
+  assert(dialog.includes('placeholder="Or type its code here"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
   // The page follows the CLI's pairing: a terminal that has connected before
   // keeps its credential and never shows a code, so the page waits for the
   // doc instead; a first-time agent connects FIRST, before reading anything.
@@ -268,9 +278,9 @@ t('the two arrivals open the right card and say what happened', () => {
   assert(shell.includes('is live.`'), 'and says the doc is live');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
   assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
-  const landingBar = read('shell/src/document/document-toolbar.jsx');
-  assert(landingBar.includes('className="tdoc-your-doc"') && shell.includes('<LandingActions stars={config.stars} yourDoc={yourDoc} />'),
-    'the landing page shows a way back to your doc');
+  // No "Your doc →" pill in the landing's top bar: the way back is the hub
+  // and the wizard's last screen (the owner asked for it gone).
+  assert(!shell.includes('yourDoc') && !read('shell/src/document/document-toolbar.jsx').includes('tdoc-your-doc'), 'the top bar carries no doc pill');
   assert(server.includes('oldVersion: (!isLanding && Number(version) < Number(latestVersion))'), 'local preview shows the newer-version strip too');
   for (const [src, label] of [[worker, 'worker'], [server, 'server']]) {
     assert(!src.includes('replied_at'), `${label}: agent-status carries no doc-level replied stamp`);
