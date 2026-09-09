@@ -108,12 +108,21 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   const upload = worker.slice(worker.indexOf("if (p === '/api/upload' && method === 'POST')"), worker.indexOf("if (p === '/api/doc/access' && method === 'PATCH')"));
   assert(/if \(firstHostedPublish\) \{[\s\S]*'published_first', \{ first_doc: slug \}/.test(upload), 'the first hosted publish stamps published_first with the slug');
   assert(/firstHostedPublish[\s\S]*kind: 'create'[\s\S]*author: SEED_COMMENT_AUTHOR[\s\S]*text: SEED_COMMENT_TEXT/.test(upload), 'and seeds the first comment');
-  assert(/else if \(verNum >= 2\) \{\s*await stampOnboardingFor\(env, auth\.actor\.account_id, 'revised'\)/.test(upload), 'a second version stamps revised');
+  assert(/else if \(verNum >= 2 && journey\.first_doc === slug\) \{[\s\S]{0,120}await stampOnboardingFor\(env, auth\.actor\.account_id, 'revised'\)/.test(upload), "a second version of the journey's own doc stamps revised");
+  // The journey follows the doc FIRST-DOC.md produced, whichever slug it landed on.
+  assert(worker.includes('function isFirstDocProduct(meta)') && worker.includes("if (meta.origin === 'first-doc') return true;") && /FIRST-DOC\\\.md/.test(worker), 'the mark, or the pasted line as prompt of record, names the first doc');
+  assert(worker.includes('async function adoptFirstDocFor(env, accountId, slug)') && /for \(const key of \['commented', 'revised', 'seeded_comment', 'comments_read'\]\) delete next\[key\];/.test(worker), "re-pointing starts the doc's own steps over");
+  assert(upload.includes("if (verNum === 1 && isFirstDocProduct(body.meta) && journey.started && !journey.shared && journey.first_doc !== slug) {") && upload.includes('await seedFirstComment(await adoptFirstDocFor(env, auth.actor.account_id, slug));'), 'a marked v1 on a started, unfinished journey becomes its doc, and gets the seed comment');
+  const tdocNew = read('bin/tdoc-new');
+  assert(tdocNew.includes('--first-doc)  FIRST_DOC=1; shift ;;') && tdocNew.includes('out["origin"] = "first-doc"') && tdocNew.includes('meta.get("origin") == "first-doc"'), 'tdoc-write --first-doc marks the meta, and the mark survives later versions');
+  assert(read('FIRST-DOC.md').includes('bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name>'), 'FIRST-DOC.md tells the agent to mark it');
+  assert(server.includes('function isFirstDocProductMeta(meta)') && server.includes('function adoptFirstDocLocal(slug)') && server.includes('if (marked && rec.first_doc !== marked.slug && !rec.shared) {'), 'the local twin adopts the marked doc too');
   assert(upload.indexOf("'published_first'") > upload.indexOf("productEvent(env, 'publish_succeeded'"), 'stamps happen after the write succeeded, never before');
   const post = worker.slice(worker.indexOf("if (p === '/api/comments' && method === 'POST')"), worker.indexOf("if (p === '/api/comments' && method === 'PATCH')"));
   assert(/res\.status === 200 && isDocOwner[\s\S]*'commented'[\s\S]*'tagged'/.test(post), "the owner's own comment and their first tag are steps");
+  assert(post.includes("if (!parent_id && (!journey.first_doc || journey.first_doc === slug)) await stampOnboardingFor(env, accountId, 'commented');"), "only a comment on the journey's doc is the journey's comment");
   const local = server.slice(server.indexOf("if (p === '/api/comments' && req.method === 'POST')"), server.indexOf("if (p === '/api/agent/reply'"));
-  assert(local.includes("stampOnboardingLocal('commented')"), 'local twin stamps commented');
+  assert(local.includes("if (!journey.first_doc || journey.first_doc === slug) stampOnboardingLocal('commented');"), "local twin stamps commented, on the journey's doc only");
   assert(server.includes("if (url.searchParams.get('version') === 'all') { try { markAgentReadLocal(slug); } catch {} }"), 'local twin marks the read');
 });
 
@@ -199,9 +208,13 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   // same two routes /activate uses — lookup names the terminal, approve binds it.
   assert(dialog.includes("postJson('/api/cli/pair/lookup', { user_code: code })") && dialog.includes("postJson('/api/cli/pair/approve', { user_code: code })"), 'pairing reuses the activate routes');
   assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
-  // The paste step names what to open — the four agents, as chips — then
+  // The paste step names what to open — the four agents, in a sentence — then
   // what to do there.
+<<<<<<< HEAD
   assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes('const copiedLine = terminal(FIRST_DOC_RECIPE, AGENT_NAMES);') && dialog.includes('<span className="tdoc-wiz-term-title">{bar}</span>') && !dialog.includes('tdoc-wiz-agents'), 'the line sits in a window whose title bar names the agents — nothing extra to read, nothing that looks clickable');
+=======
+  assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes('<p className="tdoc-wiz-agents">Works with {AGENT_NAMES.split(\' · \').join(\' / \')}</p>') && !/\.tdoc-wiz-agents span \{/.test(read('shell/src/ui/ui.css')), 'the step says what to open, by name');
+>>>>>>> origin/main
   assert(dialog.includes('placeholder="Or type its code here"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
   // The page follows the CLI's pairing: a terminal that has connected before
   // keeps its credential and never shows a code, so the page waits for the

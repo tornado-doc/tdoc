@@ -1897,6 +1897,26 @@ async function stampOnboardingFor(env, accountId, step, extra) {
   await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
   return next;
 }
+// Is this doc the one FIRST-DOC.md produced? tdoc-write --first-doc marks the
+// meta (`origin: "first-doc"`); an agent on an older skill still carries the
+// pasted line as the prompt of record, and that line names the recipe.
+function isFirstDocProduct(meta) {
+  if (!meta || typeof meta !== 'object') return false;
+  if (meta.origin === 'first-doc') return true;
+  const prompts = Array.isArray(meta.versions) ? meta.versions.map((v) => v && v.prompt) : [];
+  return prompts.some((p) => typeof p === 'string' && (/FIRST-DOC\.md/i.test(p) || /make my first doc/i.test(p)));
+}
+// The journey follows the doc FIRST-DOC.md produced, whichever slug it landed
+// on. Re-pointing starts the doc's own steps over — the comment, the fix, the
+// revision belong to the doc being watched, not to the one it replaced.
+async function adoptFirstDocFor(env, accountId, slug) {
+  if (!env || !env.META || !accountId) return null;
+  const record = await loadOnboarding(env, accountId);
+  const next = { ...record, first_doc: slug, published_first: new Date().toISOString() };
+  for (const key of ['commented', 'revised', 'seeded_comment', 'comments_read']) delete next[key];
+  await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+  return next;
+}
 // Every action the page saw, one row each. The funnel and each step's
 // drop-off are derived from these; nothing else counts anything.
 async function logOnboardingEvent(env, accountId, action, meta) {
@@ -6493,7 +6513,10 @@ export default {
       if (res.status === 200 && isDocOwner) {
         try {
           const accountId = await sessionAccountId(env, s);
-          if (!parent_id) await stampOnboardingFor(env, accountId, 'commented');
+          // Only a comment on the journey's own doc moves the journey; a
+          // comment on any other doc of theirs says nothing about it.
+          const journey = await loadOnboarding(env, accountId);
+          if (!parent_id && (!journey.first_doc || journey.first_doc === slug)) await stampOnboardingFor(env, accountId, 'commented');
           if (mentions.length) await stampOnboardingFor(env, accountId, 'tagged');
         } catch {}
       }
@@ -7049,20 +7072,31 @@ export default {
         // when the person arrives, and there is something for their agent to
         // answer even before they have written a word. Never fails the upload.
         try {
-          if (firstHostedPublish) {
-            const record = await stampOnboardingFor(env, auth.actor.account_id, 'published_first', { first_doc: slug });
-            // Only for somebody who came through the door. A CLI-first
-            // publisher never asked to be onboarded, and a comment from tdoc
-            // on their first doc would be an uninvited guest.
-            if (record && record.started && !record.seeded_comment) {
-              const seeded = await mutateComments(env, slug, {
-                kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author: SEED_COMMENT_AUTHOR,
-                text: SEED_COMMENT_TEXT, mentions: [], anchor: seedCommentAnchor(doc), version: verNum,
-                at: new Date().toISOString(),
-              });
-              if (seeded.status === 200) await stampOnboardingFor(env, auth.actor.account_id, 'seeded_comment');
-            }
-          } else if (verNum >= 2) {
+          const journey = await loadOnboarding(env, auth.actor.account_id);
+          // tdoc's first comment on the journey's doc: something for their
+          // agent to answer before they have written a word. Only for
+          // somebody who came through the door — a CLI-first publisher never
+          // asked to be onboarded, and a comment from tdoc on their first doc
+          // would be an uninvited guest.
+          const seedFirstComment = async (record) => {
+            if (!(record && record.started && !record.seeded_comment)) return;
+            const seeded = await mutateComments(env, slug, {
+              kind: 'create', slug, id: `c_${Date.now()}_${rand(4)}`, author: SEED_COMMENT_AUTHOR,
+              text: SEED_COMMENT_TEXT, mentions: [], anchor: seedCommentAnchor(doc), version: verNum,
+              at: new Date().toISOString(),
+            });
+            if (seeded.status === 200) await stampOnboardingFor(env, auth.actor.account_id, 'seeded_comment');
+          };
+          if (verNum === 1 && isFirstDocProduct(body.meta) && journey.started && !journey.shared && journey.first_doc !== slug) {
+            // The doc FIRST-DOC.md produced is the journey's doc, whichever
+            // slug it landed on. A re-run — a taken slug, a second machine —
+            // re-points the journey at the doc that exists instead of leaving
+            // it watching an older one forever.
+            await seedFirstComment(await adoptFirstDocFor(env, auth.actor.account_id, slug));
+          } else if (firstHostedPublish) {
+            await seedFirstComment(await stampOnboardingFor(env, auth.actor.account_id, 'published_first', { first_doc: slug }));
+          } else if (verNum >= 2 && journey.first_doc === slug) {
+            // Only the journey's own doc reaching v2 is the loop closing.
             await stampOnboardingFor(env, auth.actor.account_id, 'revised');
           }
         } catch (e) {

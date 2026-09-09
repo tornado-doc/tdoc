@@ -856,11 +856,18 @@ button.tdoc-pin {
 .tdoc-wiz-row.done .tdoc-wiz-mark { background: var(--td-accent); border-color: var(--td-accent); }
 .tdoc-wiz-row.live .tdoc-wiz-mark { border: 2px solid var(--td-accent); }
 .tdoc-wiz-listen { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 14px; line-height: 1.4; color: var(--td-ink-soft, #6b6a66); }
+<<<<<<< HEAD
 .tdoc-wiz-term { border: 1px solid var(--td-line, #e8e7e3); border-radius: 14px; overflow: hidden; background: #f4f4f2; }
 .tdoc-wiz-term-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 0 14px; border-bottom: 1px solid var(--td-line, #e8e7e3); background: #ebebe8; }
 .tdoc-wiz-term-title { font: 500 12px -apple-system, system-ui, sans-serif; color: var(--td-ink-soft, #6b6a66); letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tdoc-wiz-term .tdoc-wiz-line { border: 0; border-radius: 0; background: transparent; }
 .tdoc-wiz-copied { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; font: 600 12px -apple-system, system-ui, sans-serif; color: #1a7340; }
+=======
+.tdoc-wiz-agents { margin: 0; font: 13px/1.5 -apple-system, system-ui, sans-serif; color: var(--td-muted, #666); }
+.tdoc-wiz .tdoc-wiz-line { position: relative; }
+.tdoc-wiz .tdoc-wiz-line.copied { padding-right: 78px; }
+.tdoc-wiz-copied { position: absolute; right: 12px; top: 12px; display: inline-flex; align-items: center; gap: 4px; font: 600 12px -apple-system, system-ui, sans-serif; color: #1a7340; background: #e6f4ea; border-radius: 999px; padding: 3px 9px; }
+>>>>>>> origin/main
 .tdoc-wiz input.tdoc-wiz-code { width: 100%; box-sizing: border-box; height: 52px; border: 1.5px solid var(--td-line, #e8e7e3); border-radius: 14px; padding: 0 18px; font: 500 20px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .14em; text-align: center; text-transform: uppercase; background: #fff; color: var(--td-ink, #1a1a1a); }
 .tdoc-wiz input.tdoc-wiz-code:focus { outline: none; border-color: var(--td-accent); box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff); }
 .tdoc-wiz input.tdoc-wiz-code::placeholder { color: #c4c3be; letter-spacing: 0; font: 400 15px -apple-system, system-ui, sans-serif; text-transform: none; }
