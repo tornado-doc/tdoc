@@ -93,11 +93,18 @@ function Reactions({ item, me, onReact }) {
 
 function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
   const [text, setText] = useState('');
+  // One submit at a time, same as the comment composer: ⌘+Enter and the
+  // button share the lock, so a second press while the first reply is still
+  // in flight does not post a twin.
+  const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!text.trim()) return;
-    // onReply resolves false when the shell reported a failure; keep the draft.
-    if (await onReply(commentId, text) !== false) setText('');
+    if (busy || !text.trim()) return;
+    setBusy(true);
+    try {
+      // onReply resolves false when the shell reported a failure; keep the draft.
+      if (await onReply(commentId, text) !== false) setText('');
+    } finally { setBusy(false); }
   };
 
   return (
@@ -116,8 +123,8 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
       />
       <div className="tdoc-reply-form-foot">
         <span className="hint" />
-        <button className="tdoc-reply-submit" type="button" onClick={submit}>
-          Reply
+        <button className="tdoc-reply-submit" type="button" onClick={submit} disabled={busy}>
+          {busy ? 'Posting…' : 'Reply'}
         </button>
       </div>
     </div>

@@ -69,6 +69,10 @@ t('both hosts check before they write', () => {
 t('the composer submits once at a time, and says so', () => {
   assert(composer.includes('if (busy || !text.trim()) return;') && composer.includes("{busy ? 'Posting…' : 'Comment'}") && composer.includes('disabled={busy}'), 'no busy guard');
 });
+t('the reply form submits once at a time too', () => {
+  const card = read('shell/src/document/comment-card.jsx');
+  assert(card.includes('if (busy || !text.trim()) return;') && card.includes("{busy ? 'Posting…' : 'Reply'}"), 'no busy guard on replies');
+});
 t("an IME's Enter is not a submit", () => {
   assert(field.includes('if (event.isComposing || event.keyCode === 229) return;'), 'no composition guard');
 });
