@@ -45,7 +45,7 @@ import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
-import { OnboardingDialog, selectContents } from './onboarding-dialog.jsx';
+import { OnboardingDialog, handoffLine, selectContents } from './onboarding-dialog.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -117,7 +117,6 @@ const RESOLVED_KEY = 'tdoc-show-resolved';
 // into their agent after leaving a comment. What follows is read off the
 // server — the agent pulling the comments, then publishing — so the card can
 // say "your agent is reading this" because it is, not because a timer ran.
-const HANDOFF_LINE = 'Read my tdoc comments and fix them';
 const HANDOFF_POLL_MS = 3000;
 // Past this the wait reads as stuck, and the line asks the one question that
 // resolves it.
@@ -298,15 +297,19 @@ export function DocumentShell({ boot, config }) {
   // the agent already did.
   const latestVersion = Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), Number(config.version) || 0);
   const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion);
+  // The line carries the doc's own address, so the agent knows which doc's
+  // comments to read without being told; the bare instruction sent it
+  // guessing between every doc on the machine.
+  const handoffText = handoffLine(`${location.origin}/d/${encodeURIComponent(config.slug)}`);
   const handoffCopy = useCallback(async () => {
-    const ok = await copyText(HANDOFF_LINE);
+    const ok = await copyText(handoffText);
     // A refused clipboard is not a dead end: the line is left selected for a
     // manual copy, the card says so, and the wait starts anyway — the person
     // may well paste it by hand.
     if (!ok) selectContents(document.querySelector('.tdoc-handoff-line code'));
     setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });
     postOnboardingEvent('fix_copy_clicked', config.slug).catch(() => {});
-  }, [config.slug]);
+  }, [config.slug, handoffText]);
 
   const mentionable = useMentionable(
     config.slug,
@@ -917,7 +920,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled && ownerCommented ? { line: HANDOFF_LINE, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffEnabled && ownerCommented ? { line: handoffText, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -947,7 +950,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled && ownerCommented ? { line: HANDOFF_LINE, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffEnabled && ownerCommented ? { line: handoffText, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
         />
       )}
 

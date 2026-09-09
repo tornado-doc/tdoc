@@ -219,7 +219,8 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
 });
 
 t('bridge 2 lives on the card: the line, the copy, then what the server saw', () => {
-  assert(shell.includes("const HANDOFF_LINE = 'Read my tdoc comments and fix them'"), 'the one instruction');
+  assert(dialog.includes("export const handoffLine = (docUrl) => `Read all comments on ${docUrl} and fix them`;"), 'the one instruction, addressed to a doc');
+  assert(shell.includes("const handoffText = handoffLine(`${location.origin}/d/${encodeURIComponent(config.slug)}`);"), 'the card line names this doc');
   assert(shell.includes('const HANDOFF_POLL_MS = 3000'), '3s while waiting');
   assert(shell.includes("postOnboardingEvent('fix_copy_clicked', config.slug)"), 'copy is an event');
   assert(/setHandoff\(\(current\) => \(current\.state === 'waiting' \? \{ \.\.\.current, state: 'reading' \} : current\)\)/.test(shell), 'the read stamp flips waiting → reading');

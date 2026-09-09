@@ -34,7 +34,9 @@ export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL
 // The line for a person who already has one: tdoc is installed by then, and
 // FIRST-DOC.md would only build the same portrait again.
 export const ANOTHER_DOC_RECIPE = '/tdoc new "<what it is about>" — then publish it and give me the link';
-export const HANDOFF_LINE = 'Read my tdoc comments and fix them';
+// The line names the doc: an agent handed a bare 'read my comments' has to
+// guess which of the docs on the machine is meant.
+export const handoffLine = (docUrl) => `Read all comments on ${docUrl} and fix them`;
 export const EXAMPLE_URL = '/d/what-ai-knows/v/12';
 export const AGENT_DEFINITION = 'An AI that runs on your computer and can read and write files.';
 export const AGENT_NAMES = 'Claude Code · Codex · Claude Cowork · ChatGPT Work';
@@ -168,6 +170,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   const lineCopy = useCopyLine((ok) => { setCopiedAt(Date.now()); setCopyFailed(!ok); });
 
   const slug = record?.first_doc || null;
+  const fixLine = handoffLine(`${location.origin}/d/${slug ? encodeURIComponent(slug) : 'your-doc'}`);
   const latest = Number(status?.latest_version) || 0;
 
   // Each copy is its own wait: the send-back step must not inherit the
@@ -230,7 +233,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     postOnboardingEvent('copy_clicked').catch(() => {});
   };
   const copyFixLine = async () => {
-    await lineCopy.copy(HANDOFF_LINE);
+    await lineCopy.copy(fixLine);
     postOnboardingEvent('fix_copy_clicked', slug).catch(() => {});
   };
 
@@ -427,7 +430,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     title = 'Now let your agent fix it.';
     body = (
       <>
-        <code ref={lineCopy.codeRef} className="tdoc-wiz-line">{HANDOFF_LINE}</code>
+        <code ref={lineCopy.codeRef} className="tdoc-wiz-line">{fixLine}</code>
         {lineCopy.copied ? (
           <div className="tdoc-wiz-rows">
             <Row state={status?.read_at ? 'done' : 'live'}>Reading your comments</Row>
