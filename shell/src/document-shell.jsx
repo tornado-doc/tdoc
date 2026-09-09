@@ -118,6 +118,9 @@ const RESOLVED_KEY = 'tdoc-show-resolved';
 // server — the agent pulling the comments, then publishing — so the card can
 // say "your agent is reading this" because it is, not because a timer ran.
 const HANDOFF_POLL_MS = 3000;
+// Whether the block is open. The onboarding doc opens it; anywhere else the
+// reader's last choice holds.
+const HANDOFF_OPEN_KEY = 'tdoc-handoff-open';
 // Past this the wait reads as stuck, and the line asks the one question that
 // resolves it.
 const HANDOFF_STUCK_MS = 5 * 60 * 1000;
@@ -301,12 +304,32 @@ export function DocumentShell({ boot, config }) {
   // comments to read without being told; the bare instruction sent it
   // guessing between every doc on the machine.
   const handoffText = handoffLine(`${location.origin}/d/${encodeURIComponent(config.slug)}`);
+  const [handoffPref, setHandoffPref] = useState(() => {
+    try { return localStorage.getItem(HANDOFF_OPEN_KEY) !== '0'; } catch { return true; }
+  });
+  const [handoffTouched, setHandoffTouched] = useState(false);
+  // The journey's own doc, until its exit: the block stays open there so the
+  // first handoff is never behind a chevron.
+  const onboardingDoc = Boolean(onboardingRecord?.first_doc && onboardingRecord.first_doc === config.slug && !onboardingRecord.shared);
+  const handoffOpen = handoffTouched ? handoffPref : (onboardingDoc || handoffPref);
+  const handoffToggle = useCallback(() => {
+    const next = !handoffOpen;
+    setHandoffTouched(true);
+    setHandoffPref(next);
+    try { localStorage.setItem(HANDOFF_OPEN_KEY, next ? '1' : '0'); } catch {}
+  }, [handoffOpen]);
   const handoffCopy = useCallback(async () => {
     const ok = await copyText(handoffText);
     // A refused clipboard is not a dead end: the line is left selected for a
     // manual copy, the card says so, and the wait starts anyway — the person
     // may well paste it by hand.
-    if (!ok) selectContents(document.querySelector('.tdoc-handoff-line code'));
+    if (!ok) {
+      // The line has to be visible to be selected: open the block first, then
+      // select once it has rendered.
+      setHandoffTouched(true);
+      setHandoffPref(true);
+      requestAnimationFrame(() => selectContents(document.querySelector('.tdoc-handoff-line code')));
+    }
     setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });
     postOnboardingEvent('fix_copy_clicked', config.slug).catch(() => {});
   }, [config.slug, handoffText]);
@@ -920,7 +943,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled && ownerCommented ? { line: handoffText, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffEnabled && ownerCommented ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -950,7 +973,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled && ownerCommented ? { line: handoffText, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffEnabled && ownerCommented ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
         />
       )}
 
