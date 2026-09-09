@@ -53,18 +53,102 @@ that needs their hand. Left to the end, it arrives after the longest silence
 of the whole setup. If `published.json` already exists, there is no code and
 nothing to relay — skip to Step 2.
 
-## The clock
+## The clock, and the fast path
 
-**From the paste to the link: five minutes.** The human is watching a page
-that says the doc is on its way. Twenty minutes is abandonment. The budget:
+**From the paste to the link: three minutes of your work; five at the very
+most, counting the human's sign-in.** The human is watching a page that says
+the doc is on its way. Twenty minutes is abandonment. Speed beats completeness
+every time here — the page is the first thing they see tdoc do, not the best
+thing.
 
-- Reading the machine: about 15 seconds (Step 2 says how).
-- Writing: one page, at most four sections, at most four figures.
-- One pass. Draw, check the five things in Step 5b once while drawing, publish.
-  No second draft, no re-reading the machine, no question to the human that a
-  default can answer.
+The whole to-do list, in order. Nothing else is work:
 
-If the clock is running out, cut sections, not the publish.
+1. Say the scan line (Step 2), then read **layer 1 only** — file names and
+   mtimes, every vendor. Layer 2 only if it finishes in ten seconds; skip
+   layer 3. Budget: fifteen seconds.
+2. Copy **the template below** into `v1/index.html`. Fill its numbers and its
+   three lines. Do not restyle it, do not add a figure, do not add a section.
+3. Pick the slug (Step 6d) and publish privately (Step 7). Hand over the link.
+
+That is the doc. **Steps 3 to 6 describe the shape the template already has**
+— they are the reasoning behind it, not a checklist to work through. Do not
+read `authoring/visuals.md` for this doc, do not draw your own figures, do not
+run the Step 5b checks: the template's two figures already pass them once the
+numbers are real. One pass, no second draft, no question to the human that a
+default can answer. If the clock is running out, leave a line blank rather
+than skip the publish.
+
+## The page, as a template
+
+Three sections — Volume, Rhythm-as-tools, Now — two figures, one claim, one
+button. Replace the name, the claim, the eight bars, the three shares, the
+three project lines. Keep the rest byte for byte; it is what passes the reader
+template's validator and the cold-reader checks.
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What does AI know about Serena?</title>
+<style>
+  body { margin: 0; background: #fff; color: #1a1a1a; font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 34px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 8px; }
+  h2 { font-size: 22px; letter-spacing: -0.01em; margin: 40px 0 6px; }
+  p { margin: 0 0 12px; }
+  .lead { font-size: 19px; color: #444; }
+  .caption { font-size: 14px; color: #6b6a66; margin: 0 0 10px; }
+  .bars { display: grid; grid-template-columns: 6em 1fr 3em; gap: 6px 10px; align-items: center; margin: 12px 0 4px; }
+  .bars .label { font-size: 14px; color: #444; text-align: right; }
+  .bars .bar { height: 14px; border-radius: 4px; background: #1652f0; }
+  .bars .n { font-size: 14px; color: #6b6a66; font-variant-numeric: tabular-nums; }
+  .split { display: flex; height: 16px; border-radius: 6px; overflow: hidden; margin: 12px 0 8px; }
+  .split span { display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: #444; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .cta { margin-top: 48px; padding-top: 24px; border-top: 1px solid #e8e7e3; }
+  .cta a { display: inline-block; margin-top: 8px; padding: 10px 18px; border-radius: 999px; background: #1652f0; color: #fff; text-decoration: none; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>What does AI know about Serena?</h1>
+  <p class="lead">One claim, in one sentence, that the two figures below support.</p>
+
+  <h2>Volume</h2>
+  <p class="caption">Sessions per week, last eight weeks.</p>
+  <div class="bars">
+    <span class="label">Jul 14</span><div class="bar" style="width: 30%"></div><span class="n">12</span>
+    <span class="label">Jul 21</span><div class="bar" style="width: 45%"></div><span class="n">18</span>
+    <span class="label">Jul 28</span><div class="bar" style="width: 20%"></div><span class="n">8</span>
+    <span class="label">Aug 4</span><div class="bar" style="width: 60%"></div><span class="n">24</span>
+    <span class="label">Aug 11</span><div class="bar" style="width: 100%"></div><span class="n">40</span>
+    <span class="label">Aug 18</span><div class="bar" style="width: 75%"></div><span class="n">30</span>
+    <span class="label">Aug 25</span><div class="bar" style="width: 55%"></div><span class="n">22</span>
+    <span class="label">Sep 1</span><div class="bar" style="width: 85%"></div><span class="n">34</span>
+  </div>
+
+  <h2>Which tools</h2>
+  <p class="caption">Share of sessions by tool.</p>
+  <div class="split">
+    <span style="width: 62%; background: #1652f0"></span>
+    <span style="width: 28%; background: #8fa8f5"></span>
+    <span style="width: 10%; background: #d9d9d6"></span>
+  </div>
+  <div class="legend"><span><i style="background:#1652f0"></i>Claude Code 62%</span><span><i style="background:#8fa8f5"></i>Codex 28%</span><span><i style="background:#d9d9d6"></i>Cursor 10%</span></div>
+
+  <h2>Now</h2>
+  <p>The three projects with sessions this week, one line each, most recent first.</p>
+
+  <div class="cta">
+    <p>An AI just read the traces on your machine and wrote you this page. This is how documents work now: you comment, your agent rewrites.</p>
+    <a href="https://tdoc.dev">Make your next doc</a>
+  </div>
+</div>
+</body>
+</html>
+```
 
 ## Step 2 — the doc is **What does AI know about me?**
 
@@ -261,9 +345,9 @@ blurred out and still learn most of what it says.
 
 **The budget:**
 
-- **A visual every screenful, minimum — and four figures at most.** The clock
-  (above) beats completeness: pick the four that carry the most, and let each
-  one do a whole section's work.
+- **A visual every screenful, minimum — and, on the first doc, exactly the
+  template's two.** The clock (above) beats completeness: the two figures that
+  carry the most are already drawn; fill them.
 - **No explanatory paragraphs.** The only prose allowed is the section claim,
   a one-line caption above each figure, and the closing questions. If you are
   writing a paragraph to describe what a chart shows, delete the paragraph —
@@ -411,9 +495,10 @@ and the reader template owns the rest.
 
 Every rule below came from handing a single figure, with its heading removed,
 to a reader who had never seen the document and asking what it said. Each one
-was a real defect that looked fine to the person who drew it. Check them once,
-while drawing each figure — not as a review loop afterwards; the clock does
-not allow a second pass.
+was a real defect that looked fine to the person who drew it. The template's
+figures were drawn against this list; on the first doc there is nothing to
+check. It applies to the figures you draw yourself, later — once, while
+drawing, never as a review loop afterwards.
 
 **A fill that touches the page ground must be readable against the ground.**
 Check the contrast against white, not against the fill's own outline. A style's
