@@ -201,7 +201,7 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
   // The paste step names what to open — the four agents, as chips — then
   // what to do there.
-  assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes('<span>Claude Code · Claude Cowork</span>') && dialog.includes('<span>Codex · ChatGPT Work</span>') && dialog.includes("avatarFor({ login: 'claude' })") && dialog.includes("avatarFor({ login: 'codex' })") && !/<span key=\{name\}>/.test(dialog), 'the step names the coding one and the work one, a brand mark anchoring each, nothing that looks clickable');
+  assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes('const copiedLine = terminal(FIRST_DOC_RECIPE, AGENT_NAMES);') && dialog.includes('<span className="tdoc-wiz-term-title">{bar}</span>') && !dialog.includes('tdoc-wiz-agents'), 'the line sits in a window whose title bar names the agents — nothing extra to read, nothing that looks clickable');
   assert(dialog.includes('placeholder="Or type its code here"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
   // The page follows the CLI's pairing: a terminal that has connected before
   // keeps its credential and never shows a code, so the page waits for the
