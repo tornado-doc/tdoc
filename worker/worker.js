@@ -416,7 +416,7 @@ function accessDeniedHtml({ status, title, body, slug, version, signin }) {
     docTitle: `${title} · tdoc`,
     title,
     message: signin === 'signin'
-      ? `${body} You’ll come straight back to this document.`
+      ? `${body} You’ll come straight back to this document. First time here? Signing in creates your account automatically — there is no separate sign-up.`
       : body,
     error: true,
     status,
