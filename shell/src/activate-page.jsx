@@ -94,6 +94,9 @@ export function ActivatePage({ boot }) {
         <h1>Connected</h1>
         <p>Your terminal has picked this up and continued on its own — there is nothing to go back and tell it.</p>
         <p>You can close this tab.</p>
+        <div className="tdoc-status-actions">
+          <a className="secondary" href="/me">Go to your docs</a>
+        </div>
       </main>
     );
   }
@@ -107,6 +110,9 @@ export function ActivatePage({ boot }) {
           <p>{code
             ? 'A terminal wants to publish to your tdoc account. Sign in, then approve the code it showed you.'
             : 'Sign in to connect a terminal to your tdoc account.'}</p>
+          <p className="tdoc-activate-hint">
+            First time here? Signing in creates your account automatically — there is no separate sign-up.
+          </p>
           {boot.oidcAuth ? (
             // One action, one surface: every sign-in method — GitHub
             // included — lives in the provider's own modal. Legacy GitHub
