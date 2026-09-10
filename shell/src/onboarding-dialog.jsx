@@ -83,6 +83,27 @@ export function stepFromRecord(record) {
   return 'paste';
 }
 
+// The opening frame, from a record the door already holds: where the journey
+// is, whether that is a jump into the middle of something (ask first), or
+// nothing to show at all. The same rule the first tick applies — kept in one
+// place so a pop-up that opens with the record in hand paints the record's
+// step on its first frame, not the door's.
+export function openingFrom(record, initialStep) {
+  if (!record) return {};
+  const target = stepFromRecord(record);
+  // Opened by the top bar's sign-in return for an account that has already
+  // finished or skipped: nothing to show — close, quietly.
+  if (initialStep === 'welcome' && (record.revised || record.shared || record.tour_seen)) return { close: true };
+  if (record.started && (!initialStep || STEPS.indexOf(target) > STEPS.indexOf(initialStep))) {
+    // Moving a person past the paste step on their first look — from any
+    // door: the landing's button, the hub's card, a sign-in return — is a
+    // jump into the middle of something. Ask first.
+    const ask = STEPS.indexOf(target) > STEPS.indexOf('paste') && !record.revised && !record.shared;
+    return { step: target, view: ask ? 'resume' : null };
+  }
+  return {};
+}
+
 async function postJson(path, body) {
   const response = await fetch(path, {
     method: 'POST',
@@ -157,14 +178,17 @@ function Listening({ children }) {
   );
 }
 
-export function OnboardingWizard({ config, initialStep = null, embedded = false, resume = false, onClose, onSignIn }) {
+export function OnboardingWizard({ config, initialStep = null, initialRecord = null, embedded = false, resume = false, onClose, onSignIn }) {
   // `resume` is the explicit override (`?onboard=resume`). Every other door
   // leaves the question to the first-tick rule below, which asks only when the
   // journey has actually moved past the step the door opened on.
   const signedIn = Boolean(config?.identity);
-  const [record, setRecord] = useState(null);
+  // A record the door already holds decides the first frame; without one the
+  // first frame is blank until the record arrives (see `ready`).
+  const [opening] = useState(() => openingFrom(signedIn ? initialRecord : null, initialStep));
+  const [record, setRecord] = useState(signedIn ? initialRecord : null);
   const [paired, setPaired] = useState(false);
-  const [step, setStep] = useState(() => (initialStep && STEPS.includes(initialStep) ? initialStep : 'welcome'));
+  const [step, setStep] = useState(() => opening.step || (initialStep && STEPS.includes(initialStep) ? initialStep : 'welcome'));
   // Looking back. `step` is where the journey IS (the record moves it); `view`
   // is a past step the person asked to see again. Null means "show the live
   // step". Going forward past the live step, or reaching it, clears the view,
@@ -172,7 +196,7 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // A person coming back to an unfinished journey is asked first — 'resume'
   // is a view over the live step, not a step: the record still decides where
   // the journey is, and the screen says so before showing it.
-  const [view, setView] = useState(resume ? 'resume' : null);
+  const [view, setView] = useState(resume ? 'resume' : (opening.view || null));
   const [status, setStatus] = useState(null); // agent-status of the first doc
   const [copiedAt, setCopiedAt] = useState(null);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -180,7 +204,8 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
   // pairing: idle → looking → confirm → approving → connected | error
   const [code, setCode] = useState('');
   const [pair, setPair] = useState({ state: 'idle', label: '', error: '' });
-  const resumed = useRef(false);
+  const resumed = useRef(Boolean(record));
+  useEffect(() => { if (opening.close) onClose?.(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const lineCopy = useCopyLine((ok) => { setCopiedAt(Date.now()); setCopyFailed(!ok); });
 
   const slug = record?.first_doc || null;
@@ -214,16 +239,9 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
         const target = stepFromRecord(next);
         if (!resumed.current) {
           resumed.current = true;
-          // Opened by the top bar's sign-in return for an account that has
-          // already finished or skipped: nothing to show — close, quietly.
-          if (initialStep === 'welcome' && (next.revised || next.shared || next.tour_seen)) { onClose?.(); return; }
-          if (next.started && (!initialStep || STEPS.indexOf(target) > STEPS.indexOf(initialStep))) {
-            setStep(target);
-            // Moving a person past the paste step on their first look — from
-            // any door: the landing's button, the hub's card, a sign-in
-            // return — is a jump into the middle of something. Ask first.
-            if (STEPS.indexOf(target) > STEPS.indexOf('paste') && !next.revised && !next.shared) setView('resume');
-          }
+          const first = openingFrom(next, initialStep);
+          if (first.close) { onClose?.(); return; }
+          if (first.step) { setStep(first.step); if (first.view) setView(first.view); }
         } else {
           setStep((current) => (current !== 'welcome' && STEPS.indexOf(target) > STEPS.indexOf(current) ? target : current));
         }
@@ -573,16 +591,21 @@ export function OnboardingWizard({ config, initialStep = null, embedded = false,
     );
   }
 
+  // Signed in and the record not here yet: the card, its close, and nothing
+  // else — the geometry is fixed, so the step painted a moment later lands in
+  // place. Painting the door's step first showed a person who has finished
+  // the loop the paste step for a beat before the record moved them on.
+  const ready = !signedIn || record !== null;
   return (
-    <div className={`tdoc-wiz${embedded ? ' embedded' : ''}`} data-step={shown} data-live-step={step}>
+    <div className={`tdoc-wiz${embedded ? ' embedded' : ''}`} data-step={ready ? shown : ''} data-live-step={ready ? step : ''} data-ready={ready ? 'true' : 'false'}>
       {onClose ? (
         <button type="button" className="tdoc-wiz-close" onClick={onClose} aria-label="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       ) : null}
-      <h2 className="tdoc-wiz-h1">{title}</h2>
-      <div className="tdoc-wiz-body">{body}</div>
-      {footer}
+      <h2 className="tdoc-wiz-h1">{ready ? title : null}</h2>
+      <div className="tdoc-wiz-body">{ready ? body : null}</div>
+      {ready ? footer : null}
     </div>
   );
 }
@@ -600,7 +623,7 @@ export function OwnAgentDoor({ onOpenChange, closeLabel = 'Back', config = null 
 // First-time onboarding, and only that. Behind the landing page's own CTA —
 // the page itself is unchanged. `initialDoor` is the step a redirect returns
 // to (`?onboard=paste` after the sign-in); the old `own` value lands there too.
-export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initialDoor = null }) {
+export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initialDoor = null, initialRecord = null }) {
   const initialStep = initialDoor === 'own' || initialDoor === 'resume' ? 'paste' : initialDoor;
   return (
     <AppDialog
@@ -615,6 +638,7 @@ export function OnboardingDialog({ open, onOpenChange, config, onSignIn, initial
         <OnboardingWizard
           config={config}
           initialStep={initialStep}
+          initialRecord={initialRecord}
           resume={initialDoor === 'resume'}
           onSignIn={onSignIn}
           onClose={() => onOpenChange(false)}

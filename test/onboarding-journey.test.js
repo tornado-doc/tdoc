@@ -159,7 +159,7 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   // The top bar's Sign in on the landing returns into the onboarding; an
   // account that has finished or skipped is let straight through.
   assert(shell.includes("onSignIn={() => signIn(config.onboarding ? '/?onboard=welcome' : undefined)}"), 'the top bar sign-in returns to the first screen');
-  assert(dialog.includes("if (initialStep === 'welcome' && (next.revised || next.shared || next.tour_seen)) { onClose?.(); return; }"), 'a finished or skipped account is not shown the wizard again');
+  assert(dialog.includes("if (initialStep === 'welcome' && (record.revised || record.shared || record.tour_seen)) return { close: true };") && dialog.includes("if (first.close) { onClose?.(); return; }") && dialog.includes("useEffect(() => { if (opening.close) onClose?.(); }, []);"), 'a finished or skipped account is not shown the wizard again — from the first tick or from the record in hand');
   // Every step can be left.
   // Leaving is the × in the corner. Nothing on the floor says Skip or Done:
   // beside Back, with no Next, a Skip read as "next" and quietly closed the
@@ -179,7 +179,7 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   assert(/\.ui-dialog-popup\.tdoc-wiz-modal \{[^}]*height: min\(640px, calc\(100vh - 32px\)\);/.test(read('shell/src/ui/ui.css')) && read('shell/src/ui/ui.css').includes('.tdoc-wiz .tdoc-wiz-h1 { min-height: 2.3em; }') && read('shell/src/ui/ui.css').includes('.tdoc-wiz-primary-ghost { height: 48px; }'), 'the sheet, the headline slot and the floor are fixed');
   assert(dialog.includes('{primary || <div className="tdoc-wiz-primary-ghost" aria-hidden="true" />}'), 'a step without a primary keeps the floor');
   assert(/\.tdoc-wiz-body \{[^}]*justify-content: flex-start;/.test(read('shell/src/ui/ui.css')), 'the body is top-aligned, so what appears after Copy lands under the window and the window does not move');
-  assert(dialog.includes('<div className="tdoc-wiz-body">{body}</div>') && dialog.includes('className="tdoc-wiz-nav-row"'), 'headline, body, floor');
+  assert(dialog.includes('<div className="tdoc-wiz-body">{ready ? body : null}</div>') && dialog.includes('className="tdoc-wiz-nav-row"'), 'headline, body, floor');
   // A person who is done sees that they are, and gets their docs or the walk again.
   // The floor and the dots, as rules — one place, pinned:
   assert(dialog.includes("const index = atEnd ? STEPS.length : STEPS.indexOf(shown) + 1;"), 'the end screen is the last dot, whatever the record says');
@@ -212,6 +212,15 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   assert(dialog.includes("postOnboardingEvent('door_own_agent')"), 'reaching the paste step is the first stamp');
   assert(dialog.includes('const POLL_MS = 3000'), '3s while waiting');
   assert(dialog.includes('export function stepFromRecord(record)') && /if \(record\.revised\) return 'done';\s*if \(record\.commented\) return 'sendback';\s*if \(record\.published_first\) return 'doc';\s*if \(record\.agent_connected\) return 'doc';\s*return 'paste';/.test(dialog), 'the step is the record, forward only');
+  // The first frame is the record's step, not the door's (#527): the shell
+  // hands the record it fetched at boot to the pop-up, the pop-up computes its
+  // opening from it synchronously, and with no record yet it paints nothing —
+  // never the paste step for a beat before the congratulations screen.
+  assert(dialog.includes('export function openingFrom(record, initialStep)'), 'the opening rule is one function');
+  assert(dialog.includes("const [opening] = useState(() => openingFrom(signedIn ? initialRecord : null, initialStep));") && dialog.includes("useState(() => opening.step || (initialStep && STEPS.includes(initialStep) ? initialStep : 'welcome'))"), 'the opening step is computed before the first frame');
+  assert(dialog.includes('const first = openingFrom(next, initialStep);'), 'the first tick applies the same rule');
+  assert(dialog.includes('const ready = !signedIn || record !== null;') && dialog.includes('<div className="tdoc-wiz-body">{ready ? body : null}</div>'), 'no record yet paints nothing');
+  assert(shell.includes('initialRecord={onboardingRecord}'), 'the shell hands its record to the pop-up');
   assert(dialog.includes("export const WAITING = 'Listening for your agent…'"), 'copy flips to listening');
   assert(dialog.includes("export const NOTHING_YET = 'Taking a while? Check your agent’s window.'"), 'a nudge before the timeout');
   assert(dialog.includes("export const STILL_WAITING = 'Still waiting. Did you paste it?'"), 'the timeout asks the one question');
@@ -336,8 +345,8 @@ t('resuming reads the record, not localStorage', () => {
   assert(!shell.includes('setOnboardingResume') && !shell.includes('resume={onboardingResume}'), 'the shell never forces the question');
   assert(dialog.includes("resume={initialDoor === 'resume'}"), 'only ?onboard=resume forces it');
   // Coming back is a question, not a jump: where they stopped, and four ways on.
-  assert(dialog.includes("const [view, setView] = useState(resume ? 'resume' : null);") && dialog.includes("setView((current) => (current === 'resume' ? current : null))"), 'the resume view survives the record setting the step');
-  assert(dialog.includes("if (STEPS.indexOf(target) > STEPS.indexOf('paste') && !next.revised && !next.shared) setView('resume');"), 'any door that would land past the paste step asks first — unless the loop is already closed');
+  assert(dialog.includes("const [view, setView] = useState(resume ? 'resume' : (opening.view || null));") && dialog.includes("setView((current) => (current === 'resume' ? current : null))"), 'the resume view survives the record setting the step');
+  assert(dialog.includes("const ask = STEPS.indexOf(target) > STEPS.indexOf('paste') && !record.revised && !record.shared;") && dialog.includes("return { step: target, view: ask ? 'resume' : null };"), 'any door that would land past the paste step asks first — unless the loop is already closed');
   assert(dialog.includes("if (view === 'resume') {") && dialog.includes('Last time you stopped at step {liveIndex} of {STEPS.length}: {STEP_LABELS[step]}.'), 'it says where they stopped');
   assert(dialog.includes('Continue from step {liveIndex}') && dialog.includes('Start the tour over') && dialog.includes('onClick={confirmSkip}>Go to my docs') && dialog.includes('onClick={dismissForGood}>I know tdoc, don’t ask again'), 'continue, start over, my docs, or never again');
   assert(/const dismissForGood = \(\) => \{\s*postOnboardingEvent\('tour_seen'\)[\s\S]*onClose\?\.\(\);/.test(dialog), '"I know tdoc" stamps the same flag as Skip and closes in place');
