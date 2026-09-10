@@ -34,8 +34,17 @@ t('a hidden thread is still a click target', () => {
   // finds it and the shell opens the card — which is shown whatever the switch says.
   const i = probe.indexOf('_anchorTargets[c.id] = { range: r };');
   const j = probe.indexOf('if (c.hidden) { if (hlResolved', i);
-  assert(i > 0 && j > i && j - i < 200, 'the target is registered after the hidden return');
+  assert(i > 0 && j > i && j - i < 400, 'the target is registered after the hidden return');
   assert(shell.includes('|| comment.id === openCommentId'), 'the open card is not shown regardless of the switch');
+});
+
+t('a comment whose words were rewritten marks the block that replaced them', () => {
+  // Every applied comment's sentence changes in the next version; without
+  // this, v2 showed a pin beside an unmarked paragraph.
+  assert(probe.includes("best = { at: i + lb, len: lb, side: 'before' }") && probe.includes("best = { at: j, len: la, side: 'after' }") && probe.includes('candidate.tdocSide = best.side;'), 'the neighbourhood match does not say which side the words were on');
+  assert(probe.includes('function blockForMoved(r)') && probe.includes("if (!block || block.matches(CONTENT_ROOT_SEL)) return null;"), 'no block finder, or it can paint the whole document');
+  assert(probe.includes("if (approximate && hlMoved && !c.deleted) { var mv = blockForMoved(r); if (mv) hlMoved.add(mv); }") && probe.includes("CSS.highlights.set('tdoc-anchor-moved', hlMoved);"), 'the replaced block is not painted');
+  assert(chrome.includes('::highlight(tdoc-anchor-moved)'), 'no style for the moved mark');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

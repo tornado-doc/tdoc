@@ -443,6 +443,8 @@
   /* Resolved and out of the margin: a lighter mark, so the sentence still
      shows it has history; a click opens the thread. */
   ::highlight(tdoc-anchor-resolved) { background-color: #fffbe6; text-decoration: underline dotted #c9a94a; text-decoration-thickness: 1.5px; }
+  /* The block that replaced a comment's words: same light mark, dashed. */
+  ::highlight(tdoc-anchor-moved) { background-color: #fffbe6; text-decoration: underline dashed #c9a94a; text-decoration-thickness: 1.5px; }
   /* Active = clicked. Visibly different from resting: vivid yellow + thick
      gold underline. (The CSS Highlight API only supports background-color,
      color, and text-decoration — so we stack those.) */
