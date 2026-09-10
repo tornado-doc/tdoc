@@ -37,11 +37,14 @@
     // A resolved thread the margin is not showing still marks its sentence,
     // lightly — there is history here, and a click opens it.
     var resolved = dark ? 'rgba(255,214,0,.34)' : 'rgba(255,214,0,.16)';
+    // The block that replaced a comment's words: the same light mark, dashed.
+    var moved = resolved;
     var pending = dark ? 'rgba(255,214,0,.88)' : 'rgba(255,214,0,.55)';
     var selecting = dark ? 'rgba(76,137,255,.72)' : 'rgba(22,82,240,.32)';
     return '::highlight(tdoc-anchor){background:' + anchor + ';text-decoration:underline solid rgba(184,134,11,.7);text-decoration-thickness:2px;}' +
       '::highlight(tdoc-anchor-active){background:rgba(255,216,77,.94);text-decoration:underline solid #b8860b;text-decoration-thickness:3px;}' +
       '::highlight(tdoc-anchor-resolved){background:' + resolved + ';text-decoration:underline dotted rgba(184,134,11,.55);text-decoration-thickness:1.5px;}' +
+      '::highlight(tdoc-anchor-moved){background:' + moved + ';text-decoration:underline dashed rgba(184,134,11,.55);text-decoration-thickness:1.5px;}' +
       '::highlight(tdoc-selecting){background:' + selecting + ';}' +
       '::highlight(tdoc-pending){background:' + pending + ';}';
   }
@@ -622,7 +625,7 @@
     for (var lb = before.length; lb >= NEAR_CONTEXT_MIN; lb--) {
       var tail = before.slice(before.length - lb);
       var i = view.norm.indexOf(tail);
-      if (i !== -1 && view.norm.indexOf(tail, i + 1) === -1) { best = { at: i + lb, len: lb }; break; }
+      if (i !== -1 && view.norm.indexOf(tail, i + 1) === -1) { best = { at: i + lb, len: lb, side: 'before' }; break; }
     }
     // Prefixes of context_after: the start of it sat against the anchor. Only
     // taken when it beats what the other side found — longer surviving run wins.
@@ -630,7 +633,7 @@
       if (best && la <= best.len) break;
       var head = after.slice(0, la);
       var j = view.norm.indexOf(head);
-      if (j !== -1 && view.norm.indexOf(head, j + 1) === -1) { best = { at: j, len: la }; break; }
+      if (j !== -1 && view.norm.indexOf(head, j + 1) === -1) { best = { at: j, len: la, side: 'after' }; break; }
     }
     if (!best) return null;
     // Land ON the surviving context, not on the position just past it. For a
@@ -653,9 +656,38 @@
       var candidate = rangeFromNorm(view, tries[t][0], tries[t][1]);
       if (!candidate) continue;
       var box = candidate.getBoundingClientRect();
-      if (box.width || box.height) return candidate;
+      if (box.width || box.height) { candidate.tdocSide = best.side; return candidate; }
     }
     return null;
+  }
+
+  // The words a comment sat on are gone, but the block that replaced them is
+  // right there — after the surviving context_before, or before the surviving
+  // context_after. That block is what the comment is now about, so it gets a
+  // mark: "this was rewritten because of the thread beside it".
+  var MOVED_BLOCK_SEL = 'p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, td, th, dt, dd, figcaption';
+  var CONTENT_ROOT_SEL = '.wrap, main, article, .content, .container, body, html';
+  function blockForMoved(r) {
+    if (!r || !document.body) return null;
+    var after = r.tdocSide === 'after';
+    var node = after ? r.startContainer : r.endContainer;
+    var offset = after ? r.startOffset : r.endOffset;
+    var text = node && node.nodeType === 3 ? String(node.nodeValue || '') : '';
+    var here = after ? text.slice(0, offset) : text.slice(offset);
+    var t = null;
+    if (here.trim()) {
+      t = node; // the rewrite shares the block with the surviving context
+    } else {
+      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      walker.currentNode = node;
+      var guard = 0;
+      do { t = after ? walker.previousNode() : walker.nextNode(); } while (t && !String(t.nodeValue || '').trim() && guard++ < 64);
+    }
+    if (!t) return null;
+    var el = t.nodeType === 1 ? t : t.parentElement;
+    var block = el && el.closest ? el.closest(MOVED_BLOCK_SEL) : null;
+    if (!block || block.matches(CONTENT_ROOT_SEL)) return null;
+    try { var out = document.createRange(); out.selectNodeContents(block); return out; } catch (x) { return null; }
   }
 
   function findTextRange(anchor, view) {
@@ -753,7 +785,7 @@
   function reportPins(comments) {
     _lastComments = comments || [];
     _anchorTargets = {};
-    var pins = [], hl = HL ? new Highlight() : null, hlResolved = HL ? new Highlight() : null;
+    var pins = [], hl = HL ? new Highlight() : null, hlResolved = HL ? new Highlight() : null, hlMoved = HL ? new Highlight() : null;
     // An anchor that cannot be placed still deserves a seat. Without a pin the
     // desktop rail has no coordinate to draw the card at, so the comment sits in
     // the data and nowhere on screen — while the phone drawer, which renders the
@@ -804,6 +836,8 @@
       }
       if (!r) return c.hidden ? undefined : seat(c);
       _anchorTargets[c.id] = { range: r };
+      // Rewritten words: mark the block that replaced them, hidden or not.
+      if (approximate && hlMoved && !c.deleted) { var mv = blockForMoved(r); if (mv) hlMoved.add(mv); }
       if (c.hidden) { if (hlResolved && !c.deleted && !approximate) hlResolved.add(r); return; }
       if (hl && !c.deleted && !approximate) hl.add(r);
       var rect = r.getBoundingClientRect();
@@ -814,6 +848,7 @@
     });
     if (HL) CSS.highlights.set('tdoc-anchor', hl);
     if (HL) CSS.highlights.set('tdoc-anchor-resolved', hlResolved);
+    if (HL) CSS.highlights.set('tdoc-anchor-moved', hlMoved);
     setActiveAnchor(_activeAnchorId, false);
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
