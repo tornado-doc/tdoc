@@ -1069,6 +1069,7 @@ export function DocumentShell({ boot, config }) {
         config={config}
         onSignIn={signIn}
         initialDoor={onboardingDoor}
+        initialRecord={onboardingRecord}
       />
 
       {toast ? (
