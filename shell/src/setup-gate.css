@@ -61,8 +61,13 @@
   color: var(--td-ink, #1a1a1a);
   overflow-wrap: anywhere; user-select: all;
 }
-.sg-marks { display: inline-flex; align-items: center; gap: 7px; margin-left: 6px; vertical-align: 2px; color: #6b6a66; }
-.sg-marks svg { display: block; opacity: .9; }
+/* One neutral for both marks and sizes matched by eye, not by number — the
+   sunburst reads smaller than the knot at the same box. Its own orange beside
+   a blue heading put three visual languages in one line. */
+.sg-works { display: flex; align-items: center; gap: 8px; margin: -6px 0 -2px; font-size: 11.5px; color: #a6a6a1; }
+.sg-works svg { display: block; }
+.sg-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
 .sg-prompt-copy {
   flex: 0 0 auto;
   height: 30px; padding: 0 14px;
