@@ -91,8 +91,8 @@ export function ActivatePage({ boot }) {
     return (
       <main className="tdoc-status-page">
         <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-        <h1>Approved</h1>
-        <p>Your agent picked this up and carried on.</p>
+        <h1>Device login approved</h1>
+        <p>Sign-in is complete. You can close this browser page.</p>
         <div className="tdoc-status-actions">
           <button type="button" className="primary" onClick={() => window.close()}>Close this page</button>
         </div>
@@ -104,7 +104,7 @@ export function ActivatePage({ boot }) {
   return (
     <main className="tdoc-status-page tdoc-activate-page">
       <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-      <h1>Connect your agent</h1>
+      <h1>Approve Device Login</h1>
       {!identity ? (
         <>
           <p>{code
@@ -167,12 +167,12 @@ export function ActivatePage({ boot }) {
           <p className="tdoc-activate-codelabel">Device code</p>
           <div className="tdoc-activate-codeshow">{code}</div>
           <button type="button" className="primary" disabled={busy} onClick={approve}>
-            Approve
+            Approve Device Login
           </button>
           <button type="button" className="secondary" onClick={() => {
             location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate?code=${code}`)}`;
           }}>
-            Use another account
+            Use Another Account
           </button>
         </>
       )}
