@@ -224,7 +224,10 @@ export function SetupGate({ boot }) {
             {signedIn ? (
               <>
                 <div className="sg-prompt">
-                  <p className="sg-prompt-text" ref={promptRef}>{SETUP_PROMPT}</p>
+                  <p className="sg-prompt-text" ref={promptRef}>
+                    {SETUP_PROMPT.slice(0, SETUP_PROMPT.indexOf(': ') + 1)}{' '}
+                    <span className="sg-prompt-url">{SETUP_PROMPT.slice(SETUP_PROMPT.indexOf(': ') + 2)}</span>
+                  </p>
                   <div className="sg-prompt-foot">
                     <span className="sg-prompt-agents">{AGENT_NAMES}</span>
                     <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
