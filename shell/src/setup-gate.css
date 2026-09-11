@@ -33,16 +33,13 @@
 
 /* ------------------------------------------------------------ the left pane */
 .sg-pane-form { display: flex; flex-direction: column; padding: 26px 38px 34px; background: #fff; }
-.sg-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; }
-.sg-brand { display: flex; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; color: inherit; text-decoration: none; border-radius: 8px; }
+.sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; color: inherit; text-decoration: none; border-radius: 8px; }
 .sg-brand:hover { opacity: .7; }
-.sg-who { font-size: 12.5px; color: var(--td-muted, #6b6a66); }
 .sg-mid { flex: 1 1 auto; display: flex; align-items: center; }
 .sg-col { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 18px; }
 
 .sg-eyebrow { margin: 0; font-size: 11px; font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; color: var(--td-muted, #6b6a66); }
-.sg-h1 { margin: -10px 0 0; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
-.sg-sub { margin: -8px 0 0; font-size: 15px; line-height: 1.5; color: var(--td-muted, #6b6a66); text-wrap: pretty; }
+.sg-h1 { margin: -10px 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
 
 /* Not a terminal block: this is a sentence you paste into an agent, so it is
    set as text on the page's own surface, with Copy sitting with it. */

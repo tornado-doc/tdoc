@@ -216,15 +216,11 @@ export function SetupGate({ boot }) {
   return (
     <div className="sg-split">
       <section className="sg-pane-form">
-        <div className="sg-top">
-          <a className="sg-brand" href="/me" aria-label="My docs"><Mark /> tdoc</a>
-          {signedIn ? <span className="sg-who">{identity.name || identity.login}</span> : null}
-        </div>
+        <a className="sg-brand" href="/me" aria-label="My docs"><Mark /> tdoc</a>
         <div className="sg-mid">
           <div className="sg-col">
             <p className="sg-eyebrow">Set up tdoc</p>
             <h1 className="sg-h1">Connect your agent</h1>
-            <p className="sg-sub">An agent is the AI on your machine. tdoc publishes what it writes, so it needs your permission first.</p>
 
             {signedIn ? (
               <>
