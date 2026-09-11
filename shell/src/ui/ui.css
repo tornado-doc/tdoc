@@ -854,22 +854,27 @@ body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
 
 /* /activate — one column, and everything in it fills it. The page used to be
    a grid whose children each sized themselves, so nine elements arrived at
-   nine widths and every correction was another per-element max-width. The
-   stack is the structure; nothing inside it carries a width of its own. */
-.tdoc-activate-page { padding: 24px; }
+   nine widths and every correction was another per-element max-width.
+
+   Spacing is by group, not by uniform gap. One gap between everything reads as
+   crowding, because nothing tells the eye which parts belong together: the
+   mark, the heading and the account line are one thing; the code is what you
+   came to check; the two buttons are one choice. Tight inside a group, open
+   between them. */
+.tdoc-activate-page { padding: 32px 24px; }
 .tdoc-activate-stack {
-  width: 300px; max-width: 100%;
-  display: flex; flex-direction: column; align-items: stretch; gap: 12px;
+  width: 320px; max-width: 100%;
+  display: flex; flex-direction: column; align-items: stretch; gap: 0;
   text-align: center;
 }
 .tdoc-activate-stack > img { align-self: center; }
-.tdoc-activate-stack > h1 { font-size: 24px; letter-spacing: -0.02em; margin: 2px 0 0; }
-.tdoc-activate-grant { font-size: 14.5px; line-height: 1.5; color: var(--td-muted, #6b6a66); margin: -4px 0 0; }
-.tdoc-activate-grant b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
+.tdoc-activate-stack > h1 { margin: 20px 0 0; font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; }
+.tdoc-activate-page .tdoc-activate-grant { margin: 8px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--td-muted, #6b6a66); }
+.tdoc-activate-page .tdoc-activate-grant b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
 
 .tdoc-activate-codeshow,
 .tdoc-activate-page input.tdoc-activate-code {
-  width: 100%; box-sizing: border-box; padding: 16px; margin: 0;
+  width: 100%; box-sizing: border-box; padding: 17px; margin: 28px 0 0;
   border-radius: 14px; background: var(--td-surface, #f4f4f2); border: 1px solid var(--td-line, #e8e7e3);
   font: 600 22px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.18em; text-indent: 0.18em;
   color: var(--td-ink, #1a1a1a); text-align: center;
@@ -880,7 +885,7 @@ body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
 
 .tdoc-activate-page button.primary,
 .tdoc-status-page .tdoc-activate-stack button.primary {
-  width: 100%; height: 46px; margin: 2px 0 0;
+  width: 100%; height: 48px; margin: 14px 0 0;
   border: 0; border-radius: 12px; cursor: pointer;
   background: var(--td-accent, #1652f0); color: #fff;
   font: 650 15px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
@@ -888,9 +893,9 @@ body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
 .tdoc-activate-page button.primary:hover:not(:disabled) { background: var(--td-accent-hover, #1245d0); }
 .tdoc-activate-page button.primary:disabled { opacity: .35; cursor: default; }
 .tdoc-activate-page button.secondary {
-  width: 100%; margin: -6px 0 0; padding: 9px 0; border: 0; border-radius: 8px; background: none; cursor: pointer;
+  width: 100%; margin: 6px 0 0; padding: 10px 0; border: 0; border-radius: 10px; background: none; cursor: pointer;
   color: var(--td-accent, #1652f0); font: 500 14px -apple-system, system-ui, sans-serif;
 }
 .tdoc-activate-page button.secondary:hover { background: var(--td-surface, #f4f4f2); }
-.tdoc-activate-error { font-size: 14px; line-height: 1.5; margin: 2px 0 0; }
-.tdoc-activate-page .tdoc-activate-hint { font-size: 13px; line-height: 1.5; margin: -4px 0 0; }
+.tdoc-activate-page .tdoc-activate-error { margin: 22px 0 0; font-size: 14px; line-height: 1.5; }
+.tdoc-activate-page .tdoc-activate-hint { margin: 12px 0 0; font-size: 13px; line-height: 1.5; }
