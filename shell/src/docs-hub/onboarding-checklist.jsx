@@ -36,13 +36,18 @@ function rememberOpen(value) {
   try { localStorage.setItem(OPEN_KEY, value ? '1' : '0'); } catch {}
 }
 
-export function onboardingSteps(record, firstDocHref) {
+export function onboardingSteps(record, firstDocHref, docs) {
   const r = record || {};
+  // "Create your first tdoc" cannot tick on the doc we handed them. The seeder
+  // stamps published_first itself, so that stamp only says a doc exists — it
+  // says nothing about who made it. Owning one that is not the seeded one is
+  // what makes the claim true.
+  const madeTheirOwn = (docs || []).some((d) => d && d.slug && d.slug !== r.first_doc);
   return [
-    { id: 'connect', label: 'Connect your agent', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
-    { id: 'doc', label: 'Your first doc', done: Boolean(r.published_first || r.first_doc), href: firstDocHref },
-    { id: 'comment', label: 'Say what you think about one sentence', done: Boolean(r.commented || r.revised), href: firstDocHref },
-    { id: 'revise', label: 'Send it back and read v2', done: Boolean(r.revised), href: firstDocHref },
+    { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
+    { id: 'create', label: 'Create your first tdoc', done: madeTheirOwn },
+    { id: 'comment', label: 'Leave a comment on a doc', done: Boolean(r.commented || r.revised), href: firstDocHref },
+    { id: 'revise', label: 'Tell your agent to fix the comments', done: Boolean(r.revised), href: firstDocHref },
   ];
 }
 
@@ -60,7 +65,7 @@ function Thumb({ id }) {
       </span>
     );
   }
-  if (id === 'doc') {
+  if (id === 'create') {
     return (
       <span className="onb-thumb" aria-hidden="true">
         <i className="t-line title" />
@@ -96,7 +101,7 @@ export function OnboardingChecklist({ record, docs }) {
   const first = record && record.first_doc;
   const alive = Boolean(first && (docs || []).some((d) => d && d.slug === first));
   const href = alive ? `/d/${encodeURIComponent(first)}` : null;
-  const steps = onboardingSteps(record, href);
+  const steps = onboardingSteps(record, href, docs);
   const done = steps.filter((s) => s.done).length;
   // Nothing to say before the journey starts, and nothing left to say after it
   // ends: the card is for the middle.

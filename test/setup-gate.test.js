@@ -86,11 +86,17 @@ t('the seeded comment is the one the publish path already plants', () => {
     'same words, same anchoring, no second version of either');
 });
 
-t('every checklist row is a stamp the server writes', () => {
-  for (const field of ['agent_connected', 'published_first', 'commented', 'revised']) {
+t('every checklist row is backed by something real', () => {
+  for (const field of ['agent_connected', 'commented', 'revised']) {
     assert(list.includes(field), `${field} backs a row`);
   }
   assert(!/Open your doc/.test(list), 'no row for something nothing records');
+  // The seeder stamps published_first itself, so that stamp says a doc exists
+  // and nothing about who made it. Ticking "Create your first tdoc" on the doc
+  // we handed them would be a lie.
+  assert(list.includes("const madeTheirOwn = (docs || []).some((d) => d && d.slug && d.slug !== r.first_doc);"),
+    'creating is owning a doc that is not the seeded one');
+  assert(/id: 'create'[^}]*done: madeTheirOwn/.test(list), 'and that is what the row reads');
 });
 
 t('an unfinished row is a way forward, never a dead line', () => {
