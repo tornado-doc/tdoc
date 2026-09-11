@@ -59,9 +59,9 @@ export function ActivatePage({ boot }) {
     if (status === 200 && data && data.ok) {
       setPending({ label: data.label });
     } else if (status === 429) {
-      setError('Too many attempts — wait a minute and try again.');
+      setError('Too many tries. Wait a minute, then try again.');
     } else {
-      setError('That code is not waiting for approval. It may have expired — re-run the command in your terminal for a fresh one.');
+      setError('This code has expired. Ask your agent to connect again.');
     }
   };
 
@@ -73,9 +73,9 @@ export function ActivatePage({ boot }) {
     if (status === 200 && data && data.ok) {
       setApproved(true);
     } else if (status === 429) {
-      setError('Too many approvals just now — wait a minute and try again.');
+      setError('Too many tries. Wait a minute, then try again.');
     } else {
-      setError('Approval failed — the code may have just expired. Re-run the command in your terminal.');
+      setError('This code has expired. Ask your agent to connect again.');
     }
   };
 
@@ -176,7 +176,12 @@ export function ActivatePage({ boot }) {
           </button>
         </>
       )}
-      {error ? <p role="alert" className="tdoc-activate-error">{error}</p> : null}
+      {error ? (
+        <>
+          <p role="alert" className="tdoc-activate-error">{error}</p>
+          <a className="tdoc-activate-back" href="/setup">Back to setup</a>
+        </>
+      ) : null}
       <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={completeSignIn} />
     </main>
   );

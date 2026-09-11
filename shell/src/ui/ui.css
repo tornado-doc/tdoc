@@ -897,3 +897,7 @@ body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
   font: 650 15px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
 }
 .tdoc-status-page .tdoc-status-actions button.primary:hover { background: var(--td-accent-hover, #1245d0); }
+
+.tdoc-activate-error { font-size: 14px; line-height: 1.5; max-width: 300px; margin: 4px auto 0; }
+.tdoc-activate-back { display: inline-block; margin: -6px auto 0; padding: 8px 10px; border-radius: 8px; color: var(--td-accent, #1652f0); font: 500 14px -apple-system, system-ui, sans-serif; text-decoration: none; }
+.tdoc-activate-back:hover { background: var(--td-surface, #f4f4f2); }
