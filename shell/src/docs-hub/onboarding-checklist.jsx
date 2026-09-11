@@ -25,7 +25,14 @@ function remember(value) {
   try { localStorage.setItem(STORE_KEY, value ? '1' : '0'); } catch {}
 }
 function storedOpen() {
-  try { return localStorage.getItem(OPEN_KEY) === '1'; } catch { return false; }
+  // Open until they close it. The first arrival should see the whole shape
+  // once, and a modal to achieve that would be the second thing to open
+  // itself within a minute of the gate, which is the pattern that performs
+  // worst: a list opened from is completed far more often than one thrown.
+  try {
+    const v = localStorage.getItem(OPEN_KEY);
+    return v === null ? true : v === '1';
+  } catch { return true; }
 }
 function rememberOpen(value) {
   try { localStorage.setItem(OPEN_KEY, value ? '1' : '0'); } catch {}

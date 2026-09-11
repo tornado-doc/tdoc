@@ -104,6 +104,14 @@ t('a deleted seed doc does not leave rows pointing at a 404', () => {
   assert(hub.includes('docs={hub.docs}'), 'the hub hands its list over');
 });
 
+t('the first arrival sees the whole shape, without a modal', () => {
+  // A pop-up here would be the second thing to open itself within a minute of
+  // the gate. The list is simply open until it is closed, and remembers that.
+  assert(list.includes('return v === null ? true :'), 'open by default, closed only once they say so');
+  const effects = hub.match(/useEffect\([\s\S]*?\n  \}/g) || [];
+  assert(!effects.some((e) => /setModal\s*\(/.test(e)), 'no dialog opens itself when the page loads');
+});
+
 t('the checklist is for the middle of the journey', () => {
   assert(list.includes('if (!record || !record.started || done === steps.length) return null;'),
     'nothing before it starts, nothing after it ends');
