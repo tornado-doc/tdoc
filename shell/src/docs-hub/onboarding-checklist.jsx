@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, ChevronDown, X } from 'lucide-react';
 
 // The onboarding, after setup. Four things, rendered from the record's own
 // timestamps rather than a second set of counters, each with a small drawing
@@ -13,13 +13,22 @@ import { Check, X } from 'lucide-react';
 // Collapsing is a view preference, not a step, so it lives in this browser and
 // not on the account: somebody who tidies it away on their laptop has not told
 // us anything about their phone.
+// Two preferences, both this browser's: whether the list is expanded, and
+// whether it is here at all.
 const STORE_KEY = 'tdoc.onboarding.collapsed';
+const OPEN_KEY = 'tdoc.onboarding.open';
 
 function stored() {
   try { return localStorage.getItem(STORE_KEY) === '1'; } catch { return false; }
 }
 function remember(value) {
   try { localStorage.setItem(STORE_KEY, value ? '1' : '0'); } catch {}
+}
+function storedOpen() {
+  try { return localStorage.getItem(OPEN_KEY) === '1'; } catch { return false; }
+}
+function rememberOpen(value) {
+  try { localStorage.setItem(OPEN_KEY, value ? '1' : '0'); } catch {}
 }
 
 export function onboardingSteps(record, firstDocHref) {
@@ -74,6 +83,7 @@ function Thumb({ id }) {
 
 export function OnboardingChecklist({ record, docs }) {
   const [collapsed, setCollapsed] = useState(stored);
+  const [open, setOpen] = useState(storedOpen);
   // Only link to the doc while it is still in their list: a seeded doc they
   // deleted would otherwise leave every row pointing at a 404.
   const first = record && record.first_doc;
@@ -86,12 +96,33 @@ export function OnboardingChecklist({ record, docs }) {
   if (!record || !record.started || done === steps.length) return null;
 
   const toggle = (next) => { setCollapsed(next); remember(next); };
+  const setOpenState = (next) => { setOpen(next); rememberOpen(next); };
+  // There is only ever one thing to do. Finished steps need no room and
+  // unreached ones need none yet, so at rest the card is the next step and a
+  // count — four rows is a list of things that are not being asked for.
+  const next = steps.find((s) => !s.done) || steps[steps.length - 1];
 
   if (collapsed) {
     return (
       <button type="button" className="onb-chip" onClick={() => toggle(false)}>
         <span className="onb-chip-count">{done}/{steps.length}</span> Finish setting up
       </button>
+    );
+  }
+
+  if (!open) {
+    return (
+      <section className="onb-card compact" aria-label="Finish setting up">
+        <a className="onb-next" href={next.href || undefined}>
+          <span className="onb-count">{done}/{steps.length}</span>
+          <span className="onb-label">{next.label}</span>
+          <Thumb id={next.id} />
+        </a>
+        <div className="onb-compact-acts">
+          <button type="button" onClick={() => setOpenState(true)} aria-label="Show all steps"><ChevronDown size={15} /></button>
+          <button type="button" onClick={() => toggle(true)} aria-label="Hide"><X size={15} /></button>
+        </div>
+      </section>
     );
   }
 
@@ -102,9 +133,10 @@ export function OnboardingChecklist({ record, docs }) {
           <h2>Finish setting up</h2>
           <p>{done} of {steps.length}</p>
         </div>
-        <button type="button" className="onb-hide" onClick={() => toggle(true)} aria-label="Hide">
-          <X size={15} />
-        </button>
+        <div className="onb-compact-acts">
+          <button type="button" onClick={() => setOpenState(false)} aria-label="Show only the next step"><ChevronDown size={15} style={{ transform: 'rotate(180deg)' }} /></button>
+          <button type="button" onClick={() => toggle(true)} aria-label="Hide"><X size={15} /></button>
+        </div>
       </header>
       <div className="onb-bar" aria-hidden="true"><i style={{ width: `${(done / steps.length) * 100}%` }} /></div>
       <ol>
