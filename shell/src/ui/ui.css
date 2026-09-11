@@ -852,23 +852,25 @@ button.tdoc-pin {
 body.tdoc-narrow .ui-dialog-popup.tdoc-wiz-modal { padding: 22px 22px 26px; }
 body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
 
-/* /activate — Raft's content in tdoc's materials. Their box is a 1.5px
-   near-black rule, which is their language; ours is a filled surface with a
-   hairline, like every other panel in this product. The label centres with
-   everything else rather than hanging left against centred type, and the
-   second choice is a text button — an outline that pale on white reads as an
-   empty rectangle, not a control. */
-.tdoc-activate-page { gap: 14px; }
-.tdoc-activate-page h1 { font-size: 24px; letter-spacing: -0.02em; }
-.tdoc-activate-grant { font-size: 14.5px; line-height: 1.5; color: var(--td-muted, #6b6a66); }
-.tdoc-activate-grant b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
-.tdoc-activate-codelabel {
-  width: 100%; max-width: 300px; margin: 4px auto -6px;
-  font-size: 12.5px; font-weight: 600; color: var(--td-muted, #6b6a66); text-align: center;
+/* /activate — one column, and everything in it fills it. The page used to be
+   a grid whose children each sized themselves, so nine elements arrived at
+   nine widths and every correction was another per-element max-width. The
+   stack is the structure; nothing inside it carries a width of its own. */
+.tdoc-activate-page { padding: 24px; }
+.tdoc-activate-stack {
+  width: 300px; max-width: 100%;
+  display: flex; flex-direction: column; align-items: stretch; gap: 12px;
+  text-align: center;
 }
+.tdoc-activate-stack > img { align-self: center; }
+.tdoc-activate-stack > h1 { font-size: 24px; letter-spacing: -0.02em; margin: 2px 0 0; }
+.tdoc-activate-grant { font-size: 14.5px; line-height: 1.5; color: var(--td-muted, #6b6a66); margin: -4px 0 0; }
+.tdoc-activate-grant b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
+.tdoc-activate-codelabel { font-size: 12.5px; font-weight: 600; color: var(--td-muted, #6b6a66); margin: 4px 0 -6px; }
+
 .tdoc-activate-codeshow,
 .tdoc-activate-page input.tdoc-activate-code {
-  width: 100%; max-width: 300px; padding: 16px; margin: 0 auto; box-sizing: border-box; display: block;
+  width: 100%; box-sizing: border-box; padding: 16px; margin: 0;
   border-radius: 14px; background: var(--td-surface, #f4f4f2); border: 1px solid var(--td-line, #e8e7e3);
   font: 600 22px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.18em; text-indent: 0.18em;
   color: var(--td-ink, #1a1a1a); text-align: center;
@@ -877,8 +879,9 @@ body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
 .tdoc-activate-page input.tdoc-activate-code::placeholder { color: #c4c4bf; }
 .tdoc-activate-page input.tdoc-activate-code:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
 
-.tdoc-activate-page button.primary {
-  width: 100%; max-width: 300px; height: 46px; margin: 4px auto 0;
+.tdoc-activate-page button.primary,
+.tdoc-status-page .tdoc-activate-stack button.primary {
+  width: 100%; height: 46px; margin: 2px 0 0;
   border: 0; border-radius: 12px; cursor: pointer;
   background: var(--td-accent, #1652f0); color: #fff;
   font: 650 15px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
@@ -886,18 +889,9 @@ body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
 .tdoc-activate-page button.primary:hover:not(:disabled) { background: var(--td-accent-hover, #1245d0); }
 .tdoc-activate-page button.primary:disabled { opacity: .35; cursor: default; }
 .tdoc-activate-page button.secondary {
-  margin: -4px auto 0; padding: 8px 10px; border: 0; border-radius: 8px; background: none; cursor: pointer;
+  width: 100%; margin: -6px 0 0; padding: 9px 0; border: 0; border-radius: 8px; background: none; cursor: pointer;
   color: var(--td-accent, #1652f0); font: 500 14px -apple-system, system-ui, sans-serif;
 }
 .tdoc-activate-page button.secondary:hover { background: var(--td-surface, #f4f4f2); }
-
-.tdoc-status-page .tdoc-status-actions button.primary {
-  width: 100%; max-width: 300px; height: 46px; border: 0; border-radius: 12px;
-  background: var(--td-accent, #1652f0); color: #fff; cursor: pointer;
-  font: 650 15px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
-}
-.tdoc-status-page .tdoc-status-actions button.primary:hover { background: var(--td-accent-hover, #1245d0); }
-
-.tdoc-activate-error { font-size: 14px; line-height: 1.5; max-width: 300px; margin: 4px auto 0; }
-.tdoc-activate-back { display: inline-block; margin: -6px auto 0; padding: 8px 10px; border-radius: 8px; color: var(--td-accent, #1652f0); font: 500 14px -apple-system, system-ui, sans-serif; text-decoration: none; }
-.tdoc-activate-back:hover { background: var(--td-surface, #f4f4f2); }
+.tdoc-activate-error { font-size: 14px; line-height: 1.5; margin: 2px 0 0; }
+.tdoc-activate-page .tdoc-activate-hint { font-size: 13px; line-height: 1.5; margin: -4px 0 0; }

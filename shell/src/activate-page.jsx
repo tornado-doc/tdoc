@@ -89,7 +89,8 @@ export function ActivatePage({ boot }) {
 
   if (approved) {
     return (
-      <main className="tdoc-status-page">
+      <main className="tdoc-status-page tdoc-activate-page">
+        <div className="tdoc-activate-stack">
         <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
         <h1>Device login approved</h1>
         <p>Sign-in is complete. You can close this browser page.</p>
@@ -97,12 +98,14 @@ export function ActivatePage({ boot }) {
           <button type="button" className="primary" onClick={() => window.close()}>Close this page</button>
         </div>
         <p className="tdoc-activate-hint">If this tab stays open, close it manually.</p>
+        </div>
       </main>
     );
   }
 
   return (
     <main className="tdoc-status-page tdoc-activate-page">
+      <div className="tdoc-activate-stack">
       <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
       <h1>Approve Device Login</h1>
       {!identity ? (
@@ -176,12 +179,8 @@ export function ActivatePage({ boot }) {
           </button>
         </>
       )}
-      {error ? (
-        <>
-          <p role="alert" className="tdoc-activate-error">{error}</p>
-          <a className="tdoc-activate-back" href="/setup">Back to setup</a>
-        </>
-      ) : null}
+      {error ? <p role="alert" className="tdoc-activate-error">{error}</p> : null}
+      </div>
       <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={completeSignIn} />
     </main>
   );
