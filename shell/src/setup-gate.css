@@ -62,7 +62,8 @@
   overflow-wrap: anywhere; user-select: all;
 }
 .sg-prompt-foot { display: flex; align-items: center; gap: 12px; }
-.sg-prompt-agents { flex: 1 1 auto; min-width: 0; font-size: 11.5px; line-height: 1.4; color: #9a9a96; }
+.sg-marks { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 9px; color: #6b6a66; }
+.sg-marks svg { display: block; opacity: .85; }
 .sg-prompt-copy {
   flex: 0 0 auto;
   height: 30px; padding: 0 14px;
