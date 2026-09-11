@@ -71,25 +71,40 @@
 .sg-prompt-copy:active { opacity: .45; }
 .sg-prompt-copy.copied { color: #1a7340; cursor: default; }
 
-.sg-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; counter-reset: sgs; }
-.sg-steps li { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; font-size: 13.5px; line-height: 1.45; }
-.sg-steps li::before { counter-increment: sgs; content: counter(sgs); width: 20px; height: 20px; border-radius: 6px; background: var(--td-surface, #f4f4f2); border: 1px solid var(--td-line, #e8e7e3); color: var(--td-muted, #6b6a66); font: 600 11px/18px inherit; text-align: center; }
+/* Raft's shape for both: the number is a hairline square, not a filled chip,
+   and the wait is a bare line — a spinner and mono grey type on the page
+   itself. A box around a status makes a passing moment look like a warning. */
+.sg-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; counter-reset: sgs; }
+.sg-steps li { display: grid; grid-template-columns: 17px 1fr; gap: 11px; align-items: start; font-size: 13.5px; line-height: 1.4; color: var(--td-ink, #1a1a1a); }
+.sg-steps li::before {
+  counter-increment: sgs; content: counter(sgs);
+  width: 17px; height: 17px; border-radius: 4px; margin-top: 1px;
+  border: 1px solid var(--td-line, #e8e7e3); background: none;
+  color: var(--td-muted, #6b6a66);
+  font: 500 10px/15px ui-monospace, "SF Mono", Menlo, monospace;
+  text-align: center;
+}
 
-/* Sized for its tallest state, so the button below never moves. */
-.sg-status-slot { display: flex; min-height: 84px; }
-.sg-status { flex: 1 1 auto; display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; background: var(--td-surface-2, #f7f7f5); border: 1px solid var(--td-line, #e8e7e3); color: var(--td-muted, #6b6a66); }
-.sg-spin { width: 14px; height: 14px; flex: 0 0 14px; border-radius: 50%; border: 2px solid var(--td-line, #e8e7e3); border-top-color: var(--td-accent, #1652f0); animation: sg-spin .9s linear infinite; }
+/* Reserved for its tallest state so the button below never moves. */
+.sg-status-slot { display: flex; align-items: flex-start; min-height: 62px; padding-top: 4px; }
+.sg-status {
+  flex: 1 1 auto; display: flex; align-items: flex-start; gap: 10px;
+  font: 12.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--td-muted, #6b6a66);
+}
+.sg-spin { width: 14px; height: 14px; flex: 0 0 14px; margin-top: 3px; border-radius: 50%; border: 1.5px solid var(--td-line, #e8e7e3); border-top-color: var(--td-accent, #1652f0); animation: sg-spin .9s linear infinite; }
 @keyframes sg-spin { to { transform: rotate(360deg); } }
 
-.sg-status.stuck { background: #fdf3dd; border-color: transparent; color: var(--td-ink, #1a1a1a); flex-direction: column; align-items: flex-start; gap: 9px; }
-.sg-status.stuck .head { font-weight: 600; color: #8a6100; }
-.sg-doctor { display: flex; align-items: center; gap: 8px; width: 100%; }
-.sg-doctor code { flex: 1 1 auto; padding: 8px 11px; border-radius: 9px; background: #fff; border: 1px solid var(--td-line, #e8e7e3); font: 500 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; color: var(--td-ink, #1a1a1a); user-select: all; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sg-doctor button { flex: 0 0 auto; border: 1px solid var(--td-line, #e8e7e3); background: #fff; color: var(--td-accent, #1652f0); font: 600 12px/1 inherit; padding: 8px 12px; border-radius: 999px; cursor: pointer; }
+.sg-status.stuck { flex-direction: column; gap: 8px; color: #8a6100; }
+.sg-status.stuck .head { display: flex; align-items: baseline; gap: 8px; }
+.sg-doctor { display: flex; align-items: baseline; gap: 12px; width: 100%; color: var(--td-ink, #1a1a1a); }
+.sg-doctor code { flex: 1 1 auto; min-width: 0; font: inherit; user-select: all; overflow-wrap: anywhere; }
+.sg-doctor button { flex: 0 0 auto; border: 0; background: none; padding: 0 2px; cursor: pointer; font: 600 13px -apple-system, system-ui, sans-serif; color: var(--td-accent, #1652f0); }
+.sg-doctor button:hover { opacity: .65; }
 
-.sg-status.done { background: #e7f2ec; border-color: transparent; color: var(--td-ink, #1a1a1a); }
-.sg-status.done .tick { flex: 0 0 auto; color: #1a7340; }
-.sg-status.done b { font-weight: 650; }
+.sg-status.done { color: #1a7340; align-items: baseline; }
+.sg-status.done .tick { flex: 0 0 auto; align-self: flex-start; margin-top: 2px; }
+.sg-status.done b { font-weight: 600; }
 .sg-status .found { color: var(--td-muted, #6b6a66); }
 
 .sg-split .sg-primary { display: flex; align-items: center; justify-content: center; text-decoration: none; width: 100%; border: 0; border-radius: 12px; height: 46px; cursor: pointer; background: var(--td-accent, #1652f0); color: #fff; font: 650 15px inherit; letter-spacing: -0.01em; }

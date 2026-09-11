@@ -27,6 +27,7 @@ import { AGENT_NAMES } from './onboarding-dialog.jsx';
 // CLI fetch it. That is a real change to the prompt, not a UI tweak.
 
 export const SETUP_PROMPT = 'Install tdoc and connect it to my account: https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md';
+export const DOCTOR_PROMPT = 'Run tdoc doctor and fix what it reports';
 const POLL_MS = 3000;
 const STUCK_MS = 60000;
 
@@ -245,10 +246,10 @@ export function SetupGate({ boot }) {
                   ) : null}
                   {state === 'stuck' ? (
                     <div className="sg-status stuck">
-                      <div className="head">Still nothing after a minute.</div>
+                      <div className="head">Still nothing. Ask your agent to check itself:</div>
                       <div className="sg-doctor">
-                        <code>Run tdoc doctor and fix what it reports</code>
-                        <button type="button" onClick={() => copyText('Run tdoc doctor and fix what it reports')}>Copy</button>
+                        <code>{DOCTOR_PROMPT}</code>
+                        <button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy</button>
                       </div>
                     </div>
                   ) : null}
