@@ -35,8 +35,8 @@
 .sg-pane-form { display: flex; flex-direction: column; padding: 26px 38px 34px; background: #fff; }
 .sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: -4px; border-radius: 8px; text-decoration: none; }
 .sg-brand:hover { background: var(--td-surface, #f4f4f2); }
-.sg-mid { flex: 1 1 auto; display: flex; align-items: center; }
-.sg-col { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 18px; }
+.sg-mid { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; }
+.sg-col { width: 100%; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 
 .sg-h1 { margin: 0 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
 
