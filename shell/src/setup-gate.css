@@ -41,16 +41,35 @@
 .sg-h1 { margin: 0 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
 
 /* Not a terminal block: this is a sentence you paste into an agent, so it is
-   set as text on the page's own surface, with Copy sitting with it. */
-.sg-section { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-bottom: -8px; }
+   set as text on the page's own surface. Content and its action share one
+   row, ending together — a button floating below the last line leaves a void
+   that reads as a mistake, and a bordered pill makes a quiet action shout. */
+.sg-section { display: flex; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; margin-bottom: -6px; }
 .sg-section-label { font-size: 11px; font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; color: var(--td-muted, #6b6a66); flex: 0 0 auto; }
 .sg-section-note { margin-left: auto; font-size: 11.5px; color: var(--td-muted, #6b6a66); text-align: right; }
 
-.sg-prompt { display: flex; flex-direction: column; gap: 11px; padding: 15px; border-radius: 13px; background: var(--td-surface, #f4f4f2); border: 1px solid var(--td-line, #e8e7e3); }
-.sg-prompt-text { margin: 0; font: 500 13.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--td-ink, #1a1a1a); overflow-wrap: anywhere; user-select: all; }
-.sg-prompt-copy { align-self: flex-end; border: 1px solid var(--td-line, #e8e7e3); background: #fff; color: var(--td-accent, #1652f0); font: 600 12.5px/1 inherit; padding: 8px 15px; border-radius: 999px; cursor: pointer; }
-.sg-prompt-copy:hover { background: var(--td-surface-2, #f7f7f5); }
-.sg-prompt-copy.copied { color: #1a7340; border-color: #1a7340; }
+.sg-prompt {
+  display: flex; align-items: flex-end; gap: 16px;
+  padding: 16px 18px; border-radius: 18px;
+  background: var(--td-surface, #f4f4f2);
+}
+.sg-prompt-text {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  font: 500 13px/1.7 ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--td-ink, #1a1a1a);
+  overflow-wrap: anywhere; user-select: all;
+}
+.sg-prompt-copy {
+  flex: 0 0 auto; align-self: flex-end;
+  border: 0; background: none; cursor: pointer;
+  padding: 0 2px; margin-bottom: 1px;
+  font: 600 13.5px inherit; letter-spacing: -0.01em;
+  color: var(--td-accent, #1652f0);
+  transition: opacity .12s, color .12s;
+}
+.sg-prompt-copy:hover { opacity: .65; }
+.sg-prompt-copy:active { opacity: .45; }
+.sg-prompt-copy.copied { color: #1a7340; cursor: default; }
 
 .sg-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; counter-reset: sgs; }
 .sg-steps li { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; font-size: 13.5px; line-height: 1.45; }

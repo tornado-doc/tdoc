@@ -226,7 +226,7 @@ export function SetupGate({ boot }) {
                 <div className="sg-prompt">
                   <p className="sg-prompt-text">{SETUP_PROMPT}</p>
                   <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
-                    {copied ? 'Copied ✓' : 'Copy'}
+                    {copied ? 'Copied' : 'Copy'}
                   </button>
                 </div>
 
