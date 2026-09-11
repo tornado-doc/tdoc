@@ -30,13 +30,8 @@ export const SETUP_PROMPT = 'Install tdoc and connect it to my account: https://
 const POLL_MS = 3000;
 const STUCK_MS = 60000;
 
-function Mark({ size = 17 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="2.5" y="2.5" width="19" height="19" rx="5" stroke="currentColor" strokeWidth="2" />
-      <path d="M7.5 9.5h9M12 9.5V17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+function Mark({ size = 28 }) {
+  return <img src="/tdoc_logo.svg" alt="" width={size} height={size} data-tdoc-dark="invert" />;
 }
 
 // ---------------------------------------------------------------- the scenes
@@ -116,7 +111,7 @@ function SceneDone() {
     <>
       <div className="sg-app">
         <div className="sg-bar">
-          <div className="sg-mk"><Mark size={18} /></div>
+          <div className="sg-mk"><Mark size={24} /></div>
           <div className="sg-ver">v2 ▾</div>
           <div className="sg-title">What AI knows about you</div>
           <div className="sg-owner">· you</div>
@@ -216,7 +211,7 @@ export function SetupGate({ boot }) {
   return (
     <div className="sg-split">
       <section className="sg-pane-form">
-        <a className="sg-brand" href="/me" aria-label="My docs"><Mark /> tdoc</a>
+        <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a>
         <div className="sg-mid">
           <div className="sg-col">
             <h1 className="sg-h1">Connect your agent</h1>
