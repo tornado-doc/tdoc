@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
-import { AGENT_NAMES } from './onboarding-dialog.jsx';
+import { AGENT_NAMES, COPY_FALLBACK, selectContents } from './onboarding-dialog.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -163,6 +163,8 @@ function SceneDone() {
 export function SetupGate({ boot }) {
   const [record, setRecord] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const promptRef = useRef(null);
   const [elapsed, setElapsed] = useState(0);
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
@@ -200,6 +202,8 @@ export function SetupGate({ boot }) {
   const copy = async () => {
     const ok = await copyText(SETUP_PROMPT);
     setCopied(ok !== false);
+    setCopyFailed(ok === false);
+    if (ok === false) selectContents(promptRef.current);
     copiedAt.current = Date.now();
     if (!stamped.current) { stamped.current = true; postOnboardingEvent('door_own_agent').catch(() => {}); }
     postOnboardingEvent('copy_clicked').catch(() => {});
@@ -225,7 +229,7 @@ export function SetupGate({ boot }) {
                 </div>
 
                 <div className="sg-prompt">
-                  <p className="sg-prompt-text">{SETUP_PROMPT}</p>
+                  <p className="sg-prompt-text" ref={promptRef}>{SETUP_PROMPT}</p>
                   <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
                     {copied ? 'Copied' : 'Copy'}
                   </button>
@@ -241,7 +245,7 @@ export function SetupGate({ boot }) {
                   {state === 'waiting' ? (
                     <div className="sg-status">
                       <span className="sg-spin" aria-hidden="true" />
-                      {copied ? 'Waiting for your agent.' : 'Waiting for you to paste the prompt.'}
+                      {copyFailed ? COPY_FALLBACK : copied ? 'Waiting for your agent.' : 'Waiting for you to paste the prompt.'}
                     </div>
                   ) : null}
                   {state === 'stuck' ? (
