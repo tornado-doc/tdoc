@@ -98,24 +98,28 @@ t('all comment mutations share the sign-in fallback', () => {
   }
 });
 
-// A notification links to a comment, not to a position. When the anchor no
-// longer resolves — the landing page republishes new content under the same
-// version, so its thread orphans wholesale — there is no pin to scroll to, and
-// bailing there left the link doing nothing at all: no card, no scroll, and
-// `?comment=` still sitting in the URL. The floating card already knows how to
-// render unanchored, so open it.
-t('a deep link to an unanchored comment still opens its card', () => {
+// A notification links to a comment, not to a position. The frame reports a
+// pin for every comment the margin shows — a real one, or a seat at the end of
+// the document when the anchor no longer resolves — so a target with no cluster
+// is one the frame has not laid out yet, never one it has lost. The deep link
+// therefore waits for the pins instead of opening a fallback card: on a fresh
+// arrival the comments land before the frame's first `tdoc:pins`, and opening
+// the card at that moment left it floating at the top with the target cleared,
+// so the document never scrolled (JUL-38). The unanchored case that the old
+// fallback existed for is covered in the browser, in
+// notification-deep-link.test.js, where a seat is something that can be seen.
+t('a deep link with no cluster yet waits for the frame rather than giving up', () => {
   const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
   const start = shell.indexOf('const cluster = clusters.find(');
   assert(start > 0, 'deep-link cluster lookup missing');
   const branch = shell.slice(start, start + 900);
-  assert(!/if \(!cluster\) return;/.test(branch),
-    'a missing cluster still aborts the deep link, so an unanchored comment is unreachable');
   const guard = branch.slice(branch.indexOf('if (!cluster)'));
-  assert(/setOpenCommentId\(root\.id\)/.test(guard.slice(0, 700)),
-    'an unanchored deep link must open the comment card');
-  assert(/setDeepTarget\(null\)/.test(guard.slice(0, 700)),
-    'an unanchored deep link must clear the pending target');
+  const body = guard.slice(0, guard.indexOf('\n    }'));
+  assert(/return;/.test(body), 'a missing cluster must wait for the pins (return and run again)');
+  assert(!/setDeepTarget\(null\)/.test(body),
+    'clearing the target before the frame has laid the pins out is the JUL-38 race');
+  assert(!/setOpenCommentId\(root\.id\)/.test(body),
+    'opening the card before the pins arrive leaves it floating at the top with no scroll');
 });
 
 // The floating card is what shows an unanchored comment on desktop, and it is

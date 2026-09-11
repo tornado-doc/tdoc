@@ -108,6 +108,7 @@ const GATED = [
   'artifact-shell.test.js', // playwright: cross-origin iframe shell boundary (RED until the re-arch lands; see PLAN.md)
   'anchor-scenarios.test.js', // #387 everything selectable can carry a comment
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
+  'notification-deep-link.test.js', // playwright: a notification click lands on its comment from any page (JUL-38)
 ];
 
 const runAll = process.argv.includes('--all');
