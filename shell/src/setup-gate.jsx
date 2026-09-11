@@ -219,7 +219,6 @@ export function SetupGate({ boot }) {
         <a className="sg-brand" href="/me" aria-label="My docs"><Mark /> tdoc</a>
         <div className="sg-mid">
           <div className="sg-col">
-            <p className="sg-eyebrow">Set up tdoc</p>
             <h1 className="sg-h1">Connect your agent</h1>
 
             {signedIn ? (

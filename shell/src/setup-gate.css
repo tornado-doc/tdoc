@@ -38,8 +38,7 @@
 .sg-mid { flex: 1 1 auto; display: flex; align-items: center; }
 .sg-col { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 18px; }
 
-.sg-eyebrow { margin: 0; font-size: 11px; font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; color: var(--td-muted, #6b6a66); }
-.sg-h1 { margin: -10px 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
+.sg-h1 { margin: 0 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
 
 /* Not a terminal block: this is a sentence you paste into an agent, so it is
    set as text on the page's own surface, with Copy sitting with it. */
