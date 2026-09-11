@@ -45,7 +45,7 @@ export function onboardingSteps(record, firstDocHref, docs) {
   const madeTheirOwn = (docs || []).some((d) => d && d.slug && d.slug !== r.first_doc);
   return [
     { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
-    { id: 'create', label: 'Create your first tdoc', done: madeTheirOwn },
+    { id: 'create', label: 'Create your first tdoc', done: madeTheirOwn, action: 'create' },
     { id: 'comment', label: 'Leave a comment on a doc', done: Boolean(r.commented || r.revised), href: firstDocHref },
     { id: 'revise', label: 'Tell your agent to fix the comments', done: Boolean(r.revised), href: firstDocHref },
   ];
@@ -93,7 +93,7 @@ function Thumb({ id }) {
   );
 }
 
-export function OnboardingChecklist({ record, docs }) {
+export function OnboardingChecklist({ record, docs, onCreate }) {
   const [collapsed, setCollapsed] = useState(stored);
   const [open, setOpen] = useState(storedOpen);
   // Only link to the doc while it is still in their list: a seeded doc they
@@ -154,7 +154,10 @@ export function OnboardingChecklist({ record, docs }) {
           );
           return (
             <li key={step.id} className={step.done ? 'done' : ''}>
-              {!step.done && step.href ? <a href={step.href}>{body}</a> : <span className="onb-row">{body}</span>}
+              {step.done ? <span className="onb-row">{body}</span>
+                : step.action === 'create' && onCreate ? <button type="button" className="onb-go" onClick={onCreate}>{body}</button>
+                  : step.href ? <a href={step.href}>{body}</a>
+                    : <span className="onb-row">{body}</span>}
             </li>
           );
         })}

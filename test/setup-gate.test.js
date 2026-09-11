@@ -103,6 +103,10 @@ t('an unfinished row is a way forward, never a dead line', () => {
   // The person who started setup, left and came back lands here. Without a
   // link, the row naming the thing they have not done offers them nothing.
   assert(/id: 'connect'[^}]*href: '\/setup'/.test(list), 'the connect row leads back to the gate');
+  // Creating happens in this page's own dialog, so that row opens it rather
+  // than sitting there naming something with no way to do it.
+  assert(/id: 'create'[^}]*action: 'create'/.test(list) && list.includes('onCreate'), 'the create row opens the create dialog');
+  assert(hub.includes('onCreate={openCreateHelp}'), 'and the hub hands it the handler');
 });
 
 t('a deleted seed doc does not leave rows pointing at a 404', () => {

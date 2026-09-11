@@ -205,11 +205,13 @@
 .onb-card ol { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
 .onb-card ol:has(li:only-child) { margin-top: -2px; }
 
-.onb-card li a, .onb-card li .onb-row {
+.onb-card li a, .onb-card li .onb-row, .onb-card li .onb-go {
   display: grid; grid-template-columns: 18px 1fr 72px; gap: 12px; align-items: center;
   padding: 8px 0; text-decoration: none; color: inherit;
 }
-.onb-card li a:hover .onb-label { text-decoration: underline; }
+.onb-card li .onb-go { width: 100%; border: 0; background: none; cursor: pointer; font: inherit; text-align: left; }
+.onb-card li a:hover .onb-label, .onb-card li .onb-go:hover .onb-label { text-decoration: underline; }
+.onb-card li .onb-go .onb-label { color: var(--td-accent, #1652f0); }
 .onb-label { font-size: 14px; line-height: 1.35; }
 .onb-card li a .onb-label { color: var(--td-accent, #1652f0); }
 .onb-card li.done .onb-label { color: var(--td-muted, #6b6a66); text-decoration: line-through; }

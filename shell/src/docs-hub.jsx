@@ -137,7 +137,7 @@ export function DocsHub({ boot }) {
           <button className="mk-btn" type="button" onClick={openCreateHelp}>Create a doc</button>
         </div>
 
-        <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
+        <OnboardingChecklist record={boot.onboarding} docs={hub.docs} onCreate={openCreateHelp} />
         <div className="tabs" role="tablist">
           {TABS.map(([id, label]) => (
             <button
