@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
-import { SignInDialog } from './sign-in-dialog.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -170,7 +169,6 @@ export function SetupGate({ boot }) {
   const [copied, setCopied] = useState(false);
   const [agent, setAgent] = useState(AGENTS[0]);
   const [elapsed, setElapsed] = useState(0);
-  const [signInOpen, setSignInOpen] = useState(false);
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
   const copiedAt = useRef(null);
@@ -197,16 +195,11 @@ export function SetupGate({ boot }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [signedIn]);
 
-  // Two hosts, two doors. tdoc.dev signs people in through the OIDC provider
-  // (a full-page redirect back to /setup); a BYOK or local worker has no OIDC
-  // and falls back to GitHub's device flow, which runs in this window. Without
-  // the second door the gate is a dead end on every host but tdoc.dev.
+  // The site's own sign-in, and only that: a full-page redirect out to the
+  // OIDC provider and back to /setup. Signing in is signing up, so there is no
+  // second door to offer.
   const signIn = () => {
-    if (boot?.oidcAuth) {
-      location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent('/setup')}`;
-      return;
-    }
-    setSignInOpen(true);
+    location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent('/setup')}`;
   };
 
   const copy = async () => {
@@ -223,7 +216,6 @@ export function SetupGate({ boot }) {
 
   return (
     <div className="sg-split">
-      <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={(who) => { setSignInOpen(false); setIdentity(who); location.reload(); }} />
       <section className="sg-pane-form">
         <div className="sg-brand"><Mark /> tdoc</div>
         <div className="sg-mid">
@@ -292,9 +284,9 @@ export function SetupGate({ boot }) {
               </>
             ) : (
               <>
-                <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth && !boot?.authConfigured}>Sign in to start</button>
+                <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in to start</button>
                 <p className="sg-account">
-                  {boot?.oidcAuth || boot?.authConfigured
+                  {boot?.oidcAuth
                     ? 'Signing in creates your account. There is no separate sign-up.'
                     : 'Sign-in is not configured on this host.'}
                 </p>

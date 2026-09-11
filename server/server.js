@@ -959,7 +959,6 @@ function localSetupDocument(nonce) {
       identity: e2eIdentity(),
       oidcAuth: false,
       oidcLabel: '',
-      authConfigured: false,
     }),
   });
 }
