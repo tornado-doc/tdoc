@@ -206,8 +206,8 @@
 .onb-card ol:has(li:only-child) { margin-top: -2px; }
 
 .onb-card li a, .onb-card li .onb-row {
-  display: grid; grid-template-columns: 18px 1fr; gap: 12px; align-items: center;
-  padding: 9px 0; text-decoration: none; color: inherit;
+  display: grid; grid-template-columns: 18px 1fr 72px; gap: 12px; align-items: center;
+  padding: 8px 0; text-decoration: none; color: inherit;
 }
 .onb-card li a:hover .onb-label { text-decoration: underline; }
 .onb-label { font-size: 14px; line-height: 1.35; }
@@ -219,6 +219,39 @@
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
 .onb-card li.done .onb-tick { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); }
+
+/* The thumbnails. Notion's are legible because they contain something you
+   recognise, so ours do too: the agents' own marks, the anchor highlight's
+   #fff7d0, a comment card, a v2 chip. Everything is border-box — the last
+   version of these came out 23px wider on two rows for want of it. */
+.onb-thumb {
+  box-sizing: border-box; position: relative;
+  width: 72px; height: 44px; padding: 7px;
+  border-radius: 7px; border: 1px solid var(--td-line, #e8e7e3);
+  background: #fff; overflow: hidden;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.onb-card li.done .onb-thumb { opacity: .45; }
+.onb-thumb.agents { flex-direction: row; align-items: center; justify-content: center; gap: 9px; background: var(--td-surface-2, #f7f7f5); }
+.onb-thumb .t-line { display: block; height: 3px; width: 100%; border-radius: 2px; background: #dcdcd7; }
+.onb-thumb .t-line.title { height: 5px; width: 62%; border-radius: 2px; background: #8e8e88; }
+.onb-thumb .t-line.title.short { width: 46%; }
+.onb-thumb .t-mark { display: block; height: 7px; border-radius: 2px; background: #fff7d0; box-shadow: inset 0 -2px 0 #e8c54a; }
+.onb-thumb .t-mark.pale { background: #f1f1ec; box-shadow: none; }
+.onb-thumb .w95 { width: 95%; } .onb-thumb .w70 { width: 70%; } .onb-thumb .w55 { width: 55%; }
+.onb-thumb .t-card {
+  box-sizing: border-box; position: absolute; right: 6px; bottom: 6px;
+  width: 26px; height: 20px; border-radius: 5px;
+  background: #fff; border: 1px solid var(--td-accent, #1652f0);
+  box-shadow: 0 1px 3px rgba(60,64,67,.16);
+  display: flex; align-items: center; justify-content: center; color: var(--td-accent, #1652f0);
+}
+.onb-thumb .t-card.done { border-color: #1a7340; color: #1a7340; }
+.onb-thumb .t-ver {
+  position: absolute; left: 7px; bottom: 7px; padding: 1px 5px; border-radius: 999px;
+  background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0);
+  font: 650 9px/1.5 -apple-system, system-ui, sans-serif; font-style: normal;
+}
 
 /* Hidden, it parks as a chip rather than disappearing: the loop is unfinished
    and the way back to it should not be something you have to remember. */

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Check, ChevronDown, X } from 'lucide-react';
+import { ClaudeMark, OpenAIMark } from '../agent-marks.jsx';
 
 // The onboarding, after setup. Four things, rendered from the record's own
 // timestamps rather than a second set of counters.
@@ -43,6 +44,48 @@ export function onboardingSteps(record, firstDocHref) {
     { id: 'comment', label: 'Say what you think about one sentence', done: Boolean(r.commented || r.revised), href: firstDocHref },
     { id: 'revise', label: 'Send it back and read v2', done: Boolean(r.revised), href: firstDocHref },
   ];
+}
+
+// Notion's rows carry a thumbnail because theirs are recognisable: a Gmail
+// logo, a calendar grid, a waveform with a record button. The first attempt at
+// ours was grey bars, which is why it read as a smudge and got deleted. These
+// carry the things this product is actually recognised by — the two agents'
+// own marks, the anchor highlight's yellow, a comment card, a v2 chip.
+function Thumb({ id }) {
+  if (id === 'connect') {
+    return (
+      <span className="onb-thumb agents" aria-hidden="true">
+        <ClaudeMark size={19} />
+        <OpenAIMark size={17} />
+      </span>
+    );
+  }
+  if (id === 'doc') {
+    return (
+      <span className="onb-thumb" aria-hidden="true">
+        <i className="t-line title" />
+        <i className="t-line w95" />
+        <i className="t-mark w70" />
+      </span>
+    );
+  }
+  if (id === 'comment') {
+    return (
+      <span className="onb-thumb" aria-hidden="true">
+        <i className="t-line title short" />
+        <i className="t-mark w55" />
+        <i className="t-card" />
+      </span>
+    );
+  }
+  return (
+    <span className="onb-thumb" aria-hidden="true">
+      <i className="t-line title short" />
+      <i className="t-mark w55 pale" />
+      <i className="t-card done"><Check size={10} strokeWidth={3.5} /></i>
+      <i className="t-ver">v2</i>
+    </span>
+  );
 }
 
 export function OnboardingChecklist({ record, docs }) {
@@ -101,6 +144,7 @@ export function OnboardingChecklist({ record, docs }) {
             <>
               <span className="onb-tick">{step.done ? <Check size={12} strokeWidth={3} /> : null}</span>
               <span className="onb-label">{step.label}</span>
+              <Thumb id={step.id} />
             </>
           );
           return (
