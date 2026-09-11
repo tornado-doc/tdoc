@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
+import { AGENT_NAMES } from './onboarding-dialog.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -26,7 +27,6 @@ import { getOnboarding, postOnboardingEvent } from './document/api.js';
 // CLI fetch it. That is a real change to the prompt, not a UI tweak.
 
 export const SETUP_PROMPT = 'Install tdoc and connect it to my account: https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md';
-export const AGENTS = ['Claude Code', 'Codex', 'Claude Cowork', 'ChatGPT Work'];
 const POLL_MS = 3000;
 const STUCK_MS = 60000;
 
@@ -46,22 +46,22 @@ function Mark({ size = 17 }) {
 // window, because drawing four invented skins would be worse than one honest
 // one.
 
-function ChatWindow({ agent, children }) {
+function ChatWindow({ children }) {
   return (
     <div className="sg-chat">
       <div className="sg-chat-bar">
         <div className="sg-lights"><i /><i /><i /></div>
-        <div className="sg-chat-name">{agent}</div>
+        <div className="sg-chat-name">Your agent</div>
       </div>
       <div className="sg-chat-body">{children}</div>
     </div>
   );
 }
 
-function Composer({ agent, live = false, children }) {
+function Composer({ live = false, children }) {
   return (
     <div className={`sg-composer${live ? ' live' : ''}`}>
-      <div className="sg-field">{children || <span className="sg-ph">{`Reply to ${agent}…`}</span>}</div>
+      <div className="sg-field">{children || <span className="sg-ph">Reply to your agent…</span>}</div>
       <div className="sg-tools">
         <span>＋</span><span>@</span><span className="sg-sp" />
         {live ? <span className="sg-hint">⏎ to send</span> : null}
@@ -71,15 +71,15 @@ function Composer({ agent, live = false, children }) {
   );
 }
 
-function SceneWaiting({ agent }) {
+function SceneWaiting() {
   return (
     <>
-      <ChatWindow agent={agent}>
+      <ChatWindow>
         <div className="sg-msg">
           <span className="sg-av bot" />
           <p className="sg-txt">What are we working on?</p>
         </div>
-        <Composer agent={agent} live>
+        <Composer live>
           <span className="sg-typed">{SETUP_PROMPT.slice(0, 62)}…</span>
           <span className="sg-caret" />
         </Composer>
@@ -88,10 +88,10 @@ function SceneWaiting({ agent }) {
   );
 }
 
-function SceneStuck({ agent }) {
+function SceneStuck() {
   return (
     <>
-      <ChatWindow agent={agent}>
+      <ChatWindow>
         <div className="sg-msg me">
           <p className="sg-txt">Run tdoc doctor and fix what it reports</p>
           <span className="sg-av you" />
@@ -103,7 +103,7 @@ function SceneStuck({ agent }) {
           <span className="sg-av bot" />
           <p className="sg-txt">The approval expired before I got there. I’ll ask for a new code — approve it in the tab I open.</p>
         </div>
-        <Composer agent={agent} />
+        <Composer />
       </ChatWindow>
     </>
   );
@@ -167,7 +167,6 @@ function SceneDone() {
 export function SetupGate({ boot }) {
   const [record, setRecord] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [agent, setAgent] = useState(AGENTS[0]);
   const [elapsed, setElapsed] = useState(0);
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
@@ -211,13 +210,16 @@ export function SetupGate({ boot }) {
   };
 
   const scene = state === 'done' ? <SceneDone />
-    : state === 'stuck' ? <SceneStuck agent={agent} />
-      : <SceneWaiting agent={agent} />;
+    : state === 'stuck' ? <SceneStuck />
+      : <SceneWaiting />;
 
   return (
     <div className="sg-split">
       <section className="sg-pane-form">
-        <div className="sg-brand"><Mark /> tdoc</div>
+        <div className="sg-top">
+          <a className="sg-brand" href="/me" aria-label="My docs"><Mark /> tdoc</a>
+          {signedIn ? <span className="sg-who">{identity.name || identity.login}</span> : null}
+        </div>
         <div className="sg-mid">
           <div className="sg-col">
             <p className="sg-eyebrow">Set up tdoc</p>
@@ -228,11 +230,7 @@ export function SetupGate({ boot }) {
               <>
                 <div className="sg-section">
                   <span className="sg-section-label">Setup prompt</span>
-                  <div className="sg-agents" role="group" aria-label="Your agent">
-                    {AGENTS.map((name) => (
-                      <button key={name} type="button" aria-pressed={name === agent} onClick={() => setAgent(name)}>{name}</button>
-                    ))}
-                  </div>
+                  <span className="sg-section-note">{AGENT_NAMES}</span>
                 </div>
 
                 <div className="sg-prompt">
@@ -243,7 +241,7 @@ export function SetupGate({ boot }) {
                 </div>
 
                 <ol className="sg-steps">
-                  <li>Paste it into {agent}.</li>
+                  <li>Paste it into your agent.</li>
                   <li>Approve the request when it opens in your browser.</li>
                   <li>Your agent shows up here on its own. No need to refresh.</li>
                 </ol>
@@ -278,9 +276,7 @@ export function SetupGate({ boot }) {
                 <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? '/me' : undefined} aria-disabled={state !== 'done'}>
                   Continue
                 </a>
-                <p className="sg-account">
-                  Signed in as {identity.name || identity.login}. <a href="/me">I’ll do this later</a>
-                </p>
+                <p className="sg-account"><a href="/me">I’ll do this later</a></p>
               </>
             ) : (
               <>
