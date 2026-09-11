@@ -4,6 +4,7 @@ import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { CreateChoice } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
+import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
@@ -135,6 +136,8 @@ export function DocsHub({ boot }) {
           <h1>My docs</h1>
           <button className="mk-btn" type="button" onClick={openCreateHelp}>Create a doc</button>
         </div>
+
+        <OnboardingChecklist record={boot.onboarding} />
         <div className="tabs" role="tablist">
           {TABS.map(([id, label]) => (
             <button
