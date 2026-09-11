@@ -5196,7 +5196,7 @@ export default {
           page: 'activate',
           code: normalizePairCode(url.searchParams.get('code')) || '',
           identity: sessionPrincipal(session)
-            ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '' }
+            ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '', email: normalizeEmail(session.email) || '' }
             : null,
           webAuth: !!env?.GITHUB_CLIENT_SECRET,
           authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),

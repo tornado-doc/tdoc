@@ -91,12 +91,12 @@ export function ActivatePage({ boot }) {
     return (
       <main className="tdoc-status-page">
         <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-        <h1>Connected</h1>
-        <p>Your terminal has picked this up and continued on its own — there is nothing to go back and tell it.</p>
-        <p>You can close this tab.</p>
+        <h1>Approved</h1>
+        <p>Your agent picked this up and carried on.</p>
         <div className="tdoc-status-actions">
-          <a className="secondary" href="/me">Go to your docs</a>
+          <button type="button" className="primary" onClick={() => window.close()}>Close this page</button>
         </div>
+        <p className="tdoc-activate-hint">If this tab stays open, close it manually.</p>
       </main>
     );
   }
@@ -104,7 +104,7 @@ export function ActivatePage({ boot }) {
   return (
     <main className="tdoc-status-page tdoc-activate-page">
       <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-      <h1>Connect a terminal</h1>
+      <h1>Connect your agent</h1>
       {!identity ? (
         <>
           <p>{code
@@ -161,14 +161,18 @@ export function ActivatePage({ boot }) {
         </>
       ) : (
         <>
-          <p>
-            {pending.label
-              ? <>A terminal working on <code>{pending.label}</code> is asking to publish as <b>{identity.name || identity.login}</b>.</>
-              : <>A terminal is asking to publish as <b>{identity.name || identity.login}</b>.</>}
+          <p className="tdoc-activate-grant">
+            Signed in as <b>{identity.email || identity.name || identity.login}</b>.
           </p>
-          <p>Only approve this if the code came from your own terminal, just now.</p>
+          <p className="tdoc-activate-codelabel">Device code</p>
+          <div className="tdoc-activate-codeshow">{code}</div>
           <button type="button" className="primary" disabled={busy} onClick={approve}>
             Approve
+          </button>
+          <button type="button" className="secondary" onClick={() => {
+            location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate?code=${code}`)}`;
+          }}>
+            Use another account
           </button>
         </>
       )}

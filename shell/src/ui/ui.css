@@ -851,3 +851,33 @@ button.tdoc-pin {
 .tdoc-own-door { display: flex; flex-direction: column; gap: 12px; }
 body.tdoc-narrow .ui-dialog-popup.tdoc-wiz-modal { padding: 22px 22px 26px; }
 body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
+
+/* /activate — the approval, in Raft's shape: who you are, what is being
+   granted, the code, and two buttons. The code IS the anti-phishing seam;
+   a sentence telling somebody to be careful does that job worse. */
+.tdoc-activate-grant { font-size: 15px; line-height: 1.5; }
+/* The two buttons take the gate's shapes, so the tab the agent opens does not
+   look like it came from a different product than the page that sent it. */
+.tdoc-activate-page button.primary, .tdoc-activate-page button.secondary {
+  width: 100%; max-width: 320px; height: 46px; border-radius: 12px;
+  font: 650 15px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
+  cursor: pointer; margin: 0 auto;
+}
+.tdoc-activate-page button.primary { border: 0; background: var(--td-accent, #1652f0); color: #fff; }
+.tdoc-activate-page button.primary:hover:not(:disabled) { background: var(--td-accent-hover, #1245d0); }
+.tdoc-activate-page button.primary:disabled { opacity: .35; cursor: default; }
+.tdoc-activate-page button.secondary { border: 1px solid var(--td-line, #e8e7e3); background: #fff; color: var(--td-ink, #1a1a1a); }
+.tdoc-activate-page button.secondary:hover { background: var(--td-surface, #f4f4f2); }
+.tdoc-status-page .tdoc-status-actions button.primary {
+  width: 100%; max-width: 320px; height: 46px; border: 0; border-radius: 12px;
+  background: var(--td-accent, #1652f0); color: #fff; cursor: pointer;
+  font: 650 15px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
+}
+.tdoc-status-page .tdoc-status-actions button.primary:hover { background: var(--td-accent-hover, #1245d0); }
+.tdoc-activate-codelabel { width: 100%; max-width: 320px; margin: 8px auto 0; font-size: 13px; font-weight: 650; color: var(--td-ink, #1a1a1a); text-align: left; }
+.tdoc-activate-codeshow {
+  width: 100%; max-width: 320px; padding: 15px; margin: 2px auto 0;
+  border-radius: 12px; background: #fff; border: 1.5px solid var(--td-ink, #1a1a1a);
+  font: 600 21px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.14em;
+  color: var(--td-ink, #1a1a1a); user-select: all; text-align: center;
+}
