@@ -875,6 +875,13 @@ body.tdoc-narrow .tdoc-wiz .tdoc-wiz-h1 { font-size: 24px; }
 }
 .tdoc-status-page .tdoc-status-actions button.primary:hover { background: var(--td-accent-hover, #1245d0); }
 .tdoc-activate-codelabel { width: 100%; max-width: 320px; margin: 8px auto 0; font-size: 13px; font-weight: 650; color: var(--td-ink, #1a1a1a); text-align: left; }
+.tdoc-activate-page input.tdoc-activate-code {
+  width: 100%; max-width: 320px; padding: 15px; margin: 2px auto 0; box-sizing: border-box;
+  border-radius: 12px; background: #fff; border: 1.5px solid var(--td-ink, #1a1a1a);
+  font: 600 21px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.14em;
+  color: var(--td-ink, #1a1a1a); text-align: center; display: block;
+}
+.tdoc-activate-page input.tdoc-activate-code::placeholder { color: #c4c4bf; letter-spacing: 0.14em; }
 .tdoc-activate-codeshow {
   width: 100%; max-width: 320px; padding: 15px; margin: 2px auto 0;
   border-radius: 12px; background: #fff; border: 1.5px solid var(--td-ink, #1a1a1a);

@@ -137,15 +137,10 @@ export function ActivatePage({ boot }) {
         </>
       ) : !pending ? (
         <>
-          <p>Signed in as <b>{identity.name || identity.login}</b>.</p>
-          {!boot.code ? (
-            <p className="tdoc-activate-hint">
-              This page connects a terminal: running <code>tdoc publish</code> shows a short
-              code, and approving it here lets that terminal publish as you. No terminal
-              waiting? You're signed in — head to <a href="/me">your docs</a>.
-            </p>
-          ) : null}
-          <p>{boot.code ? 'Confirm the code from your terminal:' : 'Have a code? Enter it:'}</p>
+          <p className="tdoc-activate-grant">
+            Signed in as <b>{identity.email || identity.name || identity.login}</b>.
+          </p>
+          <p className="tdoc-activate-codelabel">Device code</p>
           <input
             className="tdoc-activate-code"
             value={code}
@@ -153,10 +148,15 @@ export function ActivatePage({ boot }) {
             placeholder="XXXX-XXXX"
             autoFocus
             spellCheck={false}
-            aria-label="pairing code"
+            aria-label="Device code"
           />
           <button type="button" className="primary" disabled={busy || code.length !== 9} onClick={lookup}>
             Continue
+          </button>
+          <button type="button" className="secondary" onClick={() => {
+            location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate${code ? `?code=${code}` : ''}`)}`;
+          }}>
+            Use Another Account
           </button>
         </>
       ) : (
