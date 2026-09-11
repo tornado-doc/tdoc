@@ -26,7 +26,10 @@ import { COPY_FALLBACK, selectContents } from './onboarding-dialog.jsx';
 // gate that state means handing out a per-account setup link and having the
 // CLI fetch it. That is a real change to the prompt, not a UI tweak.
 
-export const SETUP_PROMPT = 'Install tdoc and connect it to my account: https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md';
+// ONBOARDING.md only reaches the connection in its step 5, as a side effect of
+// building a first doc -- which this page deliberately no longer asks for. So
+// the line names the command that pairs, and stops there.
+export const SETUP_PROMPT = 'Install tdoc from https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md, then connect it to my account by running: bin/tdoc-publish --signin-only';
 // The same names the server's table uses. It builds every record itself, so
 // this list only decides which buttons exist.
 export const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
@@ -189,6 +192,7 @@ function SceneDone() {
 
 export function SetupGate({ boot }) {
   const [record, setRecord] = useState(null);
+  const [paired, setPaired] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const promptRef = useRef(null);
@@ -199,7 +203,12 @@ export function SetupGate({ boot }) {
   const copiedAt = useRef(null);
   const stamped = useRef(false);
 
-  const connected = Boolean(record?.agent_connected || record?.published_first);
+  // `paired` -- has this account ever connected a terminal -- is precisely the
+  // question this page asks, and it survives the record being cleared. Reading
+  // only the record's own stamps left anyone whose agent was already connected
+  // waiting forever: that agent holds a token, so it does nothing visible, and
+  // nothing re-stamps a connection that already happened.
+  const connected = Boolean(paired || record?.agent_connected || record?.published_first);
   const state = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
 
   // The record is the only thing that moves this page.
@@ -210,7 +219,7 @@ export function SetupGate({ boot }) {
     const tick = async () => {
       try {
         const result = await getOnboarding();
-        if (!cancelled) setRecord(result?.record || {});
+        if (!cancelled) { setRecord(result?.record || {}); setPaired(Boolean(result?.paired)); }
       } catch {}
       if (cancelled) return;
       if (copiedAt.current) setElapsed(Date.now() - copiedAt.current);
