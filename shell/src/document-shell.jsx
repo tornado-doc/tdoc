@@ -527,13 +527,15 @@ export function DocumentShell({ boot, config }) {
       item.items.some(({ comment }) => comment.id === root.id)
     ));
     if (!cluster) {
-      // The comment exists but its anchor no longer resolves, so there is no
-      // pin in the document to scroll to. Open it as a floating card anyway —
-      // DesktopCommentLayer already renders an unanchored card, and it offers
-      // re-anchoring from there. Returning instead leaves the link doing
-      // nothing at all: no card, no scroll, and `?comment=` still in the URL.
-      setOpenCommentId(root.id);
-      setDeepTarget(null);
+      // The frame reports a pin for every comment the margin shows — a real
+      // one, or a seat at the end of the document when the anchor is gone —
+      // and the deep target is always shown. So a target with no cluster is
+      // one the frame has not laid out yet, not one it has lost: on a fresh
+      // arrival the comments land before the frame's first `tdoc:pins`. Wait;
+      // this effect runs again when they come. Opening the card here instead,
+      // as the old fallback did, left it floating at the top of the page with
+      // the target cleared, so the document never scrolled — which is what a
+      // notification click looked like when it came from another page.
       return;
     }
     const top = TOP_BAR_HEIGHT + cluster.y - bridge.layout.scrollY;
