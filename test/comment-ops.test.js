@@ -190,6 +190,50 @@ t('deleting a comment with nothing under it still disappears outright', () => {
   assert(listAt(list, 1).length === 0, 'a tombstone with no thread under it is litter');
 });
 
+// ---- a record with no words at all (#532) ----
+// The API used to take "\n" as text. What came back was a row zero pixels tall:
+// it counted toward the thread and the pin badge, but had no hit area, so there
+// was no menu on it and no way to delete it. It folds out the same way a
+// deleted one does.
+
+t('a reply that is only whitespace disappears', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'ALICE asks', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('claude'), text: '\n   \n', version: 1, at: '2026-01-02' });
+  const [c] = listAt(list, 1);
+  assert(c, 'the comment itself went missing');
+  assert(c.replies.length === 0,
+    `a wordless reply is still on the thread: ${JSON.stringify(c.replies.map(r => r.text))}`);
+});
+
+t('a comment that is only whitespace disappears outright', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('claude'), text: '   ', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  assert(listAt(list, 1).length === 0, 'a comment with nothing to read kept its pin');
+});
+
+t('a wordless reply that holds an answer keeps its slot, so the thread keeps its middle', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'ALICE asks', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('claude'), text: ' ', version: 1, at: '2026-01-02' });
+  apply(list, { kind: 'reply', parent_id: 'r1', reply_id: 'r2', author: mkAuthor('bob'), text: 'BOB answers that', version: 1, at: '2026-01-03' });
+  const [c] = listAt(list, 1);
+  assert(c.replies.length === 2, `expected the slot and the answer, got ${c.replies.length}`);
+  const slot = c.replies.find(r => r.id === 'r1');
+  assert(slot && slot.deleted === true, 'the wordless slot must read as having no words');
+  assert(slot.author && slot.author.login === 'claude', 'the name on the slot must stay');
+  assert(c.replies.some(r => r.id === 'r2' && r.text === 'BOB answers that'),
+    'the answer under it went with it');
+});
+
+t('a reply with words is left alone', () => {
+  const list = [];
+  apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'ALICE asks', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });
+  apply(list, { kind: 'reply', parent_id: 'c1', reply_id: 'r1', author: mkAuthor('claude'), text: '  trimmable but real  ', version: 1, at: '2026-01-02' });
+  const [c] = listAt(list, 1);
+  assert(c.replies.length === 1 && !c.replies[0].deleted, 'a real reply was folded away');
+});
+
 t('a tombstone drops what the words earned: reactions, verdict, mentions', () => {
   const list = [];
   apply(list, { kind: 'create', id: 'c1', author: mkAuthor('alice'), text: 'ALICE asks', anchor: { kind: 'text', text: 'x' }, version: 1, at: '2026-01-01' });

@@ -2789,8 +2789,21 @@ function snapshotAt(c, V) {
     snap.reactions[emoji] = u;
   }
   delete snap._agentVerdict;
-  snap.replies = keepThread(replyOrder, replyById).map(r => (r.deleted ? asTombstone(r) : r));
+  snap.replies = keepThread(replyOrder, replyById).map(r => (hasNoWords(r) ? asTombstone(r) : r));
   return snap;
+}
+
+// A record with no words. Deleting takes the words away; a caller that posted
+// only whitespace never supplied any. Both leave the same thing behind — a slot
+// with a name on it and nothing to read — so the fold treats them alike rather
+// than keeping a second rule beside this one.
+//
+// The shell cannot produce one (it trims, and blocks an empty submit), but the
+// API used to accept "\n" as text, and those replies rendered as a row zero
+// pixels tall: it counted toward the thread and the pin badge, yet had no hit
+// area, so there was no menu and no way to delete it (#532).
+function hasNoWords(record) {
+  return !!record && (record.deleted || !String(record.text || '').trim());
 }
 
 // Which replies survive the fold. An alive reply always does. A DELETED one
@@ -2799,7 +2812,7 @@ function snapshotAt(c, V) {
 // Resolved to a fixpoint, so a deleted reply whose only child was itself
 // deleted-and-dropped goes as well.
 function keepThread(order, byId) {
-  const keep = new Set(order.filter(id => byId.get(id) && !byId.get(id).deleted));
+  const keep = new Set(order.filter(id => byId.get(id) && !hasNoWords(byId.get(id))));
   for (let changed = true; changed;) {
     changed = false;
     for (const id of order) {
@@ -2845,8 +2858,8 @@ function snapshotList(list, V) {
     // A deleted comment that still holds replies stays as a tombstone; deleting
     // your own words must not be a way to take everyone else's off the page.
     // One with nothing under it disappears, as it always has.
-    if (s.deleted && !s.replies.length) continue;
-    out.push(s.deleted ? asTombstone(s) : s);
+    if (hasNoWords(s) && !s.replies.length) continue;
+    out.push(hasNoWords(s) ? asTombstone(s) : s);
   }
   return out;
 }
@@ -6438,7 +6451,10 @@ export default {
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
-      const { slug, version, anchor, text: commentText, parent_id } = body;
+      const { slug, version, anchor, parent_id } = body;
+      // Trimmed before the check, the way the edit path already does it: "\n" is
+      // not a comment, and one that gets in cannot be seen or removed (#532).
+      const commentText = typeof body.text === 'string' ? body.text.trim() : body.text;
       if (!slug || !commentText) return json({ error: 'slug and text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const meta = await loadDocMeta(env, slug);
@@ -6732,8 +6748,9 @@ export default {
       if (!auth.ok) return auth.response;
       let body = {};
       try { body = await req.json(); } catch {}
-      const { slug, parent_id, text: replyText, status: agentStatus, applied_in,
+      const { slug, parent_id, status: agentStatus, applied_in,
               bind_anchor_aid } = body;
+      const replyText = typeof body.text === 'string' ? body.text.trim() : body.text;
       if (!slug || !parent_id || !replyText) return json({ error: 'slug, parent_id, text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
