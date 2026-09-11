@@ -944,6 +944,12 @@ function localDocsData() {
   return { docs, recent: [], starred: [], folders: [] };
 }
 
+// Same allowlist variable as the worker. Locally there is one anonymous
+// identity, so the flag is on when the variable names anybody at all.
+function localDebugAccount() {
+  return String(process.env.TDOC_DEBUG_ACCOUNTS || '').trim().length > 0;
+}
+
 // `/setup` locally, so the gate can be driven against the local server the
 // same way the hosted one is. The local host is anonymous by design, so the
 // identity is whatever TDOC_E2E_USER gives us.
@@ -959,6 +965,7 @@ function localSetupDocument(nonce) {
       identity: e2eIdentity(),
       oidcAuth: false,
       oidcLabel: '',
+      debug: localDebugAccount(),
     }),
   });
 }
@@ -1244,6 +1251,12 @@ const server = http.createServer(async (req, res) => {
       'Cache-Control': 'public, max-age=31536000, immutable',
       'X-Content-Type-Options': 'nosniff',
     });
+  }
+
+  if (p === '/api/onboarding/reset' && req.method === 'POST') {
+    if (!localDebugAccount()) return send(res, 403, JSON.stringify({ error: 'forbidden' }), { 'Content-Type': 'application/json' });
+    writeJson(ONBOARDING_FILE, {});
+    return send(res, 200, JSON.stringify({ ok: true, record: {} }), { 'Content-Type': 'application/json' });
   }
 
   if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD')) {

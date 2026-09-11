@@ -1830,6 +1830,18 @@ function stampOnboarding(record, step, at, extra) {
   }
   return out;
 }
+// Accounts allowed to drive their own onboarding state from the page, for
+// testing the gate's branches without hand-editing storage. Comma-separated
+// emails in TDOC_DEBUG_ACCOUNTS; empty (the default) allows nobody. It grants
+// one power and no other: clearing YOUR OWN onboarding record.
+function isDebugAccount(env, session) {
+  const allowed = String((env && env.TDOC_DEBUG_ACCOUNTS) || '')
+    .split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
+  if (!allowed.length) return false;
+  const email = normalizeEmail(session && session.email);
+  return Boolean(email) && allowed.includes(email);
+}
+
 // Which actions the page may report, and which step (if any) each one stamps.
 // Anything else is rejected: the log is what the funnel is read from, so a
 // page cannot invent a step.
@@ -5098,6 +5110,7 @@ export default {
             : null,
           oidcAuth: !!oidcConfig(env),
           oidcLabel: (oidcConfig(env) || {}).label || '',
+          debug: isDebugAccount(env, session),
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -6366,6 +6379,19 @@ export default {
       let paired = false;
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
       return json({ record: await loadOnboarding(env, accountId), paired });
+    }
+    // Clears the caller's own onboarding record so the gate can be walked
+    // again from nothing. Allowlisted accounts only, same-origin, and it can
+    // touch no account but the caller's — the id comes from the session, never
+    // from the body.
+    if (p === '/api/onboarding/reset' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      if (!isDebugAccount(env, session)) return json({ error: 'forbidden' }, { status: 403 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({}));
+      return json({ ok: true, record: {} });
     }
     if (p === '/api/onboarding/event' && method === 'POST') {
       let body = {};

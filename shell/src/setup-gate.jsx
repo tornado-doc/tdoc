@@ -183,11 +183,16 @@ export function SetupGate({ boot }) {
   const [elapsed, setElapsed] = useState(0);
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
+  // A forced view, for the allowlisted account only: it paints a branch
+  // without touching the record, and says so, so a screenshot of it can never
+  // be mistaken for the real thing.
+  const [forced, setForced] = useState(null);
   const copiedAt = useRef(null);
   const stamped = useRef(false);
 
   const connected = Boolean(record?.agent_connected || record?.published_first);
-  const state = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
+  const live = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
+  const state = forced || live;
 
   // The record is the only thing that moves this page.
   useEffect(() => {
@@ -298,6 +303,27 @@ export function SetupGate({ boot }) {
           </div>
         </div>
       </section>
+
+      {boot?.debug ? (
+        <div className="sg-debug" role="group" aria-label="Internal testing">
+          <span className="sg-debug-tag">Internal</span>
+          {['waiting', 'stuck', 'done'].map((name) => (
+            <button key={name} type="button" aria-pressed={state === name} onClick={() => setForced(name === live ? null : name)}>{name}</button>
+          ))}
+          <button type="button" onClick={() => setForced(null)} disabled={!forced}>live</button>
+          <button
+            type="button"
+            className="sg-debug-reset"
+            onClick={async () => {
+              await fetch('/api/onboarding/reset', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+              setForced(null); setCopied(false); setCopyFailed(false); copiedAt.current = null; setElapsed(0);
+              const result = await getOnboarding().catch(() => null);
+              setRecord(result?.record || {});
+            }}
+          >Reset my record</button>
+          <span className="sg-debug-now">{forced ? `forced · live is ${live}` : `live · ${live}`}</span>
+        </div>
+      ) : null}
 
       <aside className="sg-pane-art">
         <div className="sg-stage">
