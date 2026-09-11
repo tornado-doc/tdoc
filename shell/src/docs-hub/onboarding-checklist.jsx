@@ -98,8 +98,9 @@ export function OnboardingChecklist({ record, docs }) {
   const toggle = (next) => { setCollapsed(next); remember(next); };
   const setOpenState = (next) => { setOpen(next); rememberOpen(next); };
   // There is only ever one thing to do. Finished steps need no room and
-  // unreached ones need none yet, so at rest the card is the next step and a
-  // count — four rows is a list of things that are not being asked for.
+  // unreached ones need none yet, so at rest the card carries the next step
+  // alone. The heading and the bar stay: without them a count and a sentence
+  // do not say what they are, or why they are on this page.
   const next = steps.find((s) => !s.done) || steps[steps.length - 1];
 
   if (collapsed) {
@@ -110,22 +111,6 @@ export function OnboardingChecklist({ record, docs }) {
     );
   }
 
-  if (!open) {
-    return (
-      <section className="onb-card compact" aria-label="Finish setting up">
-        <a className="onb-next" href={next.href || undefined}>
-          <span className="onb-count">{done}/{steps.length}</span>
-          <span className="onb-label">{next.label}</span>
-          <Thumb id={next.id} />
-        </a>
-        <div className="onb-compact-acts">
-          <button type="button" onClick={() => setOpenState(true)} aria-label="Show all steps"><ChevronDown size={15} /></button>
-          <button type="button" onClick={() => toggle(true)} aria-label="Hide"><X size={15} /></button>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <section className="onb-card" aria-label="Finish setting up">
       <header>
@@ -133,14 +118,21 @@ export function OnboardingChecklist({ record, docs }) {
           <h2>Finish setting up</h2>
           <p>{done} of {steps.length}</p>
         </div>
-        <div className="onb-compact-acts">
-          <button type="button" onClick={() => setOpenState(false)} aria-label="Show only the next step"><ChevronDown size={15} style={{ transform: 'rotate(180deg)' }} /></button>
+        <div className="onb-acts">
+          <button
+            type="button"
+            onClick={() => setOpenState(!open)}
+            aria-label={open ? 'Show only the next step' : 'Show all steps'}
+            aria-expanded={open}
+          >
+            <ChevronDown size={15} style={open ? { transform: 'rotate(180deg)' } : undefined} />
+          </button>
           <button type="button" onClick={() => toggle(true)} aria-label="Hide"><X size={15} /></button>
         </div>
       </header>
       <div className="onb-bar" aria-hidden="true"><i style={{ width: `${(done / steps.length) * 100}%` }} /></div>
       <ol>
-        {steps.map((step) => {
+        {(open ? steps : [next]).map((step) => {
           const body = (
             <>
               <span className="onb-tick">{step.done ? <Check size={12} strokeWidth={3} /> : null}</span>

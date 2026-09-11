@@ -195,29 +195,15 @@
 .onb-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .onb-card h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.015em; }
 .onb-card header p { margin: 0; font-size: 13px; color: var(--td-muted, #6b6a66); font-variant-numeric: tabular-nums; }
-/* At rest the card is one row: the next step and a count. Four rows is a list
-   of three things nobody is being asked for, and on a page whose job is the
-   doc list it pushed that list under the fold. */
-.onb-card.compact { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; }
-.onb-next { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: auto 1fr 84px; gap: 12px; align-items: center; text-decoration: none; color: inherit; }
-.onb-count {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 34px; height: 22px; padding: 0 8px; border-radius: 999px;
-  background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0);
-  font: 650 12px -apple-system, system-ui, sans-serif; font-variant-numeric: tabular-nums;
-}
-.onb-next .onb-label { font-size: 14px; color: var(--td-accent, #1652f0); }
-.onb-next:hover .onb-label { text-decoration: underline; }
-
-.onb-compact-acts { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; align-self: flex-start; }
-.onb-compact-acts button { border: 0; background: none; padding: 5px; border-radius: 8px; cursor: pointer; color: #b0b0ab; display: flex; }
-.onb-compact-acts button:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
-.onb-card.compact .onb-compact-acts { align-self: center; }
+.onb-acts { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; align-self: flex-start; margin: -6px -8px 0 0; }
+.onb-acts button { border: 0; background: none; padding: 5px; border-radius: 8px; cursor: pointer; color: #b0b0ab; display: flex; }
+.onb-acts button:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
 
 .onb-bar { height: 2px; margin: 14px 0 6px; border-radius: 999px; background: var(--td-line, #e8e7e3); overflow: hidden; }
 .onb-bar i { display: block; height: 100%; border-radius: 999px; background: var(--td-accent, #1652f0); transition: width .35s cubic-bezier(.2,.7,.3,1); }
 
 .onb-card ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.onb-card ol:has(li:only-child) { margin-top: -2px; }
 .onb-card li + li { border-top: 1px solid var(--td-surface-2, #f7f7f5); }
 .onb-card li a, .onb-card li .onb-row {
   display: grid; grid-template-columns: 18px 1fr 84px; gap: 12px; align-items: center;
