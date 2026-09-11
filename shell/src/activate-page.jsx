@@ -143,7 +143,6 @@ export function ActivatePage({ boot }) {
           <p className="tdoc-activate-grant">
             Signed in as <b>{identity.email || identity.name || identity.login}</b>.
           </p>
-          <p className="tdoc-activate-codelabel">Device code</p>
           <input
             className="tdoc-activate-code"
             value={code}
@@ -167,7 +166,6 @@ export function ActivatePage({ boot }) {
           <p className="tdoc-activate-grant">
             Signed in as <b>{identity.email || identity.name || identity.login}</b>.
           </p>
-          <p className="tdoc-activate-codelabel">Device code</p>
           <div className="tdoc-activate-codeshow">{code}</div>
           <button type="button" className="primary" disabled={busy} onClick={approve}>
             Approve Device Login
