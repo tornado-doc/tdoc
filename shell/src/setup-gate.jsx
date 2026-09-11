@@ -236,18 +236,15 @@ export function SetupGate({ boot }) {
         <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a>
         <div className="sg-mid">
           <div className="sg-col">
-            <h1 className="sg-h1">Connect your agent</h1>
+            <h1 className="sg-h1">Connect your agent <AgentMarks /></h1>
 
             {signedIn ? (
               <>
                 <div className="sg-prompt">
                   <p className="sg-prompt-text" ref={promptRef}>{SETUP_PROMPT}</p>
-                  <div className="sg-prompt-foot">
-                    <AgentMarks />
-                    <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
-                      {copied ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
+                  <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
                 </div>
 
                 <ol className="sg-steps">

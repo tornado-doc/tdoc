@@ -49,21 +49,20 @@
    The action is outlined, not filled: it should be findable at a glance, not
    the loudest thing on a page that already has a primary. */
 .sg-prompt {
-  display: flex; flex-direction: column; gap: 11px;
-  padding: 14px 14px 11px;
+  display: flex; align-items: flex-end; gap: 10px;
+  padding: 14px 14px 12px;
   border: 1px solid #e3e3e0; border-radius: 18px;
   background: #fff;
   box-shadow: 0 1px 2px rgba(26,26,26,.035);
 }
 .sg-prompt-text {
-  margin: 0;
+  flex: 1 1 auto; min-width: 0; margin: 0;
   font: 500 13px/1.7 ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--td-ink, #1a1a1a);
   overflow-wrap: anywhere; user-select: all;
 }
-.sg-prompt-foot { display: flex; align-items: center; gap: 12px; }
-.sg-marks { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 9px; color: #6b6a66; }
-.sg-marks svg { display: block; opacity: .85; }
+.sg-marks { display: inline-flex; align-items: center; gap: 7px; margin-left: 6px; vertical-align: 2px; color: #6b6a66; }
+.sg-marks svg { display: block; opacity: .9; }
 .sg-prompt-copy {
   flex: 0 0 auto;
   height: 30px; padding: 0 14px;
