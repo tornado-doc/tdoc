@@ -2,10 +2,7 @@ import React, { useState } from 'react';
 import { Check, ChevronDown, X } from 'lucide-react';
 
 // The onboarding, after setup. Four things, rendered from the record's own
-// timestamps rather than a second set of counters, each with a small drawing
-// of what it produces — the way Notion's setup list carries a thumbnail per
-// row, because a row of labels alone makes four abstractions and a reader has
-// to imagine all of them.
+// timestamps rather than a second set of counters.
 //
 // Setup and the seeded doc are already done by the time anyone reads this, so
 // it opens at two of four. The progress is real, not a welcome mat.
@@ -46,46 +43,6 @@ export function onboardingSteps(record, firstDocHref) {
     { id: 'comment', label: 'Say what you think about one sentence', done: Boolean(r.commented || r.revised), href: firstDocHref },
     { id: 'revise', label: 'Send it back and read v2', done: Boolean(r.revised), href: firstDocHref },
   ];
-}
-
-// Four drawings at the product's own proportions: a composer, a page, a page
-// with a card in its margin, and that card answered. Built from divs rather
-// than art, so they follow the theme and cost nothing to ship.
-function Thumb({ id }) {
-  if (id === 'connect') {
-    return (
-      <span className="onb-thumb" aria-hidden="true">
-        <i className="t-line w60" />
-        <i className="t-box" />
-      </span>
-    );
-  }
-  if (id === 'doc') {
-    return (
-      <span className="onb-thumb" aria-hidden="true">
-        <i className="t-line w70 strong" />
-        <i className="t-line w90" />
-        <i className="t-line w50 mark" />
-      </span>
-    );
-  }
-  if (id === 'comment') {
-    return (
-      <span className="onb-thumb withcard" aria-hidden="true">
-        <i className="t-line w60 strong" />
-        <i className="t-line w45 mark" />
-        <i className="t-card" />
-      </span>
-    );
-  }
-  return (
-    <span className="onb-thumb withcard" aria-hidden="true">
-      <i className="t-line w60 strong" />
-      <i className="t-line w45" />
-      <i className="t-card done"><Check size={9} strokeWidth={3.5} /></i>
-      <i className="t-ver">v2</i>
-    </span>
-  );
 }
 
 export function OnboardingChecklist({ record, docs }) {
@@ -144,7 +101,6 @@ export function OnboardingChecklist({ record, docs }) {
             <>
               <span className="onb-tick">{step.done ? <Check size={12} strokeWidth={3} /> : null}</span>
               <span className="onb-label">{step.label}</span>
-              <Thumb id={step.id} />
             </>
           );
           return (

@@ -202,15 +202,14 @@
 .onb-bar { height: 2px; margin: 14px 0 6px; border-radius: 999px; background: var(--td-line, #e8e7e3); overflow: hidden; }
 .onb-bar i { display: block; height: 100%; border-radius: 999px; background: var(--td-accent, #1652f0); transition: width .35s cubic-bezier(.2,.7,.3,1); }
 
-.onb-card ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.onb-card ol { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
 .onb-card ol:has(li:only-child) { margin-top: -2px; }
-.onb-card li + li { border-top: 1px solid var(--td-surface-2, #f7f7f5); }
+
 .onb-card li a, .onb-card li .onb-row {
-  display: grid; grid-template-columns: 18px 1fr 84px; gap: 12px; align-items: center;
-  padding: 7px 0; text-decoration: none; color: inherit;
+  display: grid; grid-template-columns: 18px 1fr; gap: 12px; align-items: center;
+  padding: 9px 0; text-decoration: none; color: inherit;
 }
-.onb-card li a { border-radius: 10px; margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
-.onb-card li a:hover { background: var(--td-surface-2, #f7f7f5); }
+.onb-card li a:hover .onb-label { text-decoration: underline; }
 .onb-label { font-size: 14px; line-height: 1.35; }
 .onb-card li a .onb-label { color: var(--td-accent, #1652f0); }
 .onb-card li.done .onb-label { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
@@ -220,36 +219,6 @@
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
 .onb-card li.done .onb-tick { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); }
-
-/* The drawings: a composer, a page, a page with a card in its margin, and that
-   card answered. The yellow is the anchor highlight's own #fff7d0. */
-.onb-thumb {
-  /* border-box, or the padding and border add to the width and the two rows
-     carrying a card come out 23px wider than the two that do not. */
-  box-sizing: border-box;
-  position: relative; width: 84px; height: 52px; border-radius: 7px;
-  border: 1px solid var(--td-line, #e8e7e3); background: var(--td-surface-2, #f7f7f5);
-  padding: 8px; display: flex; flex-direction: column; gap: 4px; overflow: hidden;
-}
-.onb-card li.done .onb-thumb { opacity: .5; }
-.onb-thumb .t-line { display: block; height: 3px; border-radius: 2px; background: #d8d8d3; }
-.onb-thumb .t-line.strong { background: #a9a9a3; height: 4px; }
-.onb-thumb .t-line.mark { background: #fff7d0; box-shadow: 0 0 0 1px #f0e6b4 inset; }
-.onb-thumb .w90 { width: 90%; } .onb-thumb .w70 { width: 70%; }
-.onb-thumb .w60 { width: 60%; } .onb-thumb .w50 { width: 50%; } .onb-thumb .w45 { width: 45%; }
-.onb-thumb .t-box { box-sizing: border-box; margin-top: auto; height: 15px; border-radius: 4px; border: 1px solid var(--td-line, #e8e7e3); background: #fff; }
-.onb-thumb.withcard { padding-right: 32px; }
-.onb-thumb .t-card {
-  box-sizing: border-box; position: absolute; right: 7px; top: 12px; width: 22px; height: 26px; border-radius: 5px;
-  background: #fff; border: 1px solid var(--td-line, #e8e7e3); box-shadow: 0 1px 2px rgba(60,64,67,.12);
-  display: flex; align-items: center; justify-content: center; color: var(--td-accent, #1652f0);
-}
-.onb-thumb .t-card.done { color: #1a7340; border-color: #cfe3d6; }
-.onb-thumb .t-ver {
-  position: absolute; left: 7px; bottom: 6px; padding: 1px 5px; border-radius: 999px;
-  background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0);
-  font: 650 8px/1.5 -apple-system, system-ui, sans-serif; font-style: normal;
-}
 
 /* Hidden, it parks as a chip rather than disappearing: the loop is unfinished
    and the way back to it should not be something you have to remember. */
