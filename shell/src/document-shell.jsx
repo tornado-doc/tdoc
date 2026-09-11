@@ -261,14 +261,10 @@ export function DocumentShell({ boot, config }) {
       const record = result?.record;
       // A journey that has started and not reached its exit reopens where
       // it stopped — the wizard reads the step off the record.
-      if (record?.started && !record?.revised && !record?.shared && !record?.tour_seen && !record?.waitlist) {
-        // Opened at the paste step. Whether that is where the journey stays,
-        // or whether it has moved on and the person should be asked first, is
-        // the wizard's own rule — forcing the question here asked it of
-        // somebody parked on step 2, who has seen nothing to come back to.
-        setOnboardingDoor('own');
-        setOnboardingOpen(true);
-      }
+      // The pop-up no longer opens itself. /setup is the gate and the docs
+      // page carries the rest, so a landing visit that also threw a modal
+      // would be a second journey running beside the real one.
+      void record;
     }).catch(() => {});
     // Once, at boot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -402,7 +398,11 @@ export function DocumentShell({ boot, config }) {
       const href = String(message.href || '');
       if (!/^https?:\/\//i.test(href) && !/^\/(?!\/)/.test(href)) return;
       if (config.onboarding && href === '/start' && !message.blank) {
-        setOnboardingOpen(true);
+        // Connected already — an agent on this account has a token — means the
+        // gate has nothing to ask, so it is not shown. Everyone else starts
+        // there, signed in or not; /setup handles the sign-in itself.
+        const done = Boolean(onboardingRecord?.agent_connected || onboardingRecord?.published_first);
+        location.href = config.identity && done ? '/me' : '/setup';
         return;
       }
       if (message.blank) window.open(href, '_blank', 'noopener');
@@ -885,7 +885,7 @@ export function DocumentShell({ boot, config }) {
         // The top bar's Sign in on the landing returns into the onboarding:
         // a new account lands on the first screen; one that has finished or
         // skipped is let straight through (the wizard closes itself).
-        onSignIn={() => signIn(config.onboarding ? '/?onboard=welcome' : undefined)}
+        onSignIn={() => signIn(config.onboarding ? '/setup' : undefined)}
         onSwitchAccount={config.oidcAuth ? () => {
           const returnUrl = location.pathname + location.search + location.hash;
           location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;

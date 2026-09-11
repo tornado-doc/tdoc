@@ -65,7 +65,7 @@
    the sunburst reads smaller than the knot inside the same box. Two palettes
    only fight in a crowded line; given a row of their own, with the label held
    back in grey, they read as what they are. */
-.sg-works { display: flex; align-items: center; gap: 9px; margin: -6px 0 -2px; font-size: 11.5px; color: #a6a6a1; }
+.sg-works { display: flex; align-items: center; gap: 9px; margin: -4px 0 -2px; font-size: 12.5px; color: #9a9a95; }
 .sg-works svg { display: block; }
 .sg-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
@@ -82,13 +82,13 @@
 .sg-prompt-copy.copied { border-color: #1a7340; color: #1a7340; background: transparent; cursor: default; }
 
 .sg-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; counter-reset: sgs; }
-.sg-steps li { display: grid; grid-template-columns: 17px 1fr; gap: 11px; align-items: start; font-size: 13.5px; line-height: 1.4; color: var(--td-ink, #1a1a1a); }
+.sg-steps li { display: grid; grid-template-columns: 19px 1fr; gap: 11px; align-items: start; font-size: 13.5px; line-height: 1.4; color: var(--td-ink, #1a1a1a); }
 .sg-steps li::before {
   counter-increment: sgs; content: counter(sgs);
-  width: 17px; height: 17px; border-radius: 4px; margin-top: 1px;
+  width: 19px; height: 19px; border-radius: 5px; margin-top: 0;
   border: 1px solid var(--td-line, #e8e7e3); background: none;
   color: var(--td-muted, #6b6a66);
-  font: 500 10px/15px ui-monospace, "SF Mono", Menlo, monospace;
+  font: 500 12.5px/17px ui-monospace, "SF Mono", Menlo, monospace;
   text-align: center;
 }
 

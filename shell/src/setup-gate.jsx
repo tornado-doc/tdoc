@@ -210,6 +210,10 @@ export function SetupGate({ boot }) {
   // nothing re-stamps a connection that already happened.
   const connected = Boolean(paired || record?.agent_connected || record?.published_first);
   const state = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
+  // The seeding happens on the docs page, so that is where Continue goes: it
+  // is the one place that is right whether the doc has been minted yet, was
+  // deleted since, or is sitting there waiting to be argued with.
+  const onward = '/me';
 
   // The record is the only thing that moves this page.
   useEffect(() => {
@@ -302,7 +306,7 @@ export function SetupGate({ boot }) {
                   ) : null}
                 </div>
 
-                <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? '/me' : undefined} aria-disabled={state !== 'done'}>
+                <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
                   Continue
                 </a>
                 <p className="sg-account"><a href="/me">I’ll do this later</a></p>

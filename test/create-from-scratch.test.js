@@ -175,7 +175,9 @@ t('the choice is two cards, and neither path is a form', () => {
   // The blank doc opens on the click. A title field here is the thing this
   // design replaced — the title is typed into the page instead.
   assert(!/<input/.test(form), 'the scratch card must not ask for a title');
-  assert(form.includes('<OwnAgentDoor onOpenChange='), 'the own-agent door lives behind the second card');
+  // The door moved: /setup is the one place the journey starts, so the card
+  // sends people there instead of opening a second copy of it inline.
+  assert(form.includes("location.href = '/setup'"), 'the second card leads to the gate');
 });
 
 t('the cards live in the Docs Hub, and the recipe has one implementation', () => {
@@ -183,7 +185,8 @@ t('the cards live in the Docs Hub, and the recipe has one implementation', () =>
     'the hub must wire the cards to its hook');
   // A second hand-written copy is how the two drift apart.
   assert(!hub.includes('className="mk-card"'), 'the Docs Hub should render the shared component');
-  assert(form.includes('<OwnAgentDoor onOpenChange=') && !form.includes('FirstDocRecipe'), 'the AI card should open the shared door, not a bare recipe of its own');
+  assert(form.includes("location.href = '/setup'") && !form.includes('FirstDocRecipe') && !form.includes('OwnAgentDoor'),
+    'the AI card leads to the one door, not a bare recipe and not a second copy of the wizard');
   assert(!form.includes('tdoc-recipe-wrap'), 'the recipe markup belongs to one component');
   assert(onboarding.includes('export function FirstDocRecipe('), 'the shared recipe lost its home');
 });

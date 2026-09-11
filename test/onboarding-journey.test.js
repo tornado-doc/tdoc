@@ -158,7 +158,9 @@ t('one pop-up, five steps, and the first one is a drawing', () => {
   assert(shell.includes('Boolean(config.onboarding && config.identity && onboardingDoor)') && shell.includes("params.delete('onboard');"), 'the shell reopens the wizard after the redirect, at any step, and takes the parameter off the URL');
   // The top bar's Sign in on the landing returns into the onboarding; an
   // account that has finished or skipped is let straight through.
-  assert(shell.includes("onSignIn={() => signIn(config.onboarding ? '/?onboard=welcome' : undefined)}"), 'the top bar sign-in returns to the first screen');
+  // The gate replaced the pop-up as the door, so signing in from the top bar
+  // lands on /setup rather than reopening a wizard step.
+  assert(shell.includes("onSignIn={() => signIn(config.onboarding ? '/setup' : undefined)}"), 'the top bar sign-in returns to the gate');
   assert(dialog.includes("if (initialStep === 'welcome' && (record.revised || record.shared || record.tour_seen)) return { close: true };") && dialog.includes("if (first.close) { onClose?.(); return; }") && dialog.includes("useEffect(() => { if (opening.close) onClose?.(); }, []);"), 'a finished or skipped account is not shown the wizard again — from the first tick or from the record in hand');
   // Every step can be left.
   // Leaving is the × in the corner. Nothing on the floor says Skip or Done:
@@ -261,7 +263,9 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
   // Round-3 tester came in through /me: the "Build it with your agent" card
   // showed the line and nothing after it — no wait, no arrival, no seed.
   const cards = read('shell/src/create-from-scratch.jsx');
-  assert(cards.includes('<OwnAgentDoor onOpenChange={(open) => { if (!open) setView(\'choice\'); }} closeLabel="Back" />'), 'the card opens the shared door');
+  // The door moved: /setup is the one place the journey starts, so the card
+  // sends people there instead of opening a second copy of it inline.
+  assert(cards.includes("location.href = '/setup'"), 'the card opens the gate');
   assert(!cards.includes('FirstDocRecipe'), 'no second rendering of the recipe');
   assert(cards.includes('<span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>'), 'the card defines "agent" where the word is');
   assert(dialog.includes("export function OwnAgentDoor({ onOpenChange, closeLabel = 'Back', config = null })") && dialog.includes('initialStep="paste" embedded'), 'the hub opens the wizard at the paste step');
@@ -337,8 +341,13 @@ t('the two arrivals open the right card and say what happened', () => {
 });
 
 t('resuming reads the record, not localStorage', () => {
-  assert(/record\?\.started && !record\?\.revised && !record\?\.shared && !record\?\.tour_seen && !record\?\.waitlist[\s\S]*setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell),
-    'a started, unfinished journey reopens the wizard on the landing page');
+  // Two onboardings cannot both run. /setup is the gate and the docs page
+  // carries the rest, so the landing must not also throw a modal at somebody
+  // mid-journey — that is a second journey beside the real one.
+  assert(!/setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell),
+    'the landing pop-up no longer opens itself');
+  assert(shell.includes("location.href = config.identity && done ? '/me' : '/setup';"),
+    'the landing CTA sends the unconnected to the gate and everyone else to their docs');
   // Merely opening the door stamps `started`, so "unfinished" includes a person
   // parked on the paste step. They are not asked to come back to a step they
   // never left — that judgement belongs to the wizard's first-tick rule alone.

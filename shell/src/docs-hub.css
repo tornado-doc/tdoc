@@ -180,51 +180,51 @@
    inside the shell it cancelled the page invert out and /me stayed light. */
 
 /* ---- the onboarding, once setup is behind them -------------------------
-   A card above the list rather than a rail beside it: this page is a single
-   centred column and has no sidebar to put one in. It opens at two of four,
-   because connecting and the seeded doc are both already true by the time
-   anyone reads it — the progress is real, not a welcome mat. */
+   Same voice as /setup: no container tint, one hairline, a hairline tick
+   rather than a filled chip, and the row is the sentence with nothing added
+   to it. A card above the list rather than a rail beside it, because this
+   page is one centred column with no sidebar to put a rail in. */
 .onb-card {
-  margin: 0 0 18px;
-  padding: 16px 18px 14px;
+  margin: 0 0 20px;
+  padding: 16px 18px 15px;
   border: 1px solid var(--td-line, #e8e7e3);
-  border-radius: 16px;
-  background: var(--td-surface-2, #f7f7f5);
+  border-radius: 18px;
+  background: #fff;
 }
-.onb-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.onb-card h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
-.onb-card header p { margin: 2px 0 0; font-size: 12.5px; color: var(--td-muted, #6b6a66); }
-.onb-hide { border: 0; background: none; padding: 4px; margin: -4px -6px 0 0; border-radius: 8px; cursor: pointer; color: var(--td-muted, #6b6a66); display: flex; }
-.onb-hide:hover { background: var(--td-line, #e8e7e3); color: var(--td-ink, #1a1a1a); }
+.onb-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.onb-card h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.015em; }
+.onb-card header p { margin: 0; font-size: 12.5px; color: var(--td-muted, #6b6a66); font-variant-numeric: tabular-nums; }
+.onb-hide { border: 0; background: none; padding: 4px; margin: -6px -8px 0 0; border-radius: 8px; cursor: pointer; color: #b0b0ab; display: flex; align-self: flex-start; }
+.onb-hide:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
 
-.onb-bar { height: 3px; margin: 12px 0 14px; border-radius: 999px; background: var(--td-line, #e8e7e3); overflow: hidden; }
-.onb-bar i { display: block; height: 100%; border-radius: 999px; background: var(--td-accent, #1652f0); transition: width .3s ease; }
+.onb-bar { height: 2px; margin: 13px 0 15px; border-radius: 999px; background: var(--td-line, #e8e7e3); overflow: hidden; }
+.onb-bar i { display: block; height: 100%; border-radius: 999px; background: var(--td-accent, #1652f0); transition: width .35s cubic-bezier(.2,.7,.3,1); }
 
-.onb-card ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
-.onb-card li { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: center; font-size: 13.5px; line-height: 1.4; }
+.onb-card ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.onb-card li { display: grid; grid-template-columns: 17px 1fr; gap: 11px; align-items: center; font-size: 13.5px; line-height: 1.4; }
 .onb-card li a { color: var(--td-accent, #1652f0); text-decoration: none; }
 .onb-card li a:hover { text-decoration: underline; }
-.onb-card li.done span:last-child { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
+.onb-card li.done > span:last-child { color: var(--td-muted, #6b6a66); }
 .onb-tick {
-  width: 18px; height: 18px; border-radius: 50%;
+  width: 17px; height: 17px; border-radius: 50%;
   border: 1px solid var(--td-line, #e8e7e3); background: #fff;
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
 .onb-card li.done .onb-tick { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); }
 
 /* Hidden, it parks as a chip rather than disappearing: the loop is unfinished
-   and the way back to it should not be a thing you have to remember. */
+   and the way back to it should not be something you have to remember. */
 .onb-chip {
-  display: inline-flex; align-items: center; gap: 7px;
-  margin: 0 0 16px; padding: 6px 12px 6px 7px;
+  display: inline-flex; align-items: center; gap: 8px;
+  margin: 0 0 18px; padding: 6px 13px 6px 7px;
   border: 1px solid var(--td-line, #e8e7e3); border-radius: 999px;
   background: #fff; cursor: pointer;
-  font: 500 12.5px -apple-system, system-ui, sans-serif; color: var(--td-ink, #1a1a1a);
+  font: 500 13px -apple-system, system-ui, sans-serif; color: var(--td-ink, #1a1a1a);
 }
-.onb-chip:hover { background: var(--td-surface-2, #f7f7f5); }
+.onb-chip:hover { background: var(--td-surface, #f4f4f2); }
 .onb-chip-count {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 30px; height: 20px; padding: 0 6px; border-radius: 999px;
+  min-width: 30px; height: 20px; padding: 0 7px; border-radius: 999px;
   background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0);
-  font-weight: 650; font-size: 11.5px;
+  font-weight: 650; font-size: 11.5px; font-variant-numeric: tabular-nums;
 }

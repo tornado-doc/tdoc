@@ -21,17 +21,20 @@ function remember(value) {
 export function onboardingSteps(record, firstDocHref) {
   const r = record || {};
   return [
-    { id: 'connect', label: 'Connect your agent', done: Boolean(r.agent_connected || r.published_first) },
+    { id: 'connect', label: 'Connect your agent', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
     { id: 'doc', label: 'Your first doc', done: Boolean(r.published_first || r.first_doc), href: firstDocHref },
     { id: 'comment', label: 'Say what you think about one sentence', done: Boolean(r.commented || r.revised), href: firstDocHref },
     { id: 'revise', label: 'Send it back and read v2', done: Boolean(r.revised), href: firstDocHref },
   ];
 }
 
-export function OnboardingChecklist({ record }) {
+export function OnboardingChecklist({ record, docs }) {
   const [collapsed, setCollapsed] = useState(stored);
+  // Only link to the doc if it is still in their list: a seeded doc they
+  // deleted would otherwise leave every row pointing at a 404.
   const first = record && record.first_doc;
-  const href = first ? `/d/${encodeURIComponent(first)}` : null;
+  const alive = Boolean(first && (docs || []).some((d) => d && d.slug === first));
+  const href = alive ? `/d/${encodeURIComponent(first)}` : null;
   const steps = onboardingSteps(record, href);
   const done = steps.filter((s) => s.done).length;
   // Nothing to say before the journey starts, and nothing left to say after it
@@ -53,7 +56,7 @@ export function OnboardingChecklist({ record }) {
       <header>
         <div>
           <h2>Finish setting up</h2>
-          <p>{done} of {steps.length} done</p>
+          <p>{done} of {steps.length}</p>
         </div>
         <button type="button" className="onb-hide" onClick={() => toggle(true)} aria-label="Hide">
           <X size={15} />
