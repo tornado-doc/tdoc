@@ -5079,6 +5079,29 @@ export default {
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
 
+    // `/setup` — the gate. Setup is not the tutorial: it is the one thing that
+    // must be true before tdoc does anything, so it gets a route of its own
+    // rather than a step inside the landing pop-up. The page reads the
+    // onboarding record and moves itself when the agent turns up.
+    if (p === '/setup' && (method === 'GET' || method === 'HEAD')) {
+      const session = await getSession(env, req);
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        title: 'tdoc - connect your agent',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'setup',
+          identity: sessionPrincipal(session)
+            ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '' }
+            : null,
+          oidcAuth: !!oidcConfig(env),
+          oidcLabel: (oidcConfig(env) || {}).label || '',
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+    }
+
     if (p === '/start' && (method === 'GET' || method === 'HEAD')) {
       return landingResponse(env, req, START_SLUG);
     }

@@ -944,6 +944,25 @@ function localDocsData() {
   return { docs, recent: [], starred: [], folders: [] };
 }
 
+// `/setup` locally, so the gate can be driven against the local server the
+// same way the hosted one is. The local host is anonymous by design, so the
+// identity is whatever TDOC_E2E_USER gives us.
+function localSetupDocument(nonce) {
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  return SHELL.appHtml({
+    title: 'tdoc - connect your agent',
+    nonceAttr,
+    runtimeJsPath: SHELL_RUNTIME.js.path,
+    runtimeCssPath: SHELL_RUNTIME.css.path,
+    bootJson: safeJsonForScript({
+      page: 'setup',
+      identity: e2eIdentity(),
+      oidcAuth: false,
+      oidcLabel: '',
+    }),
+  });
+}
+
 function localHubDocument(nonce) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   return SHELL.appHtml({
@@ -1224,6 +1243,14 @@ const server = http.createServer(async (req, res) => {
       'Content-Type': runtimeAsset.type,
       'Cache-Control': 'public, max-age=31536000, immutable',
       'X-Content-Type-Options': 'nosniff',
+    });
+  }
+
+  if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const nonce = crypto.randomBytes(16).toString('hex');
+    return send(res, 200, req.method === 'HEAD' ? '' : localSetupDocument(nonce), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': cspHeader(nonce),
     });
   }
 
