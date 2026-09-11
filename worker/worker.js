@@ -1834,12 +1834,31 @@ function stampOnboarding(record, step, at, extra) {
 // testing the gate's branches without hand-editing storage. Comma-separated
 // emails in TDOC_DEBUG_ACCOUNTS; empty (the default) allows nobody. It grants
 // one power and no other: clearing YOUR OWN onboarding record.
-function isDebugAccount(env, session) {
-  const allowed = String((env && env.TDOC_DEBUG_ACCOUNTS) || '')
-    .split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
-  if (!allowed.length) return false;
+const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
+function debugRecord(state, at, firstDoc) {
+  const doc = firstDoc || 'what-ai-knows';
+  switch (state) {
+    case 'new': return {};
+    case 'started': return { started: at };
+    case 'connected': return { started: at, agent_connected: at };
+    case 'published': return { started: at, agent_connected: at, published_first: at, first_doc: doc };
+    case 'commented': return { started: at, agent_connected: at, published_first: at, first_doc: doc, commented: at };
+    case 'revised': return { started: at, agent_connected: at, published_first: at, first_doc: doc, commented: at, revised: at };
+    default: return null;
+  }
+}
+
+// Accounts allowed to put their own onboarding record into a named state, for
+// internal testing. The list is operational data, not build config: an email
+// is not a credential, and a deploy is the wrong price for adding or taking
+// away a name. It lives in KV under `debug-accounts`, comma-separated, and an
+// absent or empty key allows nobody, which is every deploy's default.
+async function isDebugAccount(env, session) {
   const email = normalizeEmail(session && session.email);
-  return Boolean(email) && allowed.includes(email);
+  if (!email) return false;
+  let raw = '';
+  try { raw = String((await env.META.get('debug-accounts')) || ''); } catch { return false; }
+  return raw.split(',').map((v) => v.trim().toLowerCase()).filter(Boolean).includes(email);
 }
 
 // Which actions the page may report, and which step (if any) each one stamps.
@@ -5110,7 +5129,7 @@ export default {
             : null,
           oidcAuth: !!oidcConfig(env),
           oidcLabel: (oidcConfig(env) || {}).label || '',
-          debug: isDebugAccount(env, session),
+          debug: await isDebugAccount(env, session),
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -6380,18 +6399,25 @@ export default {
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
       return json({ record: await loadOnboarding(env, accountId), paired });
     }
-    // Clears the caller's own onboarding record so the gate can be walked
-    // again from nothing. Allowlisted accounts only, same-origin, and it can
-    // touch no account but the caller's — the id comes from the session, never
-    // from the body.
-    if (p === '/api/onboarding/reset' && method === 'POST') {
+    // Puts the caller's own onboarding record into a named state, so the
+    // journey's branches can be walked without hand-editing storage. The body
+    // names a state; the record is built here from a fixed table, so no field
+    // arrives from the client. Allowlisted accounts only, same-origin, and the
+    // account id comes from the session — it can reach no record but yours.
+    if (p === '/api/onboarding/state' && method === 'POST') {
       if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
       const session = await getSession(env, req);
-      if (!isDebugAccount(env, session)) return json({ error: 'forbidden' }, { status: 403 });
+      if (!(await isDebugAccount(env, session))) return json({ error: 'forbidden' }, { status: 403 });
       const accountId = await sessionAccountId(env, session);
       if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
-      await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({}));
-      return json({ ok: true, record: {} });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const state = typeof body.state === 'string' ? body.state : '';
+      if (!DEBUG_STATES.includes(state)) return json({ error: 'unknown_state', states: DEBUG_STATES }, { status: 400 });
+      const prior = await loadOnboarding(env, accountId);
+      const next = debugRecord(state, new Date().toISOString(), prior && prior.first_doc);
+      await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+      return json({ ok: true, state, record: next });
     }
     if (p === '/api/onboarding/event' && method === 'POST') {
       let body = {};

@@ -946,6 +946,20 @@ function localDocsData() {
 
 // Same allowlist variable as the worker. Locally there is one anonymous
 // identity, so the flag is on when the variable names anybody at all.
+const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
+function debugRecord(state, at, firstDoc) {
+  const doc = firstDoc || 'what-ai-knows';
+  switch (state) {
+    case 'new': return {};
+    case 'started': return { started: at };
+    case 'connected': return { started: at, agent_connected: at };
+    case 'published': return { started: at, agent_connected: at, published_first: at, first_doc: doc };
+    case 'commented': return { started: at, agent_connected: at, published_first: at, first_doc: doc, commented: at };
+    case 'revised': return { started: at, agent_connected: at, published_first: at, first_doc: doc, commented: at, revised: at };
+    default: return null;
+  }
+}
+
 function localDebugAccount() {
   return String(process.env.TDOC_DEBUG_ACCOUNTS || '').trim().length > 0;
 }
@@ -1253,10 +1267,18 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  if (p === '/api/onboarding/reset' && req.method === 'POST') {
+  if (p === '/api/onboarding/state' && req.method === 'POST') {
     if (!localDebugAccount()) return send(res, 403, JSON.stringify({ error: 'forbidden' }), { 'Content-Type': 'application/json' });
-    writeJson(ONBOARDING_FILE, {});
-    return send(res, 200, JSON.stringify({ ok: true, record: {} }), { 'Content-Type': 'application/json' });
+    let parsed = {};
+    try { parsed = JSON.parse((await readBody(req)) || '{}'); } catch {}
+    const state = typeof parsed.state === 'string' ? parsed.state : '';
+    if (!DEBUG_STATES.includes(state)) {
+      return send(res, 400, JSON.stringify({ error: 'unknown_state', states: DEBUG_STATES }), { 'Content-Type': 'application/json' });
+    }
+    const prior = readJson(ONBOARDING_FILE, {}).record || {};
+    const next = debugRecord(state, new Date().toISOString(), prior.first_doc);
+    writeJson(ONBOARDING_FILE, { record: next });
+    return send(res, 200, JSON.stringify({ ok: true, state, record: next }), { 'Content-Type': 'application/json' });
   }
 
   if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD')) {

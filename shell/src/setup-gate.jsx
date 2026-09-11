@@ -27,6 +27,18 @@ import { COPY_FALLBACK, selectContents } from './onboarding-dialog.jsx';
 // CLI fetch it. That is a real change to the prompt, not a UI tweak.
 
 export const SETUP_PROMPT = 'Install tdoc and connect it to my account: https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md';
+// The same names the server's table uses. It builds every record itself, so
+// this list only decides which buttons exist.
+export const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
+function recordName(record) {
+  if (!record || !Object.keys(record).length) return 'new';
+  if (record.revised) return 'revised';
+  if (record.commented) return 'commented';
+  if (record.published_first) return 'published';
+  if (record.agent_connected) return 'connected';
+  if (record.started) return 'started';
+  return 'new';
+}
 export const DOCTOR_PROMPT = 'Run tdoc doctor and fix what it reports';
 const POLL_MS = 3000;
 const STUCK_MS = 60000;
@@ -183,16 +195,12 @@ export function SetupGate({ boot }) {
   const [elapsed, setElapsed] = useState(0);
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
-  // A forced view, for the allowlisted account only: it paints a branch
-  // without touching the record, and says so, so a screenshot of it can never
-  // be mistaken for the real thing.
-  const [forced, setForced] = useState(null);
+  const [busyState, setBusyState] = useState('');
   const copiedAt = useRef(null);
   const stamped = useRef(false);
 
   const connected = Boolean(record?.agent_connected || record?.published_first);
-  const live = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
-  const state = forced || live;
+  const state = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
 
   // The record is the only thing that moves this page.
   useEffect(() => {
@@ -307,21 +315,27 @@ export function SetupGate({ boot }) {
       {boot?.debug ? (
         <div className="sg-debug" role="group" aria-label="Internal testing">
           <span className="sg-debug-tag">Internal</span>
-          {['waiting', 'stuck', 'done'].map((name) => (
-            <button key={name} type="button" aria-pressed={state === name} onClick={() => setForced(name === live ? null : name)}>{name}</button>
+          {DEBUG_STATES.map((name) => (
+            <button
+              key={name}
+              type="button"
+              disabled={Boolean(busyState)}
+              onClick={async () => {
+                setBusyState(name);
+                await fetch('/api/onboarding/state', {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ state: name }),
+                }).catch(() => {});
+                setCopied(false); setCopyFailed(false); copiedAt.current = null; setElapsed(0);
+                const result = await getOnboarding().catch(() => null);
+                setRecord(result?.record || {});
+                setBusyState('');
+              }}
+            >{busyState === name ? '…' : name}</button>
           ))}
-          <button type="button" onClick={() => setForced(null)} disabled={!forced}>live</button>
-          <button
-            type="button"
-            className="sg-debug-reset"
-            onClick={async () => {
-              await fetch('/api/onboarding/reset', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
-              setForced(null); setCopied(false); setCopyFailed(false); copiedAt.current = null; setElapsed(0);
-              const result = await getOnboarding().catch(() => null);
-              setRecord(result?.record || {});
-            }}
-          >Reset my record</button>
-          <span className="sg-debug-now">{forced ? `forced · live is ${live}` : `live · ${live}`}</span>
+          <span className="sg-debug-now">record: {recordName(record)}</span>
         </div>
       ) : null}
 
