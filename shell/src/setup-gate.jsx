@@ -223,16 +223,14 @@ export function SetupGate({ boot }) {
 
             {signedIn ? (
               <>
-                <div className="sg-section">
-                  <span className="sg-section-label">Setup prompt</span>
-                  <span className="sg-section-note">{AGENT_NAMES}</span>
-                </div>
-
                 <div className="sg-prompt">
                   <p className="sg-prompt-text" ref={promptRef}>{SETUP_PROMPT}</p>
-                  <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
-                    {copied ? 'Copied' : 'Copy'}
-                  </button>
+                  <div className="sg-prompt-foot">
+                    <span className="sg-prompt-agents">{AGENT_NAMES}</span>
+                    <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
                 </div>
 
                 <ol className="sg-steps">

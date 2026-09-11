@@ -40,40 +40,40 @@
 
 .sg-h1 { margin: 0 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
 
-/* Not a terminal block: this is a sentence you paste into an agent, so it is
-   set as text on the page's own surface. Content and its action share one
-   row, ending together — a button floating below the last line leaves a void
-   that reads as a mistake, and a bordered pill makes a quiet action shout. */
-.sg-section { display: flex; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; margin-bottom: -6px; }
-.sg-section-label { font-size: 11px; font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; color: var(--td-muted, #6b6a66); flex: 0 0 auto; }
-.sg-section-note { margin-left: auto; font-size: 11.5px; color: var(--td-muted, #6b6a66); text-align: right; }
+/* The prompt is the message you are about to send your agent, so it is drawn
+   like the box you would send it from: white, one hairline, a large radius and
+   almost no shadow. The foot carries what it works with on the left and the
+   action on the right — where a composer puts Send — which is why the labelled
+   section row above it is gone.
 
+   The action is outlined, not filled: it should be findable at a glance, not
+   the loudest thing on a page that already has a primary. */
 .sg-prompt {
-  display: flex; align-items: flex-end; gap: 16px;
-  padding: 16px 18px; border-radius: 18px;
-  background: var(--td-surface, #f4f4f2);
+  display: flex; flex-direction: column; gap: 11px;
+  padding: 14px 14px 11px;
+  border: 1px solid #e3e3e0; border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(26,26,26,.035);
 }
 .sg-prompt-text {
-  flex: 1 1 auto; min-width: 0; margin: 0;
+  margin: 0;
   font: 500 13px/1.7 ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--td-ink, #1a1a1a);
   overflow-wrap: anywhere; user-select: all;
 }
-/* The one thing this page needs a person to do, so it is a button. Text-only
-   made it the quietest element on a screen whose loudest one is disabled until
-   the agent turns up. Green on copy is the same signal the wizard's primary
-   already uses for a step that is done. */
+.sg-prompt-foot { display: flex; align-items: center; gap: 12px; }
+.sg-prompt-agents { flex: 1 1 auto; min-width: 0; font-size: 11.5px; line-height: 1.4; color: #9a9a96; }
 .sg-prompt-copy {
-  flex: 0 0 auto; align-self: flex-end;
-  height: 34px; padding: 0 17px; border: 0; border-radius: 10px;
+  flex: 0 0 auto;
+  height: 30px; padding: 0 14px;
+  border: 1px solid var(--td-accent, #1652f0); border-radius: 9px;
+  background: transparent; color: var(--td-accent, #1652f0);
   cursor: pointer;
-  background: var(--td-accent, #1652f0); color: #fff;
-  font: 600 13.5px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
-  transition: background .12s;
+  font: 600 13px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
+  transition: background .12s, color .12s, border-color .12s;
 }
-.sg-prompt-copy:hover { background: var(--td-accent-hover, #1245d0); }
-.sg-prompt-copy.copied { background: #1a7340; cursor: default; }
-.sg-prompt-copy.copied:hover { background: #1a7340; }
+.sg-prompt-copy:hover { background: var(--td-accent-tint, #e8eeff); }
+.sg-prompt-copy.copied { border-color: #1a7340; color: #1a7340; background: transparent; cursor: default; }
 
 .sg-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; counter-reset: sgs; }
 .sg-steps li { display: grid; grid-template-columns: 17px 1fr; gap: 11px; align-items: start; font-size: 13.5px; line-height: 1.4; color: var(--td-ink, #1a1a1a); }
