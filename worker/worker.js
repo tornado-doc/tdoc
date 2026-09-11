@@ -5212,6 +5212,12 @@ export default {
     // onboarding record and moves itself when the agent turns up.
     if (p === '/setup' && (method === 'GET' || method === 'HEAD')) {
       const session = await getSession(env, req);
+      if (!sessionPrincipal(session) && oidcConfig(env)) {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: `/api/auth/oidc/login?return=${encodeURIComponent('/setup')}` },
+        });
+      }
       const nonce = rand(16);
       return html(SHELL.appHtml({
         title: 'tdoc - connect your agent',

@@ -28,6 +28,16 @@ t('the gate is a route on both hosts, not a modal', () => {
   assert(worker.includes("page: 'setup'") && server.includes("page: 'setup'"), 'both boot the same page');
 });
 
+t('a host that can sign people in does not ask them to say so twice', () => {
+  // The CTA was the intent. Rendering a screen whose only content is "Sign in
+  // to start" makes them state it again; the gate sends them to the provider
+  // and back. The rendered signed-out state survives only where there is no
+  // provider to send them to.
+  assert(/if \(!sessionPrincipal\(session\) && oidcConfig\(env\)\) \{[\s\S]{0,220}\/api\/auth\/oidc\/login\?return=/.test(worker),
+    '/setup redirects a signed-out visitor straight to sign-in');
+  assert(gate.includes("Sign-in is not configured on this host."), 'and says so plainly where there is none');
+});
+
 t('only the record moves the gate, and `paired` counts', () => {
   // An account whose agent already holds a token waits forever if the page
   // reads only the record's own stamps: nothing re-stamps a connection that
