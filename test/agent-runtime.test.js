@@ -111,10 +111,11 @@ t('tdoc_logo.svg is the vector SoT; PNG stays for Open Graph', () => {
   // surface, a favicon, or somebody else's README the white box shows. Line
   // art in currentColor needs no field — it follows the text in light mode and
   // inverts to white with it in dark.
-  assert(!/<rect[^>]*fill="#(fff|ffffff)"/i.test(svg), 'the mark must not carry a background field');
-  assert(svg.indexOf('fill="#ffffff"') < svg.indexOf('fill="currentColor"'),
-    'the field must be painted before the ink, or it covers the drawing');
-  assert(/fill-rule\s*=\s*["']evenodd["']/.test(svg), 'outline holes need evenodd');
+  assert(!/<rect[\s>]/i.test(svg), 'the mark must not carry a background field');
+  // Drawn as strokes, not as traced outlines: five lines with round caps. A
+  // filled path could still paint a field by accident, so `fill` stays off.
+  assert(/stroke="currentColor"/.test(svg), 'the ink must follow currentColor');
+  assert(/fill="none"/.test(svg), 'stroked line art must not fill');
   assert(!/<image[\s>]/i.test(svg), 'embedded <image> not allowed');
   assert(!/data:image\//i.test(svg), 'embedded bitmap not allowed');
   assert(!/<script[\s>]/i.test(svg), 'SVG must be inert');
