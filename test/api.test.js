@@ -121,6 +121,24 @@ function waitReady(port, ms = 5000) {
     if (!nested || nested.parent_id !== replyId) throw new Error('nested reply missing or wrong parent');
   });
 
+  // The edit route has always trimmed before deciding whether there is anything
+  // to save. Create and agent-reply only checked for the empty string, so "\n"
+  // got in — and what it produced could not be seen or removed (#532).
+  await t('POST /api/comments refuses text that is only whitespace', async () => {
+    const before = (await req('GET', `/api/comments?slug=${SLUG}`)).body.length;
+    for (const text of ['   ', '\n\n', '\u3000']) {
+      const r = await req('POST', '/api/comments', { slug: SLUG, version: 1, text, anchor: null });
+      if (r.status !== 400) throw new Error(`${JSON.stringify(text)} was accepted with ${r.status}`);
+    }
+    const after = (await req('GET', `/api/comments?slug=${SLUG}`)).body.length;
+    if (after !== before) throw new Error(`a blank comment was still written (${before} -> ${after})`);
+  });
+
+  await t('POST /api/agent/reply refuses text that is only whitespace', async () => {
+    const r = await req('POST', '/api/agent/reply', { slug: SLUG, parent_id: topId, text: '\n   \n' });
+    if (r.status !== 400) throw new Error(`a blank agent reply was accepted with ${r.status}`);
+  });
+
   await t('POST /api/reactions adds 👍 to top comment', async () => {
     const r = await req('POST', '/api/reactions', { slug: SLUG, comment_id: topId, emoji: '👍' });
     if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
@@ -206,6 +224,13 @@ function waitReady(port, ms = 5000) {
     }
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
     if (after.body.length !== 0) throw new Error(`an empty tombstone stayed: ${JSON.stringify(after.body)}`);
+  });
+
+  // Last, because it leaves a record behind and the deletes above read the list.
+  await t('a comment whose text merely has whitespace around it is kept, trimmed', async () => {
+    const r = await req('POST', '/api/comments', { slug: SLUG, version: 1, text: '  real words  ', anchor: null });
+    if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
+    if (r.body.text !== 'real words') throw new Error(`stored as ${JSON.stringify(r.body.text)}`);
   });
 
   function rawGet(p) {

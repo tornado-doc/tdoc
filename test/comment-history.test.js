@@ -49,7 +49,7 @@ function sliceFn(name) {
 const deps = [
   'isFiniteVersion', 'eventEid', 'backfillEids', 'dedupEvents',
   'ensureEventLog', 'legacyToEvents', 'snapshotAt',
-  'keepThread', 'asTombstone', 'snapshotList', 'historyList',
+  'keepThread', 'asTombstone', 'hasNoWords', 'snapshotList', 'historyList',
 ].map(sliceFn).join('\n\n');
 
 const sandbox = { AGENT_STATUS_EMOJI: { applied: '✅', partial: '🟡', question: '❓' } };

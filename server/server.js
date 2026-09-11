@@ -281,6 +281,19 @@ function localTombstone(record) {
   return out;
 }
 
+// A record with no words. Deleting takes the words away; a caller that posted
+// only whitespace never supplied any. Both leave the same thing behind — a slot
+// with a name on it and nothing to read — so the fold treats them alike rather
+// than keeping a second rule beside this one.
+//
+// The shell cannot produce one (it trims, and blocks an empty submit), but the
+// API used to accept "\n" as text, and those replies rendered as a row zero
+// pixels tall: it counted toward the thread and the pin badge, yet had no hit
+// area, so there was no menu and no way to delete it (#532).
+function hasNoWords(record) {
+  return !!record && (record.deleted || !String(record.text || '').trim());
+}
+
 // The Worker gets this for free — it folds, so a tombstone with nothing left
 // under it simply stops being emitted. Local storage is written, not folded,
 // so the collapse has to happen at delete time: drop tombstoned replies that
@@ -293,13 +306,13 @@ function collapseLocalTombstones(comment) {
     changed = false;
     for (let i = replies.length - 1; i >= 0; i--) {
       const r = replies[i];
-      if (!r.deleted) continue;
+      if (!hasNoWords(r)) continue;
       if (replies.some(other => other.parent_id === r.id)) continue;
       replies.splice(i, 1);
       changed = true;
     }
   }
-  return !(comment.deleted && !replies.length);
+  return !(hasNoWords(comment) && !replies.length);
 }
 
 function localRecordAuthor(comments, id) {
@@ -1590,14 +1603,24 @@ const server = http.createServer(async (req, res) => {
     // Fold to the requested version's snapshot so past versions keep their
     // historical status (matches the worker). Missing version → latest state.
     const ver = url.searchParams.get('version');
-    return json(res, 200, ver != null ? foldCommentsAtVersion(all, ver) : all);
+    // The worker folds on every read, so a record with no words stops being
+    // emitted the moment this ships. Local storage is written rather than
+    // folded, and a blank one arrives with no delete to hang the collapse on —
+    // so it has to happen here, or a document that already holds one would keep
+    // serving a row nobody can see or remove (#532). readCommentFile parses
+    // fresh, so collapsing in place touches nothing on disk.
+    const served = all.filter((c) => collapseLocalTombstones(c));
+    return json(res, 200, ver != null ? foldCommentsAtVersion(served, ver) : served);
   }
 
   if (p === '/api/comments' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
     const slug = safeSlug(body.slug);
-    const { version, anchor, text, parent_id } = body;
+    const { version, anchor, parent_id } = body;
+    // Trimmed before the check, the way the edit path already does it: "\n" is
+    // not a comment, and one that gets in cannot be seen or removed (#532).
+    const text = typeof body.text === 'string' ? body.text.trim() : body.text;
     if (!slug || !text) return json(res, 400, { error: 'invalid slug or missing text' });
     const file = path.join(ROOT, slug, 'comments.json');
     const comments = readCommentFile(file);
@@ -1690,7 +1713,8 @@ const server = http.createServer(async (req, res) => {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
     const slug = safeSlug(body.slug);
-    const { parent_id, text, status: agentStatus, applied_in } = body;
+    const { parent_id, status: agentStatus, applied_in } = body;
+    const text = typeof body.text === 'string' ? body.text.trim() : body.text;
     if (!slug || !parent_id || !text) return json(res, 400, { error: 'invalid slug or missing parent_id/text' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
