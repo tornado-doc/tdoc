@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
+import { SignInDialog } from './sign-in-dialog.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -71,14 +72,9 @@ function Composer({ agent, live = false, children }) {
   );
 }
 
-function SceneWaiting({ agent, onAgent }) {
+function SceneWaiting({ agent }) {
   return (
     <>
-      <div className="sg-agents" role="group" aria-label="Your agent">
-        {AGENTS.map((name) => (
-          <button key={name} type="button" aria-pressed={name === agent} onClick={() => onAgent(name)}>{name}</button>
-        ))}
-      </div>
       <ChatWindow agent={agent}>
         <div className="sg-msg">
           <span className="sg-av bot" />
@@ -89,7 +85,6 @@ function SceneWaiting({ agent, onAgent }) {
           <span className="sg-caret" />
         </Composer>
       </ChatWindow>
-      <p className="sg-cap">You paste it where you already talk to your agent. No terminal step, nothing to install by hand.</p>
     </>
   );
 }
@@ -111,7 +106,6 @@ function SceneStuck({ agent }) {
         </div>
         <Composer agent={agent} />
       </ChatWindow>
-      <p className="sg-cap">The doctor runs where the problem is, on your machine. This page only knows what the server saw.</p>
     </>
   );
 }
@@ -165,7 +159,6 @@ function SceneDone() {
           </div>
         </div>
       </div>
-      <p className="sg-cap">Your agent writes the page. You argue with one sentence. It reads the comment and publishes the next version.</p>
     </>
   );
 }
@@ -173,11 +166,13 @@ function SceneDone() {
 // ------------------------------------------------------------------ the gate
 
 export function SetupGate({ boot }) {
-  const signedIn = Boolean(boot?.identity);
   const [record, setRecord] = useState(null);
   const [copied, setCopied] = useState(false);
   const [agent, setAgent] = useState(AGENTS[0]);
   const [elapsed, setElapsed] = useState(0);
+  const [signInOpen, setSignInOpen] = useState(false);
+  const [identity, setIdentity] = useState(boot?.identity || null);
+  const signedIn = Boolean(identity);
   const copiedAt = useRef(null);
   const stamped = useRef(false);
 
@@ -202,9 +197,16 @@ export function SetupGate({ boot }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [signedIn]);
 
+  // Two hosts, two doors. tdoc.dev signs people in through the OIDC provider
+  // (a full-page redirect back to /setup); a BYOK or local worker has no OIDC
+  // and falls back to GitHub's device flow, which runs in this window. Without
+  // the second door the gate is a dead end on every host but tdoc.dev.
   const signIn = () => {
-    const back = '/setup';
-    location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(back)}`;
+    if (boot?.oidcAuth) {
+      location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent('/setup')}`;
+      return;
+    }
+    setSignInOpen(true);
   };
 
   const copy = async () => {
@@ -217,20 +219,30 @@ export function SetupGate({ boot }) {
 
   const scene = state === 'done' ? <SceneDone />
     : state === 'stuck' ? <SceneStuck agent={agent} />
-      : <SceneWaiting agent={agent} onAgent={setAgent} />;
+      : <SceneWaiting agent={agent} />;
 
   return (
     <div className="sg-split">
+      <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={(who) => { setSignInOpen(false); setIdentity(who); location.reload(); }} />
       <section className="sg-pane-form">
         <div className="sg-brand"><Mark /> tdoc</div>
         <div className="sg-mid">
           <div className="sg-col">
             <p className="sg-eyebrow">Set up tdoc</p>
-            <h1 className="sg-h1">Connect the agent on your machine.</h1>
-            <p className="sg-sub">One prompt. It installs tdoc, then opens a tab asking for permission to publish as you.</p>
+            <h1 className="sg-h1">Connect your agent</h1>
+            <p className="sg-sub">An agent is the AI on your machine. tdoc publishes what it writes, so it needs your permission first.</p>
 
             {signedIn ? (
               <>
+                <div className="sg-section">
+                  <span className="sg-section-label">Setup prompt</span>
+                  <div className="sg-agents" role="group" aria-label="Your agent">
+                    {AGENTS.map((name) => (
+                      <button key={name} type="button" aria-pressed={name === agent} onClick={() => setAgent(name)}>{name}</button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="sg-prompt">
                   <p className="sg-prompt-text">{SETUP_PROMPT}</p>
                   <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
@@ -239,9 +251,9 @@ export function SetupGate({ boot }) {
                 </div>
 
                 <ol className="sg-steps">
-                  <li>Paste it into {AGENTS.slice(0, -1).join(', ')} or {AGENTS[AGENTS.length - 1]}.</li>
-                  <li>A tab opens on its own. Approve it there.</li>
-                  <li>This page moves on by itself. No need to refresh.</li>
+                  <li>Paste it into {agent}.</li>
+                  <li>Approve the request when it opens in your browser.</li>
+                  <li>Your agent shows up here on its own. No need to refresh.</li>
                 </ol>
 
                 <div className="sg-status-slot">
@@ -275,13 +287,17 @@ export function SetupGate({ boot }) {
                   Continue
                 </a>
                 <p className="sg-account">
-                  Signed in as {boot.identity.name || boot.identity.login}. <a href="/me">I’ll do this later</a>
+                  Signed in as {identity.name || identity.login}. <a href="/me">I’ll do this later</a>
                 </p>
               </>
             ) : (
               <>
-                <button type="button" className="sg-primary" onClick={signIn}>Sign in to start</button>
-                <p className="sg-account">Signing in creates your account. There is no separate sign-up.</p>
+                <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth && !boot?.authConfigured}>Sign in to start</button>
+                <p className="sg-account">
+                  {boot?.oidcAuth || boot?.authConfigured
+                    ? 'Signing in creates your account. There is no separate sign-up.'
+                    : 'Sign-in is not configured on this host.'}
+                </p>
               </>
             )}
           </div>

@@ -43,6 +43,11 @@
 
 /* Not a terminal block: this is a sentence you paste into an agent, so it is
    set as text on the page's own surface, with Copy sitting with it. */
+.sg-section { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; margin-bottom: -8px; }
+.sg-section-label { font-size: 11px; font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; color: var(--td-muted, #6b6a66); flex: 0 0 auto; }
+.sg-section .sg-agents { margin: 0 0 0 auto; gap: 3px; flex-wrap: nowrap; }
+.sg-section .sg-agents button { padding: 4px 9px; font-size: 11.5px; border-radius: 7px; }
+
 .sg-prompt { display: flex; flex-direction: column; gap: 11px; padding: 15px; border-radius: 13px; background: var(--td-surface, #f4f4f2); border: 1px solid var(--td-line, #e8e7e3); }
 .sg-prompt-text { margin: 0; font: 500 13.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--td-ink, #1a1a1a); overflow-wrap: anywhere; user-select: all; }
 .sg-prompt-copy { align-self: flex-end; border: 1px solid var(--td-line, #e8e7e3); background: #fff; color: var(--td-accent, #1652f0); font: 600 12.5px/1 inherit; padding: 8px 15px; border-radius: 999px; cursor: pointer; }
@@ -86,10 +91,9 @@
   border-left: 1px solid var(--td-line, #e8e7e3);
 }
 .sg-stage { position: relative; width: 1080px; flex: 0 0 1080px; margin-left: 56px; transform: rotate(-1.1deg); }
-.sg-cap { margin: 26px 0 0; width: 520px; font-size: 12.5px; line-height: 1.5; color: var(--td-muted, #6b6a66); transform: rotate(1.1deg); }
 
 /* --- where people paste: a conversation, not a shell --- */
-.sg-agents { display: flex; gap: 4px; margin-bottom: 12px; }
+.sg-agents { display: flex; gap: 4px; }
 .sg-agents button { border: 1px solid var(--p-card-line); background: #fff; color: var(--p-icon); font: 600 12px inherit; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
 .sg-agents button[aria-pressed="true"] { background: var(--p-ink); border-color: var(--p-ink); color: #fff; }
 

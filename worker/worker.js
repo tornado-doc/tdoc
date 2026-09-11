@@ -5098,6 +5098,9 @@ export default {
             : null,
           oidcAuth: !!oidcConfig(env),
           oidcLabel: (oidcConfig(env) || {}).label || '',
+          // A host with no OIDC still has a door: GitHub's device flow needs
+          // only the client id, so a local or BYOK worker can sign a browser in.
+          authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
