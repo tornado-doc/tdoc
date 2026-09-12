@@ -174,7 +174,13 @@ export function OnboardingChecklist({ record, docs }) {
           );
           return (
             <li key={step.id} className={step.done ? 'done' : step.locked ? 'locked' : ''}>
-              {step.done || step.locked || !step.href
+              {/* A finished row still goes somewhere, and where it goes is still
+                  worth going: row 1 is how you connect a second machine, row 2
+                  is how you make another doc -- the page it opens was built
+                  for exactly the person who has already done it once. Struck
+                  through says it is finished; it does not have to mean the
+                  door is gone. Only a locked row is inert. */}
+              {step.locked || !step.href
                 ? <span className="onb-row">{body}</span>
                 : <a href={step.href}>{body}</a>}
             </li>

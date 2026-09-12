@@ -213,6 +213,10 @@
 .onb-label { font-size: 14px; line-height: 1.35; }
 .onb-card li a .onb-label { color: var(--td-accent, #1652f0); }
 .onb-card li.done .onb-label { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
+/* A finished row is still a link, so hovering must not trade its strike for an
+   underline -- losing the line-through on hover reads as the row un-ticking
+   itself. Both lines, together. */
+.onb-card li.done a:hover .onb-label { text-decoration: line-through underline; }
 .onb-tick {
   width: 18px; height: 18px; border-radius: 50%;
   border: 1px solid var(--td-line, #e8e7e3); background: #fff;

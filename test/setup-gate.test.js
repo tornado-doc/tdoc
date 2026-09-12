@@ -144,7 +144,13 @@ t('a row cannot come before the row it depends on', () => {
     'and a comment unlocks the handoff');
   // You cannot comment on a doc that does not exist, or ask an agent to fix
   // comments nobody has left. A locked row is shown and not offered.
-  assert(list.includes('{step.done || step.locked || !step.href'), 'a locked row is not a link');
+  assert(list.includes('{step.locked || !step.href'), 'a locked row is not a link');
+  // A finished row still is one. Where it goes is still worth going: row 1 is
+  // how you connect a second machine, row 2 is how you make another doc, and
+  // that page was built for exactly the person who has done it once already.
+  assert(!/step\.done \|\| step\.locked/.test(list), 'being done does not close the door');
+  assert(listCss.includes('.onb-card li.done a:hover .onb-label { text-decoration: line-through underline; }'),
+    'and hovering one does not trade its strike for an underline');
   assert(list.includes("step.done ? 'done' : step.locked ? 'locked' : ''"), 'and says so in its class');
   assert(listCss.includes('.onb-card li.locked .onb-label'), 'which the stylesheet greys');
 });
