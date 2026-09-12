@@ -48,6 +48,39 @@
 
    The action is outlined, not filled: it should be findable at a glance, not
    the loudest thing on a page that already has a primary. */
+/* The one choice in the whole journey. Rows, not cards: the read column is
+   narrow, and two cards side by side here would each be too tight to say
+   anything. A radio rather than a tick, because this is one of two and not
+   one of four -- the tick belongs to the checklist and means something else. */
+.sg-choices { display: flex; flex-direction: column; gap: 8px; }
+.sg-choice {
+  box-sizing: border-box; display: flex; align-items: flex-start; gap: 11px;
+  width: 100%; padding: 13px 14px;
+  border: 1px solid #e3e3e0; border-radius: 14px;
+  background: #fff; cursor: pointer; text-align: left;
+  font: inherit; color: var(--td-ink, #1a1a1a);
+  transition: border-color .12s, background .12s;
+}
+.sg-choice:hover { border-color: #cfcec9; }
+.sg-choice.on { border-color: var(--td-accent, #1652f0); background: var(--td-accent-tint, #e8eeff); }
+.sg-radio {
+  box-sizing: border-box; flex: 0 0 17px; width: 17px; height: 17px; margin-top: 1px;
+  border: 1.5px solid #cfcec9; border-radius: 50%; background: #fff;
+}
+.sg-choice.on .sg-radio { border: 5px solid var(--td-accent, #1652f0); }
+.sg-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sg-choice-text b { font: 600 14px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; }
+.sg-choice-text span { font-size: 13px; color: var(--td-muted, #6b6a66); }
+
+.sg-subject { display: block; }
+.sg-subject input {
+  box-sizing: border-box; width: 100%; height: 42px; padding: 0 14px;
+  border: 1px solid #e3e3e0; border-radius: 12px; background: #fff;
+  font: 500 13.5px -apple-system, system-ui, sans-serif; color: var(--td-ink, #1a1a1a);
+}
+.sg-subject input::placeholder { color: #a4a39e; font-weight: 400; }
+.sg-subject input:focus { outline: none; border-color: var(--td-accent, #1652f0); box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff); }
+
 .sg-prompt {
   display: flex; align-items: flex-end; gap: 10px;
   padding: 14px 14px 12px;
@@ -79,6 +112,8 @@
   transition: background .12s, color .12s, border-color .12s;
 }
 .sg-prompt-copy:hover { background: var(--td-accent-tint, #e8eeff); }
+.sg-prompt-copy:disabled { border-color: #dcdbd7; color: #a4a39e; background: transparent; cursor: default; }
+.sg-prompt.pending .sg-prompt-text { color: #9a9a95; }
 .sg-prompt-copy.copied { border-color: #1a7340; color: #1a7340; background: transparent; cursor: default; }
 
 .sg-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; counter-reset: sgs; }

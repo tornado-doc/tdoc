@@ -39,6 +39,7 @@ const shell = read('shell/src/document-shell.jsx');
 const hint = read('shell/src/document/step-hint.jsx');
 const hintCss = read('shell/src/document/step-hint.css');
 const card = read('shell/src/document/comment-card.jsx');
+const dialog = read('shell/src/onboarding-dialog.jsx');
 const worker = read('worker/worker.js');
 const server = read('server/server.js');
 
@@ -140,6 +141,48 @@ t('the second ask is the same ask, on the same route', () => {
   assert(gate.includes("const step = wantsDoc && connected ? 'doc' : 'connect';"),
     'and an unconnected visitor is asked to connect first, whichever link they arrived on');
   assert(gate.includes('export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;'), 'the doc line is the skill\'s own, reused not rewritten');
+});
+
+t('the second ask is the one place with a choice in it', () => {
+  // Marching everybody through the same portrait is what made the old version
+  // feel like a kidnapping to anyone who already knew what they wanted.
+  assert(/DOC_CHOICES = \[[\s\S]*?id: 'own'[\s\S]*?id: 'portrait'[\s\S]*?\]/.test(gate), 'two live choices');
+  assert(gate.includes('const [choice, setChoice] = useState(null);'), 'and neither is chosen for them');
+  // Choosing is the question this screen asks; everything downstream of it
+  // waits until it has been answered.
+  assert(gate.includes("{step === 'doc' && !choice ? null : ("), 'no instructions before there is something to paste');
+  assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');
+});
+
+t('a subject typed on the page composes the line, and an empty one does not', () => {
+  // Run the real thing rather than grepping it: the prefix and the suffix are
+  // the two halves a reader has to trust.
+  // eslint-disable-next-line no-new-func
+  const compose = new Function(`${gate.match(/export const DOC_SUBJECT_PREFIX[\s\S]*?export const docSubjectPrompt = [^;]+;/)[0].replace(/export /g, '')}; return docSubjectPrompt;`)();
+  assert(compose('pricing') === '/tdoc new "pricing" — then publish it and give me the link',
+    `the prefix and suffix wrap what they typed: ${compose('pricing')}`);
+  assert(gate.includes("const promptReady = step !== 'doc' || choice === 'portrait' || Boolean(subjectTrimmed);"),
+    'an untyped subject is not a line anybody should be handed');
+  assert(/className=\{`sg-prompt-copy\$\{copied \? ' copied' : ''\}`\}\s*\n\s*onClick=\{copy\}\s*\n\s*disabled=\{!promptReady\}/.test(gate),
+    'so Copy is refused until it is one');
+});
+
+t('the portrait line drops a preamble that is false by then', () => {
+  // FIRST_DOC_RECIPE opens with "Set up tdoc and", which is true on the
+  // landing page and a lie on a screen only a connected account can reach.
+  assert(gate.includes('export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;'), 'same recipe, no setup preamble');
+  assert(!/docPrompt[\s\S]{0,80}FIRST_DOC_RECIPE/.test(gate) && !gate.includes("import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_RECIPE"),
+    'and the landing page\'s line is not what gets copied here');
+  assert(dialog.includes("export const RECIPE_URL ="), 'the URL itself is still the wizard\'s, imported not retyped');
+});
+
+t('forking is drawn and deliberately not wired', () => {
+  // Its whole value was a first doc in ten seconds with no agent, and the
+  // seeding delivers exactly that, earlier and with no click. The only
+  // forkable template today is the one already in their Onboarding folder.
+  assert(/DOC_CHOICES[\s\S]{0,400}?\]/.test(gate) && !gate.includes("id: 'fork'"), 'no fork choice ships');
+  assert(worker.includes("const SEED_TEMPLATE_SLUG = 'what-ai-knows';"), 'because that template is the seeded one');
+  assert(gate.includes('second thing to fork'), 'and the reason is written down, not lost');
 });
 
 t('the doc step waits for a doc they made, not the one we seeded', () => {

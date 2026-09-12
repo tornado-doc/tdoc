@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
-import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, selectContents } from './onboarding-dialog.jsx';
+import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-dialog.jsx';
 import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
@@ -31,10 +31,34 @@ import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 // building a first doc -- which this page deliberately no longer asks for. So
 // the line names the command that pairs, and stops there.
 export const SETUP_PROMPT = 'Install tdoc from https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md, then connect it to my account by running: bin/tdoc-publish --signin-only';
-// The second ask, on the same route. By the time anyone reads it the skill is
-// installed and the account is connected, so the line is the skill's own
-// command and nothing else -- FIRST-DOC.md would only rebuild the portrait
-// they already have.
+// The second ask, on the same route, and the one place in the whole journey
+// where there is a choice to make. Everybody being marched through the same
+// "what AI knows about you" is what made the old version feel like a
+// kidnapping to anyone who already knew what they wanted to write.
+//
+// Two live choices, and they differ in what the agent is being asked for, not
+// in how the page behaves: one names a subject the person supplies, the other
+// asks for the portrait FIRST-DOC.md builds out of their own traces. Both end
+// as one line, pasted once.
+//
+// A third -- fork a doc that already exists -- is drawn but not wired. Its
+// whole value was a first doc in ten seconds with no agent, and the seeding
+// now delivers exactly that, earlier and without a click; the only forkable
+// template today IS the one already sitting in their Onboarding folder. It
+// becomes real when there is a second thing to fork.
+export const DOC_SUBJECT_PREFIX = '/tdoc new "';
+export const DOC_SUBJECT_SUFFIX = '" — then publish it and give me the link';
+export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${DOC_SUBJECT_SUFFIX}`;
+// FIRST_DOC_RECIPE opens with "Set up tdoc and", which is true on the landing
+// page and false here: by the time anyone reads this screen the skill is
+// installed and the account is connected. Same recipe, without the preamble.
+export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;
+export const DOC_CHOICES = [
+  { id: 'own', label: 'I know what it’s about', sub: 'Name the subject. Your agent writes it.' },
+  { id: 'portrait', label: 'Make the one about me', sub: 'Built from the traces you choose to share.' },
+];
+// Kept as the export it always was: the placeholder line still answers "what
+// do I paste" for anyone who lands here with no choice made.
 export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;
 // The same names the server's table uses. It builds every record itself, so
 // this list only decides which buttons exist.
@@ -213,6 +237,11 @@ export function SetupGate({ boot }) {
   const [record, setRecord] = useState(null);
   const [paired, setPaired] = useState(false);
   const [ownDoc, setOwnDoc] = useState(null);
+  // The choice, and the subject it may carry. Nothing is chosen on arrival:
+  // pre-selecting one would answer the only question this screen asks.
+  const [choice, setChoice] = useState(null);
+  const [subject, setSubject] = useState('');
+  const subjectRef = useRef(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const promptRef = useRef(null);
@@ -236,7 +265,13 @@ export function SetupGate({ boot }) {
   // the link is safe to hand to anybody.
   const wantsDoc = boot?.step === 'doc';
   const step = wantsDoc && connected ? 'doc' : 'connect';
-  const prompt = step === 'doc' ? FIRST_DOC_PROMPT : SETUP_PROMPT;
+  const subjectTrimmed = subject.trim();
+  const docPrompt = choice === 'portrait' ? PORTRAIT_PROMPT
+    : choice === 'own' ? docSubjectPrompt(subjectTrimmed || '<what it is about>')
+      : FIRST_DOC_PROMPT;
+  const prompt = step === 'doc' ? docPrompt : SETUP_PROMPT;
+  // A subject that has not been typed is not a line anybody should be handed.
+  const promptReady = step !== 'doc' || choice === 'portrait' || Boolean(subjectTrimmed);
   // The doc step has no stuck state of its own: there is nothing to repair.
   // An agent that has not published yet is usually mid-question, so the wait
   // just says where to look.
@@ -303,19 +338,65 @@ export function SetupGate({ boot }) {
 
             {signedIn ? (
               <>
-                <div className="sg-prompt">
-                  <p className="sg-prompt-text" ref={promptRef}>{prompt}</p>
-                  <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
-                    {copied ? 'Copied' : 'Copy'}
-                  </button>
-                </div>
+                {step === 'doc' ? (
+                  <div className="sg-choices" role="radiogroup" aria-label="What the doc is about">
+                    {DOC_CHOICES.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={choice === item.id}
+                        className={`sg-choice${choice === item.id ? ' on' : ''}`}
+                        onClick={() => {
+                          setChoice(item.id);
+                          setCopied(false); setCopyFailed(false);
+                          if (item.id === 'own') window.setTimeout(() => subjectRef.current?.focus(), 0);
+                        }}
+                      >
+                        <span className="sg-radio" aria-hidden="true" />
+                        <span className="sg-choice-text">
+                          <b>{item.label}</b>
+                          <span>{item.sub}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {step === 'doc' && choice === 'own' ? (
+                  <label className="sg-subject">
+                    <span className="sg-sr">What the doc is about</span>
+                    <input
+                      ref={subjectRef}
+                      type="text"
+                      value={subject}
+                      placeholder="what it should be about"
+                      onChange={(event) => { setSubject(event.target.value); setCopied(false); }}
+                    />
+                  </label>
+                ) : null}
+
+                {step !== 'doc' || choice ? (
+                  <div className={`sg-prompt${promptReady ? '' : ' pending'}`}>
+                    <p className="sg-prompt-text" ref={promptRef}>{prompt}</p>
+                    <button
+                      type="button"
+                      className={`sg-prompt-copy${copied ? ' copied' : ''}`}
+                      onClick={copy}
+                      disabled={!promptReady}
+                    >
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                ) : null}
 
                 {step === 'doc' ? null : <WorksWith />}
 
+                {step === 'doc' && !choice ? null : (
                 <ol className="sg-steps">
                   {step === 'doc' ? (
                     <>
-                      <li>Paste it into your agent, and say what the doc is about.</li>
+                      <li>Paste it into your agent.</li>
                       <li>It writes the page and publishes it as you.</li>
                       <li>The doc turns up here on its own. No need to refresh.</li>
                     </>
@@ -327,9 +408,10 @@ export function SetupGate({ boot }) {
                     </>
                   )}
                 </ol>
+                )}
 
                 <div className="sg-status-slot">
-                  {state === 'waiting' ? (
+                  {state === 'waiting' && !(step === 'doc' && !choice) ? (
                     <div className="sg-status">
                       <span className="sg-spin" aria-hidden="true" />
                       {copyFailed ? COPY_FALLBACK

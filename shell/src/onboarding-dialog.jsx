@@ -29,7 +29,7 @@ import { OnboardingScene } from './onboarding-scene.jsx';
 // Every step is read off the account's onboarding record, never this browser,
 // so a second device — or a reload — resumes where the first one stopped.
 
-const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
+export const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
 export const FIRST_DOC_RECIPE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
 // The line for a person who already has one: tdoc is installed by then, and
 // FIRST-DOC.md would only build the same portrait again.
