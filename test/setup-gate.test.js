@@ -150,7 +150,11 @@ t('the second ask is the one place with a choice in it', () => {
   assert(gate.includes('const [choice, setChoice] = useState(null);'), 'and neither is chosen for them');
   // Choosing is the question this screen asks; everything downstream of it
   // waits until it has been answered.
-  assert(gate.includes("{step === 'doc' && !choice ? null : ("), 'no instructions before there is something to paste');
+  assert(gate.includes("{step === 'doc' && (!choice || state === 'done') ? null : ("), 'no instructions before there is something to paste');
+  assert(gate.includes("line={step === 'doc' && !choice ? null : prompt}"), 'and the composer beside them types nothing either');
+  // A doc that already exists is not a question. The whole ask goes, rather
+  // than sitting there under a line saying it is already done.
+  assert(gate.includes("const asking = step === 'doc' && state !== 'done';"), 'and the ask retires once the doc exists');
   assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');
 });
 

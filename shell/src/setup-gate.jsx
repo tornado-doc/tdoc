@@ -135,10 +135,15 @@ function SceneWaiting({ line }) {
           <span className="sg-av bot" />
           <p className="sg-txt">What are we working on?</p>
         </div>
-        <Composer live>
-          <span className="sg-typed">{line.slice(0, 62)}{line.length > 62 ? '…' : ''}</span>
-          <span className="sg-caret" />
-        </Composer>
+        {/* Nothing typed until there is something to type: the composer showing
+            a line the left column has not handed over yet would be the page
+            answering its own question. */}
+        {line ? (
+          <Composer live>
+            <span className="sg-typed">{line.slice(0, 62)}{line.length > 62 ? '…' : ''}</span>
+            <span className="sg-caret" />
+          </Composer>
+        ) : <Composer />}
       </ChatWindow>
     </>
   );
@@ -283,6 +288,11 @@ export function SetupGate({ boot }) {
   // deleted since, or is sitting there waiting to be argued with. The doc step
   // ends at the doc it just watched arrive.
   const onward = step === 'doc' && ownDoc ? `/d/${encodeURIComponent(ownDoc)}` : '/me';
+  // Somebody whose doc already exists is not being asked anything, so the
+  // question, the line and the instructions all go. Only the connect step
+  // keeps its line on screen when it is done: one line is a receipt, a choice
+  // with a typing box in it is a question nobody asked.
+  const asking = step === 'doc' && state !== 'done';
 
   // The record is the only thing that moves this page.
   useEffect(() => {
@@ -326,7 +336,7 @@ export function SetupGate({ boot }) {
 
   const scene = state === 'done' ? <SceneDone bare={step === 'doc'} />
     : state === 'stuck' ? <SceneStuck />
-      : <SceneWaiting line={prompt} />;
+      : <SceneWaiting line={step === 'doc' && !choice ? null : prompt} />;
 
   return (
     <div className="sg-split">
@@ -338,7 +348,7 @@ export function SetupGate({ boot }) {
 
             {signedIn ? (
               <>
-                {step === 'doc' ? (
+                {asking ? (
                   <div className="sg-choices" role="radiogroup" aria-label="What the doc is about">
                     {DOC_CHOICES.map((item) => (
                       <button
@@ -363,7 +373,7 @@ export function SetupGate({ boot }) {
                   </div>
                 ) : null}
 
-                {step === 'doc' && choice === 'own' ? (
+                {asking && choice === 'own' ? (
                   <label className="sg-subject">
                     <span className="sg-sr">What the doc is about</span>
                     <input
@@ -376,7 +386,7 @@ export function SetupGate({ boot }) {
                   </label>
                 ) : null}
 
-                {step !== 'doc' || choice ? (
+                {step !== 'doc' || (choice && state !== 'done') ? (
                   <div className={`sg-prompt${promptReady ? '' : ' pending'}`}>
                     <p className="sg-prompt-text" ref={promptRef}>{prompt}</p>
                     <button
@@ -392,7 +402,7 @@ export function SetupGate({ boot }) {
 
                 {step === 'doc' ? null : <WorksWith />}
 
-                {step === 'doc' && !choice ? null : (
+                {step === 'doc' && (!choice || state === 'done') ? null : (
                 <ol className="sg-steps">
                   {step === 'doc' ? (
                     <>
