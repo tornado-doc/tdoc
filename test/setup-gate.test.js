@@ -177,11 +177,11 @@ t('the second ask is the one place with a choice in it', () => {
   assert(gate.includes('const [choice, setChoice] = useState(null);'), 'and neither is chosen for them');
   // Choosing is the question this screen asks; everything downstream of it
   // waits until it has been answered.
-  assert(gate.includes("{step === 'doc' && (!choice || state === 'done') ? null : ("), 'no instructions before there is something to paste');
+  assert(gate.includes("{step === 'doc' && (!choice || docDone) ? null : ("), 'no instructions before there is something to paste');
   assert(gate.includes("line={step === 'doc' && !choice ? null : prompt}"), 'and the composer beside them types nothing either');
   // A doc that already exists is not a question. The whole ask goes, rather
   // than sitting there under a line saying it is already done.
-  assert(gate.includes("const asking = step === 'doc' && state !== 'done';"), 'and the ask retires once the doc exists');
+  assert(gate.includes("const asking = step === 'doc' && !docDone;"), 'and the ask retires once the wait has paid off');
   assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');
 });
 
@@ -214,6 +214,29 @@ t('forking is drawn and deliberately not wired', () => {
   assert(/DOC_CHOICES[\s\S]{0,400}?\]/.test(gate) && !gate.includes("id: 'fork'"), 'no fork choice ships');
   assert(!worker.includes('seedOnboardingDocFor'), 'and nothing is forked into their account behind their back either');
   assert(gate.includes('second thing to fork'), 'and the reason is written down, not lost');
+});
+
+t('nothing is drawn before the server has answered once', () => {
+  // An empty record reads as "not connected", so a page asked for the doc step
+  // paints the connect step for a beat first. Same class of flicker as the one
+  // the old wizard had: a guess rendered while the answer is in flight.
+  assert(gate.includes('const [loaded, setLoaded] = useState(false);') && gate.includes('if (!cancelled) setLoaded(true);'),
+    'the first poll is what opens the page');
+  assert(gate.includes("{signedIn && !loaded ? null : ("), 'the heading waits for it');
+  assert(gate.includes("{signedIn && !loaded ? null : signedIn ? ("), 'and so does the column under it');
+  assert(gate.includes("const scene = signedIn && !loaded ? null"), 'the scene beside them waits too');
+});
+
+t('the receipt belongs to the wait', () => {
+  // Landing on "Published. Your first tdoc is live." answers a question nobody
+  // asked: somebody who walks in with a doc already came to make another one.
+  assert(gate.includes("const docDone = step === 'doc' && state === 'done' && waited.current;"),
+    'the done face needs a wait behind it');
+  assert(gate.includes("if (step === 'doc' && loaded && state !== 'done') waited.current = true;"),
+    'and the wait is a state this page actually saw');
+  assert(gate.includes("const asking = step === 'doc' && !docDone;"), 'everything else is an ask');
+  assert(gate.includes("record?.first_doc && !docDone ? 'Make another tdoc'"), 'which says so in the heading');
+  assert(gate.includes("{step === 'doc' && !docDone ? null : ("), 'an ask carries no dead Continue button');
 });
 
 t('the doc step reads the record, and the catalog walk is gone with the seeding', () => {

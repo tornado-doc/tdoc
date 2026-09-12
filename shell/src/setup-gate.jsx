@@ -244,6 +244,14 @@ export function SetupGate({ boot }) {
   // The choice, and the subject it may carry. Nothing is chosen on arrival:
   // pre-selecting one would answer the only question this screen asks.
   const [choice, setChoice] = useState(null);
+  // Nothing in the form column is drawn until the server has answered once.
+  // Before that the record is empty, which reads as "not connected" and paints
+  // the connect step for a beat on a page that was asked for the doc step.
+  const [loaded, setLoaded] = useState(false);
+  // The receipt belongs to the wait. Somebody who lands here with a doc
+  // already was not waiting for anything, and telling them their first tdoc is
+  // live answers a question they did not ask -- they came to make another one.
+  const waited = useRef(false);
   const [subject, setSubject] = useState('');
   const subjectRef = useRef(null);
   const [copied, setCopied] = useState(false);
@@ -295,7 +303,12 @@ export function SetupGate({ boot }) {
   // question, the line and the instructions all go. Only the connect step
   // keeps its line on screen when it is done: one line is a receipt, a choice
   // with a typing box in it is a question nobody asked.
-  const asking = step === 'doc' && state !== 'done';
+  if (step === 'doc' && loaded && state !== 'done') waited.current = true;
+  // Everything the doc step shows once its doc exists hangs on this: the
+  // receipt for somebody who watched it arrive, the ask for somebody who
+  // walked in wanting another one.
+  const docDone = step === 'doc' && state === 'done' && waited.current;
+  const asking = step === 'doc' && !docDone;
 
   // The record is the only thing that moves this page.
   useEffect(() => {
@@ -307,6 +320,7 @@ export function SetupGate({ boot }) {
         const result = await getOnboarding();
         if (!cancelled) { setRecord(result?.record || {}); setPaired(Boolean(result?.paired)); }
       } catch {}
+      if (!cancelled) setLoaded(true);
       if (cancelled) return;
       if (copiedAt.current) setElapsed(Date.now() - copiedAt.current);
       timer = window.setTimeout(tick, POLL_MS);
@@ -333,9 +347,13 @@ export function SetupGate({ boot }) {
     postOnboardingEvent('copy_clicked').catch(() => {});
   };
 
-  const scene = state === 'done' ? <SceneDone bare={step === 'doc'} />
-    : state === 'stuck' ? <SceneStuck />
-      : <SceneWaiting line={step === 'doc' && !choice ? null : prompt} />;
+  // The scene is the left column's mirror, so it waits for the same answer.
+  // Drawn early it paints the connect step's chat beside a heading that has
+  // not decided which step it is yet.
+  const scene = signedIn && !loaded ? null
+    : state === 'done' ? <SceneDone bare={step === 'doc'} />
+      : state === 'stuck' ? <SceneStuck />
+        : <SceneWaiting line={step === 'doc' && !choice ? null : prompt} />;
 
   return (
     <div className="sg-split">
@@ -343,9 +361,15 @@ export function SetupGate({ boot }) {
         <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a>
         <div className="sg-mid">
           <div className="sg-col">
-            <h1 className="sg-h1">{step === 'doc' ? 'Make your first tdoc' : 'Connect your agent'}</h1>
+            {signedIn && !loaded ? null : (
+              <h1 className="sg-h1">
+                {step !== 'doc' ? 'Connect your agent'
+                  : record?.first_doc && !docDone ? 'Make another tdoc'
+                    : 'Make your first tdoc'}
+              </h1>
+            )}
 
-            {signedIn ? (
+            {signedIn && !loaded ? null : signedIn ? (
               <>
                 {asking ? (
                   <div className="sg-choices" role="radiogroup" aria-label="What the doc is about">
@@ -385,7 +409,7 @@ export function SetupGate({ boot }) {
                   </label>
                 ) : null}
 
-                {step !== 'doc' || (choice && state !== 'done') ? (
+                {step !== 'doc' || (choice && !docDone) ? (
                   <div className={`sg-prompt${promptReady ? '' : ' pending'}`}>
                     <p className="sg-prompt-text" ref={promptRef}>{prompt}</p>
                     <button
@@ -401,7 +425,7 @@ export function SetupGate({ boot }) {
 
                 {step === 'doc' ? null : <WorksWith />}
 
-                {step === 'doc' && (!choice || state === 'done') ? null : (
+                {step === 'doc' && (!choice || docDone) ? null : (
                 <ol className="sg-steps">
                   {step === 'doc' ? (
                     <>
@@ -437,7 +461,7 @@ export function SetupGate({ boot }) {
                       </div>
                     </div>
                   ) : null}
-                  {state === 'done' ? (
+                  {state === 'done' && (step !== 'doc' || docDone) ? (
                     <div className="sg-status done">
                       <svg className="tick" width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <circle cx="12" cy="12" r="9.2" stroke="currentColor" strokeWidth="2" />
@@ -450,10 +474,14 @@ export function SetupGate({ boot }) {
                   ) : null}
                 </div>
 
-                <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
-                  {step === 'doc' ? 'Open it' : 'Continue'}
-                </a>
-                <p className="sg-account"><a href="/me">I’ll do this later</a></p>
+                {/* On the doc step the button is the end of a wait, so an
+                    ask that nobody is waiting on does not carry a dead one. */}
+                {step === 'doc' && !docDone ? null : (
+                  <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
+                    {step === 'doc' ? 'Open it' : 'Continue'}
+                  </a>
+                )}
+                <p className="sg-account"><a href="/me">{step === 'doc' && !docDone ? 'Back to my docs' : 'I’ll do this later'}</a></p>
               </>
             ) : (
               <>
