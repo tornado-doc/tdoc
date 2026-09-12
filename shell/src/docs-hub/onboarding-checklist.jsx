@@ -36,19 +36,31 @@ function rememberOpen(value) {
   try { localStorage.setItem(OPEN_KEY, value ? '1' : '0'); } catch {}
 }
 
-export function onboardingSteps(record, firstDocHref, docs) {
+// The four rows, in the only order they can happen in. Every one of them
+// stands on the same object -- the doc this person made in row 2 -- so the
+// list is a single story about a single document rather than four errands.
+//
+// That ordering is not decoration: you cannot comment on a doc that does not
+// exist, and you cannot ask an agent to fix comments nobody has left. A row
+// whose turn has not come is shown and not offered, so the shape of the whole
+// thing is visible from the first arrival without inviting a click that would
+// land nowhere.
+export function onboardingSteps(record, firstDocHref) {
   const r = record || {};
-  // "Create your first tdoc" cannot tick on the doc we handed them. The seeder
-  // stamps published_first itself, so that stamp only says a doc exists — it
-  // says nothing about who made it. Owning one that is not the seeded one is
-  // what makes the claim true.
-  const madeTheirOwn = (docs || []).some((d) => d && d.slug && d.slug !== r.first_doc);
-  return [
+  const steps = [
     { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
-    { id: 'create', label: 'Create your first tdoc', done: madeTheirOwn, href: '/setup?step=doc' },
-    { id: 'comment', label: 'Leave a comment on a doc', done: Boolean(r.commented || r.revised), href: firstDocHref },
+    { id: 'create', label: 'Create your first tdoc', done: Boolean(r.first_doc), href: '/setup?step=doc' },
+    { id: 'comment', label: 'Leave a comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref },
     { id: 'revise', label: 'Tell your agent to fix the comments', done: Boolean(r.revised), href: firstDocHref },
   ];
+  // Locked until everything above it is done. The first unfinished row is the
+  // only one anybody can act on.
+  let reached = true;
+  return steps.map((step) => {
+    const locked = !step.done && !reached;
+    if (!step.done) reached = false;
+    return { ...step, locked };
+  });
 }
 
 // Notion's rows carry a thumbnail because theirs are recognisable: a Gmail
@@ -101,7 +113,7 @@ export function OnboardingChecklist({ record, docs }) {
   const first = record && record.first_doc;
   const alive = Boolean(first && (docs || []).some((d) => d && d.slug === first));
   const href = alive ? `/d/${encodeURIComponent(first)}` : null;
-  const steps = onboardingSteps(record, href, docs);
+  const steps = onboardingSteps(record, href);
   const done = steps.filter((s) => s.done).length;
   // Nothing to say before the journey starts, and nothing left to say after it
   // ends: the card is for the middle.
@@ -153,8 +165,10 @@ export function OnboardingChecklist({ record, docs }) {
             </>
           );
           return (
-            <li key={step.id} className={step.done ? 'done' : ''}>
-              {step.done || !step.href ? <span className="onb-row">{body}</span> : <a href={step.href}>{body}</a>}
+            <li key={step.id} className={step.done ? 'done' : step.locked ? 'locked' : ''}>
+              {step.done || step.locked || !step.href
+                ? <span className="onb-row">{body}</span>
+                : <a href={step.href}>{body}</a>}
             </li>
           );
         })}

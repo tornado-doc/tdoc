@@ -219,6 +219,11 @@
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
 .onb-card li.done .onb-tick { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); }
+/* A row whose turn has not come is shown and not offered. Nothing is hidden —
+   the whole shape should be legible on the first arrival — but nothing about
+   it invites a click that would land nowhere. */
+.onb-card li.locked .onb-label { color: #a4a39e; }
+.onb-card li.locked .onb-thumb { opacity: .45; }
 
 /* The thumbnails. Notion's are legible because they contain something you
    recognise, so ours do too: the agents' own marks, the anchor highlight's

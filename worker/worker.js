@@ -1908,101 +1908,17 @@ function duplicateComment(comments, { author, text, anchor, parent_id, at }, win
 // lands on text the reader can see, and worded to ask for the one gesture the
 // page exists to teach.
 // ---- the onboarding half ----------------------------------------------
-// Setup ends at My docs, and the onboarding starts there: an "Onboarding"
-// folder holding one real doc, already commented on, so the loop can be walked
-// on something instead of read about. The doc is a copy of a template, owned
-// by the person, theirs to edit or delete.
-const SEED_TEMPLATE_SLUG = 'what-ai-knows';
-const SEED_FOLDER_NAME = 'Onboarding';
-
-async function latestVersionOf(meta) {
-  const versions = Array.isArray(meta && meta.versions) ? meta.versions : [];
-  return versions.length ? Number(versions[versions.length - 1].n) || 1 : 1;
-}
-
-// Copies the template into the caller's account, files it under Onboarding and
-// plants tdoc's first comment on it. Idempotent through the record's `seeded`
-// stamp, and every step is best-effort: a person who cannot be seeded still
-// gets their docs page, they just get it empty.
-async function seedOnboardingDocFor(env, session, accountId) {
-  if (!env || !env.META || !env.DOCS || !accountId) return null;
-  const record = await loadOnboarding(env, accountId);
-  if (!record || record.seeded || !record.agent_connected) return null;
-  // Claim the stamp before doing the work: two page loads in the same second
-  // must not each mint a document.
-  await stampOnboardingFor(env, accountId, 'seeded');
-
-  const srcMeta = await loadDocMeta(env, SEED_TEMPLATE_SLUG);
-  if (!srcMeta) return null;
-  const srcVersion = await latestVersionOf(srcMeta);
-  let html = '';
-  try {
-    const obj = await env.DOCS.get(`docs/${SEED_TEMPLATE_SLUG}/v${srcVersion}/index.html`);
-    if (!obj) return null;
-    html = await obj.text();
-  } catch { return null; }
-
-  let newSlug = null;
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const candidate = blankDocSlug(crypto.getRandomValues(new Uint8Array(8)));
-    if (await loadDocMeta(env, candidate)) continue;
-    const bytes = await docBytesExist(env, candidate);
-    if (!bytes.ok || bytes.exists) continue;
-    const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: accountId });
-    if (!claimed.ok) continue;
-    newSlug = candidate;
-    break;
-  }
-  if (!newSlug) return null;
-
-  const now = new Date().toISOString();
-  let meta = stampHostedOwnership({
-    title: (typeof srcMeta.title === 'string' && srcMeta.title.trim()) || SEED_TEMPLATE_SLUG,
-    slug: newSlug,
-    created: now,
-    created_from: 'onboarding_seed',
-    visibility: 'private',
-    versions: [{ n: 1, created: now, prompt: `Seeded from ${SEED_TEMPLATE_SLUG} v${srcVersion}` }],
-    source: { slug: SEED_TEMPLATE_SLUG, version: srcVersion },
-  }, { kind: 'hosted', account_id: accountId, email: normalizeEmail(session && session.email) });
-
-  try {
-    const { html: stamped, sha } = await prepareDocVersion(html);
-    meta.versions[0].sha = sha;
-    await env.DOCS.put(`docs/${newSlug}/v1/index.html`, stamped, {
-      httpMetadata: { contentType: 'text/html; charset=utf-8' },
-    });
-    await env.META.put(`meta:${newSlug}`, JSON.stringify(meta));
-  } catch { return null; }
-
-  // The folder is ordinary: the same shape the hub's own "New folder" writes,
-  // so it can be renamed, moved out of or deleted like any other.
-  try {
-    const key = actorKey(session);
-    if (key) {
-      const state = await loadFolderState(env, key);
-      let folder = (state.folders || []).find((f) => f && f.name === SEED_FOLDER_NAME);
-      if (!folder) {
-        folder = { id: `f_${Date.now()}_${rand(4)}`, name: SEED_FOLDER_NAME, parent: '' };
-        state.folders = [...(state.folders || []), folder];
-      }
-      state.docs = { ...(state.docs || {}), [newSlug]: folder.id };
-      await saveFolderState(env, key, state);
-    }
-  } catch {}
-
-  try {
-    const planted = await mutateComments(env, newSlug, {
-      kind: 'create', slug: newSlug, id: `c_${Date.now()}_${rand(4)}`, author: SEED_COMMENT_AUTHOR,
-      text: SEED_COMMENT_TEXT, mentions: [], anchor: seedCommentAnchor(html), version: 1, at: now,
-    });
-    if (planted.status === 200) await stampOnboardingFor(env, accountId, 'seeded_comment');
-  } catch {}
-
-  await stampOnboardingFor(env, accountId, 'published_first', { first_doc: newSlug });
-  return newSlug;
-}
-
+// Setup ends at My docs, and the onboarding starts there -- but on nothing we
+// put there. The four rows all stand on the doc the person made themselves:
+// the account arrives empty, row 2 asks for a doc, and rows 3 and 4 are that
+// same doc being argued with and then fixed.
+//
+// A template copied into an "Onboarding" folder used to sit here, so that the
+// loop could be walked before they had written anything. It was the wrong
+// object twice over: nobody argues with a generic page about nobody, and its
+// existence made "Create your first tdoc" tick on a doc we wrote. What it was
+// really for -- a first comment already on the page, so row 3 is a reply and
+// not a blank -- the publish path does anyway, on their own first doc.
 const SEED_COMMENT_TEXT = 'First reader here. Which claim on this page would you defend least? Highlight it and say so.';
 const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '', kind: 'system' };
 function seedCommentAnchor(html) {
@@ -3366,33 +3282,6 @@ async function countHostedDocs(env, accountId, stopAt) {
     if (r.list_complete) break;
   } while (cursor);
   return n;
-}
-
-// The newest doc this account published that is not the one we seeded for
-// them. "Create your first tdoc" asks for a doc they chose to make, and the
-// seeded doc cannot answer it: we wrote that one.
-async function newestOwnDoc(env, accountId, exceptSlug) {
-  if (!accountId || !env || !env.META) return null;
-  let best = null;
-  let cursor;
-  do {
-    const r = await env.META.list({ prefix: 'meta:', cursor });
-    for (const k of r.keys || []) {
-      const slug = k.name.slice('meta:'.length);
-      if (!slug || slug === exceptSlug) continue;
-      let meta = null;
-      try {
-        const raw = await env.META.get(k.name);
-        if (raw) meta = JSON.parse(raw);
-      } catch {}
-      if (!meta || !meta.hosted || meta.hosted.account_id !== accountId) continue;
-      const created = meta.created || '';
-      if (!best || created > best.created) best = { slug, created };
-    }
-    cursor = r.cursor;
-    if (r.list_complete) break;
-  } while (cursor);
-  return best ? best.slug : null;
 }
 
 function envFlagTrue(v) {
@@ -5370,13 +5259,6 @@ export default {
       }
       const nonce = rand(16);
       const identity = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
-      // Setup ends here, so the onboarding begins here: the first visit after
-      // an agent connected mints the folder and its doc, before the page is
-      // built, so they are in the very first render rather than a beat later.
-      try {
-        const seedAccount = await sessionAccountId(env, s);
-        if (seedAccount) await seedOnboardingDocFor(env, s, seedAccount);
-      } catch {}
       const data = await indexData(env, s, url.origin);
       return html(SHELL.appHtml({
         title: 'My docs',
@@ -6546,14 +6428,7 @@ export default {
       // agent never shows a code again, so the page must not wait for one.
       let paired = false;
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
-      const record = await loadOnboarding(env, accountId);
-      // `?docs=1` is asked for only by the page that waits for a doc of their
-      // own, because answering it costs a catalog scan. The default poll, which
-      // runs every few seconds on the connect gate, must stay two reads.
-      if (url.searchParams.get('docs') === '1') {
-        return json({ record, paired, own_doc: await newestOwnDoc(env, accountId, record && record.first_doc) });
-      }
-      return json({ record, paired });
+      return json({ record: await loadOnboarding(env, accountId), paired });
     }
     // Puts the caller's own onboarding record into a named state, so the
     // journey's branches can be walked without hand-editing storage. The body
@@ -7352,7 +7227,11 @@ export default {
             // re-points the journey at the doc that exists instead of leaving
             // it watching an older one forever.
             await seedFirstComment(await adoptFirstDocFor(env, auth.actor.account_id, slug));
-          } else if (firstHostedPublish) {
+          } else if (firstHostedPublish || (journey.started && !journey.first_doc)) {
+            // The journey's doc is the first one published after it started.
+            // Keying only on "this account's first doc ever" left anybody who
+            // had published before they onboarded with a row that could never
+            // tick: their first publish is long past, and nothing else stamps.
             await seedFirstComment(await stampOnboardingFor(env, auth.actor.account_id, 'published_first', { first_doc: slug }));
           } else if (verNum >= 2 && journey.first_doc === slug) {
             // Only the journey's own doc reaching v2 is the loop closing.

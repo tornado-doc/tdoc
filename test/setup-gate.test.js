@@ -40,6 +40,8 @@ const hint = read('shell/src/document/step-hint.jsx');
 const hintCss = read('shell/src/document/step-hint.css');
 const card = read('shell/src/document/comment-card.jsx');
 const dialog = read('shell/src/onboarding-dialog.jsx');
+const api = read('shell/src/document/api.js');
+const listCss = read('shell/src/docs-hub.css');
 const worker = read('worker/worker.js');
 const server = read('server/server.js');
 
@@ -90,23 +92,27 @@ t('the landing CTA is the door, and the pop-up stopped opening itself', () => {
   assert(!/setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell), 'no second journey beside the real one');
 });
 
-t('seeding is idempotent and owned by the person', () => {
-  assert(worker.includes('async function seedOnboardingDocFor(env, session, accountId)'), 'the seeder exists');
-  assert(/if \(!record \|\| record\.seeded \|\| !record\.agent_connected\) return null;/.test(worker),
-    'it runs once, and only after an agent connected');
-  assert(worker.indexOf("await stampOnboardingFor(env, accountId, 'seeded')") < worker.indexOf('const srcMeta = await loadDocMeta(env, SEED_TEMPLATE_SLUG)'),
-    'the stamp is claimed before the work, so two loads cannot each mint a doc');
-  assert(worker.includes("visibility: 'private'"), 'the seeded doc is theirs alone');
+t('nothing is put in their account for them', () => {
+  // A template copied into an "Onboarding" folder used to stand here so the
+  // loop could be walked before they had written anything. It was the wrong
+  // object twice: nobody argues with a generic page about nobody, and its
+  // existence made "Create your first tdoc" tick on a doc we wrote.
+  assert(!worker.includes('seedOnboardingDocFor') && !worker.includes('SEED_TEMPLATE_SLUG'), 'no seeder');
+  assert(!worker.includes("SEED_FOLDER_NAME"), 'and no folder minted on their behalf');
+  const hubRoute = worker.slice(worker.indexOf("if (p === '/me' && method === 'GET')"), worker.indexOf("if (p === '/api/onboarding' && method === 'GET')"));
+  assert(!/seed/i.test(hubRoute), 'the docs page writes nothing when it is opened');
+  // What the seeding was really for -- a first comment already on the page, so
+  // row 3 is a reply and not a blank -- the publish path does anyway.
+  assert(worker.includes("const SEED_COMMENT_TEXT = 'First reader here."), "tdoc's question survives");
+  assert(/firstHostedPublish[\s\S]{0,600}?seedFirstComment/.test(worker), 'planted on the doc they made');
 });
 
-t('the seeded doc lands in an ordinary folder', () => {
-  assert(worker.includes("const SEED_FOLDER_NAME = 'Onboarding'"), 'named');
-  assert(worker.includes('await saveFolderState(env, key, state)'), 'written through the hub’s own folder state, so it renames and deletes like any other');
-});
-
-t('the seeded comment is the one the publish path already plants', () => {
-  assert(worker.includes('text: SEED_COMMENT_TEXT, mentions: [], anchor: seedCommentAnchor(html)'),
-    'same words, same anchoring, no second version of either');
+t('the journey follows the first doc published after it started', () => {
+  // Keying only on "this account's first doc ever" left anybody who had
+  // published before they onboarded with a row that could never tick.
+  assert(worker.includes("} else if (firstHostedPublish || (journey.started && !journey.first_doc)) {"),
+    'an account with older docs still gets a journey doc');
+  assert(worker.includes("'published_first', { first_doc: slug }"), 'and the record names it');
 });
 
 t('every checklist row is backed by something real', () => {
@@ -117,9 +123,30 @@ t('every checklist row is backed by something real', () => {
   // The seeder stamps published_first itself, so that stamp says a doc exists
   // and nothing about who made it. Ticking "Create your first tdoc" on the doc
   // we handed them would be a lie.
-  assert(list.includes("const madeTheirOwn = (docs || []).some((d) => d && d.slug && d.slug !== r.first_doc);"),
-    'creating is owning a doc that is not the seeded one');
-  assert(/id: 'create'[^}]*done: madeTheirOwn/.test(list), 'and that is what the row reads');
+  assert(/id: 'create'[^}]*done: Boolean\(r\.first_doc\)/.test(list), 'creating is the record naming a doc');
+  assert(/id: 'comment'[^}]*href: firstDocHref/.test(list) && /id: 'revise'[^}]*href: firstDocHref/.test(list),
+    'and the last two rows stand on that same doc');
+});
+
+t('a row cannot come before the row it depends on', () => {
+  // eslint-disable-next-line no-new-func
+  const src = list.slice(list.indexOf('export function onboardingSteps'), list.indexOf("// Notion's rows carry a thumbnail"));
+  // eslint-disable-next-line no-new-func
+  const steps = new Function(`${src.replace('export ', '')}; return onboardingSteps;`)();
+  const ids = (r) => steps(r, '/d/x').filter((s) => s.locked).map((s) => s.id);
+  assert(JSON.stringify(ids({})) === JSON.stringify(['create', 'comment', 'revise']),
+    `nothing but the connect row is offered to an empty record: ${JSON.stringify(ids({}))}`);
+  assert(JSON.stringify(ids({ agent_connected: 'X' })) === JSON.stringify(['comment', 'revise']),
+    'a connected agent unlocks making a doc, and nothing past it');
+  assert(JSON.stringify(ids({ agent_connected: 'X', first_doc: 'd' })) === JSON.stringify(['revise']),
+    'a doc unlocks commenting on it');
+  assert(ids({ agent_connected: 'X', first_doc: 'd', commented: 'X' }).length === 0,
+    'and a comment unlocks the handoff');
+  // You cannot comment on a doc that does not exist, or ask an agent to fix
+  // comments nobody has left. A locked row is shown and not offered.
+  assert(list.includes('{step.done || step.locked || !step.href'), 'a locked row is not a link');
+  assert(list.includes("step.done ? 'done' : step.locked ? 'locked' : ''"), 'and says so in its class');
+  assert(listCss.includes('.onb-card li.locked .onb-label'), 'which the stylesheet greys');
 });
 
 t('an unfinished row is a way forward, never a dead line', () => {
@@ -185,28 +212,18 @@ t('forking is drawn and deliberately not wired', () => {
   // seeding delivers exactly that, earlier and with no click. The only
   // forkable template today is the one already in their Onboarding folder.
   assert(/DOC_CHOICES[\s\S]{0,400}?\]/.test(gate) && !gate.includes("id: 'fork'"), 'no fork choice ships');
-  assert(worker.includes("const SEED_TEMPLATE_SLUG = 'what-ai-knows';"), 'because that template is the seeded one');
+  assert(!worker.includes('seedOnboardingDocFor'), 'and nothing is forked into their account behind their back either');
   assert(gate.includes('second thing to fork'), 'and the reason is written down, not lost');
 });
 
-t('the doc step waits for a doc they made, not the one we seeded', () => {
-  // published_first is stamped by the seeder itself, so no record field flips
-  // when they finally make one of their own. The server has to look.
-  assert(worker.includes('async function newestOwnDoc(env, accountId, exceptSlug)'), 'the worker can name that doc');
-  assert(worker.includes("if (!slug || slug === exceptSlug) continue;"), 'and it excludes the seeded one');
-  assert(server.includes('function newestOwnDocLocal(exceptSlug)'), 'the local server twins it');
-  assert(gate.includes("const state = step === 'doc'\n    ? (ownDoc ? 'done' : 'waiting')"), 'the step turns on that doc alone');
-  assert(gate.includes('const onward = step === \'doc\' && ownDoc ? `/d/${encodeURIComponent(ownDoc)}` : \'/me\';'),
-    'and ends by opening it');
-});
-
-t('the catalog walk is paid for only by the page that needs it', () => {
-  // The connect gate polls this route every three seconds. Scanning every doc
-  // in the catalog on that poll would be a real cost for an answer it never
-  // reads.
-  assert(worker.includes("if (url.searchParams.get('docs') === '1') {"), 'the worker only walks when asked');
-  assert(server.includes("if (url.searchParams.get('docs') === '1') {"), 'and the local server matches');
-  assert(gate.includes('getOnboarding(wantsDoc ? { docs: 1 } : undefined)'), 'only the doc step asks');
+t('the doc step reads the record, and the catalog walk is gone with the seeding', () => {
+  // While a template was being minted for them, published_first said only
+  // "some doc exists" and a catalog scan was the only way to ask "one of
+  // theirs?". With nothing seeded the stamp answers it directly.
+  assert(gate.includes("? (record?.published_first ? 'done' : 'waiting')"), 'the step turns on the stamp');
+  assert(gate.includes("const ownDoc = record?.first_doc || null;"), 'and the record names the doc to open');
+  assert(!worker.includes('newestOwnDoc') && !server.includes('newestOwnDocLocal'), 'no catalog walk on either host');
+  assert(!worker.includes("searchParams.get('docs')") && !api.includes('docs=1'), 'and nothing asks for one');
 });
 
 t('a deleted seed doc does not leave rows pointing at a 404', () => {

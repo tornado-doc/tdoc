@@ -241,7 +241,6 @@ function SceneDone({ bare = false }) {
 export function SetupGate({ boot }) {
   const [record, setRecord] = useState(null);
   const [paired, setPaired] = useState(false);
-  const [ownDoc, setOwnDoc] = useState(null);
   // The choice, and the subject it may carry. Nothing is chosen on arrival:
   // pre-selecting one would answer the only question this screen asks.
   const [choice, setChoice] = useState(null);
@@ -280,8 +279,12 @@ export function SetupGate({ boot }) {
   // The doc step has no stuck state of its own: there is nothing to repair.
   // An agent that has not published yet is usually mid-question, so the wait
   // just says where to look.
+  // Nothing is seeded any more, so `published_first` means exactly what this
+  // step is waiting for: a doc this person made. The catalog walk that used to
+  // answer the same question is gone with the thing that made it necessary.
+  const ownDoc = record?.first_doc || null;
   const state = step === 'doc'
-    ? (ownDoc ? 'done' : 'waiting')
+    ? (record?.published_first ? 'done' : 'waiting')
     : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
   // The seeding happens on the docs page, so that is where Continue goes: it
   // is the one place that is right whether the doc has been minted yet, was
@@ -301,12 +304,8 @@ export function SetupGate({ boot }) {
     let timer = null;
     const tick = async () => {
       try {
-        const result = await getOnboarding(wantsDoc ? { docs: 1 } : undefined);
-        if (!cancelled) {
-          setRecord(result?.record || {});
-          setPaired(Boolean(result?.paired));
-          setOwnDoc(result?.own_doc || null);
-        }
+        const result = await getOnboarding();
+        if (!cancelled) { setRecord(result?.record || {}); setPaired(Boolean(result?.paired)); }
       } catch {}
       if (cancelled) return;
       if (copiedAt.current) setElapsed(Date.now() - copiedAt.current);
@@ -314,7 +313,7 @@ export function SetupGate({ boot }) {
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [signedIn, wantsDoc]);
+  }, [signedIn]);
 
   // The site's own sign-in, and only that: a full-page redirect out to the
   // OIDC provider and back to /setup. Signing in is signing up, so there is no

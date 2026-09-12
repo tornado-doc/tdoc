@@ -106,7 +106,8 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(get.includes("stampOnboardingFor(agentAuth.actor.account_id, 'comments_read')") === false
     && get.includes("'comments_read'"), 'a Bearer read stamps comments_read on the account');
   const upload = worker.slice(worker.indexOf("if (p === '/api/upload' && method === 'POST')"), worker.indexOf("if (p === '/api/doc/access' && method === 'PATCH')"));
-  assert(/if \(firstHostedPublish\) \{[\s\S]*'published_first', \{ first_doc: slug \}/.test(upload), 'the first hosted publish stamps published_first with the slug');
+  assert(/if \(firstHostedPublish \|\| \(journey\.started && !journey\.first_doc\)\) \{[\s\S]*'published_first', \{ first_doc: slug \}/.test(upload),
+    'the first doc published after the journey started stamps published_first with the slug');
   assert(/firstHostedPublish[\s\S]*kind: 'create'[\s\S]*author: SEED_COMMENT_AUTHOR[\s\S]*text: SEED_COMMENT_TEXT/.test(upload), 'and seeds the first comment');
   assert(/else if \(verNum >= 2 && journey\.first_doc === slug\) \{[\s\S]{0,120}await stampOnboardingFor\(env, auth\.actor\.account_id, 'revised'\)/.test(upload), "a second version of the journey's own doc stamps revised");
   // The journey follows the doc FIRST-DOC.md produced, whichever slug it landed on.
@@ -239,7 +240,7 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   // keeps its credential and never shows a code, so the page waits for the
   // doc instead; a first-time agent connects FIRST, before reading anything.
   assert(dialog.includes("} else if (lineCopy.copied !== null && (connected || paired)) {") && dialog.includes('setPaired(Boolean(result?.paired));'), 'a paired account is not asked for a code');
-  assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));") && server.includes('const paired = Boolean(process.env.TDOC_E2E_PAIRED);'), 'both hosts say whether a terminal has connected');
+  assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));") && server.includes('paired: Boolean(process.env.TDOC_E2E_PAIRED),'), 'both hosts say whether a terminal has connected');
   const firstDoc = read('FIRST-DOC.md');
   assert(firstDoc.includes('## Step 1b — connect first, before reading anything') && firstDoc.includes('bash "$SKILL_DIR/bin/tdoc-publish" --signin-only'), 'the agent connects before it reads');
   assert(firstDoc.includes('**From the paste to the link: three minutes of your work; five at the very') && firstDoc.includes('## The page, as a template') && firstDoc.includes('Copy **the template below** into `v1/index.html`') && firstDoc.includes('<div class="wrap">'), 'the first doc has a clock and a template — fill, not design');
@@ -256,7 +257,7 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   assert(skill.includes('Read all comments on https://tdoc.dev/d/<slug> and fix them') && skill.includes('is a `/tdoc edit <slug>` request'), 'the handoff line is a trigger, not something to improvise on');
   assert(/Do NOT fetch\s*\n?\s*the URL in a browser/.test(skill), 'and reading it off the page instead records nothing');
   assert(dialog.includes("openDoc(latest || 2, 'revised')"), 'v2 opens and says why it arrived');
-  assert(api.includes("'/api/onboarding?docs=1' : '/api/onboarding'") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
+  assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
 });
 
 t('the hub has the same door as the landing, not a bare recipe', () => {
