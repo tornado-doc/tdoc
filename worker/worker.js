@@ -3284,8 +3284,11 @@ async function countHostedDocs(env, accountId, stopAt) {
   return n;
 }
 
-// The newest doc this account owns. Only the internal state-switching route
-// asks for it, and only when a reset has left the record with no doc to name.
+// The newest doc this account owns. Two callers: the internal state switcher,
+// and the second ask on `/setup?step=doc`. That page cannot read the record
+// for its answer -- `published_first` and `first_doc` are stamped once, so a
+// SECOND doc moves nothing on the record at all -- and "did a new doc appear
+// while you were watching" is exactly what it is waiting for.
 async function newestDocFor(env, accountId) {
   if (!accountId || !env || !env.META) return null;
   let best = null;
@@ -6458,7 +6461,13 @@ export default {
       // agent never shows a code again, so the page must not wait for one.
       let paired = false;
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
-      return json({ record: await loadOnboarding(env, accountId), paired });
+      const record = await loadOnboarding(env, accountId);
+      // `?docs=1` costs a catalog walk, so only the page that waits for a doc
+      // to appear asks for it. The connect gate's own poll stays two reads.
+      if (url.searchParams.get('docs') === '1') {
+        return json({ record, paired, newest_doc: await newestDocFor(env, accountId) });
+      }
+      return json({ record, paired });
     }
     // Puts the caller's own onboarding record into a named state, so the
     // journey's branches can be walked without hand-editing storage. The body

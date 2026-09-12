@@ -61,7 +61,11 @@ export function onboardingSteps(record, firstDocHref) {
   // only one anybody can act on.
   let reached = true;
   return steps.map((step) => {
-    const locked = !step.done && !reached;
+    // A row is out of reach either because its turn has not come, or because
+    // the doc it stands on is gone. Deleting the journey's doc used to leave
+    // row 4 in full ink with no href: it read as the next thing to do and did
+    // nothing when clicked.
+    const locked = !step.done && (!reached || !step.href);
     if (!step.done) reached = false;
     return { ...step, locked };
   });

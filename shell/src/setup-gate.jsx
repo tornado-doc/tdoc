@@ -248,6 +248,12 @@ export function SetupGate({ boot }) {
   // Before that the record is empty, which reads as "not connected" and paints
   // the connect step for a beat on a page that was asked for the doc step.
   const [loaded, setLoaded] = useState(false);
+  // The newest doc this account owns, and the one it already owned when this
+  // page opened. The record cannot answer the second ask on its own: both of
+  // its doc stamps are written once, so a SECOND doc moves nothing on it. What
+  // this page waits for is a doc that was not here a moment ago.
+  const [newestDoc, setNewestDoc] = useState(null);
+  const knownDoc = useRef(undefined);
   // Whether they already had a doc when this page opened. Read once, so the
   // heading does not change its mind mid-wait.
   const arrivedWith = useRef(null);
@@ -286,12 +292,14 @@ export function SetupGate({ boot }) {
   // The doc step has no stuck state of its own: there is nothing to repair.
   // An agent that has not published yet is usually mid-question, so the wait
   // just says where to look.
-  // Nothing is seeded any more, so `published_first` means exactly what this
-  // step is waiting for: a doc this person made. The catalog walk that used to
-  // answer the same question is gone with the thing that made it necessary.
-  const ownDoc = record?.first_doc || null;
+  if (step === 'doc' && loaded && knownDoc.current === undefined) knownDoc.current = newestDoc;
+  // A doc that was not there when this page opened. For a first doc that is
+  // any doc at all; for a second it has to be a different one, which is the
+  // whole of what "Make another tdoc" was failing to notice.
+  const arrived = Boolean(newestDoc && newestDoc !== knownDoc.current);
+  const ownDoc = newestDoc || record?.first_doc || null;
   const state = step === 'doc'
-    ? (record?.published_first ? 'done' : 'waiting')
+    ? (arrived ? 'done' : 'waiting')
     : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
   // The seeding happens on the docs page, so that is where Continue goes: it
   // is the one place that is right whether the doc has been minted yet, was
@@ -308,7 +316,7 @@ export function SetupGate({ boot }) {
   // rename itself from "your first" to "another" in front of somebody who is
   // watching their first arrive.
   if (step === 'doc' && loaded && arrivedWith.current === null) {
-    arrivedWith.current = Boolean(record && record.first_doc);
+    arrivedWith.current = Boolean(newestDoc || (record && record.first_doc));
   }
   const another = step === 'doc' && arrivedWith.current === true;
 
@@ -319,8 +327,12 @@ export function SetupGate({ boot }) {
     let timer = null;
     const tick = async () => {
       try {
-        const result = await getOnboarding();
-        if (!cancelled) { setRecord(result?.record || {}); setPaired(Boolean(result?.paired)); }
+        const result = await getOnboarding(wantsDoc ? { docs: 1 } : undefined);
+        if (!cancelled) {
+          setRecord(result?.record || {});
+          setPaired(Boolean(result?.paired));
+          setNewestDoc(result?.newest_doc || null);
+        }
       } catch {}
       if (!cancelled) setLoaded(true);
       if (cancelled) return;
@@ -329,7 +341,7 @@ export function SetupGate({ boot }) {
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [signedIn]);
+  }, [signedIn, wantsDoc]);
 
   // The site's own sign-in, and only that: a full-page redirect out to the
   // OIDC provider and back to /setup. Signing in is signing up, so there is no

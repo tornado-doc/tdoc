@@ -29,11 +29,15 @@ function rememberHidden() {
 // Which row this doc is on. `null` means there is nothing to say: the journey
 // has not started, this is not its doc, or the loop has already closed -- and
 // the exit banner owns the page from there.
-export function docStep(record, slug, ownerCommented) {
+export function docStep(record, slug, ownerCommented, canHandoff = true) {
   if (!record || !record.started) return null;
   if (!record.first_doc || record.first_doc !== slug) return null;
   if (record.revised) return null;
-  return ownerCommented ? 'handoff' : 'comment';
+  if (!ownerCommented) return 'comment';
+  // The handoff block lives on the card and only on the latest version, so on
+  // an older one the row would name a line that is not on the page -- which is
+  // the one thing this row promised never to do.
+  return canHandoff ? 'handoff' : null;
 }
 
 // The words. The two waiting lines are the card's own, not new ones: the same

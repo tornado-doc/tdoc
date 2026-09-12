@@ -125,6 +125,21 @@ function loadOnboardingLocal() {
   const v = readJson(ONBOARDING_FILE, {});
   return v && typeof v === 'object' ? v : {};
 }
+// The newest doc on this host. Local twin of the worker's newestDocFor: one
+// owner here, so every doc on disk is theirs.
+function newestDocLocal() {
+  let best = null;
+  let names = [];
+  try { names = fs.readdirSync(ROOT); } catch { return null; }
+  for (const name of names) {
+    if (name.startsWith('.') || ONBOARD_SLUGS.has(name) || name === 'tdoc-templates') continue;
+    const meta = readJson(path.join(ROOT, name, 'meta.json'), null);
+    if (!meta) continue;
+    const created = meta.created || '';
+    if (!best || created > best.created) best = { slug: name, created };
+  }
+  return best ? best.slug : null;
+}
 function stampOnboardingLocal(step, extra) {
   const all = loadOnboardingLocal();
   all.record = stampOnboarding(all.record || {}, step, new Date().toISOString(), extra);
@@ -1622,10 +1637,14 @@ const server = http.createServer(async (req, res) => {
     const all = loadOnboardingLocal();
     // Local twin of the worker's `paired`: the local server has no pairing, so
     // an env flag stands in for "this account has connected a terminal".
-    return json(res, 200, {
-      record: discoverFirstDocLocal(all.record || {}),
-      paired: Boolean(process.env.TDOC_E2E_PAIRED),
-    });
+    const record = discoverFirstDocLocal(all.record || {});
+    const paired = Boolean(process.env.TDOC_E2E_PAIRED);
+    // Twin of the worker's `?docs=1`: only the page waiting for a doc to
+    // appear pays for the walk.
+    if (url.searchParams.get('docs') === '1') {
+      return json(res, 200, { record, paired, newest_doc: newestDocLocal() });
+    }
+    return json(res, 200, { record, paired });
   }
   if (p === '/api/onboarding/event' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });

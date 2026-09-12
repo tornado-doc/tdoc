@@ -222,7 +222,10 @@
 /* A row whose turn has not come is shown and not offered. Nothing is hidden —
    the whole shape should be legible on the first arrival — but nothing about
    it invites a click that would land nowhere. */
-.onb-card li.locked .onb-label { color: #a4a39e; }
+/* Muted, not faint: at #a4a39e this was 2.53:1 on white, under the 3:1 floor
+   even for a disabled control, and these rows carry real information -- the
+   shape of the journey still to come. The token reads 5.3:1. */
+.onb-card li.locked .onb-label { color: var(--td-muted, #6b6a66); }
 .onb-card li.locked .onb-thumb { opacity: .45; }
 
 /* The thumbnails. Notion's are legible because they contain something you

@@ -160,7 +160,7 @@ t('bridge 1 is read off the server, and a paired account is never asked for a co
   // The five-step pop-up that used to render this is gone. What it was reading
   // is not: the record, the pairing stamp, and the recipe the agent follows.
   assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));")
-    && server.includes('paired: Boolean(process.env.TDOC_E2E_PAIRED),'), 'both hosts say whether a terminal has connected');
+    && server.includes('const paired = Boolean(process.env.TDOC_E2E_PAIRED);'), 'both hosts say whether a terminal has connected');
   assert(gate.includes('const connected = Boolean(paired || record?.agent_connected || record?.published_first);'),
     'and the gate is done when any of the three says so');
   assert(gate.includes('const POLL_MS = 3000;'), '3s while waiting');
@@ -178,7 +178,7 @@ t('bridge 1 is read off the server, and a paired account is never asked for a co
   const skill = read('SKILL.md');
   assert(skill.includes('Read all comments on https://tdoc.dev/d/<slug> and fix them') && skill.includes('is a `/tdoc edit <slug>` request'), 'the handoff line is a trigger, not something to improvise on');
   assert(/Do NOT fetch\s*\n?\s*the URL in a browser/.test(skill), 'and reading it off the page instead records nothing');
-  assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
+  assert(api.includes("'/api/onboarding?docs=1' : '/api/onboarding'") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
 });
 
 t('the hub has the same door as the landing, not a bare recipe', () => {

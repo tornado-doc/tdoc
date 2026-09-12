@@ -241,14 +241,21 @@ t('both steps are one layout with a status line under it', () => {
   assert(gate.includes("const another = step === 'doc' && arrivedWith.current === true;"), 'and that is what names the page');
 });
 
-t('the doc step reads the record, and the catalog walk is gone with the seeding', () => {
-  // While a template was being minted for them, published_first said only
-  // "some doc exists" and a catalog scan was the only way to ask "one of
-  // theirs?". With nothing seeded the stamp answers it directly.
-  assert(gate.includes("? (record?.published_first ? 'done' : 'waiting')"), 'the step turns on the stamp');
-  assert(gate.includes("const ownDoc = record?.first_doc || null;"), 'and the record names the doc to open');
-  assert(!worker.includes('newestOwnDoc') && !server.includes('newestOwnDocLocal'), 'no catalog walk on either host');
-  assert(!worker.includes("searchParams.get('docs')") && !api.includes('docs=1'), 'and nothing asks for one');
+t('the doc step waits for a doc that was not there a moment ago', () => {
+  // The record cannot answer this one. Both of its doc stamps are written
+  // once, so a SECOND doc moves nothing on it -- which left "Make another
+  // tdoc" opening already done, never moving, and pointing its button at the
+  // doc before last.
+  assert(gate.includes("const arrived = Boolean(newestDoc && newestDoc !== knownDoc.current);"), 'a doc that was not here when the page opened');
+  assert(gate.includes("? (arrived ? 'done' : 'waiting')"), 'is what the step turns on');
+  assert(gate.includes("const ownDoc = newestDoc || record?.first_doc || null;"), 'and the newest one is what the button opens');
+  assert(gate.includes("if (step === 'doc' && loaded && knownDoc.current === undefined) knownDoc.current = newestDoc;"),
+    'what they arrived with is read once, after the first answer');
+  // A first doc is any doc at all, because there was nothing there before.
+  assert(worker.includes('async function newestDocFor(env, accountId)') && server.includes('function newestDocLocal()'), 'both hosts can name it');
+  assert(worker.includes("if (url.searchParams.get('docs') === '1') {") && server.includes("if (url.searchParams.get('docs') === '1') {"),
+    'behind a parameter, so the connect gate never pays for the walk');
+  assert(gate.includes('getOnboarding(wantsDoc ? { docs: 1 } : undefined)'), 'and only this step asks');
 });
 
 t('a deleted seed doc does not leave rows pointing at a 404', () => {
@@ -271,7 +278,7 @@ t('the hint is a wayfinder, never a second copy of the line', () => {
   // The same line for the agent in two places on one screen is two things to
   // drift apart. The hint says which card is yours now and opens it.
   assert(!hint.includes('handoffLine') && !hint.includes('copyText'), 'the hint carries no line and no clipboard');
-  assert(shell.includes('const hintStep = docStep(onboardingRecord, config.slug, ownerCommented);'), 'the shell decides the row');
+  assert(shell.includes('const hintStep = docStep(onboardingRecord, config.slug, ownerCommented, handoffEnabled);'), 'the shell decides the row');
   assert(/goToStep = useCallback\(\(want\) => \{[\s\S]{0,400}setOpenCommentId/.test(shell), 'and going there opens a card');
   // The checklist rows land through the same function, so the corner row and
   // the row on My docs can never drift into two ideas of where a step goes.

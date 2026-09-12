@@ -741,7 +741,7 @@ export function DocumentShell({ boot, config }) {
   // already on the page, so going there is opening the card that carries it:
   // the seeded comment asks for the highlight, and their own card carries the
   // line for the agent.
-  const hintStep = docStep(onboardingRecord, config.slug, ownerCommented);
+  const hintStep = docStep(onboardingRecord, config.slug, ownerCommented, handoffEnabled);
   const goToStep = useCallback((want) => {
     const list = comments.comments;
     const going = want || hintStep;
