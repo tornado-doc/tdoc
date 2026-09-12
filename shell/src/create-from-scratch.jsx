@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FilePlus2, Sparkles } from 'lucide-react';
-import { AGENT_DEFINITION, AGENT_NAMES } from './onboarding-dialog.jsx';
+import { AGENT_DEFINITION, AGENT_NAMES } from './onboarding-copy.js';
 
 // "Create a doc" is a fork, not a form: write it yourself, or have your agent
 // write it. Two cards, one per answer — the blank doc opens immediately (you

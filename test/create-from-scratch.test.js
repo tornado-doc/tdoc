@@ -20,7 +20,7 @@ const server = read('server/server.js');
 const shellApi = read('shell/src/document/api.js');
 const hub = read('shell/src/docs-hub.jsx') + '\n' + read('shell/src/hooks/use-docs-hub.js');
 const form = read('shell/src/create-from-scratch.jsx');
-const onboarding = read('shell/src/onboarding-dialog.jsx');
+const copy = read('shell/src/onboarding-copy.js');
 const editorHook = read('shell/src/hooks/use-document-editor.js');
 
 // Lift a function out of a source file by brace matching so it can be run here.
@@ -188,24 +188,20 @@ t('the cards live in the Docs Hub, and the recipe has one implementation', () =>
   assert(form.includes("location.href = '/setup?step=doc'") && !form.includes('FirstDocRecipe') && !form.includes('OwnAgentDoor'),
     'the AI card leads to the one door, not a bare recipe and not a second copy of the wizard');
   assert(!form.includes('tdoc-recipe-wrap'), 'the recipe markup belongs to one component');
-  assert(onboarding.includes('export function FirstDocRecipe('), 'the shared recipe lost its home');
+  // The recipe has no home in the cards any more. There is one screen that
+  // hands out a line, and this card goes to it.
+  assert(copy.includes("export const ANOTHER_DOC_RECIPE ="), 'the shared wording lives in one module');
 });
 
-t('the onboarding dialog is onboarding, not a doc launcher (#371)', () => {
-  // The landing dialog exists to get tdoc installed and a first doc published
-  // through the reader's own agent. A blank-doc card answers a question a
-  // first-time visitor has not asked yet.
-  assert(!onboarding.includes('CreateChoice'), 'the onboarding dialog must not offer the cards');
-  assert(!onboarding.includes('createDocument'), 'the onboarding dialog must not create documents');
-  // The recipe lives behind the "Use my own agent" door now — still the one
-  // rendering, still the whole of what that door hands over.
-  assert(onboarding.includes('terminal(FIRST_DOC_RECIPE, AGENT_NAMES)') && onboarding.includes('<code ref={lineCopy.codeRef} className="tdoc-wiz-line">{line}</code>'), 'the recipe is what the own-agent door hands over');
-  // The dialog takes the config (its left door needs to know whether there
-  // is a session) and the shell's sign-in, and nothing else.
-  const mount = read('shell/src/document-shell.jsx').match(/<OnboardingDialog[\s\S]*?\/>/);
-  assert(mount && /config=\{config\}/.test(mount[0]) && /onSignIn=\{signIn\}/.test(mount[0]),
-    'the dialog needs the config and the sign-in');
-  assert(!/identity=/.test(mount[0]), 'the dialog reads identity off config, not as its own prop');
+t('nothing on a document opens a second onboarding (#371)', () => {
+  // The landing dialog that used to live here existed to get tdoc installed
+  // and a first doc published. Setup is a route now and the onboarding is a
+  // checklist, so there is no pop-up left to keep honest -- only the proof
+  // that none is mounted and that the cards did not inherit its job.
+  const shell = read('shell/src/document-shell.jsx');
+  assert(!/OnboardingDialog|OnboardingWizard|OwnAgentDoor/.test(shell), 'no onboarding dialog is mounted');
+  assert(!/onboarding-dialog\.jsx|onboarding-scene\.jsx/.test(shell), 'and the wizard is not imported for its parts');
+  assert(!form.includes('createDocument'), 'the agent card must not create documents');
   // The hub's own card still respects the host capability.
   assert(form.includes('canCreate ? ('), 'the recipe card must survive canCreate=false');
 });

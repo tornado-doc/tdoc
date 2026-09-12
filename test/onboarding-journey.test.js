@@ -18,7 +18,8 @@ const root = path.join(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const worker = read('worker/worker.js');
 const server = read('server/server.js');
-const dialog = read('shell/src/onboarding-dialog.jsx');
+const copy = read('shell/src/onboarding-copy.js');
+const gate = read('shell/src/setup-gate.jsx');
 const shell = read('shell/src/document-shell.jsx');
 const card = read('shell/src/document/comment-card.jsx');
 const layer = read('shell/src/document/comment-layer.jsx');
@@ -145,118 +146,28 @@ t('a visitor with no session still sees a way to comment, and it is the sign-in'
   assert(shell.includes('signInToComment={Boolean(config.signInToComment)}') && shell.includes('onSignIn={signIn}'), 'the shell wires it');
 });
 
-t('one pop-up, five steps, and the first one is a drawing', () => {
-  assert(dialog.includes('title="Create a free doc"') && dialog.includes('hideTitle'), 'the screen is named after the button that opened it, for assistive tech');
-  assert(dialog.includes("const STEPS = ['welcome', 'paste', 'doc', 'sendback', 'done'];"), 'five steps, in order');
-  assert(dialog.includes("<OnboardingScene />") && read('shell/src/onboarding-scene.jsx').includes('Your agent') && read('shell/src/onboarding-scene.jsx').includes('Your browser'), 'the loop is drawn as two windows, not written');
-  assert(dialog.includes("export const AGENT_NAMES = 'Claude Code · Codex · Claude Cowork · ChatGPT Work'"), 'all four names');
-  assert(dialog.includes("export const AGENT_DEFINITION = 'An AI that runs on your computer and can read and write files.'"), 'the definition');
-  assert(!/tdoc-term-tip|role="tooltip"/.test(dialog), 'no tooltip');
-  assert(!/Use tdoc's agent|waitlist/.test(dialog), 'no second door: there is one way in');
-  assert(!/Start from scratch|Advanced|Read the full tutorial/.test(dialog), 'the onboarding never offers a blank doc, and carries no reading');
-  // Sign-in is the site's own; the page leaves for it and returns to the paste step.
-  assert(dialog.includes("onSignIn?.('/?onboard=paste')") && !dialog.includes("'tdoc-signin'"), 'sign-in is the existing one, not a second');
-  assert(shell.includes('Boolean(config.onboarding && config.identity && onboardingDoor)') && shell.includes("params.delete('onboard');"), 'the shell reopens the wizard after the redirect, at any step, and takes the parameter off the URL');
-  // The top bar's Sign in on the landing returns into the onboarding; an
-  // account that has finished or skipped is let straight through.
-  // The gate replaced the pop-up as the door, so signing in from the top bar
-  // lands on /setup rather than reopening a wizard step.
-  assert(shell.includes("onSignIn={() => signIn(config.onboarding ? '/setup' : undefined)}"), 'the top bar sign-in returns to the gate');
-  assert(dialog.includes("if (initialStep === 'welcome' && (record.revised || record.shared || record.tour_seen)) return { close: true };") && dialog.includes("if (first.close) { onClose?.(); return; }") && dialog.includes("useEffect(() => { if (opening.close) onClose?.(); }, []);"), 'a finished or skipped account is not shown the wizard again — from the first tick or from the record in hand');
-  // Every step can be left.
-  // Leaving is the × in the corner. Nothing on the floor says Skip or Done:
-  // beside Back, with no Next, a Skip read as "next" and quietly closed the
-  // whole thing.
-  assert(dialog.includes('className="tdoc-wiz-close" onClick={onClose} aria-label="Close"') && !/>Done</.test(dialog), 'leaving is the corner ×');
-  // Skip is not leaving: it goes to the last screen and stamps tour_seen so
-  // the landing stops reopening the pop-up.
-  assert(dialog.includes("onClick={skipToEnd}>Skip</button>") && dialog.includes("const skipToEnd = () => setView('end');"), 'Skip goes to the question');
-  assert(dialog.includes('Skip the walk-through?<br />You can come back any time.') && dialog.includes('onClick={confirmSkip}>Skip it, go to my docs</button>') && dialog.includes('onClick={() => setView(null)}>Keep going</button>'), 'the question, with its two answers');
-  assert(/const confirmSkip = \(\) => \{\s*postOnboardingEvent\('tour_seen'\)[\s\S]*location\.href = '\/me';/.test(dialog), 'only a yes is remembered, and goes to their docs');
-  // Looking back never moves the journey: `step` is the record's, `view` is
-  // the person's, and the record's next move clears the view.
-  assert(dialog.includes("const shown = view && STEPS.includes(view) && STEPS.indexOf(view) < STEPS.indexOf(step) ? view : step;") && dialog.includes("onClick={back}>Back</button>") && dialog.includes("onClick={forward}>Continue</button>"), 'a step can be looked at again, and left again, from the bottom row');
-  // The frame never moves: a fixed-height sheet, a two-line headline slot, the
-  // body in the middle, the buttons on the floor — and a step with no primary
-  // keeps the floor where it is.
-  assert(/\.ui-dialog-popup\.tdoc-wiz-modal \{[^}]*height: min\(640px, calc\(100vh - 32px\)\);/.test(read('shell/src/ui/ui.css')) && read('shell/src/ui/ui.css').includes('.tdoc-wiz .tdoc-wiz-h1 { min-height: 2.3em; }') && read('shell/src/ui/ui.css').includes('.tdoc-wiz-primary-ghost { height: 48px; }'), 'the sheet, the headline slot and the floor are fixed');
-  assert(dialog.includes('{primary || <div className="tdoc-wiz-primary-ghost" aria-hidden="true" />}'), 'a step without a primary keeps the floor');
-  assert(/\.tdoc-wiz-body \{[^}]*justify-content: flex-start;/.test(read('shell/src/ui/ui.css')), 'the body is top-aligned, so what appears after Copy lands under the window and the window does not move');
-  assert(dialog.includes('<div className="tdoc-wiz-body">{ready ? body : null}</div>') && dialog.includes('className="tdoc-wiz-nav-row"'), 'headline, body, floor');
-  // A person who is done sees that they are, and gets their docs or the walk again.
-  // The floor and the dots, as rules — one place, pinned:
-  assert(dialog.includes("const index = atEnd ? STEPS.length : STEPS.indexOf(shown) + 1;"), 'the end screen is the last dot, whatever the record says');
-  assert(dialog.includes("{index > 1 ? <button type=\"button\" className=\"tdoc-wiz-link\" onClick={back}>Back</button> : <span />}"), 'Back on every screen after the first');
-  assert(/index < liveIndex\s*\? <button type="button" className="tdoc-wiz-link" onClick=\{forward\}>Continue<\/button>\s*: shown === 'done' \? <span \/>\s*: <button type="button" className="tdoc-wiz-link" onClick=\{skipToEnd\}>Skip<\/button>/.test(dialog), 'Continue while looking back, Skip on the live step, nothing to skip on the last one');
-  assert(dialog.includes("onClick={() => setView(i + 1 === liveIndex ? null : s)}") && dialog.includes("i + 1 <= liveIndex"), 'reached dots are clickable; the live dot returns to the live step');
-  // The page control sits on the floor, centred between Back and Skip; the
-  // top of the sheet is the headline and the corner × only.
-  assert(/<div className="tdoc-wiz-nav-row">\s*\{index > 1 \? [^\n]*\n\s*\{dots\}/.test(dialog) && !dialog.includes('tdoc-wiz-head') && !dialog.includes('tdoc-wiz-mark-word'), 'the dots are the floor\'s page control, and the header is gone');
-  // After Copy the button does not turn into a sentence: the line carries a
-  // Copied badge and the floor shows the next thing to do.
-  assert(!/Copied\. Now paste it/.test(dialog) && dialog.includes("lineCopy.copied ? null : <button type=\"button\" className=\"tdoc-wiz-primary\" onClick={copyFixLine}>"), 'Copy is a button, Copied is a badge');
-  assert(dialog.includes("const finished = step === 'done' && view === null;") && dialog.includes('You’ve done the loop.') && dialog.includes('href="/me">Go to my docs</a>') && dialog.includes(">Walk through it again</button>") && dialog.includes("{status?.title ? `Open “${status.title}”` : 'Open your tutorial doc'}") && !dialog.includes('Copy link'), 'one last screen: open the doc, walk again, go to the hub — no link to copy');
-  // Walking the tour again never drags the live step backwards — the record
-  // would only yank it forward again on the next tick, three seconds later.
-  assert(dialog.includes("if (STEPS.indexOf(step) > STEPS.indexOf('paste')) { setView('paste'); return; }"), 'a re-walk moves the view, not the journey');
-  assert(dialog.includes("useEffect(() => { setView((current) => (current === 'resume' ? current : null)); }, [step]);"), 'a step that moves on is shown the moment it does — unless the person is still being asked whether to resume');
-  assert(dialog.includes('useEffect(() => { lineReset(); }, [step, lineReset]);'), 'a copy survives looking back and the skip question');
-  // Under 700px every modal button grows to 44px; the dots are buttons and
-  // became coins (seen on tdoc.dev in a 560px pane). They stay dots.
-  assert(/\.tdoc-modal \.tdoc-wiz \.tdoc-wiz-dots button \{\s*min-width: 0;\s*min-height: 0;/.test(read('shell/src/ui/ui.css')), 'the dots are exempt from the 44px floor');
-  assert(!/tdoc-wiz-sub/.test(dialog), 'no subtitles: a headline, a button, and a status line at most');
-  // Every wizard button rule outranks chrome.css's `.tdoc-modal button`, which
-  // painted them white on white (round-5 screenshots: blank buttons).
-  const css = read('shell/src/ui/ui.css');
-  assert(css.includes('.tdoc-wiz button.tdoc-wiz-primary, .tdoc-wiz a.tdoc-wiz-primary {') && css.includes('.tdoc-wiz button.tdoc-wiz-secondary, .tdoc-wiz a.tdoc-wiz-secondary {') && css.includes('.tdoc-wiz button.tdoc-wiz-link, .tdoc-wiz a.tdoc-wiz-link {'), 'wizard buttons outrank the modal button rule');
-});
-
-t('bridge 1 is read off the server, and the code from the terminal is typed under the line', () => {
-  assert(dialog.includes("postOnboardingEvent('door_own_agent')"), 'reaching the paste step is the first stamp');
-  assert(dialog.includes('const POLL_MS = 3000'), '3s while waiting');
-  assert(dialog.includes('export function stepFromRecord(record)') && /if \(record\.revised\) return 'done';\s*if \(record\.commented\) return 'sendback';\s*if \(record\.published_first\) return 'doc';\s*if \(record\.agent_connected\) return 'doc';\s*return 'paste';/.test(dialog), 'the step is the record, forward only');
-  // The first frame is the record's step, not the door's (#527): the shell
-  // hands the record it fetched at boot to the pop-up, the pop-up computes its
-  // opening from it synchronously, and with no record yet it paints nothing —
-  // never the paste step for a beat before the congratulations screen.
-  assert(dialog.includes('export function openingFrom(record, initialStep)'), 'the opening rule is one function');
-  assert(dialog.includes("const [opening] = useState(() => openingFrom(signedIn ? initialRecord : null, initialStep));") && dialog.includes("useState(() => opening.step || (initialStep && STEPS.includes(initialStep) ? initialStep : 'welcome'))"), 'the opening step is computed before the first frame');
-  assert(dialog.includes('const first = openingFrom(next, initialStep);'), 'the first tick applies the same rule');
-  assert(dialog.includes('const ready = !signedIn || record !== null;') && dialog.includes('<div className="tdoc-wiz-body">{ready ? body : null}</div>'), 'no record yet paints nothing');
-  assert(shell.includes('initialRecord={onboardingRecord}'), 'the shell hands its record to the pop-up');
-  assert(dialog.includes("export const WAITING = 'Listening for your agent…'"), 'copy flips to listening');
-  assert(dialog.includes("export const NOTHING_YET = 'Taking a while? Check your agent’s window.'"), 'a nudge before the timeout');
-  assert(dialog.includes("export const STILL_WAITING = 'Still waiting. Did you paste it?'"), 'the timeout asks the one question');
-  assert(dialog.includes('COPY_FALLBACK') && dialog.includes('selectContents(codeRef.current)'), 'a refused clipboard leaves the line selected and says so');
-  // The pairing code a terminal shows is typed in this window, against the
-  // same two routes /activate uses — lookup names the terminal, approve binds it.
-  assert(dialog.includes("postJson('/api/cli/pair/lookup', { user_code: code })") && dialog.includes("postJson('/api/cli/pair/approve', { user_code: code })"), 'pairing reuses the activate routes');
-  assert(dialog.includes('Connect {pair.label ? <strong>{pair.label}</strong> : \'this terminal\'} to your account?'), 'the terminal is named before it is bound');
-  // The paste step names what to open — the four agents, in a sentence — then
-  // what to do there.
-  assert(dialog.includes('title = <>Open your agent.<br />Paste this in.</>;') && dialog.includes('const copiedLine = terminal(FIRST_DOC_RECIPE, AGENT_NAMES);') && dialog.includes('<span className="tdoc-wiz-term-title">{bar}</span>') && !dialog.includes('tdoc-wiz-agents'), 'the line sits in a window whose title bar names the agents — nothing extra to read, nothing that looks clickable');
-  assert(dialog.includes('placeholder="Or type its code here"') && dialog.includes("} else if (lineCopy.copied !== null) {"), 'the code is typed under the line, once it is copied, on the same screen');
-  // The page follows the CLI's pairing: a terminal that has connected before
-  // keeps its credential and never shows a code, so the page waits for the
-  // doc instead; a first-time agent connects FIRST, before reading anything.
-  assert(dialog.includes("} else if (lineCopy.copied !== null && (connected || paired)) {") && dialog.includes('setPaired(Boolean(result?.paired));'), 'a paired account is not asked for a code');
-  assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));") && server.includes('paired: Boolean(process.env.TDOC_E2E_PAIRED),'), 'both hosts say whether a terminal has connected');
+t('bridge 1 is read off the server, and a paired account is never asked for a code', () => {
+  // The five-step pop-up that used to render this is gone. What it was reading
+  // is not: the record, the pairing stamp, and the recipe the agent follows.
+  assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));")
+    && server.includes('paired: Boolean(process.env.TDOC_E2E_PAIRED),'), 'both hosts say whether a terminal has connected');
+  assert(gate.includes('const connected = Boolean(paired || record?.agent_connected || record?.published_first);'),
+    'and the gate is done when any of the three says so');
+  assert(gate.includes('const POLL_MS = 3000;'), '3s while waiting');
+  assert(gate.includes("postOnboardingEvent('door_own_agent')"), 'copying the line is the first stamp');
+  assert(gate.includes('COPY_FALLBACK') && gate.includes('selectContents(promptRef.current)'),
+    'a refused clipboard leaves the line selected and says so');
+  // The agent's own instructions, which no page renders: it connects before it
+  // reads anything, and the first doc is a fill-in template with a clock on it.
   const firstDoc = read('FIRST-DOC.md');
   assert(firstDoc.includes('## Step 1b — connect first, before reading anything') && firstDoc.includes('bash "$SKILL_DIR/bin/tdoc-publish" --signin-only'), 'the agent connects before it reads');
   assert(firstDoc.includes('**From the paste to the link: three minutes of your work; five at the very') && firstDoc.includes('## The page, as a template') && firstDoc.includes('Copy **the template below** into `v1/index.html`') && firstDoc.includes('<div class="wrap">'), 'the first doc has a clock and a template — fill, not design');
   assert(firstDoc.includes('### The opening is a verdict') && firstDoc.includes('<p class="verdict">') && firstDoc.includes('**One sentence, second person, no hedge.**') && firstDoc.includes('**Mean is allowed. Vague is not.**'), 'the page opens with a verdict about the person, arguable on purpose, mean if the data says so');
   assert(/do not\s+run the Step 5b checks: the template/.test(firstDoc) && firstDoc.includes('Steps 3 to 6 describe the shape the template already has'), 'the long steps are the reasoning, not the to-do list');
-  assert(dialog.includes('Highlight a sentence.<br />Say what you think.') && dialog.includes("openDoc(1, 'welcome')"), 'the doc step is the comment, and the doc opens in a new tab');
-  // Looking back at a finished step shows what was done there, never a wait that is over.
-  assert(dialog.includes('const lookingBack = !atEnd && index < liveIndex;'), 'a past step is finished by definition');
-  assert(dialog.includes('<Row state="done">You commented on your doc</Row>') && dialog.includes("{record?.published_first ? 'Your doc was written and published' : 'Writing your doc'}") && dialog.includes("} else if (shown === 'sendback' && lookingBack) {") && dialog.includes('<Row state="done">Wrote v{latest || 2}</Row>'), 'paste, doc and fix each have a done face');
-  assert(dialog.includes('<p className="tdoc-wiz-guide">Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.</p>'), 'the fix step says what pasting the line makes happen');
-  assert(dialog.includes("lineCopy.copied !== null && !status?.read_at ? <Listening>{waitLine}</Listening> : null,"), 'a wait with nothing back yet says how long it has been waiting');
   // The pasted line is what makes an agent pull, and the pull is what the page watches.
   const skill = read('SKILL.md');
   assert(skill.includes('Read all comments on https://tdoc.dev/d/<slug> and fix them') && skill.includes('is a `/tdoc edit <slug>` request'), 'the handoff line is a trigger, not something to improvise on');
   assert(/Do NOT fetch\s*\n?\s*the URL in a browser/.test(skill), 'and reading it off the page instead records nothing');
-  assert(dialog.includes("openDoc(latest || 2, 'revised')"), 'v2 opens and says why it arrived');
   assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
 });
 
@@ -269,7 +180,6 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
   assert(cards.includes("location.href = '/setup?step=doc'"), 'the card opens the gate');
   assert(!cards.includes('FirstDocRecipe'), 'no second rendering of the recipe');
   assert(cards.includes('<span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>'), 'the card defines "agent" where the word is');
-  assert(dialog.includes("export function OwnAgentDoor({ onOpenChange, closeLabel = 'Back', config = null })") && dialog.includes('initialStep="paste" embedded'), 'the hub opens the wizard at the paste step');
   assert(/\.mk-card \.tdoc-agent-def \{/.test(read('shell/src/ui/ui.css')), 'the hub card defines the word where it is');
   // A refused clipboard on the fix line: selected, said, and still waiting.
   assert(shell.includes("requestAnimationFrame(() => selectContents(document.querySelector('.tdoc-handoff-line code')));") && shell.includes("      setHandoffPref(true);\n      requestAnimationFrame"), 'the block opens, then the line is left selected');
@@ -278,7 +188,7 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
 });
 
 t('bridge 2 lives on the card: the line, the copy, then what the server saw', () => {
-  assert(dialog.includes("export const handoffLine = (docUrl) => `Read all comments on ${docUrl} and fix them`;"), 'the one instruction, addressed to a doc');
+  assert(copy.includes("export const handoffLine = (docUrl) => `Read all comments on ${docUrl} and fix them`;"), 'the one instruction, addressed to a doc');
   assert(shell.includes("const handoffText = handoffLine(`${location.origin}/d/${encodeURIComponent(config.slug)}`);"), 'the card line names this doc');
   assert(shell.includes('const HANDOFF_POLL_MS = 3000'), '3s while waiting');
   assert(shell.includes("postOnboardingEvent('fix_copy_clicked', config.slug)"), 'copy is an event');
@@ -288,7 +198,7 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion)'), "only on the owner's own doc, and only its latest version");
   assert(card.includes("handoff = null,") && card.includes("className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}"), 'the card renders it, open or closed');
   // One interactive blue across the chrome: the reply control reads the same
-  // token as the card's ring and every wizard button.
+  // token as the card's ring and every primary button.
   assert(!/#1a73e8/i.test(read('server/chrome.css')), 'no second accent blue in the reader chrome');
   // Closed is one row — the name and Copy; the line and the sentence are behind the chevron.
   assert(card.includes('Let your agent fix it') && card.includes("{handoff.open ? (\n              <div className=\"tdoc-handoff-line\">\n                <code>{handoff.line}</code>\n                {copyButton}") && card.includes('{!handoff.open ? copyButton : null}'), 'the line shows only when open');
@@ -321,14 +231,15 @@ t('the exit is a line on a revised doc, owed until the link is copied', () => {
 });
 
 t('the two arrivals open the right card and say what happened', () => {
-  assert(/params\.get\('welcome'\) \? 'welcome'\s*\n\s*: params\.get\('revised'\) \? 'revised'/.test(shell), 'welcome and revised are read once');
+  assert(/params\.get\('revised'\) \? 'revised'/.test(shell), 'revised is read once');
   // The checklist arrives the same way: a row names which of the doc's two
   // things it came for, and the parameter is stripped like the others.
   assert(shell.includes("step === 'comment' || step === 'fix' ? step : null"), 'a checklist row names its own landing');
   assert(shell.includes("params.delete('step');"), 'and it does not survive a reload');
   assert(shell.includes('history.replaceState('), 'and taken off the URL');
-  assert(/c\.author\?\.login === 'tdoc'\)[\s\S]*setOpenCommentId\(seed\.id\)/.test(shell), 'welcome opens the seeded card');
-  assert(shell.includes('is live.`'), 'and says the doc is live');
+  // `?welcome` went with the wizard: nothing produced it once the landing
+  // pop-up stopped opening, and the checklist rows land through `?step=`.
+  assert(!shell.includes("params.get('welcome')"), 'the wizard arrival is gone');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
   assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
   // A version published without a resolved thread still arrived; the count
@@ -336,7 +247,7 @@ t('the two arrivals open the right card and say what happened', () => {
   assert(shell.includes('`v${version} is published. Send it to a real reader:`'), 'the exit line drops the count rather than printing zero');
   assert(shell.includes('`Your agent published v${config.version}.`'), 'and so does the arrival toast');
   // No "Your doc →" pill in the landing's top bar: the way back is the hub
-  // and the wizard's last screen (the owner asked for it gone).
+  // (the owner asked for it gone).
   assert(!shell.includes('yourDoc') && !read('shell/src/document/document-toolbar.jsx').includes('tdoc-your-doc'), 'the top bar carries no doc pill');
   assert(server.includes('oldVersion: (!isLanding && Number(version) < Number(latestVersion))'), 'local preview shows the newer-version strip too');
   for (const [src, label] of [[worker, 'worker'], [server, 'server']]) {
@@ -349,23 +260,27 @@ t('resuming reads the record, not localStorage', () => {
   // Two onboardings cannot both run. /setup is the gate and the docs page
   // carries the rest, so the landing must not also throw a modal at somebody
   // mid-journey — that is a second journey beside the real one.
-  assert(!/setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell),
-    'the landing pop-up no longer opens itself');
+  assert(!/OnboardingDialog|onboardingOpen|onboardingDoor/.test(shell),
+    'there is no landing pop-up left to open itself');
   assert(shell.includes("location.href = config.identity && done ? '/me' : '/setup';"),
     'the landing CTA sends the unconnected to the gate and everyone else to their docs');
-  // Merely opening the door stamps `started`, so "unfinished" includes a person
-  // parked on the paste step. They are not asked to come back to a step they
-  // never left — that judgement belongs to the wizard's first-tick rule alone.
   assert(!shell.includes('setOnboardingResume') && !shell.includes('resume={onboardingResume}'), 'the shell never forces the question');
-  assert(dialog.includes("resume={initialDoor === 'resume'}"), 'only ?onboard=resume forces it');
-  // Coming back is a question, not a jump: where they stopped, and four ways on.
-  assert(dialog.includes("const [view, setView] = useState(resume ? 'resume' : (opening.view || null));") && dialog.includes("setView((current) => (current === 'resume' ? current : null))"), 'the resume view survives the record setting the step');
-  assert(dialog.includes("const ask = STEPS.indexOf(target) > STEPS.indexOf('paste') && !record.revised && !record.shared;") && dialog.includes("return { step: target, view: ask ? 'resume' : null };"), 'any door that would land past the paste step asks first — unless the loop is already closed');
-  assert(dialog.includes("if (view === 'resume') {") && dialog.includes('Last time you stopped at step {liveIndex} of {STEPS.length}: {STEP_LABELS[step]}.'), 'it says where they stopped');
-  assert(dialog.includes('Continue from step {liveIndex}') && dialog.includes('Start the tour over') && dialog.includes('onClick={confirmSkip}>Go to my docs') && dialog.includes('onClick={dismissForGood}>I know tdoc, don’t ask again'), 'continue, start over, my docs, or never again');
-  assert(/const dismissForGood = \(\) => \{\s*postOnboardingEvent\('tour_seen'\)[\s\S]*onClose\?\.\(\);/.test(dialog), '"I know tdoc" stamps the same flag as Skip and closes in place');
-  assert(dialog.includes('<a className="tdoc-wiz-link" href="/me">Already have a doc? Go to my docs</a>'), 'the writing wait has a door out');
-  assert(!dialog.includes('localStorage'), 'the dialog keeps no local state');
+  assert(!shell.includes("get('onboard')"), 'and no URL can reopen one');
+  // Coming back is not a question any more, because there is no jump to make:
+  // the checklist is where the journey lives, every row is read off the record
+  // and nothing opens itself. "Continue / start over / never ask again" was
+  // the wizard's problem, and it went with the wizard.
+  const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
+  assert(/done: Boolean\(r\.agent_connected \|\| r\.published_first\)/.test(list)
+    && /done: Boolean\(r\.first_doc\)/.test(list)
+    && /done: Boolean\(r\.commented \|\| r\.revised\)/.test(list)
+    && /done: Boolean\(r\.revised\)/.test(list), 'every row is a stamp on the account');
+  assert(!list.includes('localStorage.setItem(STORE_KEY, value') || list.includes('remember(value)'), 'the list keeps only view state locally');
+  // What IS local is a view preference and nothing else: somebody who tidies
+  // the card away on a laptop has told us nothing about their phone.
+  const local = (list.match(/localStorage\.(get|set)Item\('([^']+)'/g) || []).map((m) => m.split("'")[1]);
+  assert(local.every((key) => key.startsWith('tdoc.onboarding.')), `only view keys are local: ${local.join(', ')}`);
+  assert(!/localStorage[\s\S]{0,80}(started|commented|revised|first_doc)/.test(list), 'no step is remembered in the browser');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

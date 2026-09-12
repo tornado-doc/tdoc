@@ -39,7 +39,7 @@ const shell = read('shell/src/document-shell.jsx');
 const hint = read('shell/src/document/step-hint.jsx');
 const hintCss = read('shell/src/document/step-hint.css');
 const card = read('shell/src/document/comment-card.jsx');
-const dialog = read('shell/src/onboarding-dialog.jsx');
+const copy = read('shell/src/onboarding-copy.js');
 const api = read('shell/src/document/api.js');
 const listCss = read('shell/src/docs-hub.css');
 const worker = read('worker/worker.js');
@@ -84,7 +84,7 @@ t('a refused clipboard says so instead of doing nothing', () => {
 });
 
 t('the gate reuses the wizard’s copy, it does not fork it', () => {
-  assert(gate.includes("from './onboarding-dialog.jsx'"), 'COPY_FALLBACK and selectContents are imported, not rewritten');
+  assert(gate.includes("from './onboarding-copy.js'"), 'COPY_FALLBACK and selectContents are imported, not rewritten');
 });
 
 t('the landing CTA is the door, and the pop-up stopped opening itself', () => {
@@ -203,7 +203,7 @@ t('the portrait line drops a preamble that is false by then', () => {
   assert(gate.includes('export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;'), 'same recipe, no setup preamble');
   assert(!/docPrompt[\s\S]{0,80}FIRST_DOC_RECIPE/.test(gate) && !gate.includes("import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_RECIPE"),
     'and the landing page\'s line is not what gets copied here');
-  assert(dialog.includes("export const RECIPE_URL ="), 'the URL itself is still the wizard\'s, imported not retyped');
+  assert(copy.includes("export const RECIPE_URL ="), 'the URL itself lives in the shared copy, imported not retyped');
 });
 
 t('forking is drawn and deliberately not wired', () => {

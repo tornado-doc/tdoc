@@ -49,16 +49,17 @@ t('Docs Hub exposes search, sort, tabs, folders, star, selection, and batch acti
 });
 
 t('Create a doc is a two-card fork rendered by the shared component', () => {
-  // The cards live in create-from-scratch; the recipe they open lives with the
-  // onboarding copy that owns its wording (#371).
-  const choice = ['shell/src/create-from-scratch.jsx', 'shell/src/onboarding-dialog.jsx']
+  // The cards live in create-from-scratch; the wording they carry lives in the
+  // shared onboarding copy (#371).
+  const choice = ['shell/src/create-from-scratch.jsx', 'shell/src/onboarding-copy.js']
     .map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
   assert(/import \{ CreateChoice \}/.test(docsHub), 'the Create dialog should render the shared component');
   assert(/<CreateChoice create=\{hub\.createDoc\} canCreate=\{capabilities\.create\} \/>/.test(docsHub),
     'the cards must be wired to the hub hook and its capability');
-  assert(/copyText\(line\)/.test(choice) && /line = FIRST_DOC_RECIPE/.test(choice), 'the recipe is not copyable');
-  assert(/className="tdoc-wiz-copy"/.test(choice) && /className="tdoc-wiz-line"/.test(choice), 'shared recipe treatment missing');
-  assert(/copied === true \? 'Copied ✓' : copied === false \? 'Select & copy' : 'Copy'/.test(choice) && /function useCopyLine\(/.test(choice), 'Copy feedback state missing (three states: idle, copied, clipboard refused), shared by every line');
+  // Neither card carries a line any more: the blank doc opens, and the agent
+  // card goes to the one screen that hands a line out.
+  assert(/location\.href = '\/setup\?step=doc'/.test(choice), 'the agent card leads to the gate');
+  assert(!/tdoc-wiz-copy|tdoc-wiz-line|useCopyLine/.test(choice), 'and no recipe rendering was left behind in it');
   // The dialog now carries its own actions — the cards themselves (#356) — so
   // the footer is a plain dismiss. Two primaries in one dialog is the thing to
   // guard against, not the missing "Done".

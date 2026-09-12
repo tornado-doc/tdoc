@@ -45,7 +45,7 @@ import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
-import { OnboardingDialog, handoffLine, selectContents } from './onboarding-dialog.jsx';
+import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep } from './document/step-hint.jsx';
 
 function useNarrowViewport() {
@@ -160,23 +160,6 @@ export function DocumentShell({ boot, config }) {
   ));
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
-  // `?onboard=<step>` is how a sign-in redirect returns a person into the
-  // onboarding — `welcome` from the top bar, `paste` (or the old `own`) from
-  // the wizard's own Get started. Read once and taken off the URL, so a
-  // reload is an ordinary visit.
-  const [onboardingDoor, setOnboardingDoor] = useState(() => {
-    const params = new URLSearchParams(location.search);
-    const door = params.get('onboard');
-    if (door) {
-      params.delete('onboard');
-      const rest = params.toString();
-      try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
-    }
-    return door;
-  });
-  const [onboardingOpen, setOnboardingOpen] = useState(() => (
-    Boolean(config.onboarding && config.identity && onboardingDoor)
-  ));
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
   ));
@@ -187,13 +170,13 @@ export function DocumentShell({ boot, config }) {
     const params = new URLSearchParams(location.search);
     // `step` is the checklist arriving: a row on My docs sends people here, and
     // the page opens whatever that row is about instead of leaving them on a
-    // wall of text to work it out.
+    // wall of text to work it out. `revised` is the shell's own: it navigates
+    // here when it sees the agent publish. (`welcome` went with the wizard --
+    // nothing has produced it since the landing pop-up stopped opening.)
     const step = params.get('step');
-    const kind = params.get('welcome') ? 'welcome'
-      : params.get('revised') ? 'revised'
-        : step === 'comment' || step === 'fix' ? step : null;
+    const kind = params.get('revised') ? 'revised'
+      : step === 'comment' || step === 'fix' ? step : null;
     if (kind) {
-      params.delete('welcome');
       params.delete('revised');
       params.delete('step');
       const rest = params.toString();
@@ -259,25 +242,6 @@ export function DocumentShell({ boot, config }) {
       .catch(() => {});
   }, [config.identity]);
 
-  // Resume. A person who chose "Use my own agent" and never got a doc lands
-  // back inside that door on their next visit to the landing page — the
-  // record says which step is empty, and the page goes there.
-  useEffect(() => {
-    if (!config.onboarding || !config.identity) return;
-    if (new URLSearchParams(location.search).get('onboard')) return;
-    getOnboarding().then((result) => {
-      const record = result?.record;
-      // A journey that has started and not reached its exit reopens where
-      // it stopped — the wizard reads the step off the record.
-      // The pop-up no longer opens itself. /setup is the gate and the docs
-      // page carries the rest, so a landing visit that also threw a modal
-      // would be a second journey running beside the real one.
-      void record;
-    }).catch(() => {});
-    // Once, at boot.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // The two arrivals the journey makes on its own. Both open the card the
   // person should be looking at, and say in one line what just happened.
   const arrivedRef = useRef(false);
@@ -285,11 +249,7 @@ export function DocumentShell({ boot, config }) {
     if (!arrival || arrivedRef.current || comments.loading) return;
     arrivedRef.current = true;
     const list = comments.comments;
-    if (arrival === 'welcome') {
-      const seed = list.find((c) => c.author?.login === 'tdoc') || list[0];
-      if (seed) setOpenCommentId(seed.id);
-      showToast(`${config.title} v${config.version} is live.`);
-    } else if (arrival === 'revised') {
+    if (arrival === 'revised') {
       // Their own answered thread first — that is the reply they are waiting
       // for — then whatever else the agent resolved.
       const mine = config.identity?.login || '';
@@ -1121,15 +1081,6 @@ export function DocumentShell({ boot, config }) {
         onOpenChange={setSignInOpen}
         onSuccess={completeSignIn}
       />
-      <OnboardingDialog
-        open={onboardingOpen}
-        onOpenChange={setOnboardingOpen}
-        config={config}
-        onSignIn={signIn}
-        initialDoor={onboardingDoor}
-        initialRecord={onboardingRecord}
-      />
-
       {toast ? (
         <div className={`tdoc-shell-toast${toast.error ? ' error' : ''}`} role="status">
           {toast.text}

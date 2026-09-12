@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
-import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-dialog.jsx';
+import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
 import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
