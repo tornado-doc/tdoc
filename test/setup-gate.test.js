@@ -11,12 +11,34 @@ function t(name, fn) {
   catch (e) { fail++; console.log(`  ✗ ${name}\n    ${e.message}`); }
 }
 function assert(cond, message) { if (!cond) throw new Error(message); }
+// Lift a plain top-level function out of a JSX file so it can be run, not just
+// grepped. Same brace-matching as test/no-drift.test.js.
+function lift(src, name) {
+  const start = src.indexOf(`export function ${name}(`);
+  assert(start >= 0, `${name} is not exported`);
+  let i = src.indexOf('(', start); let depth = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === '(') depth++;
+    else if (src[i] === ')') { depth--; if (depth === 0) { i++; break; } }
+  }
+  while (i < src.length && src[i] !== '{') i++;
+  depth = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth--; if (depth === 0) { i++; break; } }
+  }
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src.slice(start, i).replace('export ', '')}; return ${name};`)();
+}
 
 const gate = read('shell/src/setup-gate.jsx');
 const gateCss = read('shell/src/setup-gate.css');
 const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
 const hub = read('shell/src/docs-hub.jsx');
 const shell = read('shell/src/document-shell.jsx');
+const hint = read('shell/src/document/step-hint.jsx');
+const hintCss = read('shell/src/document/step-hint.css');
+const card = read('shell/src/document/comment-card.jsx');
 const worker = read('worker/worker.js');
 const server = read('server/server.js');
 
@@ -143,6 +165,53 @@ t('the catalog walk is paid for only by the page that needs it', () => {
 t('a deleted seed doc does not leave rows pointing at a 404', () => {
   assert(list.includes('(docs || []).some((d) => d && d.slug === first)'), 'the link is only offered while the doc is still there');
   assert(hub.includes('docs={hub.docs}'), 'the hub hands its list over');
+});
+
+t('the doc carries one row of the checklist, and only where it belongs', () => {
+  const step = lift(hint, 'docStep');
+  const started = { started: 'X', first_doc: 'seed' };
+  assert(step(null, 'seed', false) === null, 'nothing before there is a journey');
+  assert(step({}, 'seed', false) === null, 'nor before it starts');
+  assert(step(started, 'other', false) === null, 'and nothing on a doc that is not the journey\'s');
+  assert(step(started, 'seed', false) === 'comment', 'the untouched doc asks for the highlight');
+  assert(step(started, 'seed', true) === 'handoff', 'their own words move it to the agent');
+  assert(step({ ...started, revised: 'X' }, 'seed', true) === null, 'and the closed loop hands the page to the exit banner');
+});
+
+t('the hint is a wayfinder, never a second copy of the line', () => {
+  // The same line for the agent in two places on one screen is two things to
+  // drift apart. The hint says which card is yours now and opens it.
+  assert(!hint.includes('handoffLine') && !hint.includes('copyText'), 'the hint carries no line and no clipboard');
+  assert(shell.includes('const hintStep = docStep(onboardingRecord, config.slug, ownerCommented);'), 'the shell decides the row');
+  assert(/goToStep = useCallback\(\(\) => \{[\s\S]{0,400}setOpenCommentId/.test(shell), 'and going there opens a card');
+  assert(shell.includes("localStorage.setItem(HANDOFF_OPEN_KEY, '1')"), 'with the line already open when they land on it');
+});
+
+t('a row being watched stops being a button', () => {
+  // "Waiting for your agent" that can be clicked invites a second paste.
+  assert(hint.includes("const watching = step === 'handoff' && agentState !== 'idle';"), 'a copied line is a wait, not a task');
+  assert(hint.includes("{watching\n        ? <span className=\"sh-row\">{body}</span>"), 'and a wait is not clickable');
+  // The card already says these. Said twice in two voices, a reader starts to
+  // wonder whether they are two different waits.
+  for (const line of ['Waiting for your agent…', 'Your agent is reading this', 'Still waiting — did you paste it into your agent?']) {
+    assert(hint.includes(line) && card.includes(line), `"${line}" is the card's own wording`);
+  }
+});
+
+t('the hint keeps out of the way of everything else on the doc', () => {
+  assert(hintCss.includes('.sh-hint.lifted { bottom: 83px; }'), 'it rides up when the footer slides in');
+  assert(shell.includes('lifted={Boolean(bridge.layout.footerVisible)}'), 'and the shell tells it when');
+  assert(/editor\.mode === 'edit' \? null : \(\s*<DocStepHint/.test(shell), 'it is gone while the doc is being written');
+  const small = (hintCss.match(/font[^;]*?(\d+(?:\.\d+)?)px/g) || [])
+    .map((m) => Number((m.match(/(\d+(?:\.\d+)?)px/) || [])[1]))
+    .filter((n) => n && n < 12.5);
+  assert(small.length === 0, `nothing under 12.5px: ${small.join(', ')}`);
+});
+
+t('hiding the hint is this browser\'s business, like the checklist\'s collapse', () => {
+  assert(hint.includes("const HIDE_KEY = 'tdoc.onboarding.hint';") && hint.includes('localStorage'),
+    'the dismissal is local, not a stamp on the account');
+  assert(!hint.includes('postOnboardingEvent'), 'and tidying it away says nothing about the journey');
 });
 
 t('the first arrival sees the whole shape, without a modal', () => {

@@ -46,6 +46,7 @@ import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { OnboardingDialog, handoffLine, selectContents } from './onboarding-dialog.jsx';
+import { DocStepHint, docStep } from './document/step-hint.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -769,6 +770,28 @@ export function DocumentShell({ boot, config }) {
   const ownerCommented = Boolean(me) && comments.comments.some((c) => (
     c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
   ));
+  // The one row of the checklist that belongs to this doc. It names something
+  // already on the page, so going there is opening the card that carries it:
+  // the seeded comment asks for the highlight, and their own card carries the
+  // line for the agent.
+  const hintStep = docStep(onboardingRecord, config.slug, ownerCommented);
+  const goToStep = useCallback(() => {
+    const list = comments.comments;
+    if (hintStep === 'comment') {
+      const seed = list.find((c) => c.author?.login === 'tdoc');
+      if (seed) setOpenCommentId(seed.id);
+      return;
+    }
+    const mine = list.find((c) => (
+      c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
+    ));
+    if (mine) setOpenCommentId(mine.id);
+    // The line is the point of the trip, so it is open when they arrive.
+    setHandoffTouched(true);
+    setHandoffPref(true);
+    try { localStorage.setItem(HANDOFF_OPEN_KEY, '1'); } catch {}
+  }, [hintStep, comments.comments, me]);
+
   const copyExitLink = async () => {
     if (!await copyText(shareUrl)) { showToast('Could not copy', true); return; }
     setSharedNow(true);
@@ -938,6 +961,15 @@ export function DocumentShell({ boot, config }) {
       />
 
       <DocumentFooter visible={bridge.layout.footerVisible} />
+
+      {editor.mode === 'edit' ? null : (
+        <DocStepHint
+          step={hintStep}
+          agentState={handoff.state}
+          lifted={Boolean(bridge.layout.footerVisible)}
+          onGo={goToStep}
+        />
+      )}
 
       {narrow ? (
         <MobileCommentDrawer

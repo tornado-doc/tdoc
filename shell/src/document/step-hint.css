@@ -1,0 +1,70 @@
+/* The floating row. Everything here is borrowed on purpose: the tick is the
+   checklist's own 18px circle, the pill is the collapsed chip's shape, and the
+   waiting dot is the handoff card's. A reader should recognise the object, not
+   meet a new one. */
+.sh-hint {
+  box-sizing: border-box;
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: min(360px, calc(100vw - 40px));
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--td-line, #e8e7e3);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 10px rgb(26 26 26 / 10%), 0 8px 28px rgb(26 26 26 / 6%);
+  /* The footer slides up over the bottom of the page at the end of a doc.
+     Riding up with it keeps both readable instead of stacking them. */
+  transition: bottom .18s ease;
+}
+.sh-hint.lifted { bottom: 83px; }
+
+.sh-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 4px 6px 0;
+  border: 0;
+  background: none;
+  font: 500 13.5px/1.35 -apple-system, system-ui, sans-serif;
+  color: var(--td-ink, #1a1a1a);
+  text-align: left;
+}
+button.sh-row { cursor: pointer; }
+button.sh-row:hover .sh-text { text-decoration: underline; }
+
+/* Both leading glyphs occupy the same 18px box, so the sentence does not move
+   when a row stops being something to do and becomes something to watch. */
+.sh-tick, .sh-row .tdoc-wait-dot {
+  box-sizing: border-box;
+  flex: 0 0 18px;
+  width: 18px; height: 18px;
+  margin: 0 auto;
+  border-radius: 50%;
+}
+.sh-tick { border: 1px solid var(--td-line, #e8e7e3); background: #fff; }
+.sh-row .tdoc-wait-dot { border: 5px solid transparent; background-clip: content-box; }
+
+.sh-text { min-width: 0; }
+
+.sh-x {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  padding: 0; border: 0; border-radius: 7px;
+  background: none; color: var(--td-muted, #6b6a66); cursor: pointer;
+}
+.sh-x:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
+
+/* On a narrow screen the margin comments fold under the text and the corner
+   stops being empty, so the row spans the width instead of floating in it. */
+@media (max-width: 720px) {
+  .sh-hint { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+  .sh-hint.lifted { bottom: 75px; }
+}
