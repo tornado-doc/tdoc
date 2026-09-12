@@ -292,12 +292,16 @@ export function SetupGate({ boot }) {
   // The doc step has no stuck state of its own: there is nothing to repair.
   // An agent that has not published yet is usually mid-question, so the wait
   // just says where to look.
-  if (step === 'doc' && loaded && knownDoc.current === undefined) knownDoc.current = newestDoc;
+  // Whichever of the two knows about a doc. The catalog is the reliable one --
+  // the record's doc stamps are written once, so a SECOND doc moves nothing on
+  // it -- but the record counts too, so that a journey put into a state by
+  // hand moves this page the same way a real publish does.
+  const ownDoc = newestDoc || record?.first_doc || null;
+  if (step === 'doc' && loaded && knownDoc.current === undefined) knownDoc.current = ownDoc;
   // A doc that was not there when this page opened. For a first doc that is
   // any doc at all; for a second it has to be a different one, which is the
   // whole of what "Make another tdoc" was failing to notice.
-  const arrived = Boolean(newestDoc && newestDoc !== knownDoc.current);
-  const ownDoc = newestDoc || record?.first_doc || null;
+  const arrived = Boolean(ownDoc && ownDoc !== knownDoc.current);
   const state = step === 'doc'
     ? (arrived ? 'done' : 'waiting')
     : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
@@ -316,7 +320,7 @@ export function SetupGate({ boot }) {
   // rename itself from "your first" to "another" in front of somebody who is
   // watching their first arrive.
   if (step === 'doc' && loaded && arrivedWith.current === null) {
-    arrivedWith.current = Boolean(newestDoc || (record && record.first_doc));
+    arrivedWith.current = Boolean(ownDoc);
   }
   const another = step === 'doc' && arrivedWith.current === true;
 

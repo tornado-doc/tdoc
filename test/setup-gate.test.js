@@ -250,10 +250,12 @@ t('the doc step waits for a doc that was not there a moment ago', () => {
   // once, so a SECOND doc moves nothing on it -- which left "Make another
   // tdoc" opening already done, never moving, and pointing its button at the
   // doc before last.
-  assert(gate.includes("const arrived = Boolean(newestDoc && newestDoc !== knownDoc.current);"), 'a doc that was not here when the page opened');
+  assert(gate.includes("const arrived = Boolean(ownDoc && ownDoc !== knownDoc.current);"), 'a doc that was not here when the page opened');
   assert(gate.includes("? (arrived ? 'done' : 'waiting')"), 'is what the step turns on');
-  assert(gate.includes("const ownDoc = newestDoc || record?.first_doc || null;"), 'and the newest one is what the button opens');
-  assert(gate.includes("if (step === 'doc' && loaded && knownDoc.current === undefined) knownDoc.current = newestDoc;"),
+  // The catalog is the reliable half; the record counts too, so a journey put
+  // into a state by hand moves this page the way a real publish does.
+  assert(gate.includes("const ownDoc = newestDoc || record?.first_doc || null;"), 'either half can name the doc');
+  assert(gate.includes("if (step === 'doc' && loaded && knownDoc.current === undefined) knownDoc.current = ownDoc;"),
     'what they arrived with is read once, after the first answer');
   // A first doc is any doc at all, because there was nothing there before.
   assert(worker.includes('async function newestDocFor(env, accountId)') && server.includes('function newestDocLocal()'), 'both hosts can name it');
@@ -385,6 +387,12 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
   // wipes the record's own, and a hardcoded slug would point rows 3 and 4 at
   // somebody else's document.
   assert(worker.includes("const doc = (prior && prior.first_doc) || await newestDocFor(env, accountId);"), 'their newest doc stands in');
+  // The pairing marker moves with the state, or `new`, `started` and
+  // `connected` are one state to the gate: `paired` is half of what it calls
+  // connected and is otherwise only ever written.
+  assert(worker.includes('if (next && next.agent_connected) {') && worker.includes('await env.META.delete(key);'),
+    'the switcher can put an account back before it paired');
+  assert(worker.includes('the token lives'), 'and says out loud that the credential is untouched');
   assert(worker.includes('const doc = firstDoc || null;') && server.includes('const doc = firstDoc || null;'),
     'and neither host invents one');
 });

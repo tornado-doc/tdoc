@@ -6495,6 +6495,21 @@ export default {
       const doc = (prior && prior.first_doc) || await newestDocFor(env, accountId);
       const next = debugRecord(state, new Date().toISOString(), doc);
       await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+      // The pairing marker moves with the state. `paired` -- has this account
+      // ever connected a terminal -- is half of what the gate calls connected,
+      // and it is only ever written, so an account that has paired once could
+      // not be put back before it: `new`, `started` and `connected` all looked
+      // identical on /setup, and the waiting and stuck branches were
+      // unreachable. This is the marker, not the credential: the token lives
+      // under `hosted-token:` and is untouched, so a paired CLI keeps working.
+      try {
+        const key = `account-terminal:${accountId}`;
+        if (next && next.agent_connected) {
+          if (!(await env.META.get(key))) await env.META.put(key, JSON.stringify({ first: next.agent_connected, last: next.agent_connected }));
+        } else {
+          await env.META.delete(key);
+        }
+      } catch {}
       return json({ ok: true, state, record: next });
     }
     if (p === '/api/onboarding/event' && method === 'POST') {
