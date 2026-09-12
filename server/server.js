@@ -125,6 +125,21 @@ function loadOnboardingLocal() {
   const v = readJson(ONBOARDING_FILE, {});
   return v && typeof v === 'object' ? v : {};
 }
+// The newest doc here that is not the seeded one. Local twin of the worker's
+// newestOwnDoc: this host has a single owner, so every doc on disk is theirs.
+function newestOwnDocLocal(exceptSlug) {
+  let best = null;
+  let names = [];
+  try { names = fs.readdirSync(ROOT); } catch { return null; }
+  for (const name of names) {
+    if (name.startsWith('.') || ONBOARD_SLUGS.has(name) || name === 'tdoc-templates' || name === exceptSlug) continue;
+    const meta = readJson(path.join(ROOT, name, 'meta.json'), null);
+    if (!meta) continue;
+    const created = meta.created || '';
+    if (!best || created > best.created) best = { slug: name, created };
+  }
+  return best ? best.slug : null;
+}
 function stampOnboardingLocal(step, extra) {
   const all = loadOnboardingLocal();
   all.record = stampOnboarding(all.record || {}, step, new Date().toISOString(), extra);
@@ -967,15 +982,16 @@ function localDebugAccount() {
 // `/setup` locally, so the gate can be driven against the local server the
 // same way the hosted one is. The local host is anonymous by design, so the
 // identity is whatever TDOC_E2E_USER gives us.
-function localSetupDocument(nonce) {
+function localSetupDocument(nonce, step) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   return SHELL.appHtml({
-    title: 'tdoc - connect your agent',
+    title: step === 'doc' ? 'tdoc - make your first doc' : 'tdoc - connect your agent',
     nonceAttr,
     runtimeJsPath: SHELL_RUNTIME.js.path,
     runtimeCssPath: SHELL_RUNTIME.css.path,
     bootJson: safeJsonForScript({
       page: 'setup',
+      step: step === 'doc' ? 'doc' : 'connect',
       identity: e2eIdentity(),
       oidcAuth: false,
       oidcLabel: '',
@@ -1283,7 +1299,8 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD')) {
     const nonce = crypto.randomBytes(16).toString('hex');
-    return send(res, 200, req.method === 'HEAD' ? '' : localSetupDocument(nonce), {
+    const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';
+    return send(res, 200, req.method === 'HEAD' ? '' : localSetupDocument(nonce, step), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': cspHeader(nonce),
     });
@@ -1620,7 +1637,14 @@ const server = http.createServer(async (req, res) => {
     const all = loadOnboardingLocal();
     // Local twin of the worker's `paired`: the local server has no pairing, so
     // an env flag stands in for "this account has connected a terminal".
-    return json(res, 200, { record: discoverFirstDocLocal(all.record || {}), paired: Boolean(process.env.TDOC_E2E_PAIRED) });
+    const record = discoverFirstDocLocal(all.record || {});
+    const paired = Boolean(process.env.TDOC_E2E_PAIRED);
+    // Twin of the worker's `?docs=1`: only the page waiting for a doc of their
+    // own pays for the catalog walk.
+    if (url.searchParams.get('docs') === '1') {
+      return json(res, 200, { record, paired, own_doc: newestOwnDocLocal(record && record.first_doc) });
+    }
+    return json(res, 200, { record, paired });
   }
   if (p === '/api/onboarding/event' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
-import { COPY_FALLBACK, selectContents } from './onboarding-dialog.jsx';
+import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, selectContents } from './onboarding-dialog.jsx';
 import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
@@ -31,6 +31,11 @@ import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 // building a first doc -- which this page deliberately no longer asks for. So
 // the line names the command that pairs, and stops there.
 export const SETUP_PROMPT = 'Install tdoc from https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md, then connect it to my account by running: bin/tdoc-publish --signin-only';
+// The second ask, on the same route. By the time anyone reads it the skill is
+// installed and the account is connected, so the line is the skill's own
+// command and nothing else -- FIRST-DOC.md would only rebuild the portrait
+// they already have.
+export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;
 // The same names the server's table uses. It builds every record itself, so
 // this list only decides which buttons exist.
 export const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
@@ -98,7 +103,7 @@ function Composer({ live = false, children }) {
   );
 }
 
-function SceneWaiting() {
+function SceneWaiting({ line }) {
   return (
     <>
       <ChatWindow>
@@ -107,7 +112,7 @@ function SceneWaiting() {
           <p className="sg-txt">What are we working on?</p>
         </div>
         <Composer live>
-          <span className="sg-typed">{SETUP_PROMPT.slice(0, 62)}…</span>
+          <span className="sg-typed">{line.slice(0, 62)}{line.length > 62 ? '…' : ''}</span>
           <span className="sg-caret" />
         </Composer>
       </ChatWindow>
@@ -138,30 +143,42 @@ function SceneStuck() {
 
 // The product, at its own sizes: 48px bar, 280px card, #fff7d0 anchor. Scaled
 // down it would stop being the product, so it is cropped by the pane instead.
-function SceneDone() {
+function SceneDone({ bare = false }) {
   return (
     <>
       <div className="sg-app">
         <div className="sg-bar">
           <div className="sg-mk"><Mark size={24} /></div>
-          <div className="sg-ver">v2 ▾</div>
-          <div className="sg-title">What AI knows about you</div>
+          <div className="sg-ver">{bare ? 'v1 ▾' : 'v2 ▾'}</div>
+          <div className="sg-title">{bare ? 'How our pricing actually works' : 'What AI knows about you'}</div>
           <div className="sg-owner">· you</div>
           <div className="sg-star">☆</div>
           <div className="sg-sp" />
-          <div className="sg-res"><span className="sg-sw" /> Resolved (1)</div>
+          {bare ? null : <div className="sg-res"><span className="sg-sw" /> Resolved (1)</div>}
           <div className="sg-btn tint">Comment ▾</div>
           <div className="sg-btn solid">Share</div>
           <div className="sg-ic">⋯</div>
           <div className="sg-me"><i /> You</div>
         </div>
-        <div className="sg-page">
+        <div className={`sg-page${bare ? ' bare' : ''}`}>
           <div className="sg-doc">
-            <h2>What AI knows about you</h2>
-            <p>You have been treating your agent like a search box, and it shows.</p>
-            <p><span className="sg-anchor">Nothing you asked it this month required memory.</span> Every session started from nothing, and you paid for that in re-explaining yourself.</p>
-            <p className="faint">The traces say you work in bursts, late, and abandon about a third of what you start before the second message.</p>
+            {bare ? (
+              <>
+                <h2>How our pricing actually works</h2>
+                <p>Three plans, one number that matters: what you pay when a month goes badly.</p>
+                <p>Seats are billed on the day you add them and refunded to the hour when you take them away. Nothing renews without an invoice you can read first.</p>
+                <p className="faint">Published a moment ago. Your agent has the link.</p>
+              </>
+            ) : (
+              <>
+                <h2>What AI knows about you</h2>
+                <p>You have been treating your agent like a search box, and it shows.</p>
+                <p><span className="sg-anchor">Nothing you asked it this month required memory.</span> Every session started from nothing, and you paid for that in re-explaining yourself.</p>
+                <p className="faint">The traces say you work in bursts, late, and abandon about a third of what you start before the second message.</p>
+              </>
+            )}
           </div>
+          {bare ? null : (
           <div className="sg-margin">
             <div className="sg-pin"><i /></div>
             <div className="sg-card active">
@@ -183,6 +200,7 @@ function SceneDone() {
               <p className="sg-cc-text">Counted it properly: 61%. Rewrote the paragraph and published v2.</p>
             </div>
           </div>
+          )}
         </div>
       </div>
     </>
@@ -194,6 +212,7 @@ function SceneDone() {
 export function SetupGate({ boot }) {
   const [record, setRecord] = useState(null);
   const [paired, setPaired] = useState(false);
+  const [ownDoc, setOwnDoc] = useState(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const promptRef = useRef(null);
@@ -210,11 +229,25 @@ export function SetupGate({ boot }) {
   // waiting forever: that agent holds a token, so it does nothing visible, and
   // nothing re-stamps a connection that already happened.
   const connected = Boolean(paired || record?.agent_connected || record?.published_first);
-  const state = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
+  // Two asks, one route. `?step=doc` is the second, and it is only ever shown
+  // to somebody whose agent is already connected -- you cannot ask an agent
+  // for a doc before it can publish as you. Anyone else gets the first ask,
+  // and the page moves on to the second by itself once the agent turns up, so
+  // the link is safe to hand to anybody.
+  const wantsDoc = boot?.step === 'doc';
+  const step = wantsDoc && connected ? 'doc' : 'connect';
+  const prompt = step === 'doc' ? FIRST_DOC_PROMPT : SETUP_PROMPT;
+  // The doc step has no stuck state of its own: there is nothing to repair.
+  // An agent that has not published yet is usually mid-question, so the wait
+  // just says where to look.
+  const state = step === 'doc'
+    ? (ownDoc ? 'done' : 'waiting')
+    : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
   // The seeding happens on the docs page, so that is where Continue goes: it
   // is the one place that is right whether the doc has been minted yet, was
-  // deleted since, or is sitting there waiting to be argued with.
-  const onward = '/me';
+  // deleted since, or is sitting there waiting to be argued with. The doc step
+  // ends at the doc it just watched arrive.
+  const onward = step === 'doc' && ownDoc ? `/d/${encodeURIComponent(ownDoc)}` : '/me';
 
   // The record is the only thing that moves this page.
   useEffect(() => {
@@ -223,8 +256,12 @@ export function SetupGate({ boot }) {
     let timer = null;
     const tick = async () => {
       try {
-        const result = await getOnboarding();
-        if (!cancelled) { setRecord(result?.record || {}); setPaired(Boolean(result?.paired)); }
+        const result = await getOnboarding(wantsDoc ? { docs: 1 } : undefined);
+        if (!cancelled) {
+          setRecord(result?.record || {});
+          setPaired(Boolean(result?.paired));
+          setOwnDoc(result?.own_doc || null);
+        }
       } catch {}
       if (cancelled) return;
       if (copiedAt.current) setElapsed(Date.now() - copiedAt.current);
@@ -232,17 +269,18 @@ export function SetupGate({ boot }) {
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [signedIn]);
+  }, [signedIn, wantsDoc]);
 
   // The site's own sign-in, and only that: a full-page redirect out to the
   // OIDC provider and back to /setup. Signing in is signing up, so there is no
   // second door to offer.
   const signIn = () => {
-    location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent('/setup')}`;
+    const here = wantsDoc ? '/setup?step=doc' : '/setup';
+    location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(here)}`;
   };
 
   const copy = async () => {
-    const ok = await copyText(SETUP_PROMPT);
+    const ok = await copyText(prompt);
     setCopied(ok !== false);
     setCopyFailed(ok === false);
     if (ok === false) selectContents(promptRef.current);
@@ -251,9 +289,9 @@ export function SetupGate({ boot }) {
     postOnboardingEvent('copy_clicked').catch(() => {});
   };
 
-  const scene = state === 'done' ? <SceneDone />
+  const scene = state === 'done' ? <SceneDone bare={step === 'doc'} />
     : state === 'stuck' ? <SceneStuck />
-      : <SceneWaiting />;
+      : <SceneWaiting line={prompt} />;
 
   return (
     <div className="sg-split">
@@ -261,30 +299,42 @@ export function SetupGate({ boot }) {
         <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a>
         <div className="sg-mid">
           <div className="sg-col">
-            <h1 className="sg-h1">Connect your agent</h1>
+            <h1 className="sg-h1">{step === 'doc' ? 'Make your first tdoc' : 'Connect your agent'}</h1>
 
             {signedIn ? (
               <>
                 <div className="sg-prompt">
-                  <p className="sg-prompt-text" ref={promptRef}>{SETUP_PROMPT}</p>
+                  <p className="sg-prompt-text" ref={promptRef}>{prompt}</p>
                   <button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>
                     {copied ? 'Copied' : 'Copy'}
                   </button>
                 </div>
 
-                <WorksWith />
+                {step === 'doc' ? null : <WorksWith />}
 
                 <ol className="sg-steps">
-                  <li>Paste it into your agent.</li>
-                  <li>Approve the request when it opens in your browser.</li>
-                  <li>Your agent shows up here on its own. No need to refresh.</li>
+                  {step === 'doc' ? (
+                    <>
+                      <li>Paste it into your agent, and say what the doc is about.</li>
+                      <li>It writes the page and publishes it as you.</li>
+                      <li>The doc turns up here on its own. No need to refresh.</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>Paste it into your agent.</li>
+                      <li>Approve the request when it opens in your browser.</li>
+                      <li>Your agent shows up here on its own. No need to refresh.</li>
+                    </>
+                  )}
                 </ol>
 
                 <div className="sg-status-slot">
                   {state === 'waiting' ? (
                     <div className="sg-status">
                       <span className="sg-spin" aria-hidden="true" />
-                      {copyFailed ? COPY_FALLBACK : copied ? 'Waiting for your agent.' : 'Waiting for you to paste the prompt.'}
+                      {copyFailed ? COPY_FALLBACK
+                        : copied ? (step === 'doc' && elapsed > STUCK_MS ? NOTHING_YET : 'Waiting for your agent.')
+                          : 'Waiting for you to paste the prompt.'}
                     </div>
                   ) : null}
                   {state === 'stuck' ? (
@@ -302,13 +352,15 @@ export function SetupGate({ boot }) {
                         <circle cx="12" cy="12" r="9.2" stroke="currentColor" strokeWidth="2" />
                         <path d="M8.2 12.3l2.6 2.6 5-5.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
-                      <div><b>Connected.</b> <span className="found">Your agent can publish as you.</span></div>
+                      {step === 'doc'
+                        ? <div><b>Published.</b> <span className="found">Your first tdoc is live.</span></div>
+                        : <div><b>Connected.</b> <span className="found">Your agent can publish as you.</span></div>}
                     </div>
                   ) : null}
                 </div>
 
                 <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
-                  Continue
+                  {step === 'doc' ? 'Open it' : 'Continue'}
                 </a>
                 <p className="sg-account"><a href="/me">I’ll do this later</a></p>
               </>

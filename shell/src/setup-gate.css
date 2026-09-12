@@ -197,6 +197,9 @@
 .sg-me i { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(140deg, #6f8bb5, #46617f); display: block; }
 
 .sg-page { display: grid; grid-template-columns: minmax(0, 1fr) 320px; padding: 30px 20px 34px 56px; min-height: 330px; }
+/* A doc that was published a moment ago has no comments on it yet, so the
+   margin column is not hidden — it does not exist. */
+.sg-page.bare { grid-template-columns: minmax(0, 1fr); padding-right: 56px; }
 .sg-doc h2 { margin: 0 0 14px; font: 700 28px/1.2 inherit; letter-spacing: -0.028em; max-width: 17ch; }
 .sg-doc p { margin: 0 0 11px; font: 15px/1.62 inherit; color: #24242a; max-width: 54ch; }
 .sg-doc p.faint { color: var(--td-muted, #6b6a66); }

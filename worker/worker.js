@@ -3368,6 +3368,33 @@ async function countHostedDocs(env, accountId, stopAt) {
   return n;
 }
 
+// The newest doc this account published that is not the one we seeded for
+// them. "Create your first tdoc" asks for a doc they chose to make, and the
+// seeded doc cannot answer it: we wrote that one.
+async function newestOwnDoc(env, accountId, exceptSlug) {
+  if (!accountId || !env || !env.META) return null;
+  let best = null;
+  let cursor;
+  do {
+    const r = await env.META.list({ prefix: 'meta:', cursor });
+    for (const k of r.keys || []) {
+      const slug = k.name.slice('meta:'.length);
+      if (!slug || slug === exceptSlug) continue;
+      let meta = null;
+      try {
+        const raw = await env.META.get(k.name);
+        if (raw) meta = JSON.parse(raw);
+      } catch {}
+      if (!meta || !meta.hosted || meta.hosted.account_id !== accountId) continue;
+      const created = meta.created || '';
+      if (!best || created > best.created) best = { slug, created };
+    }
+    cursor = r.cursor;
+    if (r.list_complete) break;
+  } while (cursor);
+  return best ? best.slug : null;
+}
+
 function envFlagTrue(v) {
   const s = String(v || '').toLowerCase();
   return s === '1' || s === 'true' || s === 'yes';
@@ -5212,20 +5239,27 @@ export default {
     // onboarding record and moves itself when the agent turns up.
     if (p === '/setup' && (method === 'GET' || method === 'HEAD')) {
       const session = await getSession(env, req);
+      // Two asks live on this route, because they are the same ask twice: paste
+      // a line into your agent and watch this page move. `?step=doc` is the
+      // second one. The page still shows the first to anyone who has not done
+      // it, so the link is safe to hand to anybody.
+      const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';
+      const here = step === 'doc' ? '/setup?step=doc' : '/setup';
       if (!sessionPrincipal(session) && oidcConfig(env)) {
         return new Response(null, {
           status: 302,
-          headers: { Location: `/api/auth/oidc/login?return=${encodeURIComponent('/setup')}` },
+          headers: { Location: `/api/auth/oidc/login?return=${encodeURIComponent(here)}` },
         });
       }
       const nonce = rand(16);
       return html(SHELL.appHtml({
-        title: 'tdoc - connect your agent',
+        title: step === 'doc' ? 'tdoc - make your first doc' : 'tdoc - connect your agent',
         nonceAttr: ` nonce="${nonce}"`,
         runtimeJsPath: SHELL_RUNTIME_JS_PATH,
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
         bootJson: safeJsonForScript({
           page: 'setup',
+          step,
           identity: sessionPrincipal(session)
             ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '' }
             : null,
@@ -6512,7 +6546,14 @@ export default {
       // agent never shows a code again, so the page must not wait for one.
       let paired = false;
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
-      return json({ record: await loadOnboarding(env, accountId), paired });
+      const record = await loadOnboarding(env, accountId);
+      // `?docs=1` is asked for only by the page that waits for a doc of their
+      // own, because answering it costs a catalog scan. The default poll, which
+      // runs every few seconds on the connect gate, must stay two reads.
+      if (url.searchParams.get('docs') === '1') {
+        return json({ record, paired, own_doc: await newestOwnDoc(env, accountId, record && record.first_doc) });
+      }
+      return json({ record, paired });
     }
     // Puts the caller's own onboarding record into a named state, so the
     // journey's branches can be walked without hand-editing storage. The body

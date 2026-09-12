@@ -239,7 +239,7 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   // keeps its credential and never shows a code, so the page waits for the
   // doc instead; a first-time agent connects FIRST, before reading anything.
   assert(dialog.includes("} else if (lineCopy.copied !== null && (connected || paired)) {") && dialog.includes('setPaired(Boolean(result?.paired));'), 'a paired account is not asked for a code');
-  assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));") && server.includes('paired: Boolean(process.env.TDOC_E2E_PAIRED)'), 'both hosts say whether a terminal has connected');
+  assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));") && server.includes('const paired = Boolean(process.env.TDOC_E2E_PAIRED);'), 'both hosts say whether a terminal has connected');
   const firstDoc = read('FIRST-DOC.md');
   assert(firstDoc.includes('## Step 1b — connect first, before reading anything') && firstDoc.includes('bash "$SKILL_DIR/bin/tdoc-publish" --signin-only'), 'the agent connects before it reads');
   assert(firstDoc.includes('**From the paste to the link: three minutes of your work; five at the very') && firstDoc.includes('## The page, as a template') && firstDoc.includes('Copy **the template below** into `v1/index.html`') && firstDoc.includes('<div class="wrap">'), 'the first doc has a clock and a template — fill, not design');
@@ -256,7 +256,7 @@ t('bridge 1 is read off the server, and the code from the terminal is typed unde
   assert(skill.includes('Read all comments on https://tdoc.dev/d/<slug> and fix them') && skill.includes('is a `/tdoc edit <slug>` request'), 'the handoff line is a trigger, not something to improvise on');
   assert(/Do NOT fetch\s*\n?\s*the URL in a browser/.test(skill), 'and reading it off the page instead records nothing');
   assert(dialog.includes("openDoc(latest || 2, 'revised')"), 'v2 opens and says why it arrived');
-  assert(api.includes("return request('/api/onboarding');") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
+  assert(api.includes("'/api/onboarding?docs=1' : '/api/onboarding'") && api.includes("'/api/onboarding/event'") && api.includes('/api/doc/agent-status?'), 'the three calls');
 });
 
 t('the hub has the same door as the landing, not a bare recipe', () => {
@@ -265,7 +265,7 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
   const cards = read('shell/src/create-from-scratch.jsx');
   // The door moved: /setup is the one place the journey starts, so the card
   // sends people there instead of opening a second copy of it inline.
-  assert(cards.includes("location.href = '/setup'"), 'the card opens the gate');
+  assert(cards.includes("location.href = '/setup?step=doc'"), 'the card opens the gate');
   assert(!cards.includes('FirstDocRecipe'), 'no second rendering of the recipe');
   assert(cards.includes('<span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>'), 'the card defines "agent" where the word is');
   assert(dialog.includes("export function OwnAgentDoor({ onOpenChange, closeLabel = 'Back', config = null })") && dialog.includes('initialStep="paste" embedded'), 'the hub opens the wizard at the paste step');

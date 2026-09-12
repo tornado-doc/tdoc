@@ -103,10 +103,41 @@ t('an unfinished row is a way forward, never a dead line', () => {
   // The person who started setup, left and came back lands here. Without a
   // link, the row naming the thing they have not done offers them nothing.
   assert(/id: 'connect'[^}]*href: '\/setup'/.test(list), 'the connect row leads back to the gate');
-  // Creating happens in this page's own dialog, so that row opens it rather
-  // than sitting there naming something with no way to do it.
-  assert(/id: 'create'[^}]*action: 'create'/.test(list) && list.includes('onCreate'), 'the create row opens the create dialog');
-  assert(hub.includes('onCreate={openCreateHelp}'), 'and the hub hands it the handler');
+  // Making a doc is asking an agent for one, so the row leads to the page that
+  // does that -- not to a fork asking which kind of doc they would like.
+  assert(/id: 'create'[^}]*href: '\/setup\?step=doc'/.test(list), 'the create row leads to the doc gate');
+  assert(!list.includes('onCreate'), 'and not into the hub\'s create chooser');
+});
+
+t('the second ask is the same ask, on the same route', () => {
+  // Two pages would mean two of everything: two layouts, two polls, two sets
+  // of words for "paste this and watch". It is one page with a second line.
+  assert(worker.includes("const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';"), 'the worker reads the step');
+  assert(server.includes("const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';"), 'and so does the local server');
+  assert(worker.includes('          step,') && server.includes("step: step === 'doc' ? 'doc' : 'connect',"), 'both boot it');
+  assert(gate.includes("const step = wantsDoc && connected ? 'doc' : 'connect';"),
+    'and an unconnected visitor is asked to connect first, whichever link they arrived on');
+  assert(gate.includes('export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;'), 'the doc line is the skill\'s own, reused not rewritten');
+});
+
+t('the doc step waits for a doc they made, not the one we seeded', () => {
+  // published_first is stamped by the seeder itself, so no record field flips
+  // when they finally make one of their own. The server has to look.
+  assert(worker.includes('async function newestOwnDoc(env, accountId, exceptSlug)'), 'the worker can name that doc');
+  assert(worker.includes("if (!slug || slug === exceptSlug) continue;"), 'and it excludes the seeded one');
+  assert(server.includes('function newestOwnDocLocal(exceptSlug)'), 'the local server twins it');
+  assert(gate.includes("const state = step === 'doc'\n    ? (ownDoc ? 'done' : 'waiting')"), 'the step turns on that doc alone');
+  assert(gate.includes('const onward = step === \'doc\' && ownDoc ? `/d/${encodeURIComponent(ownDoc)}` : \'/me\';'),
+    'and ends by opening it');
+});
+
+t('the catalog walk is paid for only by the page that needs it', () => {
+  // The connect gate polls this route every three seconds. Scanning every doc
+  // in the catalog on that poll would be a real cost for an answer it never
+  // reads.
+  assert(worker.includes("if (url.searchParams.get('docs') === '1') {"), 'the worker only walks when asked');
+  assert(server.includes("if (url.searchParams.get('docs') === '1') {"), 'and the local server matches');
+  assert(gate.includes('getOnboarding(wantsDoc ? { docs: 1 } : undefined)'), 'only the doc step asks');
 });
 
 t('a deleted seed doc does not leave rows pointing at a 404', () => {

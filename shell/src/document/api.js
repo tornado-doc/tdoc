@@ -24,8 +24,11 @@ export function listComments(slug, version) {
 // person and their agent move through the journey; the events are every
 // action the page saw. Both live on the account, never in localStorage, so a
 // second device resumes where the first one stopped.
-export function getOnboarding() {
-  return request('/api/onboarding');
+export function getOnboarding(options) {
+  // `docs` asks the server to also name the newest doc this account made that
+  // is not the seeded one. It costs a catalog walk, so only the page that
+  // waits for that doc asks for it.
+  return request(options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
 }
 
 export function postOnboardingEvent(action, doc) {

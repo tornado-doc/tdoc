@@ -34,7 +34,7 @@ export function CreateChoice({ create, canCreate = true }) {
           <em>{busy ? 'Creating…' : 'Open a blank doc'}</em>
         </button>
       ) : null}
-      <button type="button" className="mk-card" onClick={() => { location.href = '/setup'; }}>
+      <button type="button" className="mk-card" onClick={() => { location.href = '/setup?step=doc'; }}>
         <Sparkles className="mk-card-icon" size={22} />
         <strong>Build it with your agent</strong>
         <span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>
