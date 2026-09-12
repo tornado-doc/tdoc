@@ -5457,7 +5457,13 @@ export default {
       const gate = await enforceDocAccess(env, req, slug, null);
       if (!gate.ok) return gate.response;
       const latest = latestVersionNumber(gate.meta);
-      if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}`);
+      // The query rides along. Everything that deep-links into a doc without
+      // knowing its version -- `?comment=<id>` from a notification, `?step=`
+      // from the checklist -- addresses the bare slug, and dropping the search
+      // here landed all of them on an ordinary page with nothing opened.
+      // `url.search` is already percent-encoded by the URL parser, so it
+      // cannot carry a newline into the header.
+      if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}${url.search}`);
       // Unknown slug → the existing not-found landing redirect below.
     }
 

@@ -50,8 +50,12 @@ export function onboardingSteps(record, firstDocHref) {
   const steps = [
     { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
     { id: 'create', label: 'Create your first tdoc', done: Boolean(r.first_doc), href: '/setup?step=doc' },
-    { id: 'comment', label: 'Leave a comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref },
-    { id: 'revise', label: 'Tell your agent to fix the comments', done: Boolean(r.revised), href: firstDocHref },
+    // Both rows open the same doc, and each says which of its two things it
+    // came for: the question already on the page, or the card carrying the
+    // line for the agent. Landing on the bare URL left the last two rows
+    // pointing at the same wall of text.
+    { id: 'comment', label: 'Leave a comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref && `${firstDocHref}?step=comment` },
+    { id: 'revise', label: 'Tell your agent to fix the comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
   ];
   // Locked until everything above it is done. The first unfinished row is the
   // only one anybody can act on.

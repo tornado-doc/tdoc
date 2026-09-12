@@ -321,7 +321,11 @@ t('the exit is a line on a revised doc, owed until the link is copied', () => {
 });
 
 t('the two arrivals open the right card and say what happened', () => {
-  assert(/params\.get\('welcome'\) \? 'welcome' : params\.get\('revised'\) \? 'revised' : null/.test(shell), 'welcome and revised are read once');
+  assert(/params\.get\('welcome'\) \? 'welcome'\s*\n\s*: params\.get\('revised'\) \? 'revised'/.test(shell), 'welcome and revised are read once');
+  // The checklist arrives the same way: a row names which of the doc's two
+  // things it came for, and the parameter is stripped like the others.
+  assert(shell.includes("step === 'comment' || step === 'fix' ? step : null"), 'a checklist row names its own landing');
+  assert(shell.includes("params.delete('step');"), 'and it does not survive a reload');
   assert(shell.includes('history.replaceState('), 'and taken off the URL');
   assert(/c\.author\?\.login === 'tdoc'\)[\s\S]*setOpenCommentId\(seed\.id\)/.test(shell), 'welcome opens the seeded card');
   assert(shell.includes('is live.`'), 'and says the doc is live');

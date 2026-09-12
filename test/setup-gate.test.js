@@ -272,7 +272,12 @@ t('the hint is a wayfinder, never a second copy of the line', () => {
   // drift apart. The hint says which card is yours now and opens it.
   assert(!hint.includes('handoffLine') && !hint.includes('copyText'), 'the hint carries no line and no clipboard');
   assert(shell.includes('const hintStep = docStep(onboardingRecord, config.slug, ownerCommented);'), 'the shell decides the row');
-  assert(/goToStep = useCallback\(\(\) => \{[\s\S]{0,400}setOpenCommentId/.test(shell), 'and going there opens a card');
+  assert(/goToStep = useCallback\(\(want\) => \{[\s\S]{0,400}setOpenCommentId/.test(shell), 'and going there opens a card');
+  // The checklist rows land through the same function, so the corner row and
+  // the row on My docs can never drift into two ideas of where a step goes.
+  assert(shell.includes("goToStep(arrival === 'fix' ? 'handoff' : 'comment');"), 'a row from My docs lands the same way');
+  assert(list.includes("`${firstDocHref}?step=comment`") && list.includes("`${firstDocHref}?step=fix`"),
+    'and each row says which thing it came for');
   assert(shell.includes("localStorage.setItem(HANDOFF_OPEN_KEY, '1')"), 'with the line already open when they land on it');
 });
 

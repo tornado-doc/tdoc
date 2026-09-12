@@ -185,10 +185,17 @@ export function DocumentShell({ boot, config }) {
   // the URL, so a reload is an ordinary visit.
   const [arrival] = useState(() => {
     const params = new URLSearchParams(location.search);
-    const kind = params.get('welcome') ? 'welcome' : params.get('revised') ? 'revised' : null;
+    // `step` is the checklist arriving: a row on My docs sends people here, and
+    // the page opens whatever that row is about instead of leaving them on a
+    // wall of text to work it out.
+    const step = params.get('step');
+    const kind = params.get('welcome') ? 'welcome'
+      : params.get('revised') ? 'revised'
+        : step === 'comment' || step === 'fix' ? step : null;
     if (kind) {
       params.delete('welcome');
       params.delete('revised');
+      params.delete('step');
       const rest = params.toString();
       try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
     }
@@ -775,9 +782,10 @@ export function DocumentShell({ boot, config }) {
   // the seeded comment asks for the highlight, and their own card carries the
   // line for the agent.
   const hintStep = docStep(onboardingRecord, config.slug, ownerCommented);
-  const goToStep = useCallback(() => {
+  const goToStep = useCallback((want) => {
     const list = comments.comments;
-    if (hintStep === 'comment') {
+    const going = want || hintStep;
+    if (going === 'comment') {
       const seed = list.find((c) => c.author?.login === 'tdoc');
       if (seed) setOpenCommentId(seed.id);
       return;
@@ -791,6 +799,17 @@ export function DocumentShell({ boot, config }) {
     setHandoffPref(true);
     try { localStorage.setItem(HANDOFF_OPEN_KEY, '1'); } catch {}
   }, [hintStep, comments.comments, me]);
+
+  // A row on My docs lands here, so it lands the way the corner row's own click
+  // does -- same function, so the two can never drift into two ideas of where
+  // that row goes. It is silent: nothing just happened, they clicked a to-do.
+  const checklistArrival = useRef(false);
+  useEffect(() => {
+    if (checklistArrival.current || comments.loading) return;
+    if (arrival !== 'comment' && arrival !== 'fix') return;
+    checklistArrival.current = true;
+    goToStep(arrival === 'fix' ? 'handoff' : 'comment');
+  }, [arrival, comments.loading, goToStep]);
 
   const copyExitLink = async () => {
     if (!await copyText(shareUrl)) { showToast('Could not copy', true); return; }
@@ -928,7 +947,9 @@ export function DocumentShell({ boot, config }) {
       {showExitBanner ? (
         <div className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
           <span>{sharedNow ? 'Link copied — send it to someone.' : exitLine(answered, config.version)}</span>
-          {sharedNow ? null : <button type="button" onClick={copyExitLink}>Copy link</button>}
+          {sharedNow
+            ? <a href="/me">Back to my docs</a>
+            : <button type="button" onClick={copyExitLink}>Copy link</button>}
         </div>
       ) : null}
 
@@ -967,7 +988,7 @@ export function DocumentShell({ boot, config }) {
           step={hintStep}
           agentState={handoff.state}
           lifted={Boolean(bridge.layout.footerVisible)}
-          onGo={goToStep}
+          onGo={() => goToStep()}
         />
       )}
 
