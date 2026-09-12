@@ -6686,7 +6686,13 @@ export default {
           // Only a comment on the journey's own doc moves the journey; a
           // comment on any other doc of theirs says nothing about it.
           const journey = await loadOnboarding(env, accountId);
-          if (!parent_id && (!journey.first_doc || journey.first_doc === slug)) await stampOnboardingFor(env, accountId, 'commented');
+          // A reply counts. The seeded comment is a question -- "which claim
+          // would you defend least?" -- and its Reply button is the most
+          // obvious thing on the page, so the gesture the checklist asks for
+          // is very often a reply and not a new thread. Excluding replies left
+          // the doc's own corner row ticking while My docs stayed at 2 of 4
+          // and row 4 stayed locked, with no way to reach it.
+          if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');
           if (mentions.length) await stampOnboardingFor(env, accountId, 'tagged');
         } catch {}
       }

@@ -104,6 +104,16 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   const get = worker.slice(worker.indexOf("if (p === '/api/comments' && method === 'GET')"), worker.indexOf("if (p === '/api/mentions' && method === 'GET')"));
   assert(get.includes("url.searchParams.get('version') === 'all'"), 'version=all — the shape only tdoc-pull asks for — marks the doc read');
   assert(get.includes('markAgentRead(env, slug)'), 'the read is per doc, so the card on that doc can flip');
+  // A reply counts as the gesture. The seeded comment is a question and its
+  // Reply button is the most obvious thing on the page, so excluding replies
+  // left the doc's corner row ticking while My docs stayed at 2 of 4 with row
+  // 4 locked and unreachable. The local server always counted them; the worker
+  // was the one out of step.
+  assert(!/if \(!parent_id && \(!journey\.first_doc/.test(worker), 'a reply is not excluded');
+  assert(worker.includes("if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');")
+    && server.includes("if (!journey.first_doc || journey.first_doc === slug) stampOnboardingLocal('commented');"),
+    'and both hosts stamp it the same way');
+  assert(/if \(res\.status === 200 && isDocOwner\)/.test(worker), "only the owner's own words move their journey");
   assert(get.includes("stampOnboardingFor(agentAuth.actor.account_id, 'comments_read')") === false
     && get.includes("'comments_read'"), 'a Bearer read stamps comments_read on the account');
   const upload = worker.slice(worker.indexOf("if (p === '/api/upload' && method === 'POST')"), worker.indexOf("if (p === '/api/doc/access' && method === 'PATCH')"));
@@ -130,7 +140,7 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(upload.indexOf("'published_first'") > upload.indexOf("productEvent(env, 'publish_succeeded'"), 'stamps happen after the write succeeded, never before');
   const post = worker.slice(worker.indexOf("if (p === '/api/comments' && method === 'POST')"), worker.indexOf("if (p === '/api/comments' && method === 'PATCH')"));
   assert(/res\.status === 200 && isDocOwner[\s\S]*'commented'[\s\S]*'tagged'/.test(post), "the owner's own comment and their first tag are steps");
-  assert(post.includes("if (!parent_id && (!journey.first_doc || journey.first_doc === slug)) await stampOnboardingFor(env, accountId, 'commented');"), "only a comment on the journey's doc is the journey's comment");
+  assert(post.includes("if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');"), "only a comment on the journey's doc is the journey's comment");
   const local = server.slice(server.indexOf("if (p === '/api/comments' && req.method === 'POST')"), server.indexOf("if (p === '/api/agent/reply'"));
   assert(local.includes("if (!journey.first_doc || journey.first_doc === slug) stampOnboardingLocal('commented');"), "local twin stamps commented, on the journey's doc only");
   assert(server.includes("if (url.searchParams.get('version') === 'all') { try { markAgentReadLocal(slug); } catch {} }"), 'local twin marks the read');
