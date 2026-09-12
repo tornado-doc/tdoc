@@ -177,11 +177,10 @@ t('the second ask is the one place with a choice in it', () => {
   assert(gate.includes('const [choice, setChoice] = useState(null);'), 'and neither is chosen for them');
   // Choosing is the question this screen asks; everything downstream of it
   // waits until it has been answered.
-  assert(gate.includes("{step === 'doc' && (!choice || docDone) ? null : ("), 'no instructions before there is something to paste');
+  assert(gate.includes("{step === 'doc' && !choice ? null : ("), 'no instructions before there is something to paste');
   assert(gate.includes("line={step === 'doc' && !choice ? null : prompt}"), 'and the composer beside them types nothing either');
   // A doc that already exists is not a question. The whole ask goes, rather
   // than sitting there under a line saying it is already done.
-  assert(gate.includes("const asking = step === 'doc' && !docDone;"), 'and the ask retires once the wait has paid off');
   assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');
 });
 
@@ -227,16 +226,19 @@ t('nothing is drawn before the server has answered once', () => {
   assert(gate.includes("const scene = signedIn && !loaded ? null"), 'the scene beside them waits too');
 });
 
-t('the receipt belongs to the wait', () => {
-  // Landing on "Published. Your first tdoc is live." answers a question nobody
-  // asked: somebody who walks in with a doc already came to make another one.
-  assert(gate.includes("const docDone = step === 'doc' && state === 'done' && waited.current;"),
-    'the done face needs a wait behind it');
-  assert(gate.includes("if (step === 'doc' && loaded && state !== 'done') waited.current = true;"),
-    'and the wait is a state this page actually saw');
-  assert(gate.includes("const asking = step === 'doc' && !docDone;"), 'everything else is an ask');
-  assert(gate.includes("record?.first_doc && !docDone ? 'Make another tdoc'"), 'which says so in the heading');
-  assert(gate.includes("{step === 'doc' && !docDone ? null : ("), 'an ask carries no dead Continue button');
+t('both steps are one layout with a status line under it', () => {
+  // Swapping the doc step into a second, emptier face when its doc arrived
+  // made a page out of a sentence: whoever landed on it was told their first
+  // tdoc is live and offered nothing to do, and whoever wanted another one had
+  // to find their way back to the question.
+  assert(!gate.includes('docDone') && !gate.includes('const asking'), 'no second face');
+  assert(gate.includes("{step === 'doc' ? (\n                  <div className=\"sg-choices\""), 'the ask stays on the doc step');
+  assert(gate.includes("{state === 'done' ? (\n                    <div className=\"sg-status done\">"), 'and the line below it changes');
+  assert(/sg-primary\$\{state === 'done' \? '' : ' off'\}/.test(gate), 'one button, off until the step is done — the same as connect');
+  // Read once, not live: the heading must not rename itself from "your first"
+  // to "another" in front of somebody watching their first arrive.
+  assert(gate.includes("if (step === 'doc' && loaded && arrivedWith.current === null) {"), 'what they arrived with is read once');
+  assert(gate.includes("const another = step === 'doc' && arrivedWith.current === true;"), 'and that is what names the page');
 });
 
 t('the doc step reads the record, and the catalog walk is gone with the seeding', () => {

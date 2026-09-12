@@ -284,6 +284,12 @@
 
 /* Internal testing only, and dressed so it can never be mistaken for product:
    dashed, off to one corner, and it always says which branch is real. */
+/* Internal only, and it floats over the page. This reserves room under the
+   column so the strip does not come to rest on the last control. It does not
+   help on a window too short to hold the column -- there the page scrolls and
+   the strip crosses whatever is in the middle of it, which is the price of an
+   internal affordance and not worth a layout for. */
+.sg-split:has(.sg-debug) .sg-mid { padding-bottom: 64px; }
 .sg-debug {
   position: fixed; left: 14px; bottom: 14px; z-index: 30;
   display: flex; flex-wrap: wrap; align-items: center; gap: 5px;

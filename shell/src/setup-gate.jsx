@@ -248,10 +248,9 @@ export function SetupGate({ boot }) {
   // Before that the record is empty, which reads as "not connected" and paints
   // the connect step for a beat on a page that was asked for the doc step.
   const [loaded, setLoaded] = useState(false);
-  // The receipt belongs to the wait. Somebody who lands here with a doc
-  // already was not waiting for anything, and telling them their first tdoc is
-  // live answers a question they did not ask -- they came to make another one.
-  const waited = useRef(false);
+  // Whether they already had a doc when this page opened. Read once, so the
+  // heading does not change its mind mid-wait.
+  const arrivedWith = useRef(null);
   const [subject, setSubject] = useState('');
   const subjectRef = useRef(null);
   const [copied, setCopied] = useState(false);
@@ -299,16 +298,19 @@ export function SetupGate({ boot }) {
   // deleted since, or is sitting there waiting to be argued with. The doc step
   // ends at the doc it just watched arrive.
   const onward = step === 'doc' && ownDoc ? `/d/${encodeURIComponent(ownDoc)}` : '/me';
-  // Somebody whose doc already exists is not being asked anything, so the
-  // question, the line and the instructions all go. Only the connect step
-  // keeps its line on screen when it is done: one line is a receipt, a choice
-  // with a typing box in it is a question nobody asked.
-  if (step === 'doc' && loaded && state !== 'done') waited.current = true;
-  // Everything the doc step shows once its doc exists hangs on this: the
-  // receipt for somebody who watched it arrive, the ask for somebody who
-  // walked in wanting another one.
-  const docDone = step === 'doc' && state === 'done' && waited.current;
-  const asking = step === 'doc' && !docDone;
+  // Both steps are one layout with a status line under it. Swapping the doc
+  // step into a second, emptier face when its doc arrived made a page out of a
+  // sentence: whoever landed on it was told their first tdoc is live and
+  // offered nothing to do, and whoever wanted another one had to find their
+  // way back to the question. The ask stays; the line below it changes.
+  //
+  // The heading is the one thing read once rather than live, so it does not
+  // rename itself from "your first" to "another" in front of somebody who is
+  // watching their first arrive.
+  if (step === 'doc' && loaded && arrivedWith.current === null) {
+    arrivedWith.current = Boolean(record && record.first_doc);
+  }
+  const another = step === 'doc' && arrivedWith.current === true;
 
   // The record is the only thing that moves this page.
   useEffect(() => {
@@ -363,15 +365,13 @@ export function SetupGate({ boot }) {
           <div className="sg-col">
             {signedIn && !loaded ? null : (
               <h1 className="sg-h1">
-                {step !== 'doc' ? 'Connect your agent'
-                  : record?.first_doc && !docDone ? 'Make another tdoc'
-                    : 'Make your first tdoc'}
+                {step !== 'doc' ? 'Connect your agent' : another ? 'Make another tdoc' : 'Make your first tdoc'}
               </h1>
             )}
 
             {signedIn && !loaded ? null : signedIn ? (
               <>
-                {asking ? (
+                {step === 'doc' ? (
                   <div className="sg-choices" role="radiogroup" aria-label="What the doc is about">
                     {DOC_CHOICES.map((item) => (
                       <button
@@ -396,7 +396,7 @@ export function SetupGate({ boot }) {
                   </div>
                 ) : null}
 
-                {asking && choice === 'own' ? (
+                {step === 'doc' && choice === 'own' ? (
                   <label className="sg-subject">
                     <span className="sg-sr">What the doc is about</span>
                     <input
@@ -409,7 +409,7 @@ export function SetupGate({ boot }) {
                   </label>
                 ) : null}
 
-                {step !== 'doc' || (choice && !docDone) ? (
+                {step !== 'doc' || choice ? (
                   <div className={`sg-prompt${promptReady ? '' : ' pending'}`}>
                     <p className="sg-prompt-text" ref={promptRef}>{prompt}</p>
                     <button
@@ -425,7 +425,7 @@ export function SetupGate({ boot }) {
 
                 {step === 'doc' ? null : <WorksWith />}
 
-                {step === 'doc' && (!choice || docDone) ? null : (
+                {step === 'doc' && !choice ? null : (
                 <ol className="sg-steps">
                   {step === 'doc' ? (
                     <>
@@ -461,27 +461,23 @@ export function SetupGate({ boot }) {
                       </div>
                     </div>
                   ) : null}
-                  {state === 'done' && (step !== 'doc' || docDone) ? (
+                  {state === 'done' ? (
                     <div className="sg-status done">
                       <svg className="tick" width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <circle cx="12" cy="12" r="9.2" stroke="currentColor" strokeWidth="2" />
                         <path d="M8.2 12.3l2.6 2.6 5-5.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                       {step === 'doc'
-                        ? <div><b>Published.</b> <span className="found">Your first tdoc is live.</span></div>
+                        ? <div><b>Published.</b> <span className="found">{another ? 'Your new tdoc is live.' : 'Your first tdoc is live.'}</span></div>
                         : <div><b>Connected.</b> <span className="found">Your agent can publish as you.</span></div>}
                     </div>
                   ) : null}
                 </div>
 
-                {/* On the doc step the button is the end of a wait, so an
-                    ask that nobody is waiting on does not carry a dead one. */}
-                {step === 'doc' && !docDone ? null : (
-                  <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
-                    {step === 'doc' ? 'Open it' : 'Continue'}
-                  </a>
-                )}
-                <p className="sg-account"><a href="/me">{step === 'doc' && !docDone ? 'Back to my docs' : 'I’ll do this later'}</a></p>
+                <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
+                  {step === 'doc' ? 'Open it' : 'Continue'}
+                </a>
+                <p className="sg-account"><a href="/me">I’ll do this later</a></p>
               </>
             ) : (
               <>
