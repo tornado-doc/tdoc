@@ -298,8 +298,14 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
   assert(worker.includes("if (p === '/api/onboarding/state' && method === 'POST')"), 'one route');
   assert(/if \(!sameOrigin\(req, url\)\) return json\(\{ error: 'forbidden' \}, \{ status: 403 \}\);[\s\S]{0,400}isDebugAccount/.test(worker),
     'same-origin and allowlisted');
-  assert(worker.includes('const next = debugRecord(state, new Date().toISOString(), prior && prior.first_doc);'),
+  assert(worker.includes('const next = debugRecord(state, new Date().toISOString(), doc);'),
     'the record is built server-side; the client names a state, never a field');
+  // The built states have to stand on a doc this person actually owns: a reset
+  // wipes the record's own, and a hardcoded slug would point rows 3 and 4 at
+  // somebody else's document.
+  assert(worker.includes("const doc = (prior && prior.first_doc) || await newestDocFor(env, accountId);"), 'their newest doc stands in');
+  assert(worker.includes('const doc = firstDoc || null;') && server.includes('const doc = firstDoc || null;'),
+    'and neither host invents one');
 });
 
 t('nothing in the column a person reads is smaller than 12.5px', () => {

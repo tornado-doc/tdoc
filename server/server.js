@@ -948,7 +948,7 @@ function localDocsData() {
 // identity, so the flag is on when the variable names anybody at all.
 const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
 function debugRecord(state, at, firstDoc) {
-  const doc = firstDoc || 'what-ai-knows';
+  const doc = firstDoc || null;
   switch (state) {
     case 'new': return {};
     case 'started': return { started: at };

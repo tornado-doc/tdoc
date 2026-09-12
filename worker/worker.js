@@ -1836,7 +1836,7 @@ function stampOnboarding(record, step, at, extra) {
 // one power and no other: clearing YOUR OWN onboarding record.
 const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
 function debugRecord(state, at, firstDoc) {
-  const doc = firstDoc || 'what-ai-knows';
+  const doc = firstDoc || null;
   switch (state) {
     case 'new': return {};
     case 'started': return { started: at };
@@ -3282,6 +3282,30 @@ async function countHostedDocs(env, accountId, stopAt) {
     if (r.list_complete) break;
   } while (cursor);
   return n;
+}
+
+// The newest doc this account owns. Only the internal state-switching route
+// asks for it, and only when a reset has left the record with no doc to name.
+async function newestDocFor(env, accountId) {
+  if (!accountId || !env || !env.META) return null;
+  let best = null;
+  let cursor;
+  do {
+    const r = await env.META.list({ prefix: 'meta:', cursor });
+    for (const k of r.keys || []) {
+      let meta = null;
+      try {
+        const raw = await env.META.get(k.name);
+        if (raw) meta = JSON.parse(raw);
+      } catch {}
+      if (!meta || !meta.hosted || meta.hosted.account_id !== accountId) continue;
+      const created = meta.created || '';
+      if (!best || created > best.created) best = { slug: k.name.slice('meta:'.length), created };
+    }
+    cursor = r.cursor;
+    if (r.list_complete) break;
+  } while (cursor);
+  return best ? best.slug : null;
 }
 
 function envFlagTrue(v) {
@@ -6446,7 +6470,13 @@ export default {
       const state = typeof body.state === 'string' ? body.state : '';
       if (!DEBUG_STATES.includes(state)) return json({ error: 'unknown_state', states: DEBUG_STATES }, { status: 400 });
       const prior = await loadOnboarding(env, accountId);
-      const next = debugRecord(state, new Date().toISOString(), prior && prior.first_doc);
+      // Which doc the built states should stand on. The record's own is right
+      // whenever it has one; resetting to `new` wipes it, so the account's
+      // newest doc stands in rather than a slug this person may not even own.
+      // A catalog walk is fine here and nowhere else: this route is a testing
+      // affordance, pressed by hand, never polled.
+      const doc = (prior && prior.first_doc) || await newestDocFor(env, accountId);
+      const next = debugRecord(state, new Date().toISOString(), doc);
       await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
       return json({ ok: true, state, record: next });
     }
