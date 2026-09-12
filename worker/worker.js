@@ -5169,7 +5169,9 @@ export default {
       }
       const nonce = rand(16);
       return html(SHELL.appHtml({
-        title: step === 'doc' ? 'tdoc - make your first doc' : 'tdoc - connect your agent',
+        // Neutral for the doc step: the server cannot know whether this is
+        // their first without a lookup, and the heading already says which.
+        title: step === 'doc' ? 'tdoc - make a doc' : 'tdoc - connect your agent',
         nonceAttr: ` nonce="${nonce}"`,
         runtimeJsPath: SHELL_RUNTIME_JS_PATH,
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,

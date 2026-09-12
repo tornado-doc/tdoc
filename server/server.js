@@ -985,7 +985,7 @@ function localDebugAccount() {
 function localSetupDocument(nonce, step) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   return SHELL.appHtml({
-    title: step === 'doc' ? 'tdoc - make your first doc' : 'tdoc - connect your agent',
+    title: step === 'doc' ? 'tdoc - make a doc' : 'tdoc - connect your agent',
     nonceAttr,
     runtimeJsPath: SHELL_RUNTIME.js.path,
     runtimeCssPath: SHELL_RUNTIME.css.path,

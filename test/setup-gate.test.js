@@ -165,6 +165,10 @@ t('the second ask is the same ask, on the same route', () => {
   assert(worker.includes("const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';"), 'the worker reads the step');
   assert(server.includes("const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';"), 'and so does the local server');
   assert(worker.includes('          step,') && server.includes("step: step === 'doc' ? 'doc' : 'connect',"), 'both boot it');
+  // The tab's name cannot say "first": the server would have to look up
+  // whether they have one, and the heading on the page already says which.
+  assert(worker.includes("title: step === 'doc' ? 'tdoc - make a doc'") && server.includes("title: step === 'doc' ? 'tdoc - make a doc'"),
+    'and neither host promises a first doc in the title');
   assert(gate.includes("const step = wantsDoc && connected ? 'doc' : 'connect';"),
     'and an unconnected visitor is asked to connect first, whichever link they arrived on');
   assert(gate.includes('export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;'), 'the doc line is the skill\'s own, reused not rewritten');
