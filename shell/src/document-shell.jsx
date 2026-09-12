@@ -973,10 +973,13 @@ export function DocumentShell({ boot, config }) {
         onCancel={() => setReanchorId(null)}
       />
 
+      {/* `aria-label`, not `title`: a title on an iframe is an accessible name
+          AND a native tooltip, and the tooltip sat over the top bar whenever
+          the pointer rested on the document. The name is what was wanted. */}
       <iframe
         ref={bridge.frameRef}
         className="tdoc-doc-frame"
-        title="Document content"
+        aria-label="Document content"
         sandbox="allow-scripts"
         src={boot.frameSrc}
       />
@@ -988,6 +991,8 @@ export function DocumentShell({ boot, config }) {
           step={hintStep}
           agentState={handoff.state}
           lifted={Boolean(bridge.layout.footerVisible)}
+          banner={showExitBanner}
+          justFinished={arrival === 'revised'}
           onGo={() => goToStep()}
         />
       )}

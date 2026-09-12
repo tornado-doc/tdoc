@@ -11,7 +11,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  max-width: min(360px, calc(100vw - 40px));
+  max-width: min(410px, calc(100vw - 40px));
   padding: 6px 6px 6px 12px;
   border: 1px solid var(--td-line, #e8e7e3);
   border-radius: 12px;
@@ -49,6 +49,30 @@ button.sh-row:hover .sh-text { text-decoration: underline; }
   border-radius: 50%;
 }
 .sh-tick { border: 1px solid var(--td-line, #e8e7e3); background: #fff; }
+.sh-tick.on {
+  display: flex; align-items: center; justify-content: center;
+  border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff;
+}
+.sh-hint.ticked .sh-text { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
+
+/* The gesture, drawn: a sentence marked, and the box that opens when you mark
+   one. Same two materials the checklist row uses, at the size this pill has
+   room for. Only on the row nobody has done before. */
+.sh-thumb {
+  box-sizing: border-box; position: relative; flex: 0 0 auto;
+  width: 42px; height: 26px; margin-left: 2px;
+  border: 1px solid var(--td-line, #e8e7e3); border-radius: 5px;
+  background: var(--td-surface-2, #f7f7f5);
+}
+.sh-thumb i { position: absolute; display: block; }
+.sh-mark {
+  left: 5px; top: 8px; width: 20px; height: 5px; border-radius: 1px;
+  background: #fff7d0; box-shadow: inset 0 -2px 0 #e8c54a;
+}
+.sh-card {
+  right: 4px; top: 5px; width: 13px; height: 15px; border-radius: 3px;
+  border: 1.5px solid var(--td-accent, #1652f0); background: #fff;
+}
 .sh-row .tdoc-wait-dot { border: 5px solid transparent; background-clip: content-box; }
 
 .sh-text { min-width: 0; }

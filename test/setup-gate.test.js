@@ -283,13 +283,53 @@ t('the hint is a wayfinder, never a second copy of the line', () => {
 
 t('a row being watched stops being a button', () => {
   // "Waiting for your agent" that can be clicked invites a second paste.
-  assert(hint.includes("const watching = step === 'handoff' && agentState !== 'idle';"), 'a copied line is a wait, not a task');
-  assert(hint.includes("{watching\n        ? <span className=\"sh-row\">{body}</span>"), 'and a wait is not clickable');
+  assert(hint.includes("const watching = !ticking && shown === 'handoff' && agentState !== 'idle';"), 'a copied line is a wait, not a task');
+  assert(hint.includes("{still\n        ? <span className=\"sh-row\">{body}</span>"), 'and neither a wait nor a tick is clickable');
   // The card already says these. Said twice in two voices, a reader starts to
   // wonder whether they are two different waits.
   for (const line of ['Waiting for your agent…', 'Your agent is reading this', 'Still waiting — did you paste it into your agent?']) {
     assert(hint.includes(line) && card.includes(line), `"${line}" is the card's own wording`);
   }
+});
+
+t('a row that finishes ticks where it stands', () => {
+  // Doing the thing and watching the to-do vanish is not the same as watching
+  // it get done, and this is the page where it happened.
+  assert(hint.includes('const DONE_LINES = {'), 'a finished row has words of its own');
+  assert(hint.includes('const [finished, setFinished] = useState('), 'and it is held in state');
+  // Read off the ref at render it would lose its name: the ref has already
+  // moved on, and the row finishes as a bare "Done."
+  assert(hint.includes('{DONE_LINES[finished]}'), 'the struck row still says which row it was');
+  assert(hintCss.includes('.sh-hint.ticked .sh-text { color: var(--td-muted, #6b6a66); text-decoration: line-through; }'), 'struck through');
+  assert(hintCss.includes('.sh-tick.on {'), 'with the tick filled in');
+  // The last step produces no state change to tick on: v2 arriving navigates
+  // this page to the new version, so the component watching is already gone.
+  assert(hint.includes("useState(justFinished ? 'handoff' : null)"), 'so the arrival ticks it on the way in');
+  assert(shell.includes("justFinished={arrival === 'revised'}"), 'and the shell says when that arrival is');
+});
+
+t('the banner and a pending row never share the page', () => {
+  // Two voices with different news. The banner owns the top once the loop has
+  // closed; a row mid-tick is the exception, because that is this page's own
+  // answer to what just happened.
+  assert(hint.includes('if (banner && !ticking) return null;'), 'a pending row steps aside');
+  assert(shell.includes('banner={showExitBanner}'), 'and the shell tells it when the banner is up');
+});
+
+t('the gesture is spelled out, and drawn', () => {
+  // "Highlight a sentence" names it in the product's own vocabulary, which is
+  // no help to somebody who has not made a highlight yet.
+  assert(hint.includes("comment: 'Select any sentence to comment on it.'"), 'the literal gesture, and what it produces');
+  assert(hint.includes("shown === 'comment' ? <span className=\"sh-thumb\""), 'only the row nobody has done carries a picture of it');
+  assert(hintCss.includes('.sh-mark {') && hintCss.includes('#fff7d0'), 'a sentence marked in the anchor colour');
+  assert(hintCss.includes('.sh-card {') && hintCss.includes('border: 1.5px solid var(--td-accent'), 'and the box that opens when you mark one');
+});
+
+t('the document frame has a name, not a tooltip', () => {
+  // `title` on an iframe is an accessible name AND a native tooltip, and the
+  // tooltip sat over the top bar whenever the pointer rested on the document.
+  assert(shell.includes('aria-label="Document content"') && !shell.includes('title="Document content"'),
+    'the name is what was wanted');
 });
 
 t('the hint keeps out of the way of everything else on the doc', () => {
