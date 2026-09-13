@@ -284,8 +284,11 @@ t('the second ask is the one place with a choice in it', () => {
   // Choosing is the question this screen asks; everything downstream of it
   // waits until it has been answered.
   assert(gate.includes("{step === 'doc' && !choice ? null : ("), 'no instructions before there is something to paste');
-  assert(gate.includes("line={!signedIn || (step === 'doc' && !choice) ? null : prompt}"),
-    'and the composer beside them types nothing either — nor for somebody with no account to use it');
+  // The replay is a recording of pasting THIS line, so it cannot run before
+  // there is one -- not for a visitor with no account to paste into, and not
+  // before they have said what the doc is about.
+  assert(gate.includes(": !signedIn || (step === 'doc' && !choice)\n          ? <SceneWaiting line={null} />"),
+    'and the picture beside them types nothing either — nor for somebody with no account to use it');
   // A doc that already exists is not a question. The whole ask goes, rather
   // than sitting there under a line saying it is already done.
   assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');

@@ -184,6 +184,19 @@
   border-left: 1px solid var(--td-line, #e8e7e3);
 }
 .sg-stage { position: relative; width: 1080px; flex: 0 0 1080px; margin-left: 56px; transform: rotate(-1.1deg); }
+/* The replay brings its own coordinate space and its own frame, so it does not
+   sit on the tilted stage with the flat mockups -- a window lying at -1.1deg
+   is a picture of a window, and this one is meant to be the thing itself.
+   Scaled to the pane, never reflowed: `zoom` would relayout the 1080px box at
+   the smaller size and every coordinate in it would mean something else. */
+/* The replay brings its own frame and its own coordinate space, so it does not
+   lie on the tilted stage with the flat mockups: a window at -1.1deg is a
+   picture of a window, and this one is meant to be the thing itself. Sized in
+   one place -- the lens, the scene and the stage all take the same number, so
+   none of the three can be the one that collapses. */
+.sg-pane-art:has(.rp-canvas) { justify-content: center; }
+.sg-stage:has(.rp-canvas),
+.sg-scene:has(.rp-canvas) { transform: none; width: 544px; flex: 0 0 544px; margin: 0; }
 
 /* --- where people paste: a conversation, not a shell --- */
 .sg-chat { width: 720px; background: #fff; border: 1px solid var(--p-card-line); border-radius: 14px; overflow: hidden; box-shadow: 0 24px 60px rgba(26,26,26,.14), 0 3px 8px rgba(26,26,26,.06); color: var(--p-ink); }

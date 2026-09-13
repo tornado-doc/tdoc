@@ -3,6 +3,7 @@ import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
 import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
+import { ConnectReplay, CANVAS } from './setup-gate/replay.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -379,7 +380,15 @@ export function SetupGate({ boot }) {
   const scene = signedIn && !loaded ? null
     : state === 'done' ? <SceneDone bare={step === 'doc'} />
       : state === 'stuck' ? <SceneStuck />
-        : <SceneWaiting line={!signedIn || (step === 'doc' && !choice) ? null : prompt} />;
+        // Waiting is the only state with time to fill, and the only one where
+        // the reader has not done the thing yet -- so it is the one that shows
+        // them doing it, at 1:1, on a loop. But the replay is a recording of
+        // pasting THIS line, so it cannot run before there is a line: not for
+        // a visitor with no account to paste into, and not on the second ask
+        // before they have said what the doc is about.
+        : !signedIn || (step === 'doc' && !choice)
+          ? <SceneWaiting line={null} />
+          : <ConnectReplay prompt={prompt} />;
 
   return (
     <div className="sg-split">
