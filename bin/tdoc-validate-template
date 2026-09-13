@@ -159,13 +159,29 @@ STYLE_ACCENTS = {
 }
 
 
+def _after_at_rule_prelude(selector_group):
+    """The selector part of a naive `[^{}]+` match, with any statement at-rule
+    in front of it removed.
+
+    A selector can never contain `;`, but a statement at-rule (`@import`,
+    `@charset`) ends at one and leaves no block behind. The rule that follows
+    it therefore lands in the same `[^{}]+` run as the at-rule, and a caller
+    that judges the run by its first character reads the whole thing as one
+    `@`-prefixed selector and skips it -- silently taking the following rule
+    with it. Keeping only what follows the last `;` leaves an ordinary
+    selector to judge, so one `@import` line can no longer hide the rule
+    after it from every check in this file.
+    """
+    return selector_group.rsplit(";", 1)[-1]
+
+
 def _css_rules(blocks):
     """[css text] -> {selector: {prop: value}}, comments stripped."""
     out = {}
     for css in blocks:
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
         for m in re.finditer(r"([^{}]+)\{([^}]*)\}", css):
-            sel = " ".join(m.group(1).split())
+            sel = " ".join(_after_at_rule_prelude(m.group(1)).split())
             if not sel:
                 continue
             props = out.setdefault(sel, {})
@@ -178,6 +194,96 @@ def _css_rules(blocks):
 
 def _norm(v):
     return (v or "").replace(" ", "").replace('"', "'").lower()
+
+
+_NAMED_GROUNDS = {
+    "black": (0, 0, 0), "white": (255, 255, 255),
+}
+
+
+def _rgb(value):
+    """(r, g, b) for a colour this file can read statically, else None.
+
+    `var(--x)` and anything else that only a renderer can resolve returns None,
+    and the caller says nothing rather than guessing.
+    """
+    v = (value or "").strip().lower()
+    if v in _NAMED_GROUNDS:
+        return _NAMED_GROUNDS[v]
+    m = re.match(r"#([0-9a-f]{3})$", v)
+    if m:
+        return tuple(int(c * 2, 16) for c in m.group(1))
+    m = re.match(r"#([0-9a-f]{6})$", v)
+    if m:
+        h = m.group(1)
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    m = re.match(r"rgba?\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})", v)
+    if m:
+        return tuple(int(g) for g in m.groups())
+    return None
+
+
+def _is_dark(value):
+    """True when a colour is dark enough that the page was authored dark."""
+    rgb = _rgb(value)
+    if rgb is None:
+        return False
+    r, g, b = (c / 255 for c in rgb)
+    # Rec. 601 luma is enough to separate a dark ground from a light one; the
+    # decision here is not a contrast ratio, only which half of the range the
+    # author painted in.
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 0.5
+
+
+DARK_THEME_SELECTOR = re.compile(
+    r"""\[\s*data-tdoc-theme\s*=\s*['"]?dark['"]?\s*\]""", re.I
+)
+PREFERS_DARK = re.compile(
+    r"prefers-color-scheme\s*:\s*dark", re.I
+)
+
+
+def check_dark_rules(styles):
+    """A document may not write dark rules at all -- it can only write light.
+
+    tdoc has no per-document dark palette. Dark mode is a whole-page
+    `filter: invert(1) hue-rotate(180deg)` that the frame applies over whatever
+    the document painted, so a hand-built dark rule is inverted along with
+    everything else and renders *light* in dark mode -- the exact opposite of
+    what its author asked for. `authoring/style/technical.md` states the rule
+    and records the bug: a page that shipped its own dark palette came out
+    white. This is a rendering fault the reader sees, not a matter of taste,
+    so it is an error rather than a note.
+    """
+    errors = []
+    for raw_css in styles:
+        css = re.sub(r"/\*.*?\*/", "", raw_css, flags=re.S)
+        if PREFERS_DARK.search(css):
+            errors.append(
+                "a '@media (prefers-color-scheme: dark)' rule is inverted along with "
+                "the rest of the page, so it renders light in dark mode; author the "
+                "light look only and let the frame invert it"
+            )
+        if DARK_THEME_SELECTOR.search(css):
+            errors.append(
+                "a rule targeting 'html[data-tdoc-theme=\"dark\"]' fights the frame's "
+                "own dark-mode invert and renders light; author the light look only"
+            )
+    # A dark ground with no dark selector anywhere is the same mistake wearing
+    # plain clothes: the document simply painted itself dark. The frame inverts
+    # it to a light page, which is why this is caught by the value and not by a
+    # selector. A ground given as `var(--x)` is left alone -- only a renderer
+    # can resolve it, and guessing would be worse than staying quiet.
+    body_ground = _css_rules(styles).get("body", {})
+    ground = body_ground.get("background-color") or body_ground.get("background")
+    if ground and _is_dark(ground.split()[0] if ground.split() else ground):
+        errors.append(
+            f"body is painted dark ({ground}); tdoc documents are authored light and "
+            "the frame inverts them for dark mode, so a dark ground renders light "
+            "there. Author the light look only"
+        )
+    # One document says this once however many blocks repeat it.
+    return sorted(set(errors))
 
 
 def check_style_contract(styles, style):
@@ -678,13 +784,16 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
         css = re.sub(r"/\*.*?\*/", "", raw_css, flags=re.S)
         for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css, flags=re.S):
             selector_group, declarations_raw = match.groups()
+            selector_group = _after_at_rule_prelude(selector_group)
             if selector_group.strip().startswith("@"):
                 continue
             declarations = split_declarations(declarations_raw)
             for selector in selector_group.split(","):
                 normalized = re.sub(r"\s+", " ", selector.strip().lower())
                 if normalized == "body":
-                    allowed = all(prop in {"background", "background-color"} for prop, _ in declarations)
+                    declares_background = any(
+                        prop in {"background", "background-color"} for prop, _ in declarations
+                    )
                     white = any(
                         prop in {"background", "background-color"}
                         and compact_css_value(value) in HOUSE_BACKGROUNDS[style]
@@ -700,7 +809,24 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
                         for prop, value in declarations
                     ):
                         body_background = True
-                    if not (allowed and white):
+                    # Name the property that actually broke the rule. One
+                    # message for both halves of that test reported a
+                    # background mismatch for a body that set a correct
+                    # background and one extra property, which reads as a bug in
+                    # this file rather than a fault in the document -- so the
+                    # author stops believing the validator and works around it.
+                    extra = sorted({prop for prop, _ in declarations}
+                                   - {"background", "background-color"})
+                    if extra:
+                        notes.append(
+                            f"'body' sets {', '.join(extra)} - under the '{style}' house style "
+                            "body carries the page ground and nothing else; move the rest to "
+                            "'.wrap' or a class of its own"
+                        )
+                    # A body that names no background at all is already the
+                    # structural error below; calling that a house-style
+                    # mismatch as well would name the wrong fault twice.
+                    if declares_background and not white:
                         notes.append(f"body background does not match the '{style}' house style")
                 elif normalized in {".wrap", ".content", ".container", "main", "article"}:
                     forbidden = sorted({prop for prop, _ in declarations}.intersection(ROOT_LAYOUT_PROPERTIES))
@@ -729,6 +855,7 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
     # every paragraph around it — a defect the reader sees, not a house-style
     # preference, and visuals.md documents it as a failure.
     errors.extend(inset)
+    errors.extend(check_dark_rules(parser.styles))
     notes.extend(check_style_accent(raw, style))
     # The cell reset is a house-style rule: tdoc tables are ruled, never filled.
     # A caller bringing its own design system returned above with the other

@@ -169,6 +169,81 @@ t('chat-driven new and edit flows require host validation', () => {
 // `max-width: 100% !important`, so a figure that states no width of its own
 // looks right where tdoc serves it and runs off the right edge anywhere else,
 // with the scroll wrapper hiding the overflow rather than announcing it.
+// A statement at-rule ends at its semicolon and leaves no block behind, so the
+// rule written after it shares one `[^{}]+` run with it. The validator judged
+// that run by its first character, read the whole thing as one `@`-prefixed
+// selector, and skipped it — carrying the following rule out of every check
+// with it. One `@import` line was therefore a general-purpose way to hide any
+// CSS from the validator, which would have let a document past whatever new
+// rules get added here later.
+// tdoc has no per-document dark palette: the frame paints dark by inverting the
+// whole page. A document that writes its own dark rule gets that rule inverted
+// too, so its "dark mode" renders light -- the failure authoring/style/
+// technical.md records. The validator used to let all three spellings through
+// as taste notes, which is how a hand-built dark palette reached a real page.
+t('a document may not write its own dark rules', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-dark-'));
+  const write = (css) => {
+    const f = path.join(dir, 'd' + Math.abs(css.length * 13) + '.html');
+    fs.writeFileSync(f, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>${css}</style>
+      </head><body><div class="wrap"><h1>T</h1><p>Body copy.</p></div></body></html>`);
+    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [f], { encoding: 'utf8' });
+  };
+  try {
+    const media = write('body{background:#fff} @media (prefers-color-scheme:dark){body{background:#0d0d0c}}');
+    assert(media.status !== 0, 'a prefers-color-scheme:dark block must be rejected');
+
+    const selector = write('body{background:#fff} html[data-tdoc-theme="dark"] body{background:#111}');
+    assert(selector.status !== 0, 'a dark-theme selector must be rejected');
+
+    // The same mistake with no dark selector at all: the page simply painted
+    // itself dark, and the invert will turn it light.
+    const ground = write('body{background:#0d0d0c}');
+    assert(ground.status !== 0, 'a dark body ground must be rejected');
+
+    // Authoring light is the whole contract, and must still pass.
+    const light = write('body{background:#fff}');
+    assert(light.status === 0, `a light document must pass: ${light.stderr}`);
+
+    // Only the dark half is forbidden -- a light media query is not a dark rule.
+    const lightMedia = write('body{background:#fff} @media (prefers-color-scheme:light){body{background:#fff}}');
+    assert(lightMedia.status === 0, `a light media query must pass: ${lightMedia.stderr}`);
+
+    // A ground only a renderer can resolve is left alone rather than guessed at.
+    const varGround = write(':root{--bg:#fff} body{background:var(--bg)}');
+    assert(varGround.status === 0, `a var() ground must not be guessed at: ${varGround.stderr}`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+t('a statement at-rule does not hide the rule written after it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-atrule-'));
+  const write = (css) => {
+    const f = path.join(dir, 'a' + Math.abs(css.length * 17) + '.html');
+    fs.writeFileSync(f, `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background: #fff; } ${css}</style>
+      </head><body><div class="wrap"><h1>T</h1><p>Body copy.</p></div></body></html>`);
+    return spawnSync(path.join(BIN, 'tdoc-validate-template'), [f], { encoding: 'utf8' });
+  };
+  const RE = /overrides reader layout/;
+  try {
+    const plain = write('.wrap { padding:99px }');
+    assert(RE.test(plain.stdout + plain.stderr),
+      'a .wrap padding override must be rejected on its own');
+
+    const hidden = write('@import url("x.css"); .wrap { padding:99px }');
+    assert(RE.test(hidden.stdout + hidden.stderr),
+      'an @import in front of it must not hide the same override');
+
+    // The at-rule itself is still not a selector to judge.
+    const only = write('@import url("x.css");');
+    assert(!RE.test(only.stdout + only.stderr),
+      'an @import on its own declares no reader-layout override');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 t('a figure with a pixel width but no CSS width is rejected', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-fig-'));
   const write = (css, body) => {
