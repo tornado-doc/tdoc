@@ -128,6 +128,21 @@ t('every checklist row is backed by something real', () => {
     'and the last two rows stand on that same doc');
 });
 
+t('every thumbnail shows the thing its own step produces', () => {
+  // Notion's read because each contains something already recognisable and no
+  // two look alike. Four identically framed boxes of grey bars is one smudge
+  // repeated, which is what these were.
+  assert(list.includes('<ClaudeMark size={18} />') && list.includes('<OpenAIMark size={16} />'), 'row 1: the agents\' own marks');
+  assert(list.includes('<em>/tdoc new</em>'), 'row 2: the line you paste');
+  assert(list.includes('className="t-mark w70"') && list.includes('className="t-card"'), 'row 3: a marked sentence and the card beside it');
+  assert(list.includes("fixed · v2"), 'row 4: the chip a fixed thread carries');
+  // Two of them run off the right edge rather than sitting in a box inside a
+  // box, which is how Notion lets its calendar and its templates crop.
+  assert(listCss.includes('right: -12px') && listCss.includes('right: -10px'), 'and two of them are cropped by the edge');
+  assert(listCss.includes('width: 92px; height: 58px;') && listCss.includes('grid-template-columns: 18px 1fr 92px;'),
+    'the row reserves exactly what the thumbnail takes');
+});
+
 t('the mark rides the bar', () => {
   // Notion puts its duck on the marker for the same reason: a bar alone is a
   // measurement, and a thing standing on it is somebody's progress.

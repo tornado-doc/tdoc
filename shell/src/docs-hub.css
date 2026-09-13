@@ -226,7 +226,7 @@
 .onb-card ol:has(li:only-child) { margin-top: -2px; }
 
 .onb-card li a, .onb-card li .onb-row {
-  display: grid; grid-template-columns: 18px 1fr 72px; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: 18px 1fr 92px; gap: 12px; align-items: center;
   padding: 8px 0; text-decoration: none; color: inherit;
 }
 .onb-card li a:hover .onb-label { text-decoration: underline; }
@@ -252,37 +252,72 @@
 .onb-card li.locked .onb-label { color: var(--td-muted, #6b6a66); }
 .onb-card li.locked .onb-thumb { opacity: .45; }
 
-/* The thumbnails. Notion's are legible because they contain something you
-   recognise, so ours do too: the agents' own marks, the anchor highlight's
-   #fff7d0, a comment card, a v2 chip. Everything is border-box — the last
-   version of these came out 23px wider on two rows for want of it. */
+/* The thumbnails. Notion's are legible because each one contains something
+   you already recognise -- a Gmail logo, a real calendar, a screenshot of the
+   thing -- and because no two look alike. Four identically framed boxes of
+   grey bars is one smudge repeated, which is what these were.
+   So each shows the artifact its own step produces: the agents' own marks,
+   the line you paste, a marked sentence with its card, the chip a fixed
+   thread carries. Everything is border-box -- an earlier version came out
+   23px wider on two rows for want of it. */
 .onb-thumb {
   box-sizing: border-box; position: relative;
-  width: 72px; height: 44px; padding: 7px;
-  border-radius: 7px; border: 1px solid var(--td-line, #e8e7e3);
+  width: 92px; height: 58px; padding: 9px 0 9px 9px;
+  border-radius: 8px; border: 1px solid var(--td-line, #e8e7e3);
   background: #fff; overflow: hidden;
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 5px;
 }
-.onb-card li.done .onb-thumb { opacity: .45; }
-.onb-thumb.agents { flex-direction: row; align-items: center; justify-content: center; gap: 9px; background: var(--td-surface-2, #f7f7f5); }
-.onb-thumb .t-line { display: block; height: 3px; width: 100%; border-radius: 2px; background: #dcdcd7; }
-.onb-thumb .t-line.title { height: 5px; width: 62%; border-radius: 2px; background: #8e8e88; }
+.onb-card li.done .onb-thumb { opacity: .5; }
+
+/* 1 — two marks, two discs, the way Notion pairs Gmail and Outlook. */
+.onb-thumb.agents {
+  flex-direction: row; align-items: center; justify-content: center; gap: 7px;
+  padding: 0; background: var(--td-surface-2, #f7f7f5);
+}
+.onb-thumb .t-disc {
+  box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgb(26 26 26 / 12%);
+}
+
+/* the page under everything else */
+.onb-thumb .t-line { display: block; height: 3px; width: 100%; border-radius: 2px; background: #e2e2dd; }
+.onb-thumb .t-line.title { height: 5px; border-radius: 2px; background: #8e8e88; }
 .onb-thumb .t-line.title.short { width: 46%; }
 .onb-thumb .t-mark { display: block; height: 7px; border-radius: 2px; background: #fff7d0; box-shadow: inset 0 -2px 0 #e8c54a; }
-.onb-thumb .t-mark.pale { background: #f1f1ec; box-shadow: none; }
+.onb-thumb .t-mark.pale { background: #eeeee9; box-shadow: none; }
 .onb-thumb .w95 { width: 95%; } .onb-thumb .w70 { width: 70%; } .onb-thumb .w55 { width: 55%; }
-.onb-thumb .t-card {
-  box-sizing: border-box; position: absolute; right: 6px; bottom: 6px;
-  width: 26px; height: 20px; border-radius: 5px;
-  background: #fff; border: 1px solid var(--td-accent, #1652f0);
-  box-shadow: 0 1px 3px rgba(60,64,67,.16);
-  display: flex; align-items: center; justify-content: center; color: var(--td-accent, #1652f0);
+
+/* 2 — the line you paste, in the composer it goes into. Runs off the right
+   edge rather than sitting in a box inside a box. */
+.onb-thumb .t-field {
+  box-sizing: border-box; position: absolute; left: 9px; right: -12px; bottom: 8px;
+  height: 19px; padding: 0 0 0 7px; display: flex; align-items: center;
+  border: 1px solid #dcdcd7; border-radius: 6px; background: #fff;
 }
-.onb-thumb .t-card.done { border-color: #1a7340; color: #1a7340; }
-.onb-thumb .t-ver {
-  position: absolute; left: 7px; bottom: 7px; padding: 1px 5px; border-radius: 999px;
-  background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0);
-  font: 650 9px/1.5 -apple-system, system-ui, sans-serif; font-style: normal;
+.onb-thumb .t-field em {
+  font: 500 9px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  font-style: normal; color: var(--td-muted, #6b6a66);
+}
+
+/* 3 — the card that opens beside a marked sentence, cropped by the edge the
+   way Notion lets its calendar run off. */
+.onb-thumb .t-card {
+  box-sizing: border-box; position: absolute; right: -10px; top: 12px;
+  width: 44px; padding: 6px; display: flex; flex-direction: column; gap: 4px;
+  border-radius: 6px; background: #fff; border: 1px solid var(--td-accent, #1652f0);
+  box-shadow: 0 1px 4px rgb(60 64 67 / 18%);
+}
+.onb-thumb .t-card b { display: block; height: 3px; border-radius: 2px; background: #cfcfc9; }
+.onb-thumb .t-card b.s { width: 60%; }
+
+/* 4 — the chip a fixed thread carries, in the product's own green. */
+.onb-thumb .t-fixed {
+  position: absolute; left: 9px; bottom: 9px;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 6px 2px 4px; border-radius: 999px;
+  background: #e8f5ed; color: #1a7340;
+  font: 650 9px/1.4 -apple-system, system-ui, sans-serif; font-style: normal;
 }
 
 /* Hidden, it parks as a chip rather than disappearing: the loop is unfinished

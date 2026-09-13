@@ -78,28 +78,38 @@ export function onboardingSteps(record, firstDocHref) {
 // own marks, the anchor highlight's yellow, a comment card, a v2 chip.
 function Thumb({ id }) {
   if (id === 'connect') {
+    // Two real marks in two white discs, the way Notion shows Gmail and
+    // Outlook. A logo somebody already recognises does more work than any
+    // drawing of one.
     return (
       <span className="onb-thumb agents" aria-hidden="true">
-        <ClaudeMark size={19} />
-        <OpenAIMark size={17} />
+        <i className="t-disc"><ClaudeMark size={18} /></i>
+        <i className="t-disc"><OpenAIMark size={16} /></i>
       </span>
     );
   }
   if (id === 'create') {
+    // What this step actually produces is a line you paste into an agent, so
+    // the picture is that line, in the composer it goes into.
     return (
       <span className="onb-thumb" aria-hidden="true">
-        <i className="t-line title" />
+        <i className="t-line title w70" />
         <i className="t-line w95" />
-        <i className="t-mark w70" />
+        <i className="t-field"><em>/tdoc new</em></i>
       </span>
     );
   }
   if (id === 'comment') {
+    // A sentence marked in the anchor's yellow, and the card that opens beside
+    // it -- cropped by the edge, the way Notion lets its calendar run off.
     return (
       <span className="onb-thumb" aria-hidden="true">
         <i className="t-line title short" />
-        <i className="t-mark w55" />
-        <i className="t-card" />
+        <i className="t-mark w70" />
+        <i className="t-line w55" />
+        <i className="t-card">
+          <b /><b className="s" />
+        </i>
       </span>
     );
   }
@@ -107,8 +117,8 @@ function Thumb({ id }) {
     <span className="onb-thumb" aria-hidden="true">
       <i className="t-line title short" />
       <i className="t-mark w55 pale" />
-      <i className="t-card done"><Check size={10} strokeWidth={3.5} /></i>
-      <i className="t-ver">v2</i>
+      <i className="t-line w70" />
+      <i className="t-fixed"><Check size={9} strokeWidth={4} />fixed · v2</i>
     </span>
   );
 }
