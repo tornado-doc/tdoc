@@ -222,27 +222,12 @@
 }
 .onb-mark img { display: block; }
 
-/* Every row is a tile, the way Notion's are: an object you can see the edges
-   of, not a line in a list. The thumbnail runs to the tile's right edge and is
-   cropped by it, which is why the tile carries no padding on that side. */
-.onb-card ol { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-
-.onb-card li {
-  box-sizing: border-box; border-radius: 11px;
-  border: 1px solid var(--td-line, #e8e7e3); background: #fff;
-  transition: background .16s, border-color .16s;
-}
-.onb-card li:hover { border-color: #d9d8d3; }
-/* Finished is highlighted, not dimmed. Notion tints the rows behind you and
-   leaves their pictures at full strength; fading them says "this no longer
-   counts" about the only part of the list somebody has actually done. */
-.onb-card li.done { background: var(--td-accent-tint, #e8eeff); border-color: transparent; }
-.onb-card li.done:hover { border-color: transparent; }
-.onb-card li.locked { background: var(--td-surface-2, #f7f7f5); }
+.onb-card ol { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
+.onb-card ol:has(li:only-child) { margin-top: -2px; }
 
 .onb-card li a, .onb-card li .onb-row {
   display: grid; grid-template-columns: 18px 1fr 92px; gap: 12px; align-items: center;
-  padding: 9px 0 9px 12px; text-decoration: none; color: inherit;
+  padding: 8px 0; text-decoration: none; color: inherit;
 }
 .onb-card li a:hover .onb-label { text-decoration: underline; }
 .onb-label { font-size: 14px; line-height: 1.35; }
@@ -265,10 +250,6 @@
    even for a disabled control, and these rows carry real information -- the
    shape of the journey still to come. The token reads 5.3:1. */
 .onb-card li.locked .onb-label { color: var(--td-muted, #6b6a66); }
-/* No fade here either. The tile's ground and the grey label already say a row
-   is out of reach; dimming its picture as well is the same thing said twice,
-   and it leaves the list looking patchy. Every picture at full strength; the
-   tile carries the state. */
 
 /* The thumbnails. Notion's are legible because each one contains something
    you already recognise -- a Gmail logo, a real calendar, a screenshot of the
@@ -285,12 +266,16 @@
   background: #fff; overflow: hidden;
   display: flex; flex-direction: column; gap: 5px;
 }
+/* No state dims a picture. Fading the finished rows says "this no longer
+   counts" about the only part of the list somebody has actually done, and
+   fading the locked ones repeats what their grey label already says. The
+   strike and the filled tick carry the state; the pictures stay real. */
 
-
-/* 1 — two marks, two discs, sitting on the tile itself. Notion frames a
-   thumbnail only when the thing it shows has a frame of its own: its calendar
-   and its templates are screenshots, its Gmail and Outlook are bare logos. A
-   logo in a box is a card inside a card. */
+/* 1 — two marks, two discs, sitting on nothing. Notion frames a thumbnail
+   only when the thing it shows has a frame of its own: its calendar and its
+   templates are screenshots, its Gmail and Outlook are bare logos. A logo in a
+   box is a card inside a card. The other three draw a corner of a document,
+   so they keep theirs. */
 .onb-thumb.agents {
   flex-direction: row; align-items: center; justify-content: center; gap: 7px;
   padding: 0; background: transparent; border: 0;

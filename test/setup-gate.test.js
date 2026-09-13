@@ -128,20 +128,18 @@ t('every checklist row is backed by something real', () => {
     'and the last two rows stand on that same doc');
 });
 
-t('a finished row is highlighted, not dimmed', () => {
-  // Notion tints the rows behind you and leaves their pictures at full
-  // strength. Fading them says "this no longer counts" about the only part of
-  // the list somebody has actually done.
-  assert(listCss.includes('.onb-card li.done { background: var(--td-accent-tint, #e8eeff); border-color: transparent; }'), 'done is a tint');
-  assert(!/\.onb-thumb \{ opacity|li\.done \.onb-thumb \{ opacity|li\.locked \.onb-thumb \{ opacity/.test(listCss),
-    'and no state dims a picture');
-  // Every row is a tile, the way Notion's are: an object with edges, not a
-  // line in a list.
-  assert(listCss.includes('.onb-card li {') && listCss.includes('border-radius: 11px;'), 'rows are tiles');
-  assert(listCss.includes('gap: 8px;'), 'with air between them');
-  // A logo in a box is a card inside a card; Notion frames a thumbnail only
-  // when the thing it shows has a frame of its own.
-  assert(listCss.includes('padding: 0; background: transparent; border: 0;'), 'the bare logos sit on the tile itself');
+t('a picture is never dimmed, and a logo is never in a box', () => {
+  // Fading the finished rows says "this no longer counts" about the only part
+  // of the list somebody has actually done; fading the locked ones repeats
+  // what their grey label already says. The strike and the filled tick carry
+  // the state.
+  assert(!/\.onb-thumb \{ opacity|\.onb-thumb \{[^}]*opacity|li\.(done|locked) \.onb-thumb \{ opacity/.test(listCss),
+    'no state dims a picture');
+  // Notion frames a thumbnail only when the thing it shows has a frame of its
+  // own: its calendar and its templates are screenshots, its Gmail and Outlook
+  // are bare logos. A logo in a box is a card inside a card.
+  assert(listCss.includes('padding: 0; background: transparent; border: 0;'), 'the two marks sit on nothing');
+  assert(/\.onb-thumb \{[\s\S]{0,200}border: 1px solid var\(--td-line/.test(listCss), 'and the document fragments keep their frame');
 });
 
 t('every thumbnail shows the thing its own step produces', () => {
