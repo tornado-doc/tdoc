@@ -44,6 +44,7 @@ const copy = read('shell/src/onboarding-copy.js');
 const api = read('shell/src/document/api.js');
 const listCss = read('shell/src/docs-hub.css');
 const worker = read('worker/worker.js');
+const cli = read('bin/tdoc-publish');
 const server = read('server/server.js');
 
 console.log('\nsetup gate + onboarding');
@@ -603,6 +604,23 @@ t('replay is new again, not just a blank record', () => {
   }
   assert(gate.includes("export const REPLAY_LOCAL_PREFIX = 'tdoc.handoff.';") && shell.includes('`tdoc.handoff.${config.slug}`'),
     'and the per-doc waits go by prefix, so a replay need not know which docs the last walk made');
+});
+
+t('a config file is a claim, not a fact', () => {
+  // Replay revokes the credential server-side. Nothing told the CLI: it held a
+  // file saying it was signed in, `--signin-only` reported "already signed in",
+  // and every later publish 401'd with the server's JSON printed at somebody.
+  // The same hole swallows any revocation -- an account reset, a terminal taken
+  // away -- not just a test reset.
+  assert(worker.includes("p === '/api/hosted/whoami'"), 'a credential can be checked');
+  assert(worker.includes("return json({ error: 'invalid_token' }, { status: 401 });"), 'and a dead one says so');
+  assert(cli.includes('if [ -f "$CONFIG_FILE" ] && hosted_credential_valid; then'), 'signin-only checks before believing');
+  assert(cli.includes('rm -f "$CONFIG_FILE"'), 'and a stale file is dropped rather than kept');
+  // Being offline is not a revoked token: only a clear 401/403 may throw a
+  // working credential away.
+  assert(/case "\$http" in\s*\n\s*401\|403\) return 1 ;;\s*\n\s*\*\) return 0 ;;/.test(cli),
+    'anything that is not a clear rejection keeps the credential');
+  assert(cli.includes("grep -qE 'invalid_token|sign_in_required|token_required'"), 'and a publish that hits one says what to do');
 });
 
 t('a finished gate stops asking, and the column fits a laptop', () => {

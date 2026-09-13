@@ -6499,6 +6499,20 @@ export default {
     // scoped upload token bound to the caller's GitHub login. Same login
     // remints the same account_id so a lost ~/.tdoc/published.json is
     // recoverable. Unset env: on for https://tdoc.dev only; explicit 0 disables.
+    // Is this credential still good? The CLI holds a config file that says it
+    // is signed in, and until now nothing could tell it otherwise: a token
+    // revoked anywhere -- an account reset, a terminal taken away, a replay --
+    // left `--signin-only` reporting "already signed in" and the next publish
+    // failing with a 401 printed as raw JSON, for ever. One cheap GET, so the
+    // file can be checked instead of believed.
+    if (p === '/api/hosted/whoami' && (method === 'GET' || method === 'HEAD')) {
+      const bearer = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      if (!bearer) return json({ error: 'token_required' }, { status: 401 });
+      const actor = await hostedTokenActor(env, bearer);
+      if (!actor) return json({ error: 'invalid_token' }, { status: 401 });
+      return json({ ok: true, account_id: actor.account_id, github_login: actor.github_login || null });
+    }
+
     if (p === '/api/hosted/token' && method === 'POST') {
       if (!hostedRegistrationEnabled(env, url.origin)) {
         return json({ error: 'hosted_registration_disabled' }, { status: 403 });
