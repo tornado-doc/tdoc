@@ -1895,12 +1895,31 @@ function debugRecord(state, at, firstDoc) {
 // is not a credential, and a deploy is the wrong price for adding or taking
 // away a name. It lives in KV under `debug-accounts`, comma-separated, and an
 // absent or empty key allows nobody, which is every deploy's default.
+// Two sources, and the account has to be in either. `TDOC_DEBUG_ACCOUNTS` is
+// filled at deploy from a repository variable -- a variable and not a secret,
+// because an email is not a credential -- so letting another tester in is a
+// field on a settings page. The KV key stays, additive, for a change that
+// cannot wait for a deploy; it is the only one of the two that can be written
+// without the repository, and the only one that needs Cloudflare credentials.
+//
+// It cannot be inferred from TDOC_OWNER, which is the deploy's GitHub login:
+// an account that signed in through the provider has an email and no login at
+// all, so the two never match.
+function debugAccountList(env) {
+  const fromEnv = String((env && env.TDOC_DEBUG_ACCOUNTS) || '');
+  // An unset repository variable leaves the placeholder behind rather than an
+  // empty string, and a placeholder is not a name.
+  return fromEnv.includes('PLACEHOLDER_') ? '' : fromEnv;
+}
+
 async function isDebugAccount(env, session) {
   const email = normalizeEmail(session && session.email);
   if (!email) return false;
+  const named = (raw) => String(raw || '').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean).includes(email);
+  if (named(debugAccountList(env))) return true;
   let raw = '';
   try { raw = String((await env.META.get('debug-accounts')) || ''); } catch { return false; }
-  return raw.split(',').map((v) => v.trim().toLowerCase()).filter(Boolean).includes(email);
+  return named(raw);
 }
 
 // Which actions the page may report, and which step (if any) each one stamps.

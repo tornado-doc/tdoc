@@ -59,10 +59,14 @@ jobs:
         env:
           TDOC_DEV_KV_ID: ${{ secrets.TDOC_DEV_KV_ID }}
           TDOC_DEV_OWNER: ${{ secrets.TDOC_DEV_OWNER }}
+          # A variable, not a secret: an email is not a credential. Unset
+          # leaves the list empty, which allows nobody.
+          TDOC_DEV_DEBUG_ACCOUNTS: ${{ vars.TDOC_DEV_DEBUG_ACCOUNTS }}
         run: |
           sed \
             -e "s/PLACEHOLDER_KV_ID/${TDOC_DEV_KV_ID}/g" \
             -e "s/PLACEHOLDER_OWNER/${TDOC_DEV_OWNER}/g" \
+            -e "s/PLACEHOLDER_DEBUG_ACCOUNTS/${TDOC_DEV_DEBUG_ACCOUNTS}/g" \
             worker/wrangler.toml.template > worker/wrangler.toml
 
       - name: Bundle overlay into the worker
