@@ -3,11 +3,13 @@ import { createRoot } from 'react-dom/client';
 import '../../server/chrome.css';
 import './ui/ui.css';
 import './shell.css';
+import './setup-gate.css';
 import { DocsHub } from './docs-hub.jsx';
 import { DocumentShell } from './document-shell.jsx';
 import { NeutralLanding } from './neutral-landing.jsx';
 import { StatusPage } from './status-page.jsx';
 import { ActivatePage } from './activate-page.jsx';
+import { SetupGate } from './setup-gate.jsx';
 
 const appRoot = document.getElementById('tdoc-app-root');
 const appBoot = window.__TDOC_APP_BOOT__;
@@ -17,6 +19,7 @@ if (appRoot && appBoot) {
   if (appBoot.page === 'docs-hub') page = <DocsHub boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;
   else if (appBoot.page === 'activate') page = <ActivatePage boot={appBoot} />;
+  else if (appBoot.page === 'setup') page = <SetupGate boot={appBoot} />;
   else page = <NeutralLanding boot={appBoot} />;
   createRoot(appRoot).render(page);
 } else {

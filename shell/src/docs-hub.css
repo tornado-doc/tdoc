@@ -178,3 +178,202 @@
    like every other surface. It used to invert `.docs-hub` a second time, which
    was right when /me was its own server-rendered page outside that rule, but
    inside the shell it cancelled the page invert out and /me stayed light. */
+
+/* ---- the onboarding, once setup is behind them -------------------------
+   Notion's setup list, in tdoc's materials: a row is a tick, a label and a
+   drawing of what the step produces. Four labels alone are four abstractions
+   the reader has to picture; the drawing does that for them. A card above the
+   list rather than a rail beside it, because this page is one centred column
+   with no sidebar to put a rail in. */
+.onb-card {
+  margin: 0 0 20px;
+  padding: 18px 20px 16px;
+  border: 1px solid var(--td-line, #e8e7e3);
+  border-radius: 18px;
+  background: #fff;
+}
+.onb-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.onb-card h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.015em; }
+.onb-card header p { margin: 0; font-size: 13px; color: var(--td-muted, #6b6a66); font-variant-numeric: tabular-nums; }
+.onb-acts { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; align-self: flex-start; margin: -6px -8px 0 0; }
+.onb-acts button { border: 0; background: none; padding: 5px; border-radius: 8px; cursor: pointer; color: #b0b0ab; display: flex; }
+.onb-acts button:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
+
+/* The track is thicker than a hairline now because something stands on it:
+   a 2px line under a 26px puck reads as a crack, not as a rail. `overflow`
+   stays visible so the puck can sit proud of it. */
+.onb-bar {
+  position: relative; height: 4px; margin: 14px 0 12px;
+  border-radius: 999px; background: var(--td-line, #e8e7e3);
+}
+.onb-bar i {
+  display: block; height: 100%; border-radius: 999px;
+  background: var(--td-accent, #1652f0);
+  transition: width .35s cubic-bezier(.2,.7,.3,1);
+}
+.onb-mark {
+  position: absolute; top: 50%; width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  box-sizing: border-box; border-radius: 50%;
+  border: 1px solid var(--td-line, #e8e7e3); background: #fff;
+  box-shadow: 0 1px 3px rgb(26 26 26 / 12%);
+  transform: translateY(-50%);
+  transition: left .35s cubic-bezier(.2,.7,.3,1);
+}
+.onb-mark img { display: block; }
+
+.onb-card ol { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
+.onb-card ol:has(li:only-child) { margin-top: -2px; }
+
+.onb-card li a, .onb-card li .onb-row {
+  display: grid; grid-template-columns: 18px 1fr 100px; gap: 12px; align-items: center;
+  /* 4, not 8. One line of text beside a picture four times its height reads as
+     a list with holes in it: the air between the labels is the thumbnail's,
+     not the row's, so the row should not add more of its own. */
+  padding: 4px 0; text-decoration: none; color: inherit;
+}
+.onb-card li a:hover .onb-label { text-decoration: underline; }
+.onb-label { font-size: 14px; line-height: 1.35; }
+.onb-card li a .onb-label { color: var(--td-accent, #1652f0); }
+.onb-card li.done .onb-label { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
+/* A finished row is still a link, so hovering must not trade its strike for an
+   underline -- losing the line-through on hover reads as the row un-ticking
+   itself. Both lines, together. */
+.onb-card li.done a:hover .onb-label { text-decoration: line-through underline; }
+.onb-tick {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px solid var(--td-line, #e8e7e3); background: #fff;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.onb-card li.done .onb-tick { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); }
+/* A row whose turn has not come is shown and not offered. Nothing is hidden —
+   the whole shape should be legible on the first arrival — but nothing about
+   it invites a click that would land nowhere. */
+/* Muted, not faint: at #a4a39e this was 2.53:1 on white, under the 3:1 floor
+   even for a disabled control, and these rows carry real information -- the
+   shape of the journey still to come. The token reads 5.3:1. */
+.onb-card li.locked .onb-label { color: var(--td-muted, #6b6a66); }
+
+/* The thumbnails. Notion's are legible because each one contains something
+   you already recognise -- a Gmail logo, a real calendar, a screenshot of the
+   thing -- and because no two look alike. Four identically framed boxes of
+   grey bars is one smudge repeated, which is what these were.
+   So each shows the artifact its own step produces: the agents' own marks,
+   the line you paste, a marked sentence with its card, the chip a fixed
+   thread carries. Everything is border-box -- an earlier version came out
+   23px wider on two rows for want of it. */
+.onb-thumb {
+  box-sizing: border-box; position: relative;
+  width: 100px; height: 62px; padding: 7px 0 7px 8px;
+  border-radius: 8px; border: 1px solid var(--td-line, #e8e7e3);
+  background: #fff; overflow: hidden;
+  display: flex; flex-direction: column; gap: 2px;
+}
+/* No state dims a picture. Fading the finished rows says "this no longer
+   counts" about the only part of the list somebody has actually done, and
+   fading the locked ones repeats what their grey label already says. The
+   strike and the filled tick carry the state; the pictures stay real. */
+
+/* 1 — two marks, two discs, sitting on nothing. Notion frames a thumbnail
+   only when the thing it shows has a frame of its own: its calendar and its
+   templates are screenshots, its Gmail and Outlook are bare logos. A logo in a
+   box is a card inside a card. The other three draw a corner of a document,
+   so they keep theirs. */
+.onb-thumb.agents {
+  flex-direction: row; align-items: center; justify-content: center; gap: 7px;
+  padding: 0; background: transparent; border: 0;
+}
+
+/* Real type, not grey bars. Bars are a wireframe of a document; a document
+   scaled down is small text, and small real text is what a thumbnail of a page
+   looks like -- it is why Notion's are screenshots. The words are the product's
+   own: the doc's real title, its real first sentence, the seeded comment's real
+   question, the chip's real label. Nothing here is lorem, so nothing here can
+   say something the product does not. */
+/* Every text box is a whole number of its own lines, and clips with an
+   ellipsis rather than a max-height. A max-height that is not a multiple of
+   the line box cuts the last line through the middle of its letters, which
+   does not read as a crop -- it reads as a rendering fault. */
+.onb-thumb .t-title {
+  display: block; height: 10px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font: 700 8px/10px -apple-system, system-ui, sans-serif;
+  letter-spacing: -0.01em; color: var(--td-ink, #1a1a1a);
+  padding-right: 8px;
+}
+.onb-thumb .t-body {
+  margin: 0; height: 20px; overflow: hidden;
+  font: 400 6.5px/10px -apple-system, system-ui, sans-serif;
+  color: #6f6f69; padding-right: 8px;
+}
+/* The anchor highlight, at the value the document itself paints it. */
+.onb-thumb .t-body mark {
+  background: #fff7d0; box-shadow: inset 0 -1.5px 0 #e8c54a;
+  color: #4a4a44; border-radius: 1px;
+}
+/* The version pill off the doc's own top bar. */
+.onb-thumb .t-ver {
+  align-self: flex-start;
+  padding: 1px 4px; border-radius: 4px;
+  background: var(--td-surface-2, #f7f7f5); border: 1px solid var(--td-line, #e8e7e3);
+  font: 600 6.5px/1.3 ui-monospace, "SF Mono", Menlo, monospace;
+  font-style: normal; color: var(--td-muted, #6b6a66);
+}
+
+/* 2 — the line you paste, in the composer it goes into. Runs off the right
+   edge rather than sitting in a box inside a box. */
+.onb-thumb .t-field {
+  box-sizing: border-box; position: absolute; left: 8px; right: -12px; bottom: 7px;
+  height: 18px; padding: 0 0 0 6px; display: flex; align-items: center;
+  border: 1px solid #dcdcd7; border-radius: 6px; background: #fff;
+}
+.onb-thumb .t-field em {
+  font: 500 9px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  font-style: normal; color: var(--td-muted, #6b6a66);
+}
+
+/* 3 — the card that opens beside a marked sentence, cropped by the edge the
+   way Notion lets its calendar run off. It carries what a real card carries:
+   the author, and their first words. */
+.onb-thumb .t-card {
+  box-sizing: border-box; position: absolute; right: -14px; top: 25px;
+  width: 56px; padding: 4px 5px; display: flex; flex-direction: column; gap: 2px;
+  border-radius: 6px; background: #fff; border: 1px solid var(--td-accent, #1652f0);
+  box-shadow: 0 1px 5px rgb(60 64 67 / 16%);
+  font-style: normal; overflow: hidden;
+}
+.onb-thumb .t-card em {
+  font: 700 6.5px/1.2 -apple-system, system-ui, sans-serif;
+  font-style: normal; color: var(--td-ink, #1a1a1a);
+}
+.onb-thumb .t-card span {
+  max-height: 18px; overflow: hidden;
+  font: 400 6px/1.5 -apple-system, system-ui, sans-serif; color: #6f6f69;
+}
+
+/* 4 — the chip a fixed thread carries, in the product's own green and its own
+   words. */
+.onb-thumb .t-fixed {
+  position: absolute; left: 8px; bottom: 7px;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 7px 2px 5px; border-radius: 999px;
+  background: #e8f5ed; color: #1a7340;
+  font: 650 8px/1.4 -apple-system, system-ui, sans-serif; font-style: normal;
+}
+
+/* Hidden, it parks as a chip rather than disappearing: the loop is unfinished
+   and the way back to it should not be something you have to remember. */
+.onb-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin: 0 0 18px; padding: 6px 13px 6px 7px;
+  border: 1px solid var(--td-line, #e8e7e3); border-radius: 999px;
+  background: #fff; cursor: pointer;
+  font: 500 13px -apple-system, system-ui, sans-serif; color: var(--td-ink, #1a1a1a);
+}
+.onb-chip:hover { background: var(--td-surface, #f4f4f2); }
+.onb-chip-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 30px; height: 20px; padding: 0 7px; border-radius: 999px;
+  background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0);
+  font-weight: 650; font-size: 12px; font-variant-numeric: tabular-nums;
+}

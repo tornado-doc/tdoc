@@ -20,7 +20,8 @@ const server = read('server/server.js');
 const shellApi = read('shell/src/document/api.js');
 const hub = read('shell/src/docs-hub.jsx') + '\n' + read('shell/src/hooks/use-docs-hub.js');
 const form = read('shell/src/create-from-scratch.jsx');
-const onboarding = read('shell/src/onboarding-dialog.jsx');
+const uiCss = read('shell/src/ui/ui.css');
+const copy = read('shell/src/onboarding-copy.js');
 const editorHook = read('shell/src/hooks/use-document-editor.js');
 
 // Lift a function out of a source file by brace matching so it can be run here.
@@ -167,42 +168,62 @@ t('a host that would refuse the create never offers the form', () => {
   assert(hub.includes('canCreate={capabilities.create}'), 'the modal must honour the capability');
 });
 
-t('the choice is two cards, and neither path is a form', () => {
+t('the choice is a menu, and neither answer is a form', () => {
   assert(shellApi.includes("request('/api/doc/create'"), 'createDocument missing from the shell API');
   assert(form.includes('Start from scratch') && form.includes('Build it with your agent'),
-    'both cards must exist');
-  assert(form.includes('className="mk-card"'), 'the cards need a stable hook');
-  // The blank doc opens on the click. A title field here is the thing this
-  // design replaced — the title is typed into the page instead.
-  assert(!/<input/.test(form), 'the scratch card must not ask for a title');
-  assert(form.includes('<OwnAgentDoor onOpenChange='), 'the own-agent door lives behind the second card');
+    'both answers must exist');
+  // A modal to choose between two things is a room built for a sentence.
+  assert(/<AppMenu trigger=\{trigger\}>/.test(form) && form.includes('className="mk-item"'), 'the fork is a menu');
+  // The two glyphs say who writes it: a pen on a page, and the agents' own
+  // marks. Every symbol tried for the second was a drawing of "an AI wrote
+  // this" -- a sparkle, a wand, a page with lines -- while the two things that
+  // actually write it were already on the row.
+  // What you do: write on a page, or send a message. Same square family, same
+  // weight, and neither is the sparkle every AI feature has worn since 2023 --
+  // a symbol that says "a model was involved" and nothing about which of these
+  // two answers you are picking.
+  assert(form.includes('<SquarePen size={17}') && form.includes('<MessageSquare size={17}'), 'a pair, not a cliché');
+  assert(!form.includes('Sparkles'), 'no sparkle');
+  // Which agents is a separate question, answered at the end of the row.
+  assert(form.includes('<AgentMarks size={21} />'), 'the marks are a list of what it works with, so they sit where a list does');
+  assert(uiCss.includes('.ui-menu-item.mk-item > .agent-marks { margin-left: auto;'), 'pushed to the end');
+  assert(uiCss.includes('.ui-menu-item.mk-item > svg {\n  flex: 0 0 22px;'), 'one icon slot, one width, both titles aligned');
+  // A bare `> span` also caught the cluster, which is a span too, and stood
+  // its three marks on top of each other.
+  assert(uiCss.includes('.ui-menu-item.mk-item > .mk-text {') && !uiCss.includes('.ui-menu-item.mk-item > span {'),
+    'the description wrapper is addressed by class, not by tag');
+  // The blank doc opens on the click. A title field there is the thing this
+  // design replaced -- the title is typed into the page instead.
+  const blank = form.slice(form.indexOf('export function CreateMenu'), form.indexOf('export function AgentRecipe'));
+  assert(!/<input/.test(blank), 'the scratch answer must not ask for a title');
+  // The agent answer finishes where it was asked rather than leaving for the
+  // onboarding gate: somebody on their fifth doc should not be sent to a page
+  // built to watch their first one arrive.
+  assert(!form.includes("location.href = '/setup?step=doc'"), 'and it no longer leaves for the gate');
+  assert(form.includes('export function AgentRecipe()') && form.includes('docSubjectPrompt('), 'it composes the line in place');
 });
 
-t('the cards live in the Docs Hub, and the recipe has one implementation', () => {
-  assert(hub.includes('<CreateChoice create={hub.createDoc} canCreate={capabilities.create} />'),
-    'the hub must wire the cards to its hook');
+t('the menu lives in the Docs Hub, and the line has one implementation', () => {
+  assert(/<CreateMenu\s/.test(hub) && hub.includes('create={hub.createDoc}') && hub.includes('canCreate={capabilities.create}'),
+    'the hub must wire the menu to its hook and its capability');
   // A second hand-written copy is how the two drift apart.
-  assert(!hub.includes('className="mk-card"'), 'the Docs Hub should render the shared component');
-  assert(form.includes('<OwnAgentDoor onOpenChange=') && !form.includes('FirstDocRecipe'), 'the AI card should open the shared door, not a bare recipe of its own');
+  assert(!hub.includes('className="mk-item"'), 'the Docs Hub should render the shared component');
+  assert(!form.includes('FirstDocRecipe') && !form.includes('OwnAgentDoor'), 'no second copy of the old wizard');
   assert(!form.includes('tdoc-recipe-wrap'), 'the recipe markup belongs to one component');
-  assert(onboarding.includes('export function FirstDocRecipe('), 'the shared recipe lost its home');
+  // The prefix and suffix the line is built from live with the gate that also
+  // composes it, imported rather than retyped here.
+  assert(form.includes("from './setup-gate.jsx'") && form.includes('DOC_SUBJECT_PREFIX'), 'one line, one definition');
 });
 
-t('the onboarding dialog is onboarding, not a doc launcher (#371)', () => {
-  // The landing dialog exists to get tdoc installed and a first doc published
-  // through the reader's own agent. A blank-doc card answers a question a
-  // first-time visitor has not asked yet.
-  assert(!onboarding.includes('CreateChoice'), 'the onboarding dialog must not offer the cards');
-  assert(!onboarding.includes('createDocument'), 'the onboarding dialog must not create documents');
-  // The recipe lives behind the "Use my own agent" door now — still the one
-  // rendering, still the whole of what that door hands over.
-  assert(onboarding.includes('terminal(FIRST_DOC_RECIPE, AGENT_NAMES)') && onboarding.includes('<code ref={lineCopy.codeRef} className="tdoc-wiz-line">{line}</code>'), 'the recipe is what the own-agent door hands over');
-  // The dialog takes the config (its left door needs to know whether there
-  // is a session) and the shell's sign-in, and nothing else.
-  const mount = read('shell/src/document-shell.jsx').match(/<OnboardingDialog[\s\S]*?\/>/);
-  assert(mount && /config=\{config\}/.test(mount[0]) && /onSignIn=\{signIn\}/.test(mount[0]),
-    'the dialog needs the config and the sign-in');
-  assert(!/identity=/.test(mount[0]), 'the dialog reads identity off config, not as its own prop');
+t('nothing on a document opens a second onboarding (#371)', () => {
+  // The landing dialog that used to live here existed to get tdoc installed
+  // and a first doc published. Setup is a route now and the onboarding is a
+  // checklist, so there is no pop-up left to keep honest -- only the proof
+  // that none is mounted and that the cards did not inherit its job.
+  const shell = read('shell/src/document-shell.jsx');
+  assert(!/OnboardingDialog|OnboardingWizard|OwnAgentDoor/.test(shell), 'no onboarding dialog is mounted');
+  assert(!/onboarding-dialog\.jsx|onboarding-scene\.jsx/.test(shell), 'and the wizard is not imported for its parts');
+  assert(!form.includes('createDocument'), 'the agent card must not create documents');
   // The hub's own card still respects the host capability.
   assert(form.includes('canCreate ? ('), 'the recipe card must survive canCreate=false');
 });

@@ -1,0 +1,133 @@
+/* The step you are standing on, docked under the top bar.
+
+   It used to float in the bottom-left corner, which is where a page puts the
+   things it does not mean: a toast, a cookie bar, a "copied" flash. Everything
+   in that corner is ignorable by training, and this row was being ignored --
+   on a page whose whole job was to teach one gesture, the instruction was the
+   last thing in the reading path and the first thing dismissed.
+
+   So it sits where a banner sits: first thing under the chrome, above the
+   document, in flow -- it pushes the page down rather than covering a word of
+   it. But it is a card, not a bar. Tinting the full width is the crudest way
+   to be noticed and it costs the page its composure: the strip is mostly two
+   fields of flat colour with nothing in them, because the words sit in the
+   middle where the document is. A card is the same blue doing the same job
+   over the width it actually occupies.
+
+   Two more things give it the weight it was missing: a numbered disc instead
+   of an empty tick (a number says "you are three of four through something";
+   an empty circle says "an unchecked box, maybe later"), and a real filled
+   button instead of a pill that happened to be clickable. */
+.sh-hint {
+  box-sizing: border-box;
+  position: relative;
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 10px 20px;
+}
+
+/* The card. Its width is the document's, not the window's -- a sentence
+   beginning at the window's left edge belongs to the application; one
+   beginning where the document begins belongs to the document. */
+.sh-inner {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 720px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 10px 0 14px;
+  border-radius: 14px;
+  background: var(--td-accent-tint, #e8eeff);
+  border: 1px solid rgb(22 82 240 / 16%);
+  /* Two shadows: a tight one to seat the edge, a wide soft one to lift the
+     card off a page that is otherwise flat white. */
+  box-shadow: 0 1px 2px rgb(22 82 240 / 7%), 0 6px 20px rgb(26 26 26 / 6%);
+}
+
+/* The step's own number. Filled, because this is the one that is happening:
+   the checklist's hollow circles are the ones that are not. */
+.sh-step {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--td-accent, #1652f0);
+  color: #fff;
+  font: 700 13px/1 -apple-system, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+/* Waiting is not a step you can take, so the number becomes the card's own
+   pulse and the button goes away. Same box either way, so the sentence does
+   not move when the row stops being something to do. */
+.sh-hint .tdoc-wait-dot {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 24px; height: 24px;
+  border: 7px solid transparent;
+  border-radius: 50%;
+  background-clip: content-box;
+}
+
+.sh-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 14px/1.3 -apple-system, system-ui, sans-serif;
+  color: var(--td-ink, #1a1a1a);
+  letter-spacing: -0.01em;
+}
+
+/* The click target, and the thing that was missing. A whole pill that happens
+   to be a button is not an invitation; a button shaped like the product's
+   other buttons is. */
+.sh-go {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 15px;
+  border: 0; border-radius: 999px;
+  background: var(--td-accent, #1652f0);
+  color: #fff;
+  cursor: pointer;
+  font: 600 13px -apple-system, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  transition: background .12s, transform .12s;
+}
+.sh-go:hover { background: #0f3fc4; }
+.sh-go:active { transform: scale(.97); }
+
+.sh-x {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  padding: 0; border: 0; border-radius: 8px;
+  background: none; color: rgb(22 82 240 / 55%); cursor: pointer;
+}
+.sh-x:hover { background: rgb(22 82 240 / 10%); color: var(--td-ink, #1a1a1a); }
+
+/* Finished, for as long as it takes to see it. */
+.sh-tick {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid var(--td-accent, #1652f0);
+  background: var(--td-accent, #1652f0);
+  color: #fff;
+}
+.sh-hint.ticked .sh-text { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
+
+@media (max-width: 720px) {
+  .sh-hint { padding: 8px 10px; }
+  .sh-inner { height: 46px; gap: 9px; padding: 0 8px 0 11px; border-radius: 12px; }
+  .sh-text { font-size: 13.5px; }
+  .sh-go { padding: 0 12px; }
+}

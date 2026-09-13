@@ -13,10 +13,10 @@ const latest = meta.versions[meta.versions.length - 1].n;
 const html = fs.readFileSync(path.join(root, 'landing', 'tdoc-start', `v${latest}`, 'index.html'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'server', 'server.js'), 'utf8');
-// The dialog and the create-choice component it renders: the recipe itself
-// moved into the shared component when Create a doc became two cards (#356),
-// so the prompt contract spans both files.
-const dialog = ['shell/src/onboarding-dialog.jsx', 'shell/src/create-from-scratch.jsx']
+// The create-choice cards and the shared copy they pull their wording from.
+// The pop-up that used to hold the recipe is gone; the prompt contract is what
+// these two say between them.
+const dialog = ['shell/src/create-from-scratch.jsx', 'shell/src/onboarding-copy.js', 'shell/src/setup-gate.jsx']
   .map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
 const documentShell = fs.readFileSync(path.join(root, 'shell', 'src', 'document-shell.jsx'), 'utf8');
 const probe = fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8');
@@ -48,17 +48,13 @@ t('the local /start alias reuses the latest tdoc-start document route', () => {
   assert(/req\.method === 'GET' \|\| req\.method === 'HEAD'/.test(route[0]), 'local /start is not GET/HEAD safe');
 });
 
-t('the tutorial can open the provider-owned onboarding dialog', () => {
+t('the tutorial keeps its own link, and opens no pop-up', () => {
   assert(/href="\/start"/.test(html), 'tutorial CTA missing');
   assert(/config\.onboarding/.test(documentShell) && /href === '\/start'/.test(documentShell),
     'frame navigation is not intercepted for onboarding');
-  assert(/<OnboardingDialog/.test(documentShell), 'React onboarding dialog is not mounted in the shell');
-});
-
-t('the dialog is one reusable Base UI screen with five steps read off the record', () => {
-  assert(/<AppDialog/.test(dialog), 'shared dialog primitive missing');
-  assert(!/PAGES|stepSignIn|device\/start|device\/poll/.test(dialog), 'old paged or sign-in flow returned');
-  assert(/const STEPS = \['welcome', 'paste', 'doc', 'sendback', 'done'\];/.test(dialog), 'the five steps are missing');
+  // The five-step wizard this used to mount is gone. Setup is a route and the
+  // onboarding is a checklist, so nothing on a document opens a journey.
+  assert(!/OnboardingDialog|OnboardingWizard/.test(documentShell), 'no onboarding dialog is mounted in the shell');
 });
 
 t('mobile onboarding actions keep names and 44px touch targets', () => {
@@ -71,7 +67,8 @@ t('mobile onboarding actions keep names and 44px touch targets', () => {
 t('the short prompt points to FIRST-DOC and never embeds a credential', () => {
   assert(/FIRST-DOC\.md/.test(dialog), 'FIRST-DOC link missing');
   assert(!/token\s*(is|=)|Authorization|Bearer/.test(dialog), 'credential leaked into the prompt');
-  assert(/copyText\(line\)/.test(dialog) && /line = FIRST_DOC_RECIPE/.test(dialog), 'copy action is not wired to the recipe');
+  assert(/copyText\(prompt\)/.test(dialog) && /PORTRAIT_PROMPT = `Make my first doc: \$\{RECIPE_URL\}`/.test(dialog),
+    'copy is wired to the line the gate composed');
 });
 
 t('the tutorial promises the same private personal AI portrait as FIRST-DOC', () => {
@@ -81,11 +78,11 @@ t('the tutorial promises the same private personal AI portrait as FIRST-DOC', ()
   assert(!/You get a Game of Life/i.test(text), 'tutorial still promises the old first doc');
 });
 
-t('the wizard reads the journey record, not a capability probe', () => {
+t('the gate reads the journey record, not a capability probe', () => {
   assert(!/fetch\('\/api\/hosted\/token'/.test(dialog), 'the old capability probe is back');
-  assert(/getOnboarding\(\)/.test(dialog), 'the wizard does not read the journey record');
-  assert(/stepFromRecord\(next\)/.test(dialog), 'the wizard does not move with the record');
-  assert(/openDoc\(1, 'welcome'\)/.test(dialog), 'the wizard does not open the first doc');
+  assert(/getOnboarding\(\)/.test(dialog), 'the gate does not read the journey record');
+  // Only the record moves the page: no step is advanced by a click.
+  assert(/const connected = Boolean\(paired \|\| record\?\.agent_connected/.test(dialog), 'the gate does not move with the record');
 });
 
 t('self-hosting remains an explicit alternate in the recipe and the tutorial', () => {

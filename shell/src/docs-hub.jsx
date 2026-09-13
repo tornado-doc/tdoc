@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
-import { CreateChoice } from './create-from-scratch.jsx';
+import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
+import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
@@ -93,7 +94,7 @@ export function DocsHub({ boot }) {
   const [modal, setModal] = useState(null);
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
-  const openCreateHelp = () => setModal({ type: 'create-help' });
+  const openAgentRecipe = () => setModal({ type: 'create-agent' });
 
   const docMenu = (slugs, doc) => [
     doc && (doc.mine || !doc.owner || doc.owner === viewer) ? {
@@ -133,8 +134,15 @@ export function DocsHub({ boot }) {
       <main className="wrap">
         <div className="page-hd">
           <h1>My docs</h1>
-          <button className="mk-btn" type="button" onClick={openCreateHelp}>Create a doc</button>
+          <CreateMenu
+            create={hub.createDoc}
+            canCreate={capabilities.create}
+            onAgent={openAgentRecipe}
+            trigger={<button className="mk-btn" type="button">Create a doc</button>}
+          />
         </div>
+
+        <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
         <div className="tabs" role="tablist">
           {TABS.map(([id, label]) => (
             <button
@@ -253,13 +261,13 @@ export function DocsHub({ boot }) {
         ) : null}
       </main>
 
-      {modal?.type === 'create-help' ? (
+      {modal?.type === 'create-agent' ? (
         <HubDialog
-          title="Create a doc"
+          title="Build it with your agent"
           onClose={closeModal}
           actions={<button type="button" onClick={closeModal}>Close</button>}
         >
-          <CreateChoice create={hub.createDoc} canCreate={capabilities.create} />
+          <AgentRecipe />
         </HubDialog>
       ) : null}
       {modal?.type === 'rename-doc' ? (

@@ -22,7 +22,10 @@ export function avatarFor(author) {
   if (key.includes('claude') || key.includes('anthropic')) {
     return 'https://cdn.simpleicons.org/claude/d97757';
   }
-  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  // xAI's published logomark, served by both hosts at /grok_logo.svg. NOT
+  // `github.com/xai-org.png`: that is the avatar of an org GitHub calls
+  // "SpaceXAI Org", and it is the SpaceX X.
+  if (key.includes('grok') || key.includes('xai')) return '/grok_logo.svg';
   if (key.includes('gemini')) return 'https://cdn.simpleicons.org/googlegemini/8e75b2';
   if (key.includes('cursor')) return 'https://cdn.simpleicons.org/cursor/000000';
   return 'https://github.com/openai.png';

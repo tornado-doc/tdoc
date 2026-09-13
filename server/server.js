@@ -125,6 +125,25 @@ function loadOnboardingLocal() {
   const v = readJson(ONBOARDING_FILE, {});
   return v && typeof v === 'object' ? v : {};
 }
+// The newest doc on this host. Local twin of the worker's newestDocFor: one
+// owner here, so every doc on disk is theirs.
+function newestDocLocal() {
+  let best = null;
+  let names = [];
+  try { names = fs.readdirSync(ROOT); } catch { return null; }
+  for (const name of names) {
+    if (name.startsWith('.') || ONBOARD_SLUGS.has(name) || name === 'tdoc-templates') continue;
+    const meta = readJson(path.join(ROOT, name, 'meta.json'), null);
+    if (!meta) continue;
+    // The newest version's stamp, not `meta.created` -- nothing writes that.
+    // Same fix as the worker's twin: ranking on a field that is always ''
+    // made this "whichever the filesystem listed first".
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const created = (versions.length ? versions[versions.length - 1].created : meta.created) || '';
+    if (!best || created > best.created) best = { slug: name, created };
+  }
+  return best ? best.slug : null;
+}
 function stampOnboardingLocal(step, extra) {
   const all = loadOnboardingLocal();
   all.record = stampOnboarding(all.record || {}, step, new Date().toISOString(), extra);
@@ -661,7 +680,11 @@ function isAnthropicCompanyMark(url) {
 }
 function logoForAgentLogin(login) {
   const key = String(login || '').toLowerCase();
-  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  // xAI's published logomark (assets/grok_logo.svg, served at /grok_logo.svg).
+  // NOT `github.com/xai-org.png`: that is the avatar of an org GitHub calls
+  // "SpaceXAI Org", and it is the SpaceX X -- every Grok reply on a doc was
+  // signed with another company's logo.
+  if (key.includes('grok') || key.includes('xai')) return '/grok_logo.svg';
   if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
   if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
     return 'https://github.com/openai.png';
@@ -957,6 +980,50 @@ function localDocsData() {
   return { docs, recent: [], starred: [], folders: [] };
 }
 
+// Same allowlist variable as the worker. Locally there is one anonymous
+// identity, so the flag is on when the variable names anybody at all.
+const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
+function debugRecord(state, at, firstDoc) {
+  const doc = firstDoc || null;
+  switch (state) {
+    case 'new': return {};
+    case 'started': return { started: at };
+    case 'connected': return { started: at, agent_connected: at };
+    case 'published': return { started: at, agent_connected: at, published_first: at, first_doc: doc };
+    case 'commented': return { started: at, agent_connected: at, published_first: at, first_doc: doc, commented: at };
+    case 'revised': return { started: at, agent_connected: at, published_first: at, first_doc: doc, commented: at, revised: at };
+    default: return null;
+  }
+}
+
+function localDebugAccount() {
+  return String(process.env.TDOC_DEBUG_ACCOUNTS || '').trim().length > 0;
+}
+
+// `/setup` locally, so the gate can be driven against the local server the
+// same way the hosted one is. The local host is anonymous by design, so the
+// identity is whatever TDOC_E2E_USER gives us.
+function localSetupDocument(nonce, step) {
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
+  return SHELL.appHtml({
+    // One title for both steps -- see the worker's twin. `?step=doc` is a
+    // request, not a fact, and a tab reading "make a doc" over a screen headed
+    // "Connect your agent" is the URL talking over the product.
+    title: 'tdoc - set up',
+    nonceAttr,
+    runtimeJsPath: SHELL_RUNTIME.js.path,
+    runtimeCssPath: SHELL_RUNTIME.css.path,
+    bootJson: safeJsonForScript({
+      page: 'setup',
+      step: step === 'doc' ? 'doc' : 'connect',
+      identity: e2eIdentity(),
+      oidcAuth: false,
+      oidcLabel: '',
+      debug: localDebugAccount(),
+    }),
+  });
+}
+
 function localHubDocument(nonce) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   return SHELL.appHtml({
@@ -1221,6 +1288,15 @@ const server = http.createServer(async (req, res) => {
       'X-Content-Type-Options': 'nosniff',
     });
   }
+  if (p === '/grok_logo.svg') {
+    const logoPath = path.join(__dirname, '..', 'assets', 'grok_logo.svg');
+    if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(logoPath), {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
   if (p === '/tdoc_logo.png') {
     const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
     if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
@@ -1237,6 +1313,29 @@ const server = http.createServer(async (req, res) => {
       'Content-Type': runtimeAsset.type,
       'Cache-Control': 'public, max-age=31536000, immutable',
       'X-Content-Type-Options': 'nosniff',
+    });
+  }
+
+  if (p === '/api/onboarding/state' && req.method === 'POST') {
+    if (!localDebugAccount()) return send(res, 403, JSON.stringify({ error: 'forbidden' }), { 'Content-Type': 'application/json' });
+    let parsed = {};
+    try { parsed = JSON.parse((await readBody(req)) || '{}'); } catch {}
+    const state = typeof parsed.state === 'string' ? parsed.state : '';
+    if (!DEBUG_STATES.includes(state)) {
+      return send(res, 400, JSON.stringify({ error: 'unknown_state', states: DEBUG_STATES }), { 'Content-Type': 'application/json' });
+    }
+    const prior = readJson(ONBOARDING_FILE, {}).record || {};
+    const next = debugRecord(state, new Date().toISOString(), prior.first_doc);
+    writeJson(ONBOARDING_FILE, { record: next });
+    return send(res, 200, JSON.stringify({ ok: true, state, record: next }), { 'Content-Type': 'application/json' });
+  }
+
+  if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';
+    return send(res, 200, req.method === 'HEAD' ? '' : localSetupDocument(nonce, step), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': cspHeader(nonce),
     });
   }
 
@@ -1571,7 +1670,14 @@ const server = http.createServer(async (req, res) => {
     const all = loadOnboardingLocal();
     // Local twin of the worker's `paired`: the local server has no pairing, so
     // an env flag stands in for "this account has connected a terminal".
-    return json(res, 200, { record: discoverFirstDocLocal(all.record || {}), paired: Boolean(process.env.TDOC_E2E_PAIRED) });
+    const record = discoverFirstDocLocal(all.record || {});
+    const paired = Boolean(process.env.TDOC_E2E_PAIRED);
+    // Twin of the worker's `?docs=1`: only the page waiting for a doc to
+    // appear pays for the walk.
+    if (url.searchParams.get('docs') === '1') {
+      return json(res, 200, { record, paired, newest_doc: newestDocLocal() });
+    }
+    return json(res, 200, { record, paired });
   }
   if (p === '/api/onboarding/event' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });

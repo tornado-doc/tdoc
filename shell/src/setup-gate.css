@@ -1,0 +1,369 @@
+/* /setup — the gate. Prefixed `sg-` throughout so nothing here can reach the
+   document shell, and nothing in chrome.css can reach in.
+
+   The right-hand pane reproduces the product at its real pixel sizes — 48px
+   bar, 280px card, #fff7d0 anchor, the two-layer card shadow — and lets the
+   pane crop it, because a scaled-down product stops being the product the
+   moment its 13px type renders at 6px. Those values are copied from
+   server/chrome.css and the probe's highlight CSS; when they change there,
+   change them here. */
+
+.sg-split {
+  --p-bar-line: #e5e5e7;
+  --p-card-line: #e8eaed;
+  --p-card-shadow: 0 1px 3px rgba(60,64,67,.15), 0 4px 8px rgba(60,64,67,.08);
+  --p-when: #80868b;
+  --p-anchor: #fff7d0;
+  --p-pin-line: #cdd3dc;
+  --p-reply-line: #e5e5e5;
+  --p-icon: #5f6368;
+  --p-resolved-bg: #e8f5ed;
+  --p-chip: #f5f6f8;
+  --p-ink: #1a1a1a;
+  --sg-dot: rgba(22,82,240,0.16);
+  --sg-wash: rgba(22,82,240,0.055);
+  --sg-agent: #d97757;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  background: #fff;
+  color: var(--td-ink, #1a1a1a);
+  font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ------------------------------------------------------------ the left pane */
+.sg-pane-form { display: flex; flex-direction: column; padding: 26px 38px 34px; background: #fff; }
+.sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: -4px; border-radius: 8px; text-decoration: none; }
+.sg-brand:hover { background: var(--td-surface, #f4f4f2); }
+/* The column is anchored, not centred. Centring meant every change to the
+   answer moved the question: picking the choice that needs a subject typed
+   into it added a row, and the heading and both choices slid up the page to
+   make room for something below them. Furniture does not move because the
+   content under it grew. It hangs from a fixed top; the answer grows
+   downward. */
+.sg-mid {
+  flex: 1 1 auto; display: flex; align-items: flex-start; justify-content: center;
+  /* The step number added a row above everything, which on a laptop-height
+     window pushed the one button on the screen past the bottom of it. The
+     column hangs from a fixed top, so the top is where the room comes from. */
+  padding-top: clamp(28px, 11vh, 108px);
+}
+/* The tallest the column ever gets is the second ask with a subject typed into
+   it: eyebrow, heading, two choices, a field, the composed line, three steps, a
+   status row, the button. That was measured 32px past the bottom of an 800px
+   window. A vh clamp cannot buy it back -- the overflow is one fixed column
+   against a shrinking window, not something proportional to the height -- so
+   short windows get the top margin back instead. */
+@media (max-height: 870px) {
+  .sg-mid { padding-top: 26px; }
+  .sg-col { gap: 15px; }
+}
+.sg-col { width: 100%; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+
+/* Where you are, above what to do. Same disc and same count as the checklist
+   on My docs, so the two read as one list. */
+.sg-eyebrow {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0 0 10px;
+  font: 600 13px -apple-system, system-ui, sans-serif;
+  letter-spacing: -0.005em; color: var(--td-muted, #6b6a66);
+}
+.sg-step-n {
+  display: flex; align-items: center; justify-content: center;
+  /* 24/13, the same disc the row above a doc wears -- and 13 clears the
+     12.5px floor the rest of this column keeps, rather than asking for an
+     exemption from it. */
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--td-accent, #1652f0); color: #fff;
+  font: 700 13px/1 inherit; font-variant-numeric: tabular-nums;
+}
+
+.sg-h1 { margin: 0 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
+
+/* The prompt is the message you are about to send your agent, so it is drawn
+   like the box you would send it from: white, one hairline, a large radius and
+   almost no shadow. The foot carries what it works with on the left and the
+   action on the right — where a composer puts Send — which is why the labelled
+   section row above it is gone.
+
+   The action is outlined, not filled: it should be findable at a glance, not
+   the loudest thing on a page that already has a primary. */
+/* The one choice in the whole journey. Rows, not cards: the read column is
+   narrow, and two cards side by side here would each be too tight to say
+   anything. A radio rather than a tick, because this is one of two and not
+   one of four -- the tick belongs to the checklist and means something else. */
+.sg-choices { display: flex; flex-direction: column; gap: 8px; }
+.sg-choice {
+  box-sizing: border-box; display: flex; align-items: flex-start; gap: 11px;
+  width: 100%; padding: 13px 14px;
+  border: 1px solid #e3e3e0; border-radius: 14px;
+  background: #fff; cursor: pointer; text-align: left;
+  font: inherit; color: var(--td-ink, #1a1a1a);
+  transition: border-color .12s, background .12s;
+}
+.sg-choice:hover { border-color: #cfcec9; }
+.sg-choice.on { border-color: var(--td-accent, #1652f0); background: var(--td-accent-tint, #e8eeff); }
+.sg-radio {
+  box-sizing: border-box; flex: 0 0 17px; width: 17px; height: 17px; margin-top: 1px;
+  border: 1.5px solid #cfcec9; border-radius: 50%; background: #fff;
+}
+.sg-choice.on .sg-radio { border: 5px solid var(--td-accent, #1652f0); }
+.sg-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sg-choice-text b { font: 600 14px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; }
+.sg-choice-text span { font-size: 13px; color: var(--td-muted, #6b6a66); }
+
+.sg-subject { display: block; }
+.sg-subject input {
+  box-sizing: border-box; width: 100%; height: 42px; padding: 0 14px;
+  border: 1px solid #e3e3e0; border-radius: 12px; background: #fff;
+  font: 500 13.5px -apple-system, system-ui, sans-serif; color: var(--td-ink, #1a1a1a);
+}
+.sg-subject input::placeholder { color: #a4a39e; font-weight: 400; }
+.sg-subject input:focus { outline: none; border-color: var(--td-accent, #1652f0); box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff); }
+
+.sg-prompt {
+  display: flex; align-items: flex-end; gap: 10px;
+  padding: 14px 14px 12px;
+  border: 1px solid #e3e3e0; border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(26,26,26,.035);
+}
+.sg-prompt-text {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  font: 500 13px/1.7 ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--td-ink, #1a1a1a);
+  overflow-wrap: anywhere; user-select: all;
+}
+/* Each mark in its own colour, sizes matched by eye rather than by number —
+   the sunburst reads smaller than the knot inside the same box. Two palettes
+   only fight in a crowded line; given a row of their own, with the label held
+   back in grey, they read as what they are. */
+.sg-works { display: flex; align-items: center; gap: 9px; margin: -4px 0 -2px; font-size: 12.5px; color: #9a9a95; }
+
+.sg-works svg { display: block; }
+.sg-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.sg-prompt-copy {
+  flex: 0 0 auto;
+  height: 30px; padding: 0 14px;
+  border: 1px solid var(--td-accent, #1652f0); border-radius: 9px;
+  background: transparent; color: var(--td-accent, #1652f0);
+  cursor: pointer;
+  font: 600 13px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.sg-prompt-copy:hover { background: var(--td-accent-tint, #e8eeff); }
+.sg-prompt-copy:disabled { border-color: #dcdbd7; color: #a4a39e; background: transparent; cursor: default; }
+.sg-prompt.pending .sg-prompt-text { color: #9a9a95; }
+.sg-prompt-copy.copied { border-color: #1a7340; color: #1a7340; background: transparent; cursor: default; }
+
+.sg-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; counter-reset: sgs; }
+.sg-steps li { display: grid; grid-template-columns: 19px 1fr; gap: 11px; align-items: start; font-size: 13.5px; line-height: 1.4; color: var(--td-ink, #1a1a1a); }
+.sg-steps li::before {
+  counter-increment: sgs; content: counter(sgs);
+  width: 19px; height: 19px; border-radius: 5px; margin-top: 0;
+  border: 1px solid var(--td-line, #e8e7e3); background: none;
+  color: var(--td-muted, #6b6a66);
+  font: 500 12.5px/17px ui-monospace, "SF Mono", Menlo, monospace;
+  text-align: center;
+}
+
+/* Reserved for its tallest state so the button below never moves. */
+.sg-status-slot { display: flex; align-items: flex-start; min-height: 62px; padding-top: 4px; }
+.sg-status {
+  flex: 1 1 auto; display: flex; align-items: flex-start; gap: 10px;
+  font: 12.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--td-muted, #6b6a66);
+}
+.sg-spin { width: 14px; height: 14px; flex: 0 0 14px; margin-top: 3px; border-radius: 50%; border: 1.5px solid var(--td-line, #e8e7e3); border-top-color: var(--td-accent, #1652f0); animation: sg-spin .9s linear infinite; }
+@keyframes sg-spin { to { transform: rotate(360deg); } }
+
+.sg-status.stuck { flex-direction: column; gap: 8px; color: #8a6100; }
+.sg-status.stuck .head { display: flex; align-items: baseline; gap: 8px; }
+.sg-doctor { display: flex; align-items: baseline; gap: 12px; width: 100%; color: var(--td-ink, #1a1a1a); }
+.sg-doctor code { flex: 1 1 auto; min-width: 0; font: inherit; user-select: all; overflow-wrap: anywhere; }
+.sg-doctor button { flex: 0 0 auto; border: 0; background: none; padding: 0 2px; cursor: pointer; font: 600 13px -apple-system, system-ui, sans-serif; color: var(--td-accent, #1652f0); }
+.sg-doctor button:hover { opacity: .65; }
+
+.sg-status.done { color: #1a7340; align-items: baseline; }
+.sg-status.done .tick { flex: 0 0 auto; align-self: flex-start; margin-top: 2px; }
+.sg-status.done b { font-weight: 600; }
+.sg-status .found { color: var(--td-muted, #6b6a66); }
+
+.sg-split .sg-primary { display: flex; align-items: center; justify-content: center; text-decoration: none; width: 100%; border: 0; border-radius: 12px; height: 46px; cursor: pointer; background: var(--td-accent, #1652f0); color: #fff; font: 650 15px inherit; letter-spacing: -0.01em; }
+.sg-split .sg-primary:hover { background: var(--td-accent-hover, #1245d0); }
+.sg-split .sg-primary.off { opacity: .3; pointer-events: none; }
+.sg-account { margin: -4px 0 0; font-size: 13px; text-align: center; }
+.sg-account a { color: var(--td-accent, #1652f0); }
+
+/* ----------------------------------------------------------- the right pane */
+/* Centred in the viewport, not in the grid row -- which is the same mistake
+   the left column made, arriving by a different road. A grid row is as tall as
+   its tallest cell, so the height of this one was being set by the form beside
+   it: picking the choice that needs a subject typed into it made the left
+   column taller, the row taller, and the picture in here slid down to stay in
+   the middle of it. Sticky to the top at exactly one screen tall, it has a
+   height of its own, and the answer on the left can grow as far as it likes
+   without moving the furniture on the right. */
+.sg-pane-art {
+  position: sticky; top: 0;
+  height: 100vh; overflow: hidden;
+  background-color: var(--sg-wash);
+  background-image: radial-gradient(var(--sg-dot) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  display: flex; align-items: center; justify-content: flex-start;
+  border-left: 1px solid var(--td-line, #e8e7e3);
+}
+.sg-stage { position: relative; width: 1080px; flex: 0 0 1080px; margin-left: 56px; transform: rotate(-1.1deg); }
+/* The replay brings its own coordinate space and its own frame, so it does not
+   sit on the tilted stage with the flat mockups -- a window lying at -1.1deg
+   is a picture of a window, and this one is meant to be the thing itself.
+   Scaled to the pane, never reflowed: `zoom` would relayout the 1080px box at
+   the smaller size and every coordinate in it would mean something else. */
+/* The replay brings its own frame and its own coordinate space, so it does not
+   lie on the tilted stage with the flat mockups: a window at -1.1deg is a
+   picture of a window, and this one is meant to be the thing itself. Sized in
+   one place -- the lens, the scene and the stage all take the same number, so
+   none of the three can be the one that collapses. */
+.sg-pane-art:has(.rp-canvas) { justify-content: center; }
+.sg-stage:has(.rp-canvas),
+.sg-scene:has(.rp-canvas) { transform: none; width: 544px; flex: 0 0 544px; margin: 0; }
+
+/* --- where people paste: a conversation, not a shell --- */
+.sg-chat { width: 720px; background: #fff; border: 1px solid var(--p-card-line); border-radius: 14px; overflow: hidden; box-shadow: 0 24px 60px rgba(26,26,26,.14), 0 3px 8px rgba(26,26,26,.06); color: var(--p-ink); }
+.sg-chat-bar { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 13px; background: #fbfbfa; border-bottom: 1px solid var(--p-bar-line); }
+.sg-lights { display: flex; gap: 6px; }
+.sg-lights i { width: 11px; height: 11px; border-radius: 50%; display: block; background: #dcdcdf; }
+.sg-chat-name { flex: 1 1 auto; text-align: center; font: 600 12.5px inherit; color: var(--p-icon); }
+.sg-chat-body { padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 13px; min-height: 268px; }
+
+.sg-msg { display: flex; gap: 10px; align-items: flex-start; }
+.sg-msg.me { justify-content: flex-end; }
+.sg-av { width: 24px; height: 24px; border-radius: 6px; flex: 0 0 auto; display: block; }
+.sg-av.you { background: linear-gradient(140deg, #6f8bb5, #46617f); border-radius: 50%; }
+.sg-av.bot { background: var(--sg-agent); }
+.sg-txt { margin: 0; font: 14px/1.55 inherit; color: #24242a; min-width: 0; }
+.sg-msg.me .sg-txt { background: var(--p-chip); border-radius: 12px; padding: 9px 12px; }
+
+/* the agent's own running notes: one bullet per action */
+.sg-run { font: 13px/1.65 inherit; color: #4a4a52; display: flex; gap: 8px; }
+.sg-run .b { color: var(--sg-agent); flex: 0 0 auto; }
+.sg-run .b.ok { color: #1a7340; }
+.sg-run .b.bad { color: #b42318; }
+.sg-run .m { font: 12.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace; color: var(--td-muted, #6b6a66); }
+
+.sg-composer { margin-top: auto; border: 1px solid #d9d9d6; border-radius: 14px; padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 9px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+.sg-composer.live { border-color: var(--p-ink); }
+.sg-field { font: 14px/1.5 inherit; color: #24242a; min-height: 21px; }
+.sg-ph { color: #9a9a96; }
+.sg-tools { display: flex; align-items: center; gap: 8px; color: #9a9a96; font-size: 13px; }
+.sg-sp { flex: 1 1 auto; }
+.sg-send { width: 28px; height: 28px; border-radius: 8px; background: var(--p-ink); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+.sg-send.off { background: #e8e8e5; color: #b5b5b0; }
+.sg-hint { font-size: 11.5px; color: #b0b0ab; }
+
+.sg-typed { display: inline-block; white-space: nowrap; overflow: hidden; max-width: 100%; vertical-align: bottom; }
+.sg-scene.run .sg-typed { animation: sg-type 1.15s cubic-bezier(.2,.7,.3,1) .35s both; }
+@keyframes sg-type { from { width: 0; } to { width: 100%; } }
+.sg-caret { display: inline-block; width: 1.5px; height: 16px; background: var(--p-ink); vertical-align: -3px; animation: sg-blink 1.1s steps(1) infinite; }
+@keyframes sg-blink { 50% { opacity: 0; } }
+
+.sg-scene.run .f1 { animation: sg-rise .45s ease-out 1.7s both; }
+.sg-scene.run .f2 { animation: sg-rise .45s ease-out 2.15s both; }
+.sg-scene.run .f3 { animation: sg-rise .45s ease-out 2.6s both; }
+.sg-scene.run .f4 { animation: sg-rise .45s ease-out 3.05s both; }
+@keyframes sg-rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+
+/* --- the product itself, at the sizes chrome.css gives it --- */
+.sg-app { width: 1000px; background: #fff; border: 1px solid var(--p-card-line); border-radius: 14px; overflow: hidden; box-shadow: 0 24px 60px rgba(26,26,26,.14), 0 3px 8px rgba(26,26,26,.06); color: var(--p-ink); }
+.sg-bar { height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #fff; border-bottom: 1px solid var(--p-bar-line); font: 13px system-ui, -apple-system, sans-serif; }
+.sg-mk { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.sg-brand img, .sg-mk img { display: block; }
+.sg-ver { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 7px; border-radius: 6px; background: var(--p-chip); color: #555; font: 600 11.5px ui-monospace, "SF Mono", Menlo, monospace; }
+.sg-title { font-weight: 700; letter-spacing: -0.01em; }
+.sg-owner { color: var(--p-when); font-size: 12px; }
+.sg-star { color: #b8b8bc; }
+.sg-bar .sg-sp { flex: 1 1 auto; }
+.sg-res { display: inline-flex; align-items: center; gap: 6px; color: #444; font-size: 12.5px; }
+.sg-sw { width: 26px; height: 15px; border-radius: 999px; background: var(--td-accent, #1652f0); position: relative; }
+.sg-sw::after { content: ""; position: absolute; right: 2px; top: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; }
+.sg-btn { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; border-radius: 8px; font: 600 12.5px inherit; }
+.sg-btn.tint { background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); }
+.sg-btn.solid { background: var(--td-accent, #1652f0); color: #fff; }
+.sg-ic { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--p-icon); }
+.sg-me { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #333; }
+.sg-me i { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(140deg, #6f8bb5, #46617f); display: block; }
+
+.sg-page { display: grid; grid-template-columns: minmax(0, 1fr) 320px; padding: 30px 20px 34px 56px; min-height: 330px; }
+/* A doc that was published a moment ago has no comments on it yet, so the
+   margin column is not hidden — it does not exist. */
+.sg-page.bare { grid-template-columns: minmax(0, 1fr); padding-right: 56px; }
+.sg-doc h2 { margin: 0 0 14px; font: 700 28px/1.2 inherit; letter-spacing: -0.028em; max-width: 17ch; }
+.sg-doc p { margin: 0 0 11px; font: 15px/1.62 inherit; color: #24242a; max-width: 54ch; }
+.sg-doc p.faint { color: var(--td-muted, #6b6a66); }
+.sg-anchor { background-color: var(--p-anchor); }
+.sg-scene.run .sg-anchor { animation: sg-sweep .55s ease-out 1.35s both; }
+@keyframes sg-sweep { from { box-shadow: inset -100% 0 0 #fff; } to { box-shadow: inset 0 0 0 #fff; } }
+
+.sg-margin { position: relative; }
+.sg-pin { position: absolute; left: -26px; top: 2px; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid var(--p-pin-line); box-shadow: 0 1px 3px rgba(0,0,0,.12); display: flex; align-items: center; justify-content: center; }
+.sg-pin i { width: 100%; height: 100%; border-radius: 50%; background: linear-gradient(140deg, #6f8bb5, #46617f); display: block; }
+.sg-pin.b { top: 128px; }
+.sg-pin.b i { background: linear-gradient(140deg, #3a3a40, #1a1a1e); }
+
+.sg-card { position: absolute; left: 14px; top: 0; width: 280px; background: #fff; border: 1px solid var(--p-card-line); border-radius: 12px; padding: 14px 14px 12px; box-shadow: var(--p-card-shadow); font: 13px system-ui, sans-serif; }
+.sg-card.active { border-color: var(--td-accent, #1652f0); box-shadow: 0 4px 16px var(--td-accent-ring-soft, rgba(22,82,240,0.18)); }
+.sg-card.b { top: 126px; }
+.sg-cc-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.sg-cc-av { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(140deg, #6f8bb5, #46617f); flex: 0 0 auto; }
+.sg-cc-av.bot { background: linear-gradient(140deg, #3a3a40, #1a1a1e); }
+.sg-cc-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; flex: 1 1 auto; }
+.sg-cc-who b { font-weight: 600; }
+.sg-cc-when { color: var(--p-when); font-size: 11px; margin-top: 1px; }
+.sg-cc-acts { display: flex; gap: 2px; color: var(--p-icon); margin: -2px -4px 0 0; }
+.sg-cc-acts span { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 50%; }
+.sg-cc-text { margin: 0; font-size: 13px; line-height: 1.5; color: #1f1f23; }
+.sg-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: var(--p-resolved-bg); color: #1a7340; }
+.sg-react { display: flex; gap: 4px; margin-top: 8px; }
+.sg-react span { display: inline-flex; align-items: center; gap: 4px; font: 12px system-ui; background: var(--p-chip); border: 1px solid var(--p-reply-line); border-radius: 999px; padding: 2px 8px; color: #333; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sg-scene.run .sg-typed, .sg-scene.run .f1, .sg-scene.run .f2, .sg-scene.run .f3,
+  .sg-scene.run .f4, .sg-scene.run .sg-anchor { animation: none; }
+  .sg-typed { width: auto; }
+  .sg-caret, .sg-spin { animation: none; }
+}
+
+/* Below the split's own breakpoint the canvas goes rather than shrinking: a
+   cropped product at 400px shows nothing worth looking at. */
+@media (max-width: 1080px) {
+  .sg-split { grid-template-columns: 1fr; }
+  .sg-pane-art { display: none; }
+  .sg-pane-form { padding: 24px 22px 30px; }
+  .sg-mid { padding-top: 26px; }
+  .sg-col { max-width: 520px; margin: 0 auto; }
+  .sg-h1 { font-size: 26px; }
+}
+
+/* Internal testing only, and dressed so it can never be mistaken for product:
+   dashed, off to one corner, and it always says which branch is real. */
+/* Internal only, and it floats over the page. This reserves room under the
+   column so the strip does not come to rest on the last control. It does not
+   help on a window too short to hold the column -- there the page scrolls and
+   the strip crosses whatever is in the middle of it, which is the price of an
+   internal affordance and not worth a layout for. */
+.sg-split:has(.sg-debug) .sg-mid { padding-bottom: 64px; }
+.sg-debug {
+  position: fixed; left: 14px; bottom: 14px; z-index: 30;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  padding: 7px 9px; border-radius: 12px;
+  background: #fff; border: 1px dashed #c9c9c4;
+  box-shadow: 0 2px 10px rgba(26,26,26,.06);
+  font: 11.5px -apple-system, system-ui, sans-serif;
+}
+.sg-debug-tag { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #b0b0ab; padding-right: 2px; }
+.sg-debug button { border: 0; border-radius: 999px; padding: 5px 10px; cursor: pointer; background: #f0f0ee; color: #6b6a66; font: 600 11.5px inherit; }
+.sg-debug button[aria-pressed="true"] { background: #1a1a1a; color: #fff; }
+.sg-debug button:disabled { opacity: .4; cursor: default; }
+.sg-debug .sg-debug-reset { background: #fdeceb; color: #b42318; }
+.sg-debug-now { color: #a8a8a3; padding-left: 4px; }

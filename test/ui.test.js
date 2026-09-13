@@ -183,23 +183,24 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     }
   });
 
-  await t('Docs Hub Create dialog copies the shared first-doc recipe', async () => {
+  await t('Docs Hub Create a doc is a menu, and the agent answer composes its line', async () => {
     await page.click('.mk-btn');
-    await page.waitForSelector('.ui-dialog-popup');
+    // A modal to choose between two things is a room built for a sentence, so
+    // the fork is a menu. Only the answer that needs a subject typed into it
+    // gets a dialog.
+    await page.waitForSelector('.ui-menu-item.mk-item:has-text("Build it with your agent")');
+    await page.click('.ui-menu-item.mk-item:has-text("Build it with your agent")');
+    await page.waitForSelector('.ui-dialog-popup .mk-agent');
     const title = await page.textContent('.ui-dialog-title');
-    if (title !== 'Create a doc') throw new Error(`unexpected dialog title: ${title}`);
-    // The dialog offers two doors; the agent one opens the same wizard the
-    // landing does, at its paste step, where the line lives in the terminal.
-    await page.click('.mk-card:has-text("Build it with your agent")');
-    await page.waitForSelector('.tdoc-wiz-term .tdoc-wiz-line');
-    await page.click('.tdoc-wiz-foot button.tdoc-wiz-primary');
-    await page.waitForSelector('.tdoc-wiz-term.copied .tdoc-wiz-copied');
+    if (title !== 'Build it with your agent') throw new Error(`unexpected dialog title: ${title}`);
+    // Copy is refused until the line is a line and not a placeholder.
+    if (!await page.isDisabled('.mk-line button')) throw new Error('Copy offered an unfinished line');
+    await page.fill('.mk-subject input', 'what our on-call rotation costs');
+    await page.click('.mk-line button');
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    if (!clipboard.includes('/FIRST-DOC.md')) throw new Error(`unexpected recipe: ${clipboard}`);
-    // Inside the hub the wizard's corner button is this view's Back — it
-    // returns to the two doors rather than closing the dialog around it.
-    await page.click('.tdoc-wiz-close');
-    await page.waitForSelector('.mk-cards .mk-card');
+    if (!clipboard.includes('Use tdoc to write a doc about what our on-call rotation costs')) {
+      throw new Error(`unexpected line: ${clipboard}`);
+    }
     await page.keyboard.press('Escape');
     await page.waitForSelector('.ui-dialog-popup', { state: 'detached' });
   });

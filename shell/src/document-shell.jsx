@@ -45,7 +45,8 @@ import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
-import { OnboardingDialog, handoffLine, selectContents } from './onboarding-dialog.jsx';
+import { handoffLine, selectContents } from './onboarding-copy.js';
+import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -159,23 +160,6 @@ export function DocumentShell({ boot, config }) {
   ));
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
-  // `?onboard=<step>` is how a sign-in redirect returns a person into the
-  // onboarding — `welcome` from the top bar, `paste` (or the old `own`) from
-  // the wizard's own Get started. Read once and taken off the URL, so a
-  // reload is an ordinary visit.
-  const [onboardingDoor, setOnboardingDoor] = useState(() => {
-    const params = new URLSearchParams(location.search);
-    const door = params.get('onboard');
-    if (door) {
-      params.delete('onboard');
-      const rest = params.toString();
-      try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
-    }
-    return door;
-  });
-  const [onboardingOpen, setOnboardingOpen] = useState(() => (
-    Boolean(config.onboarding && config.identity && onboardingDoor)
-  ));
   const [deepTarget, setDeepTarget] = useState(() => (
     new URLSearchParams(location.search).get('comment')
   ));
@@ -184,10 +168,17 @@ export function DocumentShell({ boot, config }) {
   // the URL, so a reload is an ordinary visit.
   const [arrival] = useState(() => {
     const params = new URLSearchParams(location.search);
-    const kind = params.get('welcome') ? 'welcome' : params.get('revised') ? 'revised' : null;
+    // `step` is the checklist arriving: a row on My docs sends people here, and
+    // the page opens whatever that row is about instead of leaving them on a
+    // wall of text to work it out. `revised` is the shell's own: it navigates
+    // here when it sees the agent publish. (`welcome` went with the wizard --
+    // nothing has produced it since the landing pop-up stopped opening.)
+    const step = params.get('step');
+    const kind = params.get('revised') ? 'revised'
+      : step === 'comment' || step === 'fix' ? step : null;
     if (kind) {
-      params.delete('welcome');
       params.delete('revised');
+      params.delete('step');
       const rest = params.toString();
       try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
     }
@@ -251,29 +242,6 @@ export function DocumentShell({ boot, config }) {
       .catch(() => {});
   }, [config.identity]);
 
-  // Resume. A person who chose "Use my own agent" and never got a doc lands
-  // back inside that door on their next visit to the landing page — the
-  // record says which step is empty, and the page goes there.
-  useEffect(() => {
-    if (!config.onboarding || !config.identity) return;
-    if (new URLSearchParams(location.search).get('onboard')) return;
-    getOnboarding().then((result) => {
-      const record = result?.record;
-      // A journey that has started and not reached its exit reopens where
-      // it stopped — the wizard reads the step off the record.
-      if (record?.started && !record?.revised && !record?.shared && !record?.tour_seen && !record?.waitlist) {
-        // Opened at the paste step. Whether that is where the journey stays,
-        // or whether it has moved on and the person should be asked first, is
-        // the wizard's own rule — forcing the question here asked it of
-        // somebody parked on step 2, who has seen nothing to come back to.
-        setOnboardingDoor('own');
-        setOnboardingOpen(true);
-      }
-    }).catch(() => {});
-    // Once, at boot.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // The two arrivals the journey makes on its own. Both open the card the
   // person should be looking at, and say in one line what just happened.
   const arrivedRef = useRef(false);
@@ -281,11 +249,7 @@ export function DocumentShell({ boot, config }) {
     if (!arrival || arrivedRef.current || comments.loading) return;
     arrivedRef.current = true;
     const list = comments.comments;
-    if (arrival === 'welcome') {
-      const seed = list.find((c) => c.author?.login === 'tdoc') || list[0];
-      if (seed) setOpenCommentId(seed.id);
-      showToast(`${config.title} v${config.version} is live.`);
-    } else if (arrival === 'revised') {
+    if (arrival === 'revised') {
       // Their own answered thread first — that is the reply they are waiting
       // for — then whatever else the agent resolved.
       const mine = config.identity?.login || '';
@@ -301,7 +265,20 @@ export function DocumentShell({ boot, config }) {
 
   // Bridge 2 state lives on the doc, not on a card: one paste covers every
   // comment, and the card that shows it can close and reopen.
-  const [handoff, setHandoff] = useState({ state: 'idle', copiedAt: null });
+  // The wait survives a reload. It used to be component state only, so
+  // somebody who pasted the line and then refreshed was told to do it again --
+  // the polling never re-armed and the card's own status line vanished. The
+  // copy is a gesture this browser saw, so this browser is where it is
+  // remembered; the poll below clears it when the version it is waiting for
+  // arrives.
+  const handoffKey = `tdoc.handoff.${config.slug}`;
+  const [handoff, setHandoff] = useState(() => {
+    try {
+      const at = Number(localStorage.getItem(handoffKey));
+      if (at > 0) return { state: 'waiting', copiedAt: at };
+    } catch {}
+    return { state: 'idle', copiedAt: null };
+  });
   // Only on the latest version: a handoff on v1 while v2 exists asks for work
   // the agent already did.
   const latestVersion = Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), Number(config.version) || 0);
@@ -336,7 +313,9 @@ export function DocumentShell({ boot, config }) {
       setHandoffPref(true);
       requestAnimationFrame(() => selectContents(document.querySelector('.tdoc-handoff-line code')));
     }
-    setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });
+    const copiedAt = Date.now();
+    try { localStorage.setItem(handoffKey, String(copiedAt)); } catch {}
+    setHandoff({ state: 'waiting', copiedAt, copyFailed: !ok });
     postOnboardingEvent('fix_copy_clicked', config.slug).catch(() => {});
   }, [config.slug, handoffText]);
 
@@ -402,7 +381,11 @@ export function DocumentShell({ boot, config }) {
       const href = String(message.href || '');
       if (!/^https?:\/\//i.test(href) && !/^\/(?!\/)/.test(href)) return;
       if (config.onboarding && href === '/start' && !message.blank) {
-        setOnboardingOpen(true);
+        // Connected already — an agent on this account has a token — means the
+        // gate has nothing to ask, so it is not shown. Everyone else starts
+        // there, signed in or not; /setup handles the sign-in itself.
+        const done = Boolean(onboardingRecord?.agent_connected || onboardingRecord?.published_first);
+        location.href = config.identity && done ? '/me' : '/setup';
         return;
       }
       if (message.blank) window.open(href, '_blank', 'noopener');
@@ -596,9 +579,23 @@ export function DocumentShell({ boot, config }) {
     }
   };
 
+  // Their own first words on the journey's doc are a step, and the server
+  // stamps it on the way through. Moving it here too is what keeps the row
+  // above the document honest between now and the next page load, which is the
+  // whole time somebody is looking at what they just wrote.
+  const markCommented = () => {
+    if (!config.isOwner) return;
+    setOnboardingRecord((current) => (
+      current && current.started && current.first_doc === config.slug && !current.commented
+        ? { ...current, commented: new Date().toISOString() }
+        : current
+    ));
+  };
+
   const postComment = async (text) => {
     const { ok, value } = await attempt(() => comments.addComment(composer, text));
     if (!ok) return;
+    markCommented();
     closeComposer();
     reportMentions(value);
     // The new card opens: it is where the next instruction lives.
@@ -607,7 +604,7 @@ export function DocumentShell({ boot, config }) {
 
   const replyTo = async (parentId, text) => {
     const { ok, value } = await attempt(() => comments.addReply(parentId, text));
-    if (ok) reportMentions(value);
+    if (ok) { markCommented(); reportMentions(value); }
     return ok;
   };
 
@@ -733,6 +730,9 @@ export function DocumentShell({ boot, config }) {
         if (cancelled) return;
         const latest = Number(status?.latest_version) || 0;
         if (latest > Number(config.version)) {
+          // The thing it was waiting for arrived; the wait should not outlive
+          // it into the next page.
+          try { localStorage.removeItem(handoffKey); } catch {}
           location.href = `/d/${encodeURIComponent(config.slug)}/v/${latest}?revised=1`;
           return;
         }
@@ -758,6 +758,8 @@ export function DocumentShell({ boot, config }) {
   // Copied in this session: the banner stays, as the confirmation, so the
   // frame does not jump and the pins and the open card stay where they are.
   const [sharedNow, setSharedNow] = useState(false);
+  // Set by the hint itself -- only it knows whether it drew.
+  const [hintBar, setHintBar] = useState(false);
   const showExitBanner = Boolean(
     handoffEnabled && Number(config.version) >= 2
     && onboardingRecord && onboardingRecord.started && (!onboardingRecord.shared || sharedNow),
@@ -766,9 +768,64 @@ export function DocumentShell({ boot, config }) {
   // the reply the seeded card asks for. The handoff appears once they exist,
   // not on an untouched seeded card.
   const me = config.identity?.login || '';
-  const ownerCommented = Boolean(me) && comments.comments.some((c) => (
-    c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
-  ));
+  // The thread the owner has said something in -- their own comment, or the
+  // reply the seeded card asks for. One lookup, because three things need the
+  // same one: whether they have spoken at all, which card carries the line for
+  // the agent, and which card the row above the document opens.
+  const myThread = me
+    ? comments.comments.find((c) => (
+      c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
+    ))
+    : null;
+  const ownerCommented = Boolean(myThread);
+  // Whether the line for the agent is on this page at all. Three conditions,
+  // and it used to have one: the owner has to have spoken (it belongs under
+  // their words, not under the seeded card that is still asking for them),
+  // this has to be the latest version, and this has to be the onboarding doc
+  // with the loop still open. Without that last one every comment the owner
+  // ever wrote, on every doc they own, carried a copyable instruction for an
+  // agent -- a teaching aid that never stopped teaching.
+  // `!revised`, not just `onboardingDoc`. The loop closing is what ends the
+  // tutorial -- it is what `docStep` reads to stop drawing the row, and what
+  // empties the checklist. `onboardingDoc` ends on `shared` instead, which is
+  // stamped by copying the exit link, and the exit banner that asks for that
+  // only renders from v2: on a doc that never reached v2 nothing ever stamped
+  // it, so the box sat on their comment for ever with no tutorial around it.
+  const tutorialOpen = onboardingDoc && !onboardingRecord?.revised;
+  const handoffOnPage = handoffEnabled && ownerCommented && tutorialOpen;
+  // The one row of the checklist that belongs to this doc. It names something
+  // already on the page, so going there is opening the card that carries it:
+  // the seeded comment asks for the highlight, and their own card carries the
+  // line for the agent. The record says which step; `handoffOnPage` says
+  // whether the page can honour it, because a row naming a line that is not
+  // here is the one thing this row promised never to do.
+  const hintStep = docStep(onboardingRecord, config.slug, handoffOnPage);
+  const goToStep = useCallback((want) => {
+    const list = comments.comments;
+    const going = want || hintStep;
+    if (going === 'comment') {
+      const seed = list.find((c) => c.author?.login === 'tdoc');
+      if (seed) setOpenCommentId(seed.id);
+      return;
+    }
+    if (myThread) setOpenCommentId(myThread.id);
+    // The line is the point of the trip, so it is open when they arrive.
+    setHandoffTouched(true);
+    setHandoffPref(true);
+    try { localStorage.setItem(HANDOFF_OPEN_KEY, '1'); } catch {}
+  }, [hintStep, comments.comments, myThread]);
+
+  // A row on My docs lands here, so it lands the way the corner row's own click
+  // does -- same function, so the two can never drift into two ideas of where
+  // that row goes. It is silent: nothing just happened, they clicked a to-do.
+  const checklistArrival = useRef(false);
+  useEffect(() => {
+    if (checklistArrival.current || comments.loading) return;
+    if (arrival !== 'comment' && arrival !== 'fix') return;
+    checklistArrival.current = true;
+    goToStep(arrival === 'fix' ? 'handoff' : 'comment');
+  }, [arrival, comments.loading, goToStep]);
+
   const copyExitLink = async () => {
     if (!await copyText(shareUrl)) { showToast('Could not copy', true); return; }
     setSharedNow(true);
@@ -776,7 +833,11 @@ export function DocumentShell({ boot, config }) {
     postOnboardingEvent('share_link_copied', config.slug).catch(() => {});
   };
 
-  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? 36 : 0) + (editor.mode === 'edit' ? 46 : 0);
+  // Every comment card and pin is placed from the top of the document, so
+  // anything docked above it moves all of them. STEP_HINT_HEIGHT is the bar's
+  // own height in step-hint.css.
+  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? 36 : 0)
+    + (hintBar ? STEP_HINT_HEIGHT : 0) + (editor.mode === 'edit' ? 46 : 0);
   const pinLeft = Math.min(
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
     window.innerWidth - 34,
@@ -885,7 +946,7 @@ export function DocumentShell({ boot, config }) {
         // The top bar's Sign in on the landing returns into the onboarding:
         // a new account lands on the first screen; one that has finished or
         // skipped is let straight through (the wizard closes itself).
-        onSignIn={() => signIn(config.onboarding ? '/?onboard=welcome' : undefined)}
+        onSignIn={() => signIn(config.onboarding ? '/setup' : undefined)}
         onSwitchAccount={config.oidcAuth ? () => {
           const returnUrl = location.pathname + location.search + location.hash;
           location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;
@@ -905,9 +966,25 @@ export function DocumentShell({ boot, config }) {
       {showExitBanner ? (
         <div className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
           <span>{sharedNow ? 'Link copied — send it to someone.' : exitLine(answered, config.version)}</span>
-          {sharedNow ? null : <button type="button" onClick={copyExitLink}>Copy link</button>}
+          {sharedNow
+            ? <a href="/me">Back to my docs</a>
+            : <button type="button" onClick={copyExitLink}>Copy link</button>}
         </div>
       ) : null}
+
+      {/* Under the chrome, over the document, in flow: the step pushes the page
+          down rather than floating in the corner the eye reaches last. */}
+      {editor.mode === 'edit' ? null : (
+        <DocStepHint
+          step={hintStep}
+          agentState={handoff.state}
+          banner={showExitBanner}
+          hidden={narrow && drawerOpen}
+          justFinished={arrival === 'revised'}
+          onGo={() => goToStep()}
+          onVisible={setHintBar}
+        />
+      )}
 
       {editor.mode === 'edit' ? (
         <EditorToolbar
@@ -929,10 +1006,13 @@ export function DocumentShell({ boot, config }) {
         onCancel={() => setReanchorId(null)}
       />
 
+      {/* `aria-label`, not `title`: a title on an iframe is an accessible name
+          AND a native tooltip, and the tooltip sat over the top bar whenever
+          the pointer rested on the document. The name is what was wanted. */}
       <iframe
         ref={bridge.frameRef}
         className="tdoc-doc-frame"
-        title="Document content"
+        aria-label="Document content"
         sandbox="allow-scripts"
         src={boot.frameSrc}
       />
@@ -960,7 +1040,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled && ownerCommented ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -990,7 +1070,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled && ownerCommented ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
         />
       )}
 
@@ -1063,15 +1143,6 @@ export function DocumentShell({ boot, config }) {
         onOpenChange={setSignInOpen}
         onSuccess={completeSignIn}
       />
-      <OnboardingDialog
-        open={onboardingOpen}
-        onOpenChange={setOnboardingOpen}
-        config={config}
-        onSignIn={signIn}
-        initialDoor={onboardingDoor}
-        initialRecord={onboardingRecord}
-      />
-
       {toast ? (
         <div className={`tdoc-shell-toast${toast.error ? ' error' : ''}`} role="status">
           {toast.text}

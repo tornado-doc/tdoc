@@ -59,9 +59,9 @@ export function ActivatePage({ boot }) {
     if (status === 200 && data && data.ok) {
       setPending({ label: data.label });
     } else if (status === 429) {
-      setError('Too many attempts — wait a minute and try again.');
+      setError('Too many tries. Wait a minute, then try again.');
     } else {
-      setError('That code is not waiting for approval. It may have expired — re-run the command in your terminal for a fresh one.');
+      setError('This code has expired. Ask your agent to connect again.');
     }
   };
 
@@ -73,9 +73,9 @@ export function ActivatePage({ boot }) {
     if (status === 200 && data && data.ok) {
       setApproved(true);
     } else if (status === 429) {
-      setError('Too many approvals just now — wait a minute and try again.');
+      setError('Too many tries. Wait a minute, then try again.');
     } else {
-      setError('Approval failed — the code may have just expired. Re-run the command in your terminal.');
+      setError('This code has expired. Ask your agent to connect again.');
     }
   };
 
@@ -89,13 +89,15 @@ export function ActivatePage({ boot }) {
 
   if (approved) {
     return (
-      <main className="tdoc-status-page">
+      <main className="tdoc-status-page tdoc-activate-page">
+        <div className="tdoc-activate-stack">
         <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-        <h1>Connected</h1>
-        <p>Your terminal has picked this up and continued on its own — there is nothing to go back and tell it.</p>
-        <p>You can close this tab.</p>
+        <h1>Device login approved</h1>
+        <p>Sign-in is complete. You can close this browser page.</p>
         <div className="tdoc-status-actions">
-          <a className="secondary" href="/me">Go to your docs</a>
+          <button type="button" className="primary" onClick={() => window.close()}>Close this page</button>
+        </div>
+        <p className="tdoc-activate-hint">If this tab stays open, close it manually.</p>
         </div>
       </main>
     );
@@ -103,8 +105,9 @@ export function ActivatePage({ boot }) {
 
   return (
     <main className="tdoc-status-page tdoc-activate-page">
+      <div className="tdoc-activate-stack">
       <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-      <h1>Connect a terminal</h1>
+      <h1>Approve Device Login</h1>
       {!identity ? (
         <>
           <p>{code
@@ -137,15 +140,9 @@ export function ActivatePage({ boot }) {
         </>
       ) : !pending ? (
         <>
-          <p>Signed in as <b>{identity.name || identity.login}</b>.</p>
-          {!boot.code ? (
-            <p className="tdoc-activate-hint">
-              This page connects a terminal: running <code>tdoc publish</code> shows a short
-              code, and approving it here lets that terminal publish as you. No terminal
-              waiting? You're signed in — head to <a href="/me">your docs</a>.
-            </p>
-          ) : null}
-          <p>{boot.code ? 'Confirm the code from your terminal:' : 'Have a code? Enter it:'}</p>
+          <p className="tdoc-activate-grant">
+            Signed in as <b>{identity.email || identity.name || identity.login}</b>.
+          </p>
           <input
             className="tdoc-activate-code"
             value={code}
@@ -153,26 +150,35 @@ export function ActivatePage({ boot }) {
             placeholder="XXXX-XXXX"
             autoFocus
             spellCheck={false}
-            aria-label="pairing code"
+            aria-label="Device code"
           />
           <button type="button" className="primary" disabled={busy || code.length !== 9} onClick={lookup}>
             Continue
           </button>
+          <button type="button" className="secondary" onClick={() => {
+            location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate${code ? `?code=${code}` : ''}`)}`;
+          }}>
+            Use Another Account
+          </button>
         </>
       ) : (
         <>
-          <p>
-            {pending.label
-              ? <>A terminal working on <code>{pending.label}</code> is asking to publish as <b>{identity.name || identity.login}</b>.</>
-              : <>A terminal is asking to publish as <b>{identity.name || identity.login}</b>.</>}
+          <p className="tdoc-activate-grant">
+            Signed in as <b>{identity.email || identity.name || identity.login}</b>.
           </p>
-          <p>Only approve this if the code came from your own terminal, just now.</p>
+          <div className="tdoc-activate-codeshow">{code}</div>
           <button type="button" className="primary" disabled={busy} onClick={approve}>
-            Approve
+            Approve Device Login
+          </button>
+          <button type="button" className="secondary" onClick={() => {
+            location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate?code=${code}`)}`;
+          }}>
+            Use Another Account
           </button>
         </>
       )}
       {error ? <p role="alert" className="tdoc-activate-error">{error}</p> : null}
+      </div>
       <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={completeSignIn} />
     </main>
   );

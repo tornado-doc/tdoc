@@ -59,7 +59,8 @@ t('device flow opens only HTTPS GitHub URLs', () => {
 t('agent avatars map to product marks without the Anthropic company avatar', () => {
   assert(box.avatarFor({ kind: 'agent', login: 'claude-code' }).includes('simpleicons.org/claude'));
   assert(box.avatarFor({ kind: 'agent', login: 'codex' }).includes('openai'));
-  assert(box.avatarFor({ kind: 'agent', login: 'grok' }).includes('xai-org'));
+  assert(box.avatarFor({ kind: 'agent', login: 'grok' }) === '/grok_logo.svg');
+  assert(!box.avatarFor({ kind: 'agent', login: 'grok' }).includes('xai-org'), 'never the SpaceXAI org avatar');
   assert(box.avatarFor({ kind: 'agent', login: 'gemini' }).includes('googlegemini'));
 });
 

@@ -1,0 +1,183 @@
+/* The replay's coordinate space. Everything inside is placed absolutely in a
+   1080x720 box, so no scene can be moved by the length of anything beside it.
+   The stage scales the box; the box never reflows. */
+/* The lens. Fixed size, so the panel beside it can never change what the
+   camera sees -- and overflow hidden, because the desk is bigger than the
+   frame on purpose. */
+.rp-view {
+  position: relative; overflow: hidden;
+  /* Stated, not derived. Everything inside the lens is absolutely positioned,
+     so the frame has no content width of its own: anything that asks the
+     parent (`width: 100%`, `flex: 1 1 auto`) resolves against a parent that is
+     itself sizing to its children, and the frame collapses to nothing. */
+  width: 544px; height: min(72vh, 648px);
+  border-radius: 18px;
+  background: #1e2333;
+  box-shadow: 0 30px 70px rgba(26, 26, 26, .22), 0 3px 10px rgba(26, 26, 26, .08);
+}
+
+/* The middle of the frame, wherever the pane puts it. The camera scales and
+   pans around this point, so the aim in JS never has to know how wide the
+   panel is -- and a resize cannot knock the shot off centre. */
+.rp-lens { position: absolute; left: 50%; top: 50%; transform-origin: 0 0; }
+
+.rp-canvas {
+  position: absolute; left: 0; top: 0;
+  width: 1080px; height: 720px;
+  background: linear-gradient(160deg, #2c3550 0%, #46406a 46%, #7a5570 100%);
+  font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  transition: opacity .4s linear;
+}
+
+.rp-menubar {
+  position: absolute; inset: 0 0 auto 0; height: 26px;
+  display: flex; align-items: center; gap: 18px; padding: 0 16px;
+  background: rgba(20, 20, 26, .34);
+  backdrop-filter: blur(18px);
+  color: rgba(255, 255, 255, .92);
+  font-size: 12px; font-weight: 500;
+}
+.rp-mb-app { font-weight: 700; }
+.rp-sp { flex: 1 1 auto; }
+
+/* ------------------------------------------------------------------ the dock */
+.rp-dock {
+  position: absolute; left: 540px; bottom: 14px;
+  display: flex; align-items: flex-end; gap: 16px;
+  padding: 9px 13px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .22);
+  border: 1px solid rgba(255, 255, 255, .3);
+  backdrop-filter: blur(26px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
+  transition: opacity .18s linear;
+}
+.rp-app {
+  position: relative; display: flex; flex-direction: column; align-items: center;
+  transform-origin: 50% 100%;
+  transition: transform .16s cubic-bezier(.2,.7,.3,1);
+}
+.rp-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 52px; height: 52px; border-radius: 13px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
+}
+/* The dot under a running app. */
+.rp-run {
+  position: absolute; bottom: -7px;
+  width: 4px; height: 4px; border-radius: 50%;
+  background: rgba(255, 255, 255, .85);
+}
+
+.rp-cursor { position: absolute; left: 0; top: 0; z-index: 40; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); transition: transform .1s linear; }
+
+/* ---------------------------------------------------------------- the window */
+/* Portrait, because the lens is. A window is whatever size its owner dragged
+   it to, so a tall one is no less true than a wide one -- and a wide one
+   cannot be pushed in on far enough to read without losing both its edges. At
+   600 it fits the frame whole at the closest shot in the script. */
+.rp-win {
+  position: absolute; left: 50%; top: 52px;
+  width: 600px; height: 552px;
+  display: flex; flex-direction: column;
+  border-radius: 12px; overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, .1);
+  box-shadow: 0 28px 64px rgba(0, 0, 0, .34), 0 2px 6px rgba(0, 0, 0, .16);
+  transform-origin: 50% 0;
+}
+.rp-win-bar {
+  flex: 0 0 auto; height: 44px;
+  display: flex; align-items: center; gap: 14px; padding: 0 16px;
+  background: #f7f7f7; border-bottom: 1px solid #e8e8e8;
+}
+.rp-lights { display: flex; gap: 8px; }
+.rp-lights i { width: 12px; height: 12px; border-radius: 50%; background: #ddd; }
+.rp-lights i:nth-child(1) { background: #ff5f57; }
+.rp-lights i:nth-child(2) { background: #febc2e; }
+.rp-lights i:nth-child(3) { background: #28c840; }
+.rp-win-title { font: 600 14px/1 inherit; color: #1a1a1a; }
+
+.rp-win-body {
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 20px 22px;
+  font-size: 14.5px; color: #1a1a1a;
+}
+
+.rp-composer {
+  position: relative; align-self: stretch;
+  min-height: 52px; padding: 15px 18px;
+  border: 1px solid #e3e3e3; border-radius: 14px; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+  color: #1a1a1a; line-height: 1.45;
+}
+.rp-ph { position: absolute; left: 18px; top: 15px; color: #9b9b9b; }
+.rp-typed { transition: opacity .1s linear; }
+.rp-caret { display: inline-block; width: 1.5px; height: 17px; margin-left: 2px; background: #1a1a1a; vertical-align: -3px; animation: rp-blink 1s steps(1) infinite; }
+@keyframes rp-blink { 50% { opacity: 0; } }
+
+.rp-bubble {
+  align-self: flex-end; max-width: 74%;
+  padding: 13px 18px; border-radius: 20px;
+  background: #0d0d0d; color: #fff;
+  line-height: 1.45;
+}
+
+.rp-worked { display: flex; align-items: center; gap: 9px; color: #7d7d7d; font-size: 14px; }
+.rp-spin {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid #d8d8d8; border-top-color: #8a8a8a;
+  animation: rp-spin .8s linear infinite;
+}
+@keyframes rp-spin { to { transform: rotate(360deg); } }
+.rp-done { color: #1a7340; font-style: normal; font-weight: 700; }
+.rp-chev { color: #b5b5b5; }
+
+.rp-cli {
+  margin: 0; padding: 14px 16px;
+  border-radius: 10px; background: #f7f7f5; border: 1px solid #ebebe8;
+  font: 400 12.5px/1.7 ui-monospace, "SF Mono", Menlo, monospace;
+  color: #4a4a45; white-space: pre-wrap;
+}
+.rp-summary { transition: opacity .2s linear; line-height: 1.5; }
+.rp-summary p { margin: 0 0 8px; }
+.rp-summary ul { margin: 0; padding-left: 20px; color: #3d3d3d; }
+.rp-summary li { margin: 3px 0; }
+.rp-summary code {
+  padding: 1px 6px; border-radius: 5px; background: #f0f0ee;
+  font: 400 13px ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* -------------------------------------------------------------- the approval */
+.rp-sheet {
+  position: absolute; left: 50%; top: 188px; z-index: 30;
+  width: 420px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 30px 34px 32px;
+  border-radius: 16px; background: #fff;
+  border: 1px solid rgba(0, 0, 0, .08);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .4);
+  text-align: center;
+  transition: opacity .2s linear;
+}
+.rp-sheet h3 { margin: 4px 0 0; font: 700 21px/1.2 inherit; letter-spacing: -0.02em; color: #1a1a1a; }
+.rp-sheet p { margin: 0; font-size: 14px; color: #6b6a66; }
+.rp-code {
+  margin: 6px 0 2px; padding: 11px 20px;
+  border-radius: 10px; background: var(--td-surface-2, #f7f7f5); border: 1px solid var(--td-line, #e8e7e3);
+  font: 700 23px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: .1em; color: #1a1a1a;
+}
+.rp-approve {
+  margin-top: 6px; height: 42px; padding: 0 30px;
+  border: 0; border-radius: 11px;
+  background: var(--td-accent, #1652f0); color: #fff;
+  font: 650 15px inherit; letter-spacing: -0.01em;
+  transition: transform .1s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rp-caret, .rp-spin { animation: none; }
+  .rp-app, .rp-cursor, .rp-approve { transition: none; }
+}

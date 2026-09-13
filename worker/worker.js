@@ -899,6 +899,15 @@ const TDOC_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="201.2 20
   </g>
 </svg>
 `;
+
+// xAI's published Grok logomark, served at /grok_logo.svg so a Grok reply
+// carries the right company's mark without a third-party favicon request.
+// Byte-identical with assets/grok_logo.svg (pinned by agent-runtime.test.js).
+const GROK_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" role="img" aria-label="Grok">
+<path d="M395.479 633.828L735.91 381.105C752.599 368.715 776.454 373.548 784.406 392.792C826.26 494.285 807.561 616.253 724.288 699.996C641.016 783.739 525.151 802.104 419.247 760.277L303.556 814.143C469.49 928.202 670.987 899.995 796.901 773.282C896.776 672.843 927.708 535.937 898.785 412.476L899.047 412.739C857.105 231.37 909.358 158.874 1016.4 10.6326C1018.93 7.11771 1021.47 3.60279 1024 0L883.144 141.651V141.212L395.392 633.916" fill="#0A0A0A"/>
+<path d="M325.226 695.251C206.128 580.84 226.662 403.776 328.285 301.668C403.431 226.097 526.549 195.254 634.026 240.596L749.454 186.994C728.657 171.88 702.007 155.623 671.424 144.2C533.19 86.9942 367.693 115.465 255.323 228.382C147.234 337.081 113.244 504.215 171.613 646.833C215.216 753.423 143.739 828.818 71.7385 904.916C46.2237 931.893 20.6216 958.87 0 987.429L325.139 695.339" fill="#0A0A0A"/>
+</svg>
+`;
 const TDOC_LOGO_PNG_B64 = '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';
 // Add to Home Screen never reads the SVG favicon: iOS takes apple-touch-icon,
 // Android takes the manifest's PNGs. Both sit on the reader's wallpaper, so
@@ -927,7 +936,11 @@ function isAnthropicCompanyMark(url) {
 }
 function logoForAgentLogin(login) {
   const key = String(login || '').toLowerCase();
-  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  // xAI's published logomark (assets/grok_logo.svg, served at /grok_logo.svg).
+  // NOT `github.com/xai-org.png`: that is the avatar of an org GitHub calls
+  // "SpaceXAI Org", and it is the SpaceX X -- every Grok reply on a doc was
+  // signed with another company's logo.
+  if (key.includes('grok') || key.includes('xai')) return '/grok_logo.svg';
   if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
   if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
     return 'https://github.com/openai.png';
@@ -1830,6 +1843,37 @@ function stampOnboarding(record, step, at, extra) {
   }
   return out;
 }
+// Accounts allowed to drive their own onboarding state from the page, for
+// testing the gate's branches without hand-editing storage. Comma-separated
+// emails in TDOC_DEBUG_ACCOUNTS; empty (the default) allows nobody. It grants
+// one power and no other: clearing YOUR OWN onboarding record.
+const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
+function debugRecord(state, at, firstDoc) {
+  const doc = firstDoc || null;
+  switch (state) {
+    case 'new': return {};
+    case 'started': return { started: at };
+    case 'connected': return { started: at, agent_connected: at };
+    case 'published': return { started: at, agent_connected: at, published_first: at, first_doc: doc };
+    case 'commented': return { started: at, agent_connected: at, published_first: at, first_doc: doc, commented: at };
+    case 'revised': return { started: at, agent_connected: at, published_first: at, first_doc: doc, commented: at, revised: at };
+    default: return null;
+  }
+}
+
+// Accounts allowed to put their own onboarding record into a named state, for
+// internal testing. The list is operational data, not build config: an email
+// is not a credential, and a deploy is the wrong price for adding or taking
+// away a name. It lives in KV under `debug-accounts`, comma-separated, and an
+// absent or empty key allows nobody, which is every deploy's default.
+async function isDebugAccount(env, session) {
+  const email = normalizeEmail(session && session.email);
+  if (!email) return false;
+  let raw = '';
+  try { raw = String((await env.META.get('debug-accounts')) || ''); } catch { return false; }
+  return raw.split(',').map((v) => v.trim().toLowerCase()).filter(Boolean).includes(email);
+}
+
 // Which actions the page may report, and which step (if any) each one stamps.
 // Anything else is rejected: the log is what the funnel is read from, so a
 // page cannot invent a step.
@@ -1876,6 +1920,18 @@ function duplicateComment(comments, { author, text, anchor, parent_id, at }, win
 // not a person pretending to be one. Anchored to the first paragraph so it
 // lands on text the reader can see, and worded to ask for the one gesture the
 // page exists to teach.
+// ---- the onboarding half ----------------------------------------------
+// Setup ends at My docs, and the onboarding starts there -- but on nothing we
+// put there. The four rows all stand on the doc the person made themselves:
+// the account arrives empty, row 2 asks for a doc, and rows 3 and 4 are that
+// same doc being argued with and then fixed.
+//
+// A template copied into an "Onboarding" folder used to sit here, so that the
+// loop could be walked before they had written anything. It was the wrong
+// object twice over: nobody argues with a generic page about nobody, and its
+// existence made "Create your first tdoc" tick on a doc we wrote. What it was
+// really for -- a first comment already on the page, so row 3 is a reply and
+// not a blank -- the publish path does anyway, on their own first doc.
 const SEED_COMMENT_TEXT = 'First reader here. Which claim on this page would you defend least? Highlight it and say so.';
 const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '', kind: 'system' };
 function seedCommentAnchor(html) {
@@ -3252,6 +3308,38 @@ async function countHostedDocs(env, accountId, stopAt) {
     if (r.list_complete) break;
   } while (cursor);
   return n;
+}
+
+// The newest doc this account owns. Two callers: the internal state switcher,
+// and the second ask on `/setup?step=doc`. That page cannot read the record
+// for its answer -- `published_first` and `first_doc` are stamped once, so a
+// SECOND doc moves nothing on the record at all -- and "did a new doc appear
+// while you were watching" is exactly what it is waiting for.
+async function newestDocFor(env, accountId) {
+  if (!accountId || !env || !env.META) return null;
+  let best = null;
+  let cursor;
+  do {
+    const r = await env.META.list({ prefix: 'meta:', cursor });
+    for (const k of r.keys || []) {
+      let meta = null;
+      try {
+        const raw = await env.META.get(k.name);
+        if (raw) meta = JSON.parse(raw);
+      } catch {}
+      if (!meta || !meta.hosted || meta.hosted.account_id !== accountId) continue;
+      // The newest version's stamp, not `meta.created` -- nothing writes that.
+      // Ranking on a field that is always '' made this "whichever KV listed
+      // first", so the debug states rebuilt the journey on a doc that could be
+      // months older than the one the tester had just published.
+      const versions = Array.isArray(meta.versions) ? meta.versions : [];
+      const created = (versions.length ? versions[versions.length - 1].created : meta.created) || '';
+      if (!best || created > best.created) best = { slug: k.name.slice('meta:'.length), created };
+    }
+    cursor = r.cursor;
+    if (r.list_complete) break;
+  } while (cursor);
+  return best ? best.slug : null;
 }
 
 function envFlagTrue(v) {
@@ -5026,6 +5114,15 @@ export default {
         },
       });
     }
+    if (p === '/grok_logo.svg' && method === 'GET') {
+      return new Response(GROK_LOGO_SVG, {
+        headers: {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     if (TDOC_HOME_ICONS[p] && method === 'GET') {
       const bin = Uint8Array.from(atob(TDOC_HOME_ICONS[p]), (c) => c.charCodeAt(0));
       return new Response(bin, {
@@ -5082,12 +5179,66 @@ export default {
           page: 'activate',
           code: normalizePairCode(url.searchParams.get('code')) || '',
           identity: sessionPrincipal(session)
-            ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '' }
+            ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '', email: normalizeEmail(session.email) || '' }
             : null,
           webAuth: !!env?.GITHUB_CLIENT_SECRET,
           authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
           oidcAuth: !!oidcConfig(env),
           oidcLabel: (oidcConfig(env) || {}).label || '',
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+    }
+
+    // `/setup` — the gate. Setup is not the tutorial: it is the one thing that
+    // must be true before tdoc does anything, so it gets a route of its own
+    // rather than a step inside the landing pop-up. The page reads the
+    // onboarding record and moves itself when the agent turns up.
+    if (p === '/setup' && (method === 'GET' || method === 'HEAD')) {
+      const session = await getSession(env, req);
+      // Two asks live on this route, because they are the same ask twice: paste
+      // a line into your agent and watch this page move. `?step=doc` is the
+      // second one. The page still shows the first to anyone who has not done
+      // it, so the link is safe to hand to anybody.
+      const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';
+      const here = step === 'doc' ? '/setup?step=doc' : '/setup';
+      if (!sessionPrincipal(session) && oidcConfig(env)) {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: `/api/auth/oidc/login?return=${encodeURIComponent(here)}` },
+        });
+      }
+      // Opening the gate is beginning. `started` used to be stamped by the page
+      // and only when somebody pressed Copy, so anyone who selected the line
+      // and hit cmd-C connected their agent and then found no checklist on My
+      // docs at all -- the card renders on `started`. The door is the honest
+      // signal, and the server is standing in it. A CLI-first publisher who
+      // never loads this page still never starts, which is what keeps tdoc's
+      // seeded question off the doc of somebody who did not ask to be onboarded.
+      try {
+        const who = await sessionAccountId(env, session);
+        if (who) await stampOnboardingFor(env, who, 'started');
+      } catch {}
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        // One title for both steps. `?step=doc` is a request, not a fact: the
+        // page falls back to step 1 for anybody who has not connected yet, and
+        // a tab reading "make a doc" over a screen headed "Connect your agent"
+        // is the URL talking over the product. The server would need the
+        // account's record to tell them apart, and this route renders before
+        // that is read.
+        title: 'tdoc - set up',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'setup',
+          step,
+          identity: sessionPrincipal(session)
+            ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '' }
+            : null,
+          oidcAuth: !!oidcConfig(env),
+          oidcLabel: (oidcConfig(env) || {}).label || '',
+          debug: await isDebugAccount(env, session),
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -5205,6 +5356,12 @@ export default {
           // Mirrors the /api/doc/create gate: offering "start from scratch" on a
           // host that will 403 it is worse than not offering it.
           capabilities: { create: isOwnerSession(env, s) || hostedAccountCopiesEnabled(env, req) },
+          onboarding: await (async () => {
+            try {
+              const id = await sessionAccountId(env, s);
+              return id ? await loadOnboarding(env, id) : null;
+            } catch { return null; }
+          })(),
           ...data,
         }),
       }), {
@@ -5360,7 +5517,13 @@ export default {
       const gate = await enforceDocAccess(env, req, slug, null);
       if (!gate.ok) return gate.response;
       const latest = latestVersionNumber(gate.meta);
-      if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}`);
+      // The query rides along. Everything that deep-links into a doc without
+      // knowing its version -- `?comment=<id>` from a notification, `?step=`
+      // from the checklist -- addresses the bare slug, and dropping the search
+      // here landed all of them on an ordinary page with nothing opened.
+      // `url.search` is already percent-encoded by the URL parser, so it
+      // cannot carry a newline into the header.
+      if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}${url.search}`);
       // Unknown slug → the existing not-found landing redirect below.
     }
 
@@ -6355,7 +6518,54 @@ export default {
       // agent never shows a code again, so the page must not wait for one.
       let paired = false;
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
-      return json({ record: await loadOnboarding(env, accountId), paired });
+      const record = await loadOnboarding(env, accountId);
+      // `?docs=1` costs a catalog walk, so only the page that waits for a doc
+      // to appear asks for it. The connect gate's own poll stays two reads.
+      if (url.searchParams.get('docs') === '1') {
+        return json({ record, paired, newest_doc: await newestDocFor(env, accountId) });
+      }
+      return json({ record, paired });
+    }
+    // Puts the caller's own onboarding record into a named state, so the
+    // journey's branches can be walked without hand-editing storage. The body
+    // names a state; the record is built here from a fixed table, so no field
+    // arrives from the client. Allowlisted accounts only, same-origin, and the
+    // account id comes from the session — it can reach no record but yours.
+    if (p === '/api/onboarding/state' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      if (!(await isDebugAccount(env, session))) return json({ error: 'forbidden' }, { status: 403 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const state = typeof body.state === 'string' ? body.state : '';
+      if (!DEBUG_STATES.includes(state)) return json({ error: 'unknown_state', states: DEBUG_STATES }, { status: 400 });
+      const prior = await loadOnboarding(env, accountId);
+      // Which doc the built states should stand on. The record's own is right
+      // whenever it has one; resetting to `new` wipes it, so the account's
+      // newest doc stands in rather than a slug this person may not even own.
+      // A catalog walk is fine here and nowhere else: this route is a testing
+      // affordance, pressed by hand, never polled.
+      const doc = (prior && prior.first_doc) || await newestDocFor(env, accountId);
+      const next = debugRecord(state, new Date().toISOString(), doc);
+      await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+      // The pairing marker moves with the state. `paired` -- has this account
+      // ever connected a terminal -- is half of what the gate calls connected,
+      // and it is only ever written, so an account that has paired once could
+      // not be put back before it: `new`, `started` and `connected` all looked
+      // identical on /setup, and the waiting and stuck branches were
+      // unreachable. This is the marker, not the credential: the token lives
+      // under `hosted-token:` and is untouched, so a paired CLI keeps working.
+      try {
+        const key = `account-terminal:${accountId}`;
+        if (next && next.agent_connected) {
+          if (!(await env.META.get(key))) await env.META.put(key, JSON.stringify({ first: next.agent_connected, last: next.agent_connected }));
+        } else {
+          await env.META.delete(key);
+        }
+      } catch {}
+      return json({ ok: true, state, record: next });
     }
     if (p === '/api/onboarding/event' && method === 'POST') {
       let body = {};
@@ -6560,7 +6770,13 @@ export default {
           // Only a comment on the journey's own doc moves the journey; a
           // comment on any other doc of theirs says nothing about it.
           const journey = await loadOnboarding(env, accountId);
-          if (!parent_id && (!journey.first_doc || journey.first_doc === slug)) await stampOnboardingFor(env, accountId, 'commented');
+          // A reply counts. The seeded comment is a question -- "which claim
+          // would you defend least?" -- and its Reply button is the most
+          // obvious thing on the page, so the gesture the checklist asks for
+          // is very often a reply and not a new thread. Excluding replies left
+          // the doc's own corner row ticking while My docs stayed at 2 of 4
+          // and row 4 stayed locked, with no way to reach it.
+          if (!journey.first_doc || journey.first_doc === slug) await stampOnboardingFor(env, accountId, 'commented');
           if (mentions.length) await stampOnboardingFor(env, accountId, 'tagged');
         } catch {}
       }
@@ -7138,7 +7354,11 @@ export default {
             // re-points the journey at the doc that exists instead of leaving
             // it watching an older one forever.
             await seedFirstComment(await adoptFirstDocFor(env, auth.actor.account_id, slug));
-          } else if (firstHostedPublish) {
+          } else if (firstHostedPublish || (journey.started && !journey.first_doc)) {
+            // The journey's doc is the first one published after it started.
+            // Keying only on "this account's first doc ever" left anybody who
+            // had published before they onboarded with a row that could never
+            // tick: their first publish is long past, and nothing else stamps.
             await seedFirstComment(await stampOnboardingFor(env, auth.actor.account_id, 'published_first', { first_doc: slug }));
           } else if (verNum >= 2 && journey.first_doc === slug) {
             // Only the journey's own doc reaching v2 is the loop closing.

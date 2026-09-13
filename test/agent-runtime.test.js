@@ -85,7 +85,7 @@ t('agentIdentity fills from detect when login is missing or generic', () => {
 
   const generic = agentIdentity({ agent_login: 'tdoc-agent', agent_name: 'tdoc-agent' }, { GROK_AGENT: '1' });
   assert(generic.login === 'grok' && generic.name === 'Grok', JSON.stringify(generic));
-  assert(generic.avatar_url.includes('xai-org'), generic.avatar_url);
+  assert(generic.avatar_url === '/grok_logo.svg', generic.avatar_url);
 });
 
 t('TDOC_AGENT_LOGIN is the last fallback before tdoc-agent', () => {
@@ -129,8 +129,29 @@ t('worker TDOC_LOGO_SVG matches assets/tdoc_logo.svg', () => {
   assert(m[1] === asset, 'worker SVG drifted from assets/tdoc_logo.svg');
 });
 
+t('worker GROK_LOGO_SVG matches assets/grok_logo.svg', () => {
+  const assetPath = path.join(__dirname, '..', 'assets', 'grok_logo.svg');
+  assert(fs.existsSync(assetPath), 'assets/grok_logo.svg missing');
+  const asset = fs.readFileSync(assetPath, 'utf8');
+  const m = src.match(/const GROK_LOGO_SVG = `([\s\S]*?)`;/);
+  assert(m, 'GROK_LOGO_SVG missing from worker.js');
+  assert(m[1] === asset, 'worker SVG drifted from assets/grok_logo.svg');
+  assert(!/<script[\s>]/i.test(asset), 'SVG must be inert');
+  assert(!/<image[\s>]/i.test(asset), 'embedded bitmap not allowed');
+  // The shell draws the same mark inline (agent-marks.jsx). One vendor logo,
+  // two renderers -- if the path data diverges, one of them is wrong.
+  const marks = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'agent-marks.jsx'), 'utf8');
+  for (const d of asset.match(/ d="([^"]+)"/g) || []) {
+    assert(marks.includes(d.trim()), 'agent-marks.jsx Grok path drifted from the asset');
+  }
+});
+
 t('logoForAgentLogin maps each product, Claude is not Anthropic', () => {
-  assert(logoForAgentLogin('grok').includes('xai-org'));
+  // xAI's published logomark. `github.com/xai-org.png` is the avatar of an org
+  // GitHub calls "SpaceXAI Org" and it is the SpaceX X -- every Grok reply on a
+  // doc was signed with another company's logo.
+  assert(logoForAgentLogin('grok') === '/grok_logo.svg');
+  assert(!logoForAgentLogin('grok').includes('xai-org'), 'never the SpaceXAI org avatar');
   assert(logoForAgentLogin('claude').includes('claude'));
   assert(!logoForAgentLogin('claude').includes('anthropic'));
   assert(logoForAgentLogin('codex').includes('openai'));
