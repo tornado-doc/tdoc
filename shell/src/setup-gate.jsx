@@ -552,6 +552,7 @@ export function SetupGate({ boot }) {
       {boot?.debug ? (
         <DebugBar
           record={record}
+          surface={step === 'doc' ? 'doc' : 'connect'}
           onState={async () => {
             setCopied(false); setCopyFailed(false);
             waitingSince.current = Date.now(); setElapsed(0);

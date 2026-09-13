@@ -5410,6 +5410,9 @@ export default {
               return id ? await loadOnboarding(env, id) : null;
             } catch { return null; }
           })(),
+          // The checklist lives here, so every state reads differently on this
+          // page -- it is the one surface that has a face for all six.
+          debug: await isDebugAccount(env, s),
           ...data,
         }),
       }), {

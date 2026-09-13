@@ -1025,6 +1025,7 @@ export function DocumentShell({ boot, config }) {
       {config.debug ? (
         <DebugBar
           record={onboardingRecord}
+          surface={config.isLanding ? 'landing' : 'document'}
           onState={async () => {
             const result = await getOnboarding().catch(() => null);
             setOnboardingRecord(result?.record || null);

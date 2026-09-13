@@ -580,6 +580,31 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
     'and neither host invents one');
 });
 
+t('a page offers only the states it can show', () => {
+  // All six everywhere made most of the bar noise: the landing page looks the
+  // same at every step of the journey, so five of its six buttons changed
+  // nothing a tester could see, and pressing one on a document meant guessing
+  // which of them that document reacts to. A button whose result you cannot
+  // read is worse than no button.
+  const states = (name) => {
+    const m = bar.match(new RegExp(`${name}: (\\[[^\\]]*\\]|DEBUG_STATES)`));
+    return m ? m[1] : null;
+  };
+  assert(states('landing') === '[]', 'the landing page is the same page at every step');
+  assert(states('connect') === "['new', 'started', 'connected']", 'the gate shows waiting and connected');
+  assert(states('doc') === "['connected', 'published']", 'the second ask shows waiting and published');
+  assert(states('document') === "['published', 'commented', 'revised']", 'a doc shows its row: comment, handoff, gone');
+  assert(states('hub') === 'DEBUG_STATES', 'and the checklist has a face for all six');
+  // Each surface says which one it is.
+  assert(gate.includes("surface={step === 'doc' ? 'doc' : 'connect'}"), 'the gate names its step');
+  assert(shell.includes("surface={config.isLanding ? 'landing' : 'document'}"), 'a document names itself');
+  assert(hub.includes('surface="hub"') && worker.includes('debug: await isDebugAccount(env, s),'),
+    'and the hub, where the checklist is');
+  // Whatever the page can show, the record's current value is always printed:
+  // "you are at revised, and these are the ones this page can show you".
+  assert(bar.includes('record: {recordName(record)}'), 'the current state is always named');
+});
+
 t('letting a tester in does not need Cloudflare credentials', () => {
   // The list lived only in KV, which can only be written by somebody holding
   // Cloudflare credentials -- so "let Julie test too" was a terminal session

@@ -15,6 +15,34 @@ import './debug-bar.css';
 
 export const DEBUG_STATES = ['new', 'started', 'connected', 'published', 'commented', 'revised'];
 
+// Which states a page can actually SHOW.
+//
+// The bar carried all six everywhere, which made most of it noise: the landing
+// page looks identical at every step of the journey, so five of its six
+// buttons changed nothing a tester could see, and pressing one on a document
+// meant guessing which of them that document would react to. A button that
+// does nothing visible here is worse than no button -- it is a test whose
+// result you cannot read.
+//
+// So each surface lists the states it has a face for, and shows only those.
+// The record's current value is always printed, whatever it is: "you are at
+// `revised`, and these are the ones this page can show you" is the useful
+// sentence.
+export const PAGE_STATES = {
+  // The gate's connect step: waiting for an agent, or connected. (`stuck` is a
+  // face too, but the clock draws it, not the record.)
+  connect: ['new', 'started', 'connected'],
+  // The gate's second ask: waiting for the doc, or published.
+  doc: ['connected', 'published'],
+  // The checklist has a row per step, so every state reads differently here.
+  hub: DEBUG_STATES,
+  // The row docked on a document: comment, handoff, or gone.
+  document: ['published', 'commented', 'revised'],
+  // The landing page is the same page at every step of the journey. Nothing to
+  // choose between -- only somewhere to start over.
+  landing: [],
+};
+
 // What a replay has to clear in this browser. Each of these is somebody saying
 // "not now" about a piece of the onboarding, and each of them silently removes
 // that piece from every later walk.
@@ -38,7 +66,8 @@ function postState(body) {
   }).catch(() => {});
 }
 
-export function DebugBar({ record, onState }) {
+export function DebugBar({ record, onState, surface = 'hub' }) {
+  const states = PAGE_STATES[surface] || DEBUG_STATES;
   const [busy, setBusy] = useState('');
   // Replay's first press, waiting for its second.
   const [armed, setArmed] = useState(false);
@@ -48,7 +77,7 @@ export function DebugBar({ record, onState }) {
   return (
     <div className="sg-debug" role="group" aria-label="Internal testing">
       <span className="sg-debug-tag">Internal</span>
-      {DEBUG_STATES.map((name) => (
+      {states.map((name) => (
         <button
           key={name}
           type="button"
