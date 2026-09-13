@@ -79,7 +79,7 @@ export function onboardingSteps(record, firstDocHref) {
 // ours was grey bars, which is why it read as a smudge and got deleted. These
 // carry the things this product is actually recognised by — the two agents'
 // own marks, the anchor highlight's yellow, a comment card, a v2 chip.
-function Thumb({ id }) {
+function Thumb({ id, title }) {
   if (id === 'connect') {
     // Two real marks in two white discs, the way Notion shows Gmail and
     // Outlook. A logo somebody already recognises does more work than any
@@ -87,42 +87,52 @@ function Thumb({ id }) {
     return (
       <span className="onb-thumb agents" aria-hidden="true">
         {/* Notion runs the app logos in a checklist thumbnail at about half
-            the thumbnail's height. This slot is 58px tall. */}
+            the thumbnail's height. This slot is 74px tall. */}
         <AgentMarks size={32} />
       </span>
     );
   }
+  // Their own doc's title, in the face the doc sets it in. A thumbnail of a
+  // page they have not written yet has to borrow one; once they have written
+  // it, it is theirs, and that is the difference between a picture of the
+  // product and a picture of their product.
+  const heading = title || 'What standups actually cost us';
   if (id === 'create') {
     // What this step actually produces is a line you paste into an agent, so
-    // the picture is that line, in the composer it goes into.
+    // the picture is that line, in the composer it goes into, on the page it
+    // makes.
     return (
       <span className="onb-thumb" aria-hidden="true">
-        <i className="t-line title w70" />
-        <i className="t-line w95" />
+        <i className="t-ver">v1</i>
+        <b className="t-title">{heading}</b>
         <i className="t-field"><em>Use tdoc to…</em></i>
       </span>
     );
   }
   if (id === 'comment') {
-    // A sentence marked in the anchor's yellow, and the card that opens beside
-    // it -- cropped by the edge, the way Notion lets its calendar run off.
+    // A sentence marked in the anchor's own yellow, and the card that opens
+    // beside it -- cropped by the edge, the way Notion lets its calendar run
+    // off. The card carries what a real one carries: who, and their first
+    // words.
     return (
       <span className="onb-thumb" aria-hidden="true">
-        <i className="t-line title short" />
-        <i className="t-mark w70" />
-        <i className="t-line w55" />
+        <b className="t-title">{heading}</b>
+        <p className="t-body"><mark>We ran a daily standup for three years</mark> and cancelled it in March.</p>
         <i className="t-card">
-          <b /><b className="s" />
+          <em>tdoc</em>
+          <span>Which claim would you defend least?</span>
         </i>
       </span>
     );
   }
+  // The chip a fixed thread carries, in the product's own words and its own
+  // green -- the same one the card shows when the agent has answered.
   return (
     <span className="onb-thumb" aria-hidden="true">
-      <i className="t-line title short" />
-      <i className="t-mark w55 pale" />
-      <i className="t-line w70" />
-      <i className="t-fixed"><Check size={9} strokeWidth={4} />fixed · v2</i>
+      <i className="t-ver">v2</i>
+      <b className="t-title">{heading}</b>
+      <p className="t-body one">Counted it properly: 61%.</p>
+      <i className="t-fixed"><Check size={9} strokeWidth={4} />Applied in v2</i>
     </span>
   );
 }
@@ -133,7 +143,8 @@ export function OnboardingChecklist({ record, docs }) {
   // Only link to the doc while it is still in their list: a seeded doc they
   // deleted would otherwise leave every row pointing at a 404.
   const first = record && record.first_doc;
-  const alive = Boolean(first && (docs || []).some((d) => d && d.slug === first));
+  const firstDoc = first ? (docs || []).find((d) => d && d.slug === first) : null;
+  const alive = Boolean(firstDoc);
   const href = alive ? `/d/${encodeURIComponent(first)}` : null;
   const steps = onboardingSteps(record, href);
   const done = steps.filter((s) => s.done).length;
@@ -193,7 +204,7 @@ export function OnboardingChecklist({ record, docs }) {
             <>
               <span className="onb-tick">{step.done ? <Check size={12} strokeWidth={3} /> : null}</span>
               <span className="onb-label">{step.label}</span>
-              <Thumb id={step.id} />
+              <Thumb id={step.id} title={firstDoc?.title} />
             </>
           );
           return (

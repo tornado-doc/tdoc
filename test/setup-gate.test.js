@@ -153,13 +153,22 @@ t('every thumbnail shows the thing its own step produces', () => {
   assert(marks, 'row 1: the agents\' own marks');
   assert(Number(marks[1]) >= 28, `row 1: the marks are Notion-sized, not ${marks[1]}px`);
   assert(list.includes('<em>Use tdoc to…</em>'), 'row 2: the line you paste');
-  assert(list.includes('className="t-mark w70"') && list.includes('className="t-card"'), 'row 3: a marked sentence and the card beside it');
-  assert(list.includes("fixed · v2"), 'row 4: the chip a fixed thread carries');
+  assert(list.includes('<mark>') && list.includes('className="t-card"'), 'row 3: a marked sentence and the card beside it');
+  assert(list.includes('Applied in v2'), 'row 4: the chip a fixed thread carries, in the product\'s own words');
+  // Real words, not grey bars. Bars are a wireframe of a document; a document
+  // scaled down is small text, which is why Notion's thumbnails are
+  // screenshots. Every string here is one the product itself says.
+  assert(list.includes('{heading}'), 'and the doc in them is their own doc');
+  assert(list.includes('firstDoc?.title'), 'by its real title');
+  assert(!listCss.includes('.t-line'), 'no grey bars standing in for text');
   // Two of them run off the right edge rather than sitting in a box inside a
   // box, which is how Notion lets its calendar and its templates crop.
-  assert(listCss.includes('right: -12px') && listCss.includes('right: -10px'), 'and two of them are cropped by the edge');
-  assert(listCss.includes('width: 92px; height: 58px;') && listCss.includes('grid-template-columns: 18px 1fr 92px;'),
+  assert(listCss.includes('right: -12px') && listCss.includes('right: -14px'), 'and two of them are cropped by the edge');
+  assert(listCss.includes('width: 118px; height: 74px;') && listCss.includes('grid-template-columns: 18px 1fr 118px;'),
     'the row reserves exactly what the thumbnail takes');
+  // A box that is not a whole number of its own lines cuts the last line
+  // through the middle of the letters, which reads as a fault, not a crop.
+  assert(listCss.includes('font: 700 8px/10px') && listCss.includes('height: 10px;'), 'every text box is whole lines');
 });
 
 t('the mark rides the bar', () => {
@@ -353,7 +362,7 @@ t('the doc step answers on arrival', () => {
 });
 
 t('a deleted seed doc does not leave rows pointing at a 404', () => {
-  assert(list.includes('(docs || []).some((d) => d && d.slug === first)'), 'the link is only offered while the doc is still there');
+  assert(list.includes('(docs || []).find((d) => d && d.slug === first)'), 'the link is only offered while the doc is still there');
   assert(hub.includes('docs={hub.docs}'), 'the hub hands its list over');
 });
 
@@ -385,7 +394,7 @@ t('the hint is a wayfinder, never a second copy of the line', () => {
 t('a row being watched stops being a button', () => {
   // "Waiting for your agent" that can be clicked invites a second paste.
   assert(hint.includes("const watching = !ticking && shown === 'handoff' && agentState !== 'idle';"), 'a copied line is a wait, not a task');
-  assert(hint.includes("{still\n        ? <span className=\"sh-row\">{body}</span>"), 'and neither a wait nor a tick is clickable');
+  assert(hint.includes('{still ? null : ('), 'and neither a wait nor a tick offers a button');
   // The card already says these. Said twice in two voices, a reader starts to
   // wonder whether they are two different waits.
   for (const line of ['Waiting for your agent…', 'Your agent is reading this', 'Still waiting — did you paste it into your agent?']) {
@@ -397,19 +406,27 @@ t('whatever owns the screen owns it', () => {
   // On a phone the comment drawer takes the screen, and the corner row was
   // staying mounted underneath: present to a screen reader, invisible to
   // everyone else.
-  assert(hint.includes('if (covered) return null;'), 'the row steps aside');
+  assert(/const showing = [^;]*!covered/.test(hint), 'the row steps aside');
   assert(shell.includes('hidden={narrow && drawerOpen}'), 'when the drawer has the phone');
 });
 
-t('the corner row is meant to be noticed', () => {
-  // White on a white page behind a hairline is a thing you find, not a thing
-  // you notice, and this row's whole job is to be noticed without covering
-  // anything. It takes the accent's tint and its own edge in the accent --
-  // the same blue the live row on My docs wears, because it is the same row.
-  assert(hintCss.includes('background: var(--td-accent-tint, #e8eeff);'), 'the tint');
-  assert(hintCss.includes('border: 1px solid rgb(22 82 240 / 22%);'), 'an edge that is not a hairline');
-  assert(hintCss.includes('box-shadow: 0 3px 14px rgb(22 82 240 / 16%)'), 'and a shadow with some weight');
-  assert(hintCss.includes('font: 600 13.5px/1.35'), 'the line reads at the weight of something being asked');
+t('the step is the first thing on the page, not the last', () => {
+  // It used to float in the bottom-left corner, which is where a page puts the
+  // things it does not mean: a toast, a cookie bar, a "copied" flash. Anything
+  // in that corner is ignorable by training, and it was being ignored -- on a
+  // page whose whole job was to teach one gesture. So it sits where a banner
+  // sits, first under the chrome and above the document.
+  assert(!hintCss.includes('position: fixed'), 'it is not floating in a corner');
+  assert(hintCss.includes('border-bottom: 1px solid rgb(22 82 240 / 14%);'), 'it is docked, with an edge below it');
+  assert(hintCss.includes('background: var(--td-accent-tint, #e8eeff);'), 'in the same blue the live row on My docs wears');
+  assert(/<OldVersionNotice[\s\S]*?showExitBanner[\s\S]*?<DocStepHint/.test(shell), 'above the document in the flow');
+  // A whole pill that happens to be clickable is not an invitation. A button
+  // shaped like the product's other buttons is -- and a number says "you are
+  // three of four through something" where an empty circle said "an unchecked
+  // box, maybe later".
+  assert(hint.includes('className="sh-go"') && hintCss.includes('.sh-go {'), 'the click target is a button');
+  assert(hint.includes('const STEP_NO = {') && hint.includes('className="sh-step"'), 'and the row says which step it is');
+  assert(hintCss.includes('font: 600 14px/1.3'), 'the line reads at the weight of something being asked');
 });
 
 t('a row that finishes ticks where it stands', () => {
@@ -419,9 +436,9 @@ t('a row that finishes ticks where it stands', () => {
   assert(hint.includes('const [finished, setFinished] = useState('), 'and it is held in state');
   // Read off the ref at render it would lose its name: the ref has already
   // moved on, and the row finishes as a bare "Done."
-  assert(hint.includes('{DONE_LINES[finished]}'), 'the struck row still says which row it was');
+  assert(hint.includes('DONE_LINES[finished]'), 'the struck row still says which row it was');
   assert(hintCss.includes('.sh-hint.ticked .sh-text { color: var(--td-muted, #6b6a66); text-decoration: line-through; }'), 'struck through');
-  assert(hintCss.includes('.sh-tick.on {'), 'with the tick filled in');
+  assert(/\.sh-tick \{[^}]*background: var\(--td-accent/.test(hintCss), 'with the tick filled in');
   // The last step produces no state change to tick on: v2 arriving navigates
   // this page to the new version, so the component watching is already gone.
   assert(hint.includes("useState(justFinished ? 'handoff' : null)"), 'so the arrival ticks it on the way in');
@@ -432,17 +449,18 @@ t('the banner and a pending row never share the page', () => {
   // Two voices with different news. The banner owns the top once the loop has
   // closed; a row mid-tick is the exception, because that is this page's own
   // answer to what just happened.
-  assert(hint.includes('if (banner && !ticking) return null;'), 'a pending row steps aside');
+  assert(/const showing = [^;]*ticking \|\| Boolean\(shown && !banner\)/.test(hint), 'a pending row steps aside');
   assert(shell.includes('banner={showExitBanner}'), 'and the shell tells it when the banner is up');
 });
 
-t('the gesture is spelled out, and drawn', () => {
+t('the gesture is spelled out', () => {
   // "Highlight a sentence" names it in the product's own vocabulary, which is
-  // no help to somebody who has not made a highlight yet.
+  // no help to somebody who has not made a highlight yet. The literal version
+  // says what to do with a mouse and what will happen when they do.
   assert(hint.includes("comment: 'Select any sentence to comment on it.'"), 'the literal gesture, and what it produces');
-  assert(hint.includes("shown === 'comment' ? <span className=\"sh-thumb\""), 'only the row nobody has done carries a picture of it');
-  assert(hintCss.includes('.sh-mark {') && hintCss.includes('#fff7d0'), 'a sentence marked in the anchor colour');
-  assert(hintCss.includes('.sh-card {') && hintCss.includes('border: 1.5px solid var(--td-accent'), 'and the box that opens when you mark one');
+  // One label for both rows, because it is one behaviour: open the card that
+  // carries the next thing. A button naming its destination would name two.
+  assert(hint.includes("const GO = 'Show me';"), 'and one way in');
 });
 
 t('the document frame has a name, not a tooltip', () => {
@@ -453,8 +471,15 @@ t('the document frame has a name, not a tooltip', () => {
 });
 
 t('the hint keeps out of the way of everything else on the doc', () => {
-  assert(hintCss.includes('.sh-hint.lifted { bottom: 83px; }'), 'it rides up when the footer slides in');
-  assert(shell.includes('lifted={Boolean(bridge.layout.footerVisible)}'), 'and the shell tells it when');
+  // In flow, so it pushes the document down rather than covering a word of it
+  // -- and every comment card is placed from the top of that document, so the
+  // overlay has to be told the bar took its height. One number, exported, or
+  // the whole margin sits 48px off.
+  assert(hint.includes('export const STEP_HINT_HEIGHT = 48;'), 'the height has one home');
+  assert(hintCss.includes('height: 48px;'), 'and the stylesheet agrees with it');
+  assert(shell.includes('(hintBar ? STEP_HINT_HEIGHT : 0)'), 'the overlay counts it');
+  assert(hint.includes('onVisible(showing)') && shell.includes('onVisible={setHintBar}'),
+    'and only the row itself knows whether it drew');
   assert(/editor\.mode === 'edit' \? null : \(\s*<DocStepHint/.test(shell), 'it is gone while the doc is being written');
   const small = (hintCss.match(/font[^;]*?(\d+(?:\.\d+)?)px/g) || [])
     .map((m) => Number((m.match(/(\d+(?:\.\d+)?)px/) || [])[1]))

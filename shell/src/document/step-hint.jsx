@@ -4,15 +4,13 @@ import './step-hint.css';
 
 // The doc-page half of the onboarding checklist. Same object as the card on My
 // docs, reduced to the one row that belongs to this doc: four rows and a bar
-// there, here the single row you are standing on. The empty tick is what makes
-// that legible without a word of explanation -- it is the glyph the checklist's
-// unfinished rows already use, so a line floating in the corner reads as a
-// to-do and not as a tip.
+// there, here the single row you are standing on, carrying its own number so
+// the two agree about where you are.
 //
 // It is a wayfinder, never a second affordance. Everything it names is already
 // on this page: the seeded comment asks for the highlight, and the card
 // carries the line for the agent. So the hint says which one is yours now and
-// opens it. Putting a copy of that line down here would be the same line on
+// opens it. Putting a copy of that line up here would be the same line on
 // screen twice, and the two would drift.
 //
 // Dismissal is this browser's, like the checklist's collapse: somebody who
@@ -60,9 +58,21 @@ const DONE_LINES = {
   comment: 'Commented.',
   handoff: 'Your agent published v2.',
 };
+// The checklist's row numbers. The card on My docs counts four; a row down
+// here that did not say which of the four it was made the two look like two
+// different lists.
+const STEP_NO = { comment: 3, handoff: 4 };
+// One label for both rows, because it is one behaviour: open the card that
+// carries the next thing. A button that named the destination would have to
+// name two.
+const GO = 'Show me';
 const TICK_MS = 2400;
+// The bar's own height, in one place: the overlay positions every comment card
+// from the top of the document, so a number that drifts from step-hint.css
+// moves every card on the page by the difference.
+export const STEP_HINT_HEIGHT = 48;
 
-export function DocStepHint({ step, agentState = 'idle', lifted = false, banner = false, justFinished = false, hidden: covered = false, onGo }) {
+export function DocStepHint({ step, agentState = 'idle', banner = false, justFinished = false, hidden: covered = false, onGo, onVisible }) {
   const [gone, setGone] = useState(hidden);
   // A row that is finished while somebody is looking at the page ticks where
   // it stands before it goes. Doing the thing and watching the to-do vanish is
@@ -98,47 +108,43 @@ export function DocStepHint({ step, agentState = 'idle', lifted = false, banner 
   }, [step]);
   const ticking = Boolean(finished);
 
-  if (gone) return null;
-  // On a phone the comment drawer takes the screen, and this row was staying
-  // mounted underneath it: present to a screen reader, invisible to everyone
-  // else. Whatever owns the screen owns it.
-  if (covered) return null;
-  // The banner owns the top of the page once the loop has closed, so a pending
-  // row underneath it would be a second voice with older news. A row in the
-  // middle of ticking is the exception: that is this page's own answer.
-  if (banner && !ticking) return null;
-  if (!shown && !ticking) return null;
+  // Whether any of the below will draw. The comment cards are positioned from
+  // the top of the document, so the overlay has to know that a bar took 48px
+  // of it -- and only this component knows whether it drew.
+  const showing = !gone && !covered && (ticking || Boolean(shown && !banner));
+  useEffect(() => { if (onVisible) onVisible(showing); }, [showing, onVisible]);
+
+  if (!showing) return null;
   // Once the line has been copied the row stops being something to do and
-  // becomes something to watch, so it stops being a button.
+  // becomes something to watch, so it stops offering a button.
   const watching = !ticking && shown === 'handoff' && agentState !== 'idle';
   const key = watching ? (LINES[agentState] ? agentState : 'waiting') : shown;
-  const body = ticking ? (
-    <>
-      <span className="sh-tick on" aria-hidden="true"><Check size={11} strokeWidth={3.5} /></span>
-      <span className="sh-text">{DONE_LINES[finished]}</span>
-    </>
-  ) : (
-    <>
-      {watching
-        ? <span className="tdoc-wait-dot" aria-hidden="true" />
-        : <span className="sh-tick" aria-hidden="true" />}
-      <span className="sh-text">{LINES[key]}</span>
-      {/* Only the row nobody knows how to do carries a picture of it: a
-          sentence marked, and the box that opens when you mark one. */}
-      {shown === 'comment' ? <span className="sh-thumb" aria-hidden="true"><i className="sh-mark" /><i className="sh-card" /></span> : null}
-    </>
-  );
   const still = ticking || watching;
   return (
-    <div className={`sh-hint${lifted ? ' lifted' : ''}${ticking ? ' ticked' : ''}`} role={still ? 'status' : undefined} aria-live={still ? 'polite' : undefined}>
-      {still
-        ? <span className="sh-row">{body}</span>
-        : <button type="button" className="sh-row" onClick={onGo}>{body}</button>}
-      {ticking ? null : (
-        <button type="button" className="sh-x" aria-label="Hide" onClick={() => { setGone(true); rememberHidden(); }}>
-          <X size={14} />
-        </button>
-      )}
+    <div
+      className={`sh-hint${ticking ? ' ticked' : ''}`}
+      role={still ? 'status' : undefined}
+      aria-live={still ? 'polite' : undefined}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <div className="sh-inner">
+        {ticking ? (
+          <span className="sh-tick" aria-hidden="true"><Check size={13} strokeWidth={3.5} /></span>
+        ) : watching ? (
+          <span className="tdoc-wait-dot" aria-hidden="true" />
+        ) : (
+          <span className="sh-step" aria-hidden="true">{STEP_NO[shown]}</span>
+        )}
+        <span className="sh-text">{ticking ? DONE_LINES[finished] : LINES[key]}</span>
+        {still ? null : (
+          <>
+            <button type="button" className="sh-go" onClick={onGo}>{GO}</button>
+            <button type="button" className="sh-x" aria-label="Hide" onClick={() => { setGone(true); rememberHidden(); }}>
+              <X size={15} />
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

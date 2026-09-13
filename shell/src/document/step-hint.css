@@ -1,99 +1,126 @@
-/* The floating row. Everything here is borrowed on purpose: the tick is the
-   checklist's own 18px circle, the pill is the collapsed chip's shape, and the
-   waiting dot is the handoff card's. A reader should recognise the object, not
-   meet a new one. */
+/* The step you are standing on, docked under the top bar.
+
+   It used to float in the bottom-left corner, which is where a page puts the
+   things it does not mean: a toast, a cookie bar, a "copied" flash. Everything
+   in that corner is ignorable by training, and this row was being ignored --
+   on a page whose whole job was to teach one gesture, the instruction was the
+   last thing in the reading path and the first thing dismissed.
+
+   So it sits where a banner sits: first thing under the chrome, above the
+   document, in flow -- it pushes the page down rather than covering a word of
+   it. Three things give it the weight it was missing: a numbered disc instead
+   of an empty tick (a number says "you are three of four through something";
+   an empty circle says "an unchecked box, maybe later"), a real filled button
+   instead of a pill that happened to be clickable, and the width of the text
+   column under it, so it reads as belonging to the document rather than
+   hovering over it. */
 .sh-hint {
   box-sizing: border-box;
-  position: fixed;
-  left: 20px;
-  bottom: 20px;
-  z-index: 5;
+  position: relative;
+  z-index: 4;
   display: flex;
   align-items: center;
-  gap: 2px;
-  max-width: min(410px, calc(100vw - 40px));
-  padding: 8px 8px 8px 14px;
-  /* White on a white page with a hairline round it is a thing you find, not a
-     thing you notice, and this row's whole job is to be noticed without
-     covering anything. So it takes the accent's tint, its own edge in the
-     accent, and a shadow with some weight -- the same blue the live row on My
-     docs uses, because it is the same row. */
-  border: 1px solid rgb(22 82 240 / 22%);
-  border-radius: 13px;
-  background: var(--td-accent-tint, #e8eeff);
-  box-shadow: 0 3px 14px rgb(22 82 240 / 16%), 0 10px 34px rgb(26 26 26 / 8%);
-  /* The footer slides up over the bottom of the page at the end of a doc.
-     Riding up with it keeps both readable instead of stacking them. */
-  transition: bottom .18s ease;
-}
-.sh-hint.lifted { bottom: 83px; }
-
-.sh-row {
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
+  justify-content: center;
   gap: 10px;
-  min-width: 0;
-  padding: 6px 4px 6px 0;
-  border: 0;
-  background: none;
-  font: 600 13.5px/1.35 -apple-system, system-ui, sans-serif;
-  color: var(--td-ink, #1a1a1a);
-  text-align: left;
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  background: var(--td-accent-tint, #e8eeff);
+  border-bottom: 1px solid rgb(22 82 240 / 14%);
 }
-button.sh-row { cursor: pointer; }
-button.sh-row:hover .sh-text { text-decoration: underline; }
 
-/* Both leading glyphs occupy the same 18px box, so the sentence does not move
-   when a row stops being something to do and becomes something to watch. */
-.sh-tick, .sh-row .tdoc-wait-dot {
+/* The bar spans the window; what is on it spans the text column. A sentence
+   beginning at the window's left edge belongs to the application -- one
+   beginning where the document begins belongs to the document. */
+.sh-inner {
   box-sizing: border-box;
-  flex: 0 0 18px;
-  width: 18px; height: 18px;
-  margin: 0 auto;
-  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 780px;
+  min-width: 0;
 }
-.sh-tick { border: 1.5px solid rgb(22 82 240 / 40%); background: #fff; }
-.sh-tick.on {
+
+/* The step's own number. Filled, because this is the one that is happening:
+   the checklist's hollow circles are the ones that are not. */
+.sh-step {
+  box-sizing: border-box;
+  flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--td-accent, #1652f0);
+  color: #fff;
+  font: 700 13px/1 -apple-system, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
-.sh-hint.ticked .sh-text { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
+/* Waiting is not a step you can take, so the number becomes the card's own
+   pulse and the button goes away. Same box either way, so the sentence does
+   not move when the row stops being something to do. */
+.sh-hint .tdoc-wait-dot {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 24px; height: 24px;
+  border: 7px solid transparent;
+  border-radius: 50%;
+  background-clip: content-box;
+}
 
-/* The gesture, drawn: a sentence marked, and the box that opens when you mark
-   one. Same two materials the checklist row uses, at the size this pill has
-   room for. Only on the row nobody has done before. */
-.sh-thumb {
-  box-sizing: border-box; position: relative; flex: 0 0 auto;
-  width: 42px; height: 26px; margin-left: 2px;
-  border: 1px solid var(--td-line, #e8e7e3); border-radius: 5px;
-  background: #fff;
+.sh-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 14px/1.3 -apple-system, system-ui, sans-serif;
+  color: var(--td-ink, #1a1a1a);
+  letter-spacing: -0.01em;
 }
-.sh-thumb i { position: absolute; display: block; }
-.sh-mark {
-  left: 5px; top: 8px; width: 20px; height: 5px; border-radius: 1px;
-  background: #fff7d0; box-shadow: inset 0 -2px 0 #e8c54a;
-}
-.sh-card {
-  right: 4px; top: 5px; width: 13px; height: 15px; border-radius: 3px;
-  border: 1.5px solid var(--td-accent, #1652f0); background: #fff;
-}
-.sh-row .tdoc-wait-dot { border: 5px solid transparent; background-clip: content-box; }
 
-.sh-text { min-width: 0; }
+/* The click target, and the thing that was missing. A whole pill that happens
+   to be a button is not an invitation; a button shaped like the product's
+   other buttons is. */
+.sh-go {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 15px;
+  border: 0; border-radius: 999px;
+  background: var(--td-accent, #1652f0);
+  color: #fff;
+  cursor: pointer;
+  font: 600 13px -apple-system, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  transition: background .12s, transform .12s;
+}
+.sh-go:hover { background: #0f3fc4; }
+.sh-go:active { transform: scale(.97); }
 
 .sh-x {
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px;
-  padding: 0; border: 0; border-radius: 7px;
+  width: 28px; height: 28px;
+  padding: 0; border: 0; border-radius: 8px;
   background: none; color: rgb(22 82 240 / 55%); cursor: pointer;
 }
 .sh-x:hover { background: rgb(22 82 240 / 10%); color: var(--td-ink, #1a1a1a); }
 
-/* On a narrow screen the margin comments fold under the text and the corner
-   stops being empty, so the row spans the width instead of floating in it. */
+/* Finished, for as long as it takes to see it. */
+.sh-tick {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid var(--td-accent, #1652f0);
+  background: var(--td-accent, #1652f0);
+  color: #fff;
+}
+.sh-hint.ticked .sh-text { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
+
 @media (max-width: 720px) {
-  .sh-hint { left: 12px; right: 12px; bottom: 12px; max-width: none; }
-  .sh-hint.lifted { bottom: 75px; }
+  .sh-hint { height: 46px; padding: 0 10px; gap: 8px; }
+  .sh-inner { gap: 9px; }
+  .sh-text { font-size: 13.5px; }
+  .sh-go { padding: 0 12px; }
 }

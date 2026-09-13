@@ -46,7 +46,7 @@ import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
-import { DocStepHint, docStep } from './document/step-hint.jsx';
+import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -744,6 +744,8 @@ export function DocumentShell({ boot, config }) {
   // Copied in this session: the banner stays, as the confirmation, so the
   // frame does not jump and the pins and the open card stay where they are.
   const [sharedNow, setSharedNow] = useState(false);
+  // Set by the hint itself -- only it knows whether it drew.
+  const [hintBar, setHintBar] = useState(false);
   const showExitBanner = Boolean(
     handoffEnabled && Number(config.version) >= 2
     && onboardingRecord && onboardingRecord.started && (!onboardingRecord.shared || sharedNow),
@@ -796,7 +798,11 @@ export function DocumentShell({ boot, config }) {
     postOnboardingEvent('share_link_copied', config.slug).catch(() => {});
   };
 
-  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? 36 : 0) + (editor.mode === 'edit' ? 46 : 0);
+  // Every comment card and pin is placed from the top of the document, so
+  // anything docked above it moves all of them. STEP_HINT_HEIGHT is the bar's
+  // own height in step-hint.css.
+  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? 36 : 0)
+    + (hintBar ? STEP_HINT_HEIGHT : 0) + (editor.mode === 'edit' ? 46 : 0);
   const pinLeft = Math.min(
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
     window.innerWidth - 34,
@@ -931,6 +937,20 @@ export function DocumentShell({ boot, config }) {
         </div>
       ) : null}
 
+      {/* Under the chrome, over the document, in flow: the step pushes the page
+          down rather than floating in the corner the eye reaches last. */}
+      {editor.mode === 'edit' ? null : (
+        <DocStepHint
+          step={hintStep}
+          agentState={handoff.state}
+          banner={showExitBanner}
+          hidden={narrow && drawerOpen}
+          justFinished={arrival === 'revised'}
+          onGo={() => goToStep()}
+          onVisible={setHintBar}
+        />
+      )}
+
       {editor.mode === 'edit' ? (
         <EditorToolbar
           dirty={editor.dirty}
@@ -963,18 +983,6 @@ export function DocumentShell({ boot, config }) {
       />
 
       <DocumentFooter visible={bridge.layout.footerVisible} />
-
-      {editor.mode === 'edit' ? null : (
-        <DocStepHint
-          step={hintStep}
-          agentState={handoff.state}
-          lifted={Boolean(bridge.layout.footerVisible)}
-          banner={showExitBanner}
-          hidden={narrow && drawerOpen}
-          justFinished={arrival === 'revised'}
-          onGo={() => goToStep()}
-        />
-      )}
 
       {narrow ? (
         <MobileCommentDrawer
