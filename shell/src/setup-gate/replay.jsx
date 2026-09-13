@@ -198,8 +198,8 @@ function Working({ t }) {
   );
 }
 
-function Window({ t, prompt }) {
-  const open = phase(t, T.windowIn);
+function Window({ t, prompt, fade }) {
+  const open = phase(t, T.windowIn) * fade;
   const pasted = phase(t, T.paste);
   const sent = after(t, T.send);
   // Lines arrive one after another across the CLI window, the way they arrive
@@ -290,14 +290,17 @@ export function ConnectReplay({ prompt }) {
     && window.matchMedia
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const t = useClock(!reduced);
+  // The desk and the dock never fade -- only the window does, so the loop
+  // reads as somebody closing it and starting over rather than as the screen
+  // being switched off and on.
   const fade = 1 - phase(t, T.fade);
   const cam = camera(t);
   return (
     <div className="rp-view" aria-hidden="true">
       <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
-      <div className="rp-canvas" style={{ opacity: fade }}>
+      <div className="rp-canvas">
         <div className="rp-menubar"><span className="rp-mb-app">ChatGPT</span><span className="rp-sp" /><span>Fri 2:59 AM</span></div>
-        <Window t={t} prompt={prompt} />
+        <Window t={t} prompt={prompt} fade={fade} />
         <ApprovalSheet t={t} />
         <Dock t={t} />
         <Cursor t={t} />
