@@ -60,9 +60,14 @@ export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${D
 // page and false here: by the time anyone reads this screen the skill is
 // installed and the account is connected. Same recipe, without the preamble.
 export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;
+// The question on this screen is "what is this doc about", so both labels
+// answer it in the same shape, and the difference between them is the last
+// word. "I know what it's about" described the reader's state of mind rather
+// than the doc, and "the one about me" pointed at something with a pronoun
+// nobody had introduced -- which one? -- so neither could be read at a glance.
 export const DOC_CHOICES = [
-  { id: 'own', label: 'I know what it’s about', sub: 'Name the subject. Your agent writes it.' },
-  { id: 'portrait', label: 'Make the one about me', sub: 'Built from the traces you choose to share.' },
+  { id: 'own', label: 'Write about a topic', sub: 'Name it. Your agent writes and publishes it.' },
+  { id: 'portrait', label: 'Write about me', sub: 'Built from the traces you choose to share.' },
 ];
 // Kept as the export it always was: the placeholder line still answers "what
 // do I paste" for anyone who lands here with no choice made.
