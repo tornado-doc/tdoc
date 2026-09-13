@@ -43,7 +43,10 @@
    downward. */
 .sg-mid {
   flex: 1 1 auto; display: flex; align-items: flex-start; justify-content: center;
-  padding-top: clamp(48px, 16vh, 132px);
+  /* The step number added a row above everything, which on a laptop-height
+     window pushed the one button on the screen past the bottom of it. The
+     column hangs from a fixed top, so the top is where the room comes from. */
+  padding-top: clamp(28px, 11vh, 108px);
 }
 .sg-col { width: 100%; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 
@@ -51,7 +54,7 @@
    on My docs, so the two read as one list. */
 .sg-eyebrow {
   display: flex; align-items: center; gap: 9px;
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   font: 600 13px -apple-system, system-ui, sans-serif;
   letter-spacing: -0.005em; color: var(--td-muted, #6b6a66);
 }

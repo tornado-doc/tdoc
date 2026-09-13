@@ -60,6 +60,13 @@ const after = (t, [from]) => t >= from;
 // on the doc step that is the line itself, so every keystroke on the left
 // starts the typing on the right again rather than joining it halfway.
 function useClock(running, total, restart) {
+  // `total` is required and has no default on purpose. A clock with no length
+  // is not a slow clock, it is a stopped one: `% undefined` is NaN, every
+  // derived style becomes `scale(NaN)` / `opacity: NaN`, the browser drops
+  // them, and the scene holds whatever it rendered at t=0 for ever -- which is
+  // exactly what step 1 did after the doc step taught this hook to take a
+  // length and its own caller was not updated. A default would have hidden
+  // that; setup-gate.test.js pins both call sites instead.
   const [t, setT] = useState(0);
   const frame = useRef(0);
   useEffect(() => {
@@ -293,7 +300,7 @@ export function ConnectReplay({ prompt }) {
   const reduced = typeof window !== 'undefined'
     && window.matchMedia
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const t = useClock(!reduced);
+  const t = useClock(!reduced, REPLAY_MS);
   // The desk and the dock never fade -- only the window does, so the loop
   // reads as somebody closing it and starting over rather than as the screen
   // being switched off and on.

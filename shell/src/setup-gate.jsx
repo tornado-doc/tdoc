@@ -448,7 +448,10 @@ export function SetupGate({ boot }) {
                     <span className="sg-sr">What the doc is about</span>
                     <input
                       ref={subjectRef}
+                      id="sg-subject"
+                      name="subject"
                       type="text"
+                      autoComplete="off"
                       value={subject}
                       placeholder={DOC_SUBJECT_PLACEHOLDER}
                       onChange={(event) => { setSubject(event.target.value); setCopied(false); }}

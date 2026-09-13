@@ -236,8 +236,14 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   // line for handing their answer to an agent above a Reply button they had not
   // pressed. Without the last, every comment the owner ever wrote on every doc
   // they own carried it -- a teaching aid that never stopped teaching.
-  assert(shell.includes('const handoffOnPage = handoffEnabled && ownerCommented && onboardingDoc;'),
+  assert(shell.includes('const tutorialOpen = onboardingDoc && !onboardingRecord?.revised;')
+    && shell.includes('const handoffOnPage = handoffEnabled && ownerCommented && tutorialOpen;'),
     'after the owner has commented, on the latest version, and only while the tutorial is open');
+  // The loop closing is what ends the tutorial. Ending it on `shared` instead
+  // left the box on their comment for ever on any doc that never reached v2:
+  // the banner that asks for the share link only renders from v2, so nothing
+  // ever stamped `shared`.
+  assert(!/handoffOnPage = [^;]*onboardingDoc;/.test(shell), 'not until they happen to copy a share link');
   assert(shell.includes('handoff={handoffOnPage ? { threadId: myThread.id,'), 'the card that carries it is named');
   assert(card.includes('handoff && handoff.threadId === comment.id'),
     'and no other card draws it, however many the layer hands it to');

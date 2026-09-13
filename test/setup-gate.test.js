@@ -33,6 +33,7 @@ function lift(src, name) {
 
 const gate = read('shell/src/setup-gate.jsx');
 const gateCss = read('shell/src/setup-gate.css');
+const replay = read('shell/src/setup-gate/replay.jsx');
 const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
 const hub = read('shell/src/docs-hub.jsx');
 const shell = read('shell/src/document-shell.jsx');
@@ -566,6 +567,25 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
   assert(worker.includes('the token lives'), 'and says out loud that the credential is untouched');
   assert(worker.includes('const doc = firstDoc || null;') && server.includes('const doc = firstDoc || null;'),
     'and neither host invents one');
+});
+
+t('every replay is wound up before it is started', () => {
+  // A clock with no length is a stopped clock: `% undefined` is NaN, every
+  // style derived from it is dropped by the browser as invalid, and the scene
+  // holds its t=0 frame for ever. Step 1 shipped like that for exactly as long
+  // as it took to run the journey by hand -- an empty desk with an approval
+  // card floating on it -- because the hook grew a `total` for the doc step and
+  // this call site was not updated. Neither the hook nor a default can catch
+  // that; only counting the call sites can.
+  const calls = replay.match(/useClock\([^)]*\)/g) || [];
+  assert(calls.length >= 2, `expected a clock per scene, found ${calls.length}`);
+  for (const call of calls) {
+    if (call.startsWith('useClock(running')) continue;
+    assert(call.split(',').length >= 2, `${call} starts a clock with no length`);
+  }
+  assert(replay.includes('useClock(!reduced, REPLAY_MS)'), 'the connect replay runs for REPLAY_MS');
+  assert(replay.includes('useClock(!reduced, s.total, line)'),
+    'and the doc replay for as long as its own line takes, restarting on every keystroke');
 });
 
 t('nothing in the column a person reads is smaller than 12.5px', () => {

@@ -785,7 +785,14 @@ export function DocumentShell({ boot, config }) {
   // with the loop still open. Without that last one every comment the owner
   // ever wrote, on every doc they own, carried a copyable instruction for an
   // agent -- a teaching aid that never stopped teaching.
-  const handoffOnPage = handoffEnabled && ownerCommented && onboardingDoc;
+  // `!revised`, not just `onboardingDoc`. The loop closing is what ends the
+  // tutorial -- it is what `docStep` reads to stop drawing the row, and what
+  // empties the checklist. `onboardingDoc` ends on `shared` instead, which is
+  // stamped by copying the exit link, and the exit banner that asks for that
+  // only renders from v2: on a doc that never reached v2 nothing ever stamped
+  // it, so the box sat on their comment for ever with no tutorial around it.
+  const tutorialOpen = onboardingDoc && !onboardingRecord?.revised;
+  const handoffOnPage = handoffEnabled && ownerCommented && tutorialOpen;
   // The one row of the checklist that belongs to this doc. It names something
   // already on the page, so going there is opening the card that carries it:
   // the seeded comment asks for the highlight, and their own card carries the
