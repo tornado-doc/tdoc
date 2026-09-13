@@ -180,6 +180,34 @@ t('the second ask is the same ask, on the same route', () => {
   assert(gate.includes('export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;'), 'the doc line is the skill\'s own, reused not rewritten');
 });
 
+t('opening the gate is beginning, whatever the browser reports', () => {
+  // `started` was stamped by the page, and only when somebody pressed Copy. A
+  // person who selected the line and hit cmd-C connected their agent,
+  // published, and then found no checklist on My docs at all -- it renders on
+  // `started`. The door is the honest signal, and the server is standing in it.
+  assert(/const who = await sessionAccountId\(env, session\);\s*\n\s*if \(who\) await stampOnboardingFor\(env, who, 'started'\);/.test(worker),
+    'a signed-in visit to /setup starts the journey');
+  assert(list.includes('if (!record || !record.started'), 'which is what the card renders on');
+  // And no further: a CLI-first publisher who never loads this page must not
+  // start, or tdoc's question lands on the first doc of somebody who never
+  // asked to be onboarded.
+  assert(worker.includes("if (!(record && record.started && !record.seeded_comment)) return;"), 'the seeded question still waits for a journey');
+  assert(!/if \(step && step !== 'started'/.test(worker), 'and no step quietly implies one');
+});
+
+t('the wait is timed from the page, not from a button', () => {
+  // The page cannot see a paste, and cannot see a selection copied by hand
+  // either. Timing the doctor line from a click meant the one person most
+  // likely to be stuck -- the one who never pressed Copy -- was the one it
+  // never appeared for.
+  assert(gate.includes('const waitingSince = useRef(null);') && !gate.includes('copiedAt'), 'the clock is the page\'s');
+  assert(gate.includes("if (loaded && signedIn && state !== 'done' && !waitingSince.current) waitingSince.current = Date.now();"),
+    'and it starts when the waiting does');
+  assert(gate.includes('if (waitingSince.current) setElapsed(Date.now() - waitingSince.current);'), 'the poll reads it');
+  assert(!/copied \? \(step === 'doc'/.test(gate) && !gate.includes("'Waiting for you to paste the prompt.'"),
+    'and the status stops claiming to know whether they pasted');
+});
+
 t('the second ask is the one place with a choice in it', () => {
   // Marching everybody through the same portrait is what made the old version
   // feel like a kidnapping to anyone who already knew what they wanted.

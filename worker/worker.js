@@ -5167,6 +5167,17 @@ export default {
           headers: { Location: `/api/auth/oidc/login?return=${encodeURIComponent(here)}` },
         });
       }
+      // Opening the gate is beginning. `started` used to be stamped by the page
+      // and only when somebody pressed Copy, so anyone who selected the line
+      // and hit cmd-C connected their agent and then found no checklist on My
+      // docs at all -- the card renders on `started`. The door is the honest
+      // signal, and the server is standing in it. A CLI-first publisher who
+      // never loads this page still never starts, which is what keeps tdoc's
+      // seeded question off the doc of somebody who did not ask to be onboarded.
+      try {
+        const who = await sessionAccountId(env, session);
+        if (who) await stampOnboardingFor(env, who, 'started');
+      } catch {}
       const nonce = rand(16);
       return html(SHELL.appHtml({
         // Neutral for the doc step: the server cannot know whether this is

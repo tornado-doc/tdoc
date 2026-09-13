@@ -268,7 +268,7 @@ export function SetupGate({ boot }) {
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
   const [busyState, setBusyState] = useState('');
-  const copiedAt = useRef(null);
+  const waitingSince = useRef(null);
   const stamped = useRef(false);
 
   // `paired` -- has this account ever connected a terminal -- is precisely the
@@ -318,6 +318,9 @@ export function SetupGate({ boot }) {
   // bare here was the coldest arrival in the whole journey: the one moment
   // somebody has just made a thing and is most ready to be handed the next
   // move, and the page said nothing.
+  // The clock starts when this page starts waiting, not when somebody presses
+  // a button. It is the same wait either way.
+  if (loaded && signedIn && state !== 'done' && !waitingSince.current) waitingSince.current = Date.now();
   const onward = step === 'doc' && ownDoc
     ? `/d/${encodeURIComponent(ownDoc)}?step=comment`
     : '/me';
@@ -352,7 +355,11 @@ export function SetupGate({ boot }) {
       } catch {}
       if (!cancelled) setLoaded(true);
       if (cancelled) return;
-      if (copiedAt.current) setElapsed(Date.now() - copiedAt.current);
+      // The wait is timed from when this page started waiting, not from a
+      // click on Copy. Somebody who selects the line and hits cmd-C is waiting
+      // exactly as much as somebody who pressed the button, and used to be
+      // told nothing at all when it went wrong.
+      if (waitingSince.current) setElapsed(Date.now() - waitingSince.current);
       timer = window.setTimeout(tick, POLL_MS);
     };
     tick();
@@ -372,7 +379,6 @@ export function SetupGate({ boot }) {
     setCopied(ok !== false);
     setCopyFailed(ok === false);
     if (ok === false) selectContents(promptRef.current);
-    copiedAt.current = Date.now();
     if (!stamped.current) { stamped.current = true; postOnboardingEvent('door_own_agent').catch(() => {}); }
     postOnboardingEvent('copy_clicked').catch(() => {});
   };
@@ -475,9 +481,12 @@ export function SetupGate({ boot }) {
                   {state === 'waiting' && !(step === 'doc' && !choice) ? (
                     <div className="sg-status">
                       <span className="sg-spin" aria-hidden="true" />
+                      {/* Not "waiting for you to paste": the page cannot see a
+                          paste, and it cannot see a selection copied by hand
+                          either. What it can say is what it is doing. */}
                       {copyFailed ? COPY_FALLBACK
-                        : copied ? (step === 'doc' && elapsed > STUCK_MS ? NOTHING_YET : 'Waiting for your agent.')
-                          : 'Waiting for you to paste the prompt.'}
+                        : step === 'doc' && elapsed > STUCK_MS ? NOTHING_YET
+                          : 'Waiting for your agent.'}
                     </div>
                   ) : null}
                   {state === 'stuck' ? (
@@ -537,7 +546,7 @@ export function SetupGate({ boot }) {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ state: name }),
                 }).catch(() => {});
-                setCopied(false); setCopyFailed(false); copiedAt.current = null; setElapsed(0);
+                setCopied(false); setCopyFailed(false); waitingSince.current = Date.now(); setElapsed(0);
                 const result = await getOnboarding().catch(() => null);
                 setRecord(result?.record || {});
                 setBusyState('');
