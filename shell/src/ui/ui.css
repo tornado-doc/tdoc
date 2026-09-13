@@ -355,17 +355,28 @@ button.tdoc-pin {
   max-width: 320px;
   white-space: normal;
 }
-.ui-menu-item.mk-item > svg { flex: 0 0 auto; margin-top: 1px; color: var(--td-ink); opacity: .75; }
+/* One slot, wide enough for the wider of the two glyphs, so both titles start
+   at the same x. A pen is 17px and a pair of marks is 35; left to themselves
+   the two rows begin in different places. */
+.ui-menu-item.mk-item > svg,
+.ui-menu-item.mk-item > .mk-agents {
+  flex: 0 0 35px;
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 1px;
+}
+.ui-menu-item.mk-item > svg { color: var(--td-ink); opacity: .75; }
 .ui-menu-item.mk-item > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ui-menu-item.mk-item b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
 .ui-menu-item.mk-item em {
   font-style: normal; font-size: 12.5px; line-height: 1.45;
   color: var(--td-ink-soft, #6b6b73);
 }
-/* Four product names set as a list was the longest thing in the old dialog.
-   Two marks say the same and read in a glance. */
-.ui-menu-item.mk-item .mk-works { display: flex; align-items: center; gap: 6px; margin: 3px 0 0 auto; align-self: center; opacity: .85; }
-.ui-menu-item.mk-item .mk-works svg { display: block; }
+/* The agents' own marks, standing where the icon goes. Four product names set
+   as a list was the longest thing in the old dialog; two marks say the same,
+   read in a glance, and are the only thing on this row that identifies
+   anything -- so they are also the only thing on it with colour. */
+.ui-menu-item.mk-item .mk-agents { gap: 5px; }
+.ui-menu-item.mk-item .mk-agents svg { display: block; }
 
 /* ---- the agent answer, finished in place ------------------------------ */
 /* It used to leave for the onboarding gate. This button is the product's

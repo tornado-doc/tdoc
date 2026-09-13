@@ -203,8 +203,12 @@ t('an unfinished row is a way forward, never a dead line', () => {
   assert(/id: 'connect'[^}]*href: '\/setup'/.test(list), 'the connect row leads back to the gate');
   // Making a doc is asking an agent for one, so the row leads to the page that
   // does that -- not to a fork asking which kind of doc they would like.
-  assert(/id: 'create'[^}]*href: r\.first_doc \? null : '\/setup\?step=doc'/.test(list),
-    'the create row leads to the doc gate, but only while that is still ahead of them');
+  // Every row opens the page for its own step, finished or not: that page is
+  // where the step's state is written, and a finished one should say so.
+  assert(/id: 'create'[^}]*href: '\/setup\?step=doc'/.test(list), 'the create row leads to its own page, always');
+  const rows = list.match(/\{ id: '[a-z]+', label:[^\n]*\},/g) || [];
+  assert(rows.length === 4 && rows.every((row) => row.includes('href:')),
+    'every row carries an href — no row is a dead line while its neighbours are links');
   // That page exists to watch a FIRST doc arrive. Somebody who has one and
   // wants another is served by Create a doc, at the top of this same page.
   assert(!gate.includes('Make another tdoc'), 'the gate no longer offers a second doc');
@@ -326,30 +330,20 @@ t('both steps are one layout with a status line under it', () => {
   assert(/sg-primary\$\{state === 'done' \? '' : ' off'\}/.test(gate), 'one button, off until the step is done — the same as connect');
   // Read once, not live: the heading must not rename itself from "your first"
   // to "another" in front of somebody watching their first arrive.
-  assert(gate.includes("if (step === 'doc' && loaded && known.current === null) {"), 'what they arrived with is read once');
   assert(list.includes("done: Boolean(r.first_doc)"), 'and row 2 reads the same field the gate does');
 });
 
-t('the doc step waits for a doc that was not there a moment ago', () => {
-  // The record cannot answer this one. Both of its doc stamps are written
-  // once, so a SECOND doc moves nothing on it -- which left "Make another
-  // tdoc" opening already done, never moving, and pointing its button at the
-  // doc before last.
-  assert(gate.includes("(catalogDoc && catalogDoc !== known.current.catalog)"), 'the catalog is what makes a SECOND doc visible');
-  assert(gate.includes("|| (journeyDoc && journeyDoc !== known.current.journey)"),
-    'and the record is what makes the first one visible to a journey that had none');
-  assert(gate.includes("? (arrived ? 'done' : 'waiting')"), 'either is what the step turns on');
-  assert(gate.includes("const ownDoc = catalogDoc || journeyDoc;"), 'and either can name the doc to open');
-  // The one moment somebody has just made a thing is the worst one to land
-  // them on a bare page: Open it arrives the way row 3 does, with tdoc's
-  // question open and the corner row saying what to do with it.
-  assert(gate.includes("? `/d/${encodeURIComponent(ownDoc)}?step=comment`"), 'Open it lands on step 3, not on a cold page');
-  assert(list.includes("`${firstDocHref}?step=comment`"), 'the same landing row 3 uses');
-  // A first doc is any doc at all, because there was nothing there before.
-  assert(worker.includes('async function newestDocFor(env, accountId)') && server.includes('function newestDocLocal()'), 'both hosts can name it');
-  assert(worker.includes("if (url.searchParams.get('docs') === '1') {") && server.includes("if (url.searchParams.get('docs') === '1') {"),
-    'behind a parameter, so the connect gate never pays for the walk');
-  assert(gate.includes('getOnboarding(wantsDoc ? { docs: 1 } : undefined)'), 'and only this step asks');
+t('the doc step answers on arrival', () => {
+  // It briefly asked a harder question -- "did a doc appear since this page
+  // opened" -- because it also had to serve somebody making their SECOND one,
+  // and a record whose doc stamps are written once cannot see a second doc.
+  // That job moved to Create a doc, so the hard question went with it.
+  assert(gate.includes("const ownDoc = record?.first_doc || null;"), 'the journey names the doc');
+  assert(gate.includes("? (ownDoc ? 'done' : 'waiting')"), 'and having one is what done means');
+  // Which is what lets row 2 open this page after it is finished and be told
+  // so, rather than being asked again for something it already has.
+  assert(!gate.includes('newestDoc') && !gate.includes('known.current'), 'no catalog, no memory of what was here before');
+  assert(!gate.includes("getOnboarding(wantsDoc"), 'and the poll is back to two reads');
 });
 
 t('a deleted seed doc does not leave rows pointing at a 404', () => {
@@ -391,6 +385,17 @@ t('a row being watched stops being a button', () => {
   for (const line of ['Waiting for your agent…', 'Your agent is reading this', 'Still waiting — did you paste it into your agent?']) {
     assert(hint.includes(line) && card.includes(line), `"${line}" is the card's own wording`);
   }
+});
+
+t('the corner row is meant to be noticed', () => {
+  // White on a white page behind a hairline is a thing you find, not a thing
+  // you notice, and this row's whole job is to be noticed without covering
+  // anything. It takes the accent's tint and its own edge in the accent --
+  // the same blue the live row on My docs wears, because it is the same row.
+  assert(hintCss.includes('background: var(--td-accent-tint, #e8eeff);'), 'the tint');
+  assert(hintCss.includes('border: 1px solid rgb(22 82 240 / 22%);'), 'an edge that is not a hairline');
+  assert(hintCss.includes('box-shadow: 0 3px 14px rgb(22 82 240 / 16%)'), 'and a shadow with some weight');
+  assert(hintCss.includes('font: 600 13.5px/1.35'), 'the line reads at the weight of something being asked');
 });
 
 t('a row that finishes ticks where it stands', () => {

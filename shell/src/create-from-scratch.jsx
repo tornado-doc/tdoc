@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppMenu, AppMenuItem } from './ui/menu.jsx';
-import { File, FileText } from 'lucide-react';
+import { SquarePen } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
@@ -24,13 +24,11 @@ import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSub
 // button that asked. A modal to choose between two things is a room built for
 // a sentence.
 //
-// The two glyphs are one object with one difference: an empty page, and a page
-// with writing already on it. That IS the choice -- who puts the words there --
-// and it needs no third metaphor to say it. The sparkle that used to sit on the
-// second one is the house style of every AI feature shipped since 2023 and says
-// nothing about this one; it was also competing with the two agent marks on the
-// same row, which do say something. Monochrome, at the label's weight: in a
-// menu, colour should mean state, and neither of these is a state.
+// The two glyphs say who writes it: a pen on a page, and the agents' own
+// marks. Every symbol I tried for the second one was a drawing of "an AI wrote
+// this" -- a sparkle, a wand, a page with lines on it -- while the two things
+// that actually write it were already on the row. So they became the icon.
+// Nothing here is invented, and nothing needs decoding.
 export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
   const [busy, setBusy] = useState(false);
   const startBlank = async () => {
@@ -42,7 +40,7 @@ export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
     <AppMenu trigger={trigger}>
       {canCreate ? (
         <AppMenuItem onClick={startBlank} disabled={busy} className="mk-item">
-          <File size={17} strokeWidth={1.75} aria-hidden="true" />
+          <SquarePen size={17} strokeWidth={1.75} aria-hidden="true" />
           <span>
             <b>{busy ? 'Creating…' : 'Start from scratch'}</b>
             <em>A blank doc, open in edit mode.</em>
@@ -50,14 +48,15 @@ export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
         </AppMenuItem>
       ) : null}
       <AppMenuItem onClick={onAgent} className="mk-item">
-        <FileText size={17} strokeWidth={1.75} aria-hidden="true" />
+        {/* The agents' own marks, where the icon goes. Every glyph I tried
+            here was a drawing of "an AI wrote this" -- a sparkle, a wand, a
+            page with lines -- and the two things that actually write it were
+            already sitting on the same row saying so. So they moved left. */}
+        <i className="mk-agents" aria-hidden="true"><ClaudeMark size={16} /><OpenAIMark size={14} /></i>
         <span>
           <b>Build it with your agent</b>
           <em>Name the subject. It writes and publishes the page.</em>
         </span>
-        {/* Four product names set as a list was the longest thing in the old
-            dialog. Two marks say the same and read in a glance. */}
-        <i className="mk-works"><ClaudeMark size={15} /><OpenAIMark size={13} /></i>
       </AppMenuItem>
     </AppMenu>
   );

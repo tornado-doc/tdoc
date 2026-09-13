@@ -12,11 +12,16 @@
   align-items: center;
   gap: 2px;
   max-width: min(410px, calc(100vw - 40px));
-  padding: 6px 6px 6px 12px;
-  border: 1px solid var(--td-line, #e8e7e3);
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 2px 10px rgb(26 26 26 / 10%), 0 8px 28px rgb(26 26 26 / 6%);
+  padding: 8px 8px 8px 14px;
+  /* White on a white page with a hairline round it is a thing you find, not a
+     thing you notice, and this row's whole job is to be noticed without
+     covering anything. So it takes the accent's tint, its own edge in the
+     accent, and a shadow with some weight -- the same blue the live row on My
+     docs uses, because it is the same row. */
+  border: 1px solid rgb(22 82 240 / 22%);
+  border-radius: 13px;
+  background: var(--td-accent-tint, #e8eeff);
+  box-shadow: 0 3px 14px rgb(22 82 240 / 16%), 0 10px 34px rgb(26 26 26 / 8%);
   /* The footer slides up over the bottom of the page at the end of a doc.
      Riding up with it keeps both readable instead of stacking them. */
   transition: bottom .18s ease;
@@ -32,7 +37,7 @@
   padding: 6px 4px 6px 0;
   border: 0;
   background: none;
-  font: 500 13.5px/1.35 -apple-system, system-ui, sans-serif;
+  font: 600 13.5px/1.35 -apple-system, system-ui, sans-serif;
   color: var(--td-ink, #1a1a1a);
   text-align: left;
 }
@@ -48,7 +53,7 @@ button.sh-row:hover .sh-text { text-decoration: underline; }
   margin: 0 auto;
   border-radius: 50%;
 }
-.sh-tick { border: 1px solid var(--td-line, #e8e7e3); background: #fff; }
+.sh-tick { border: 1.5px solid rgb(22 82 240 / 40%); background: #fff; }
 .sh-tick.on {
   display: flex; align-items: center; justify-content: center;
   border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff;
@@ -62,7 +67,7 @@ button.sh-row:hover .sh-text { text-decoration: underline; }
   box-sizing: border-box; position: relative; flex: 0 0 auto;
   width: 42px; height: 26px; margin-left: 2px;
   border: 1px solid var(--td-line, #e8e7e3); border-radius: 5px;
-  background: var(--td-surface-2, #f7f7f5);
+  background: #fff;
 }
 .sh-thumb i { position: absolute; display: block; }
 .sh-mark {
@@ -82,9 +87,9 @@ button.sh-row:hover .sh-text { text-decoration: underline; }
   display: flex; align-items: center; justify-content: center;
   width: 26px; height: 26px;
   padding: 0; border: 0; border-radius: 7px;
-  background: none; color: var(--td-muted, #6b6a66); cursor: pointer;
+  background: none; color: rgb(22 82 240 / 55%); cursor: pointer;
 }
-.sh-x:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
+.sh-x:hover { background: rgb(22 82 240 / 10%); color: var(--td-ink, #1a1a1a); }
 
 /* On a narrow screen the margin comments fold under the text and the corner
    stops being empty, so the row spans the width instead of floating in it. */

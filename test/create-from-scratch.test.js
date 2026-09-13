@@ -174,14 +174,17 @@ t('the choice is a menu, and neither answer is a form', () => {
     'both answers must exist');
   // A modal to choose between two things is a room built for a sentence.
   assert(/<AppMenu trigger=\{trigger\}>/.test(form) && form.includes('className="mk-item"'), 'the fork is a menu');
-  // One object, one difference: an empty page and a page with writing on it.
-  // That IS the choice -- who puts the words there -- and it needs no third
-  // metaphor. The sparkle it replaced is the house style of every AI feature
-  // shipped since 2023 and says nothing about this one.
-  assert(form.includes('<File size={17}') && form.includes('<FileText size={17}'), 'the pair is one object twice');
-  assert(!form.includes('Sparkles'), 'and not the sparkle every AI feature wears');
-  assert(uiCss.includes('.ui-menu-item.mk-item > svg { flex: 0 0 auto; margin-top: 1px; color: var(--td-ink); opacity: .75; }'),
-    'monochrome at the label\'s weight: in a menu, colour should mean state');
+  // The two glyphs say who writes it: a pen on a page, and the agents' own
+  // marks. Every symbol tried for the second was a drawing of "an AI wrote
+  // this" -- a sparkle, a wand, a page with lines -- while the two things that
+  // actually write it were already on the row.
+  assert(form.includes('<SquarePen size={17}'), 'you write the blank one');
+  assert(form.includes('<i className="mk-agents"') && form.includes('<ClaudeMark size={16} /><OpenAIMark size={14} />'),
+    'and the agents stand where the other icon would');
+  assert(!form.includes('Sparkles') && !form.includes('FileText'), 'no invented metaphor for "an AI did it"');
+  // One slot, wide enough for the wider glyph, so both titles start at the
+  // same x: a pen is 17px and a pair of marks is 35.
+  assert(uiCss.includes('flex: 0 0 35px;'), 'both rows begin in the same place');
   // The blank doc opens on the click. A title field there is the thing this
   // design replaced -- the title is typed into the page instead.
   const blank = form.slice(form.indexOf('export function CreateMenu'), form.indexOf('export function AgentRecipe'));

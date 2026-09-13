@@ -255,16 +255,6 @@ export function SetupGate({ boot }) {
   // Before that the record is empty, which reads as "not connected" and paints
   // the connect step for a beat on a page that was asked for the doc step.
   const [loaded, setLoaded] = useState(false);
-  // The newest doc this account owns, and the one it already owned when this
-  // page opened. The record cannot answer the second ask on its own: both of
-  // its doc stamps are written once, so a SECOND doc moves nothing on it. What
-  // this page waits for is a doc that was not here a moment ago.
-  const [newestDoc, setNewestDoc] = useState(null);
-  // Both answers, as they stood when this page opened. The catalog is what
-  // makes a doc appearing visible at all; the record is what makes the first
-  // one visible to a journey that had none, including one put into that state
-  // by hand.
-  const known = useRef(null);
   const [subject, setSubject] = useState('');
   const subjectRef = useRef(null);
   const [copied, setCopied] = useState(false);
@@ -300,22 +290,16 @@ export function SetupGate({ boot }) {
   // The doc step has no stuck state of its own: there is nothing to repair.
   // An agent that has not published yet is usually mid-question, so the wait
   // just says where to look.
-  const catalogDoc = newestDoc || null;
-  const journeyDoc = record?.first_doc || null;
-  const ownDoc = catalogDoc || journeyDoc;
-  if (step === 'doc' && loaded && known.current === null) {
-    known.current = { catalog: catalogDoc, journey: journeyDoc };
-  }
-  // Something moved since this page opened. The catalog is what makes a SECOND
-  // doc visible, because the record's doc stamps are written once and a second
-  // doc moves nothing on them. The record is what makes the FIRST one visible
-  // to a journey that had none -- including one put into that state by hand.
-  const arrived = Boolean(known.current && (
-    (catalogDoc && catalogDoc !== known.current.catalog)
-    || (journeyDoc && journeyDoc !== known.current.journey)
-  ));
+  // This step is done when the journey has a doc, full stop. It briefly asked a
+  // harder question -- "did a doc appear since this page opened" -- because it
+  // also had to serve somebody making their SECOND one, and a record whose doc
+  // stamps are written once cannot see a second doc. That job moved to Create
+  // a doc, so the hard question went with it. What is left is the one this
+  // page was always for, and it answers on arrival: somebody opening row 2
+  // after finishing it should be told it is finished.
+  const ownDoc = record?.first_doc || null;
   const state = step === 'doc'
-    ? (arrived ? 'done' : 'waiting')
+    ? (ownDoc ? 'done' : 'waiting')
     : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
   // The connect step ends on the docs page, which is right whether their first
   // doc exists yet or not. The doc step ends on the doc it just watched
@@ -347,12 +331,8 @@ export function SetupGate({ boot }) {
     let timer = null;
     const tick = async () => {
       try {
-        const result = await getOnboarding(wantsDoc ? { docs: 1 } : undefined);
-        if (!cancelled) {
-          setRecord(result?.record || {});
-          setPaired(Boolean(result?.paired));
-          setNewestDoc(result?.newest_doc || null);
-        }
+        const result = await getOnboarding();
+        if (!cancelled) { setRecord(result?.record || {}); setPaired(Boolean(result?.paired)); }
       } catch {}
       if (!cancelled) setLoaded(true);
       if (cancelled) return;
@@ -365,7 +345,7 @@ export function SetupGate({ boot }) {
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [signedIn, wantsDoc]);
+  }, [signedIn]);
 
   // The site's own sign-in, and only that: a full-page redirect out to the
   // OIDC provider and back to /setup. Signing in is signing up, so there is no
