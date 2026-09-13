@@ -203,7 +203,7 @@
    a 2px line under a 26px puck reads as a crack, not as a rail. `overflow`
    stays visible so the puck can sit proud of it. */
 .onb-bar {
-  position: relative; height: 4px; margin: 18px 0 16px;
+  position: relative; height: 4px; margin: 14px 0 12px;
   border-radius: 999px; background: var(--td-line, #e8e7e3);
 }
 .onb-bar i {
@@ -226,8 +226,11 @@
 .onb-card ol:has(li:only-child) { margin-top: -2px; }
 
 .onb-card li a, .onb-card li .onb-row {
-  display: grid; grid-template-columns: 18px 1fr 118px; gap: 12px; align-items: center;
-  padding: 8px 0; text-decoration: none; color: inherit;
+  display: grid; grid-template-columns: 18px 1fr 100px; gap: 12px; align-items: center;
+  /* 4, not 8. One line of text beside a picture four times its height reads as
+     a list with holes in it: the air between the labels is the thumbnail's,
+     not the row's, so the row should not add more of its own. */
+  padding: 4px 0; text-decoration: none; color: inherit;
 }
 .onb-card li a:hover .onb-label { text-decoration: underline; }
 .onb-label { font-size: 14px; line-height: 1.35; }
@@ -261,10 +264,10 @@
    23px wider on two rows for want of it. */
 .onb-thumb {
   box-sizing: border-box; position: relative;
-  width: 118px; height: 74px; padding: 9px 0 9px 10px;
+  width: 100px; height: 62px; padding: 7px 0 7px 8px;
   border-radius: 8px; border: 1px solid var(--td-line, #e8e7e3);
   background: #fff; overflow: hidden;
-  display: flex; flex-direction: column; gap: 3px;
+  display: flex; flex-direction: column; gap: 2px;
 }
 /* No state dims a picture. Fading the finished rows says "this no longer
    counts" about the only part of the list somebody has actually done, and
@@ -296,16 +299,12 @@
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   font: 700 8px/10px -apple-system, system-ui, sans-serif;
   letter-spacing: -0.01em; color: var(--td-ink, #1a1a1a);
-  padding-right: 10px;
+  padding-right: 8px;
 }
 .onb-thumb .t-body {
   margin: 0; height: 20px; overflow: hidden;
   font: 400 6.5px/10px -apple-system, system-ui, sans-serif;
-  color: #6f6f69; padding-right: 10px;
-}
-/* One line, where something else owns the bottom of the tile. */
-.onb-thumb .t-body.one {
-  height: 10px; white-space: nowrap; text-overflow: ellipsis;
+  color: #6f6f69; padding-right: 8px;
 }
 /* The anchor highlight, at the value the document itself paints it. */
 .onb-thumb .t-body mark {
@@ -324,8 +323,8 @@
 /* 2 — the line you paste, in the composer it goes into. Runs off the right
    edge rather than sitting in a box inside a box. */
 .onb-thumb .t-field {
-  box-sizing: border-box; position: absolute; left: 10px; right: -12px; bottom: 9px;
-  height: 20px; padding: 0 0 0 7px; display: flex; align-items: center;
+  box-sizing: border-box; position: absolute; left: 8px; right: -12px; bottom: 7px;
+  height: 18px; padding: 0 0 0 6px; display: flex; align-items: center;
   border: 1px solid #dcdcd7; border-radius: 6px; background: #fff;
 }
 .onb-thumb .t-field em {
@@ -337,8 +336,8 @@
    way Notion lets its calendar run off. It carries what a real card carries:
    the author, and their first words. */
 .onb-thumb .t-card {
-  box-sizing: border-box; position: absolute; right: -14px; top: 30px;
-  width: 62px; padding: 5px 6px; display: flex; flex-direction: column; gap: 2px;
+  box-sizing: border-box; position: absolute; right: -14px; top: 25px;
+  width: 56px; padding: 4px 5px; display: flex; flex-direction: column; gap: 2px;
   border-radius: 6px; background: #fff; border: 1px solid var(--td-accent, #1652f0);
   box-shadow: 0 1px 5px rgb(60 64 67 / 16%);
   font-style: normal; overflow: hidden;
@@ -355,7 +354,7 @@
 /* 4 — the chip a fixed thread carries, in the product's own green and its own
    words. */
 .onb-thumb .t-fixed {
-  position: absolute; left: 10px; bottom: 9px;
+  position: absolute; left: 8px; bottom: 7px;
   display: inline-flex; align-items: center; gap: 3px;
   padding: 2px 7px 2px 5px; border-radius: 999px;
   background: #e8f5ed; color: #1a7340;

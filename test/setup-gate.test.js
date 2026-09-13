@@ -164,8 +164,12 @@ t('every thumbnail shows the thing its own step produces', () => {
   // Two of them run off the right edge rather than sitting in a box inside a
   // box, which is how Notion lets its calendar and its templates crop.
   assert(listCss.includes('right: -12px') && listCss.includes('right: -14px'), 'and two of them are cropped by the edge');
-  assert(listCss.includes('width: 118px; height: 74px;') && listCss.includes('grid-template-columns: 18px 1fr 118px;'),
+  assert(listCss.includes('width: 100px; height: 62px;') && listCss.includes('grid-template-columns: 18px 1fr 100px;'),
     'the row reserves exactly what the thumbnail takes');
+  // The picture sets the row's height, so the row adds almost nothing of its
+  // own: one line of text beside four lines' worth of picture reads as a list
+  // with holes in it.
+  assert(listCss.includes('padding: 4px 0; text-decoration: none;'), 'and adds almost no air of its own');
   // A box that is not a whole number of its own lines cuts the last line
   // through the middle of the letters, which reads as a fault, not a crop.
   assert(listCss.includes('font: 700 8px/10px') && listCss.includes('height: 10px;'), 'every text box is whole lines');

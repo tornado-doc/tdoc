@@ -87,7 +87,7 @@ function Thumb({ id, title }) {
     return (
       <span className="onb-thumb agents" aria-hidden="true">
         {/* Notion runs the app logos in a checklist thumbnail at about half
-            the thumbnail's height. This slot is 74px tall. */}
+            the thumbnail's height. This slot is 62px tall. */}
         <AgentMarks size={32} />
       </span>
     );
@@ -131,7 +131,6 @@ function Thumb({ id, title }) {
     <span className="onb-thumb" aria-hidden="true">
       <i className="t-ver">v2</i>
       <b className="t-title">{heading}</b>
-      <p className="t-body one">Counted it properly: 61%.</p>
       <i className="t-fixed"><Check size={9} strokeWidth={4} />Applied in v2</i>
     </span>
   );
