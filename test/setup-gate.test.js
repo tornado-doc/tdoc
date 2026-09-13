@@ -247,8 +247,14 @@ t('both steps are one layout with a status line under it', () => {
   assert(/sg-primary\$\{state === 'done' \? '' : ' off'\}/.test(gate), 'one button, off until the step is done — the same as connect');
   // Read once, not live: the heading must not rename itself from "your first"
   // to "another" in front of somebody watching their first arrive.
-  assert(gate.includes("if (step === 'doc' && loaded && arrivedWith.current === null) {"), 'what they arrived with is read once');
-  assert(gate.includes("const another = step === 'doc' && arrivedWith.current === true;"), 'and that is what names the page');
+  assert(gate.includes("if (step === 'doc' && loaded && known.current === null) {"), 'what they arrived with is read once');
+  // "Another" has to mean what the checklist means by it. Row 2 there reads
+  // `first_doc`, so an account that owns docs but whose journey has recorded
+  // none is on its FIRST -- the catalog saying otherwise had the two surfaces
+  // contradicting each other on one screen's worth of clicks.
+  assert(gate.includes("const another = step === 'doc' && Boolean(known.current && known.current.journey);"),
+    'and the journey names the page, not the catalog');
+  assert(list.includes("done: Boolean(r.first_doc)"), 'which is the same thing row 2 reads');
 });
 
 t('the doc step waits for a doc that was not there a moment ago', () => {
@@ -256,13 +262,11 @@ t('the doc step waits for a doc that was not there a moment ago', () => {
   // once, so a SECOND doc moves nothing on it -- which left "Make another
   // tdoc" opening already done, never moving, and pointing its button at the
   // doc before last.
-  assert(gate.includes("const arrived = Boolean(ownDoc && ownDoc !== knownDoc.current);"), 'a doc that was not here when the page opened');
-  assert(gate.includes("? (arrived ? 'done' : 'waiting')"), 'is what the step turns on');
-  // The catalog is the reliable half; the record counts too, so a journey put
-  // into a state by hand moves this page the way a real publish does.
-  assert(gate.includes("const ownDoc = newestDoc || record?.first_doc || null;"), 'either half can name the doc');
-  assert(gate.includes("if (step === 'doc' && loaded && knownDoc.current === undefined) knownDoc.current = ownDoc;"),
-    'what they arrived with is read once, after the first answer');
+  assert(gate.includes("(catalogDoc && catalogDoc !== known.current.catalog)"), 'the catalog is what makes a SECOND doc visible');
+  assert(gate.includes("|| (journeyDoc && journeyDoc !== known.current.journey)"),
+    'and the record is what makes the first one visible to a journey that had none');
+  assert(gate.includes("? (arrived ? 'done' : 'waiting')"), 'either is what the step turns on');
+  assert(gate.includes("const ownDoc = catalogDoc || journeyDoc;"), 'and either can name the doc to open');
   // A first doc is any doc at all, because there was nothing there before.
   assert(worker.includes('async function newestDocFor(env, accountId)') && server.includes('function newestDocLocal()'), 'both hosts can name it');
   assert(worker.includes("if (url.searchParams.get('docs') === '1') {") && server.includes("if (url.searchParams.get('docs') === '1') {"),

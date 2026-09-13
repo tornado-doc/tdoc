@@ -253,10 +253,12 @@ export function SetupGate({ boot }) {
   // its doc stamps are written once, so a SECOND doc moves nothing on it. What
   // this page waits for is a doc that was not here a moment ago.
   const [newestDoc, setNewestDoc] = useState(null);
-  const knownDoc = useRef(undefined);
-  // Whether they already had a doc when this page opened. Read once, so the
-  // heading does not change its mind mid-wait.
-  const arrivedWith = useRef(null);
+  // Both answers, as they stood when this page opened. Two different questions
+  // get asked of them and they are not the same question, which is what went
+  // wrong: the catalog knows whether a doc exists, the record knows whether
+  // the JOURNEY has one, and an account can easily have the first without the
+  // second.
+  const known = useRef(null);
   const [subject, setSubject] = useState('');
   const subjectRef = useRef(null);
   const [copied, setCopied] = useState(false);
@@ -292,16 +294,20 @@ export function SetupGate({ boot }) {
   // The doc step has no stuck state of its own: there is nothing to repair.
   // An agent that has not published yet is usually mid-question, so the wait
   // just says where to look.
-  // Whichever of the two knows about a doc. The catalog is the reliable one --
-  // the record's doc stamps are written once, so a SECOND doc moves nothing on
-  // it -- but the record counts too, so that a journey put into a state by
-  // hand moves this page the same way a real publish does.
-  const ownDoc = newestDoc || record?.first_doc || null;
-  if (step === 'doc' && loaded && knownDoc.current === undefined) knownDoc.current = ownDoc;
-  // A doc that was not there when this page opened. For a first doc that is
-  // any doc at all; for a second it has to be a different one, which is the
-  // whole of what "Make another tdoc" was failing to notice.
-  const arrived = Boolean(ownDoc && ownDoc !== knownDoc.current);
+  const catalogDoc = newestDoc || null;
+  const journeyDoc = record?.first_doc || null;
+  const ownDoc = catalogDoc || journeyDoc;
+  if (step === 'doc' && loaded && known.current === null) {
+    known.current = { catalog: catalogDoc, journey: journeyDoc };
+  }
+  // Something moved since this page opened. The catalog is what makes a SECOND
+  // doc visible, because the record's doc stamps are written once and a second
+  // doc moves nothing on them. The record is what makes the FIRST one visible
+  // to a journey that had none -- including one put into that state by hand.
+  const arrived = Boolean(known.current && (
+    (catalogDoc && catalogDoc !== known.current.catalog)
+    || (journeyDoc && journeyDoc !== known.current.journey)
+  ));
   const state = step === 'doc'
     ? (arrived ? 'done' : 'waiting')
     : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
@@ -319,10 +325,11 @@ export function SetupGate({ boot }) {
   // The heading is the one thing read once rather than live, so it does not
   // rename itself from "your first" to "another" in front of somebody who is
   // watching their first arrive.
-  if (step === 'doc' && loaded && arrivedWith.current === null) {
-    arrivedWith.current = Boolean(ownDoc);
-  }
-  const another = step === 'doc' && arrivedWith.current === true;
+  // "Another" has to mean what the checklist means by it. Row 2 there reads
+  // `first_doc`, so an account that owns docs but whose journey has not
+  // recorded one is on its FIRST -- the catalog saying otherwise had the two
+  // surfaces contradicting each other on the same screen's worth of clicks.
+  const another = step === 'doc' && Boolean(known.current && known.current.journey);
 
   // The record is the only thing that moves this page.
   useEffect(() => {
