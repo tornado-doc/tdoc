@@ -1327,7 +1327,20 @@ const server = http.createServer(async (req, res) => {
     const prior = readJson(ONBOARDING_FILE, {}).record || {};
     const next = debugRecord(state, new Date().toISOString(), prior.first_doc);
     writeJson(ONBOARDING_FILE, { record: next });
-    return send(res, 200, JSON.stringify({ ok: true, state, record: next }), { 'Content-Type': 'application/json' });
+    // Replay, local twin. There is no hosted credential here -- this host is
+    // anonymous by design -- so `unpair` has nothing to take away; `purge`
+    // removes the journey's doc so a second walk starts on an empty list.
+    const cleared = { tokens: 0, doc: null };
+    if (parsed.purge === true && prior.first_doc) {
+      const dir = path.join(ROOT, prior.first_doc);
+      try {
+        if (fs.existsSync(dir) && !ONBOARD_SLUGS.has(prior.first_doc)) {
+          fs.rmSync(dir, { recursive: true, force: true });
+          cleared.doc = prior.first_doc;
+        }
+      } catch {}
+    }
+    return send(res, 200, JSON.stringify({ ok: true, state, record: next, cleared }), { 'Content-Type': 'application/json' });
   }
 
   if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD')) {
