@@ -5,6 +5,7 @@ import { AppDialog } from './ui/dialog.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
+import { DebugBar } from './debug-bar.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
@@ -143,6 +144,11 @@ export function DocsHub({ boot }) {
         </div>
 
         <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
+        {/* The checklist is on this page, so all six states show a difference
+            here -- this is the one surface that has a face for every one. */}
+        {boot.debug ? (
+          <DebugBar record={boot.onboarding} surface="hub" onState={() => location.reload()} />
+        ) : null}
         <div className="tabs" role="tablist">
           {TABS.map(([id, label]) => (
             <button
