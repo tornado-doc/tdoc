@@ -663,7 +663,11 @@ function isAnthropicCompanyMark(url) {
 }
 function logoForAgentLogin(login) {
   const key = String(login || '').toLowerCase();
-  if (key.includes('grok') || key.includes('xai')) return 'https://github.com/xai-org.png';
+  // xAI's published logomark (assets/grok_logo.svg, served at /grok_logo.svg).
+  // NOT `github.com/xai-org.png`: that is the avatar of an org GitHub calls
+  // "SpaceXAI Org", and it is the SpaceX X -- every Grok reply on a doc was
+  // signed with another company's logo.
+  if (key.includes('grok') || key.includes('xai')) return '/grok_logo.svg';
   if (key.includes('claude') || key.includes('anthropic')) return 'https://cdn.simpleicons.org/claude/d97757';
   if (key.includes('codex') || key.includes('openai') || key.includes('chatgpt') || key === 'gpt' || key.startsWith('gpt-')) {
     return 'https://github.com/openai.png';
@@ -1257,6 +1261,15 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/tdoc_logo.svg') {
     const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.svg');
+    if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(logoPath), {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+  if (p === '/grok_logo.svg') {
+    const logoPath = path.join(__dirname, '..', 'assets', 'grok_logo.svg');
     if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
     return send(res, 200, fs.readFileSync(logoPath), {
       'Content-Type': 'image/svg+xml; charset=utf-8',

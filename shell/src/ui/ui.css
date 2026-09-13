@@ -375,7 +375,6 @@ button.tdoc-pin {
 /* Only between marks -- a first child pulled left lands in whatever text sits
    beside the cluster, which is exactly what it did. */
 .agent-marks > i + i { margin-left: calc(var(--am, 22px) * -0.28); }
-.agent-marks > i.fill { background: #000; border-color: #000; }
 .agent-marks > i img, .agent-marks > i svg { display: block; }
 
 /* One slot, one width, both rows beginning at the same x. The two marks are

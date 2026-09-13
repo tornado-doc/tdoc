@@ -196,7 +196,7 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
   assert(cards.includes('docSubjectPrompt(') && cards.includes('The doc turns up in this list.'),
     'it composes the line and says where the doc lands');
   // Four product names set as a list was the longest thing in the old dialog.
-  assert(cards.includes('<AgentMarks size={18} />') && !cards.includes('AGENT_NAMES'),
+  assert(cards.includes('<AgentMarks size={21} />') && !cards.includes('AGENT_NAMES'),
     'marks in place of a list of names');
   // A refused clipboard on the fix line: selected, said, and still waiting.
   assert(shell.includes("requestAnimationFrame(() => selectContents(document.querySelector('.tdoc-handoff-line code')));") && shell.includes("      setHandoffPref(true);\n      requestAnimationFrame"), 'the block opens, then the line is left selected');

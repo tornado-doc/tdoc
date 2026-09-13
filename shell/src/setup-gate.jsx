@@ -102,7 +102,9 @@ function WorksWith() {
   return (
     <p className="sg-works">
       <span>Works with</span>
-      <AgentMarks size={17} />
+      {/* The same 21px the create menu uses. At 17 the three marks were a
+          smudge -- Claude's line art in particular needs the diameter. */}
+      <AgentMarks size={21} />
       <span className="sg-sr">Claude Code, ChatGPT and Grok</span>
     </p>
   );

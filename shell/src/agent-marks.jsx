@@ -21,41 +21,37 @@ export function OpenAIMark({ size = 15, color = '#0D0D0D' }) {
 }
 
 // Grok. tdoc detects it like the others -- `detectAgentRuntime` returns it,
-// the CLI's --login accepts it, and a Grok reply on a doc already gets this
-// same avatar -- so a "works with" row that leaves it out is wrong.
+// the CLI's --login accepts it, a Grok reply on a doc already gets an avatar
+// -- so a "works with" row that leaves it out is wrong.
 //
-// It is an <img> where the other two are paths because there is no published
-// monochrome vector for it: simple-icons has no xAI slug, and the only asset
-// the product already trusts is the org avatar, which is a white mark on a
-// black square. Drawing one from memory would be inventing somebody's logo.
-// Cropped to a circle it reads as what it is.
-export const GROK_MARK_SRC = 'https://github.com/xai-org.png';
-export function GrokMark({ size = 15 }) {
+// The path data is xAI's own published logomark (Grok_Logomark_Dark), kept
+// byte-identical with assets/grok_logo.svg. It is NOT `github.com/xai-org.png`:
+// that is the avatar of an org GitHub calls "SpaceXAI Org", and it is the
+// SpaceX X -- a different company's mark on every Grok reply.
+export function GrokMark({ size = 15, color = '#0A0A0A' }) {
   return (
-    <img
-      src={GROK_MARK_SRC}
-      width={size}
-      height={size}
-      alt=""
-      style={{ display: 'block', borderRadius: '50%' }}
-    />
+    <svg viewBox="0 0 1024 1024" width={size} height={size} aria-hidden="true" focusable="false">
+      <path fill={color} d="M395.479 633.828L735.91 381.105C752.599 368.715 776.454 373.548 784.406 392.792C826.26 494.285 807.561 616.253 724.288 699.996C641.016 783.739 525.151 802.104 419.247 760.277L303.556 814.143C469.49 928.202 670.987 899.995 796.901 773.282C896.776 672.843 927.708 535.937 898.785 412.476L899.047 412.739C857.105 231.37 909.358 158.874 1016.4 10.6326C1018.93 7.11771 1021.47 3.60279 1024 0L883.144 141.651V141.212L395.392 633.916" />
+      <path fill={color} d="M325.226 695.251C206.128 580.84 226.662 403.776 328.285 301.668C403.431 226.097 526.549 195.254 634.026 240.596L749.454 186.994C728.657 171.88 702.007 155.623 671.424 144.2C533.19 86.9942 367.693 115.465 255.323 228.382C147.234 337.081 113.244 504.215 171.613 646.833C215.216 753.423 143.739 828.818 71.7385 904.916C46.2237 931.893 20.6216 958.87 0 987.429L325.139 695.339" />
+    </svg>
   );
 }
 
 // The three, as one cluster: each in a disc of its own, overlapped like a
-// stack of avatars. The discs are what make it work -- the three marks are
-// three different KINDS of thing (a starburst, a knot, a filled square), and
-// dropped straight onto a row the filled one swallows the other two. A disc
-// each gives them the same silhouette and the same weight.
+// stack of avatars. The discs are what make it work -- three marks drawn at
+// three different weights, dropped straight onto a row, read as a jumble --
+// and they are all light, so the marks sit on them at one size rather than
+// one of them arriving as a black coin.
 //
 // One component and one stylesheet rule, so every place that claims "works
 // with" agrees with every other, and a fourth agent is one line here.
 export function AgentMarks({ size = 22 }) {
+  const inner = Math.round(size * 0.66);
   return (
     <span className="agent-marks" style={{ '--am': `${size}px` }}>
-      <i><ClaudeMark size={Math.round(size * 0.66)} /></i>
-      <i><OpenAIMark size={Math.round(size * 0.6)} /></i>
-      <i className="fill"><GrokMark size={size} /></i>
+      <i><ClaudeMark size={inner} /></i>
+      <i><OpenAIMark size={inner} /></i>
+      <i><GrokMark size={inner} /></i>
     </span>
   );
 }

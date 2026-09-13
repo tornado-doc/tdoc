@@ -185,7 +185,7 @@ t('the choice is a menu, and neither answer is a form', () => {
   assert(form.includes('<SquarePen size={17}') && form.includes('<MessageSquare size={17}'), 'a pair, not a cliché');
   assert(!form.includes('Sparkles'), 'no sparkle');
   // Which agents is a separate question, answered at the end of the row.
-  assert(form.includes('<AgentMarks size={18} />'), 'the marks are a list of what it works with, so they sit where a list does');
+  assert(form.includes('<AgentMarks size={21} />'), 'the marks are a list of what it works with, so they sit where a list does');
   assert(uiCss.includes('.ui-menu-item.mk-item > .agent-marks { margin-left: auto;'), 'pushed to the end');
   assert(uiCss.includes('.ui-menu-item.mk-item > svg {\n  flex: 0 0 22px;'), 'one icon slot, one width, both titles aligned');
   // A bare `> span` also caught the cluster, which is a span too, and stood

@@ -57,7 +57,7 @@ export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
         {/* At the end of the row, where a list says what it works with. The
             icon slot stays one width for both rows so the titles align; three
             logos were never going to fit in it. */}
-        <AgentMarks size={18} />
+        <AgentMarks size={21} />
       </AppMenuItem>
     </AppMenu>
   );
