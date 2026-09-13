@@ -3,7 +3,7 @@ import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
 import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
-import { ConnectReplay, CANVAS } from './setup-gate/replay.jsx';
+import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -388,7 +388,11 @@ export function SetupGate({ boot }) {
         // before they have said what the doc is about.
         : !signedIn || (step === 'doc' && !choice)
           ? <SceneWaiting line={null} />
-          : <ConnectReplay prompt={prompt} />;
+          // Two acts, two recordings. The first is a line being pasted; the
+          // second is a line being typed, as the reader types it.
+          : step === 'doc'
+            ? <DocReplay prompt={prompt} />
+            : <ConnectReplay prompt={prompt} />;
 
   return (
     <div className="sg-split">
@@ -397,9 +401,19 @@ export function SetupGate({ boot }) {
         <div className="sg-mid">
           <div className="sg-col">
             {signedIn && !loaded ? null : (
-              <h1 className="sg-h1">
-                {step !== 'doc' ? 'Connect your agent' : 'Make your first tdoc'}
-              </h1>
+              <>
+                {/* The same four rows the checklist on My docs counts, and the
+                    same numbers the row above a doc wears. Two screens saying
+                    "step 2" about the same act is the only way a reader can
+                    tell the gate and the list are one journey and not two. */}
+                <p className="sg-eyebrow">
+                  <span className="sg-step-n">{step === 'doc' ? 2 : 1}</span>
+                  Step {step === 'doc' ? 2 : 1} of 4
+                </p>
+                <h1 className="sg-h1">
+                  {step !== 'doc' ? 'Connect your agent' : 'Make your first tdoc'}
+                </h1>
+              </>
             )}
 
             {signedIn && !loaded ? null : signedIn ? (

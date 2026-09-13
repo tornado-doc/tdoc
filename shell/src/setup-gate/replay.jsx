@@ -56,19 +56,22 @@ function phase(t, [from, to]) {
 }
 const after = (t, [from]) => t >= from;
 
-function useClock(running) {
+// `restart` is anything whose change should send the replay back to zero --
+// on the doc step that is the line itself, so every keystroke on the left
+// starts the typing on the right again rather than joining it halfway.
+function useClock(running, total, restart) {
   const [t, setT] = useState(0);
   const frame = useRef(0);
   useEffect(() => {
-    if (!running) { setT(REPLAY_MS - 2000); return undefined; }
+    if (!running) { setT(total - 2200); return undefined; }
     const start = performance.now();
     const tick = (now) => {
-      setT((now - start) % REPLAY_MS);
+      setT((now - start) % total);
       frame.current = window.requestAnimationFrame(tick);
     };
     frame.current = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame.current);
-  }, [running]);
+  }, [running, total, restart]);
   return t;
 }
 
@@ -103,11 +106,11 @@ const SHOTS = [
   { at: REPLAY_MS, s: 0.50, x: 540, y: 360 },
 ];
 
-function camera(t) {
+function camera(t, shots = SHOTS) {
   let i = 0;
-  while (i < SHOTS.length - 2 && t >= SHOTS[i + 1].at) i += 1;
-  const a = SHOTS[i];
-  const b = SHOTS[i + 1] || a;
+  while (i < shots.length - 2 && t >= shots[i + 1].at) i += 1;
+  const a = shots[i];
+  const b = shots[i + 1] || a;
   const span = b.at - a.at;
   const p = span > 0 ? phase(t, [a.at, b.at]) : 1;
   return {
@@ -125,8 +128,8 @@ const APPS = [
   { id: 'grok', name: 'Grok', bg: '#0A0A0A', mark: (s) => <GrokMark size={s} color="#fff" /> },
 ];
 
-function Dock({ t }) {
-  const wake = phase(t, T.dockWake);
+function Dock({ t, wake: fixed }) {
+  const wake = fixed === undefined ? phase(t, T.dockWake) : fixed;
   const press = phase(t, T.dockPress);
   return (
     <div className="rp-dock" style={{ opacity: wake, transform: `translate(-50%, ${(1 - wake) * 26}px)` }}>
@@ -186,9 +189,10 @@ const SIGNED_LINES = [
   '[tdoc] Credential saved to ~/.tdoc/published.json',
 ];
 
-function Working({ t }) {
-  const spin = after(t, T.working) && !after(t, T.cli);
-  const secs = Math.min(268, Math.round(phase(t, T.working) * 268));
+function Working({ t, range = T.working, done }) {
+  const finished = done === undefined ? after(t, T.cli) : done;
+  const spin = after(t, range) && !finished;
+  const secs = Math.min(268, Math.round(phase(t, range) * 268));
   return (
     <div className="rp-worked">
       {spin ? <i className="rp-spin" /> : <i className="rp-done">✓</i>}
@@ -305,6 +309,98 @@ export function ConnectReplay({ prompt }) {
         <Dock t={t} />
         <Cursor t={t} />
       </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------- the second ask
+// The same desk, the same window, a different act: on this screen the line is
+// not pasted, it is typed -- and it is typed as the reader types it, because
+// the subject they are naming on the left is what the agent is being asked
+// about on the right. Every keystroke restarts the take, so the picture is
+// never showing a sentence they have moved on from.
+const TYPE_MS = 38;
+export function docScript(prompt) {
+  const type = Math.max(900, String(prompt || '').length * TYPE_MS);
+  const t0 = 600;
+  return {
+    type: [t0, t0 + type],
+    send: [t0 + type + 420, t0 + type + 700],
+    working: [t0 + type + 700, t0 + type + 2600],
+    published: [t0 + type + 2600, t0 + type + 3400],
+    doc: [t0 + type + 3500, t0 + type + 4400],
+    fade: [t0 + type + 7200, t0 + type + 8000],
+    total: t0 + type + 8000,
+  };
+}
+
+// The doc script's length moves with the line, so its shots are written as
+// fractions of it rather than as milliseconds that would fall in the wrong
+// place the moment somebody typed a longer subject.
+const DOC_FRAMES = [
+  { p: 0, s: 0.90, x: 540, y: 190 },
+  { p: 0.42, s: 0.90, x: 540, y: 190 },
+  { p: 0.58, s: 0.90, x: 540, y: 300 },
+  { p: 0.82, s: 0.90, x: 540, y: 300 },
+  { p: 1, s: 0.90, x: 540, y: 260 },
+];
+const docShots = (total) => DOC_FRAMES.map((f) => ({ at: Math.round(f.p * total), s: f.s, x: f.x, y: f.y }));
+
+function DocWindow({ t, s, prompt }) {
+  const typed = Math.round(phase(t, s.type) * prompt.length);
+  const sent = after(t, s.send);
+  const pub = phase(t, s.published);
+  const doc = phase(t, s.doc);
+  const fade = 1 - phase(t, s.fade);
+  return (
+    <div className="rp-win" style={{ opacity: fade, transform: 'translate(-50%, 0)' }}>
+      <div className="rp-win-bar">
+        <span className="rp-lights"><i /><i /><i /></span>
+        <span className="rp-win-title">Make a tdoc</span>
+      </div>
+      <div className="rp-win-body">
+        {sent ? (
+          <div className="rp-bubble">{prompt}</div>
+        ) : (
+          <div className="rp-composer">
+            <span className="rp-typed">{prompt.slice(0, typed)}</span>
+            <span className="rp-caret" />
+          </div>
+        )}
+        {after(t, s.working) ? <Working t={t} range={s.working} done={after(t, s.published)} /> : null}
+        {pub > 0 ? (
+          <pre className="rp-cli" style={{ opacity: pub }}>
+            {'[tdoc] Published v1 — https://tdoc.dev/d/what-standups-cost'}
+          </pre>
+        ) : null}
+        {doc > 0 ? (
+          <div className="rp-summary" style={{ opacity: doc }}>
+            <p>Published. Your first tdoc is live.</p>
+            <ul><li>Anyone with the link can read it</li><li>Comments are open to you</li></ul>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function DocReplay({ prompt }) {
+  const reduced = typeof window !== 'undefined'
+    && window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const line = String(prompt || '');
+  const s = docScript(line);
+  const t = useClock(!reduced, s.total, line);
+  const cam = camera(t, docShots(s.total));
+  return (
+    <div className="rp-view" aria-hidden="true">
+      <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
+        <div className="rp-canvas">
+          <div className="rp-menubar"><span className="rp-mb-app">ChatGPT</span><span className="rp-sp" /><span>Fri 2:59 AM</span></div>
+          <DocWindow t={t} s={s} prompt={line} />
+          <Dock t={t} wake={1} />
+        </div>
       </div>
     </div>
   );

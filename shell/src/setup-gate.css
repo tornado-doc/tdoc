@@ -47,6 +47,24 @@
 }
 .sg-col { width: 100%; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 
+/* Where you are, above what to do. Same disc and same count as the checklist
+   on My docs, so the two read as one list. */
+.sg-eyebrow {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0 0 12px;
+  font: 600 13px -apple-system, system-ui, sans-serif;
+  letter-spacing: -0.005em; color: var(--td-muted, #6b6a66);
+}
+.sg-step-n {
+  display: flex; align-items: center; justify-content: center;
+  /* 24/13, the same disc the row above a doc wears -- and 13 clears the
+     12.5px floor the rest of this column keeps, rather than asking for an
+     exemption from it. */
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--td-accent, #1652f0); color: #fff;
+  font: 700 13px/1 inherit; font-variant-numeric: tabular-nums;
+}
+
 .sg-h1 { margin: 0 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
 
 /* The prompt is the message you are about to send your agent, so it is drawn
