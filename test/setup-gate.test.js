@@ -35,6 +35,8 @@ const gate = read('shell/src/setup-gate.jsx');
 const gateCss = read('shell/src/setup-gate.css');
 const replay = read('shell/src/setup-gate/replay.jsx');
 const bar = read('shell/src/debug-bar.jsx');
+const template = read('worker/wrangler.toml.template');
+const deploy = read('.github/workflows/deploy-tdoc-dev.yml');
 const windowElement = read('shell/src/setup-gate/codex-window.jsx');
 const windowCss = read('shell/src/setup-gate/codex-window.css');
 const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
@@ -576,6 +578,27 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
   assert(worker.includes('the token lives'), 'and says out loud that the credential is untouched');
   assert(worker.includes('const doc = firstDoc || null;') && server.includes('const doc = firstDoc || null;'),
     'and neither host invents one');
+});
+
+t('letting a tester in does not need Cloudflare credentials', () => {
+  // The list lived only in KV, which can only be written by somebody holding
+  // Cloudflare credentials -- so "let Julie test too" was a terminal session
+  // for one person rather than a field on a settings page, and the deploy that
+  // already knows who runs this could not help.
+  assert(worker.includes('function debugAccountList(env)'), 'the deploy can name them');
+  assert(template.includes('TDOC_DEBUG_ACCOUNTS = "PLACEHOLDER_DEBUG_ACCOUNTS"'), 'through a var on the worker');
+  assert(deploy.includes('TDOC_DEV_DEBUG_ACCOUNTS: ${{ vars.TDOC_DEV_DEBUG_ACCOUNTS }}'),
+    'filled from a repository VARIABLE, not a secret -- an email is not a credential');
+  assert(deploy.includes('s/PLACEHOLDER_DEBUG_ACCOUNTS/${TDOC_DEV_DEBUG_ACCOUNTS}/g'), 'and substituted like the others');
+  // An unset variable leaves the placeholder in the toml, and a placeholder is
+  // not a name -- otherwise the literal string would be an allow-listed
+  // "email" on every deploy that forgot to set it.
+  assert(worker.includes("fromEnv.includes('PLACEHOLDER_') ? '' : fromEnv"), 'an unset variable allows nobody');
+  // Additive, because a change sometimes cannot wait for a deploy.
+  assert(worker.includes("env.META.get('debug-accounts')"), 'and the KV key still works');
+  // It cannot come from TDOC_OWNER: that is the deploy's GitHub login, and an
+  // account that signed in through the provider has an email and no login.
+  assert(!/isDebugAccount[\s\S]{0,400}TDOC_OWNER/.test(worker), 'not inferred from the owner login');
 });
 
 t('replay is new again, not just a blank record', () => {

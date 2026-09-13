@@ -67,6 +67,19 @@ GITHUB_CLIENT_ID = "Ov23li1jJiBkS23x4O07"
 # TDOC_OWNER still owns legacy docs with no hosted.github_login.
 TDOC_OWNER = "PLACEHOLDER_OWNER"
 
+# Who may put their OWN onboarding record into a named state, for internal
+# testing. Comma-separated emails; empty allows nobody, which is every
+# deploy's default.
+#
+# A variable, not a secret: an email is not a credential, and this list is
+# read by people who need to change it, not guarded from them. And a variable
+# rather than only KV, because the KV key can only be written by somebody
+# holding Cloudflare credentials -- which made "let another tester in" a
+# terminal session for one person instead of a field on a settings page.
+# The KV key still works and is still additive, for when a change has to land
+# without waiting for a deploy.
+TDOC_DEBUG_ACCOUNTS = "PLACEHOLDER_DEBUG_ACCOUNTS"
+
 # Secret: TDOC_UPLOAD_TOKEN — set via `wrangler secret put TDOC_UPLOAD_TOKEN`
 # Secret: GITHUB_CLIENT_SECRET — set via `wrangler secret put GITHUB_CLIENT_SECRET`.
 #   The web OAuth redirect flow (browsers) needs it to exchange the code for a
