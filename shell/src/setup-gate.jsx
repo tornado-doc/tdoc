@@ -253,11 +253,10 @@ export function SetupGate({ boot }) {
   // its doc stamps are written once, so a SECOND doc moves nothing on it. What
   // this page waits for is a doc that was not here a moment ago.
   const [newestDoc, setNewestDoc] = useState(null);
-  // Both answers, as they stood when this page opened. Two different questions
-  // get asked of them and they are not the same question, which is what went
-  // wrong: the catalog knows whether a doc exists, the record knows whether
-  // the JOURNEY has one, and an account can easily have the first without the
-  // second.
+  // Both answers, as they stood when this page opened. The catalog is what
+  // makes a doc appearing visible at all; the record is what makes the first
+  // one visible to a journey that had none, including one put into that state
+  // by hand.
   const known = useRef(null);
   const [subject, setSubject] = useState('');
   const subjectRef = useRef(null);
@@ -333,11 +332,6 @@ export function SetupGate({ boot }) {
   // The heading is the one thing read once rather than live, so it does not
   // rename itself from "your first" to "another" in front of somebody who is
   // watching their first arrive.
-  // "Another" has to mean what the checklist means by it. Row 2 there reads
-  // `first_doc`, so an account that owns docs but whose journey has not
-  // recorded one is on its FIRST -- the catalog saying otherwise had the two
-  // surfaces contradicting each other on the same screen's worth of clicks.
-  const another = step === 'doc' && Boolean(known.current && known.current.journey);
 
   // The record is the only thing that moves this page.
   useEffect(() => {
@@ -399,7 +393,7 @@ export function SetupGate({ boot }) {
           <div className="sg-col">
             {signedIn && !loaded ? null : (
               <h1 className="sg-h1">
-                {step !== 'doc' ? 'Connect your agent' : another ? 'Make another tdoc' : 'Make your first tdoc'}
+                {step !== 'doc' ? 'Connect your agent' : 'Make your first tdoc'}
               </h1>
             )}
 
@@ -505,7 +499,7 @@ export function SetupGate({ boot }) {
                         <path d="M8.2 12.3l2.6 2.6 5-5.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                       {step === 'doc'
-                        ? <div><b>Published.</b> <span className="found">{another ? 'Your new tdoc is live.' : 'Your first tdoc is live.'}</span></div>
+                        ? <div><b>Published.</b> <span className="found">Your first tdoc is live.</span></div>
                         : <div><b>Connected.</b> <span className="found">Your agent can publish as you.</span></div>}
                     </div>
                   ) : null}

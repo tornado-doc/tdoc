@@ -187,10 +187,17 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
   const cards = read('shell/src/create-from-scratch.jsx');
   // The door moved: /setup is the one place the journey starts, so the card
   // sends people there instead of opening a second copy of it inline.
-  assert(cards.includes("location.href = '/setup?step=doc'"), 'the card opens the gate');
+  // It no longer opens anything: the answer finishes where it was asked. The
+  // round-3 complaint was that the card showed a line and nothing after it --
+  // no wait, no arrival. What it shows now is a subject box, the line that
+  // subject composes, and where the doc will turn up.
+  assert(!cards.includes("location.href = '/setup?step=doc'"), 'the menu item does not leave the page');
   assert(!cards.includes('FirstDocRecipe'), 'no second rendering of the recipe');
-  assert(cards.includes('<span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>'), 'the card defines "agent" where the word is');
-  assert(/\.mk-card \.tdoc-agent-def \{/.test(read('shell/src/ui/ui.css')), 'the hub card defines the word where it is');
+  assert(cards.includes('docSubjectPrompt(') && cards.includes('The doc turns up in this list.'),
+    'it composes the line and says where the doc lands');
+  // Four product names set as a list was the longest thing in the old dialog.
+  assert(cards.includes('<ClaudeMark size={15} /><OpenAIMark size={13} />') && !cards.includes('AGENT_NAMES'),
+    'two marks in place of a list of four names');
   // A refused clipboard on the fix line: selected, said, and still waiting.
   assert(shell.includes("requestAnimationFrame(() => selectContents(document.querySelector('.tdoc-handoff-line code')));") && shell.includes("      setHandoffPref(true);\n      requestAnimationFrame"), 'the block opens, then the line is left selected');
   assert(shell.includes("setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });"), 'the wait starts either way');

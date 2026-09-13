@@ -183,18 +183,26 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     }
   });
 
-  await t('Docs Hub Create dialog sends the agent card to the setup gate', async () => {
+  await t('Docs Hub Create a doc is a menu, and the agent answer composes its line', async () => {
     await page.click('.mk-btn');
-    await page.waitForSelector('.ui-dialog-popup');
+    // A modal to choose between two things is a room built for a sentence, so
+    // the fork is a menu. Only the answer that needs a subject typed into it
+    // gets a dialog.
+    await page.waitForSelector('.ui-menu-item.mk-item:has-text("Build it with your agent")');
+    await page.click('.ui-menu-item.mk-item:has-text("Build it with your agent")');
+    await page.waitForSelector('.ui-dialog-popup .mk-agent');
     const title = await page.textContent('.ui-dialog-title');
-    if (title !== 'Create a doc') throw new Error(`unexpected dialog title: ${title}`);
-    // The dialog offers two doors. The agent one used to open a wizard inline
-    // and hand over the recipe here; there is one screen that hands out a line
-    // now, and this card is a way to it rather than a second copy of it.
-    await page.click('.mk-card:has-text("Build it with your agent")');
-    await page.waitForURL(/\/setup\?step=doc$/);
-    await page.goBack();
-    await page.waitForSelector('.mk-btn');
+    if (title !== 'Build it with your agent') throw new Error(`unexpected dialog title: ${title}`);
+    // Copy is refused until the line is a line and not a placeholder.
+    if (!await page.isDisabled('.mk-line button')) throw new Error('Copy offered an unfinished line');
+    await page.fill('.mk-subject input', 'what our on-call rotation costs');
+    await page.click('.mk-line button');
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    if (!clipboard.includes('/tdoc new "what our on-call rotation costs"')) {
+      throw new Error(`unexpected line: ${clipboard}`);
+    }
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.ui-dialog-popup', { state: 'detached' });
   });
 
   await t('Docs Hub search filters rows without shifting page chrome', async () => {

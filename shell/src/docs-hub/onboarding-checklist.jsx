@@ -49,7 +49,10 @@ export function onboardingSteps(record, firstDocHref) {
   const r = record || {};
   const steps = [
     { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
-    { id: 'create', label: 'Create your first tdoc', done: Boolean(r.first_doc), href: '/setup?step=doc' },
+    // Only while it is still ahead of them. That page exists to watch a FIRST
+    // doc arrive; somebody who has one and wants another is served by Create a
+    // doc, which is sitting at the top of this very page.
+    { id: 'create', label: 'Create your first tdoc', done: Boolean(r.first_doc), href: r.first_doc ? null : '/setup?step=doc' },
     // Both rows open the same doc, and each says which of its two things it
     // came for: the question already on the page, or the card carrying the
     // line for the agent. Landing on the bare URL left the last two rows

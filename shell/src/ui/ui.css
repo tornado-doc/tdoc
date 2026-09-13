@@ -341,63 +341,88 @@ button.tdoc-pin {
   cursor: pointer;
 }
 
-/* "Create a doc" is a fork: two cards, one per answer. They stack below the
-   narrow breakpoint rather than shrinking into unreadable columns. */
-.mk-cards {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-@media (max-width: 560px) {
-  .mk-cards { grid-template-columns: 1fr; }
-}
-
-.tdoc-modal .mk-cards button.mk-card {
+/* "Create a doc" is a fork, and a fork is a menu: two answers, one line each,
+   under the button that asked. A modal to choose between two things is a room
+   built for a sentence. */
+.ui-menu-item.mk-item {
+  /* The base item is `display: block` with `nowrap`; this one is a row with a
+     sentence in it, so it needs both overridden or the icon stacks above the
+     title and the description refuses to wrap. */
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
-  height: 100%;
-  padding: 16px;
-  border: 1px solid var(--td-line);
-  border-radius: 12px;
-  background: var(--td-ground);
-  color: var(--td-ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color .12s, background .12s, transform .12s;
+  gap: 11px;
+  padding: 10px 12px;
+  max-width: 320px;
+  white-space: normal;
 }
-
-.tdoc-modal .mk-cards button.mk-card:hover:not(:disabled) {
-  border-color: var(--td-accent);
-  background: var(--td-surface-2);
-}
-
-.tdoc-modal .mk-cards button.mk-card:disabled {
-  cursor: default;
-  opacity: .7;
-}
-
-.mk-card-icon { color: var(--td-accent); }
-
-.mk-card strong { font-size: 14px; }
-
-.mk-card span {
+.ui-menu-item.mk-item > svg { flex: 0 0 auto; margin-top: 2px; color: var(--td-accent); }
+.ui-menu-item.mk-item > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ui-menu-item.mk-item b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+.ui-menu-item.mk-item em {
+  font-style: normal; font-size: 12.5px; line-height: 1.45;
   color: var(--td-ink-soft, #6b6b73);
-  font-size: 13px;
-  line-height: 1.5;
+}
+/* Four product names set as a list was the longest thing in the old dialog.
+   Two marks say the same and read in a glance. */
+.ui-menu-item.mk-item .mk-works { display: flex; align-items: center; gap: 6px; margin: 3px 0 0 auto; align-self: center; opacity: .85; }
+.ui-menu-item.mk-item .mk-works svg { display: block; }
+
+/* ---- the agent answer, finished in place ------------------------------ */
+/* It used to leave for the onboarding gate. This button is the product's
+   ordinary way to make a document, so its answer belongs in the dialog it was
+   asked in: a subject, the line that subject composes, and Copy. */
+.mk-agent { display: flex; flex-direction: column; gap: 12px; }
+.mk-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.mk-back {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 5px;
+  margin: -4px 0 -2px -6px; padding: 4px 6px;
+  border: 0; border-radius: 7px; background: none; cursor: pointer;
+  color: var(--td-ink-soft, #6b6b73); font: 500 13px inherit;
+}
+.mk-back:hover { background: var(--td-surface-2); color: var(--td-ink); }
+
+.mk-subject input {
+  box-sizing: border-box; width: 100%; height: 44px; padding: 0 14px;
+  border: 1px solid var(--td-line); border-radius: 12px;
+  background: var(--td-ground); color: var(--td-ink);
+  font: 500 14px inherit;
+}
+.mk-subject input::placeholder { color: var(--td-ink-soft, #6b6b73); font-weight: 400; }
+.mk-subject input:focus {
+  outline: none; border-color: var(--td-accent);
+  box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff);
 }
 
-.mk-card em {
-  margin-top: auto;
-  padding-top: 8px;
-  color: var(--td-accent);
-  font-style: normal;
-  font-size: 13px;
-  font-weight: 600;
+.mk-line {
+  display: flex; align-items: flex-end; gap: 10px;
+  padding: 13px 13px 12px;
+  border: 1px solid var(--td-line); border-radius: 14px;
+  background: var(--td-ground);
 }
+.mk-line p {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  font: 500 12.5px/1.65 ui-monospace, "SF Mono", Menlo, monospace;
+  overflow-wrap: anywhere; user-select: all;
+}
+/* The half they typed is the only part of the line that is theirs, so it is
+   the only part set in the ink colour. */
+.mk-line .mk-fixed { color: var(--td-ink-soft, #6b6b73); }
+.mk-line .mk-typed { color: var(--td-ink); }
+.mk-line.pending .mk-typed { color: var(--td-ink-soft, #6b6b73); }
+.mk-line button {
+  flex: 0 0 auto; height: 30px; padding: 0 14px;
+  border: 1px solid var(--td-accent); border-radius: 9px;
+  background: transparent; color: var(--td-accent);
+  font: 600 13px inherit; cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.mk-line button:hover:not(:disabled) { background: var(--td-accent-tint, #e8eeff); }
+.mk-line button.copied { border-color: #1a7340; color: #1a7340; cursor: default; }
+.mk-line button:disabled { border-color: var(--td-line); color: var(--td-ink-soft, #6b6b73); cursor: default; }
+
+.mk-foot { margin: -2px 0 0; color: var(--td-ink-soft, #6b6b73); font-size: 13px; line-height: 1.5; }
 
 /* The recipe step, one click in from its card. */
 .tdoc-modal button.mk-back {
@@ -736,7 +761,7 @@ button.tdoc-pin {
 .tdoc-onboard-banner button:hover { background: rgba(255, 255, 255, .15); }
 
 /* The hub card's one-line definition of "agent", under its title. */
-.mk-card .tdoc-agent-def { display: block; margin-top: -2px; color: var(--td-ink, #111); font-size: 12px; line-height: 1.45; }
+
 
 .ui-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 

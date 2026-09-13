@@ -48,25 +48,17 @@ t('Docs Hub exposes search, sort, tabs, folders, star, selection, and batch acti
   ]) assert(hub.includes(needle), `missing Docs Hub behavior: ${needle}`);
 });
 
-t('Create a doc is a two-card fork rendered by the shared component', () => {
-  // The cards live in create-from-scratch; the wording they carry lives in the
-  // shared onboarding copy (#371).
-  const choice = ['shell/src/create-from-scratch.jsx', 'shell/src/onboarding-copy.js']
-    .map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
-  assert(/import \{ CreateChoice \}/.test(docsHub), 'the Create dialog should render the shared component');
-  assert(/<CreateChoice create=\{hub\.createDoc\} canCreate=\{capabilities\.create\} \/>/.test(docsHub),
-    'the cards must be wired to the hub hook and its capability');
-  // Neither card carries a line any more: the blank doc opens, and the agent
-  // card goes to the one screen that hands a line out.
-  assert(/location\.href = '\/setup\?step=doc'/.test(choice), 'the agent card leads to the gate');
-  assert(!/tdoc-wiz-copy|tdoc-wiz-line|useCopyLine/.test(choice), 'and no recipe rendering was left behind in it');
-  // The dialog now carries its own actions — the cards themselves (#356) — so
-  // the footer is a plain dismiss. Two primaries in one dialog is the thing to
-  // guard against, not the missing "Done".
-  assert(/actions=\{<button type="button" onClick=\{closeModal\}>Close<\/button>\}/.test(docsHub),
-    'Create dialog should close through the shared action row');
-  assert(!/actions=\{<button[^>]+className="primary"/.test(docsHub),
-    'the footer must not compete with the cards');
+t('Create a doc is a menu, and only the agent answer opens a dialog', () => {
+  // A modal to choose between two things is a room built for a sentence. The
+  // fork is a menu under the button that asked; only the answer that needs a
+  // subject typed into it gets a dialog.
+  assert(/<CreateMenu\s/.test(docsHub) && /trigger=\{<button className="mk-btn"/.test(docsHub),
+    'the button is the menu trigger');
+  assert(docsHub.includes('create={hub.createDoc}') && docsHub.includes('canCreate={capabilities.create}'),
+    'the blank doc is wired to the hub hook and its capability');
+  assert(docsHub.includes("modal?.type === 'create-agent'") && /<AgentRecipe \/>/.test(docsHub),
+    'and the agent answer is the only thing left in a dialog');
+  assert(!docsHub.includes('CreateChoice') && !docsHub.includes("'create-help'"), 'the two-card dialog is gone');
 });
 
 t('mobile hub keeps 44px actions while quieting management controls', () => {

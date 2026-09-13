@@ -167,30 +167,33 @@ t('a host that would refuse the create never offers the form', () => {
   assert(hub.includes('canCreate={capabilities.create}'), 'the modal must honour the capability');
 });
 
-t('the choice is two cards, and neither path is a form', () => {
+t('the choice is a menu, and neither answer is a form', () => {
   assert(shellApi.includes("request('/api/doc/create'"), 'createDocument missing from the shell API');
   assert(form.includes('Start from scratch') && form.includes('Build it with your agent'),
-    'both cards must exist');
-  assert(form.includes('className="mk-card"'), 'the cards need a stable hook');
-  // The blank doc opens on the click. A title field here is the thing this
-  // design replaced — the title is typed into the page instead.
-  assert(!/<input/.test(form), 'the scratch card must not ask for a title');
-  // The door moved: /setup is the one place the journey starts, so the card
-  // sends people there instead of opening a second copy of it inline.
-  assert(form.includes("location.href = '/setup?step=doc'"), 'the second card leads to the gate');
+    'both answers must exist');
+  // A modal to choose between two things is a room built for a sentence.
+  assert(/<AppMenu trigger=\{trigger\}>/.test(form) && form.includes('className="mk-item"'), 'the fork is a menu');
+  // The blank doc opens on the click. A title field there is the thing this
+  // design replaced -- the title is typed into the page instead.
+  const blank = form.slice(form.indexOf('export function CreateMenu'), form.indexOf('export function AgentRecipe'));
+  assert(!/<input/.test(blank), 'the scratch answer must not ask for a title');
+  // The agent answer finishes where it was asked rather than leaving for the
+  // onboarding gate: somebody on their fifth doc should not be sent to a page
+  // built to watch their first one arrive.
+  assert(!form.includes("location.href = '/setup?step=doc'"), 'and it no longer leaves for the gate');
+  assert(form.includes('export function AgentRecipe()') && form.includes('docSubjectPrompt('), 'it composes the line in place');
 });
 
-t('the cards live in the Docs Hub, and the recipe has one implementation', () => {
-  assert(hub.includes('<CreateChoice create={hub.createDoc} canCreate={capabilities.create} />'),
-    'the hub must wire the cards to its hook');
+t('the menu lives in the Docs Hub, and the line has one implementation', () => {
+  assert(/<CreateMenu\s/.test(hub) && hub.includes('create={hub.createDoc}') && hub.includes('canCreate={capabilities.create}'),
+    'the hub must wire the menu to its hook and its capability');
   // A second hand-written copy is how the two drift apart.
-  assert(!hub.includes('className="mk-card"'), 'the Docs Hub should render the shared component');
-  assert(form.includes("location.href = '/setup?step=doc'") && !form.includes('FirstDocRecipe') && !form.includes('OwnAgentDoor'),
-    'the AI card leads to the one door, not a bare recipe and not a second copy of the wizard');
+  assert(!hub.includes('className="mk-item"'), 'the Docs Hub should render the shared component');
+  assert(!form.includes('FirstDocRecipe') && !form.includes('OwnAgentDoor'), 'no second copy of the old wizard');
   assert(!form.includes('tdoc-recipe-wrap'), 'the recipe markup belongs to one component');
-  // The recipe has no home in the cards any more. There is one screen that
-  // hands out a line, and this card goes to it.
-  assert(copy.includes("export const ANOTHER_DOC_RECIPE ="), 'the shared wording lives in one module');
+  // The prefix and suffix the line is built from live with the gate that also
+  // composes it, imported rather than retyped here.
+  assert(form.includes("from './setup-gate.jsx'") && form.includes('DOC_SUBJECT_PREFIX'), 'one line, one definition');
 });
 
 t('nothing on a document opens a second onboarding (#371)', () => {

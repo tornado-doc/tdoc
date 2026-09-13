@@ -1,46 +1,108 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { AppMenu, AppMenuItem } from './ui/menu.jsx';
 import { FilePlus2, Sparkles } from 'lucide-react';
-import { AGENT_DEFINITION, AGENT_NAMES } from './onboarding-copy.js';
+import { copyText } from './document/model.js';
+import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
+import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
+import { DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSubjectPrompt } from './setup-gate.jsx';
 
 // "Create a doc" is a fork, not a form: write it yourself, or have your agent
-// write it. Two cards, one per answer — the blank doc opens immediately (you
-// name it by typing into the page, which is where the title lives anyway), and
-// the agent recipe is one step in.
+// write it. Two cards, one per answer.
 //
-// Shared by both entry points, the Docs Hub modal and the landing's onboarding
-// dialog, which differ only in how a refusal is reported.
+// Both answers finish inside this dialog. The blank doc opens immediately —
+// you name it by typing into the page, which is where the title lives anyway.
+// The agent answer used to leave for the onboarding gate, which was the wrong
+// errand: this button is the product's ordinary way to make a document, not a
+// step in anybody's journey, and somebody on their fifth doc should not be
+// sent to a page built to watch their first one arrive.
 //
 // `create` resolves truthy once the browser is on its way to the new document.
-// `busy` is deliberately never cleared on success: the page is already leaving,
-// and flipping the card back to its resting state underneath reads as a
-// no-op.
-export function CreateChoice({ create, canCreate = true }) {
+// `busy` is deliberately never cleared on success: the page is already
+// leaving, and flipping the card back to its resting state underneath reads as
+// a no-op.
+// The fork is a menu now, not a screen: two answers, one line each, under the
+// button that asked. A modal to choose between two things is a room built for
+// a sentence.
+export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
   const [busy, setBusy] = useState(false);
-
   const startBlank = async () => {
     if (busy) return;
     setBusy(true);
     if (!await create()) setBusy(false);
   };
+  return (
+    <AppMenu trigger={trigger}>
+      {canCreate ? (
+        <AppMenuItem onClick={startBlank} disabled={busy} className="mk-item">
+          <FilePlus2 size={16} aria-hidden="true" />
+          <span>
+            <b>{busy ? 'Creating…' : 'Start from scratch'}</b>
+            <em>A blank doc, open in edit mode.</em>
+          </span>
+        </AppMenuItem>
+      ) : null}
+      <AppMenuItem onClick={onAgent} className="mk-item">
+        <Sparkles size={16} aria-hidden="true" />
+        <span>
+          <b>Build it with your agent</b>
+          <em>Name the subject. It writes and publishes the page.</em>
+        </span>
+        {/* Four product names set as a list was the longest thing in the old
+            dialog. Two marks say the same and read in a glance. */}
+        <i className="mk-works"><ClaudeMark size={15} /><OpenAIMark size={13} /></i>
+      </AppMenuItem>
+    </AppMenu>
+  );
+}
 
+// The agent answer, and only that. Somebody on their fifth doc should not be
+// sent to a page built to watch their first one arrive, so this finishes where
+// it was asked: a subject, the line that subject composes, and Copy.
+export function AgentRecipe() {
+  const [subject, setSubject] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const subjectRef = useRef(null);
+  const promptRef = useRef(null);
+
+  useEffect(() => { subjectRef.current?.focus(); }, []);
+
+  const trimmed = subject.trim();
+  const line = docSubjectPrompt(trimmed || '<what it is about>');
+  const ready = Boolean(trimmed);
+
+  const copy = async () => {
+    const ok = await copyText(line);
+    setCopied(ok !== false);
+    setCopyFailed(ok === false);
+    if (ok === false) selectContents(promptRef.current);
+  };
 
   return (
-    <div className="mk-cards">
-      {canCreate ? (
-        <button type="button" className="mk-card" onClick={startBlank} disabled={busy}>
-          <FilePlus2 className="mk-card-icon" size={22} />
-          <strong>Start from scratch</strong>
-          <span>A blank doc, opened straight into edit mode. Type the title into the page.</span>
-          <em>{busy ? 'Creating…' : 'Open a blank doc'}</em>
+    <div className="mk-agent">
+      <label className="mk-subject">
+        <span className="mk-sr">What the doc is about</span>
+        <input
+          ref={subjectRef}
+          type="text"
+          value={subject}
+          placeholder="what it should be about"
+          onChange={(event) => { setSubject(event.target.value); setCopied(false); setCopyFailed(false); }}
+        />
+      </label>
+      <div className={`mk-line${ready ? '' : ' pending'}`}>
+        <p ref={promptRef}>
+          <span className="mk-fixed">{DOC_SUBJECT_PREFIX}</span>
+          <span className="mk-typed">{trimmed || 'what it is about'}</span>
+          <span className="mk-fixed">{DOC_SUBJECT_SUFFIX}</span>
+        </p>
+        <button type="button" className={copied ? 'copied' : ''} onClick={copy} disabled={!ready}>
+          {copied ? 'Copied' : 'Copy'}
         </button>
-      ) : null}
-      <button type="button" className="mk-card" onClick={() => { location.href = '/setup?step=doc'; }}>
-        <Sparkles className="mk-card-icon" size={22} />
-        <strong>Build it with your agent</strong>
-        <span className="tdoc-agent-def">{AGENT_DEFINITION} {AGENT_NAMES}</span>
-        <span>Copy one line into it. It builds a page about you from traces you choose to share, and publishes it.</span>
-        <em>Get the prompt</em>
-      </button>
+      </div>
+      <p className="mk-foot">
+        {copyFailed ? COPY_FALLBACK : 'Paste it into your agent. The doc turns up in this list.'}
+      </p>
     </div>
   );
 }

@@ -203,8 +203,12 @@ t('an unfinished row is a way forward, never a dead line', () => {
   assert(/id: 'connect'[^}]*href: '\/setup'/.test(list), 'the connect row leads back to the gate');
   // Making a doc is asking an agent for one, so the row leads to the page that
   // does that -- not to a fork asking which kind of doc they would like.
-  assert(/id: 'create'[^}]*href: '\/setup\?step=doc'/.test(list), 'the create row leads to the doc gate');
-  assert(!list.includes('onCreate'), 'and not into the hub\'s create chooser');
+  assert(/id: 'create'[^}]*href: r\.first_doc \? null : '\/setup\?step=doc'/.test(list),
+    'the create row leads to the doc gate, but only while that is still ahead of them');
+  // That page exists to watch a FIRST doc arrive. Somebody who has one and
+  // wants another is served by Create a doc, at the top of this same page.
+  assert(!gate.includes('Make another tdoc'), 'the gate no longer offers a second doc');
+  assert(!list.includes('onCreate'), 'and the row does not reach into the hub\'s menu');
 });
 
 t('the second ask is the same ask, on the same route', () => {
@@ -318,13 +322,7 @@ t('both steps are one layout with a status line under it', () => {
   // Read once, not live: the heading must not rename itself from "your first"
   // to "another" in front of somebody watching their first arrive.
   assert(gate.includes("if (step === 'doc' && loaded && known.current === null) {"), 'what they arrived with is read once');
-  // "Another" has to mean what the checklist means by it. Row 2 there reads
-  // `first_doc`, so an account that owns docs but whose journey has recorded
-  // none is on its FIRST -- the catalog saying otherwise had the two surfaces
-  // contradicting each other on one screen's worth of clicks.
-  assert(gate.includes("const another = step === 'doc' && Boolean(known.current && known.current.journey);"),
-    'and the journey names the page, not the catalog');
-  assert(list.includes("done: Boolean(r.first_doc)"), 'which is the same thing row 2 reads');
+  assert(list.includes("done: Boolean(r.first_doc)"), 'and row 2 reads the same field the gate does');
 });
 
 t('the doc step waits for a doc that was not there a moment ago', () => {
