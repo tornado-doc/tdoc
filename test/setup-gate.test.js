@@ -146,7 +146,12 @@ t('every thumbnail shows the thing its own step produces', () => {
   // Notion's read because each contains something already recognisable and no
   // two look alike. Four identically framed boxes of grey bars is one smudge
   // repeated, which is what these were.
-  assert(list.includes('<AgentMarks size={16} />'), 'row 1: the agents\' own marks');
+  // Notion runs the app logos in a checklist thumbnail at about half the
+  // thumbnail's height, and the slot below is 58px. At 16 they were a smudge
+  // beside three full-size thumbnails.
+  const marks = list.match(/<AgentMarks size=\{(\d+)\} \/>/);
+  assert(marks, 'row 1: the agents\' own marks');
+  assert(Number(marks[1]) >= 28, `row 1: the marks are Notion-sized, not ${marks[1]}px`);
   assert(list.includes('<em>Use tdoc to…</em>'), 'row 2: the line you paste');
   assert(list.includes('className="t-mark w70"') && list.includes('className="t-card"'), 'row 3: a marked sentence and the card beside it');
   assert(list.includes("fixed · v2"), 'row 4: the chip a fixed thread carries');

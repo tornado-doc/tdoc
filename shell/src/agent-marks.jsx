@@ -45,13 +45,23 @@ export function GrokMark({ size = 15, color = '#0A0A0A' }) {
 //
 // One component and one stylesheet rule, so every place that claims "works
 // with" agrees with every other, and a fourth agent is one line here.
+// Drawn at one number the three marks do not read at one size, because none
+// of them fills its own viewBox the same way: Claude's ink spans 95% of its
+// box, OpenAI's only 59% across, and Grok's spans the full width but as two
+// hairlines with air between them. Equal `width` therefore means unequal
+// marks -- which is exactly what "why is the ChatGPT logo so small" was.
+// These three numbers are optical, not arithmetic. Grok's is capped: its
+// strokes run corner to corner, so anything past 0.707 pushes the tips
+// outside the round disc and they get clipped.
+const OPTICAL = { claude: 0.66, openai: 0.74, grok: 0.70 };
+
 export function AgentMarks({ size = 22 }) {
-  const inner = Math.round(size * 0.66);
+  const at = (k) => Math.round(size * OPTICAL[k]);
   return (
     <span className="agent-marks" style={{ '--am': `${size}px` }}>
-      <i><ClaudeMark size={inner} /></i>
-      <i><OpenAIMark size={inner} /></i>
-      <i><GrokMark size={inner} /></i>
+      <i><ClaudeMark size={at('claude')} /></i>
+      <i><OpenAIMark size={at('openai')} /></i>
+      <i><GrokMark size={at('grok')} /></i>
     </span>
   );
 }

@@ -86,7 +86,9 @@ function Thumb({ id }) {
     // drawing of one.
     return (
       <span className="onb-thumb agents" aria-hidden="true">
-        <AgentMarks size={16} />
+        {/* Notion runs the app logos in a checklist thumbnail at about half
+            the thumbnail's height. This slot is 58px tall. */}
+        <AgentMarks size={32} />
       </span>
     );
   }
