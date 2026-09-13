@@ -285,6 +285,9 @@ export function SetupGate({ boot }) {
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
   const [busyState, setBusyState] = useState('');
+  // Replay's first press, waiting for its second.
+  const [armed, setArmed] = useState(false);
+  const armTimer = useRef(0);
   const waitingSince = useRef(null);
   const stamped = useRef(false);
 
@@ -600,9 +603,23 @@ export function SetupGate({ boot }) {
               exercised locally at all. */}
           <button
             type="button"
-            className="sg-debug-replay"
+            className={`sg-debug-replay${armed ? ' armed' : ''}`}
             disabled={Boolean(busyState)}
             onClick={async () => {
+              // Two presses, and the first one says what will be destroyed by
+              // name. This deletes a document -- bytes, comments and the slug
+              // -- through the product's own delete, which is exactly right on
+              // a test account and unrecoverable on any other. It disarms
+              // itself, so a press left behind by a wandering finger does not
+              // sit there waiting to be completed by the next one.
+              if (!armed) {
+                setArmed(true);
+                window.clearTimeout(armTimer.current);
+                armTimer.current = window.setTimeout(() => setArmed(false), 4000);
+                return;
+              }
+              window.clearTimeout(armTimer.current);
+              setArmed(false);
               setBusyState('replay');
               await fetch('/api/onboarding/state', {
                 method: 'POST',
@@ -621,7 +638,11 @@ export function SetupGate({ boot }) {
               } catch {}
               location.href = '/setup';
             }}
-          >{busyState === 'replay' ? '…' : 'replay'}</button>
+          >{busyState === 'replay'
+            ? '…'
+            : armed
+              ? (record?.first_doc ? `delete ${record.first_doc}?` : 'replay?')
+              : 'replay'}</button>
           <span className="sg-debug-now">record: {recordName(record)}</span>
         </div>
       ) : null}

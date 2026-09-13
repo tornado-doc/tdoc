@@ -580,6 +580,13 @@ t('replay is new again, not just a blank record', () => {
   // survive a record reset. Each makes the next walk a different walk.
   assert(gate.includes("body: JSON.stringify({ state: 'new', unpair: true, purge: true })"),
     'the credential and the doc go with the record');
+  // It deletes a document -- bytes, comments and the slug -- through the
+  // product's own delete. Exactly right on a test account, unrecoverable on
+  // any other, so it takes two presses and the first one names the doc.
+  assert(gate.includes('if (!armed) {') && gate.includes('`delete ${record.first_doc}?`'),
+    'the first press names what the second will destroy');
+  assert(gate.includes('setTimeout(() => setArmed(false), 4000)'),
+    'and a press left behind by a wandering finger disarms itself');
   // The credential is the one that matters: `account-terminal:` is a marker,
   // and the token it stands for is what actually keeps a CLI connected. Leave
   // it and step 1 can never be walked again -- the one step that cannot be

@@ -369,4 +369,7 @@
 /* Replay is not one of the states -- it throws away a credential and a doc,
    so it does not sit in the row of things that only move a record. */
 .sg-debug .sg-debug-replay { margin-left: 6px; background: var(--td-accent, #1652f0); color: #fff; }
+/* Armed, it is about to delete a document, so it stops looking like the
+   product's own accent and starts looking like the warning it is. */
+.sg-debug .sg-debug-replay.armed { background: #b42318; }
 .sg-debug-now { color: #a8a8a3; padding-left: 4px; }
