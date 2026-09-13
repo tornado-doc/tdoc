@@ -355,7 +355,7 @@ button.tdoc-pin {
   max-width: 320px;
   white-space: normal;
 }
-.ui-menu-item.mk-item > svg { flex: 0 0 auto; margin-top: 2px; color: var(--td-accent); }
+.ui-menu-item.mk-item > svg { flex: 0 0 auto; margin-top: 1px; color: var(--td-ink); opacity: .75; }
 .ui-menu-item.mk-item > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ui-menu-item.mk-item b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
 .ui-menu-item.mk-item em {

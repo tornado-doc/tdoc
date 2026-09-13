@@ -20,6 +20,7 @@ const server = read('server/server.js');
 const shellApi = read('shell/src/document/api.js');
 const hub = read('shell/src/docs-hub.jsx') + '\n' + read('shell/src/hooks/use-docs-hub.js');
 const form = read('shell/src/create-from-scratch.jsx');
+const uiCss = read('shell/src/ui/ui.css');
 const copy = read('shell/src/onboarding-copy.js');
 const editorHook = read('shell/src/hooks/use-document-editor.js');
 
@@ -173,6 +174,14 @@ t('the choice is a menu, and neither answer is a form', () => {
     'both answers must exist');
   // A modal to choose between two things is a room built for a sentence.
   assert(/<AppMenu trigger=\{trigger\}>/.test(form) && form.includes('className="mk-item"'), 'the fork is a menu');
+  // One object, one difference: an empty page and a page with writing on it.
+  // That IS the choice -- who puts the words there -- and it needs no third
+  // metaphor. The sparkle it replaced is the house style of every AI feature
+  // shipped since 2023 and says nothing about this one.
+  assert(form.includes('<File size={17}') && form.includes('<FileText size={17}'), 'the pair is one object twice');
+  assert(!form.includes('Sparkles'), 'and not the sparkle every AI feature wears');
+  assert(uiCss.includes('.ui-menu-item.mk-item > svg { flex: 0 0 auto; margin-top: 1px; color: var(--td-ink); opacity: .75; }'),
+    'monochrome at the label\'s weight: in a menu, colour should mean state');
   // The blank doc opens on the click. A title field there is the thing this
   // design replaced -- the title is typed into the page instead.
   const blank = form.slice(form.indexOf('export function CreateMenu'), form.indexOf('export function AgentRecipe'));

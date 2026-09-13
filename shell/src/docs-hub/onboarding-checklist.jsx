@@ -98,7 +98,7 @@ function Thumb({ id }) {
       <span className="onb-thumb" aria-hidden="true">
         <i className="t-line title w70" />
         <i className="t-line w95" />
-        <i className="t-field"><em>/tdoc new</em></i>
+        <i className="t-field"><em>Use tdoc to…</em></i>
       </span>
     );
   }

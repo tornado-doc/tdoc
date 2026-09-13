@@ -147,7 +147,7 @@ t('every thumbnail shows the thing its own step produces', () => {
   // two look alike. Four identically framed boxes of grey bars is one smudge
   // repeated, which is what these were.
   assert(list.includes('<ClaudeMark size={18} />') && list.includes('<OpenAIMark size={16} />'), 'row 1: the agents\' own marks');
-  assert(list.includes('<em>/tdoc new</em>'), 'row 2: the line you paste');
+  assert(list.includes('<em>Use tdoc to…</em>'), 'row 2: the line you paste');
   assert(list.includes('className="t-mark w70"') && list.includes('className="t-card"'), 'row 3: a marked sentence and the card beside it');
   assert(list.includes("fixed · v2"), 'row 4: the chip a fixed thread carries');
   // Two of them run off the right edge rather than sitting in a box inside a
@@ -273,8 +273,13 @@ t('a subject typed on the page composes the line, and an empty one does not', ()
   // the two halves a reader has to trust.
   // eslint-disable-next-line no-new-func
   const compose = new Function(`${gate.match(/export const DOC_SUBJECT_PREFIX[\s\S]*?export const docSubjectPrompt = [^;]+;/)[0].replace(/export /g, '')}; return docSubjectPrompt;`)();
-  assert(compose('pricing') === '/tdoc new "pricing" — then publish it and give me the link',
+  // A sentence, not a slash command: the line is pasted into a conversation
+  // with an agent, and the skill's own front matter says a plain request is
+  // enough -- "no need for the word tdoc". Naming it is still worth doing, so
+  // an agent with many skills does not have to guess which one this is.
+  assert(compose('pricing') === 'Use tdoc to write a doc about pricing, publish it, and give me the link',
     `the prefix and suffix wrap what they typed: ${compose('pricing')}`);
+  assert(!gate.includes("'/tdoc new"), 'and no slash command is handed to anybody');
   assert(gate.includes("const promptReady = step !== 'doc' || choice === 'portrait' || Boolean(subjectTrimmed);"),
     'an untyped subject is not a line anybody should be handed');
   assert(/className=\{`sg-prompt-copy\$\{copied \? ' copied' : ''\}`\}\s*\n\s*onClick=\{copy\}\s*\n\s*disabled=\{!promptReady\}/.test(gate),

@@ -7,8 +7,11 @@
 
 export const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
 // The line for somebody who already has tdoc installed: FIRST-DOC.md would
-// only build the same portrait again.
-export const ANOTHER_DOC_RECIPE = '/tdoc new "<what it is about>" — then publish it and give me the link';
+// only build the same portrait again. A sentence rather than a slash command,
+// because it is pasted into a conversation with an agent and the skill fires
+// on a plain request -- its own front matter says the word "tdoc" is not even
+// required.
+export const ANOTHER_DOC_RECIPE = 'Use tdoc to write a doc about what it should be about, publish it, and give me the link';
 // The line names the doc: an agent handed a bare 'read my comments' has to
 // guess which of the docs on the machine is meant.
 export const handoffLine = (docUrl) => `Read all comments on ${docUrl} and fix them`;

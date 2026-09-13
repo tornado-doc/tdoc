@@ -198,7 +198,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     await page.fill('.mk-subject input', 'what our on-call rotation costs');
     await page.click('.mk-line button');
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    if (!clipboard.includes('/tdoc new "what our on-call rotation costs"')) {
+    if (!clipboard.includes('Use tdoc to write a doc about what our on-call rotation costs')) {
       throw new Error(`unexpected line: ${clipboard}`);
     }
     await page.keyboard.press('Escape');

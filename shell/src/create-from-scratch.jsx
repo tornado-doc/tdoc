@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppMenu, AppMenuItem } from './ui/menu.jsx';
-import { FilePlus2, Sparkles } from 'lucide-react';
+import { File, FileText } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
-import { DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSubjectPrompt } from './setup-gate.jsx';
+import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSubjectPrompt } from './setup-gate.jsx';
 
 // "Create a doc" is a fork, not a form: write it yourself, or have your agent
 // write it. Two cards, one per answer.
@@ -23,6 +23,14 @@ import { DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSubjectPrompt } from './setu
 // The fork is a menu now, not a screen: two answers, one line each, under the
 // button that asked. A modal to choose between two things is a room built for
 // a sentence.
+//
+// The two glyphs are one object with one difference: an empty page, and a page
+// with writing already on it. That IS the choice -- who puts the words there --
+// and it needs no third metaphor to say it. The sparkle that used to sit on the
+// second one is the house style of every AI feature shipped since 2023 and says
+// nothing about this one; it was also competing with the two agent marks on the
+// same row, which do say something. Monochrome, at the label's weight: in a
+// menu, colour should mean state, and neither of these is a state.
 export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
   const [busy, setBusy] = useState(false);
   const startBlank = async () => {
@@ -34,7 +42,7 @@ export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
     <AppMenu trigger={trigger}>
       {canCreate ? (
         <AppMenuItem onClick={startBlank} disabled={busy} className="mk-item">
-          <FilePlus2 size={16} aria-hidden="true" />
+          <File size={17} strokeWidth={1.75} aria-hidden="true" />
           <span>
             <b>{busy ? 'Creating…' : 'Start from scratch'}</b>
             <em>A blank doc, open in edit mode.</em>
@@ -42,7 +50,7 @@ export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
         </AppMenuItem>
       ) : null}
       <AppMenuItem onClick={onAgent} className="mk-item">
-        <Sparkles size={16} aria-hidden="true" />
+        <FileText size={17} strokeWidth={1.75} aria-hidden="true" />
         <span>
           <b>Build it with your agent</b>
           <em>Name the subject. It writes and publishes the page.</em>
@@ -68,7 +76,7 @@ export function AgentRecipe() {
   useEffect(() => { subjectRef.current?.focus(); }, []);
 
   const trimmed = subject.trim();
-  const line = docSubjectPrompt(trimmed || '<what it is about>');
+  const line = docSubjectPrompt(trimmed || DOC_SUBJECT_PLACEHOLDER);
   const ready = Boolean(trimmed);
 
   const copy = async () => {
@@ -86,14 +94,14 @@ export function AgentRecipe() {
           ref={subjectRef}
           type="text"
           value={subject}
-          placeholder="what it should be about"
+          placeholder={DOC_SUBJECT_PLACEHOLDER}
           onChange={(event) => { setSubject(event.target.value); setCopied(false); setCopyFailed(false); }}
         />
       </label>
       <div className={`mk-line${ready ? '' : ' pending'}`}>
         <p ref={promptRef}>
           <span className="mk-fixed">{DOC_SUBJECT_PREFIX}</span>
-          <span className="mk-typed">{trimmed || 'what it is about'}</span>
+          <span className="mk-typed">{trimmed || DOC_SUBJECT_PLACEHOLDER}</span>
           <span className="mk-fixed">{DOC_SUBJECT_SUFFIX}</span>
         </p>
         <button type="button" className={copied ? 'copied' : ''} onClick={copy} disabled={!ready}>

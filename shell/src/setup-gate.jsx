@@ -46,8 +46,15 @@ export const SETUP_PROMPT = 'Install tdoc from https://github.com/tornado-doc/td
 // now delivers exactly that, earlier and without a click; the only forkable
 // template today IS the one already sitting in their Onboarding folder. It
 // becomes real when there is a second thing to fork.
-export const DOC_SUBJECT_PREFIX = '/tdoc new "';
-export const DOC_SUBJECT_SUFFIX = '" — then publish it and give me the link';
+// A sentence, not a slash command. `/tdoc new` made a line meant for a chat
+// with an agent look like something typed at a shell, and it was never
+// required: the skill's own front matter says "no need for the word tdoc" and
+// tells the agent to fire on a plain request to write a doc. Naming tdoc is
+// still worth doing -- an agent with many skills should not have to guess --
+// but the rest is how somebody would actually ask.
+export const DOC_SUBJECT_PREFIX = 'Use tdoc to write a doc about ';
+export const DOC_SUBJECT_SUFFIX = ', publish it, and give me the link';
+export const DOC_SUBJECT_PLACEHOLDER = 'what it should be about';
 export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${DOC_SUBJECT_SUFFIX}`;
 // FIRST_DOC_RECIPE opens with "Set up tdoc and", which is true on the landing
 // page and false here: by the time anyone reads this screen the skill is
@@ -285,7 +292,7 @@ export function SetupGate({ boot }) {
   const step = wantsDoc && connected ? 'doc' : 'connect';
   const subjectTrimmed = subject.trim();
   const docPrompt = choice === 'portrait' ? PORTRAIT_PROMPT
-    : choice === 'own' ? docSubjectPrompt(subjectTrimmed || '<what it is about>')
+    : choice === 'own' ? docSubjectPrompt(subjectTrimmed || DOC_SUBJECT_PLACEHOLDER)
       : FIRST_DOC_PROMPT;
   const prompt = step === 'doc' ? docPrompt : SETUP_PROMPT;
   // A subject that has not been typed is not a line anybody should be handed.
@@ -431,7 +438,7 @@ export function SetupGate({ boot }) {
                       ref={subjectRef}
                       type="text"
                       value={subject}
-                      placeholder="what it should be about"
+                      placeholder={DOC_SUBJECT_PLACEHOLDER}
                       onChange={(event) => { setSubject(event.target.value); setCopied(false); }}
                     />
                   </label>
