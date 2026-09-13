@@ -1,0 +1,110 @@
+/* The window, at the proportions of a real one: near-square, its conversation
+   a column down the middle rather than the full width. */
+.cw {
+  /* Clear of the dock. The canvas is 720 tall and the dock's top edge sits at
+     ~636, so a window that ends below that is one the dock slices. */
+  position: absolute; left: 50%; top: 40px;
+  width: 640px; height: 578px;
+  display: flex; flex-direction: column;
+  transform: translate(-50%, 0);
+  border-radius: 13px; overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, .09);
+  box-shadow: 0 30px 68px rgba(0, 0, 0, .36), 0 2px 6px rgba(0, 0, 0, .15);
+  font: 400 14px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  color: #0d0d0d;
+}
+
+/* Controls on both sides, the thread's name centred between them. */
+.cw-bar {
+  flex: 0 0 auto; height: 46px;
+  display: flex; align-items: center; gap: 13px; padding: 0 15px;
+  border-bottom: 1px solid #ececec; background: #fff;
+  color: #5d5d5d;
+}
+.cw-lights { display: flex; gap: 8px; }
+.cw-lights i { width: 12px; height: 12px; border-radius: 50%; }
+.cw-lights i:nth-child(1) { background: #ff5f57; }
+.cw-lights i:nth-child(2) { background: #febc2e; }
+.cw-lights i:nth-child(3) { background: #28c840; }
+.cw-bar-icons { display: flex; gap: 11px; margin-left: 4px; }
+.cw-title {
+  flex: 1 1 auto; min-width: 0; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 600 14px/1 inherit; color: #0d0d0d;
+}
+.cw-dots { color: #8e8e8e; letter-spacing: .06em; }
+.cw-bar-right { display: flex; align-items: center; gap: 9px; font-size: 13.5px; }
+
+.cw-body { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 20px 0 8px; }
+/* Not the full width. A conversation runs down the middle of the window and
+   the margins are part of what makes it recognisable. */
+.cw-col { width: 78%; margin: 0 auto; display: flex; flex-direction: column; gap: 15px; }
+
+.cw-stamp { align-self: center; font-size: 12.5px; color: #8e8e8e; }
+
+/* The human's turn. Dark, right-aligned, generously rounded, never full width. */
+.cw-ask { display: flex; justify-content: flex-end; }
+.cw-ask > span {
+  max-width: 84%;
+  padding: 11px 17px; border-radius: 20px;
+  background: #0d0d0d; color: #fff;
+  font-size: 13.5px; line-height: 1.5;
+}
+.cw-caret { display: inline-block; width: 1.5px; height: 15px; margin-left: 2px; background: #fff; vertical-align: -2px; animation: cw-blink 1s steps(1) infinite; }
+@keyframes cw-blink { 50% { opacity: 0; } }
+
+/* A tool call is one grey line until it is opened. Showing its output as a
+   permanent block was the biggest thing the drawing got wrong: it filled half
+   the window with something a real window keeps behind a chevron. */
+.cw-worked { display: flex; flex-direction: column; gap: 11px; }
+.cw-worked-row {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 7px;
+  padding: 0; border: 0; background: none;
+  font: 400 13.5px inherit; color: #8e8e8e;
+}
+.cw-chev { display: inline-block; color: #b4b4b4; transition: transform .2s ease; }
+.cw-chev.open { transform: rotate(90deg); }
+.cw-tool {
+  margin: 0; padding: 12px 14px;
+  border-radius: 9px; background: #f7f7f5; border: 1px solid #ededea;
+  font: 400 11.5px/1.65 ui-monospace, "SF Mono", Menlo, monospace;
+  color: #55554f; white-space: pre-wrap;
+}
+.cw-rule { width: 100%; height: 1px; margin: 0; border: 0; background: #ececec; }
+
+/* The assistant's turn: plain text. No bubble, no avatar, no tint. */
+.cw-answer { font-size: 13.5px; line-height: 1.6; }
+.cw-answer p { margin: 0 0 10px; }
+.cw-answer p:last-child { margin-bottom: 0; }
+.cw-answer ul { margin: 0; padding-left: 21px; }
+.cw-answer li { margin: 5px 0; }
+.cw-answer code {
+  padding: 1.5px 6px; border-radius: 5px; background: #f1f1ef;
+  font: 400 12.5px ui-monospace, "SF Mono", Menlo, monospace;
+}
+.cw-answer a { color: #2a6df4; text-decoration: none; }
+
+.cw-feedback { display: flex; gap: 15px; color: #9a9a9a; }
+
+/* Always there. A window whose composer disappears after the first message is
+   not a window anybody has used. */
+.cw-composer {
+  flex: 0 0 auto; margin: 0 18px 16px;
+  border: 1px solid #e4e4e4; border-radius: 22px; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+  padding: 13px 16px 9px;
+}
+.cw-field { min-height: 20px; font-size: 13.5px; color: #a3a3a3; }
+.cw-tools { display: flex; align-items: center; gap: 10px; margin-top: 8px; color: #8e8e8e; }
+.cw-plus { font-size: 18px; line-height: 1; color: #6b6b6b; }
+.cw-access { display: inline-flex; align-items: center; gap: 5px; color: #d4700f; font-size: 13px; }
+.cw-sp { flex: 1 1 auto; }
+.cw-model { font-size: 13px; color: #5d5d5d; }
+.cw-model em { font-style: normal; color: #a3a3a3; }
+.cw-send { width: 28px; height: 28px; border-radius: 50%; background: #0d0d0d; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cw-caret { animation: none; }
+  .cw-chev { transition: none; }
+}
