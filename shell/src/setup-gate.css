@@ -166,8 +166,17 @@
 .sg-account a { color: var(--td-accent, #1652f0); }
 
 /* ----------------------------------------------------------- the right pane */
+/* Centred in the viewport, not in the grid row -- which is the same mistake
+   the left column made, arriving by a different road. A grid row is as tall as
+   its tallest cell, so the height of this one was being set by the form beside
+   it: picking the choice that needs a subject typed into it made the left
+   column taller, the row taller, and the picture in here slid down to stay in
+   the middle of it. Sticky to the top at exactly one screen tall, it has a
+   height of its own, and the answer on the left can grow as far as it likes
+   without moving the furniture on the right. */
 .sg-pane-art {
-  position: relative; overflow: hidden;
+  position: sticky; top: 0;
+  height: 100vh; overflow: hidden;
   background-color: var(--sg-wash);
   background-image: radial-gradient(var(--sg-dot) 1.2px, transparent 1.2px);
   background-size: 22px 22px;
