@@ -574,6 +574,37 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
     'and neither host invents one');
 });
 
+t('replay is new again, not just a blank record', () => {
+  // Testing onboarding means being new more than once, and three things
+  // survive a record reset. Each makes the next walk a different walk.
+  assert(gate.includes("body: JSON.stringify({ state: 'new', unpair: true, purge: true })"),
+    'the credential and the doc go with the record');
+  // The credential is the one that matters: `account-terminal:` is a marker,
+  // and the token it stands for is what actually keeps a CLI connected. Leave
+  // it and step 1 can never be walked again -- the one step that cannot be
+  // exercised locally at all.
+  assert(worker.includes("if (body.unpair === true) {") && worker.includes("prefix: 'hosted-token:'"),
+    'unpair takes the credential, not the marker');
+  assert(worker.includes('if (body.purge === true && prior && prior.first_doc) {'), 'purge takes the journey\'s doc');
+  assert(worker.includes('meta.hosted.account_id === accountId'), 'and only one this account owns');
+  // The product already knows how to delete a doc. A second, thinner version
+  // is how one of them ends up leaving the DO populated.
+  assert(worker.includes('async function deleteDocEverywhere(env, slug) {')
+    && (worker.match(/deleteDocEverywhere\(env, /g) || []).length >= 2,
+    'both callers delete a doc the same way');
+  // The dismissals live in the browser. Every key here is somebody saying
+  // "not now" about a piece of the onboarding, and each silently removes that
+  // piece from every later walk -- so the list has to be the real constants.
+  const keys = ['tdoc.onboarding.hint', 'tdoc.onboarding.collapsed', 'tdoc.onboarding.open', 'tdoc-handoff-open'];
+  for (const key of keys) {
+    assert(gate.includes(`'${key}'`), `replay does not clear ${key}`);
+    const owner = [hint, list, shell].some((src) => src.includes(`'${key}'`));
+    assert(owner, `${key} is not a key anything actually writes`);
+  }
+  assert(gate.includes("export const REPLAY_LOCAL_PREFIX = 'tdoc.handoff.';") && shell.includes('`tdoc.handoff.${config.slug}`'),
+    'and the per-doc waits go by prefix, so a replay need not know which docs the last walk made');
+});
+
 t('a finished gate stops asking, and the column fits a laptop', () => {
   // The poll asks the server what the agent has done. Once it has done it the
   // question stops being a question, and the page was still asking it every

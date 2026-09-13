@@ -30,6 +30,11 @@ const hostedRoute = block("if (p === '/api/hosted/token' && method === 'POST')",
 const uploadRoute = block("if (p === '/api/upload' && method === 'POST')", '// ---- admin access mutation ----');
 const accessRoute = block("if (p === '/api/doc/access' && method === 'PATCH')", '// ---- admin delete ----');
 const deleteRoute = block("if (p === '/api/doc' && method === 'DELETE')", "return text('Not found'");
+// The erasing itself lives in a named helper now, because the replay reset
+// deletes a doc too and a second, thinner copy is how one of them ends up
+// leaving the DO populated. The order still matters, so the order is still
+// pinned -- just where it is written.
+const deleteBody = block('async function deleteDocEverywhere(env, slug) {', 'async function loadDocMeta');
 const wipeRoute = block("url.searchParams.get('all') === '1'", '// Soft-delete:');
 const agentReplyRoute = block("if (p === '/api/agent/reply' && method === 'POST')", '// ---- admin upload');
 const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env, slug) {');
@@ -144,12 +149,14 @@ t('Access mutation and delete go through the shared gate with the slug', () => {
 });
 
 t('DELETE releases hosted slug ownership after wiping storage', () => {
-  const release = deleteRoute.indexOf("kind: 'release_owner'");
-  const metaDel = deleteRoute.indexOf('env.META.delete(`meta:${slug}`)');
-  const wipe = deleteRoute.indexOf("kind: 'wipe'");
+  const release = deleteBody.indexOf("kind: 'release_owner'");
+  const metaDel = deleteBody.indexOf('env.META.delete(`meta:${slug}`)');
+  const wipe = deleteBody.indexOf("kind: 'wipe'");
   assert(release >= 0, 'DELETE must call release_owner');
+  assert(deleteRoute.includes('await deleteDocEverywhere(env, slug)'), 'and it is the route that asks for it');
   assert(metaDel >= 0 && wipe >= 0 && metaDel < release && wipe < release,
     'release_owner must run after meta/comment wipe so a failed delete cannot free a live slug');
+  assert(deleteBody.indexOf('DOCS.delete') < metaDel, 'and the bytes go before the index that finds them');
   assert(deleteRoute.includes('released.ok === false'),
     'DELETE must fail closed when COMMENTS is present and release_owner fails');
   assert(deleteRoute.includes("error: released.error || 'owner_release_failed'"),

@@ -340,6 +340,30 @@ function canCommentOnDoc(access, session, env, meta) {
   return false;
 }
 
+// Every copy of a doc, in the order that is safe: bytes, then the index, then
+// the comments, then the slug reservation. Authorization is the caller's job --
+// this only knows how to erase. Named because two callers need it and a second
+// thinner version is how one of them ends up leaving the DO populated, which
+// is what made delete-then-recreate resurrect old comments.
+async function deleteDocEverywhere(env, slug) {
+  let cursor;
+  do {
+    const r = await env.DOCS.list({ prefix: `docs/${slug}/`, cursor });
+    for (const o of r.objects) await env.DOCS.delete(o.key);
+    cursor = r.truncated ? r.cursor : undefined;
+  } while (cursor);
+  await env.META.delete(`meta:${slug}`);
+  // Through the DO (the canonical store), not just the KV mirror: deleting
+  // only KV left DO storage populated. The wipe op clears state.storage; the
+  // legacy KV value goes too, as cleanup.
+  await mutateComments(env, slug, { kind: 'wipe' });
+  await env.META.delete(`comments:${slug}`);
+  // Free the hosted slug reservation so it can be republished. Data is already
+  // gone; this goes last. If COMMENTS is absent (Vercel) there was never a
+  // hostedOwner key -- the caller ignores the 503.
+  return hostedOwnerOp(env, slug, { kind: 'release_owner' });
+}
+
 async function loadDocMeta(env, slug) {
   try {
     const raw = await env.META.get(`meta:${slug}`);
@@ -6565,7 +6589,54 @@ export default {
           await env.META.delete(key);
         }
       } catch {}
-      return json({ ok: true, state, record: next });
+      // --- replay ---
+      // Resetting the record is not the same as being new again, and testing
+      // onboarding means being new again more than once. Three things survive
+      // a reset and each of them makes the next walk a different walk:
+      //
+      //   the credential   `account-terminal:` above is a marker; the token it
+      //                    stands for lives under `hosted-token:` and is what
+      //                    actually keeps a CLI connected. Leaving it means
+      //                    step 1 can never be walked again -- the one step
+      //                    that cannot be exercised locally at all.
+      //   the doc          the journey's doc and its comments stay, so a second
+      //                    walk publishes a second one, and a tenth walk leaves
+      //                    ten test docs in somebody's list.
+      //   the dismissals   live in the browser, not here; the page clears its
+      //                    own (see the debug bar).
+      //
+      // Both are opt-in, because the states are also used to jump *to* a step
+      // on an account that should keep working afterwards.
+      const cleared = { tokens: 0, doc: null };
+      if (body.unpair === true) {
+        // No account -> token index exists; the token's key is its own hash.
+        // A full scan is the price, and this route is pressed by hand.
+        let cursor;
+        do {
+          const r = await env.META.list({ prefix: 'hosted-token:', cursor });
+          for (const k of r.keys) {
+            let rec = null;
+            try { rec = JSON.parse(await env.META.get(k.name)); } catch {}
+            if (rec && rec.account_id === accountId) {
+              await env.META.delete(k.name);
+              cleared.tokens += 1;
+            }
+          }
+          cursor = r.cursor;
+          if (r.list_complete) break;
+        } while (cursor);
+        try { await env.META.delete(`account-terminal:${accountId}`); } catch {}
+      }
+      if (body.purge === true && prior && prior.first_doc) {
+        // Only the journey's own doc, and only after checking this account
+        // owns it -- a slug in a record is not a licence to delete.
+        const meta = await loadDocMeta(env, prior.first_doc);
+        if (meta && meta.hosted && meta.hosted.account_id === accountId) {
+          await deleteDocEverywhere(env, prior.first_doc);
+          cleared.doc = prior.first_doc;
+        }
+      }
+      return json({ ok: true, state, record: next, cleared });
     }
     if (p === '/api/onboarding/event' && method === 'POST') {
       let body = {};
@@ -7537,26 +7608,7 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const auth = await authorizeOwnerMutation(req, env, slug);
       if (!auth.ok) return auth.response;
-      // delete all R2 versions
-      let cursor;
-      do {
-        const r = await env.DOCS.list({ prefix: `docs/${slug}/`, cursor });
-        for (const o of r.objects) await env.DOCS.delete(o.key);
-        cursor = r.truncated ? r.cursor : undefined;
-      } while (cursor);
-      await env.META.delete(`meta:${slug}`);
-      // Wipe comments through the DO (the canonical store), not just the KV
-      // mirror (Codex P1: deleting only KV left DO storage populated, so
-      // delete-then-recreate resurrected old comments). The wipe op clears
-      // state.storage; the legacy KV value is removed too as cleanup.
-      await mutateComments(env, slug, { kind: 'wipe' });
-      await env.META.delete(`comments:${slug}`);
-      // Free the hosted slug reservation so the original owner (or anyone)
-      // can republish. Data is already gone; do this last. If COMMENTS is
-      // absent (Vercel), there was never a hostedOwner key — ignore the 503.
-      // If the DO is present and release fails, do not report success: the
-      // slug would stay parked while the API lied.
-      const released = await hostedOwnerOp(env, slug, { kind: 'release_owner' });
+      const released = await deleteDocEverywhere(env, slug);
       if (env.COMMENTS && released && released.ok === false) {
         return json(
           { error: released.error || 'owner_release_failed' },

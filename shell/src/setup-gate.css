@@ -366,4 +366,7 @@
 .sg-debug button[aria-pressed="true"] { background: #1a1a1a; color: #fff; }
 .sg-debug button:disabled { opacity: .4; cursor: default; }
 .sg-debug .sg-debug-reset { background: #fdeceb; color: #b42318; }
+/* Replay is not one of the states -- it throws away a credential and a doc,
+   so it does not sit in the row of things that only move a record. */
+.sg-debug .sg-debug-replay { margin-left: 6px; background: var(--td-accent, #1652f0); color: #fff; }
 .sg-debug-now { color: #a8a8a3; padding-left: 4px; }

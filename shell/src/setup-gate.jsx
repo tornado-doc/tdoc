@@ -31,6 +31,20 @@ import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
 // ONBOARDING.md only reaches the connection in its step 5, as a side effect of
 // building a first doc -- which this page deliberately no longer asks for. So
 // the line names the command that pairs, and stops there.
+// What a replay has to clear in this browser. Each of these is somebody
+// saying "not now" about a piece of the onboarding, and each of them silently
+// removes that piece from every later walk.
+export const REPLAY_LOCAL_KEYS = [
+  'tdoc.onboarding.hint',        // the step row docked on a doc, X'd away
+  'tdoc.onboarding.collapsed',   // the checklist, parked as a chip
+  'tdoc.onboarding.open',        // the checklist, showing one step or all
+  'tdoc-handoff-open',           // the line for the agent, folded shut
+];
+// And one per doc: `tdoc.handoff.<slug>` remembers that a line was copied and
+// the page is waiting for an agent. A prefix, so a replay does not have to
+// know which docs the last walk made.
+export const REPLAY_LOCAL_PREFIX = 'tdoc.handoff.';
+
 export const SETUP_PROMPT = 'Install tdoc from https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md, then connect it to my account by running: bin/tdoc-publish --signin-only';
 // The second ask, on the same route, and the one place in the whole journey
 // where there is a choice to make. Everybody being marched through the same
@@ -578,6 +592,36 @@ export function SetupGate({ boot }) {
               }}
             >{busyState === name ? '…' : name}</button>
           ))}
+          {/* Replay: be new again, properly. Resetting the record is not the
+              same thing -- the credential, the doc and this browser's
+              dismissals all survive it, and each one makes the next walk a
+              different walk. The credential matters most: leave it and step 1
+              can never be walked again, which is the one step that cannot be
+              exercised locally at all. */}
+          <button
+            type="button"
+            className="sg-debug-replay"
+            disabled={Boolean(busyState)}
+            onClick={async () => {
+              setBusyState('replay');
+              await fetch('/api/onboarding/state', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: 'new', unpair: true, purge: true }),
+              }).catch(() => {});
+              // The dismissals live here, not on the server: a hidden
+              // checklist and an X'd step row would stay hidden through every
+              // later walk, and they are part of what is being tested.
+              try {
+                for (const key of REPLAY_LOCAL_KEYS) localStorage.removeItem(key);
+                for (const key of Object.keys(localStorage)) {
+                  if (key.startsWith(REPLAY_LOCAL_PREFIX)) localStorage.removeItem(key);
+                }
+              } catch {}
+              location.href = '/setup';
+            }}
+          >{busyState === 'replay' ? '…' : 'replay'}</button>
           <span className="sg-debug-now">record: {recordName(record)}</span>
         </div>
       ) : null}
