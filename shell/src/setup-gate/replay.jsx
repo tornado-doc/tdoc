@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ClaudeMark, OpenAIMark, GrokMark } from '../agent-marks.jsx';
+import { FinderIcon, SafariIcon, MessagesIcon, TrashIcon } from './mac-icons.jsx';
 import { CodexWindow, Stamp, Ask, Worked, Answer, Feedback } from './codex-window.jsx';
 import './codex-window.css';
 import './replay.css';
@@ -100,24 +101,30 @@ function useClock(running, total, restart) {
 // deliberate crop, never an accident -- and the approval sheet is 420 wide, so
 // it can be pushed in on much further than the window can.
 const SHOTS = [
-  { at: 0, s: 0.50, x: 540, y: 360 },
-  { at: 1300, s: 0.50, x: 540, y: 360 },
-  { at: 1950, s: 1.00, x: 540, y: 640 },
-  { at: 2600, s: 1.00, x: 540, y: 640 },
-  { at: 3250, s: 0.85, x: 540, y: 300 },
-  { at: 5200, s: 0.85, x: 540, y: 300 },
-  { at: 6300, s: 0.85, x: 540, y: 350 },
-  { at: 8300, s: 0.85, x: 540, y: 350 },
-  // The sheet is the subject here, but it is a browser window opening in front
-  // of the app -- so the app stays whole behind it. Pushing in far enough to
-  // fill the frame with the sheet sliced both edges off the thing it is
-  // sitting on, which is not what anybody sees.
-  { at: 9000, s: 0.92, x: 540, y: 330 },
-  { at: 11500, s: 0.92, x: 540, y: 330 },
-  { at: 12700, s: 0.85, x: 540, y: 350 },
-  { at: 15500, s: 0.85, x: 540, y: 320 },
-  { at: 18600, s: 0.50, x: 540, y: 360 },
-  { at: REPLAY_MS, s: 0.50, x: 540, y: 360 },
+  // At 0.85 the frame holds the whole desk vertically (648 / 0.85 = 762 > 720)
+  // and the whole window across (544 / 0.85 = 640), so the menu bar and the
+  // dock stay in shot for the entire script. They are always on a real screen;
+  // half of one hanging off the top is worse than not drawing it.
+  // 0.85 is the floor, not a wide shot: 612 / 720 = 0.85 is the scale at which
+  // the desk exactly fills the frame, so anything smaller shrinks the desk
+  // inside it and shows the frame's own ground around the edges. There is no
+  // "further out" to go.
+  { at: 0, s: 0.85, x: 540, y: 358 },
+  { at: 1300, s: 0.85, x: 540, y: 358 },
+  // In on the dock, to watch the app open.
+  { at: 1950, s: 1.00, x: 540, y: 630 },
+  { at: 2600, s: 1.00, x: 540, y: 630 },
+  // Back out far enough to keep the desk whole while the window is read.
+  { at: 3250, s: 0.85, x: 540, y: 358 },
+  { at: 8300, s: 0.85, x: 540, y: 358 },
+  // The sheet is a browser window opening in front of the app, so the app
+  // stays whole behind it.
+  { at: 9000, s: 0.92, x: 540, y: 340 },
+  { at: 11500, s: 0.92, x: 540, y: 340 },
+  { at: 12700, s: 0.85, x: 540, y: 358 },
+  { at: 15500, s: 0.85, x: 540, y: 358 },
+  { at: 18600, s: 0.85, x: 540, y: 358 },
+  { at: REPLAY_MS, s: 0.85, x: 540, y: 358 },
 ];
 
 function camera(t, shots = SHOTS) {
@@ -136,11 +143,23 @@ function camera(t, shots = SHOTS) {
 
 // ------------------------------------------------------------------ the desk
 const DOCK = { x: 540, y: 664, gap: 76 };
+// What is always in a dock, then the three this story is about, then the bin.
+// A dock holding only chat apps is not a dock anybody has, and that was most
+// of why the desk read as a drawing.
 const APPS = [
-  { id: 'claude', name: 'Claude', bg: '#D97757', mark: (s) => <ClaudeMark size={s} color="#fff" /> },
-  { id: 'chatgpt', name: 'ChatGPT', bg: '#0D0D0D', mark: (s) => <OpenAIMark size={s} color="#fff" /> },
-  { id: 'grok', name: 'Grok', bg: '#0A0A0A', mark: (s) => <GrokMark size={s} color="#fff" /> },
+  { id: 'finder', fixed: FinderIcon },
+  { id: 'safari', fixed: SafariIcon },
+  { id: 'messages', fixed: MessagesIcon },
+  { id: 'claude', bg: '#D97757', mark: (n) => <ClaudeMark size={n} color="#fff" /> },
+  { id: 'chatgpt', bg: '#0D0D0D', mark: (n) => <OpenAIMark size={n} color="#fff" /> },
+  { id: 'grok', bg: '#0A0A0A', mark: (n) => <GrokMark size={n} color="#fff" /> },
+  { id: 'sep', separator: true },
+  { id: 'trash', fixed: TrashIcon },
 ];
+// Which icon the pointer goes to, found by name rather than by position --
+// adding an app to the dock should not silently move the click.
+const LAUNCHES = 'chatgpt';
+const LAUNCH_INDEX = APPS.findIndex((a) => a.id === LAUNCHES);
 
 // `launch` is the connect script's own beat -- the click that opens the app.
 // The doc script has no such beat (the window is already open and the person is
@@ -153,26 +172,53 @@ function Dock({ t, wake: fixed, launch = true }) {
   return (
     <div className="rp-dock" style={{ opacity: wake, transform: `translate(-50%, ${(1 - wake) * 26}px)` }}>
       {APPS.map((app, i) => {
-        // The magnification is real: the pointer is over ChatGPT, so ChatGPT
-        // stands up and its neighbours lean.
+        if (app.separator) return <i key={app.id} className="rp-dock-sep" />;
         // Magnification is the pointer's doing, so it only happens on the
         // script where a pointer goes there. On the other one the dock sits
-        // flat -- and a magnified icon reaches ~5px higher than the window's
-        // bottom edge, so this was also poking through it.
-        const near = Math.abs(i - 1);
+        // flat -- and a magnified icon reaches higher than the window's bottom
+        // edge, so this was also poking through it.
+        const near = Math.abs(i - LAUNCH_INDEX);
         const lift = (launch ? wake : 0) * (near === 0 ? 1 : near === 1 ? 0.42 : 0);
-        const bounce = app.id === 'chatgpt' ? Math.sin(press * Math.PI) * 12 : 0;
+        const bounce = app.id === LAUNCHES ? Math.sin(press * Math.PI) * 12 : 0;
         return (
           <div
             key={app.id}
             className="rp-app"
             style={{ transform: `translateY(${-lift * 14 - bounce}px) scale(${1 + lift * 0.34})` }}
           >
-            <span className="rp-icon" style={{ background: app.bg }}>{app.mark(30)}</span>
-            <i className="rp-run" style={{ opacity: app.id === 'chatgpt' ? press : 0 }} />
+            {app.fixed
+              ? <app.fixed />
+              : <span className="rp-icon" style={{ background: app.bg }}>{app.mark(28)}</span>}
+            <i className="rp-run" style={{ opacity: app.id === LAUNCHES ? press : 0 }} />
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// The apple, the front app's name in bold, that app's menus, then the status
+// items on the right. A dark strip with one word on it was the giveaway.
+function MenuBar({ app, clock }) {
+  return (
+    <div className="rp-menubar" aria-hidden="true">
+      <span className="rp-mb-apple">⌘</span>
+      <span className="rp-mb-app">{app}</span>
+      <span className="rp-mb-menu">
+        <span>File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span>
+      </span>
+      <span className="rp-sp" />
+      <span className="rp-mb-status">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+          <path d="M8 12.4a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Zm0-3.5c1.2 0 2.3.5 3.1 1.3l-1.1 1.1A2.8 2.8 0 0 0 8 10.4c-.8 0-1.5.3-2 .9L4.9 10.2A4.4 4.4 0 0 1 8 8.9Zm0-3.4c2.1 0 4 .8 5.4 2.2l-1.1 1.1A6.1 6.1 0 0 0 8 7.1c-1.7 0-3.2.6-4.3 1.7L2.6 7.7A7.6 7.6 0 0 1 8 5.5Zm0-3.4c3 0 5.7 1.2 7.7 3.2l-1.1 1.1A9.4 9.4 0 0 0 8 3.7c-2.6 0-4.9 1-6.6 2.7L.3 5.3A11 11 0 0 1 8 2.1Z" />
+        </svg>
+        <svg viewBox="0 0 26 14" width="23" height="12" aria-hidden="true">
+          <rect x=".8" y=".8" width="21" height="12.4" rx="3.4" fill="none" stroke="currentColor" strokeWidth="1.2" opacity=".6" />
+          <rect x="2.6" y="2.6" width="15" height="8.8" rx="1.8" fill="currentColor" />
+          <path d="M23.4 5v4a2.6 2.6 0 0 0 0-4Z" fill="currentColor" opacity=".5" />
+        </svg>
+        <span>{clock}</span>
+      </span>
     </div>
   );
 }
@@ -289,10 +335,13 @@ function ApprovalSheet({ t }) {
 
 // ------------------------------------------------------------------- the set
 export function ConnectReplay({ prompt }) {
+  // No line yet: the desk, the dock, and no app open. Running the script
+  // would be a recording of pasting something that does not exist.
+  const idle = !prompt;
   const reduced = typeof window !== 'undefined'
     && window.matchMedia
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const t = useClock(!reduced, REPLAY_MS);
+  const t = useClock(!reduced && !idle, REPLAY_MS);
   // The desk and the dock never fade -- only the window does, so the loop
   // reads as somebody closing it and starting over rather than as the screen
   // being switched off and on.
@@ -302,18 +351,29 @@ export function ConnectReplay({ prompt }) {
     <div className="rp-view" aria-hidden="true">
       <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
       <div className="rp-canvas">
-        <div className="rp-menubar"><span className="rp-mb-app">ChatGPT</span><span className="rp-sp" /><span>Fri 2:59 AM</span></div>
-        {/* Never a component called `Window`: delete its definition and the
-            name does not go undefined, it quietly resolves to the DOM's own
-            global and React tries to construct it. */}
-        <div style={{ opacity: fade }}>
+        <MenuBar app="ChatGPT" clock="Fri 2:59 AM" />
+        {/* The app opens when the icon is pressed, not before. Lifting the
+            window into a shared component dropped its entrance: it was drawn
+            from the first frame, so the pointer was still walking to a dock
+            whose app was already open.
+
+            Never a component called `Window`, either: delete its definition
+            and the name does not go undefined, it quietly resolves to the
+            DOM's own global and React tries to construct it. */}
+        <div
+          className="rp-app-window"
+          style={{
+            opacity: idle ? 0 : phase(t, T.windowIn) * fade,
+            transform: `scale(${0.965 + phase(t, T.windowIn) * 0.035})`,
+          }}
+        >
           <CodexWindow title="Install tdoc and connect account">
             <ConnectTurns t={t} prompt={prompt} />
           </CodexWindow>
         </div>
-        <ApprovalSheet t={t} />
-        <Dock t={t} />
-        <Cursor t={t} />
+        {idle ? null : <ApprovalSheet t={t} />}
+        <Dock t={t} wake={idle ? 1 : undefined} launch={!idle} />
+        {idle ? null : <Cursor t={t} />}
       </div>
       </div>
     </div>
@@ -345,11 +405,11 @@ export function docScript(prompt) {
 // fractions of it rather than as milliseconds that would fall in the wrong
 // place the moment somebody typed a longer subject.
 const DOC_FRAMES = [
-  { p: 0, s: 0.85, x: 540, y: 330 },
-  { p: 0.42, s: 0.85, x: 540, y: 330 },
-  { p: 0.58, s: 0.85, x: 540, y: 330 },
-  { p: 0.82, s: 0.85, x: 540, y: 330 },
-  { p: 1, s: 0.85, x: 540, y: 330 },
+  { p: 0, s: 0.85, x: 540, y: 358 },
+  { p: 0.42, s: 0.85, x: 540, y: 358 },
+  { p: 0.58, s: 0.85, x: 540, y: 358 },
+  { p: 0.82, s: 0.85, x: 540, y: 358 },
+  { p: 1, s: 0.85, x: 540, y: 358 },
 ];
 const docShots = (total) => DOC_FRAMES.map((f) => ({ at: Math.round(f.p * total), s: f.s, x: f.x, y: f.y }));
 
@@ -404,8 +464,8 @@ export function DocReplay({ prompt }) {
     <div className="rp-view" aria-hidden="true">
       <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
         <div className="rp-canvas">
-          <div className="rp-menubar"><span className="rp-mb-app">ChatGPT</span><span className="rp-sp" /><span>Fri 3:04 AM</span></div>
-          <div style={{ opacity: 1 - phase(t, s.fade) }}>
+          <MenuBar app="ChatGPT" clock="Fri 3:04 AM" />
+          <div className="rp-app-window" style={{ opacity: 1 - phase(t, s.fade) }}>
             <CodexWindow title="Make a tdoc">
               <DocTurns t={t} s={s} prompt={line} />
             </CodexWindow>

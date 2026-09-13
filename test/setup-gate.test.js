@@ -299,8 +299,12 @@ t('the second ask is the one place with a choice in it', () => {
   // The replay is a recording of pasting THIS line, so it cannot run before
   // there is one -- not for a visitor with no account to paste into, and not
   // before they have said what the doc is about.
-  assert(gate.includes(": !signedIn || (step === 'doc' && !choice)\n          ? <SceneWaiting line={null} />"),
+  // Before there is a line, the same desk is shown with no app open -- which
+  // is true, and is the same desk. A different window in a different style
+  // here was two windows in one product.
+  assert(gate.includes("? <ConnectReplay prompt={null} />"),
     'and the picture beside them types nothing either — nor for somebody with no account to use it');
+  assert(replay.includes('const idle = !prompt;'), 'no line, no app open');
   // A doc that already exists is not a question. The whole ask goes, rather
   // than sitting there under a line saying it is already done.
   assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');
@@ -837,7 +841,7 @@ t('every replay is wound up before it is started', () => {
     if (call.startsWith('useClock(running')) continue;
     assert(call.split(',').length >= 2, `${call} starts a clock with no length`);
   }
-  assert(replay.includes('useClock(!reduced, REPLAY_MS)'), 'the connect replay runs for REPLAY_MS');
+  assert(replay.includes('useClock(!reduced && !idle, REPLAY_MS)'), 'the connect replay runs for REPLAY_MS, and not at all with no line');
   assert(replay.includes('useClock(!reduced, s.total, line)'),
     'and the doc replay for as long as its own line takes, restarting on every keystroke');
 });

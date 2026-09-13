@@ -10,7 +10,13 @@
      so the frame has no content width of its own: anything that asks the
      parent (`width: 100%`, `flex: 1 1 auto`) resolves against a parent that is
      itself sizing to its children, and the frame collapses to nothing. */
-  width: 544px; height: min(72vh, 648px);
+  /* 544 x 612, and not a viewport fraction. The camera's widest shot is 0.85,
+     so the frame has to be 720 * 0.85 = 612 tall for the whole desk to fit in
+     it -- a height that changes with the window changes what the camera can
+     see, and the menu bar (which is always on a real screen) was being pushed
+     out of shot on a shorter one. A screen too short for 612 crops the frame
+     instead, which loses the edges rather than the geometry. */
+  width: 544px; height: 612px;
   border-radius: 18px;
   background: #1e2333;
   box-shadow: 0 30px 70px rgba(26, 26, 26, .22), 0 3px 10px rgba(26, 26, 26, .08);
@@ -24,32 +30,49 @@
 .rp-canvas {
   position: absolute; left: 0; top: 0;
   width: 1080px; height: 720px;
-  background: linear-gradient(160deg, #2c3550 0%, #46406a 46%, #7a5570 100%);
+  /* The desktop, in the blues macOS actually ships rather than the purple
+     wash that was here -- a colour nobody's screen has is the first thing that
+     says "this is a drawing". Two soft lights over a deep blue ground, which
+     is the shape every recent default wallpaper has. */
+  background:
+    radial-gradient(120% 85% at 26% 22%, rgba(140, 196, 255, .55) 0%, rgba(140, 196, 255, 0) 58%),
+    radial-gradient(90% 70% at 78% 74%, rgba(86, 128, 214, .45) 0%, rgba(86, 128, 214, 0) 60%),
+    linear-gradient(168deg, #1d3f7a 0%, #17356b 42%, #122a58 100%);
   font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
   transition: opacity .4s linear;
 }
 
+/* A menu bar has the apple, the front app's name in bold, that app's menus,
+   and the status items on the right. A dark strip with one word in it was the
+   giveaway. Translucent over the wallpaper, the way the real one is. */
 .rp-menubar {
-  position: absolute; inset: 0 0 auto 0; height: 26px;
-  display: flex; align-items: center; gap: 18px; padding: 0 16px;
-  background: rgba(20, 20, 26, .34);
-  backdrop-filter: blur(18px);
-  color: rgba(255, 255, 255, .92);
-  font-size: 12px; font-weight: 500;
+  position: absolute; inset: 0 0 auto 0; height: 25px;
+  display: flex; align-items: center; gap: 19px; padding: 0 14px;
+  background: rgba(255, 255, 255, .18);
+  backdrop-filter: blur(24px) saturate(180%);
+  color: #fff;
+  font: 400 13px/1 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  text-shadow: 0 0 1px rgba(0, 0, 0, .25);
 }
+.rp-mb-apple { font-size: 15px; line-height: 1; margin-right: -4px; }
 .rp-mb-app { font-weight: 700; }
+.rp-mb-menu { display: flex; gap: 18px; opacity: .96; }
+.rp-mb-status { display: flex; align-items: center; gap: 13px; }
 .rp-sp { flex: 1 1 auto; }
 
 /* ------------------------------------------------------------------ the dock */
+/* The dock as it comes: the apps that are always there, then the ones this
+   story is about, then the bin behind a separator. A dock holding only three
+   chat apps is not a dock anybody has. */
 .rp-dock {
-  position: absolute; left: 540px; bottom: 14px;
-  display: flex; align-items: flex-end; gap: 16px;
-  padding: 9px 13px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, .22);
-  border: 1px solid rgba(255, 255, 255, .3);
-  backdrop-filter: blur(26px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
+  position: absolute; left: 540px; bottom: 10px;
+  display: flex; align-items: flex-end; gap: 9px;
+  padding: 7px 9px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, .26);
+  border: 1px solid rgba(255, 255, 255, .34);
+  backdrop-filter: blur(34px) saturate(170%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .4);
   transition: opacity .18s linear;
 }
 .rp-app {
@@ -59,14 +82,16 @@
 }
 .rp-icon {
   display: flex; align-items: center; justify-content: center;
-  width: 52px; height: 52px; border-radius: 13px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
+  width: 46px; height: 46px; border-radius: 11px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .22);
+  overflow: hidden;
 }
-/* The dot under a running app. */
+/* The separator before the bin, hairline, the way the real one is. */
+.rp-dock-sep { width: 1px; height: 42px; margin: 0 3px; background: rgba(255, 255, 255, .3); }
 .rp-run {
-  position: absolute; bottom: -7px;
+  position: absolute; bottom: -5px;
   width: 4px; height: 4px; border-radius: 50%;
-  background: rgba(255, 255, 255, .85);
+  background: rgba(255, 255, 255, .9);
 }
 
 .rp-cursor { position: absolute; left: 0; top: 0; z-index: 40; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); transition: transform .1s linear; }
@@ -102,4 +127,13 @@
 @media (prefers-reduced-motion: reduce) {
   .rp-caret, .rp-spin { animation: none; }
   .rp-app, .rp-cursor, .rp-approve { transition: none; }
+}
+
+/* The window's own wrapper: it scales from the dock as it opens, so the
+   transform origin is the icon that was pressed, not the middle of the
+   screen. */
+.rp-app-window {
+  position: absolute; inset: 0;
+  transform-origin: 50% 92%;
+  will-change: opacity, transform;
 }

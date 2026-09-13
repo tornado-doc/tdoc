@@ -386,8 +386,11 @@ export function SetupGate({ boot }) {
         // pasting THIS line, so it cannot run before there is a line: not for
         // a visitor with no account to paste into, and not on the second ask
         // before they have said what the doc is about.
+        // Before there is a line, the desk is there and the app is not yet
+        // open -- which is true, and is the same desk. Showing a different
+        // window in a different style here was two windows in one product.
         : !signedIn || (step === 'doc' && !choice)
-          ? <SceneWaiting line={null} />
+          ? <ConnectReplay prompt={null} />
           // Two acts, two recordings. The first is a line being pasted; the
           // second is a line being typed, as the reader types it.
           : step === 'doc'
