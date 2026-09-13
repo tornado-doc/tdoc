@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Check, ChevronDown, X } from 'lucide-react';
-import { ClaudeMark, OpenAIMark } from '../agent-marks.jsx';
+import { AgentMarks } from '../agent-marks.jsx';
 
 // The onboarding, after setup. Four things, rendered from the record's own
 // timestamps rather than a second set of counters.
@@ -86,8 +86,7 @@ function Thumb({ id }) {
     // drawing of one.
     return (
       <span className="onb-thumb agents" aria-hidden="true">
-        <i className="t-disc"><ClaudeMark size={18} /></i>
-        <i className="t-disc"><OpenAIMark size={16} /></i>
+        <AgentMarks size={16} />
       </span>
     );
   }

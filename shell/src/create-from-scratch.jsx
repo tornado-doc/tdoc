@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppMenu, AppMenuItem } from './ui/menu.jsx';
-import { SquarePen } from 'lucide-react';
+import { MessageSquare, SquarePen } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
-import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
+import { AgentMarks } from './agent-marks.jsx';
 import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSubjectPrompt } from './setup-gate.jsx';
 
 // "Create a doc" is a fork, not a form: write it yourself, or have your agent
@@ -24,11 +24,12 @@ import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSub
 // button that asked. A modal to choose between two things is a room built for
 // a sentence.
 //
-// The two glyphs say who writes it: a pen on a page, and the agents' own
-// marks. Every symbol I tried for the second one was a drawing of "an AI wrote
-// this" -- a sparkle, a wand, a page with lines on it -- while the two things
-// that actually write it were already on the row. So they became the icon.
-// Nothing here is invented, and nothing needs decoding.
+// The two glyphs say what you do: write on a page, or send a message. Both
+// are the same square family at the same weight, and neither is the sparkle
+// every AI feature has worn since 2023 -- a symbol that says "a model was
+// involved" and nothing about which of these two answers you are picking.
+// Which agents is a separate question, answered by the marks at the end of
+// the row, where a list of what something works with belongs.
 export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
   const [busy, setBusy] = useState(false);
   const startBlank = async () => {
@@ -41,22 +42,22 @@ export function CreateMenu({ create, canCreate = true, onAgent, trigger }) {
       {canCreate ? (
         <AppMenuItem onClick={startBlank} disabled={busy} className="mk-item">
           <SquarePen size={17} strokeWidth={1.75} aria-hidden="true" />
-          <span>
+          <span className="mk-text">
             <b>{busy ? 'Creating…' : 'Start from scratch'}</b>
             <em>A blank doc, open in edit mode.</em>
           </span>
         </AppMenuItem>
       ) : null}
       <AppMenuItem onClick={onAgent} className="mk-item">
-        {/* The agents' own marks, where the icon goes. Every glyph I tried
-            here was a drawing of "an AI wrote this" -- a sparkle, a wand, a
-            page with lines -- and the two things that actually write it were
-            already sitting on the same row saying so. So they moved left. */}
-        <i className="mk-agents" aria-hidden="true"><ClaudeMark size={16} /><OpenAIMark size={14} /></i>
-        <span>
+        <MessageSquare size={17} strokeWidth={1.75} aria-hidden="true" />
+        <span className="mk-text">
           <b>Build it with your agent</b>
           <em>Name the subject. It writes and publishes the page.</em>
         </span>
+        {/* At the end of the row, where a list says what it works with. The
+            icon slot stays one width for both rows so the titles align; three
+            logos were never going to fit in it. */}
+        <AgentMarks size={18} />
       </AppMenuItem>
     </AppMenu>
   );

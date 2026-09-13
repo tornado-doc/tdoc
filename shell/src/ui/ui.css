@@ -355,17 +355,51 @@ button.tdoc-pin {
   max-width: 320px;
   white-space: normal;
 }
-/* One slot, wide enough for the wider of the two glyphs, so both titles start
-   at the same x. A pen is 17px and a pair of marks is 35; left to themselves
-   the two rows begin in different places. */
-.ui-menu-item.mk-item > svg,
-.ui-menu-item.mk-item > .mk-agents {
-  flex: 0 0 35px;
+/* The agent cluster, wherever it appears. Each mark in a disc of its own,
+   overlapped like a stack of avatars: the three are different KINDS of mark --
+   a starburst, a knot, a filled square -- and dropped straight onto a row the
+   filled one swallows the other two. A disc each gives them one silhouette.
+   `--am` is the disc; everything else follows from it. */
+.agent-marks { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.agent-marks > i {
+  box-sizing: border-box; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  width: var(--am, 22px); height: var(--am, 22px);
+  border-radius: 50%; background: #fff;
+  /* A hairline, or the two light discs are invisible on a white page and the
+     row reads as two squiggles beside one solid black circle. The white ring
+     outside it is what keeps the overlap from looking like a collision. */
+  border: 1px solid var(--td-line, #e8e7e3);
+  box-shadow: 0 0 0 1.5px #fff;
+}
+/* Only between marks -- a first child pulled left lands in whatever text sits
+   beside the cluster, which is exactly what it did. */
+.agent-marks > i + i { margin-left: calc(var(--am, 22px) * -0.28); }
+.agent-marks > i.fill { background: #000; border-color: #000; }
+.agent-marks > i img, .agent-marks > i svg { display: block; }
+
+/* One slot, one width, both rows beginning at the same x. The two marks are
+   overlapped into a single glyph rather than set side by side: two logos with
+   air between them is two icons, and the slot had to be twice as wide to hold
+   them, which pushed both titles across the menu. Overlapped, they are one
+   mark the size of the pen above. */
+.ui-menu-item.mk-item > svg {
+  flex: 0 0 22px;
+  /* A flex item will not shrink below its content by default, so a glyph even
+     a pixel wider than the slot widens the slot and walks the title across. */
+  min-width: 0;
   display: flex; align-items: center; justify-content: center;
   margin-top: 1px;
 }
+/* At the end of the row, vertically centred against however many lines the
+   description runs to. */
+.ui-menu-item.mk-item > .agent-marks { margin-left: auto; align-self: center; }
 .ui-menu-item.mk-item > svg { color: var(--td-ink); opacity: .75; }
-.ui-menu-item.mk-item > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* A class, not `> span`. The bare element selector also caught the agent
+   cluster, which is a span too, and stood its three marks on top of each
+   other -- a rule meant for one child quietly claiming every sibling of the
+   same tag is how that happens. */
+.ui-menu-item.mk-item > .mk-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ui-menu-item.mk-item b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
 .ui-menu-item.mk-item em {
   font-style: normal; font-size: 12.5px; line-height: 1.45;
@@ -375,7 +409,7 @@ button.tdoc-pin {
    as a list was the longest thing in the old dialog; two marks say the same,
    read in a glance, and are the only thing on this row that identifies
    anything -- so they are also the only thing on it with colour. */
-.ui-menu-item.mk-item .mk-agents { gap: 5px; }
+
 .ui-menu-item.mk-item .mk-agents svg { display: block; }
 
 /* ---- the agent answer, finished in place ------------------------------ */

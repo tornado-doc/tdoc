@@ -178,13 +178,20 @@ t('the choice is a menu, and neither answer is a form', () => {
   // marks. Every symbol tried for the second was a drawing of "an AI wrote
   // this" -- a sparkle, a wand, a page with lines -- while the two things that
   // actually write it were already on the row.
-  assert(form.includes('<SquarePen size={17}'), 'you write the blank one');
-  assert(form.includes('<i className="mk-agents"') && form.includes('<ClaudeMark size={16} /><OpenAIMark size={14} />'),
-    'and the agents stand where the other icon would');
-  assert(!form.includes('Sparkles') && !form.includes('FileText'), 'no invented metaphor for "an AI did it"');
-  // One slot, wide enough for the wider glyph, so both titles start at the
-  // same x: a pen is 17px and a pair of marks is 35.
-  assert(uiCss.includes('flex: 0 0 35px;'), 'both rows begin in the same place');
+  // What you do: write on a page, or send a message. Same square family, same
+  // weight, and neither is the sparkle every AI feature has worn since 2023 --
+  // a symbol that says "a model was involved" and nothing about which of these
+  // two answers you are picking.
+  assert(form.includes('<SquarePen size={17}') && form.includes('<MessageSquare size={17}'), 'a pair, not a cliché');
+  assert(!form.includes('Sparkles'), 'no sparkle');
+  // Which agents is a separate question, answered at the end of the row.
+  assert(form.includes('<AgentMarks size={18} />'), 'the marks are a list of what it works with, so they sit where a list does');
+  assert(uiCss.includes('.ui-menu-item.mk-item > .agent-marks { margin-left: auto;'), 'pushed to the end');
+  assert(uiCss.includes('.ui-menu-item.mk-item > svg {\n  flex: 0 0 22px;'), 'one icon slot, one width, both titles aligned');
+  // A bare `> span` also caught the cluster, which is a span too, and stood
+  // its three marks on top of each other.
+  assert(uiCss.includes('.ui-menu-item.mk-item > .mk-text {') && !uiCss.includes('.ui-menu-item.mk-item > span {'),
+    'the description wrapper is addressed by class, not by tag');
   // The blank doc opens on the click. A title field there is the thing this
   // design replaced -- the title is typed into the page instead.
   const blank = form.slice(form.indexOf('export function CreateMenu'), form.indexOf('export function AgentRecipe'));

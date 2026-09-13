@@ -35,7 +35,16 @@
 .sg-pane-form { display: flex; flex-direction: column; padding: 26px 38px 34px; background: #fff; }
 .sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: -4px; border-radius: 8px; text-decoration: none; }
 .sg-brand:hover { background: var(--td-surface, #f4f4f2); }
-.sg-mid { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; }
+/* The column is anchored, not centred. Centring meant every change to the
+   answer moved the question: picking the choice that needs a subject typed
+   into it added a row, and the heading and both choices slid up the page to
+   make room for something below them. Furniture does not move because the
+   content under it grew. It hangs from a fixed top; the answer grows
+   downward. */
+.sg-mid {
+  flex: 1 1 auto; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: clamp(48px, 16vh, 132px);
+}
 .sg-col { width: 100%; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 
 .sg-h1 { margin: 0 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
@@ -99,6 +108,7 @@
    only fight in a crowded line; given a row of their own, with the label held
    back in grey, they read as what they are. */
 .sg-works { display: flex; align-items: center; gap: 9px; margin: -4px 0 -2px; font-size: 12.5px; color: #9a9a95; }
+
 .sg-works svg { display: block; }
 .sg-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
@@ -277,7 +287,7 @@
   .sg-split { grid-template-columns: 1fr; }
   .sg-pane-art { display: none; }
   .sg-pane-form { padding: 24px 22px 30px; }
-  .sg-mid { align-items: flex-start; padding-top: 26px; }
+  .sg-mid { padding-top: 26px; }
   .sg-col { max-width: 520px; margin: 0 auto; }
   .sg-h1 { font-size: 26px; }
 }

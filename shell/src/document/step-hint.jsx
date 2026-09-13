@@ -62,7 +62,7 @@ const DONE_LINES = {
 };
 const TICK_MS = 2400;
 
-export function DocStepHint({ step, agentState = 'idle', lifted = false, banner = false, justFinished = false, onGo }) {
+export function DocStepHint({ step, agentState = 'idle', lifted = false, banner = false, justFinished = false, hidden: covered = false, onGo }) {
   const [gone, setGone] = useState(hidden);
   // A row that is finished while somebody is looking at the page ticks where
   // it stands before it goes. Doing the thing and watching the to-do vanish is
@@ -99,6 +99,10 @@ export function DocStepHint({ step, agentState = 'idle', lifted = false, banner 
   const ticking = Boolean(finished);
 
   if (gone) return null;
+  // On a phone the comment drawer takes the screen, and this row was staying
+  // mounted underneath it: present to a screen reader, invisible to everyone
+  // else. Whatever owns the screen owns it.
+  if (covered) return null;
   // The banner owns the top of the page once the loop has closed, so a pending
   // row underneath it would be a second voice with older news. A row in the
   // middle of ticking is the exception: that is this page's own answer.

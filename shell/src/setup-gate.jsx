@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
 import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
-import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
+import { AgentMarks } from './agent-marks.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -102,9 +102,8 @@ function WorksWith() {
   return (
     <p className="sg-works">
       <span>Works with</span>
-      <ClaudeMark size={17} />
-      <OpenAIMark size={15} />
-      <span className="sg-sr">Claude Code and ChatGPT</span>
+      <AgentMarks size={17} />
+      <span className="sg-sr">Claude Code, ChatGPT and Grok</span>
     </p>
   );
 }
@@ -367,10 +366,13 @@ export function SetupGate({ boot }) {
   // The scene is the left column's mirror, so it waits for the same answer.
   // Drawn early it paints the connect step's chat beside a heading that has
   // not decided which step it is yet.
+  // Nothing typed for somebody who cannot act on it yet: a signed-out visitor
+  // watching the composer spell out a line they have no account to use is the
+  // page rehearsing in front of them.
   const scene = signedIn && !loaded ? null
     : state === 'done' ? <SceneDone bare={step === 'doc'} />
       : state === 'stuck' ? <SceneStuck />
-        : <SceneWaiting line={step === 'doc' && !choice ? null : prompt} />;
+        : <SceneWaiting line={!signedIn || (step === 'doc' && !choice) ? null : prompt} />;
 
   return (
     <div className="sg-split">

@@ -146,7 +146,7 @@ t('every thumbnail shows the thing its own step produces', () => {
   // Notion's read because each contains something already recognisable and no
   // two look alike. Four identically framed boxes of grey bars is one smudge
   // repeated, which is what these were.
-  assert(list.includes('<ClaudeMark size={18} />') && list.includes('<OpenAIMark size={16} />'), 'row 1: the agents\' own marks');
+  assert(list.includes('<AgentMarks size={16} />'), 'row 1: the agents\' own marks');
   assert(list.includes('<em>Use tdoc to…</em>'), 'row 2: the line you paste');
   assert(list.includes('className="t-mark w70"') && list.includes('className="t-card"'), 'row 3: a marked sentence and the card beside it');
   assert(list.includes("fixed · v2"), 'row 4: the chip a fixed thread carries');
@@ -266,7 +266,8 @@ t('the second ask is the one place with a choice in it', () => {
   // Choosing is the question this screen asks; everything downstream of it
   // waits until it has been answered.
   assert(gate.includes("{step === 'doc' && !choice ? null : ("), 'no instructions before there is something to paste');
-  assert(gate.includes("line={step === 'doc' && !choice ? null : prompt}"), 'and the composer beside them types nothing either');
+  assert(gate.includes("line={!signedIn || (step === 'doc' && !choice) ? null : prompt}"),
+    'and the composer beside them types nothing either — nor for somebody with no account to use it');
   // A doc that already exists is not a question. The whole ask goes, rather
   // than sitting there under a line saying it is already done.
   assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');
@@ -385,6 +386,14 @@ t('a row being watched stops being a button', () => {
   for (const line of ['Waiting for your agent…', 'Your agent is reading this', 'Still waiting — did you paste it into your agent?']) {
     assert(hint.includes(line) && card.includes(line), `"${line}" is the card's own wording`);
   }
+});
+
+t('whatever owns the screen owns it', () => {
+  // On a phone the comment drawer takes the screen, and the corner row was
+  // staying mounted underneath: present to a screen reader, invisible to
+  // everyone else.
+  assert(hint.includes('if (covered) return null;'), 'the row steps aside');
+  assert(shell.includes('hidden={narrow && drawerOpen}'), 'when the drawer has the phone');
 });
 
 t('the corner row is meant to be noticed', () => {

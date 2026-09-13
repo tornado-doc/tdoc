@@ -196,11 +196,19 @@ t('the hub has the same door as the landing, not a bare recipe', () => {
   assert(cards.includes('docSubjectPrompt(') && cards.includes('The doc turns up in this list.'),
     'it composes the line and says where the doc lands');
   // Four product names set as a list was the longest thing in the old dialog.
-  assert(cards.includes('<ClaudeMark size={16} /><OpenAIMark size={14} />') && !cards.includes('AGENT_NAMES'),
-    'two marks in place of a list of four names, standing where the icon goes');
+  assert(cards.includes('<AgentMarks size={18} />') && !cards.includes('AGENT_NAMES'),
+    'marks in place of a list of names');
   // A refused clipboard on the fix line: selected, said, and still waiting.
   assert(shell.includes("requestAnimationFrame(() => selectContents(document.querySelector('.tdoc-handoff-line code')));") && shell.includes("      setHandoffPref(true);\n      requestAnimationFrame"), 'the block opens, then the line is left selected');
-  assert(shell.includes("setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });"), 'the wait starts either way');
+  assert(shell.includes("setHandoff({ state: 'waiting', copiedAt, copyFailed: !ok });"), 'the wait starts either way');
+  // And survives a reload. It was component state only, so pasting the line
+  // and then refreshing re-armed nothing and lost the card's status line: the
+  // person was told to do it again. The copy is a gesture this browser saw,
+  // so this browser remembers it, and the poll clears it when v2 lands.
+  assert(shell.includes('const handoffKey = `tdoc.handoff.${config.slug}`;'), 'remembered per doc');
+  assert(shell.includes("const at = Number(localStorage.getItem(handoffKey));") && shell.includes("if (at > 0) return { state: 'waiting', copiedAt: at };"),
+    'and picked up on the next mount');
+  assert(shell.includes('localStorage.removeItem(handoffKey)'), 'then cleared by the version it was waiting for');
   assert(card.includes("handoff.copyFailed ? 'Select & copy' : 'Copied'") && card.includes('{COPY_FALLBACK}'), 'the card says what to do');
 });
 

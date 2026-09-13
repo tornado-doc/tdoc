@@ -280,11 +280,7 @@
   flex-direction: row; align-items: center; justify-content: center; gap: 7px;
   padding: 0; background: transparent; border: 0;
 }
-.onb-thumb .t-disc {
-  box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 3px rgb(26 26 26 / 12%);
-}
+
 
 /* the page under everything else */
 .onb-thumb .t-line { display: block; height: 3px; width: 100%; border-radius: 2px; background: #e2e2dd; }

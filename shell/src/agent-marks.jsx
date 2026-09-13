@@ -19,3 +19,43 @@ export function OpenAIMark({ size = 15, color = '#0D0D0D' }) {
     </svg>
   );
 }
+
+// Grok. tdoc detects it like the others -- `detectAgentRuntime` returns it,
+// the CLI's --login accepts it, and a Grok reply on a doc already gets this
+// same avatar -- so a "works with" row that leaves it out is wrong.
+//
+// It is an <img> where the other two are paths because there is no published
+// monochrome vector for it: simple-icons has no xAI slug, and the only asset
+// the product already trusts is the org avatar, which is a white mark on a
+// black square. Drawing one from memory would be inventing somebody's logo.
+// Cropped to a circle it reads as what it is.
+export const GROK_MARK_SRC = 'https://github.com/xai-org.png';
+export function GrokMark({ size = 15 }) {
+  return (
+    <img
+      src={GROK_MARK_SRC}
+      width={size}
+      height={size}
+      alt=""
+      style={{ display: 'block', borderRadius: '50%' }}
+    />
+  );
+}
+
+// The three, as one cluster: each in a disc of its own, overlapped like a
+// stack of avatars. The discs are what make it work -- the three marks are
+// three different KINDS of thing (a starburst, a knot, a filled square), and
+// dropped straight onto a row the filled one swallows the other two. A disc
+// each gives them the same silhouette and the same weight.
+//
+// One component and one stylesheet rule, so every place that claims "works
+// with" agrees with every other, and a fourth agent is one line here.
+export function AgentMarks({ size = 22 }) {
+  return (
+    <span className="agent-marks" style={{ '--am': `${size}px` }}>
+      <i><ClaudeMark size={Math.round(size * 0.66)} /></i>
+      <i><OpenAIMark size={Math.round(size * 0.6)} /></i>
+      <i className="fill"><GrokMark size={size} /></i>
+    </span>
+  );
+}

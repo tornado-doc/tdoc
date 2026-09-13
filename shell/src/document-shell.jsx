@@ -265,7 +265,20 @@ export function DocumentShell({ boot, config }) {
 
   // Bridge 2 state lives on the doc, not on a card: one paste covers every
   // comment, and the card that shows it can close and reopen.
-  const [handoff, setHandoff] = useState({ state: 'idle', copiedAt: null });
+  // The wait survives a reload. It used to be component state only, so
+  // somebody who pasted the line and then refreshed was told to do it again --
+  // the polling never re-armed and the card's own status line vanished. The
+  // copy is a gesture this browser saw, so this browser is where it is
+  // remembered; the poll below clears it when the version it is waiting for
+  // arrives.
+  const handoffKey = `tdoc.handoff.${config.slug}`;
+  const [handoff, setHandoff] = useState(() => {
+    try {
+      const at = Number(localStorage.getItem(handoffKey));
+      if (at > 0) return { state: 'waiting', copiedAt: at };
+    } catch {}
+    return { state: 'idle', copiedAt: null };
+  });
   // Only on the latest version: a handoff on v1 while v2 exists asks for work
   // the agent already did.
   const latestVersion = Math.max(...(config.versions || []).map((v) => Number(v.n) || 0), Number(config.version) || 0);
@@ -300,7 +313,9 @@ export function DocumentShell({ boot, config }) {
       setHandoffPref(true);
       requestAnimationFrame(() => selectContents(document.querySelector('.tdoc-handoff-line code')));
     }
-    setHandoff({ state: 'waiting', copiedAt: Date.now(), copyFailed: !ok });
+    const copiedAt = Date.now();
+    try { localStorage.setItem(handoffKey, String(copiedAt)); } catch {}
+    setHandoff({ state: 'waiting', copiedAt, copyFailed: !ok });
     postOnboardingEvent('fix_copy_clicked', config.slug).catch(() => {});
   }, [config.slug, handoffText]);
 
@@ -701,6 +716,9 @@ export function DocumentShell({ boot, config }) {
         if (cancelled) return;
         const latest = Number(status?.latest_version) || 0;
         if (latest > Number(config.version)) {
+          // The thing it was waiting for arrived; the wait should not outlive
+          // it into the next page.
+          try { localStorage.removeItem(handoffKey); } catch {}
           location.href = `/d/${encodeURIComponent(config.slug)}/v/${latest}?revised=1`;
           return;
         }
@@ -952,6 +970,7 @@ export function DocumentShell({ boot, config }) {
           agentState={handoff.state}
           lifted={Boolean(bridge.layout.footerVisible)}
           banner={showExitBanner}
+          hidden={narrow && drawerOpen}
           justFinished={arrival === 'revised'}
           onGo={() => goToStep()}
         />
