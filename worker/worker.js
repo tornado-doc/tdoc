@@ -1818,6 +1818,11 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     // still steering people to the first-party GitHub flow.
     oidcAuth: !!(oidc && oidc.enabled),
     oidcLabel: (oidc && oidc.label) || '',
+    // The internal bar goes on every page a walk passes through, and a walk
+    // starts at the landing page -- everything between there and the gate is
+    // part of what is being tested. Rides in the options seat rather than
+    // becoming a nineteenth positional argument.
+    debug: !!(oidc && oidc.debug),
     mode: 'published',
     versions: vlist,
     stars: stars || null,
@@ -2148,7 +2153,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '' }), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', debug: await isDebugAccount(env, session) }), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };

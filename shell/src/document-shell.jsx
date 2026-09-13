@@ -47,6 +47,7 @@ import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
+import { DebugBar } from './debug-bar.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -1016,6 +1017,20 @@ export function DocumentShell({ boot, config }) {
         sandbox="allow-scripts"
         src={boot.frameSrc}
       />
+
+      {/* The internal bar, for an allow-listed account. It matters most here:
+          a new reader starts at the landing page, and a replay pressed at the
+          gate skips everything between the two -- the call to action, the
+          sign-in, the first sight of the product. */}
+      {config.debug ? (
+        <DebugBar
+          record={onboardingRecord}
+          onState={async () => {
+            const result = await getOnboarding().catch(() => null);
+            setOnboardingRecord(result?.record || null);
+          }}
+        />
+      ) : null}
 
       <DocumentFooter visible={bridge.layout.footerVisible} />
 

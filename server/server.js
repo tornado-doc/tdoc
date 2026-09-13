@@ -937,6 +937,9 @@ function shellDocument(slug, version, nonce) {
     authConfigured: false,
     webAuth: false,
     isLanding,
+    // Local twin of the worker's: the internal bar goes on every page a walk
+    // passes through, and a walk starts at the landing page.
+    debug: localDebugAccount(),
     onboarding: ONBOARD_SLUGS.has(slug),
     // Local preview is anonymous by design and always may comment.
     signInToComment: false,

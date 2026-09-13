@@ -34,6 +34,7 @@ function lift(src, name) {
 const gate = read('shell/src/setup-gate.jsx');
 const gateCss = read('shell/src/setup-gate.css');
 const replay = read('shell/src/setup-gate/replay.jsx');
+const bar = read('shell/src/debug-bar.jsx');
 const windowElement = read('shell/src/setup-gate/codex-window.jsx');
 const windowCss = read('shell/src/setup-gate/codex-window.css');
 const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
@@ -580,15 +581,25 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
 t('replay is new again, not just a blank record', () => {
   // Testing onboarding means being new more than once, and three things
   // survive a record reset. Each makes the next walk a different walk.
-  assert(gate.includes("body: JSON.stringify({ state: 'new', unpair: true, purge: true })"),
+  assert(bar.includes("postState({ state: 'new', unpair: true, purge: true })"),
     'the credential and the doc go with the record');
   // It deletes a document -- bytes, comments and the slug -- through the
   // product's own delete. Exactly right on a test account, unrecoverable on
   // any other, so it takes two presses and the first one names the doc.
-  assert(gate.includes('if (!armed) {') && gate.includes('`delete ${record.first_doc}?`'),
+  assert(bar.includes('if (!armed) {') && bar.includes('`delete ${doc}?`'),
     'the first press names what the second will destroy');
-  assert(gate.includes('setTimeout(() => setArmed(false), 4000)'),
+  assert(bar.includes('setTimeout(() => setArmed(false), 4000)'),
     'and a press left behind by a wandering finger disarms itself');
+  // It lived inside the gate, so a walk could only be restarted from step 1 --
+  // and step 1 is not where a walk starts. Everything between the landing page
+  // and the gate (the call to action, the sign-in, the first sight of the
+  // product) was untestable, and /setup stamps `started` on sight, so a replay
+  // that landed there could never show what `new` looks like.
+  assert(shell.includes('{config.debug ? (') && shell.includes('<DebugBar'),
+    'the bar is on every document, the landing page included');
+  assert(worker.includes('debug: await isDebugAccount(env, session) }'),
+    'and the server tells the document who is allow-listed');
+  assert(bar.includes('location.reload();'), 'a replay stays where it was pressed');
   // The credential is the one that matters: `account-terminal:` is a marker,
   // and the token it stands for is what actually keeps a CLI connected. Leave
   // it and step 1 can never be walked again -- the one step that cannot be
@@ -607,11 +618,11 @@ t('replay is new again, not just a blank record', () => {
   // piece from every later walk -- so the list has to be the real constants.
   const keys = ['tdoc.onboarding.hint', 'tdoc.onboarding.collapsed', 'tdoc.onboarding.open', 'tdoc-handoff-open'];
   for (const key of keys) {
-    assert(gate.includes(`'${key}'`), `replay does not clear ${key}`);
+    assert(bar.includes(`'${key}'`), `replay does not clear ${key}`);
     const owner = [hint, list, shell].some((src) => src.includes(`'${key}'`));
     assert(owner, `${key} is not a key anything actually writes`);
   }
-  assert(gate.includes("export const REPLAY_LOCAL_PREFIX = 'tdoc.handoff.';") && shell.includes('`tdoc.handoff.${config.slug}`'),
+  assert(bar.includes("export const REPLAY_LOCAL_PREFIX = 'tdoc.handoff.';") && shell.includes('`tdoc.handoff.${config.slug}`'),
     'and the per-doc waits go by prefix, so a replay need not know which docs the last walk made');
 });
 
