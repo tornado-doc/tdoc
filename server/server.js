@@ -135,7 +135,11 @@ function newestDocLocal() {
     if (name.startsWith('.') || ONBOARD_SLUGS.has(name) || name === 'tdoc-templates') continue;
     const meta = readJson(path.join(ROOT, name, 'meta.json'), null);
     if (!meta) continue;
-    const created = meta.created || '';
+    // The newest version's stamp, not `meta.created` -- nothing writes that.
+    // Same fix as the worker's twin: ranking on a field that is always ''
+    // made this "whichever the filesystem listed first".
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const created = (versions.length ? versions[versions.length - 1].created : meta.created) || '';
     if (!best || created > best.created) best = { slug: name, created };
   }
   return best ? best.slug : null;
@@ -989,7 +993,10 @@ function localDebugAccount() {
 function localSetupDocument(nonce, step) {
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   return SHELL.appHtml({
-    title: step === 'doc' ? 'tdoc - make a doc' : 'tdoc - connect your agent',
+    // One title for both steps -- see the worker's twin. `?step=doc` is a
+    // request, not a fact, and a tab reading "make a doc" over a screen headed
+    // "Connect your agent" is the URL talking over the product.
+    title: 'tdoc - set up',
     nonceAttr,
     runtimeJsPath: SHELL_RUNTIME.js.path,
     runtimeCssPath: SHELL_RUNTIME.css.path,

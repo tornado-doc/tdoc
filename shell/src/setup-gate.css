@@ -48,6 +48,16 @@
      column hangs from a fixed top, so the top is where the room comes from. */
   padding-top: clamp(28px, 11vh, 108px);
 }
+/* The tallest the column ever gets is the second ask with a subject typed into
+   it: eyebrow, heading, two choices, a field, the composed line, three steps, a
+   status row, the button. That was measured 32px past the bottom of an 800px
+   window. A vh clamp cannot buy it back -- the overflow is one fixed column
+   against a shrinking window, not something proportional to the height -- so
+   short windows get the top margin back instead. */
+@media (max-height: 870px) {
+  .sg-mid { padding-top: 26px; }
+  .sg-col { gap: 15px; }
+}
 .sg-col { width: 100%; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 
 /* Where you are, above what to do. Same disc and same count as the checklist

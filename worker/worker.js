@@ -3315,7 +3315,12 @@ async function newestDocFor(env, accountId) {
         if (raw) meta = JSON.parse(raw);
       } catch {}
       if (!meta || !meta.hosted || meta.hosted.account_id !== accountId) continue;
-      const created = meta.created || '';
+      // The newest version's stamp, not `meta.created` -- nothing writes that.
+      // Ranking on a field that is always '' made this "whichever KV listed
+      // first", so the debug states rebuilt the journey on a doc that could be
+      // months older than the one the tester had just published.
+      const versions = Array.isArray(meta.versions) ? meta.versions : [];
+      const created = (versions.length ? versions[versions.length - 1].created : meta.created) || '';
       if (!best || created > best.created) best = { slug: k.name.slice('meta:'.length), created };
     }
     cursor = r.cursor;
@@ -5202,9 +5207,13 @@ export default {
       } catch {}
       const nonce = rand(16);
       return html(SHELL.appHtml({
-        // Neutral for the doc step: the server cannot know whether this is
-        // their first without a lookup, and the heading already says which.
-        title: step === 'doc' ? 'tdoc - make a doc' : 'tdoc - connect your agent',
+        // One title for both steps. `?step=doc` is a request, not a fact: the
+        // page falls back to step 1 for anybody who has not connected yet, and
+        // a tab reading "make a doc" over a screen headed "Connect your agent"
+        // is the URL talking over the product. The server would need the
+        // account's record to tell them apart, and this route renders before
+        // that is read.
+        title: 'tdoc - set up',
         nonceAttr: ` nonce="${nonce}"`,
         runtimeJsPath: SHELL_RUNTIME_JS_PATH,
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,

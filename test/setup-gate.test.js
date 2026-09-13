@@ -240,10 +240,15 @@ t('the second ask is the same ask, on the same route', () => {
   assert(worker.includes("const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';"), 'the worker reads the step');
   assert(server.includes("const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';"), 'and so does the local server');
   assert(worker.includes('          step,') && server.includes("step: step === 'doc' ? 'doc' : 'connect',"), 'both boot it');
-  // The tab's name cannot say "first": the server would have to look up
-  // whether they have one, and the heading on the page already says which.
-  assert(worker.includes("title: step === 'doc' ? 'tdoc - make a doc'") && server.includes("title: step === 'doc' ? 'tdoc - make a doc'"),
-    'and neither host promises a first doc in the title');
+  // One title for both steps, on both hosts. `?step=doc` is a request, not a
+  // fact -- the page falls back to step 1 for anybody who has not connected
+  // yet, and a tab reading "make a doc" over a screen headed "Connect your
+  // agent" is the URL talking over the product. Telling them apart needs the
+  // account's record, which this route renders before reading.
+  assert(worker.includes("title: 'tdoc - set up',") && server.includes("title: 'tdoc - set up',"),
+    'neither host lets the URL name a step the page may not be on');
+  assert(!worker.includes("title: step === 'doc'") && !server.includes("title: step === 'doc'"),
+    'and neither picks the title from the query string');
   assert(gate.includes("const step = wantsDoc && connected ? 'doc' : 'connect';"),
     'and an unconnected visitor is asked to connect first, whichever link they arrived on');
   assert(gate.includes('export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;'), 'the doc line is the skill\'s own, reused not rewritten');
@@ -567,6 +572,31 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
   assert(worker.includes('the token lives'), 'and says out loud that the credential is untouched');
   assert(worker.includes('const doc = firstDoc || null;') && server.includes('const doc = firstDoc || null;'),
     'and neither host invents one');
+});
+
+t('a finished gate stops asking, and the column fits a laptop', () => {
+  // The poll asks the server what the agent has done. Once it has done it the
+  // question stops being a question, and the page was still asking it every
+  // three seconds for as long as the tab stayed open.
+  assert(gate.includes('if (!settled.current) timer = window.setTimeout(tick, POLL_MS);'), 'the loop ends when the answer arrives');
+  assert(gate.includes("settled.current = state === 'done';"), 'and it reads the current state, not the one the effect closed over');
+  // The tallest this column gets -- the second ask with a subject typed into
+  // it -- was measured 32px past the bottom of an 800px window, which put the
+  // only button on the screen out of sight. A vh clamp cannot buy that back:
+  // the overflow is one fixed column against a shrinking window.
+  assert(/@media \(max-height: 870px\) \{[^}]*\.sg-mid \{ padding-top: 26px; \}/s.test(gateCss),
+    'a short window gets the top margin back');
+});
+
+t('the dock only launches on the script that has a launch in it', () => {
+  // The bounce and the running-dot are the connect script's own beat -- the
+  // click that opens the app. The doc script has no such beat: the window is
+  // already open and the person is typing into it. Overriding `wake` alone
+  // left the icon jumping at 1650ms of a timeline it was not on, drifting
+  // against the typing because that script's length moves with the line.
+  assert(replay.includes('function Dock({ t, wake: fixed, launch = true })'), 'the beat is a parameter');
+  assert(replay.includes('const press = launch ? phase(t, T.dockPress) : 0;'), 'and it is the only thing that presses the icon');
+  assert(replay.includes('<Dock t={t} wake={1} launch={false} />'), 'the doc replay opens no app');
 });
 
 t('every replay is wound up before it is started', () => {

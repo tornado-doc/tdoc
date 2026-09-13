@@ -135,9 +135,14 @@ const APPS = [
   { id: 'grok', name: 'Grok', bg: '#0A0A0A', mark: (s) => <GrokMark size={s} color="#fff" /> },
 ];
 
-function Dock({ t, wake: fixed }) {
+// `launch` is the connect script's own beat -- the click that opens the app.
+// The doc script has no such beat (the window is already open and the person is
+// typing into it), so it says so rather than inheriting a bounce from a
+// timeline it is not on. Overriding `wake` alone left the icon jumping and its
+// running-dot lighting up at 1650ms of a script that had moved on.
+function Dock({ t, wake: fixed, launch = true }) {
   const wake = fixed === undefined ? phase(t, T.dockWake) : fixed;
-  const press = phase(t, T.dockPress);
+  const press = launch ? phase(t, T.dockPress) : 0;
   return (
     <div className="rp-dock" style={{ opacity: wake, transform: `translate(-50%, ${(1 - wake) * 26}px)` }}>
       {APPS.map((app, i) => {
@@ -406,7 +411,7 @@ export function DocReplay({ prompt }) {
         <div className="rp-canvas">
           <div className="rp-menubar"><span className="rp-mb-app">ChatGPT</span><span className="rp-sp" /><span>Fri 2:59 AM</span></div>
           <DocWindow t={t} s={s} prompt={line} />
-          <Dock t={t} wake={1} />
+          <Dock t={t} wake={1} launch={false} />
         </div>
       </div>
     </div>

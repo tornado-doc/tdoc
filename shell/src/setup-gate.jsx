@@ -308,6 +308,11 @@ export function SetupGate({ boot }) {
   const state = step === 'doc'
     ? (ownDoc ? 'done' : 'waiting')
     : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
+  // Read by the poll loop, which is created once and never sees a later
+  // render's `state`. Assigned here rather than in an effect so the tick that
+  // lands on the answer is the one that stops asking.
+  const settled = useRef(false);
+  settled.current = state === 'done';
   // The connect step ends on the docs page, which is right whether their first
   // doc exists yet or not. The doc step ends on the doc it just watched
   // arrive, and it arrives the way row 3 does -- `?step=comment`, so tdoc's
@@ -348,7 +353,11 @@ export function SetupGate({ boot }) {
       // exactly as much as somebody who pressed the button, and used to be
       // told nothing at all when it went wrong.
       if (waitingSince.current) setElapsed(Date.now() - waitingSince.current);
-      timer = window.setTimeout(tick, POLL_MS);
+      // Only while there is still an answer to wait for. This asks the server
+      // what the agent has done; once it has done it, the question stops being
+      // a question and the page was still asking it every three seconds for as
+      // long as the tab stayed open.
+      if (!settled.current) timer = window.setTimeout(tick, POLL_MS);
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
