@@ -162,7 +162,17 @@ export function OnboardingChecklist({ record, docs }) {
           <button type="button" onClick={() => toggle(true)} aria-label="Hide"><X size={15} /></button>
         </div>
       </header>
-      <div className="onb-bar" aria-hidden="true"><i style={{ width: `${(done / steps.length) * 100}%` }} /></div>
+      {/* The mark rides the bar. Notion puts its duck on the marker for the
+          same reason: a bar alone is a measurement, and a thing standing on it
+          is somebody's progress. The puck is positioned across the track minus
+          its own width, so it never hangs off either end -- at zero its left
+          edge sits on the start, at full its right edge sits on the finish. */}
+      <div className="onb-bar" aria-hidden="true">
+        <i style={{ width: `${(done / steps.length) * 100}%` }} />
+        <span className="onb-mark" style={{ left: `calc(${(done / steps.length) * 100}% - ${(done / steps.length) * 26}px)` }}>
+          <img src="/tdoc_logo.svg" width="17" height="17" alt="" data-tdoc-dark="invert" />
+        </span>
+      </div>
       <ol>
         {(open ? steps : [next]).map((step) => {
           const body = (

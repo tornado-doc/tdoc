@@ -199,8 +199,28 @@
 .onb-acts button { border: 0; background: none; padding: 5px; border-radius: 8px; cursor: pointer; color: #b0b0ab; display: flex; }
 .onb-acts button:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
 
-.onb-bar { height: 2px; margin: 14px 0 6px; border-radius: 999px; background: var(--td-line, #e8e7e3); overflow: hidden; }
-.onb-bar i { display: block; height: 100%; border-radius: 999px; background: var(--td-accent, #1652f0); transition: width .35s cubic-bezier(.2,.7,.3,1); }
+/* The track is thicker than a hairline now because something stands on it:
+   a 2px line under a 26px puck reads as a crack, not as a rail. `overflow`
+   stays visible so the puck can sit proud of it. */
+.onb-bar {
+  position: relative; height: 4px; margin: 18px 0 16px;
+  border-radius: 999px; background: var(--td-line, #e8e7e3);
+}
+.onb-bar i {
+  display: block; height: 100%; border-radius: 999px;
+  background: var(--td-accent, #1652f0);
+  transition: width .35s cubic-bezier(.2,.7,.3,1);
+}
+.onb-mark {
+  position: absolute; top: 50%; width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  box-sizing: border-box; border-radius: 50%;
+  border: 1px solid var(--td-line, #e8e7e3); background: #fff;
+  box-shadow: 0 1px 3px rgb(26 26 26 / 12%);
+  transform: translateY(-50%);
+  transition: left .35s cubic-bezier(.2,.7,.3,1);
+}
+.onb-mark img { display: block; }
 
 .onb-card ol { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
 .onb-card ol:has(li:only-child) { margin-top: -2px; }

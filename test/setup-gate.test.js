@@ -128,6 +128,19 @@ t('every checklist row is backed by something real', () => {
     'and the last two rows stand on that same doc');
 });
 
+t('the mark rides the bar', () => {
+  // Notion puts its duck on the marker for the same reason: a bar alone is a
+  // measurement, and a thing standing on it is somebody's progress.
+  assert(list.includes('className="onb-mark"') && list.includes('src="/tdoc_logo.svg"'), 'the product\'s own mark, not a dot');
+  assert(list.includes('data-tdoc-dark="invert"'), 'and it follows the page into dark mode');
+  // Positioned across the track minus its own width, so it never hangs off
+  // either end: at zero its left edge sits on the start, at full its right
+  // edge sits on the finish.
+  assert(list.includes('* 26}px)`'), 'the puck is inset by its own width across the range');
+  assert(listCss.includes('.onb-mark {') && listCss.includes('width: 26px; height: 26px;'), 'and the stylesheet agrees on that width');
+  assert(!/\.onb-bar \{[^}]*overflow: hidden/.test(listCss), 'the track does not clip what stands on it');
+});
+
 t('a row cannot come before the row it depends on', () => {
   // eslint-disable-next-line no-new-func
   const src = list.slice(list.indexOf('export function onboardingSteps'), list.indexOf("// Notion's rows carry a thumbnail"));
