@@ -267,6 +267,11 @@ t('the doc step waits for a doc that was not there a moment ago', () => {
     'and the record is what makes the first one visible to a journey that had none');
   assert(gate.includes("? (arrived ? 'done' : 'waiting')"), 'either is what the step turns on');
   assert(gate.includes("const ownDoc = catalogDoc || journeyDoc;"), 'and either can name the doc to open');
+  // The one moment somebody has just made a thing is the worst one to land
+  // them on a bare page: Open it arrives the way row 3 does, with tdoc's
+  // question open and the corner row saying what to do with it.
+  assert(gate.includes("? `/d/${encodeURIComponent(ownDoc)}?step=comment`"), 'Open it lands on step 3, not on a cold page');
+  assert(list.includes("`${firstDocHref}?step=comment`"), 'the same landing row 3 uses');
   // A first doc is any doc at all, because there was nothing there before.
   assert(worker.includes('async function newestDocFor(env, accountId)') && server.includes('function newestDocLocal()'), 'both hosts can name it');
   assert(worker.includes("if (url.searchParams.get('docs') === '1') {") && server.includes("if (url.searchParams.get('docs') === '1') {"),

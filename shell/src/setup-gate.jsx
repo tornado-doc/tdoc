@@ -311,11 +311,16 @@ export function SetupGate({ boot }) {
   const state = step === 'doc'
     ? (arrived ? 'done' : 'waiting')
     : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
-  // The seeding happens on the docs page, so that is where Continue goes: it
-  // is the one place that is right whether the doc has been minted yet, was
-  // deleted since, or is sitting there waiting to be argued with. The doc step
-  // ends at the doc it just watched arrive.
-  const onward = step === 'doc' && ownDoc ? `/d/${encodeURIComponent(ownDoc)}` : '/me';
+  // The connect step ends on the docs page, which is right whether their first
+  // doc exists yet or not. The doc step ends on the doc it just watched
+  // arrive, and it arrives the way row 3 does -- `?step=comment`, so tdoc's
+  // question is open and the corner row is saying what to do with it. Landing
+  // bare here was the coldest arrival in the whole journey: the one moment
+  // somebody has just made a thing and is most ready to be handed the next
+  // move, and the page said nothing.
+  const onward = step === 'doc' && ownDoc
+    ? `/d/${encodeURIComponent(ownDoc)}?step=comment`
+    : '/me';
   // Both steps are one layout with a status line under it. Swapping the doc
   // step into a second, emptier face when its doc arrived made a page out of a
   // sentence: whoever landed on it was told their first tdoc is live and
