@@ -27,11 +27,19 @@ function rememberHidden() {
 // Which row this doc is on. `null` means there is nothing to say: the journey
 // has not started, this is not its doc, or the loop has already closed -- and
 // the exit banner owns the page from there.
-export function docStep(record, slug, ownerCommented, canHandoff = true) {
+export function docStep(record, slug, canHandoff = true) {
   if (!record || !record.started) return null;
   if (!record.first_doc || record.first_doc !== slug) return null;
   if (record.revised) return null;
-  if (!ownerCommented) return 'comment';
+  // The record, not the comment list. Both were being read as the same fact:
+  // the checklist on My docs asks the record whether they have commented, and
+  // this row used to ask the page -- is there a comment here signed by the
+  // owner? Those answer differently the moment they disagree, and then the
+  // list offers "leave a comment on your doc" while the doc it opens is
+  // already asking for the handoff. Anything that leaves a comment on the
+  // journey's doc stamps the record, so the record is the one that knows; a
+  // comment posted in this tab moves it here before the server is asked.
+  if (!record.commented) return 'comment';
   // The handoff block lives on the card and only on the latest version, so on
   // an older one the row would name a line that is not on the page -- which is
   // the one thing this row promised never to do.

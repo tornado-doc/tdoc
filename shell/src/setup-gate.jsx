@@ -66,8 +66,8 @@ export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;
 // than the doc, and "the one about me" pointed at something with a pronoun
 // nobody had introduced -- which one? -- so neither could be read at a glance.
 export const DOC_CHOICES = [
-  { id: 'own', label: 'Write about a topic', sub: 'Name it. Your agent writes and publishes it.' },
-  { id: 'portrait', label: 'Write about me', sub: 'Built from the traces you choose to share.' },
+  { id: 'own', label: 'Write about anything I want', sub: 'Name the topic. Your agent writes and publishes it.' },
+  { id: 'portrait', label: 'Write about how I use AI', sub: 'Built from the traces you choose to share.' },
 ];
 // Kept as the export it always was: the placeholder line still answers "what
 // do I paste" for anyone who lands here with no choice made.

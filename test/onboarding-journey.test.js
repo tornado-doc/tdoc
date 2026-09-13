@@ -231,7 +231,8 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes("const onboardingDoc = Boolean(onboardingRecord?.first_doc && onboardingRecord.first_doc === config.slug && !onboardingRecord.shared);") && shell.includes('const handoffOpen = handoffTouched ? handoffPref : (onboardingDoc || handoffPref);'), 'open on the onboarding doc; elsewhere the last choice holds');
   assert(shell.includes("localStorage.setItem(HANDOFF_OPEN_KEY, next ? '1' : '0')"), 'the choice is remembered');
   assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && !card.includes("handoff.state === 'replied'") && card.includes('Still waiting — did you paste it into your agent?'), 'the four states — no doc-level "replied" on a thread');
-  assert(shell.includes('handoffEnabled && ownerCommented ?'), 'the handoff appears after the owner has commented, not on the seeded card that asks for it');
+  assert(shell.includes('const handoffOnPage = handoffEnabled && ownerCommented;') && shell.includes('handoff={handoffOnPage ?'),
+    'the handoff appears after the owner has commented, not on the seeded card that asks for it');
   assert(shell.includes('Number(config.version) === latestVersion'), 'only on the latest version');
   assert(shell.includes("if (value?.id) setOpenCommentId(value.id);"), 'a posted comment opens its card — the next instruction lives there');
   assert(shell.includes("v/${latest}?revised=1"), 'a new version is arrived at as one');

@@ -369,19 +369,42 @@ t('a deleted seed doc does not leave rows pointing at a 404', () => {
 t('the doc carries one row of the checklist, and only where it belongs', () => {
   const step = lift(hint, 'docStep');
   const started = { started: 'X', first_doc: 'seed' };
-  assert(step(null, 'seed', false) === null, 'nothing before there is a journey');
-  assert(step({}, 'seed', false) === null, 'nor before it starts');
-  assert(step(started, 'other', false) === null, 'and nothing on a doc that is not the journey\'s');
-  assert(step(started, 'seed', false) === 'comment', 'the untouched doc asks for the highlight');
-  assert(step(started, 'seed', true) === 'handoff', 'their own words move it to the agent');
-  assert(step({ ...started, revised: 'X' }, 'seed', true) === null, 'and the closed loop hands the page to the exit banner');
+  const commented = { ...started, commented: 'X' };
+  assert(step(null, 'seed', true) === null, 'nothing before there is a journey');
+  assert(step({}, 'seed', true) === null, 'nor before it starts');
+  assert(step(started, 'other', true) === null, 'and nothing on a doc that is not the journey\'s');
+  assert(step(started, 'seed', true) === 'comment', 'the untouched doc asks for the highlight');
+  assert(step(commented, 'seed', true) === 'handoff', 'their own words move it to the agent');
+  assert(step({ ...commented, revised: 'X' }, 'seed', true) === null, 'and the closed loop hands the page to the exit banner');
+  // The record says which step; the page says whether it can honour it. A row
+  // naming a line that is not on this page is the one thing it promised never
+  // to do -- so on an older version, where the handoff block does not render,
+  // it says nothing rather than pointing at nothing.
+  assert(step(commented, 'seed', false) === null, 'and it never names a line that is not here');
+});
+
+t('one record answers "have they commented", not two', () => {
+  // The checklist on My docs asks the record. This row used to ask the page --
+  // is there a comment here signed by the owner? Two sources of one fact
+  // disagree the moment anything moves one and not the other, and then the
+  // list offers "leave a comment on your doc" while the doc it opens is
+  // already asking for the handoff. Anything that comments on the journey's
+  // doc stamps the record, so the record is the one that knows.
+  assert(/if \(!record\.commented\) return 'comment';/.test(hint), 'the row reads the record');
+  assert(list.includes('Boolean(r.commented || r.revised)'), 'and so does the checklist');
+  // The stamp is a round trip, and the whole time somebody is looking at what
+  // they just wrote is inside it.
+  assert(shell.includes('const markCommented = ()') && shell.includes('commented: new Date().toISOString()'),
+    'a comment posted in this tab moves the record before the server is asked');
+  assert(shell.includes('markCommented();\n    closeComposer();') && shell.includes('{ markCommented(); reportMentions(value); }'),
+    'both ways of saying something -- a comment of their own, and the reply the seeded card asks for');
 });
 
 t('the hint is a wayfinder, never a second copy of the line', () => {
   // The same line for the agent in two places on one screen is two things to
   // drift apart. The hint says which card is yours now and opens it.
   assert(!hint.includes('handoffLine') && !hint.includes('copyText'), 'the hint carries no line and no clipboard');
-  assert(shell.includes('const hintStep = docStep(onboardingRecord, config.slug, ownerCommented, handoffEnabled);'), 'the shell decides the row');
+  assert(shell.includes('const hintStep = docStep(onboardingRecord, config.slug, handoffOnPage);'), 'the shell decides the row');
   assert(/goToStep = useCallback\(\(want\) => \{[\s\S]{0,400}setOpenCommentId/.test(shell), 'and going there opens a card');
   // The checklist rows land through the same function, so the corner row and
   // the row on My docs can never drift into two ideas of where a step goes.

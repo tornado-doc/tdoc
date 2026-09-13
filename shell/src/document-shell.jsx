@@ -579,9 +579,23 @@ export function DocumentShell({ boot, config }) {
     }
   };
 
+  // Their own first words on the journey's doc are a step, and the server
+  // stamps it on the way through. Moving it here too is what keeps the row
+  // above the document honest between now and the next page load, which is the
+  // whole time somebody is looking at what they just wrote.
+  const markCommented = () => {
+    if (!config.isOwner) return;
+    setOnboardingRecord((current) => (
+      current && current.started && current.first_doc === config.slug && !current.commented
+        ? { ...current, commented: new Date().toISOString() }
+        : current
+    ));
+  };
+
   const postComment = async (text) => {
     const { ok, value } = await attempt(() => comments.addComment(composer, text));
     if (!ok) return;
+    markCommented();
     closeComposer();
     reportMentions(value);
     // The new card opens: it is where the next instruction lives.
@@ -590,7 +604,7 @@ export function DocumentShell({ boot, config }) {
 
   const replyTo = async (parentId, text) => {
     const { ok, value } = await attempt(() => comments.addReply(parentId, text));
-    if (ok) reportMentions(value);
+    if (ok) { markCommented(); reportMentions(value); }
     return ok;
   };
 
@@ -757,11 +771,17 @@ export function DocumentShell({ boot, config }) {
   const ownerCommented = Boolean(me) && comments.comments.some((c) => (
     c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
   ));
+  // Whether the line for the agent is on this page at all -- it lives on the
+  // owner's own card, and only on the latest version. Named once because three
+  // things ask it, and because it is what the row below is allowed to point at.
+  const handoffOnPage = handoffEnabled && ownerCommented;
   // The one row of the checklist that belongs to this doc. It names something
   // already on the page, so going there is opening the card that carries it:
   // the seeded comment asks for the highlight, and their own card carries the
-  // line for the agent.
-  const hintStep = docStep(onboardingRecord, config.slug, ownerCommented, handoffEnabled);
+  // line for the agent. The record says which step; `handoffOnPage` says
+  // whether the page can honour it, because a row naming a line that is not
+  // here is the one thing this row promised never to do.
+  const hintStep = docStep(onboardingRecord, config.slug, handoffOnPage);
   const goToStep = useCallback((want) => {
     const list = comments.comments;
     const going = want || hintStep;
@@ -1005,7 +1025,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled && ownerCommented ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffOnPage ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -1035,7 +1055,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffEnabled && ownerCommented ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffOnPage ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
         />
       )}
 
