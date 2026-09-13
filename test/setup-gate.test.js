@@ -128,6 +128,22 @@ t('every checklist row is backed by something real', () => {
     'and the last two rows stand on that same doc');
 });
 
+t('a finished row is highlighted, not dimmed', () => {
+  // Notion tints the rows behind you and leaves their pictures at full
+  // strength. Fading them says "this no longer counts" about the only part of
+  // the list somebody has actually done.
+  assert(listCss.includes('.onb-card li.done { background: var(--td-accent-tint, #e8eeff); border-color: transparent; }'), 'done is a tint');
+  assert(!/\.onb-thumb \{ opacity|li\.done \.onb-thumb \{ opacity|li\.locked \.onb-thumb \{ opacity/.test(listCss),
+    'and no state dims a picture');
+  // Every row is a tile, the way Notion's are: an object with edges, not a
+  // line in a list.
+  assert(listCss.includes('.onb-card li {') && listCss.includes('border-radius: 11px;'), 'rows are tiles');
+  assert(listCss.includes('gap: 8px;'), 'with air between them');
+  // A logo in a box is a card inside a card; Notion frames a thumbnail only
+  // when the thing it shows has a frame of its own.
+  assert(listCss.includes('padding: 0; background: transparent; border: 0;'), 'the bare logos sit on the tile itself');
+});
+
 t('every thumbnail shows the thing its own step produces', () => {
   // Notion's read because each contains something already recognisable and no
   // two look alike. Four identically framed boxes of grey bars is one smudge
