@@ -440,7 +440,14 @@ t('the step is the first thing on the page, not the last', () => {
   // page whose whole job was to teach one gesture. So it sits where a banner
   // sits, first under the chrome and above the document.
   assert(!hintCss.includes('position: fixed'), 'it is not floating in a corner');
-  assert(hintCss.includes('border-bottom: 1px solid rgb(22 82 240 / 14%);'), 'it is docked, with an edge below it');
+  assert(/<OldVersionNotice/.test(shell), 'it is docked under the chrome');
+  // A card, not a bar. Tinting the full width is the crudest way to be noticed
+  // and it costs the page its composure: the strip is then mostly two fields of
+  // flat colour with nothing in them, because the words sit in the middle where
+  // the document is.
+  assert(/\.sh-inner \{[^}]*max-width: 720px;[^}]*border-radius: 14px;/s.test(hintCss), 'the blue is a card the width of the document');
+  assert(/\.sh-hint \{(?:(?!\}).)*\}/s.test(hintCss) && !/\.sh-hint \{[^}]*background:/s.test(hintCss),
+    'and the strip behind it is not painted');
   assert(hintCss.includes('background: var(--td-accent-tint, #e8eeff);'), 'in the same blue the live row on My docs wears');
   assert(/<OldVersionNotice[\s\S]*?showExitBanner[\s\S]*?<DocStepHint/.test(shell), 'above the document in the flow');
   // A whole pill that happens to be clickable is not an invitation. A button
@@ -498,8 +505,10 @@ t('the hint keeps out of the way of everything else on the doc', () => {
   // -- and every comment card is placed from the top of that document, so the
   // overlay has to be told the bar took its height. One number, exported, or
   // the whole margin sits 48px off.
-  assert(hint.includes('export const STEP_HINT_HEIGHT = 48;'), 'the height has one home');
-  assert(hintCss.includes('height: 48px;'), 'and the stylesheet agrees with it');
+  assert(hint.includes('export const STEP_HINT_HEIGHT = 68;'), 'the height has one home');
+  // The card's 48 plus the 10 of air above and below it.
+  assert(/\.sh-inner \{[^}]*height: 48px;/s.test(hintCss) && /\.sh-hint \{[^}]*padding: 10px 20px;/s.test(hintCss),
+    'and the stylesheet adds up to it');
   assert(shell.includes('(hintBar ? STEP_HINT_HEIGHT : 0)'), 'the overlay counts it');
   assert(hint.includes('onVisible(showing)') && shell.includes('onVisible={setHintBar}'),
     'and only the row itself knows whether it drew');

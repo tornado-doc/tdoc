@@ -75,10 +75,11 @@ const STEP_NO = { comment: 3, handoff: 4 };
 // name two.
 const GO = 'Show me';
 const TICK_MS = 2400;
-// The bar's own height, in one place: the overlay positions every comment card
-// from the top of the document, so a number that drifts from step-hint.css
-// moves every card on the page by the difference.
-export const STEP_HINT_HEIGHT = 48;
+// What the hint takes off the top of the document, in one place: the card's own
+// 48px plus the 10px of air above and below it. The overlay positions every
+// comment card from the top of that document, so a number that drifts from
+// step-hint.css moves every card on the page by the difference.
+export const STEP_HINT_HEIGHT = 68;
 
 export function DocStepHint({ step, agentState = 'idle', banner = false, justFinished = false, hidden: covered = false, onGo, onVisible }) {
   const [gone, setGone] = useState(hidden);

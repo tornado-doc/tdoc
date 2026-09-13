@@ -8,29 +8,28 @@
 
    So it sits where a banner sits: first thing under the chrome, above the
    document, in flow -- it pushes the page down rather than covering a word of
-   it. Three things give it the weight it was missing: a numbered disc instead
+   it. But it is a card, not a bar. Tinting the full width is the crudest way
+   to be noticed and it costs the page its composure: the strip is mostly two
+   fields of flat colour with nothing in them, because the words sit in the
+   middle where the document is. A card is the same blue doing the same job
+   over the width it actually occupies.
+
+   Two more things give it the weight it was missing: a numbered disc instead
    of an empty tick (a number says "you are three of four through something";
-   an empty circle says "an unchecked box, maybe later"), a real filled button
-   instead of a pill that happened to be clickable, and the width of the text
-   column under it, so it reads as belonging to the document rather than
-   hovering over it. */
+   an empty circle says "an unchecked box, maybe later"), and a real filled
+   button instead of a pill that happened to be clickable. */
 .sh-hint {
   box-sizing: border-box;
   position: relative;
   z-index: 4;
   display: flex;
-  align-items: center;
   justify-content: center;
-  gap: 10px;
   width: 100%;
-  height: 48px;
-  padding: 0 16px;
-  background: var(--td-accent-tint, #e8eeff);
-  border-bottom: 1px solid rgb(22 82 240 / 14%);
+  padding: 10px 20px;
 }
 
-/* The bar spans the window; what is on it spans the text column. A sentence
-   beginning at the window's left edge belongs to the application -- one
+/* The card. Its width is the document's, not the window's -- a sentence
+   beginning at the window's left edge belongs to the application; one
    beginning where the document begins belongs to the document. */
 .sh-inner {
   box-sizing: border-box;
@@ -38,8 +37,16 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  max-width: 780px;
+  max-width: 720px;
   min-width: 0;
+  height: 48px;
+  padding: 0 10px 0 14px;
+  border-radius: 14px;
+  background: var(--td-accent-tint, #e8eeff);
+  border: 1px solid rgb(22 82 240 / 16%);
+  /* Two shadows: a tight one to seat the edge, a wide soft one to lift the
+     card off a page that is otherwise flat white. */
+  box-shadow: 0 1px 2px rgb(22 82 240 / 7%), 0 6px 20px rgb(26 26 26 / 6%);
 }
 
 /* The step's own number. Filled, because this is the one that is happening:
@@ -119,8 +126,8 @@
 .sh-hint.ticked .sh-text { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
 
 @media (max-width: 720px) {
-  .sh-hint { height: 46px; padding: 0 10px; gap: 8px; }
-  .sh-inner { gap: 9px; }
+  .sh-hint { padding: 8px 10px; }
+  .sh-inner { height: 46px; gap: 9px; padding: 0 8px 0 11px; border-radius: 12px; }
   .sh-text { font-size: 13.5px; }
   .sh-go { padding: 0 12px; }
 }
