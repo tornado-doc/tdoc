@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ClaudeMark, OpenAIMark, GrokMark } from '../agent-marks.jsx';
+import { CodexWindow, Stamp, Ask, Worked, Answer, Feedback } from './codex-window.jsx';
+import './codex-window.css';
 import './replay.css';
 
 // What actually happens when somebody does this, replayed at 1:1.
@@ -93,22 +95,27 @@ function useClock(running, total, restart) {
 // Only the aim lives here. Where the middle of the frame is on screen is the
 // stylesheet's business -- a number for it in here would have to agree with a
 // number over there, and the two would drift the first time the pane resized.
-// s is capped by what the lens can hold: 544 / 600 = 0.90 shows the whole
+// s is capped by what the lens can hold: 544 / 640 = 0.85 shows the whole
 // window, 544 / 1080 = 0.50 shows the whole desk. Anything closer is a
-// deliberate crop, never an accident.
+// deliberate crop, never an accident -- and the approval sheet is 420 wide, so
+// it can be pushed in on much further than the window can.
 const SHOTS = [
   { at: 0, s: 0.50, x: 540, y: 360 },
   { at: 1300, s: 0.50, x: 540, y: 360 },
   { at: 1950, s: 1.00, x: 540, y: 640 },
   { at: 2600, s: 1.00, x: 540, y: 640 },
-  { at: 3250, s: 0.90, x: 540, y: 300 },
-  { at: 5200, s: 0.90, x: 540, y: 300 },
-  { at: 6300, s: 0.90, x: 540, y: 340 },
-  { at: 8300, s: 0.90, x: 540, y: 340 },
-  { at: 9000, s: 1.10, x: 540, y: 330 },
-  { at: 11500, s: 1.10, x: 540, y: 330 },
-  { at: 12700, s: 0.90, x: 540, y: 340 },
-  { at: 15500, s: 0.90, x: 540, y: 300 },
+  { at: 3250, s: 0.85, x: 540, y: 300 },
+  { at: 5200, s: 0.85, x: 540, y: 300 },
+  { at: 6300, s: 0.85, x: 540, y: 350 },
+  { at: 8300, s: 0.85, x: 540, y: 350 },
+  // The sheet is the subject here, but it is a browser window opening in front
+  // of the app -- so the app stays whole behind it. Pushing in far enough to
+  // fill the frame with the sheet sliced both edges off the thing it is
+  // sitting on, which is not what anybody sees.
+  { at: 9000, s: 0.92, x: 540, y: 330 },
+  { at: 11500, s: 0.92, x: 540, y: 330 },
+  { at: 12700, s: 0.85, x: 540, y: 350 },
+  { at: 15500, s: 0.85, x: 540, y: 320 },
   { at: 18600, s: 0.50, x: 540, y: 360 },
   { at: REPLAY_MS, s: 0.50, x: 540, y: 360 },
 ];
@@ -148,8 +155,12 @@ function Dock({ t, wake: fixed, launch = true }) {
       {APPS.map((app, i) => {
         // The magnification is real: the pointer is over ChatGPT, so ChatGPT
         // stands up and its neighbours lean.
+        // Magnification is the pointer's doing, so it only happens on the
+        // script where a pointer goes there. On the other one the dock sits
+        // flat -- and a magnified icon reaches ~5px higher than the window's
+        // bottom edge, so this was also poking through it.
         const near = Math.abs(i - 1);
-        const lift = wake * (near === 0 ? 1 : near === 1 ? 0.42 : 0);
+        const lift = (launch ? wake : 0) * (near === 0 ? 1 : near === 1 ? 0.42 : 0);
         const bounce = app.id === 'chatgpt' ? Math.sin(press * Math.PI) * 12 : 0;
         return (
           <div
@@ -184,11 +195,9 @@ function Cursor({ t }) {
   );
 }
 
-// -------------------------------------------------------------- the window
-// The shape of the app the prompt goes into: traffic lights, the thread's own
-// name in the title, the message from the human as a dark bubble on the right,
-// then what the tool printed. The words below are not written for this picture
-// -- they are what bin/tdoc-publish prints on this path.
+// ---------------------------------------------------------------- the turns
+// The words below are not written for this picture: they are what
+// `hosted_pair_signin` prints to stderr in bin/tdoc-publish, in order.
 const CLI_LINES = [
   '[tdoc] Sign in to publish on https://tdoc.dev',
   '[tdoc] A tdoc page just opened in your browser — the code is filled in;',
@@ -201,71 +210,49 @@ const SIGNED_LINES = [
   '[tdoc] Credential saved to ~/.tdoc/published.json',
 ];
 
-function Working({ t, range = T.working, done }) {
-  const finished = done === undefined ? after(t, T.cli) : done;
-  const spin = after(t, range) && !finished;
+function workedLabel(t, range) {
   const secs = Math.min(268, Math.round(phase(t, range) * 268));
-  return (
-    <div className="rp-worked">
-      {spin ? <i className="rp-spin" /> : <i className="rp-done">✓</i>}
-      <span>Worked for {Math.floor(secs / 60)}m {String(secs % 60).padStart(2, '0')}s</span>
-      <span className="rp-chev">›</span>
-    </div>
-  );
+  return `Worked for ${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`;
 }
 
-function Window({ t, prompt, fade }) {
-  const open = phase(t, T.windowIn) * fade;
+function ConnectTurns({ t, prompt }) {
   const pasted = phase(t, T.paste);
   const sent = after(t, T.send);
-  // Lines arrive one after another across the CLI window, the way they arrive
-  // in a terminal -- not as a block that appears.
-  const cliShown = Math.floor(phase(t, T.cli) * (CLI_LINES.length + 0.4));
-  const signedShown = Math.floor(phase(t, T.signedIn) * (SIGNED_LINES.length + 0.4));
+  const shown = Math.floor(phase(t, T.cli) * (CLI_LINES.length + 0.4));
+  const signed = Math.floor(phase(t, T.signedIn) * (SIGNED_LINES.length + 0.4));
   const summary = phase(t, T.summary);
+  if (!sent) {
+    return pasted > 0 ? (
+      <>
+        <Stamp>Today 2:59 AM</Stamp>
+        <Ask caret>{prompt}</Ask>
+      </>
+    ) : <Stamp>Today 2:59 AM</Stamp>;
+  }
   return (
-    <div
-      className="rp-win"
-      style={{ opacity: open, transform: `translate(-50%, 0) scale(${0.94 + open * 0.06})` }}
-    >
-      <div className="rp-win-bar">
-        <span className="rp-lights"><i /><i /><i /></span>
-        <span className="rp-win-title">Install tdoc and connect account</span>
-      </div>
-      <div className="rp-win-body">
-        {sent ? (
-          <div className="rp-bubble">{prompt}</div>
-        ) : (
-          <div className="rp-composer">
-            <span className="rp-typed" style={{ opacity: pasted }}>{prompt}</span>
-            {pasted < 1 ? <span className="rp-ph">Message ChatGPT</span> : null}
-            <span className="rp-caret" style={{ opacity: pasted }} />
-          </div>
-        )}
-
-        {after(t, T.working) ? <Working t={t} /> : null}
-
-        {/* Only once there is a line in it. An empty block that fills in later
-            is a grey bar with nothing to say for two seconds. */}
-        {cliShown > 0 ? (
-          <pre className="rp-cli">
-            {CLI_LINES.slice(0, cliShown).join('\n')}
-            {signedShown ? `\n${SIGNED_LINES.slice(0, signedShown).join('\n')}` : ''}
-          </pre>
-        ) : null}
-
-        {summary > 0 ? (
-          <div className="rp-summary" style={{ opacity: summary }}>
+    <>
+      <Stamp>Today 2:59 AM</Stamp>
+      <Ask>{prompt}</Ask>
+      {after(t, T.working) ? (
+        <Worked label={workedLabel(t, T.working)} open={shown > 0}>
+          {CLI_LINES.slice(0, shown).join('\n')}
+          {signed ? `\n${SIGNED_LINES.slice(0, signed).join('\n')}` : ''}
+        </Worked>
+      ) : null}
+      {summary > 0 ? (
+        <>
+          <Answer>
             <p>tdoc is installed and connected to your account.</p>
             <ul>
               <li>Account: <code>serenakeyitan</code></li>
               <li>Target: <code>tdoc.dev</code></li>
               <li>Doctor check: ready to publish; no missing steps</li>
             </ul>
-          </div>
-        ) : null}
-      </div>
-    </div>
+          </Answer>
+          <Feedback />
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -316,7 +303,14 @@ export function ConnectReplay({ prompt }) {
       <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
       <div className="rp-canvas">
         <div className="rp-menubar"><span className="rp-mb-app">ChatGPT</span><span className="rp-sp" /><span>Fri 2:59 AM</span></div>
-        <Window t={t} prompt={prompt} fade={fade} />
+        {/* Never a component called `Window`: delete its definition and the
+            name does not go undefined, it quietly resolves to the DOM's own
+            global and React tries to construct it. */}
+        <div style={{ opacity: fade }}>
+          <CodexWindow title="Install tdoc and connect account">
+            <ConnectTurns t={t} prompt={prompt} />
+          </CodexWindow>
+        </div>
         <ApprovalSheet t={t} />
         <Dock t={t} />
         <Cursor t={t} />
@@ -351,49 +345,50 @@ export function docScript(prompt) {
 // fractions of it rather than as milliseconds that would fall in the wrong
 // place the moment somebody typed a longer subject.
 const DOC_FRAMES = [
-  { p: 0, s: 0.90, x: 540, y: 190 },
-  { p: 0.42, s: 0.90, x: 540, y: 190 },
-  { p: 0.58, s: 0.90, x: 540, y: 300 },
-  { p: 0.82, s: 0.90, x: 540, y: 300 },
-  { p: 1, s: 0.90, x: 540, y: 260 },
+  { p: 0, s: 0.85, x: 540, y: 330 },
+  { p: 0.42, s: 0.85, x: 540, y: 330 },
+  { p: 0.58, s: 0.85, x: 540, y: 330 },
+  { p: 0.82, s: 0.85, x: 540, y: 330 },
+  { p: 1, s: 0.85, x: 540, y: 330 },
 ];
 const docShots = (total) => DOC_FRAMES.map((f) => ({ at: Math.round(f.p * total), s: f.s, x: f.x, y: f.y }));
 
-function DocWindow({ t, s, prompt }) {
+function DocTurns({ t, s, prompt }) {
   const typed = Math.round(phase(t, s.type) * prompt.length);
   const sent = after(t, s.send);
   const pub = phase(t, s.published);
   const doc = phase(t, s.doc);
-  const fade = 1 - phase(t, s.fade);
+  if (!sent) {
+    return (
+      <>
+        <Stamp>Today 3:04 AM</Stamp>
+        {typed > 0 ? <Ask caret>{prompt.slice(0, typed)}</Ask> : null}
+      </>
+    );
+  }
   return (
-    <div className="rp-win" style={{ opacity: fade, transform: 'translate(-50%, 0)' }}>
-      <div className="rp-win-bar">
-        <span className="rp-lights"><i /><i /><i /></span>
-        <span className="rp-win-title">Make a tdoc</span>
-      </div>
-      <div className="rp-win-body">
-        {sent ? (
-          <div className="rp-bubble">{prompt}</div>
-        ) : (
-          <div className="rp-composer">
-            <span className="rp-typed">{prompt.slice(0, typed)}</span>
-            <span className="rp-caret" />
-          </div>
-        )}
-        {after(t, s.working) ? <Working t={t} range={s.working} done={after(t, s.published)} /> : null}
-        {pub > 0 ? (
-          <pre className="rp-cli" style={{ opacity: pub }}>
-            {'[tdoc] Published v1 — https://tdoc.dev/d/what-standups-cost'}
-          </pre>
-        ) : null}
-        {doc > 0 ? (
-          <div className="rp-summary" style={{ opacity: doc }}>
+    <>
+      <Stamp>Today 3:04 AM</Stamp>
+      <Ask>{prompt}</Ask>
+      {after(t, s.working) ? (
+        <Worked label={workedLabel(t, s.working)} open={pub > 0}>
+          {'[tdoc] Published v1 — https://tdoc.dev/d/what-standups-cost'}
+        </Worked>
+      ) : null}
+      {doc > 0 ? (
+        <>
+          <Answer>
             <p>Published. Your first tdoc is live.</p>
-            <ul><li>Anyone with the link can read it</li><li>Comments are open to you</li></ul>
-          </div>
-        ) : null}
-      </div>
-    </div>
+            <p><a href="#">https://tdoc.dev/d/what-standups-cost</a></p>
+            <ul>
+              <li>Anyone with the link can read it</li>
+              <li>Comments are open to you</li>
+            </ul>
+          </Answer>
+          <Feedback />
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -409,8 +404,12 @@ export function DocReplay({ prompt }) {
     <div className="rp-view" aria-hidden="true">
       <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
         <div className="rp-canvas">
-          <div className="rp-menubar"><span className="rp-mb-app">ChatGPT</span><span className="rp-sp" /><span>Fri 2:59 AM</span></div>
-          <DocWindow t={t} s={s} prompt={line} />
+          <div className="rp-menubar"><span className="rp-mb-app">ChatGPT</span><span className="rp-sp" /><span>Fri 3:04 AM</span></div>
+          <div style={{ opacity: 1 - phase(t, s.fade) }}>
+            <CodexWindow title="Make a tdoc">
+              <DocTurns t={t} s={s} prompt={line} />
+            </CodexWindow>
+          </div>
           <Dock t={t} wake={1} launch={false} />
         </div>
       </div>

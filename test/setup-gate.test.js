@@ -34,6 +34,8 @@ function lift(src, name) {
 const gate = read('shell/src/setup-gate.jsx');
 const gateCss = read('shell/src/setup-gate.css');
 const replay = read('shell/src/setup-gate/replay.jsx');
+const windowElement = read('shell/src/setup-gate/codex-window.jsx');
+const windowCss = read('shell/src/setup-gate/codex-window.css');
 const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
 const hub = read('shell/src/docs-hub.jsx');
 const shell = read('shell/src/document-shell.jsx');
@@ -642,6 +644,31 @@ t('a finished gate stops asking, and the column fits a laptop', () => {
   // the overflow is one fixed column against a shrinking window.
   assert(/@media \(max-height: 870px\) \{[^}]*\.sg-mid \{ padding-top: 26px; \}/s.test(gateCss),
     'a short window gets the top margin back');
+});
+
+t('one window, drawn from a real one', () => {
+  // There was a copy of the window per scene, which is how the second one
+  // ended up bouncing an app in a dock on a screen where no app is launched.
+  // A scene hands it a title and a stream of turns; every part of the chrome
+  // belongs to the window.
+  assert(!replay.includes('function DocWindow'), 'no second window');
+  assert((replay.match(/<CodexWindow/g) || []).length === 2, 'both scripts use the same one');
+  // `Window` is a name that does not go undefined when its definition is
+  // deleted -- it quietly resolves to the DOM's own global and React tries to
+  // construct it. Which is what happened.
+  assert(!/<Window[\s/>]/.test(replay), 'and nothing is called Window');
+  // Measured against a real one rather than remembered: controls on both sides
+  // with the thread's name centred between them, the conversation a column
+  // down the middle, the human's turn a dark bubble on the right, the
+  // assistant's plain text with no bubble, a tool call collapsed behind one
+  // grey line, and a composer that is there whether or not anything was sent.
+  assert(/\.cw-title \{[^}]*text-align: center;/s.test(windowCss), 'the title is centred between the controls');
+  assert(/\.cw-col \{[^}]*width: 78%;[^}]*margin: 0 auto;/s.test(windowCss), 'the conversation is a column, not the full width');
+  assert(/\.cw-ask \{[^}]*justify-content: flex-end;/s.test(windowCss), 'the human is on the right');
+  assert(!/\.cw-answer \{[^}]*background:/s.test(windowCss), 'and the assistant has no bubble');
+  assert(windowElement.includes('{open ? <pre className="cw-tool">'), 'a tool call shows its output only when opened');
+  assert(/\.cw \{[^}]*display: flex; flex-direction: column;/s.test(windowCss)
+    && windowElement.includes('<Composer />'), 'the composer is the window\'s, not a turn\'s');
 });
 
 t('the dock only launches on the script that has a launch in it', () => {
