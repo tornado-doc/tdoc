@@ -665,7 +665,11 @@ export function CommentCard({
         <Reactions item={comment} me={currentUser} onReact={onReact} />
       ) : null}
 
-      {handoff && comment.status !== 'applied'
+      {/* On the owner's own thread, and no other. It used to arrive on every
+          card the layer drew, so the seeded comment -- which is still asking
+          them to say something -- carried the line for handing their answer to
+          an agent, above a Reply button they had not pressed yet. */}
+      {handoff && handoff.threadId === comment.id && comment.status !== 'applied'
         && !replies.some((reply) => reply.author?.kind === 'agent') ? (() => {
           const copyButton = (
             <button

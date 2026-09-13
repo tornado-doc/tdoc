@@ -768,13 +768,24 @@ export function DocumentShell({ boot, config }) {
   // the reply the seeded card asks for. The handoff appears once they exist,
   // not on an untouched seeded card.
   const me = config.identity?.login || '';
-  const ownerCommented = Boolean(me) && comments.comments.some((c) => (
-    c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
-  ));
-  // Whether the line for the agent is on this page at all -- it lives on the
-  // owner's own card, and only on the latest version. Named once because three
-  // things ask it, and because it is what the row below is allowed to point at.
-  const handoffOnPage = handoffEnabled && ownerCommented;
+  // The thread the owner has said something in -- their own comment, or the
+  // reply the seeded card asks for. One lookup, because three things need the
+  // same one: whether they have spoken at all, which card carries the line for
+  // the agent, and which card the row above the document opens.
+  const myThread = me
+    ? comments.comments.find((c) => (
+      c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
+    ))
+    : null;
+  const ownerCommented = Boolean(myThread);
+  // Whether the line for the agent is on this page at all. Three conditions,
+  // and it used to have one: the owner has to have spoken (it belongs under
+  // their words, not under the seeded card that is still asking for them),
+  // this has to be the latest version, and this has to be the onboarding doc
+  // with the loop still open. Without that last one every comment the owner
+  // ever wrote, on every doc they own, carried a copyable instruction for an
+  // agent -- a teaching aid that never stopped teaching.
+  const handoffOnPage = handoffEnabled && ownerCommented && onboardingDoc;
   // The one row of the checklist that belongs to this doc. It names something
   // already on the page, so going there is opening the card that carries it:
   // the seeded comment asks for the highlight, and their own card carries the
@@ -790,15 +801,12 @@ export function DocumentShell({ boot, config }) {
       if (seed) setOpenCommentId(seed.id);
       return;
     }
-    const mine = list.find((c) => (
-      c.author?.login === me || (c.replies || []).some((r) => r.author?.login === me)
-    ));
-    if (mine) setOpenCommentId(mine.id);
+    if (myThread) setOpenCommentId(myThread.id);
     // The line is the point of the trip, so it is open when they arrive.
     setHandoffTouched(true);
     setHandoffPref(true);
     try { localStorage.setItem(HANDOFF_OPEN_KEY, '1'); } catch {}
-  }, [hintStep, comments.comments, me]);
+  }, [hintStep, comments.comments, myThread]);
 
   // A row on My docs lands here, so it lands the way the corner row's own click
   // does -- same function, so the two can never drift into two ideas of where
@@ -1025,7 +1033,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffOnPage ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -1055,7 +1063,7 @@ export function DocumentShell({ boot, config }) {
           onDelete={removeComment}
           onResolve={resolveComment}
           onReanchor={setReanchorId}
-          handoff={handoffOnPage ? { line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
         />
       )}
 
