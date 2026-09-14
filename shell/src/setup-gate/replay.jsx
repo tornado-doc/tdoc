@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ClaudeMark, OpenAIMark, GrokMark } from '../agent-marks.jsx';
 import { CodexWindow, Stamp, Ask, Worked, Answer, Feedback } from './codex-window.jsx';
 import './codex-window.css';
 import './replay.css';
@@ -164,16 +163,24 @@ const APPS = [
   //
   // Finder is always running. There is no state of a Mac in which it is not,
   // and a dock with nothing running is a screenshot of nothing.
-  { id: 'finder', src: '/mac/finder.png', running: true },
-  { id: 'safari', src: '/mac/safari.png' },
-  { id: 'messages', src: '/mac/messages.png' },
-  { id: 'claude', bg: '#D97757', mark: (s) => <ClaudeMark size={s} color="#fff" /> },
-  { id: 'chatgpt', bg: '#0D0D0D', mark: (s) => <OpenAIMark size={s} color="#fff" /> },
-  { id: 'grok', bg: '#0A0A0A', mark: (s) => <GrokMark size={s} color="#fff" /> },
+  { id: 'finder', name: 'Finder', src: '/mac/finder.png', running: true },
+  { id: 'safari', name: 'Safari', src: '/mac/safari.png' },
+  { id: 'messages', name: 'Messages', src: '/mac/messages.png' },
+  // Each app's own icon, off this machine, exactly like the four above. Drawing
+  // a mark on a coloured tile got both the proportions and the identity wrong:
+  // the black OpenAI petal is the ChatGPT web mark, and the app in a dock next
+  // to Claude is Codex, whose icon is a pale violet cloud with a prompt in it.
+  { id: 'claude', name: 'Claude', src: '/mac/claude.png' },
+  { id: 'codex', name: 'Codex', src: '/mac/codex.png' },
+  { id: 'grok', name: 'Grok', src: '/mac/grok.png' },
   { id: 'sep', separator: true },
-  { id: 'trash', src: '/mac/trash.png' },
+  // The separator divides applications from the stacks-and-Trash region, and
+  // that region always holds at least Downloads. A separator with only the bin
+  // behind it is a dock nobody has.
+  { id: 'downloads', src: '/mac/downloads.png', name: 'Downloads' },
+  { id: 'trash', src: '/mac/trash.png', name: 'Trash' },
 ];
-const LAUNCHES = 'chatgpt';
+const LAUNCHES = 'codex';
 const LAUNCH_INDEX = APPS.findIndex((a) => a.id === LAUNCHES);
 
 // `launch` is the connect script's own beat -- the click that opens the app.
@@ -205,6 +212,9 @@ function Dock({ t, wake: fixed, launch = true }) {
               ? <img className="rp-icon real" src={app.src} alt="" width="46" height="46" />
               : <span className="rp-icon" style={{ background: app.bg }}>{app.mark(28)}</span>}
             <i className="rp-run" style={{ opacity: app.running ? 1 : (app.id === LAUNCHES ? press : 0) }} />
+            {/* The name bubble a real dock shows under the pointer. Light, with
+                a tail, above the icon -- and only for the one being pointed at. */}
+            {app.name && lift > 0.55 ? <span className="rp-tip">{app.name}</span> : null}
           </div>
         );
       })}

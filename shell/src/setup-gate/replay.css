@@ -107,6 +107,28 @@
 
 /* The separator before the bin, hairline, the way the real one is. */
 .rp-dock-sep { width: 1px; height: 44px; margin: 0 3px; background: rgba(255, 255, 255, .16); }
+/* The name bubble. macOS 26 draws it light with a small tail, sitting above
+   the icon it belongs to -- it was missing entirely, and it is one of the few
+   things on a dock that only appears when a pointer is actually there, which
+   is exactly what this scene is showing. */
+.rp-tip {
+  position: absolute; bottom: calc(100% + 11px); left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 9px 4px;
+  border-radius: 7px;
+  background: rgba(246, 246, 245, .94);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .22), inset 0 0 0 .5px rgba(0, 0, 0, .06);
+  color: #1c1c1e;
+  font: 500 11.5px/1.25 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.rp-tip::after {
+  content: ''; position: absolute; top: 100%; left: 50%;
+  margin-left: -4px; border: 4px solid transparent;
+  border-top-color: rgba(246, 246, 245, .94);
+}
+
 .rp-run {
   position: absolute; bottom: -5px;
   width: 4px; height: 4px; border-radius: 50%;
