@@ -413,7 +413,8 @@ const DOC_FRAMES = [
 ];
 const docShots = (total) => DOC_FRAMES.map((f) => ({ at: Math.round(f.p * total), s: f.s, x: f.x, y: f.y }));
 
-function DocTurns({ t, s, prompt }) {
+function DocTurns({ t, s, prompt, slug }) {
+  const url = `https://tdoc.dev/d/${slug}`;
   const typed = Math.round(phase(t, s.type) * prompt.length);
   const sent = after(t, s.send);
   const pub = phase(t, s.published);
@@ -432,14 +433,14 @@ function DocTurns({ t, s, prompt }) {
       <Ask>{prompt}</Ask>
       {after(t, s.working) ? (
         <Worked label={workedLabel(t, s.working)} open={pub > 0}>
-          {'[tdoc] Published v1 — https://tdoc.dev/d/what-standups-cost'}
+          {`[tdoc] Published v1 — ${url}`}
         </Worked>
       ) : null}
       {doc > 0 ? (
         <>
           <Answer>
             <p>Published. Your first tdoc is live.</p>
-            <p><a href="#">https://tdoc.dev/d/what-standups-cost</a></p>
+            <p><a href="#">{url}</a></p>
             <ul>
               <li>Anyone with the link can read it</li>
               <li>Comments are open to you</li>
@@ -452,7 +453,12 @@ function DocTurns({ t, s, prompt }) {
   );
 }
 
-export function DocReplay({ prompt }) {
+// The slug travels with the line, because the two are the same take: a
+// recording of publishing THIS doc. Hard-coding one meant the person typed
+// "trip" on the left and watched a doc about standups get published on the
+// right -- the one thing a 1:1 replay must never do is show something that
+// did not follow from what they just did.
+export function DocReplay({ prompt, slug }) {
   const reduced = typeof window !== 'undefined'
     && window.matchMedia
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -467,7 +473,7 @@ export function DocReplay({ prompt }) {
           <MenuBar app="ChatGPT" clock="Fri 3:04 AM" />
           <div className="rp-app-window" style={{ opacity: 1 - phase(t, s.fade) }}>
             <CodexWindow title="Make a tdoc">
-              <DocTurns t={t} s={s} prompt={line} />
+              <DocTurns t={t} s={s} prompt={line} slug={slug} />
             </CodexWindow>
           </div>
           <Dock t={t} wake={1} launch={false} />
