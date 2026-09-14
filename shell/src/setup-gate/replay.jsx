@@ -194,18 +194,20 @@ const LAUNCH_INDEX = APPS.findIndex((a) => a.id === LAUNCHES);
 // timeline it is not on. Overriding `wake` alone left the icon jumping and its
 // running-dot lighting up at 1650ms of a script that had moved on.
 function Dock({ t, wake: fixed, launch = true }) {
-  // The dock is only awake while the pointer is on it. `phase` holds at 1
-  // after its window, so once it woke it never went back down: the icons
-  // stayed magnified and the name bubble hung there for the rest of the
-  // twenty seconds, long after the pointer had opened the app and moved into
-  // it. Opening the window takes the hover away, which is what actually
-  // happens.
-  const wake = fixed === undefined
-    ? phase(t, T.dockWake) * (1 - phase(t, T.windowIn))
-    : fixed;
+  // Two different things, and conflating them cost the dock its existence.
+  //
+  // `shown` is whether the dock is on screen at all -- it slides up at the
+  // start of the take and stays, because a dock does not leave when you open
+  // an app. `hover` is whether the pointer is on it, which drives the
+  // magnification and the name bubble and ends the moment the app opens and
+  // the pointer moves into the window. Driving both from one value meant
+  // either the bubble hung there for the rest of the twenty seconds, or -- as
+  // soon as that was fixed -- the whole dock vanished when the window opened.
+  const shown = fixed === undefined ? phase(t, T.dockWake) : fixed;
+  const hover = shown * (1 - phase(t, T.windowIn));
   const press = launch ? phase(t, T.dockPress) : 0;
   return (
-    <div className="rp-dock" style={{ opacity: wake, transform: `translate(-50%, ${(1 - wake) * 26}px)` }}>
+    <div className="rp-dock" style={{ opacity: shown, transform: `translate(-50%, ${(1 - shown) * 26}px)` }}>
       {APPS.map((app, i) => {
         if (app.separator) return <i key={app.id} className="rp-dock-sep" />;
         // Magnification is the pointer's doing, so it only happens on the
@@ -213,7 +215,7 @@ function Dock({ t, wake: fixed, launch = true }) {
         // flat -- and a magnified icon reaches higher than the window's bottom
         // edge, so this was also poking through it.
         const near = Math.abs(i - LAUNCH_INDEX);
-        const lift = (launch ? wake : 0) * (near === 0 ? 1 : near === 1 ? 0.42 : 0);
+        const lift = (launch ? hover : 0) * (near === 0 ? 1 : near === 1 ? 0.42 : 0);
         const bounce = app.id === LAUNCHES ? Math.sin(press * Math.PI) * 12 : 0;
         return (
           <div
@@ -329,20 +331,22 @@ function ConnectTurns({ t, prompt }) {
   const shown = Math.floor(phase(t, T.cli) * (CLI_LINES.length + 0.4));
   const signed = Math.floor(phase(t, T.signedIn) * (SIGNED_LINES.length + 0.4));
   const summary = phase(t, T.summary);
-  if (!sent) {
-    return pasted > 0 ? (
-      <>
-        <Stamp>Today 2:59 AM</Stamp>
-        <Ask caret>{prompt}</Ask>
-      </>
-    ) : <Stamp>Today 2:59 AM</Stamp>;
-  }
+  // Open while it is working, folded once the answer arrives -- which is what
+  // the real one does, and what a finished turn looks like: a "Worked for"
+  // line with a chevron, then the reply. Leaving the tool output permanently
+  // expanded put a grey slab of log in the middle of a chat window.
+  const logOpen = summary === 0 && shown > 0;
+  // Before it is sent, the line lives in the composer -- that is what pasting
+  // looks like. It used to appear straight away as a sent bubble, so the one
+  // gesture this whole scene is teaching (paste it into your agent) never
+  // happened on screen: the message simply existed.
+  if (!sent) return <Stamp>Today 2:59 AM</Stamp>;
   return (
     <>
       <Stamp>Today 2:59 AM</Stamp>
       <Ask>{prompt}</Ask>
       {after(t, T.working) ? (
-        <Worked label={workedLabel(t, T.working)} open={shown > 0}>
+        <Worked label={workedLabel(t, T.working)} open={logOpen}>
           {CLI_LINES.slice(0, shown).join('\n')}
           {signed ? `\n${SIGNED_LINES.slice(0, signed).join('\n')}` : ''}
         </Worked>
@@ -432,7 +436,10 @@ export function ConnectReplay({ prompt }) {
             transform: `scale(${0.965 + phase(t, T.windowIn) * 0.035})`,
           }}
         >
-          <CodexWindow title="Install tdoc and connect account">
+          <CodexWindow
+            title="Install tdoc and connect account"
+            typing={!idle && phase(t, T.paste) > 0 && !after(t, T.send) ? prompt : null}
+          >
             <ConnectTurns t={t} prompt={prompt} />
           </CodexWindow>
         </div>

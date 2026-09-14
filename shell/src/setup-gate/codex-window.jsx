@@ -15,7 +15,7 @@ import React from 'react';
 // bubble at all, a tool call collapses behind one grey line, and the composer
 // sits at the bottom whether or not anything has been sent.
 
-export function CodexWindow({ title, children }) {
+export function CodexWindow({ title, children, typing }) {
   return (
     <div className="cw">
       <div className="cw-bar">
@@ -28,7 +28,7 @@ export function CodexWindow({ title, children }) {
       <div className="cw-body">
         <div className="cw-col">{children}</div>
       </div>
-      <Composer />
+      <Composer typing={typing} />
     </div>
   );
 }
@@ -87,7 +87,18 @@ function Composer({ typing }) {
         <span className="cw-sp" />
         <span className="cw-model">GPT-5.6 Sol <em>Medium</em> ⌄</span>
         <MicIcon />
-        <span className="cw-send" />
+        <span className="cw-send">
+          {/* A black disc with nothing in it is not a control. The real one
+              carries the voice-mode waveform. */}
+          <svg viewBox="0 0 22 22" width="15" height="15" aria-hidden="true">
+            <g fill="#fff">
+              <rect x="4" y="9" width="1.7" height="4" rx=".85" />
+              <rect x="7.6" y="6.4" width="1.7" height="9.2" rx=".85" />
+              <rect x="11.2" y="4.6" width="1.7" height="12.8" rx=".85" />
+              <rect x="14.8" y="7.8" width="1.7" height="6.4" rx=".85" />
+            </g>
+          </svg>
+        </span>
       </div>
     </div>
   );

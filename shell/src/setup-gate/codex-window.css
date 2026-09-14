@@ -106,7 +106,10 @@
 .cw-sp { flex: 1 1 auto; }
 .cw-model { font-size: 13px; color: #5d5d5d; }
 .cw-model em { font-style: normal; color: #a3a3a3; }
-.cw-send { width: 28px; height: 28px; border-radius: 50%; background: #0d0d0d; }
+.cw-send {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%; background: #0d0d0d;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .cw-caret { animation: none; }
