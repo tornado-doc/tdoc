@@ -580,6 +580,21 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
     'and neither host invents one');
 });
 
+t('an account is found in the registry it was written to', () => {
+  // `hostedAccountForEmail` writes `account-email:<addr>`; `lookupHostedAccount`
+  // reads `hosted-account:` and `hosted-github:`. Two different keys, so an
+  // account born through the provider door could be minted and then not be
+  // found by the very next request -- and everything keyed on the account id,
+  // the onboarding record most of all, silently belonged to nobody until a
+  // first publish happened to write the other index.
+  const fn = worker.slice(worker.indexOf('async function sessionAccountId'));
+  const body = fn.slice(0, fn.indexOf('\n}'));
+  assert(body.includes('lookupHostedAccount'), 'the handle registry first');
+  assert(body.includes('account-email:${email}'), 'then the email registry, which is where a provider-born account lives');
+  assert(body.indexOf('lookupHostedAccount') < body.indexOf('account-email:'), 'in that order');
+  assert(worker.includes('await env.META.put(`account-email:${email}`'), 'and that is the key the mint writes');
+});
+
 t('a brand-new account is the one state it must not refuse', () => {
   // An account record is only written when somebody first publishes or
   // creates something, so a tester who has just signed in and done nothing
