@@ -63,10 +63,16 @@ jobs:
           # leaves the list empty, which allows nobody.
           TDOC_DEV_DEBUG_ACCOUNTS: ${{ vars.TDOC_DEV_DEBUG_ACCOUNTS }}
         run: |
+          # The settings page gives a multi-line box, so a list of addresses
+          # arrives with newlines in it -- which sed cannot put in a
+          # replacement (unterminated `s') and TOML cannot hold in a basic
+          # string. Flatten to commas before substituting, and strip any
+          # trailing one so the list has no empty entry.
+          ACCOUNTS="$(printf '%s' "${TDOC_DEV_DEBUG_ACCOUNTS}" | tr '\r\n' ',,' | sed -e 's/,\{1,\}/,/g' -e 's/^,//' -e 's/,$//')"
           sed \
             -e "s/PLACEHOLDER_KV_ID/${TDOC_DEV_KV_ID}/g" \
             -e "s/PLACEHOLDER_OWNER/${TDOC_DEV_OWNER}/g" \
-            -e "s/PLACEHOLDER_DEBUG_ACCOUNTS/${TDOC_DEV_DEBUG_ACCOUNTS}/g" \
+            -e "s/PLACEHOLDER_DEBUG_ACCOUNTS/${ACCOUNTS}/g" \
             worker/wrangler.toml.template > worker/wrangler.toml
 
       - name: Bundle overlay into the worker

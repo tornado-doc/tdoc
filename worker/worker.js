@@ -1915,7 +1915,15 @@ function debugAccountList(env) {
 async function isDebugAccount(env, session) {
   const email = normalizeEmail(session && session.email);
   if (!email) return false;
-  const named = (raw) => String(raw || '').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean).includes(email);
+  // Commas, newlines, semicolons or spaces. The settings page hands somebody a
+  // multi-line box and the docs said "comma-separated", so the list arrives in
+  // whichever shape the person reached for -- and a list that silently matches
+  // nobody looks exactly like a list that was never set.
+  const named = (raw) => String(raw || '')
+    .split(/[\s,;]+/)
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(email);
   if (named(debugAccountList(env))) return true;
   let raw = '';
   try { raw = String((await env.META.get('debug-accounts')) || ''); } catch { return false; }
