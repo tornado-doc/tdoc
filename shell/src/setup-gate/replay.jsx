@@ -176,13 +176,13 @@ const APPS = [
   // for a dock: the others carry their own squircle and a transparent margin,
   // this one is a flat tile, so beside them it read as a white box. It gets
   // the same superellipse mask the marks we draw get.
-  { id: 'codex', name: 'Codex', src: '/mac/codex.png', square: true },
+  { id: 'codex', name: 'Codex', src: '/mac/codex.png', square: true, fill: 1.00 },
   { id: 'grok', name: 'Grok', src: '/mac/grok.png' },
   { id: 'sep', separator: true },
   // The separator divides applications from the stacks-and-Trash region, and
   // that region always holds at least Downloads. A separator with only the bin
   // behind it is a dock nobody has.
-  { id: 'downloads', src: '/mac/downloads.png', name: 'Downloads' },
+  { id: 'downloads', src: '/mac/downloads.png', name: 'Downloads', fill: 0.93 },
   { id: 'trash', src: '/mac/trash.png', name: 'Trash' },
 ];
 const LAUNCHES = 'codex';
@@ -214,7 +214,22 @@ function Dock({ t, wake: fixed, launch = true }) {
             style={{ transform: `translateY(${-lift * 14 - bounce}px) scale(${1 + lift * 0.34})` }}
           >
             {app.src
-              ? <img className={`rp-icon real${app.square ? ' squared' : ''}`} src={app.src} alt="" width="46" height="46" />
+              ? (
+                <img
+                  className={`rp-icon real${app.square ? ' squared' : ''}`}
+                  src={app.src}
+                  alt=""
+                  width="46"
+                  height="46"
+                  // Measured, not guessed. A dock icon's artwork fills 80.5% of
+                  // its tile and the rest is transparent margin -- that is what
+                  // makes a row of them look the same size. Six of these files
+                  // do that on their own (81-83%); Codex's fills 100% and the
+                  // Downloads folder 93%, so at equal width they rendered 23%
+                  // and 13% larger than everything beside them.
+                  style={app.fill ? { transform: `scale(${(0.805 / app.fill).toFixed(3)})` } : undefined}
+                />
+              )
               : <span className="rp-icon" style={{ background: app.bg }}>{app.mark(28)}</span>}
             <i className="rp-run" style={{ opacity: app.running ? 1 : (app.id === LAUNCHES ? press : 0) }} />
             {/* The name bubble a real dock shows under the pointer. Light, with
