@@ -117,22 +117,22 @@ const SHOTS = [
   // the desk exactly fills the frame, so anything smaller shrinks the desk
   // inside it and shows the frame's own ground around the edges. There is no
   // "further out" to go.
-  { at: 0, s: 0.85, x: 320, y: 358 },
-  { at: 1300, s: 0.85, x: 320, y: 358 },
+  { at: 0, s: 0.85, x: 320, y: 360 },
+  { at: 1300, s: 0.85, x: 320, y: 360 },
   // In on the dock, to watch the app open.
-  { at: 1950, s: 1.00, x: 320, y: 630 },
-  { at: 2600, s: 1.00, x: 320, y: 630 },
+  { at: 1950, s: 1.00, x: 320, y: 410 },
+  { at: 2600, s: 1.00, x: 320, y: 410 },
   // Back out far enough to keep the desk whole while the window is read.
-  { at: 3250, s: 0.85, x: 320, y: 358 },
-  { at: 8300, s: 0.85, x: 320, y: 358 },
+  { at: 3250, s: 0.85, x: 320, y: 360 },
+  { at: 8300, s: 0.85, x: 320, y: 360 },
   // The sheet is a browser window opening in front of the app, so the app
   // stays whole behind it.
   { at: 9000, s: 0.92, x: 320, y: 340 },
   { at: 11500, s: 0.92, x: 320, y: 340 },
-  { at: 12700, s: 0.85, x: 320, y: 358 },
-  { at: 15500, s: 0.85, x: 320, y: 358 },
-  { at: 18600, s: 0.85, x: 320, y: 358 },
-  { at: REPLAY_MS, s: 0.85, x: 320, y: 358 },
+  { at: 12700, s: 0.85, x: 320, y: 360 },
+  { at: 15500, s: 0.85, x: 320, y: 360 },
+  { at: 18600, s: 0.85, x: 320, y: 360 },
+  { at: REPLAY_MS, s: 0.85, x: 320, y: 360 },
 ];
 
 function camera(t, shots = SHOTS) {
@@ -176,7 +176,7 @@ const APPS = [
   // for a dock: the others carry their own squircle and a transparent margin,
   // this one is a flat tile, so beside them it read as a white box. It gets
   // the same superellipse mask the marks we draw get.
-  { id: 'codex', name: 'Codex', src: '/mac/codex.png', square: true, fill: 1.00 },
+  { id: 'codex', name: 'ChatGPT', src: '/mac/codex.png', square: true, fill: 1.00 },
   { id: 'grok', name: 'Grok', src: '/mac/grok.png' },
   { id: 'sep', separator: true },
   // The separator divides applications from the stacks-and-Trash region, and
@@ -244,6 +244,13 @@ function Dock({ t, wake: fixed, launch = true }) {
 
 // The apple, the front app's name in bold, that app's menus, then the status
 // items on the right. A dark strip with one word on it was the giveaway.
+// Finder's menus and an app's are not the same list: Finder has Go, and
+// nothing else does.
+const MENUS = {
+  Finder: ['File', 'Edit', 'View', 'Go', 'Window', 'Help'],
+  app: ['File', 'Edit', 'View', 'Window', 'Help'],
+};
+
 function MenuBar({ app, clock }) {
   return (
     <div className="rp-menubar" aria-hidden="true">
@@ -253,7 +260,7 @@ function MenuBar({ app, clock }) {
       <span className="rp-mb-apple">{'\uF8FF'}</span>
       <span className="rp-mb-app">{app}</span>
       <span className="rp-mb-menu">
-        <span>File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span>
+        {(app === 'Finder' ? MENUS.Finder : MENUS.app).map((m) => <span key={m}>{m}</span>)}
       </span>
       <span className="rp-sp" />
       <span className="rp-mb-status">
@@ -398,7 +405,10 @@ export function ConnectReplay({ prompt }) {
     <div className="rp-view" aria-hidden="true">
       <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
       <div className="rp-canvas">
-        <MenuBar app="ChatGPT" clock="Fri Sep 12  2:59 AM" />
+        {/* Whatever is in front. Before the icon is pressed nothing is open but
+            Finder, which is always running -- naming the app that has not
+            launched yet was the bar describing a window that was not there. */}
+        <MenuBar app={!idle && phase(t, T.windowIn) > 0.5 ? 'ChatGPT' : 'Finder'} clock="Fri Sep 12  2:59 AM" />
         {/* The app opens when the icon is pressed, not before. Lifting the
             window into a shared component dropped its entrance: it was drawn
             from the first frame, so the pointer was still walking to a dock
@@ -452,11 +462,11 @@ export function docScript(prompt) {
 // fractions of it rather than as milliseconds that would fall in the wrong
 // place the moment somebody typed a longer subject.
 const DOC_FRAMES = [
-  { p: 0, s: 0.85, x: 320, y: 358 },
-  { p: 0.42, s: 0.85, x: 320, y: 358 },
-  { p: 0.58, s: 0.85, x: 320, y: 358 },
-  { p: 0.82, s: 0.85, x: 320, y: 358 },
-  { p: 1, s: 0.85, x: 320, y: 358 },
+  { p: 0, s: 0.85, x: 320, y: 360 },
+  { p: 0.42, s: 0.85, x: 320, y: 360 },
+  { p: 0.58, s: 0.85, x: 320, y: 360 },
+  { p: 0.82, s: 0.85, x: 320, y: 360 },
+  { p: 1, s: 0.85, x: 320, y: 360 },
 ];
 const docShots = (total) => DOC_FRAMES.map((f) => ({ at: Math.round(f.p * total), s: f.s, x: f.x, y: f.y }));
 

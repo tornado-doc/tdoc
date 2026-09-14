@@ -18,7 +18,12 @@
      instead, which loses the edges rather than the geometry. */
   width: 544px; height: 612px;
   border-radius: 18px;
-  background: #1e2333;
+  /* The colour behind the desk. It should never be visible -- every shot is
+     framed to stay inside the canvas -- but a dark slab here turns any
+     sub-pixel rounding into a black line along an edge, which is exactly what
+     it did along the top. A mid-tone from the picture makes the same rounding
+     invisible. */
+  background: #4a86c4;
   box-shadow: 0 30px 70px rgba(26, 26, 26, .22), 0 3px 10px rgba(26, 26, 26, .08);
 }
 
