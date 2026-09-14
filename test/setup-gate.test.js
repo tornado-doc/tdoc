@@ -813,7 +813,14 @@ t('one window, drawn from a real one', () => {
   assert(!/\.cw-answer \{[^}]*background:/s.test(windowCss), 'and the assistant has no bubble');
   assert(windowElement.includes('{open ? <pre className="cw-tool">'), 'a tool call shows its output only when opened');
   assert(/\.cw \{[^}]*display: flex; flex-direction: column;/s.test(windowCss)
-    && windowElement.includes('<Composer />'), 'the composer is the window\'s, not a turn\'s');
+    && windowElement.includes('<Composer typing={typing} />'), 'the composer is the window\'s, not a turn\'s');
+  // And the window hands it the line still in flight. A paste that appears
+  // straight away as a sent bubble skips the one gesture this scene teaches:
+  // `Composer` took this prop from the day it was written and was never given
+  // it, so the field only ever held its placeholder.
+  assert(/<Composer typing=\{typing\} \/>/.test(windowElement)
+    && /typing=\{[^}]*phase\(t, T\.paste\)[^}]*\}/.test(replay),
+    'and what is being pasted goes into it, before it is sent');
 });
 
 t('the dock only launches on the script that has a launch in it', () => {
