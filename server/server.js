@@ -1282,6 +1282,17 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // The dock's four fixed apps, the real artwork off a Mac. The worker inlines
+  // these as base64; here they are read from the same files on disk.
+  const macIcon = p.match(/^\/mac\/(finder|safari|messages|trash)\.png$/);
+  if (macIcon) {
+    const iconPath = path.join(__dirname, '..', 'assets', `mac-${macIcon[1]}.png`);
+    if (!fs.existsSync(iconPath)) return send(res, 404, 'not found');
+    return send(res, 200, fs.readFileSync(iconPath), {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+  }
   if (p === '/tdoc_logo.svg') {
     const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.svg');
     if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');

@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ClaudeMark, OpenAIMark, GrokMark } from '../agent-marks.jsx';
-import { FinderIcon, SafariIcon, MessagesIcon, TrashIcon } from './mac-icons.jsx';
 import { CodexWindow, Stamp, Ask, Worked, Answer, Feedback } from './codex-window.jsx';
 import './codex-window.css';
 import './replay.css';
@@ -23,7 +22,17 @@ import './replay.css';
 // on this screen: a choice that added a row to the left column moved the
 // picture on the right. Scenes cannot drift because their coordinates are
 // written down, not computed.
-export const CANVAS = { w: 1080, h: 720 };
+// 640, not 1080. The camera's widest shot is 0.85 in a 544x612 frame, so what
+// it can ever show is 544/0.85 x 612/0.85 = 640 x 720. The height was already
+// exactly that; the width was 1080, which meant 41% of the desk -- the whole
+// left and right of the screen -- was drawn and never rendered. Both
+// informative ends of a menu bar live there: the apple and the app name on the
+// left, the clock and status items on the right. At the widest shot a viewer
+// saw a translucent band reading "iew Window Help".
+//
+// That is why three rounds of fixing the menu bar's contents changed nothing
+// anybody could see. A desk the camera cannot reach is not a desk.
+export const CANVAS = { w: 640, h: 720 };
 
 // ------------------------------------------------------------- the timeline
 // One clock, read by everything. A scene is a window on it, and an element
@@ -109,22 +118,22 @@ const SHOTS = [
   // the desk exactly fills the frame, so anything smaller shrinks the desk
   // inside it and shows the frame's own ground around the edges. There is no
   // "further out" to go.
-  { at: 0, s: 0.85, x: 540, y: 358 },
-  { at: 1300, s: 0.85, x: 540, y: 358 },
+  { at: 0, s: 0.85, x: 320, y: 358 },
+  { at: 1300, s: 0.85, x: 320, y: 358 },
   // In on the dock, to watch the app open.
-  { at: 1950, s: 1.00, x: 540, y: 630 },
-  { at: 2600, s: 1.00, x: 540, y: 630 },
+  { at: 1950, s: 1.00, x: 320, y: 630 },
+  { at: 2600, s: 1.00, x: 320, y: 630 },
   // Back out far enough to keep the desk whole while the window is read.
-  { at: 3250, s: 0.85, x: 540, y: 358 },
-  { at: 8300, s: 0.85, x: 540, y: 358 },
+  { at: 3250, s: 0.85, x: 320, y: 358 },
+  { at: 8300, s: 0.85, x: 320, y: 358 },
   // The sheet is a browser window opening in front of the app, so the app
   // stays whole behind it.
-  { at: 9000, s: 0.92, x: 540, y: 340 },
-  { at: 11500, s: 0.92, x: 540, y: 340 },
-  { at: 12700, s: 0.85, x: 540, y: 358 },
-  { at: 15500, s: 0.85, x: 540, y: 358 },
-  { at: 18600, s: 0.85, x: 540, y: 358 },
-  { at: REPLAY_MS, s: 0.85, x: 540, y: 358 },
+  { at: 9000, s: 0.92, x: 320, y: 340 },
+  { at: 11500, s: 0.92, x: 320, y: 340 },
+  { at: 12700, s: 0.85, x: 320, y: 358 },
+  { at: 15500, s: 0.85, x: 320, y: 358 },
+  { at: 18600, s: 0.85, x: 320, y: 358 },
+  { at: REPLAY_MS, s: 0.85, x: 320, y: 358 },
 ];
 
 function camera(t, shots = SHOTS) {
@@ -142,22 +151,28 @@ function camera(t, shots = SHOTS) {
 }
 
 // ------------------------------------------------------------------ the desk
-const DOCK = { x: 540, y: 664, gap: 76 };
+const DOCK = { x: 320, y: 664, gap: 76 };
 // What is always in a dock, then the three this story is about, then the bin.
 // A dock holding only chat apps is not a dock anybody has, and that was most
 // of why the desk read as a drawing.
 const APPS = [
-  { id: 'finder', fixed: FinderIcon },
-  { id: 'safari', fixed: SafariIcon },
-  { id: 'messages', fixed: MessagesIcon },
-  { id: 'claude', bg: '#D97757', mark: (n) => <ClaudeMark size={n} color="#fff" /> },
-  { id: 'chatgpt', bg: '#0D0D0D', mark: (n) => <OpenAIMark size={n} color="#fff" /> },
-  { id: 'grok', bg: '#0A0A0A', mark: (n) => <GrokMark size={n} color="#fff" /> },
+  // The real artwork, off a Mac, served by both hosts at /mac/*.png. These were
+  // hand-drawn first and audited against the originals: Finder came out with
+  // two faces on it and Safari as a white tile with a thin blue ring. At 46px a
+  // wrong drawing names no app at all. The real files also bring the squircle
+  // and each icon's own shadow, neither of which a border-radius can fake.
+  //
+  // Finder is always running. There is no state of a Mac in which it is not,
+  // and a dock with nothing running is a screenshot of nothing.
+  { id: 'finder', src: '/mac/finder.png', running: true },
+  { id: 'safari', src: '/mac/safari.png' },
+  { id: 'messages', src: '/mac/messages.png' },
+  { id: 'claude', bg: '#D97757', mark: (s) => <ClaudeMark size={s} color="#fff" /> },
+  { id: 'chatgpt', bg: '#0D0D0D', mark: (s) => <OpenAIMark size={s} color="#fff" /> },
+  { id: 'grok', bg: '#0A0A0A', mark: (s) => <GrokMark size={s} color="#fff" /> },
   { id: 'sep', separator: true },
-  { id: 'trash', fixed: TrashIcon },
+  { id: 'trash', src: '/mac/trash.png' },
 ];
-// Which icon the pointer goes to, found by name rather than by position --
-// adding an app to the dock should not silently move the click.
 const LAUNCHES = 'chatgpt';
 const LAUNCH_INDEX = APPS.findIndex((a) => a.id === LAUNCHES);
 
@@ -186,10 +201,10 @@ function Dock({ t, wake: fixed, launch = true }) {
             className="rp-app"
             style={{ transform: `translateY(${-lift * 14 - bounce}px) scale(${1 + lift * 0.34})` }}
           >
-            {app.fixed
-              ? <app.fixed />
+            {app.src
+              ? <img className="rp-icon real" src={app.src} alt="" width="46" height="46" />
               : <span className="rp-icon" style={{ background: app.bg }}>{app.mark(28)}</span>}
-            <i className="rp-run" style={{ opacity: app.id === LAUNCHES ? press : 0 }} />
+            <i className="rp-run" style={{ opacity: app.running ? 1 : (app.id === LAUNCHES ? press : 0) }} />
           </div>
         );
       })}
@@ -202,21 +217,23 @@ function Dock({ t, wake: fixed, launch = true }) {
 function MenuBar({ app, clock }) {
   return (
     <div className="rp-menubar" aria-hidden="true">
-      <span className="rp-mb-apple">⌘</span>
+      {/* U+F8FF, as a JS string rather than an HTML entity -- the entity went
+          in as U+2318 (the Command key) and nobody could see it to catch it,
+          because the left of the bar was off-frame. */}
+      <span className="rp-mb-apple">{'\uF8FF'}</span>
       <span className="rp-mb-app">{app}</span>
       <span className="rp-mb-menu">
         <span>File</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span>
       </span>
       <span className="rp-sp" />
       <span className="rp-mb-status">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
-          <path d="M8 12.4a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Zm0-3.5c1.2 0 2.3.5 3.1 1.3l-1.1 1.1A2.8 2.8 0 0 0 8 10.4c-.8 0-1.5.3-2 .9L4.9 10.2A4.4 4.4 0 0 1 8 8.9Zm0-3.4c2.1 0 4 .8 5.4 2.2l-1.1 1.1A6.1 6.1 0 0 0 8 7.1c-1.7 0-3.2.6-4.3 1.7L2.6 7.7A7.6 7.6 0 0 1 8 5.5Zm0-3.4c3 0 5.7 1.2 7.7 3.2l-1.1 1.1A9.4 9.4 0 0 0 8 3.7c-2.6 0-4.9 1-6.6 2.7L.3 5.3A11 11 0 0 1 8 2.1Z" />
-        </svg>
-        <svg viewBox="0 0 26 14" width="23" height="12" aria-hidden="true">
-          <rect x=".8" y=".8" width="21" height="12.4" rx="3.4" fill="none" stroke="currentColor" strokeWidth="1.2" opacity=".6" />
-          <rect x="2.6" y="2.6" width="15" height="8.8" rx="1.8" fill="currentColor" />
-          <path d="M23.4 5v4a2.6 2.6 0 0 0 0-4Z" fill="currentColor" opacity=".5" />
-        </svg>
+        {/* Battery, Wi-Fi, Control Centre, clock -- the real order. Battery and
+            Wi-Fi were the other way round, and Control Centre was missing
+            entirely; it is the mark that says "a Mac from the last five
+            years". */}
+        <svg viewBox="0 0 26 14" width="24" height="13" aria-hidden="true"><rect x=".8" y=".8" width="21" height="12.4" rx="3.4" fill="none" stroke="currentColor" strokeWidth="1.2" opacity=".65" /><rect x="2.6" y="2.6" width="15" height="8.8" rx="2" fill="currentColor" /><path d="M23.4 5v4a2.6 2.6 0 0 0 0-4Z" fill="currentColor" opacity=".55" /></svg>
+        <svg viewBox="0 0 16 16" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M8 12.4a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Zm0-3.5c1.2 0 2.3.5 3.1 1.3l-1.1 1.1A2.8 2.8 0 0 0 8 10.4c-.8 0-1.5.3-2 .9L4.9 10.2A4.4 4.4 0 0 1 8 8.9Zm0-3.4c2.1 0 4 .8 5.4 2.2l-1.1 1.1A6.1 6.1 0 0 0 8 7.1c-1.7 0-3.2.6-4.3 1.7L2.6 7.7A7.6 7.6 0 0 1 8 5.5Zm0-3.4c3 0 5.7 1.2 7.7 3.2l-1.1 1.1A9.4 9.4 0 0 0 8 3.7c-2.6 0-4.9 1-6.6 2.7L.3 5.3A11 11 0 0 1 8 2.1Z" /></svg>
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2.5" y="1.5" width="11" height="6" rx="3" fill="none" stroke="currentColor" strokeWidth="1.2" /><circle cx="10.5" cy="4.5" r="1.6" fill="currentColor" /><rect x="2.5" y="8.5" width="11" height="6" rx="3" fill="none" stroke="currentColor" strokeWidth="1.2" /><circle cx="5.5" cy="11.5" r="1.6" fill="currentColor" /></svg>
         <span>{clock}</span>
       </span>
     </div>
@@ -351,7 +368,7 @@ export function ConnectReplay({ prompt }) {
     <div className="rp-view" aria-hidden="true">
       <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
       <div className="rp-canvas">
-        <MenuBar app="ChatGPT" clock="Fri 2:59 AM" />
+        <MenuBar app="ChatGPT" clock="Fri Sep 12  2:59 AM" />
         {/* The app opens when the icon is pressed, not before. Lifting the
             window into a shared component dropped its entrance: it was drawn
             from the first frame, so the pointer was still walking to a dock
@@ -405,11 +422,11 @@ export function docScript(prompt) {
 // fractions of it rather than as milliseconds that would fall in the wrong
 // place the moment somebody typed a longer subject.
 const DOC_FRAMES = [
-  { p: 0, s: 0.85, x: 540, y: 358 },
-  { p: 0.42, s: 0.85, x: 540, y: 358 },
-  { p: 0.58, s: 0.85, x: 540, y: 358 },
-  { p: 0.82, s: 0.85, x: 540, y: 358 },
-  { p: 1, s: 0.85, x: 540, y: 358 },
+  { p: 0, s: 0.85, x: 320, y: 358 },
+  { p: 0.42, s: 0.85, x: 320, y: 358 },
+  { p: 0.58, s: 0.85, x: 320, y: 358 },
+  { p: 0.82, s: 0.85, x: 320, y: 358 },
+  { p: 1, s: 0.85, x: 320, y: 358 },
 ];
 const docShots = (total) => DOC_FRAMES.map((f) => ({ at: Math.round(f.p * total), s: f.s, x: f.x, y: f.y }));
 
@@ -470,7 +487,7 @@ export function DocReplay({ prompt, slug }) {
     <div className="rp-view" aria-hidden="true">
       <div className="rp-lens" style={{ transform: `scale(${cam.s}) translate(${-cam.x}px, ${-cam.y}px)` }}>
         <div className="rp-canvas">
-          <MenuBar app="ChatGPT" clock="Fri 3:04 AM" />
+          <MenuBar app="ChatGPT" clock="Fri Sep 12  3:04 AM" />
           <div className="rp-app-window" style={{ opacity: 1 - phase(t, s.fade) }}>
             <CodexWindow title="Make a tdoc">
               <DocTurns t={t} s={s} prompt={line} slug={slug} />

@@ -4,7 +4,11 @@
   /* Clear of the dock. The canvas is 720 tall and the dock's top edge sits at
      ~636, so a window that ends below that is one the dock slices. */
   position: absolute; left: 50%; top: 40px;
-  width: 640px; height: 578px;
+  /* 560 on a 640-wide screen: a real window somebody has actually sized, with
+     desktop showing at both edges. At 640 it was exactly the width of the
+     screen, which is a maximised window and hides the desk the scene is set
+     on. */
+  width: 560px; height: 578px;
   display: flex; flex-direction: column;
   transform: translate(-50%, 0);
   border-radius: 13px; overflow: hidden;
