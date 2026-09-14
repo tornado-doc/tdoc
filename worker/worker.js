@@ -76,10 +76,28 @@ async function getSession(env, req) {
   if (!sid) return null;
   const raw = await env.META.get(`session:${sid}`);
   if (!raw) return null;
+  let session = null;
   try {
     const data = JSON.parse(raw);
-    return { id: sid, ...data };
+    session = { id: sid, ...data };
   } catch { return null; }
+  // A session is stamped with its account at sign-in -- but an account that
+  // did not exist yet cannot be stamped, and one is only born when somebody
+  // first publishes or creates something. So the session of a person who
+  // signed in and then made their first doc carried no account id until they
+  // signed in again, and `isDocOwnerSession` compares `session.account_id`
+  // first: their own document did not look like theirs. My docs was empty
+  // for every new account that arrived through the provider door.
+  //
+  // Resolved here, once, rather than in the twelve places that ask -- and
+  // only when it is missing, so a session that already knows costs nothing.
+  if (!session.account_id) {
+    try {
+      const id = await sessionAccountId(env, session);
+      if (id) session.account_id = id;
+    } catch {}
+  }
+  return session;
 }
 // The worker operator = the GitHub login configured in TDOC_OWNER at deploy.
 // On BYOK (hosted registration off) only that signed-in viewer sees /me.
