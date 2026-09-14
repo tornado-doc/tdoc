@@ -33,16 +33,13 @@
      11.4% are the standard approximation of Apple's continuous curvature. */
   --squircle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M0,50 C0,11.4 11.4,0 50,0 C88.6,0 100,11.4 100,50 C100,88.6 88.6,100 50,100 C11.4,100 0,88.6 0,50 Z' fill='%23000'/%3E%3C/svg%3E");
   width: 640px; height: 720px;
-  /* A translucent dock only looks like glass if there is something under it to
-     blur. The previous wallpaper was a flat blue vignette with almost no
-     luminance change across the bottom 100px -- exactly where the dock sits --
-     so the dock had nothing to refract and read as a painted pill however its
-     own tints were tuned. This keeps the blues but puts a bright band behind
-     the dock and a darker foreground under it, so the panel crosses an edge. */
-  background:
-    radial-gradient(140% 60% at 50% 88%, rgba(255, 214, 170, .40) 0%, rgba(255, 214, 170, 0) 55%),
-    radial-gradient(90% 55% at 22% 18%, rgba(150, 200, 255, .34) 0%, rgba(150, 200, 255, 0) 60%),
-    linear-gradient(180deg, #0e2a54 0%, #1b4c86 46%, #2e6fa8 62%, #16345e 78%, #0b1e3c 100%);
+  /* The real desktop picture, served at /mac/wallpaper.jpg. A CSS gradient
+     cannot stand in for this: a translucent dock only reads as glass if there
+     is something under it with real luminance variation to refract, and a
+     hand-made gradient has none -- which is why the dock kept looking painted
+     however its own tints were tuned. The colour behind it is a mid-tone from
+     the picture, so a slow decode never flashes white. */
+  background: #2f6ea6 url('/mac/wallpaper.jpg') center / cover no-repeat;
   font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
   transition: opacity .4s linear;
 }
