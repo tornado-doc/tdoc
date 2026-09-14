@@ -580,6 +580,20 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
     'and neither host invents one');
 });
 
+t('revoking an account\'s terminals does not read every token on the host', () => {
+  // There is no account-to-token index and a token's key is its own hash, so
+  // "which of these are this account's" meant fetching every token record one
+  // at a time. On a host with a few hundred that took the replay button past
+  // 45 seconds -- it shows a spinner and looks like a hang, which is the same
+  // thing as broken for the person pressing it.
+  assert(worker.includes('metadata: { account_id: record.account_id },'), 'the account rides on the key metadata');
+  assert(worker.includes('let owner = k.metadata && k.metadata.account_id;'), 'and the listing answers the question');
+  // Completeness is not traded for speed: a key written before this still gets
+  // read, so revocation stays total. That set only shrinks.
+  assert(/if \(!owner\) \{\s*\n\s*try \{ owner = \(JSON\.parse\(await env\.META\.get\(k\.name\)\)/.test(worker),
+    'a key that predates the metadata is still read');
+});
+
 t('a session carries its account, so a new doc looks like theirs', () => {
   // A session is stamped with its account at sign-in, but an account that does
   // not exist yet cannot be stamped -- and one is only born when somebody first
