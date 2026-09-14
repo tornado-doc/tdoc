@@ -194,7 +194,15 @@ const LAUNCH_INDEX = APPS.findIndex((a) => a.id === LAUNCHES);
 // timeline it is not on. Overriding `wake` alone left the icon jumping and its
 // running-dot lighting up at 1650ms of a script that had moved on.
 function Dock({ t, wake: fixed, launch = true }) {
-  const wake = fixed === undefined ? phase(t, T.dockWake) : fixed;
+  // The dock is only awake while the pointer is on it. `phase` holds at 1
+  // after its window, so once it woke it never went back down: the icons
+  // stayed magnified and the name bubble hung there for the rest of the
+  // twenty seconds, long after the pointer had opened the app and moved into
+  // it. Opening the window takes the hover away, which is what actually
+  // happens.
+  const wake = fixed === undefined
+    ? phase(t, T.dockWake) * (1 - phase(t, T.windowIn))
+    : fixed;
   const press = launch ? phase(t, T.dockPress) : 0;
   return (
     <div className="rp-dock" style={{ opacity: wake, transform: `translate(-50%, ${(1 - wake) * 26}px)` }}>
