@@ -580,6 +580,25 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
     'and neither host invents one');
 });
 
+t('a session carries its account, so a new doc looks like theirs', () => {
+  // A session is stamped with its account at sign-in, but an account that does
+  // not exist yet cannot be stamped -- and one is only born when somebody first
+  // publishes or creates something. So somebody who signed in and then made
+  // their first doc had no account id on their session until they signed in
+  // again, and `isDocOwnerSession` compares `session.account_id` FIRST: their
+  // own document did not look like theirs, and My docs was empty for every new
+  // account that came through the provider door.
+  const fn = worker.slice(worker.indexOf('async function getSession'));
+  const body = fn.slice(0, fn.indexOf('\n}'));
+  assert(body.includes('if (!session.account_id)'), 'only when it is missing');
+  assert(body.includes('await sessionAccountId(env, session)'), 'the session resolves its own account');
+  // Resolved once here rather than in each place that asks: the ownership test
+  // is synchronous and cannot look it up, which is why it could only read what
+  // the session already carried.
+  assert(worker.includes('const acct = session && session.account_id;'), 'the ownership test still reads it from the session');
+  assert((worker.match(/isDocOwnerSession\(/g) || []).length >= 8, 'and there are many askers, all now reading a filled-in value');
+});
+
 t('an account is found in the registry it was written to', () => {
   // `hostedAccountForEmail` writes `account-email:<addr>`; `lookupHostedAccount`
   // reads `hosted-account:` and `hosted-github:`. Two different keys, so an
