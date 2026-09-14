@@ -396,9 +396,36 @@ hosted_pair_signin() {
   fi
 
   if [ "$resumed" = "0" ]; then
-  resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
-    -X POST "$base/api/cli/pair/start" -H "Content-Type: application/json" \
-    -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\"}")" || return 1
+  # A network blip must not change WHICH ACCOUNT you sign in as.
+  #
+  # `|| return 1` fell back to the GitHub device flow without a word, while the
+  # HTTP branch below says so out loud. The two are not interchangeable: an
+  # account created through the web is keyed by email, and GitHub signs you in
+  # as a GitHub handle. Falling back silently hands the CLI a credential for a
+  # different identity than the one the person is looking at on the web, and
+  # the first sign of it is a published doc that never appears in My docs.
+  #
+  # Seen for real: one 30s timeout against a host that answered in 0.8s on
+  # either side of it, and the CLI switched flows without saying anything.
+  # So: try twice, and if it still cannot be reached, say what is about to
+  # happen and what it means.
+  resp=""
+  for pair_attempt in 1 2; do
+    if resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+      -X POST "$base/api/cli/pair/start" -H "Content-Type: application/json" \
+      -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\"}")"; then
+      break
+    fi
+    resp=""
+    [ "$pair_attempt" = 1 ] && sleep 2
+  done
+  if [ -z "$resp" ]; then
+    echo "[tdoc] Could not reach $base to start pairing — falling back to GitHub sign-in." >&2
+    echo "[tdoc] Note: that signs this machine in as a GitHub account. If you use" >&2
+    echo "[tdoc] $base with an email login, that is a different account, and docs" >&2
+    echo "[tdoc] published from here will not show up in your My docs." >&2
+    return 1
+  fi
   http="${resp##*$'\n'}"
   payload="${resp%$'\n'*}"
   case "$http" in
