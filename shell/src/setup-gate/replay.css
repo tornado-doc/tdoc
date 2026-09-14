@@ -104,6 +104,13 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
 }
 .rp-icon.real { box-shadow: none; -webkit-mask-image: none; mask-image: none; }
+/* Except one whose icon file is a flat opaque square rather than a dock icon:
+   it takes the mask back, and the small shadow, so it sits in the row like
+   the six around it. */
+.rp-icon.real.squared {
+  -webkit-mask-image: var(--squircle); mask-image: var(--squircle);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+}
 
 /* The separator before the bin, hairline, the way the real one is. */
 .rp-dock-sep { width: 1px; height: 44px; margin: 0 3px; background: rgba(255, 255, 255, .16); }

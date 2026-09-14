@@ -171,7 +171,12 @@ const APPS = [
   // the black OpenAI petal is the ChatGPT web mark, and the app in a dock next
   // to Claude is Codex, whose icon is a pale violet cloud with a prompt in it.
   { id: 'claude', name: 'Claude', src: '/mac/claude.png' },
-  { id: 'codex', name: 'Codex', src: '/mac/codex.png' },
+  // Codex's .icns is a full-bleed opaque white square -- its top-left pixel is
+  // (255,255,255,255) where every other app's is (0,0,0,0). It was not drawn
+  // for a dock: the others carry their own squircle and a transparent margin,
+  // this one is a flat tile, so beside them it read as a white box. It gets
+  // the same superellipse mask the marks we draw get.
+  { id: 'codex', name: 'Codex', src: '/mac/codex.png', square: true },
   { id: 'grok', name: 'Grok', src: '/mac/grok.png' },
   { id: 'sep', separator: true },
   // The separator divides applications from the stacks-and-Trash region, and
@@ -209,7 +214,7 @@ function Dock({ t, wake: fixed, launch = true }) {
             style={{ transform: `translateY(${-lift * 14 - bounce}px) scale(${1 + lift * 0.34})` }}
           >
             {app.src
-              ? <img className="rp-icon real" src={app.src} alt="" width="46" height="46" />
+              ? <img className={`rp-icon real${app.square ? ' squared' : ''}`} src={app.src} alt="" width="46" height="46" />
               : <span className="rp-icon" style={{ background: app.bg }}>{app.mark(28)}</span>}
             <i className="rp-run" style={{ opacity: app.running ? 1 : (app.id === LAUNCHES ? press : 0) }} />
             {/* The name bubble a real dock shows under the pointer. Light, with
