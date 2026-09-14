@@ -708,10 +708,36 @@ t('tdoc-doctor defaults to a concise target, readiness, and next-action summary'
   assert(r.status === 0, `doctor must exit 0, got ${r.status}: ${r.stderr}`);
   assert(/^tdoc doctor$/m.test(r.stdout), `summary title missing: ${r.stdout}`);
   assert(/^Target\s+Hosted · tdoc\.dev$/m.test(r.stdout), `target missing: ${r.stdout}`);
-  assert(/^Readiness\s+Ready to publish$/m.test(r.stdout), `readiness missing: ${r.stdout}`);
-  assert(/^Next$/m.test(r.stdout) && /\/tdoc new <prompt>/.test(r.stdout),
-    `next action missing: ${r.stdout}`);
+  // This run is NOT connected (TDOC_MOCK_NOT_PUBLISHED), and that is the whole
+  // point of the state: `published.json` is the credential, written by
+  // `--signin-only` before any document exists. Reporting "Ready to publish"
+  // and "No published document yet" told somebody who had not connected an
+  // account that they were one `/tdoc new` away -- the first step of
+  // onboarding, reported as done.
+  assert(/^Readiness\s+1 setup step remaining$/m.test(r.stdout), `readiness missing: ${r.stdout}`);
+  assert(/^Account\s+Not connected$/m.test(r.stdout), `account state missing: ${r.stdout}`);
+  assert(/^Next$/m.test(r.stdout) && /--signin-only/.test(r.stdout),
+    `next action must be connecting, not writing: ${r.stdout}`);
   assert(!/"deps"|"cloudflare"|\{\s*$/.test(r.stdout), `default still looks like a JSON dump: ${r.stdout}`);
+});
+
+t('a connected machine is told to write, not to connect again', () => {
+  // The other half of the same state. Once the credential exists, the checklist
+  // is empty and the next move is the document.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-doctor-connected-'));
+  fs.mkdirSync(path.join(dir, '.tdoc'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.tdoc', 'published.json'),
+    JSON.stringify({ platform: 'hosted', base: 'https://tdoc.dev', token: 'x', account_id: 'acct_t' }));
+  const r = spawnSync(path.join(BIN, 'tdoc-doctor'), [], {
+    env: { ...process.env, HOME: dir, TDOC_SKIP_UPDATE_CHECK: '1', TDOC_PLATFORM: 'hosted' },
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert(r.status === 0, `doctor must exit 0, got ${r.status}: ${r.stderr}`);
+  assert(/^Account\s+Connected on this machine$/m.test(r.stdout), `account state: ${r.stdout}`);
+  assert(/^Readiness\s+Ready to publish$/m.test(r.stdout), `readiness: ${r.stdout}`);
+  assert(/\/tdoc new <prompt>/.test(r.stdout) && !/--signin-only/.test(r.stdout),
+    `a connected machine should not be told to connect: ${r.stdout}`);
 });
 
 t('tdoc-update-nag diverged mock does not tell the user to --yes', () => {

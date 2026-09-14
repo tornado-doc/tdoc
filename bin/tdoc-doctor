@@ -232,6 +232,13 @@ add_step() { steps="${steps}${1}	${2}	${3}	${4}
 $node_ok || add_step node "Install Node 18+" install "brew install node"
 $curl_ok || add_step curl "Install curl" install "brew install curl"
 
+# Connecting an account is a setup step like any other, and on hosted it is the
+# one that blocks everything else. It was missing from the checklist entirely,
+# so an agent reading the JSON saw "ready_to_publish" with nothing left to do.
+if [ "$target" = "hosted" ] && ! $published; then
+  add_step connect "Connect this machine to your tdoc account" login "bin/tdoc-publish --signin-only"
+fi
+
 # Everything below is self-host setup. A hosted user needs none of it, so it is
 # never offered to them — including jq, which the hosted publish path dropped
 # in #256 and #272.
@@ -329,10 +336,19 @@ printf '%s' "$report_json" | node -e '
 
     console.log("tdoc doctor\n");
     line("Target", targets[r.target] || r.target);
-    line("Readiness", r.ready_to_publish
-      ? "Ready to publish"
-      : `${r.missing_steps.length} setup ${r.missing_steps.length === 1 ? "step" : "steps"} remaining`);
-    line("Setup", r.published.ok ? "Configured on this machine" : "No published document yet");
+    // The checklist decides this line, not `ready_to_publish`. That flag means
+    // "the tools are here", which on hosted is true before an account is
+    // connected -- so it said "Ready to publish" directly above a list of
+    // things still to do. One of them had to be wrong, and it was this one.
+    line("Readiness", r.missing_steps.length
+      ? `${r.missing_steps.length} setup ${r.missing_steps.length === 1 ? "step" : "steps"} remaining`
+      : "Ready to publish");
+    // `published.ok` is whether ~/.tdoc/published.json exists, and that file is
+    // the CREDENTIAL -- it is written by `--signin-only`, before any document
+    // exists. Calling its absence "no published document yet" told somebody who
+    // had not connected an account that they were one `/tdoc new` away, which
+    // is the first step of onboarding reported as done.
+    line("Account", r.published.ok ? "Connected on this machine" : "Not connected");
     if (r.update && r.update.checked && !r.update.ok) {
       line("Update", r.update.diverged
         ? "Local checkout has diverged"
@@ -345,8 +361,6 @@ printf '%s' "$report_json" | node -e '
         console.log(`  ${index + 1}. ${step.label}`);
         console.log(`     ${step.cmd}`);
       });
-    } else if (r.published.ok) {
-      console.log("  /tdoc publish <slug>");
     } else {
       console.log("  /tdoc new <prompt>");
     }
