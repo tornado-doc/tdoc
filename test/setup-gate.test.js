@@ -580,6 +580,27 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
     'and neither host invents one');
 });
 
+t('a brand-new account is the one state it must not refuse', () => {
+  // An account record is only written when somebody first publishes or
+  // creates something, so a tester who has just signed in and done nothing
+  // else has no account id -- and the route answered 401 "sign_in_required"
+  // to somebody plainly signed in, which is wrong and unactionable: signing in
+  // again produces the same account with the same absence.
+  //
+  // It also refused exactly the state onboarding most needs simulating from.
+  // The point of the internal bar is to stand at the beginning of the journey,
+  // and the beginning is an account that has done nothing.
+  const route = worker.slice(worker.indexOf("p === '/api/onboarding/state'"));
+  assert(/let accountId = await sessionAccountId\(env, session\);/.test(route), 'it looks the account up');
+  assert(route.indexOf('hostedAccountForEmail(env, session && session.email') < route.indexOf('let body = {}'),
+    'and mints one on first use, the way creating a doc does');
+  assert(!/if \(!accountId\) return json\(\{ error: 'sign_in_required' \}/.test(route),
+    'rather than telling a signed-in person to sign in');
+  // A store that cannot be reached is a different answer from a person who is
+  // not signed in.
+  assert(route.includes("{ error: 'hosted_account_unavailable' }, { status: 503 }"), 'and says so when the store is down');
+});
+
 t('the allow-list takes the shape the settings page gives it', () => {
   // The variable is edited in a multi-line box, so a list of addresses arrives
   // with newlines in it. sed cannot put a newline in a replacement

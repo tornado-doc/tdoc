@@ -6608,8 +6608,22 @@ export default {
       if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
       const session = await getSession(env, req);
       if (!(await isDebugAccount(env, session))) return json({ error: 'forbidden' }, { status: 403 });
-      const accountId = await sessionAccountId(env, session);
-      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      // Mint on first use, the way creating a doc does. An account record is
+      // only written when somebody first publishes or creates something, so a
+      // tester who has just signed in and done nothing else has no account id
+      // -- and answering "sign in again" to somebody who is plainly signed in
+      // is both wrong and unactionable. A brand-new account is exactly the
+      // state onboarding most needs to be simulated from, so it is the one
+      // this route must not refuse.
+      let accountId = await sessionAccountId(env, session);
+      if (!accountId) {
+        const acct = sessionLogin(session)
+          ? await hostedAccountForGithub(env, session.login, session && session.email,
+            session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+          : await hostedAccountForEmail(env, session && session.email, session && session.idp);
+        accountId = acct && acct.account_id;
+      }
+      if (!accountId) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
       let body = {};
       try { body = await req.json(); } catch {}
       const state = typeof body.state === 'string' ? body.state : '';
