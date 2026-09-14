@@ -149,7 +149,25 @@ export function OnboardingChecklist({ record, docs }) {
   const done = steps.filter((s) => s.done).length;
   // Nothing to say before the journey starts, and nothing left to say after it
   // ends: the card is for the middle.
-  if (!record || !record.started || done === steps.length) return null;
+  //
+  // `started` alone is not the middle. It is stamped by a signed-in visit to
+  // /setup, and the journey this product is actually built around never goes
+  // there: the reader pastes a line into their agent, the agent connects and
+  // publishes over the CLI, and the first page they open afterwards is this
+  // one. Two steps done, and the card that tracks them was invisible, because
+  // the only thing that had not happened was a page view.
+  //
+  // So the middle is any evidence the walk began. `published_first` and
+  // `first_doc` are conclusive -- the server only stamps them for an account's
+  // first hosted publish. `agent_connected` is not, because somebody who has
+  // been publishing for months also signs a new terminal in; on its own it
+  // counts only when there is nothing in the account yet, which is the one
+  // case where it cannot be a returning user.
+  const walking = Boolean(record && (
+    record.started || record.published_first || record.first_doc
+    || (record.agent_connected && !(docs || []).length)
+  ));
+  if (!walking || done === steps.length) return null;
 
   const toggle = (next) => { setCollapsed(next); remember(next); };
   const setOpenState = (next) => { setOpen(next); rememberOpen(next); };
