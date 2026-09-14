@@ -3845,7 +3845,14 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
   if (typeof body.label === 'string' && body.label.trim()) {
     record.label = body.label.trim().slice(0, 80);
   }
-  await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record));
+  // The account rides on the key's metadata as well as in the value. A list
+  // returns metadata with the keys, so "which of these belong to this account"
+  // can be answered from the listing alone -- without it, revoking an
+  // account's terminals means reading every token record on the host one at a
+  // time, which took the replay button past 45 seconds and looked like a hang.
+  await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record), {
+    metadata: { account_id: record.account_id },
+  });
   // "Has this account ever connected a terminal?" — one key, so the future
   // browser-side gate (pairing is a sideshow at sign-in, enforced only when
   // a feature actually needs a terminal) has something O(1) to ask.
@@ -6709,9 +6716,15 @@ export default {
         do {
           const r = await env.META.list({ prefix: 'hosted-token:', cursor });
           for (const k of r.keys) {
-            let rec = null;
-            try { rec = JSON.parse(await env.META.get(k.name)); } catch {}
-            if (rec && rec.account_id === accountId) {
+            // Metadata when the key has it (every token written since this
+            // shipped), a read only for the ones that predate it. The
+            // fallback keeps revocation complete on an old key; the metadata
+            // keeps it fast on every new one, and the slow set only shrinks.
+            let owner = k.metadata && k.metadata.account_id;
+            if (!owner) {
+              try { owner = (JSON.parse(await env.META.get(k.name)) || {}).account_id; } catch {}
+            }
+            if (owner === accountId) {
               await env.META.delete(k.name);
               cleared.tokens += 1;
             }
