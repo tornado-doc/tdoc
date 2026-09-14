@@ -740,6 +740,25 @@ t('a connected machine is told to write, not to connect again', () => {
     `a connected machine should not be told to connect: ${r.stdout}`);
 });
 
+t('a network blip does not silently change which account you sign in as', () => {
+  // The hosted pairing flow signs you in as the account you use on the web
+  // (email, via the provider). The GitHub device flow signs you in as a GitHub
+  // handle. They are different identities, and the first visible sign of the
+  // wrong one is a published doc that never appears in My docs.
+  //
+  // `|| return 1` took the second path on any curl failure without a word,
+  // while the HTTP branch beside it announced the same fallback. Seen for
+  // real against tdoc.dev: one 30s timeout between two 0.8s responses.
+  const src = fs.readFileSync(path.join(BIN, 'tdoc-publish'), 'utf8');
+  const start = src.indexOf('/api/cli/pair/start');
+  assert(start > 0, 'pairing start call not found');
+  const around = src.slice(start - 1200, start + 600);
+  assert(/for pair_attempt in 1 2; do/.test(around), 'a blip is retried before it is believed');
+  assert(!/pair\/start"[\s\S]{0,400}?\|\| return 1/.test(around), 'and never falls back without a word');
+  assert(/falling back to GitHub sign-in/i.test(around) && /different account/.test(around),
+    'and when it does fall back, it says what that means for the account');
+});
+
 t('tdoc-update-nag diverged mock does not tell the user to --yes', () => {
   const nag = path.join(BIN, 'tdoc-update-nag');
   const r = spawnSync(nag, [], { env: { ...process.env, TDOC_MOCK_UPDATE_DIVERGED: '1' }, encoding: 'utf8' });
