@@ -2016,9 +2016,22 @@ async function sessionAccountId(env, session) {
   if (!session) return null;
   if (typeof session.account_id === 'string' && session.account_id) return session.account_id;
   const login = sessionLogin(session);
-  if (!login) return null;
-  const rec = await lookupHostedAccount(env, login);
-  return rec && rec.account_id ? rec.account_id : null;
+  const rec = login ? await lookupHostedAccount(env, login) : null;
+  if (rec && rec.account_id) return rec.account_id;
+  // The email registry, which is where an account born through the provider
+  // door actually lives. `hostedAccountForEmail` writes `account-email:<addr>`
+  // and `lookupHostedAccount` reads `hosted-account:` / `hosted-github:` --
+  // two different keys, so an account could be minted and then not be found
+  // by the very next request. Everything keyed on the account id (the
+  // onboarding record most of all) silently belonged to nobody until the
+  // first publish happened to write the other index.
+  const email = normalizeEmail(session && session.email);
+  if (!email || !env || !env.META) return null;
+  try {
+    const byEmail = JSON.parse(await env.META.get(`account-email:${email}`));
+    if (byEmail && typeof byEmail.account_id === 'string' && byEmail.account_id) return byEmail.account_id;
+  } catch {}
+  return null;
 }
 async function loadOnboarding(env, accountId) {
   try {
