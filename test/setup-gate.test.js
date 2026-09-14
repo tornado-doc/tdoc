@@ -580,6 +580,19 @@ t('internal state switching is allowlisted, narrow and server-built', () => {
     'and neither host invents one');
 });
 
+t('the allow-list takes the shape the settings page gives it', () => {
+  // The variable is edited in a multi-line box, so a list of addresses arrives
+  // with newlines in it. sed cannot put a newline in a replacement
+  // (unterminated `s') and TOML cannot hold one in a basic string, so the next
+  // deploy after somebody used the box would have failed -- and the reader
+  // only split on commas, so even a value that survived matched nobody. A list
+  // that silently matches nobody looks exactly like one that was never set.
+  assert(deploy.includes("tr '\\r\\n' ',,'"), 'the deploy flattens newlines before substituting');
+  assert(/ACCOUNTS="\$\(printf/.test(deploy) && deploy.includes('s/PLACEHOLDER_DEBUG_ACCOUNTS/${ACCOUNTS}/g'),
+    'and substitutes the flattened value');
+  assert(worker.includes('.split(/[\\s,;]+/)'), 'and the reader takes commas, newlines, semicolons or spaces');
+});
+
 t('a page offers only the states it can show', () => {
   // All six everywhere made most of the bar noise: the landing page looks the
   // same at every step of the journey, so five of its six buttons changed
@@ -614,7 +627,7 @@ t('letting a tester in does not need Cloudflare credentials', () => {
   assert(template.includes('TDOC_DEBUG_ACCOUNTS = "PLACEHOLDER_DEBUG_ACCOUNTS"'), 'through a var on the worker');
   assert(deploy.includes('TDOC_DEV_DEBUG_ACCOUNTS: ${{ vars.TDOC_DEV_DEBUG_ACCOUNTS }}'),
     'filled from a repository VARIABLE, not a secret -- an email is not a credential');
-  assert(deploy.includes('s/PLACEHOLDER_DEBUG_ACCOUNTS/${TDOC_DEV_DEBUG_ACCOUNTS}/g'), 'and substituted like the others');
+  assert(deploy.includes('s/PLACEHOLDER_DEBUG_ACCOUNTS/${ACCOUNTS}/g'), 'and substituted like the others');
   // An unset variable leaves the placeholder in the toml, and a placeholder is
   // not a name -- otherwise the literal string would be an allow-listed
   // "email" on every deploy that forgot to set it.
