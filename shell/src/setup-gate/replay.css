@@ -50,14 +50,17 @@
 .rp-menubar {
   position: absolute; inset: 0 0 auto 0; height: 25px;
   display: flex; align-items: center; gap: 19px; padding: 0 14px;
-  /* Darkened, not lightened. macOS lightens the wallpaper and uses BLACK text,
-     or darkens it and uses white -- it never lightens and then puts white type
-     on the result, which is what this did, and why it read as a pale band with
-     washed-out lettering. There is also no text-shadow on a real menu bar, and
-     no hairline under it since Big Sur. */
-  background: rgba(0, 0, 0, .28);
-  backdrop-filter: blur(24px) saturate(180%);
-  color: rgba(255, 255, 255, .94);
+  /* No band at all. macOS 26 does not tint the menu bar -- the wallpaper runs
+     straight through it and the type sits on top, which is why a real one has
+     no visible edge where it meets the desktop. Every tint tried here read as
+     a strip laid over the picture: lightened with white type (wrong, and
+     unreadable), then darkened with white type, which is right for a dark
+     appearance and became an obvious dark band across a pale sky.
+     The shadow is what a real one uses to stay legible over a light
+     wallpaper, and it is the only thing between the type and the picture. */
+  background: transparent;
+  color: #fff;
+  text-shadow: 0 0 3px rgba(0, 0, 0, .34), 0 1px 2px rgba(0, 0, 0, .22);
   font: 400 13px/1 -apple-system, "SF Pro Text", system-ui, sans-serif;
 }
 .rp-mb-apple { font-size: 15px; line-height: 1; margin-right: -4px; }
