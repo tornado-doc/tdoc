@@ -761,9 +761,17 @@ export function DocumentShell({ boot, config }) {
   const [sharedNow, setSharedNow] = useState(false);
   // Set by the hint itself -- only it knows whether it drew.
   const [hintBar, setHintBar] = useState(false);
+  // On the journey's own doc, and nowhere else. This never checked the slug,
+  // so the tutorial's closing banner appeared over ANY document the account
+  // owned that had reached v2 -- announcing "your agent answered N comments in
+  // v2" on a page that had nothing to do with onboarding, to an owner with no
+  // idea what it was talking about. Same leak as the checklist row and the
+  // handoff block: onboarding furniture standing on somebody's real work.
   const showExitBanner = Boolean(
     handoffEnabled && Number(config.version) >= 2
-    && onboardingRecord && onboardingRecord.started && (!onboardingRecord.shared || sharedNow),
+    && onboardingRecord && onboardingRecord.started
+    && onboardingRecord.first_doc === config.slug
+    && (!onboardingRecord.shared || sharedNow),
   );
   // The owner's own first words are the gesture — a comment of their own, or
   // the reply the seeded card asks for. The handoff appears once they exist,
