@@ -858,7 +858,7 @@ t('every replay is wound up before it is started', () => {
   // composer mirrors the field keystroke for keystroke, and the take is held
   // until the line settles. Sending on a timer posted a half-typed subject and
   // published a doc about it mid-word.
-  assert(replay.includes('useClock(!reduced && settled, s.total, line)'),
+  assert(/useClock\(!reduced && settled, s\.total, line,/.test(replay),
     'and the doc replay only once the line has stopped changing, restarting on every keystroke');
   assert(/const SETTLE_MS = \d+;/.test(replay) && /setTimeout\(\(\) => setSettled\(true\), SETTLE_MS\)/.test(replay),
     'settling is a timer on the line, not a beat in the script');
@@ -873,6 +873,16 @@ t('every replay is wound up before it is started', () => {
     'and the gate passes the same readiness the Copy button uses');
   assert(/typing=\{!ready \? null :/.test(replay),
     'nor is the placeholder line typed into the composer');
+  // Nor left on screen from the clock's resting frame. A stopped clock parks
+  // at `total - 2200` -- the published-and-done still, which is right for
+  // `prefers-reduced-motion` and wrong for a take that has not started: it
+  // showed a finished document about the placeholder next to an empty field.
+  // The two stops mean opposite things, so the caller says where to rest.
+  assert(/useClock\(running, total, restart, restingAt\)/.test(replay), 'the clock takes a resting frame');
+  assert(/setT\(restingAt === undefined \? total - 2200 : restingAt\)/.test(replay),
+    'and uses it, defaulting to the finished still');
+  assert(/useClock\(!reduced && settled, s\.total, line, reduced \? undefined : 0\)/.test(replay),
+    'the doc take rests at the beginning unless motion is the thing being avoided');
   assert(!/\btype: \[t0/.test(replay), 'and nothing re-types what the reader already typed');
 });
 

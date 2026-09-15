@@ -78,7 +78,7 @@ const after = (t, [from]) => t >= from;
 // `restart` is anything whose change should send the replay back to zero --
 // on the doc step that is the line itself, so every keystroke on the left
 // starts the typing on the right again rather than joining it halfway.
-function useClock(running, total, restart) {
+function useClock(running, total, restart, restingAt) {
   // `total` is required and has no default on purpose. A clock with no length
   // is not a slow clock, it is a stopped one: `% undefined` is NaN, every
   // derived style becomes `scale(NaN)` / `opacity: NaN`, the browser drops
@@ -89,7 +89,18 @@ function useClock(running, total, restart) {
   const [t, setT] = useState(0);
   const frame = useRef(0);
   useEffect(() => {
-    if (!running) { setT(total - 2200); return undefined; }
+    // Where a stopped clock rests. Two things stop this clock and they mean
+    // opposite things.
+    //
+    // `prefers-reduced-motion` means "do not move" -- a still of the finished
+    // result is the right answer, and `total - 2200` is that frame.
+    //
+    // A held take means "this has not started": the reader has chosen how
+    // their doc gets written but has typed no subject yet. Resting at the
+    // finished frame there showed a published document about the placeholder
+    // text, complete with a link, next to an empty field. One value cannot
+    // serve both, so the caller says which.
+    if (!running) { setT(restingAt === undefined ? total - 2200 : restingAt); return undefined; }
     const start = performance.now();
     const tick = (now) => {
       setT((now - start) % total);
@@ -561,7 +572,11 @@ export function DocReplay({ prompt, slug, ready = true }) {
     return () => window.clearTimeout(timer);
   }, [line, ready]);
   const s = docScript();
-  const t = useClock(!reduced && settled, s.total, line);
+  // A held take rests at 0: whether the reader has typed nothing yet or is
+  // still mid-word, what belongs on screen is the beginning, not the end.
+  // Only `reduced` rests at the finished frame -- a reader who cannot have
+  // motion should get the result as a still.
+  const t = useClock(!reduced && settled, s.total, line, reduced ? undefined : 0);
   const cam = camera(t, docShots(s.total));
   return (
     <div className="rp-view" aria-hidden="true">
