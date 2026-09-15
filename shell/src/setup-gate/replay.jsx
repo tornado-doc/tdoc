@@ -301,7 +301,12 @@ function Cursor({ t }) {
   const press = phase(t, T.approvePress) > 0 && phase(t, T.approvePress) < 1;
   const from = { x: 300, y: 360 };
   const dock = { x: DOCK.x, y: DOCK.y - 10 };
-  const approve = { x: 610, y: 470 };
+  // Measured against the rendered button, not carried over: the sheet is
+  // centred, and on the old 1080-wide canvas that put Approve near x 610. On a
+  // 640-wide one the pointer flew past the sheet to the right edge of the
+  // screen and pressed nothing -- the click that the whole sign-in beat turns
+  // on, happening 290px away from the button.
+  const approve = { x: 320, y: 438 };
   const a = { x: from.x + (dock.x - from.x) * toDock, y: from.y + (dock.y - from.y) * toDock };
   const p = { x: a.x + (approve.x - a.x) * toApprove, y: a.y + (approve.y - a.y) * toApprove };
   return (
