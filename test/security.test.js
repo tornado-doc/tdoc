@@ -69,6 +69,34 @@ t('forHtmlComment neutralizes <!-- (cannot open a nested comment)', () => {
   const out = box.forHtmlComment('x <!-- y');
   assert(!out.includes('<!--'), 'output still contains a comment opener');
 });
+t('forHtmlComment survives input that REBUILDS the terminator', () => {
+  // The original fix escaped one pass, and one pass can rebuild the thing it
+  // removes: in `--->` the first pair becomes `-\\-`, and the leftover `-`
+  // joins the tail of that replacement to spell `-->` again. The test above
+  // missed it because it probes a single `-->`, which does escape cleanly.
+  //
+  // This matters because the banner is an HTML comment carrying every
+  // comment's text, concatenated into the published document, and anyone who
+  // may comment writes that text. A terminator that survives is a stored XSS:
+  // close the comment and the rest of the string is document.
+  for (const probe of ['--->', '---!>', '----', 'a---b', '<!-- x --->',
+                       '-'.repeat(9) + '>', '--' + '-'.repeat(5) + '!>', '--->--->']) {
+    const out = box.forHtmlComment(probe);
+    assert(!out.includes('-->'), `${JSON.stringify(probe)} -> ${JSON.stringify(out)} still closes the comment`);
+    assert(!out.includes('--!>'), `${JSON.stringify(probe)} -> ${JSON.stringify(out)} still closes it with a bang`);
+  }
+});
+t('forHtmlComment reaches a fixed point rather than looping forever', () => {
+  // Every pass inserts a backslash between the pair it rewrote, so the count of
+  // `--` strictly decreases and the loop settles. Assert it settled: running it
+  // again must change nothing.
+  for (const probe of ['-'.repeat(40), '--->'.repeat(12)]) {
+    const once = box.forHtmlComment(probe);
+    assert(box.forHtmlComment(once) === once, 'not a fixed point');
+    assert(!once.includes('-->'), 'escaped, but still terminating');
+  }
+});
+
 t('forHtmlComment preserves benign text intact', () => {
   assert(box.forHtmlComment('hello world @user') === 'hello world @user');
 });
