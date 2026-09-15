@@ -195,8 +195,29 @@ fi
 published=false
 publish_subdomain=""
 publish_worker=""
+credential_problem=""
 if [ -z "${TDOC_MOCK_NOT_PUBLISHED:-}" ] && [ -f "$CONFIG_FILE" ]; then
   published=true
+  # Existing is not the same as usable. This checked only that the file was
+  # there, so a truncated write, a hand-edited file, or a hosted credential
+  # whose token had been revoked all reported "Connected on this machine,
+  # ready to publish" -- while publish itself refused the same file with a
+  # precise diagnosis. The doctor exists to say that BEFORE the publish does.
+  #
+  # Read with node, not jq: jq is one of the things being reported on, and on
+  # the hosted path it is not installed at all.
+  credential_problem="$(node -e '
+    const fs = require("fs");
+    let raw = "";
+    try { raw = fs.readFileSync(process.argv[1], "utf8"); } catch { process.stdout.write("unreadable"); process.exit(0); }
+    if (!raw.trim()) { process.stdout.write("empty"); process.exit(0); }
+    let cfg;
+    try { cfg = JSON.parse(raw); } catch { process.stdout.write("unparseable"); process.exit(0); }
+    if (!cfg || typeof cfg !== "object") { process.stdout.write("unparseable"); process.exit(0); }
+    const platform = String(cfg.platform || process.argv[2] || "");
+    if (platform === "hosted" && !cfg.upload_token) { process.stdout.write("no_token"); process.exit(0); }
+    process.stdout.write("");
+  ' "$CONFIG_FILE" "$target" 2>/dev/null || echo unreadable)"
   if $jq_ok; then
     publish_subdomain="$(jq -r '.subdomain // empty' "$CONFIG_FILE" 2>/dev/null || true)"
     publish_worker="$(jq -r '.worker // empty' "$CONFIG_FILE" 2>/dev/null || true)"
@@ -231,6 +252,17 @@ add_step() { steps="${steps}${1}	${2}	${3}	${4}
 
 $node_ok || add_step node "Install Node 18+" install "brew install node"
 $curl_ok || add_step curl "Install curl" install "brew install curl"
+
+# A credential that exists but cannot be used. Publish already refuses these
+# with a precise message; this is the doctor saying it first.
+if [ -n "$credential_problem" ]; then
+  case "$credential_problem" in
+    no_token) cred_label="Reconnect this machine (the saved credential has no token)" ;;
+    empty|unparseable|unreadable) cred_label="Reconnect this machine (the saved credential is damaged)" ;;
+    *) cred_label="Reconnect this machine" ;;
+  esac
+  add_step credential "$cred_label" login "rm ~/.tdoc/published.json && bin/tdoc-publish --signin-only"
+fi
 
 # Connecting an account is a setup step like any other, and on hosted it is the
 # one that blocks everything else. It was missing from the checklist entirely,
@@ -282,7 +314,7 @@ missing_json="$(printf '%b' "$steps" | node -e '
 # machine it most needs to answer correctly, and it answered wrong.
 report_json="$(node -e '
   const [target, nodeVer, wranglerVer, cfAccount, cfSubdomain, pubSub, pubWorker,
-         flags, missingRaw, updateRaw] = process.argv.slice(1);
+         flags, missingRaw, updateRaw, credentialProblem] = process.argv.slice(1);
   const f = JSON.parse(flags);
   let missing = [];
   try { missing = JSON.parse(missingRaw); } catch {}
@@ -305,6 +337,7 @@ report_json="$(node -e '
       r2_enabled: f.cf_r2,
     },
     published: { ok: f.published, subdomain: pubSub, worker: pubWorker },
+    credential_problem: credentialProblem || null,
     ready_to_publish: f.ready,
     missing_steps: missing,
     update,
@@ -312,7 +345,7 @@ report_json="$(node -e '
 ' "$target" "$node_ver" "$wrangler_ver" "$cf_account_id" "$cf_subdomain" \
   "$publish_subdomain" "$publish_worker" \
   "{\"node\":$node_ok,\"curl\":$curl_ok,\"wrangler\":$wrangler_ok,\"vercel\":$vercel_ok,\"jq\":$jq_ok,\"gh\":$gh_ok,\"cf_logged_in\":$cf_logged_in,\"cf_token\":$cf_publish_token_ok,\"cf_subdomain\":$cf_subdomain_ok,\"cf_r2\":$cf_r2_enabled,\"published\":$published,\"ready\":$ready_to_publish}" \
-  "$missing_json" "$update_json")"
+  "$missing_json" "$update_json" "$credential_problem")"
 
 if [ "$JSON_MODE" = "1" ]; then
   printf '%s\n' "$report_json"
@@ -348,7 +381,9 @@ printf '%s' "$report_json" | node -e '
     // exists. Calling its absence "no published document yet" told somebody who
     // had not connected an account that they were one `/tdoc new` away, which
     // is the first step of onboarding reported as done.
-    line("Account", r.published.ok ? "Connected on this machine" : "Not connected");
+    line("Account", !r.published.ok ? "Not connected"
+      : r.credential_problem ? "Connected, but the saved credential is unusable"
+        : "Connected on this machine");
     if (r.update && r.update.checked && !r.update.ok) {
       line("Update", r.update.diverged
         ? "Local checkout has diverged"
