@@ -298,7 +298,10 @@ function MenuBar({ app, clock }) {
 function Cursor({ t }) {
   const toDock = phase(t, T.cursorToDock);
   const toApprove = phase(t, T.cursorToApprove);
-  const press = phase(t, T.approvePress) > 0 && phase(t, T.approvePress) < 1;
+  // A press is a curve, not a flag. `> 0 && < 1` snapped the arrow to 0.88 and
+  // back in one frame each way, which is the flicker: no travel, just two
+  // discontinuities. A half-sine goes down and comes back up over the window.
+  const press = Math.sin(phase(t, T.approvePress) * Math.PI);
   const from = { x: 300, y: 360 };
   const dock = { x: DOCK.x, y: DOCK.y - 10 };
   // Measured against the rendered button, not carried over: the sheet is
@@ -311,7 +314,7 @@ function Cursor({ t }) {
   const p = { x: a.x + (approve.x - a.x) * toApprove, y: a.y + (approve.y - a.y) * toApprove };
   return (
     <svg className="rp-cursor" width="22" height="26" viewBox="0 0 22 26" aria-hidden="true"
-      style={{ transform: `translate(${p.x}px, ${p.y}px) scale(${press ? 0.88 : 1})` }}>
+      style={{ transform: `translate(${p.x}px, ${p.y}px) scale(${1 - press * 0.12})` }}>
       <path d="M2 1.5 L2 20.5 L7.2 15.6 L10.6 23.2 L13.6 21.9 L10.3 14.5 L17.2 14.2 Z"
         fill="#fff" stroke="#1a1a1a" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
@@ -465,24 +468,21 @@ export function ConnectReplay({ prompt }) {
   );
 }
 
-// ------------------------------------------------------- the second ask
-// The same desk, the same window, a different act: on this screen the line is
-// not pasted, it is typed -- and it is typed as the reader types it, because
-// the subject they are naming on the left is what the agent is being asked
-// about on the right. Every keystroke restarts the take, so the picture is
-// never showing a sentence they have moved on from.
-const TYPE_MS = 38;
-export function docScript(prompt) {
-  const type = Math.max(900, String(prompt || '').length * TYPE_MS);
-  const t0 = 600;
+// No typing beat any more. The reader is the one typing, in the field on the
+// left, and the composer on the right mirrors it as they go -- a second
+// machine re-typing what they already typed is a puppet show, and it ran at
+// its own speed, which was never theirs.
+//
+// So this script starts at the moment they stop: send, work, publish.
+export function docScript() {
+  const t0 = 260;
   return {
-    type: [t0, t0 + type],
-    send: [t0 + type + 420, t0 + type + 700],
-    working: [t0 + type + 700, t0 + type + 2600],
-    published: [t0 + type + 2600, t0 + type + 3400],
-    doc: [t0 + type + 3500, t0 + type + 4400],
-    fade: [t0 + type + 7200, t0 + type + 8000],
-    total: t0 + type + 8000,
+    send: [t0, t0 + 280],
+    working: [t0 + 280, t0 + 2180],
+    published: [t0 + 2180, t0 + 2980],
+    doc: [t0 + 3080, t0 + 3980],
+    fade: [t0 + 6800, t0 + 7600],
+    total: t0 + 7600,
   };
 }
 
@@ -500,18 +500,13 @@ const docShots = (total) => DOC_FRAMES.map((f) => ({ at: Math.round(f.p * total)
 
 function DocTurns({ t, s, prompt, slug }) {
   const url = `https://tdoc.dev/d/${slug}`;
-  const typed = Math.round(phase(t, s.type) * prompt.length);
   const sent = after(t, s.send);
   const pub = phase(t, s.published);
   const doc = phase(t, s.doc);
-  if (!sent) {
-    return (
-      <>
-        <Stamp>Today 3:04 AM</Stamp>
-        {typed > 0 ? <Ask caret>{prompt.slice(0, typed)}</Ask> : null}
-      </>
-    );
-  }
+  // Before it is sent the line is in the composer, not in a bubble. It used to
+  // appear here as an already-sent message, which is the same fault the
+  // connect scene had: the gesture never happens, the message simply exists.
+  if (!sent) return <Stamp>Today 3:04 AM</Stamp>;
   return (
     <>
       <Stamp>Today 3:04 AM</Stamp>
@@ -543,13 +538,30 @@ function DocTurns({ t, s, prompt, slug }) {
 // "trip" on the left and watched a doc about standups get published on the
 // right -- the one thing a 1:1 replay must never do is show something that
 // did not follow from what they just did.
+// How long the line has to sit unchanged before the take starts. Long enough
+// that it does not fire between two keystrokes, short enough that it does not
+// feel like nothing is happening: this is a reader who has just stopped
+// typing and is looking at the screen.
+const SETTLE_MS = 1400;
+
 export function DocReplay({ prompt, slug }) {
   const reduced = typeof window !== 'undefined'
     && window.matchMedia
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const line = String(prompt || '');
-  const s = docScript(line);
-  const t = useClock(!reduced, s.total, line);
+  // The composer mirrors the field on the left keystroke for keystroke, and
+  // the rest of the take is held until the line stops changing. Sending on a
+  // timer meant the recording posted a half-typed subject and published a doc
+  // about it while the reader was still mid-word.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    setSettled(false);
+    if (!line) return undefined;
+    const timer = window.setTimeout(() => setSettled(true), SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [line]);
+  const s = docScript();
+  const t = useClock(!reduced && settled, s.total, line);
   const cam = camera(t, docShots(s.total));
   return (
     <div className="rp-view" aria-hidden="true">
@@ -557,7 +569,7 @@ export function DocReplay({ prompt, slug }) {
         <div className="rp-canvas">
           <MenuBar app="ChatGPT" clock="Fri Sep 12  3:04 AM" />
           <div className="rp-app-window" style={{ opacity: 1 - phase(t, s.fade) }}>
-            <CodexWindow title="Make a tdoc">
+            <CodexWindow title="Make a tdoc" typing={settled && after(t, s.send) ? null : line}>
               <DocTurns t={t} s={s} prompt={line} slug={slug} />
             </CodexWindow>
           </div>
