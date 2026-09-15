@@ -544,7 +544,7 @@ function DocTurns({ t, s, prompt, slug }) {
 // typing and is looking at the screen.
 const SETTLE_MS = 1400;
 
-export function DocReplay({ prompt, slug }) {
+export function DocReplay({ prompt, slug, ready = true }) {
   const reduced = typeof window !== 'undefined'
     && window.matchMedia
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -556,10 +556,10 @@ export function DocReplay({ prompt, slug }) {
   const [settled, setSettled] = useState(false);
   useEffect(() => {
     setSettled(false);
-    if (!line) return undefined;
+    if (!line || !ready) return undefined;
     const timer = window.setTimeout(() => setSettled(true), SETTLE_MS);
     return () => window.clearTimeout(timer);
-  }, [line]);
+  }, [line, ready]);
   const s = docScript();
   const t = useClock(!reduced && settled, s.total, line);
   const cam = camera(t, docShots(s.total));
@@ -569,7 +569,10 @@ export function DocReplay({ prompt, slug }) {
         <div className="rp-canvas">
           <MenuBar app="ChatGPT" clock="Fri Sep 12  3:04 AM" />
           <div className="rp-app-window" style={{ opacity: 1 - phase(t, s.fade) }}>
-            <CodexWindow title="Make a tdoc" typing={settled && after(t, s.send) ? null : line}>
+            {/* And nothing in the composer either: the placeholder-composed
+                line is not something the reader has written, so showing it
+                being typed puts words in their mouth. */}
+            <CodexWindow title="Make a tdoc" typing={!ready ? null : (settled && after(t, s.send) ? null : line)}>
               <DocTurns t={t} s={s} prompt={line} slug={slug} />
             </CodexWindow>
           </div>

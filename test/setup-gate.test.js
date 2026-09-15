@@ -862,6 +862,17 @@ t('every replay is wound up before it is started', () => {
     'and the doc replay only once the line has stopped changing, restarting on every keystroke');
   assert(/const SETTLE_MS = \d+;/.test(replay) && /setTimeout\(\(\) => setSettled\(true\), SETTLE_MS\)/.test(replay),
     'settling is a timer on the line, not a beat in the script');
+  // And a line is not the same as a subject. Until one is typed the prompt is
+  // composed from the field's PLACEHOLDER -- a complete sentence nobody wrote
+  // -- and the take played it in full, publishing a doc about "what it should
+  // be about" while the field was still empty. The Copy button already refuses
+  // that same line.
+  assert(/if \(!line \|\| !ready\) return undefined;/.test(replay),
+    'no take until there is a subject, not merely a line');
+  assert(/<DocReplay prompt=\{prompt\} slug=\{replaySlug\} ready=\{promptReady\} \/>/.test(gate),
+    'and the gate passes the same readiness the Copy button uses');
+  assert(/typing=\{!ready \? null :/.test(replay),
+    'nor is the placeholder line typed into the composer');
   assert(!/\btype: \[t0/.test(replay), 'and nothing re-types what the reader already typed');
 });
 

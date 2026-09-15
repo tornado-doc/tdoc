@@ -343,7 +343,13 @@ export function SetupGate({ boot }) {
           // Two acts, two recordings. The first is a line being pasted; the
           // second is a line being typed, as the reader types it.
           : step === 'doc'
-            ? <DocReplay prompt={prompt} slug={replaySlug} />
+            // `ready`, not just a line. Until a subject is typed the line is
+            // composed from the field's PLACEHOLDER, so it is a complete
+            // sentence that nobody wrote -- and the take played it in full,
+            // publishing a document about "what it should be about" while the
+            // field was still empty. The Copy button already refuses that line
+            // for the same reason.
+            ? <DocReplay prompt={prompt} slug={replaySlug} ready={promptReady} />
             : <ConnectReplay prompt={prompt} />;
 
   return (
