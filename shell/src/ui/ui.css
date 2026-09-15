@@ -840,8 +840,19 @@ button.tdoc-pin {
 .tdoc-activate-page input.tdoc-activate-code::placeholder { color: #c4c4bf; }
 .tdoc-activate-page input.tdoc-activate-code:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
 
+/* The approved page's action is a link now, not a button: it goes somewhere.
+   Same object either way -- an anchor has to be told to lay out like one. */
+.tdoc-activate-page a.primary,
+.tdoc-status-page .tdoc-activate-stack a.primary {
+  display: flex; align-items: center; justify-content: center;
+  box-sizing: border-box; text-decoration: none;
+}
+.tdoc-activate-page a.primary:hover { background: var(--td-accent-hover, #1245d0); }
+
 .tdoc-activate-page button.primary,
-.tdoc-status-page .tdoc-activate-stack button.primary {
+.tdoc-activate-page a.primary,
+.tdoc-status-page .tdoc-activate-stack button.primary,
+.tdoc-status-page .tdoc-activate-stack a.primary {
   width: 100%; height: 48px; margin: 14px 0 0;
   border: 0; border-radius: 12px; cursor: pointer;
   background: var(--td-accent, #1652f0); color: #fff;

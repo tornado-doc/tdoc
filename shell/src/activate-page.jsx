@@ -93,11 +93,22 @@ export function ActivatePage({ boot }) {
         <div className="tdoc-activate-stack">
         <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
         <h1>Device login approved</h1>
-        <p>Sign-in is complete. You can close this browser page.</p>
+        {/* What happens next, not what this page cannot do. `window.close()`
+            is ignored by every browser on a tab the script did not open --
+            which is every tab reached from a link in a terminal -- so the
+            button did nothing, and the line under it ("if this tab stays
+            open, close it manually") was an apology for that. A page whose
+            main action visibly fails and then explains itself is the thing
+            that reads as untrustworthy, on the one screen that is supposed to
+            confirm a credential was granted.
+
+            So: say what the terminal is doing, and offer the one place worth
+            going instead. */}
+        <p>Your terminal is finishing sign-in on its own. Nothing else is needed here.</p>
         <div className="tdoc-status-actions">
-          <button type="button" className="primary" onClick={() => window.close()}>Close this page</button>
+          <a className="primary" href="/me">Go to my docs</a>
         </div>
-        <p className="tdoc-activate-hint">If this tab stays open, close it manually.</p>
+        <p className="tdoc-activate-hint">You can close this tab.</p>
         </div>
       </main>
     );

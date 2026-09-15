@@ -267,7 +267,12 @@ t('opening the gate is beginning, whatever the browser reports', () => {
   // `started`. The door is the honest signal, and the server is standing in it.
   assert(/const who = await sessionAccountId\(env, session\);\s*\n\s*if \(who\) await stampOnboardingFor\(env, who, 'started'\);/.test(worker),
     'a signed-in visit to /setup starts the journey');
-  assert(list.includes('if (!record || !record.started'), 'which is what the card renders on');
+  // That fixed the half of the walk that goes through the door. The other half
+  // never opens it -- agent connects and publishes over the CLI, /me is the
+  // first page seen -- so the card counts a first hosted publish as evidence
+  // too, and `started` is one signal among them rather than the only one.
+  assert(/record\.started \|\| record\.published_first/.test(list),
+    'and the card renders on that, or on a first publish that never passed it');
   // And no further: a CLI-first publisher who never loads this page must not
   // start, or tdoc's question lands on the first doc of somebody who never
   // asked to be onboarded.
@@ -557,7 +562,7 @@ t('the first arrival sees the whole shape, without a modal', () => {
 });
 
 t('the checklist is for the middle of the journey', () => {
-  assert(list.includes('if (!record || !record.started || done === steps.length) return null;'),
+  assert(/if \(!walking \|\| done === steps\.length\) return null;/.test(list),
     'nothing before it starts, nothing after it ends');
   assert(list.includes("const STORE_KEY = 'tdoc.onboarding.collapsed'"), 'collapsing is a per-browser preference, not an account fact');
   assert(list.includes('onb-chip'), 'hidden, it parks rather than vanishing');
@@ -871,6 +876,22 @@ t('the one button on the gate is never below the fold', () => {
   const dbg = read('shell/src/debug-bar.css');
   assert(/@media \(max-height: 710px\) \{ \.sg-split:has\(\.sg-debug\)/.test(dbg),
     'and the internal strip yields too, rather than pushing the button off');
+});
+
+t('the checklist shows up for a walk that never opened /setup', () => {
+  // The journey this product is built around does not go through /setup: the
+  // reader pastes a line into their agent, the agent connects and publishes
+  // over the CLI, and /me is the first page they open. `started` is stamped by
+  // a signed-in visit to /setup, so on that walk it is never set -- and gating
+  // the card on it hid the progress of somebody two steps in.
+  assert(/record\.started \|\| record\.published_first \|\| record\.first_doc/.test(list),
+    'a first hosted publish is evidence the walk began');
+  // Not `agent_connected` on its own: somebody who has been publishing for
+  // months also signs a new terminal in. It counts only when the account is
+  // still empty, which is the one case it cannot be a returning user.
+  assert(/record\.agent_connected && !\(docs \|\| \[\]\)\.length/.test(list),
+    'a new terminal alone only counts on an account with nothing in it');
+  assert(!/if \(!record \|\| !record\.started \|\|/.test(list), 'and a page view is no longer the gate');
 });
 
 t('nothing in the column a person reads is smaller than 12.5px', () => {
