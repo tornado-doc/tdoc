@@ -38,10 +38,18 @@ export const CANVAS = { w: 640, h: 720 };
 // reads the clock rather than being told what to do by a chain of timeouts:
 // timeouts drift and cannot be scrubbed, a clock cannot.
 const T = {
+  // The order is the order it happens in, and it used to be wrong: the dock
+  // began sliding out at 1000ms while the pointer was still on its way and did
+  // not arrive until 1200. So the dock appeared for no reason and the pointer
+  // caught up with it -- effect before cause.
+  //
+  // A dock is woken BY the pointer reaching the bottom of the screen. It waits
+  // there, the dock comes up to meet it, the icon under it grows, and then it
+  // is pressed.
   cursorToDock: [200, 1200],
-  dockWake: [1000, 1500],
-  dockPress: [1650, 1950],
-  windowIn: [1950, 2450],
+  dockWake: [1200, 1700],
+  dockPress: [1850, 2150],
+  windowIn: [2150, 2650],
   paste: [2850, 3150],
   send: [3500, 3800],
   working: [3800, 6000],

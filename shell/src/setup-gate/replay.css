@@ -90,7 +90,10 @@
   border: 1px solid rgba(255, 255, 255, .14);
   backdrop-filter: blur(34px) saturate(170%);
   box-shadow: 0 10px 28px rgba(0, 0, 0, .3);
-  transition: opacity .18s linear;
+  /* No CSS transition. Every value in this scene is computed per frame from
+     one clock; a transition on top of that is a second animation fighting the
+     first, and it leaves the previous loop's value bleeding across the
+     restart. */
 }
 .rp-app {
   position: relative; display: flex; flex-direction: column; align-items: center;
