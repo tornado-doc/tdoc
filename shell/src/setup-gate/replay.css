@@ -1,5 +1,5 @@
 /* The replay's coordinate space. Everything inside is placed absolutely in a
-   1080x720 box, so no scene can be moved by the length of anything beside it.
+   640x720 box, so no scene can be moved by the length of anything beside it.
    The stage scales the box; the box never reflows. */
 /* The lens. Fixed size, so the panel beside it can never change what the
    camera sees -- and overflow hidden, because the desk is bigger than the
@@ -10,9 +10,20 @@
      so the frame has no content width of its own: anything that asks the
      parent (`width: 100%`, `flex: 1 1 auto`) resolves against a parent that is
      itself sizing to its children, and the frame collapses to nothing. */
-  width: 544px; height: min(72vh, 648px);
+  /* 544 x 612, and not a viewport fraction. The camera's widest shot is 0.85,
+     so the frame has to be 720 * 0.85 = 612 tall for the whole desk to fit in
+     it -- a height that changes with the window changes what the camera can
+     see, and the menu bar (which is always on a real screen) was being pushed
+     out of shot on a shorter one. A screen too short for 612 crops the frame
+     instead, which loses the edges rather than the geometry. */
+  width: 544px; height: 612px;
   border-radius: 18px;
-  background: #1e2333;
+  /* The colour behind the desk. It should never be visible -- every shot is
+     framed to stay inside the canvas -- but a dark slab here turns any
+     sub-pixel rounding into a black line along an edge, which is exactly what
+     it did along the top. A mid-tone from the picture makes the same rounding
+     invisible. */
+  background: #4a86c4;
   box-shadow: 0 30px 70px rgba(26, 26, 26, .22), 0 3px 10px rgba(26, 26, 26, .08);
 }
 
@@ -23,50 +34,123 @@
 
 .rp-canvas {
   position: absolute; left: 0; top: 0;
-  width: 1080px; height: 720px;
-  background: linear-gradient(160deg, #2c3550 0%, #46406a 46%, #7a5570 100%);
+  /* The superellipse macOS uses for icon corners, as a mask. Control points at
+     11.4% are the standard approximation of Apple's continuous curvature. */
+  --squircle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M0,50 C0,11.4 11.4,0 50,0 C88.6,0 100,11.4 100,50 C100,88.6 88.6,100 50,100 C11.4,100 0,88.6 0,50 Z' fill='%23000'/%3E%3C/svg%3E");
+  width: 640px; height: 720px;
+  /* The real desktop picture, served at /mac/wallpaper.jpg. A CSS gradient
+     cannot stand in for this: a translucent dock only reads as glass if there
+     is something under it with real luminance variation to refract, and a
+     hand-made gradient has none -- which is why the dock kept looking painted
+     however its own tints were tuned. The colour behind it is a mid-tone from
+     the picture, so a slow decode never flashes white. */
+  background: #2f6ea6 url('/mac/wallpaper.jpg') center / cover no-repeat;
   font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
   transition: opacity .4s linear;
 }
 
+/* A menu bar has the apple, the front app's name in bold, that app's menus,
+   and the status items on the right. A dark strip with one word in it was the
+   giveaway. Translucent over the wallpaper, the way the real one is. */
 .rp-menubar {
-  position: absolute; inset: 0 0 auto 0; height: 26px;
-  display: flex; align-items: center; gap: 18px; padding: 0 16px;
-  background: rgba(20, 20, 26, .34);
-  backdrop-filter: blur(18px);
-  color: rgba(255, 255, 255, .92);
-  font-size: 12px; font-weight: 500;
+  position: absolute; inset: 0 0 auto 0; height: 25px;
+  display: flex; align-items: center; gap: 19px; padding: 0 14px;
+  /* No band at all. macOS 26 does not tint the menu bar -- the wallpaper runs
+     straight through it and the type sits on top, which is why a real one has
+     no visible edge where it meets the desktop. Every tint tried here read as
+     a strip laid over the picture: lightened with white type (wrong, and
+     unreadable), then darkened with white type, which is right for a dark
+     appearance and became an obvious dark band across a pale sky.
+     The shadow is what a real one uses to stay legible over a light
+     wallpaper, and it is the only thing between the type and the picture. */
+  background: transparent;
+  color: #fff;
+  text-shadow: 0 0 3px rgba(0, 0, 0, .34), 0 1px 2px rgba(0, 0, 0, .22);
+  font: 400 13px/1 -apple-system, "SF Pro Text", system-ui, sans-serif;
 }
+.rp-mb-apple { font-size: 15px; line-height: 1; margin-right: -4px; }
 .rp-mb-app { font-weight: 700; }
+.rp-mb-menu { display: flex; gap: 18px; opacity: .96; }
+.rp-mb-status { display: flex; align-items: center; gap: 13px; }
 .rp-sp { flex: 1 1 auto; }
 
 /* ------------------------------------------------------------------ the dock */
+/* The dock as it comes: the apps that are always there, then the ones this
+   story is about, then the bin behind a separator. A dock holding only three
+   chat apps is not a dock anybody has. */
 .rp-dock {
-  position: absolute; left: 540px; bottom: 14px;
-  display: flex; align-items: flex-end; gap: 16px;
-  padding: 9px 13px;
+  position: absolute; left: 320px; bottom: 10px;
+  display: flex; align-items: flex-end; gap: 9px;
+  padding: 8px 9px;
+  /* 20px on a ~62px panel. The 22px here was 35% -- a pill. And the rim is a
+     faint hairline with NO inset highlight: that white top line is Aqua-era
+     skeuomorphism Big Sur removed, and it was the loudest "painted" cue. */
   border-radius: 20px;
-  background: rgba(255, 255, 255, .22);
-  border: 1px solid rgba(255, 255, 255, .3);
-  backdrop-filter: blur(26px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .28);
-  transition: opacity .18s linear;
+  background: rgba(255, 255, 255, .14);
+  border: 1px solid rgba(255, 255, 255, .14);
+  backdrop-filter: blur(34px) saturate(170%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .3);
+  /* No CSS transition. Every value in this scene is computed per frame from
+     one clock; a transition on top of that is a second animation fighting the
+     first, and it leaves the previous loop's value bleeding across the
+     restart. */
 }
 .rp-app {
   position: relative; display: flex; flex-direction: column; align-items: center;
   transform-origin: 50% 100%;
   transition: transform .16s cubic-bezier(.2,.7,.3,1);
 }
+/* The three we draw get masked to a squircle. macOS icon corners are a
+   continuous curve, not a circular arc, and a `border-radius` terminates
+   abruptly at the tangent point -- at 46px that discontinuity is the classic
+   tell. The four real PNGs already carry their own squircle and their own
+   shadow, so they get neither a mask nor a box-shadow: `.rp-icon.real` opts
+   out of both rather than stacking a second shadow on a baked-in one, which
+   is what made half this row look different from the other half. */
 .rp-icon {
   display: flex; align-items: center; justify-content: center;
-  width: 52px; height: 52px; border-radius: 13px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
+  width: 46px; height: 46px;
+  -webkit-mask-image: var(--squircle); mask-image: var(--squircle);
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
 }
-/* The dot under a running app. */
+.rp-icon.real { box-shadow: none; -webkit-mask-image: none; mask-image: none; }
+/* Except one whose icon file is a flat opaque square rather than a dock icon:
+   it takes the mask back, and the small shadow, so it sits in the row like
+   the six around it. */
+.rp-icon.real.squared {
+  -webkit-mask-image: var(--squircle); mask-image: var(--squircle);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+}
+
+/* The separator before the bin, hairline, the way the real one is. */
+.rp-dock-sep { width: 1px; height: 44px; margin: 0 3px; background: rgba(255, 255, 255, .16); }
+/* The name bubble. macOS 26 draws it light with a small tail, sitting above
+   the icon it belongs to -- it was missing entirely, and it is one of the few
+   things on a dock that only appears when a pointer is actually there, which
+   is exactly what this scene is showing. */
+.rp-tip {
+  position: absolute; bottom: calc(100% + 11px); left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 9px 4px;
+  border-radius: 7px;
+  background: rgba(246, 246, 245, .94);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .22), inset 0 0 0 .5px rgba(0, 0, 0, .06);
+  color: #1c1c1e;
+  font: 500 11.5px/1.25 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.rp-tip::after {
+  content: ''; position: absolute; top: 100%; left: 50%;
+  margin-left: -4px; border: 4px solid transparent;
+  border-top-color: rgba(246, 246, 245, .94);
+}
+
 .rp-run {
-  position: absolute; bottom: -7px;
+  position: absolute; bottom: -5px;
   width: 4px; height: 4px; border-radius: 50%;
-  background: rgba(255, 255, 255, .85);
+  background: rgba(255, 255, 255, .9);
 }
 
 .rp-cursor { position: absolute; left: 0; top: 0; z-index: 40; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); transition: transform .1s linear; }
@@ -102,4 +186,13 @@
 @media (prefers-reduced-motion: reduce) {
   .rp-caret, .rp-spin { animation: none; }
   .rp-app, .rp-cursor, .rp-approve { transition: none; }
+}
+
+/* The window's own wrapper: it scales from the dock as it opens, so the
+   transform origin is the icon that was pressed, not the middle of the
+   screen. */
+.rp-app-window {
+  position: absolute; inset: 0;
+  transform-origin: 50% 92%;
+  will-change: opacity, transform;
 }

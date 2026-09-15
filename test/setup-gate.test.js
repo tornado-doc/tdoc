@@ -304,8 +304,12 @@ t('the second ask is the one place with a choice in it', () => {
   // The replay is a recording of pasting THIS line, so it cannot run before
   // there is one -- not for a visitor with no account to paste into, and not
   // before they have said what the doc is about.
-  assert(gate.includes(": !signedIn || (step === 'doc' && !choice)\n          ? <SceneWaiting line={null} />"),
+  // Before there is a line, the same desk is shown with no app open -- which
+  // is true, and is the same desk. A different window in a different style
+  // here was two windows in one product.
+  assert(gate.includes("? <ConnectReplay prompt={null} />"),
     'and the picture beside them types nothing either — nor for somebody with no account to use it');
+  assert(replay.includes('const idle = !prompt;'), 'no line, no app open');
   // A doc that already exists is not a question. The whole ask goes, rather
   // than sitting there under a line saying it is already done.
   assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');
@@ -814,7 +818,14 @@ t('one window, drawn from a real one', () => {
   assert(!/\.cw-answer \{[^}]*background:/s.test(windowCss), 'and the assistant has no bubble');
   assert(windowElement.includes('{open ? <pre className="cw-tool">'), 'a tool call shows its output only when opened');
   assert(/\.cw \{[^}]*display: flex; flex-direction: column;/s.test(windowCss)
-    && windowElement.includes('<Composer />'), 'the composer is the window\'s, not a turn\'s');
+    && windowElement.includes('<Composer typing={typing} />'), 'the composer is the window\'s, not a turn\'s');
+  // And the window hands it the line still in flight. A paste that appears
+  // straight away as a sent bubble skips the one gesture this scene teaches:
+  // `Composer` took this prop from the day it was written and was never given
+  // it, so the field only ever held its placeholder.
+  assert(/<Composer typing=\{typing\} \/>/.test(windowElement)
+    && /typing=\{[^}]*phase\(t, T\.paste\)[^}]*\}/.test(replay),
+    'and what is being pasted goes into it, before it is sent');
 });
 
 t('the dock only launches on the script that has a launch in it', () => {
@@ -842,9 +853,29 @@ t('every replay is wound up before it is started', () => {
     if (call.startsWith('useClock(running')) continue;
     assert(call.split(',').length >= 2, `${call} starts a clock with no length`);
   }
-  assert(replay.includes('useClock(!reduced, REPLAY_MS)'), 'the connect replay runs for REPLAY_MS');
+  assert(replay.includes('useClock(!reduced && !idle, REPLAY_MS)'), 'the connect replay runs for REPLAY_MS, and not at all with no line');
   assert(replay.includes('useClock(!reduced, s.total, line)'),
     'and the doc replay for as long as its own line takes, restarting on every keystroke');
+});
+
+t('the one button on the gate is never below the fold', () => {
+  // Every row in this column has a height that cannot be argued with -- 537px
+  // of it at the tallest ask -- so the only room to find on a short window is
+  // the air: the gaps, the top margin, and the strip the internal bar reserves.
+  const base = gateCss.indexOf('.sg-col { width: 100%');
+  const collapse = gateCss.indexOf('@media (max-height: 870px)');
+  assert(base > 0 && collapse > 0, 'both rules exist');
+  // This was wrong once: the collapse sat ABOVE the base rule, so the base's
+  // own `gap: 18px` -- same specificity, later in the file -- won at every
+  // height, and a media query that was supposed to tighten the column measured
+  // 18px on the window it was written for.
+  assert(base < collapse, 'the base rule comes first, or the overrides do nothing');
+  for (const h of [870, 790, 710]) {
+    assert(gateCss.includes(`@media (max-height: ${h}px)`), `a step at ${h}px`);
+  }
+  const dbg = read('shell/src/debug-bar.css');
+  assert(/@media \(max-height: 710px\) \{ \.sg-split:has\(\.sg-debug\)/.test(dbg),
+    'and the internal strip yields too, rather than pushing the button off');
 });
 
 t('the checklist shows up for a walk that never opened /setup', () => {

@@ -4,6 +4,11 @@
    the strip crosses whatever is in the middle of it, which is the price of an
    internal affordance and not worth a layout for. */
 .sg-split:has(.sg-debug) .sg-mid { padding-bottom: 64px; }
+/* On a short window this strip is competing with the page's only button for
+   the same pixels, and the bar is the one that is not the product. It keeps
+   clear of the column; it does not get to push it off the screen. */
+@media (max-height: 790px) { .sg-split:has(.sg-debug) .sg-mid { padding-bottom: 50px; } }
+@media (max-height: 710px) { .sg-split:has(.sg-debug) .sg-mid { padding-bottom: 44px; } }
 .sg-debug {
   position: fixed; left: 14px; bottom: 14px; z-index: 30;
   display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
