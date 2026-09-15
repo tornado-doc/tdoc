@@ -18,8 +18,13 @@ console.log('React dark mode');
 
 t('TopBar owns a stable theme button and persists the explicit choice', () => {
   assert(src.includes('id="tdoc-theme-btn"'), 'theme button missing');
-  assert(src.includes("localStorage.setItem('tdoc-theme'"), 'theme persistence missing');
-  assert(src.includes("localStorage.getItem('tdoc-theme')"), 'stored theme restore missing');
+  // Through the guarded helper, not raw. A raw read throws -- it does not
+  // return null -- in a browser that refuses storage, and this one runs inside
+  // a `useState` initialiser, so it throws during the first render and the
+  // page never mounts.
+  assert(src.includes("writeStored('tdoc-theme'"), 'theme persistence missing');
+  assert(!/localStorage\.(get|set)Item\('tdoc-theme'/.test(src), 'and never reaches localStorage unguarded');
+  assert(src.includes("readStored('tdoc-theme')"), 'stored theme restore missing');
 });
 
 t('theme paints the shell html element and is signaled to the frame', () => {

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { readStored, writeStored } from './safe-storage.js';
 import {
   Bell,
   ChevronRight,
@@ -27,7 +28,7 @@ export function TopBar({
   onSwitchAccount,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
-    localStorage.getItem('tdoc-theme') === 'dark' ? 'dark' : 'light'
+    readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
   ));
   const activeTheme = theme || localTheme;
   const dark = activeTheme === 'dark';
@@ -40,7 +41,7 @@ export function TopBar({
 
   const toggleTheme = () => {
     const next = !dark;
-    localStorage.setItem('tdoc-theme', next ? 'dark' : 'light');
+    writeStored('tdoc-theme', next ? 'dark' : 'light');
     const nextTheme = next ? 'dark' : 'light';
     setLocalTheme(nextTheme);
     onThemeChange?.(nextTheme);

@@ -69,6 +69,36 @@ t('forHtmlComment neutralizes <!-- (cannot open a nested comment)', () => {
   const out = box.forHtmlComment('x <!-- y');
   assert(!out.includes('<!--'), 'output still contains a comment opener');
 });
+t('a browser that refuses storage does not blank the document', () => {
+  // Reading localStorage THROWS -- it does not return null -- in contexts a
+  // browser has decided should not have storage: third-party-cookie blocking,
+  // "prevent cross-site tracking", a profile with site data off. The exception
+  // is `Access to storage is not allowed from this context.`
+  //
+  // Three of the four unguarded reads were inside `useState(() => ...)`, which
+  // throws during the FIRST render, so React never mounts. What the reader
+  // gets is a working top bar with nothing under it: the document's own text
+  // never appears, and nothing says why. Seen on tdoc.dev's landing page in a
+  // browser configured that way, while the same page was perfect in a default
+  // profile.
+  const readSrc = (rel) => fs.readFileSync(path.join(__dirname, '..', ...rel.split('/')), 'utf8');
+  const src = readSrc('shell/src/safe-storage.js').replace(/export function/g, 'function')
+    + '\nmodule.exports = { readStored, writeStored };';
+  const mod = { exports: {} };
+  const refuse = () => { throw new Error('Access to storage is not allowed from this context.'); };
+  new Function('module', 'localStorage', src)(mod, { getItem: refuse, setItem: refuse });
+  assert(mod.exports.readStored('tdoc-theme') === null, 'a refused read must fall back, not throw');
+  assert(mod.exports.readStored('tdoc-theme', 'light') === 'light', 'and honour the fallback given');
+  assert(mod.exports.writeStored('tdoc-theme', 'dark') === false, 'a refused write must report, not throw');
+
+  // And no theme read may bypass it: those are the ones that run before mount.
+  for (const f of ['shell/src/top-bar.jsx', 'shell/src/document-shell.jsx']) {
+    const body = readSrc(f);
+    assert(!/localStorage\.getItem\('tdoc-theme'\)/.test(body), `${f} still reads the theme unguarded`);
+    assert(!/localStorage\.setItem\('tdoc-theme'/.test(body), `${f} still writes the theme unguarded`);
+  }
+});
+
 t('forHtmlComment survives input that REBUILDS the terminator', () => {
   // The original fix escaped one pass, and one pass can rebuild the thing it
   // removes: in `--->` the first pair becomes `-\\-`, and the leftover `-`
