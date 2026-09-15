@@ -40,6 +40,7 @@ import {
   OwnerAccessDialog,
 } from './document/owner-access-dialog.jsx';
 import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
+import { readStored } from './safe-storage.js';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -157,7 +158,7 @@ export function DocumentShell({ boot, config }) {
   // which are painted in the danger tone and stay long enough to read.
   const showToast = useCallback((text, error = false) => setToast({ text, error }), []);
   const [theme, setTheme] = useState(() => (
-    localStorage.getItem('tdoc-theme') === 'dark' ? 'dark' : 'light'
+    readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
   ));
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
@@ -354,7 +355,7 @@ export function DocumentShell({ boot, config }) {
       setOpenClusterKey(null);
     },
     'tdoc:ready': (message) => {
-      const storedTheme = localStorage.getItem('tdoc-theme');
+      const storedTheme = readStored('tdoc-theme');
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       bridge.send({ type: 'tdoc:theme', theme: nextTheme });
