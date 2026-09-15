@@ -259,8 +259,15 @@ t('the exit is a line on a revised doc, owed until the link is copied', () => {
   assert(/`Your agent answered \$\{answered\} \$\{answered === 1 \? 'comment' : 'comments'\} in v\$\{version\}\. Send it to a real reader:`/.test(shell), 'the line says what happened and what to do');
   assert(!shell.includes('Now get a real one'), 'no line a stranger has to decode');
   assert(/\.tdoc-onboard-banner \{\s*position: relative;/.test(read('shell/src/ui/ui.css')), 'in the flow, never floating over the card');
-  assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started && \(!onboardingRecord\.shared \|\| sharedNow\)/.test(shell), 'v2+, journey started, not yet shared (or shared just now)');
+  assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started\s*&& onboardingRecord\.first_doc === config\.slug\s*&& \(!onboardingRecord\.shared \|\| sharedNow\)/.test(shell),
+    'v2+, journey started, THIS doc, not yet shared (or shared just now)');
   assert(shell.includes("postOnboardingEvent('share_link_copied', config.slug)"), 'copying is the stamp');
+  // On the journey's own doc, and nowhere else. Without the slug check the
+  // tutorial's closing banner stood over ANY v2 document the account owned,
+  // telling its owner their agent had answered N comments on a page that had
+  // nothing to do with onboarding.
+  assert(/showExitBanner = Boolean\([\s\S]{0,240}?onboardingRecord\.first_doc === config\.slug/.test(shell),
+    'the closing banner belongs to the journey doc, not to every doc the account owns');
   assert(shell.includes('(showExitBanner ? 36 : 0)'), 'the frame moves down under it');
   // Round-4: copying the link used to unmount the banner, shift the frame and
   // close the card — the doc looked comment-free the moment it was shared.
