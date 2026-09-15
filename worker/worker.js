@@ -1133,7 +1133,27 @@ function escapeHtml(s) {
 // comment. Applied once, at every interpolation point — escaping as one layer,
 // not a per-spot patch.
 function forHtmlComment(s) {
-  return String(s == null ? '' : s).replace(/--/g, '-\\-');
+  // Escape until it stops changing, because one pass can REBUILD the thing it
+  // is removing. `--->` has its first pair rewritten to `-\-`, and the `-` that
+  // was left over joins the tail of the replacement to spell `-->` again:
+  //
+  //   '--->'  ->  '-\\-->'   which still closes the comment
+  //   '---!>' ->  '-\\--!>'  which still closes it the other way
+  //
+  // This banner is an HTML comment carrying every comment's text, concatenated
+  // into the published document, and anyone who may comment writes that text.
+  // One pass made that a stored XSS: close the comment, and the rest of the
+  // string is document.
+  //
+  // The loop terminates -- every pass inserts a backslash between the pair it
+  // rewrote, so the number of `--` occurrences strictly decreases.
+  let out = String(s == null ? '' : s);
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = out.replace(/--/g, '-\\-');
+    if (next === out) return out;
+    out = next;
+  }
+  return out;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
