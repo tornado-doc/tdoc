@@ -184,72 +184,6 @@ function SceneStuck() {
   );
 }
 
-// The product, at its own sizes: 48px bar, 280px card, #fff7d0 anchor. Scaled
-// down it would stop being the product, so it is cropped by the pane instead.
-function SceneDone({ bare = false }) {
-  return (
-    <>
-      <div className="sg-app">
-        <div className="sg-bar">
-          <div className="sg-mk"><Mark size={24} /></div>
-          <div className="sg-ver">{bare ? 'v1 ▾' : 'v2 ▾'}</div>
-          <div className="sg-title">{bare ? 'How our pricing actually works' : 'What AI knows about you'}</div>
-          <div className="sg-owner">· you</div>
-          <div className="sg-star">☆</div>
-          <div className="sg-sp" />
-          {bare ? null : <div className="sg-res"><span className="sg-sw" /> Resolved (1)</div>}
-          <div className="sg-btn tint">Comment ▾</div>
-          <div className="sg-btn solid">Share</div>
-          <div className="sg-ic">⋯</div>
-          <div className="sg-me"><i /> You</div>
-        </div>
-        <div className={`sg-page${bare ? ' bare' : ''}`}>
-          <div className="sg-doc">
-            {bare ? (
-              <>
-                <h2>How our pricing actually works</h2>
-                <p>Three plans, one number that matters: what you pay when a month goes badly.</p>
-                <p>Seats are billed on the day you add them and refunded to the hour when you take them away. Nothing renews without an invoice you can read first.</p>
-                <p className="faint">Published a moment ago. Your agent has the link.</p>
-              </>
-            ) : (
-              <>
-                <h2>What AI knows about you</h2>
-                <p>You have been treating your agent like a search box, and it shows.</p>
-                <p><span className="sg-anchor">Nothing you asked it this month required memory.</span> Every session started from nothing, and you paid for that in re-explaining yourself.</p>
-                <p className="faint">The traces say you work in bursts, late, and abandon about a third of what you start before the second message.</p>
-              </>
-            )}
-          </div>
-          {bare ? null : (
-          <div className="sg-margin">
-            <div className="sg-pin"><i /></div>
-            <div className="sg-card active">
-              <div className="sg-cc-head">
-                <div className="sg-cc-av" />
-                <div className="sg-cc-who"><b>You</b><span className="sg-cc-when">2:41 PM</span></div>
-                <div className="sg-cc-acts"><span>✓</span><span>⋯</span></div>
-              </div>
-              <p className="sg-cc-text">This is too kind. I abandon far more than a third — check the real number.</p>
-              <div className="sg-react"><span>👍 1</span></div>
-            </div>
-            <div className="sg-pin b"><i /></div>
-            <div className="sg-card b">
-              <div className="sg-chip">✓ Applied in v2</div>
-              <div className="sg-cc-head">
-                <div className="sg-cc-av bot" />
-                <div className="sg-cc-who"><b>Your agent</b><span className="sg-cc-when">2:48 PM</span></div>
-              </div>
-              <p className="sg-cc-text">Counted it properly: 61%. Rewrote the paragraph and published v2.</p>
-            </div>
-          </div>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
-
 // ------------------------------------------------------------------ the gate
 
 export function SetupGate({ boot }) {
@@ -386,8 +320,11 @@ export function SetupGate({ boot }) {
   // Nothing typed for somebody who cannot act on it yet: a signed-out visitor
   // watching the composer spell out a line they have no account to use is the
   // page rehearsing in front of them.
+  // No separate scene for `done`. It used to swap in a hand-drawn document
+  // window -- a different object, in a different style, at the exact moment
+  // the reader has just succeeded. The desk they have been watching is where
+  // the result of that success lives, so it stays.
   const scene = signedIn && !loaded ? null
-    : state === 'done' ? <SceneDone bare={step === 'doc'} />
       : state === 'stuck' ? <SceneStuck />
         // Waiting is the only state with time to fill, and the only one where
         // the reader has not done the thing yet -- so it is the one that shows

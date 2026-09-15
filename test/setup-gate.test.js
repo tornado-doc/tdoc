@@ -854,8 +854,15 @@ t('every replay is wound up before it is started', () => {
     assert(call.split(',').length >= 2, `${call} starts a clock with no length`);
   }
   assert(replay.includes('useClock(!reduced && !idle, REPLAY_MS)'), 'the connect replay runs for REPLAY_MS, and not at all with no line');
-  assert(replay.includes('useClock(!reduced, s.total, line)'),
-    'and the doc replay for as long as its own line takes, restarting on every keystroke');
+  // The doc replay is also gated on the reader having stopped typing: the
+  // composer mirrors the field keystroke for keystroke, and the take is held
+  // until the line settles. Sending on a timer posted a half-typed subject and
+  // published a doc about it mid-word.
+  assert(replay.includes('useClock(!reduced && settled, s.total, line)'),
+    'and the doc replay only once the line has stopped changing, restarting on every keystroke');
+  assert(/const SETTLE_MS = \d+;/.test(replay) && /setTimeout\(\(\) => setSettled\(true\), SETTLE_MS\)/.test(replay),
+    'settling is a timer on the line, not a beat in the script');
+  assert(!/\btype: \[t0/.test(replay), 'and nothing re-types what the reader already typed');
 });
 
 t('the one button on the gate is never below the fold', () => {
