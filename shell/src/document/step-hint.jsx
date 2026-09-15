@@ -147,7 +147,16 @@ export function DocStepHint({ step, agentState = 'idle', banner = false, justFin
         <span className="sh-text">{ticking ? DONE_LINES[finished] : LINES[key]}</span>
         {still ? null : (
           <>
-            <button type="button" className="sh-go" onClick={onGo}>{GO}</button>
+            {/* Only when there is somewhere to go. This row opens the card that
+                carries the next thing, and on the comment step that card is
+                tdoc's seeded one -- which a CLI-first publisher never gets,
+                because seeding is deliberately reserved for somebody who came
+                through /setup. The button stayed anyway and did nothing at all:
+                measured on tdoc.dev, cards 0 -> 0, scroll 0 -> 0.
+                The sentence is the whole instruction on its own. A button that
+                does nothing is worse than no button, and worst of all on the
+                one step whose job is to teach a gesture. */}
+            {onGo ? <button type="button" className="sh-go" onClick={onGo}>{GO}</button> : null}
             <button type="button" className="sh-x" aria-label="Hide" onClick={() => { setGone(true); rememberHidden(); }}>
               <X size={15} />
             </button>

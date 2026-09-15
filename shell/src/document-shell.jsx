@@ -801,6 +801,13 @@ export function DocumentShell({ boot, config }) {
   // whether the page can honour it, because a row naming a line that is not
   // here is the one thing this row promised never to do.
   const hintStep = docStep(onboardingRecord, config.slug, handoffOnPage);
+  // What `goToStep` would open, if anything. The comment step opens tdoc's
+  // seeded card, and a CLI-first publisher has none -- seeding is reserved for
+  // somebody who came through /setup, on purpose.
+  const stepHasSomewhereToGo = hintStep === 'comment'
+    ? comments.comments.some((c) => c.author?.login === 'tdoc')
+    : Boolean(myThread);
+
   const goToStep = useCallback((want) => {
     const list = comments.comments;
     const going = want || hintStep;
@@ -982,7 +989,9 @@ export function DocumentShell({ boot, config }) {
           banner={showExitBanner}
           hidden={narrow && drawerOpen}
           justFinished={arrival === 'revised'}
-          onGo={() => goToStep()}
+          // Null when `goToStep` would find nothing to open, so the row does
+          // not offer a button that goes nowhere.
+          onGo={stepHasSomewhereToGo ? () => goToStep() : null}
           onVisible={setHintBar}
         />
       )}
