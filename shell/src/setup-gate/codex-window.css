@@ -40,15 +40,17 @@
 .cw-dots { color: #8e8e8e; letter-spacing: .06em; }
 .cw-bar-right { display: flex; align-items: center; gap: 9px; font-size: 13.5px; }
 
-/* The conversation sits at the BOTTOM of the window, the way a chat that has
-   been scrolled to its newest message does. It used to sit at the top and grow
-   downward, so once the turn had a few lines in it the newest ones -- the
-   answer, the thing being demonstrated -- were below the composer and could
-   not be seen at all. Anything too tall now runs off the top, which is what
-   scrolling to the end looks like. */
+/* The turn starts at the TOP. Sending a message in a real client scrolls it to
+   the top of the view and leaves the space below it empty for the reply to
+   grow into -- that wait, with the question sitting at the top of an empty
+   window, is most of what the beat looks like.
+   Pinning the column to the bottom instead put the question halfway down with
+   nothing above it, and the reply crowded against the composer. It was meant
+   to stop the newest lines being clipped, which measurement then showed was
+   never happening: the tallest this turn ever gets is 300px in a 422px body. */
 .cw-body {
   flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 20px 0 8px;
-  display: flex; flex-direction: column; justify-content: flex-end;
+  display: flex; flex-direction: column; justify-content: flex-start;
 }
 /* Not the full width. A conversation runs down the middle of the window and
    the margins are part of what makes it recognisable. */
