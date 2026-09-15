@@ -727,7 +727,10 @@ t('a connected machine is told to write, not to connect again', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-doctor-connected-'));
   fs.mkdirSync(path.join(dir, '.tdoc'), { recursive: true });
   fs.writeFileSync(path.join(dir, '.tdoc', 'published.json'),
-    JSON.stringify({ platform: 'hosted', base: 'https://tdoc.dev', token: 'x', account_id: 'acct_t' }));
+    // `upload_token`, which is the field a real hosted credential carries --
+    // this fixture said `token`, so it was not the shape it claimed to stand
+    // for, and it only passed while nothing looked inside the file.
+    JSON.stringify({ platform: 'hosted', base: 'https://tdoc.dev', upload_token: 'tdoc_x', account_id: 'acct_t' }));
   const r = spawnSync(path.join(BIN, 'tdoc-doctor'), [], {
     env: { ...process.env, HOME: dir, TDOC_SKIP_UPDATE_CHECK: '1', TDOC_PLATFORM: 'hosted' },
     encoding: 'utf8',
@@ -738,6 +741,34 @@ t('a connected machine is told to write, not to connect again', () => {
   assert(/^Readiness\s+Ready to publish$/m.test(r.stdout), `readiness: ${r.stdout}`);
   assert(/\/tdoc new <prompt>/.test(r.stdout) && !/--signin-only/.test(r.stdout),
     `a connected machine should not be told to connect: ${r.stdout}`);
+});
+
+t('doctor reads the credential rather than only stat-ing it', () => {
+  // Existing is not the same as usable. The check was `[ -f "$CONFIG_FILE" ]`,
+  // so a truncated write or a token-less hosted credential reported "Connected
+  // on this machine / Ready to publish" -- while publish refused the very same
+  // file with a precise diagnosis. The doctor's whole job is to say that
+  // first.
+  const doctor = path.join(BIN, 'tdoc-doctor');
+  const cases = [
+    ['damaged', 'this is not json {{{', /the saved credential is damaged/],
+    ['no token', JSON.stringify({ platform: 'hosted', base: 'https://tdoc.dev', upload_token: '' }), /the saved credential has no token/],
+  ];
+  for (const [label, body, expected] of cases) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-doctor-cred-'));
+    fs.mkdirSync(path.join(dir, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.tdoc', 'published.json'), body);
+    const r = spawnSync(doctor, [], {
+      env: { ...process.env, HOME: dir, TDOC_SKIP_UPDATE_CHECK: '1', TDOC_PLATFORM: 'hosted' },
+      encoding: 'utf8', timeout: 15000,
+    });
+    assert(r.status === 0, `${label}: doctor must exit 0, got ${r.status}`);
+    assert(/^Account\s+Connected, but the saved credential is unusable$/m.test(r.stdout),
+      `${label}: still claims a working connection: ${r.stdout}`);
+    assert(!/^Readiness\s+Ready to publish$/m.test(r.stdout), `${label}: still says ready`);
+    assert(expected.test(r.stdout), `${label}: does not name the problem: ${r.stdout}`);
+    assert(/--signin-only/.test(r.stdout), `${label}: offers no way out`);
+  }
 });
 
 t('a network blip does not silently change which account you sign in as', () => {
