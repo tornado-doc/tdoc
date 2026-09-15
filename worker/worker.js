@@ -5723,7 +5723,12 @@ export default {
         const who = c.author?.login ? `@${forHtmlComment(c.author.login)}` : 'anonymous';
         const anchor = c.anchor?.kind === 'element'
           ? `(on ${forHtmlComment(c.anchor.label || c.anchor.selector || 'element')})`
-          : c.anchor?.text ? `(on text: "${forHtmlComment(c.anchor.text.replace(/"/g, '\\"').slice(0, 120))}")` : '(no anchor)';
+          // No backslash-escaping of quotes: this goes into an HTML comment,
+          // where a quote means nothing. It was a JSON habit applied to the
+          // wrong grammar -- and it escaped quotes without escaping
+          // backslashes, which is the flaw CodeQL named. `forHtmlComment` is
+          // the actual defence here.
+          : c.anchor?.text ? `(on text: "${forHtmlComment(c.anchor.text.slice(0, 120))}")` : '(no anchor)';
         banner += `\n  [${i + 1}] ${who} ${anchor}\n    "${forHtmlComment(c.text.replace(/\n/g, ' '))}"\n${reactionsText(c.reactions)}`;
         if (Array.isArray(c.replies)) {
           for (const r of c.replies) {
