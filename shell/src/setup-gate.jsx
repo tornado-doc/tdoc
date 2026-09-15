@@ -59,6 +59,14 @@ export const DOC_SUBJECT_PREFIX = 'Use tdoc to write a doc about ';
 export const DOC_SUBJECT_SUFFIX = ', publish it, and give me the link';
 export const DOC_SUBJECT_PLACEHOLDER = 'what it should be about';
 export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${DOC_SUBJECT_SUFFIX}`;
+// What the replay publishes. The real slug is the agent's to pick, so this is
+// a plausible one rather than a promise -- but it has to follow from the words
+// on this screen, or the recording is of somebody else's doc.
+export const replaySlugFor = (choice, subject) => {
+  if (choice === 'portrait') return 'what-ai-knows-me';
+  const words = String(subject || '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/[\s-]+/).filter(Boolean);
+  return words.slice(0, 4).join('-') || 'my-first-doc';
+};
 // FIRST_DOC_RECIPE opens with "Set up tdoc and", which is true on the landing
 // page and false here: by the time anyone reads this screen the skill is
 // installed and the account is connected. Same recipe, without the preamble.
@@ -283,6 +291,7 @@ export function SetupGate({ boot }) {
     : choice === 'own' ? docSubjectPrompt(subjectTrimmed || DOC_SUBJECT_PLACEHOLDER)
       : FIRST_DOC_PROMPT;
   const prompt = step === 'doc' ? docPrompt : SETUP_PROMPT;
+  const replaySlug = replaySlugFor(choice, subject);
   // A subject that has not been typed is not a line anybody should be handed.
   const promptReady = step !== 'doc' || choice === 'portrait' || Boolean(subjectTrimmed);
   // The doc step has no stuck state of its own: there is nothing to repair.
@@ -386,12 +395,18 @@ export function SetupGate({ boot }) {
         // pasting THIS line, so it cannot run before there is a line: not for
         // a visitor with no account to paste into, and not on the second ask
         // before they have said what the doc is about.
-        : !signedIn || (step === 'doc' && !choice)
-          ? <SceneWaiting line={null} />
+        // The second ask, before they have named a subject, is the one place
+        // with no line yet: the desk is there and no app is open, which is
+        // true. A signed-out visitor is NOT that case -- the line they would
+        // paste is fixed and printed beside this, so the replay can show it
+        // being pasted. Holding the desk still for them meant the one person
+        // who has never seen this product got a photograph of a desktop.
+        : step === 'doc' && !choice
+          ? <ConnectReplay prompt={null} />
           // Two acts, two recordings. The first is a line being pasted; the
           // second is a line being typed, as the reader types it.
           : step === 'doc'
-            ? <DocReplay prompt={prompt} />
+            ? <DocReplay prompt={prompt} slug={replaySlug} />
             : <ConnectReplay prompt={prompt} />;
 
   return (
