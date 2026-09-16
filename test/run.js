@@ -18,6 +18,7 @@ const OFFLINE = [
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
+  'feedback-extension.test.js', // product feedback extension reuses tdoc probe/comment stack
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
   'event-convergence.test.js',// eid dedup convergence + fold ordering
