@@ -5,6 +5,7 @@
   "description": "Prompt-native interactive HTML documents — local server, Cloudflare Worker, React reader shell.",
   "scripts": {
     "build:shell": "vite build --config shell/vite.config.js",
+    "build:feedback": "vite build --config extensions/feedback/vite.config.js",
     "dev:shell": "vite --config shell/vite.config.js",
     "test": "node test/run.js",
     "test:all": "node test/run.js --all"

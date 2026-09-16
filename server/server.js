@@ -1696,7 +1696,12 @@ const server = http.createServer(async (req, res) => {
     if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
     const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
     const viewer = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
-    return json(res, 200, { users: localMentionable(comments).filter((u) => u.login !== viewer) });
+    const identity = e2eIdentity();
+    return json(res, 200, {
+      users: localMentionable(comments).filter((u) => u.login !== viewer),
+      identity,
+      is_owner: Boolean(identity && E2E_OWNER && identity.login.toLowerCase() === E2E_OWNER.toLowerCase()),
+    });
   }
 
   // --- COMMENTS (anonymous) ---

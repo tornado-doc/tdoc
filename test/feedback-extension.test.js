@@ -7,7 +7,10 @@ const ROOT = path.join(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'extensions/feedback/manifest.json'), 'utf8'));
 const background = fs.readFileSync(path.join(ROOT, 'extensions/feedback/background.js'), 'utf8');
 const content = fs.readFileSync(path.join(ROOT, 'extensions/feedback/content.js'), 'utf8');
+const contentSource = fs.readFileSync(path.join(ROOT, 'extensions/feedback/src/content.jsx'), 'utf8');
 const options = fs.readFileSync(path.join(ROOT, 'extensions/feedback/options.js'), 'utf8');
+const server = fs.readFileSync(path.join(ROOT, 'server/server.js'), 'utf8');
+const worker = fs.readFileSync(path.join(ROOT, 'worker/worker.js'), 'utf8');
 let pass = 0, fail = 0;
 function t(name, fn) { try { fn(); console.log(`  ✓ ${name}`); pass++; } catch (error) { console.log(`  ✗ ${name}\n    ${error.message}`); fail++; } }
 
@@ -27,14 +30,25 @@ t('plugin reuses tdoc comments, mentions, login, and remote storage', () => {
 });
 
 t('product probe anchors carry URL, selector, text, a11y, rect, and viewport', () => {
-  for (const field of ["kind: 'product'", 'url: canonical()', 'selector: selectorFor(element)', 'accessible_name:', 'rect:', 'viewport:']) assert(content.includes(field), field);
-  assert(content.includes("event.key !== 'Alt'") && content.includes('tdoc-feedback-toggle'));
+  for (const field of ["kind: 'product'", 'url: canonical()', 'selector: selectorFor(element)', 'accessible_name:', 'rect:', 'viewport:']) assert(contentSource.includes(field), field);
+  assert(contentSource.includes("event.key !== 'Alt'") && contentSource.includes('tdoc-feedback-toggle'));
 });
 
-t('comment threads support create, reply, resolve, pins, and mentions', () => {
-  for (const action of ['tdoc-feedback-submit', 'tdoc-feedback-reply', 'tdoc-feedback-resolve']) assert(content.includes(action), action);
-  assert(content.includes('renderPins()'));
-  assert(content.includes('mentionChips'));
+t('extension uses the real tdoc React comment UI and its CSS source', () => {
+  assert(contentSource.includes("import { CommentCard } from '../../../shell/src/document/comment-card.jsx'"));
+  assert(contentSource.includes("import { CommentComposer } from '../../../shell/src/document/comment-composer.jsx'"));
+  assert(contentSource.includes("import chromeCss from '../../../server/chrome.css?inline'"));
+  assert(!contentSource.includes('mentionChips') && !contentSource.includes('className="message"'));
+  assert(content.includes('tdoc-feedback-root') && content.includes('tdoc-margin-comment'));
+});
+
+t('comment threads support the same create and mutation actions as tdoc', () => {
+  for (const action of ['tdoc-feedback-submit', 'tdoc-feedback-reply', 'tdoc-feedback-resolve', 'tdoc-feedback-edit', 'tdoc-feedback-delete', 'tdoc-feedback-react', 'tdoc-feedback-reanchor']) {
+    assert(contentSource.includes(action), action);
+    assert(background.includes(action), action);
+  }
+  assert(background.includes('currentUser:') && background.includes('isOwner:'));
+  assert(server.includes('identity,\n      is_owner:') && worker.includes('identity: { login: me'));
 });
 
 t('configured document URL parser accepts only tdoc-shaped HTTP(S) URLs', () => {

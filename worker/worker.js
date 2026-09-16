@@ -6892,7 +6892,11 @@ export default {
         participants: commentParticipants(list),
         includeAllowed: isAllowlisted(access, s, env, meta),
       }).filter((u) => u.login !== me);
-      return json({ users });
+      return json({
+        users,
+        identity: { login: me, name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
+        is_owner: isDocOwnerSession(env, s, meta),
+      });
     }
 
     if (p === '/api/comments' && method === 'POST') {

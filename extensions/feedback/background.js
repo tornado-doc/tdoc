@@ -39,9 +39,10 @@ async function loadSurface(parsed, pageUrl) {
   const query = new URLSearchParams({ slug: parsed.slug, version: String(parsed.version) });
   const comments = await request(parsed, `/api/comments?${query}`);
   let mentionable = [];
+  let mentions = null;
   let signedIn = true;
   try {
-    const mentions = await request(parsed, `/api/mentions?slug=${encodeURIComponent(parsed.slug)}`);
+    mentions = await request(parsed, `/api/mentions?slug=${encodeURIComponent(parsed.slug)}`);
     mentionable = Array.isArray(mentions && mentions.users) ? mentions.users : [];
   } catch (error) {
     if (error.status === 401) signedIn = false;
@@ -51,7 +52,9 @@ async function loadSurface(parsed, pageUrl) {
   return {
     comments: (Array.isArray(comments) ? comments : []).filter((comment) =>
       comment && comment.anchor && comment.anchor.kind === 'product' && canonicalPage(comment.anchor.url) === here),
-    mentionable, signedIn
+    mentionable, signedIn,
+    currentUser: mentions && mentions.identity && mentions.identity.login || 'anon',
+    isOwner: Boolean(mentions && mentions.is_owner)
   };
 }
 
@@ -89,6 +92,22 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     if (message.type === 'tdoc-feedback-resolve') {
       await request(parsed, '/api/comments', { method: 'PATCH', body: JSON.stringify({ slug: parsed.slug, version: parsed.version, id: message.id, resolved: Boolean(message.resolved) }) });
+      return { ok: true, ...(await loadSurface(parsed, message.pageUrl)) };
+    }
+    if (message.type === 'tdoc-feedback-edit' || message.type === 'tdoc-feedback-reanchor') {
+      const payload = { slug: parsed.slug, version: parsed.version, id: message.id };
+      if (message.type === 'tdoc-feedback-edit') payload.text = message.text;
+      else payload.anchor = message.anchor;
+      await request(parsed, '/api/comments', { method: 'PATCH', body: JSON.stringify(payload) });
+      return { ok: true, ...(await loadSurface(parsed, message.pageUrl)) };
+    }
+    if (message.type === 'tdoc-feedback-delete') {
+      const query = new URLSearchParams({ slug: parsed.slug, version: String(parsed.version), id: message.id });
+      await request(parsed, `/api/comments?${query}`, { method: 'DELETE' });
+      return { ok: true, ...(await loadSurface(parsed, message.pageUrl)) };
+    }
+    if (message.type === 'tdoc-feedback-react') {
+      await request(parsed, '/api/reactions', { method: 'POST', body: JSON.stringify({ slug: parsed.slug, version: parsed.version, id: message.id, emoji: message.emoji }) });
       return { ok: true, ...(await loadSurface(parsed, message.pageUrl)) };
     }
     if (message.type === 'tdoc-feedback-signin') {

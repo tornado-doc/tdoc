@@ -6,6 +6,8 @@ to that element. The plugin does not create a second feedback backend:
 
 - comments, replies, resolution, `@mentions`, notifications, and storage use
   the existing tdoc comment APIs;
+- the extension bundles the same React `CommentComposer` and `CommentCard`
+  used by the document shell, with `server/chrome.css` as the style source;
 - sign-in and access rules come from the connected tdoc;
 - product anchors reuse the probe model (`kind`, selector, label/text, rect,
   viewport), extended with the live page URL;
@@ -33,6 +35,9 @@ comment system.
 
 This unpacked build is for product validation. Chrome Web Store packaging and
 per-origin project mapping should follow after the interaction is approved.
+
+After changing the shared comment UI or extension source, rebuild the checked-in
+content script from the repository root with `npm run build:feedback`.
 
 ## Why a backing tdoc?
 
