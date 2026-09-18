@@ -3860,12 +3860,12 @@ const FEEDBACK_PAGE_CSS = `
   .step-1 { position: absolute; left: calc(50% + 7.2rem); top: 1.95rem; z-index: 2;
     font: 700 1.55rem/1.1 var(--hand); color: var(--td-accent); white-space: nowrap;
     pointer-events: none; letter-spacing: .01em; transform: rotate(-6deg); }
-  .install-steps { margin: 0 0 1rem; padding-left: 0; list-style: none; color: var(--td-ink); }
-  .install-steps li { margin: 0 0 .45rem; font: 700 1.35rem/1.25 var(--hand); color: var(--td-ink); }
-  .install-steps li strong { color: var(--td-accent); font-weight: 700; }
+  .install-steps { margin: 0 0 1rem; padding-left: 1.25rem; color: var(--td-ink);
+    font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; }
+  .install-steps li { margin: 0 0 .4rem; }
+  .install-steps li strong { color: var(--td-accent); font-weight: 650; }
   .install-steps kbd { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; background: #f1f3f4;
-    border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem;
-    vertical-align: .15em; }
+    border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem; }
 
   .coach[hidden] { display: none !important; }
   .coach { position: fixed; inset: 0; z-index: 10000; }
@@ -3981,9 +3981,9 @@ function feedbackBookmarkletPage(base, nonce) {
     </div>
   </div>
   <ol class="install-steps">
-    <li><strong>1 · Click Me!</strong> — that blue pill is the real bookmark</li>
-    <li><strong>2 · Drag me up</strong> — all the way to the top of the window</li>
-    <li><strong>3 · No bar?</strong> Hit <kbd>⌘⇧B</kbd> (Chrome &amp; Safari)</li>
+    <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
+    <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
+    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> (Chrome &amp; Safari)</li>
   </ol>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
@@ -4009,8 +4009,8 @@ function feedbackBookmarkletPage(base, nonce) {
       marker-end="url(#coachHead)"></path>
   </svg>
   <p class="coach-copy">
-    <span class="line"><span class="n">2</span>Drag me up — all the way</span>
-    <span class="line"><span class="n">3</span>No bar? Hit ⌘⇧B</span>
+    <span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>
+    <span class="line"><span class="n">3</span>No bookmarks bar? Hit ⌘⇧B</span>
   </p>
 </div>
 
