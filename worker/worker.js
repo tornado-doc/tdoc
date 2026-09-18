@@ -3798,6 +3798,58 @@ const FEEDBACK_PAGE_CSS = `
   .card { border: 1px solid #e4e4e9; border-radius: 10px; padding: 1rem 1.1rem; margin: 0 0 1rem; }
   .err { color: #b3261e; }
   ol { padding-left: 1.3rem; }
+  details.advanced { margin: 2rem 0 0; border-top: 1px solid #ececf1; padding-top: 1rem; }
+  details.advanced > summary { cursor: pointer; color: #55555f; font-weight: 600; list-style: none; }
+  details.advanced > summary::-webkit-details-marker { display: none; }
+  details.advanced > summary::before { content: "▸ "; }
+  details.advanced[open] > summary::before { content: "▾ "; }
+  details.advanced[open] > summary { margin-bottom: .75rem; color: #17171a; }
+  .demo { position: relative; margin: 0 0 1.25rem; border: 1px solid #e4e4e9; border-radius: 12px;
+    background: #f7f7fa; overflow: hidden; user-select: none; pointer-events: none; }
+  .demo-chrome { padding: .55rem .7rem .85rem; }
+  .demo-traffic { display: flex; gap: .35rem; margin-bottom: .55rem; }
+  .demo-traffic span { width: .55rem; height: .55rem; border-radius: 50%; background: #d8d8de; }
+  .demo-bar { position: relative; height: 2rem; border-radius: 6px; background: #fff;
+    border: 1px solid #e4e4e9; display: flex; align-items: center; gap: .45rem; padding: 0 .55rem;
+    color: #8a8a93; font-size: .78rem; }
+  .demo-slot { width: 7.2rem; height: 1.35rem; border-radius: 5px; border: 1.5px dashed #2f5bea;
+    background: rgba(47,91,234,.06); flex: 0 0 auto;
+    animation: demo-slot 3.2s ease-in-out infinite; }
+  .demo-page { margin-top: .7rem; height: 5.5rem; border-radius: 8px; background: #fff;
+    border: 1px solid #e4e4e9; display: flex; align-items: center; justify-content: center;
+    position: relative; }
+  .demo-chip { display: inline-block; background: #2f5bea; color: #fff; font-weight: 600;
+    font-size: .85rem; padding: .45rem .85rem; border-radius: 8px;
+    box-shadow: 0 3px 10px rgba(47,91,234,.35); }
+  .demo-chip.ghost { opacity: .35; }
+  .demo-fly { position: absolute; left: 50%; top: 4.9rem; transform: translateX(-50%);
+    z-index: 2; animation: demo-drag 3.2s ease-in-out infinite; }
+  .demo-caption { margin: 0; padding: .55rem .85rem .7rem; font-size: .88rem; color: #55555f;
+    border-top: 1px solid #e4e4e9; background: #fff; }
+  .demo-hand { position: absolute; width: 1.1rem; height: 1.1rem; margin-left: 3.4rem; margin-top: .55rem;
+    border-radius: 50% 50% 50% 0; border: 2px solid #17171a; background: rgba(255,255,255,.85);
+    transform: rotate(-35deg); animation: demo-hand 3.2s ease-in-out infinite; }
+  @keyframes demo-drag {
+    0%, 12% { top: 4.9rem; opacity: 1; transform: translateX(-50%) scale(1); }
+    45%, 62% { top: .95rem; opacity: 1; transform: translateX(-50%) scale(.92); }
+    78%, 100% { top: .95rem; opacity: 0; transform: translateX(-50%) scale(.92); }
+  }
+  @keyframes demo-hand {
+    0%, 12% { opacity: 0; transform: rotate(-35deg) translate(0, 8px); }
+    18% { opacity: 1; transform: rotate(-35deg) translate(0, 0); }
+    45%, 62% { opacity: 1; transform: rotate(-35deg) translate(0, -3.7rem); }
+    78%, 100% { opacity: 0; transform: rotate(-35deg) translate(0, -3.7rem); }
+  }
+  @keyframes demo-slot {
+    0%, 40% { background: rgba(47,91,234,.06); border-style: dashed; }
+    48%, 70% { background: rgba(47,91,234,.18); border-style: solid; }
+    85%, 100% { background: rgba(47,91,234,.06); border-style: dashed; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .demo-fly, .demo-hand, .demo-slot { animation: none; }
+    .demo-fly { top: .95rem; opacity: 1; }
+    .demo-hand { display: none; }
+  }
 `;
 
 // /feedback — where the bookmarklet is picked up, and the one-line install
@@ -3819,6 +3871,7 @@ function feedbackBookmarklet(src) {
 function feedbackBookmarkletPage(base, nonce) {
   const src = feedbackScriptSrc(base);
   const bookmarklet = feedbackBookmarklet(src);
+  const host = escapeHtml(new URL(base).host);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -3833,17 +3886,28 @@ function feedbackBookmarkletPage(base, nonce) {
   <h1>Leave feedback on your own app</h1>
   <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent. Nothing to install.</p>
 
-  <h2>Bookmark</h2>
-  <p>Drag this button to your bookmarks bar (⌘⇧B shows it in Chrome). Then, on any page of your app, click the bookmark.</p>
-  <p><a class="bookmarklet" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar">✎ tdoc Feedback</a></p>
-  <p class="muted">The first click on a new app opens a small ${escapeHtml(new URL(base).host)} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
-
-  <h2>One line in the app</h2>
-  <p>For an app the whole team opens, add this once (dev and preview builds only) and everyone gets the comment button without a bookmark:</p>
-  <pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre>
+  <h2>Add the bookmark once</h2>
+  <div class="demo" aria-hidden="true">
+    <div class="demo-chrome">
+      <div class="demo-traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="demo-bar"><span class="demo-slot"></span><span>Bookmarks bar · ⌘⇧B</span></div>
+      <div class="demo-page"><span class="demo-chip ghost">✎ tdoc Feedback</span></div>
+    </div>
+    <div class="demo-fly"><span class="demo-chip">✎ tdoc Feedback</span><span class="demo-hand"></span></div>
+    <p class="demo-caption">Drag — don't click. Drop it on the bookmarks bar.</p>
+  </div>
+  <p>Drag this button up to your bookmarks bar. Then open your app and click the bookmark.</p>
+  <p><a id="bookmarklet" class="bookmarklet" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a></p>
+  <p class="muted">First click on a new app opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
   <h2>Where it goes</h2>
-  <p>Comments land in a feedback space on ${escapeHtml(new URL(base).host)} — a doc named after your app, created for you on first connect. Share its link the way you share any doc; @mention a teammate or an agent from the comment itself.</p>
+  <p>Comments land in a feedback space on ${host} — a doc named after your app, created for you on first connect. Share that doc’s link the way you share any TDoc; @mention a teammate or an agent from the comment itself.</p>
+
+  <details class="advanced">
+    <summary>Advanced — one line in the app</summary>
+    <p>For an app the whole team opens, add this once (dev and preview builds only) and everyone gets the comment button without a bookmark:</p>
+    <pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre>
+  </details>
 </main>
 </body>
 </html>`;
