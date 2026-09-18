@@ -3775,35 +3775,46 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
 }
 
 const FEEDBACK_PAGE_CSS = `
-  :root { color-scheme: light; }
-  body { margin: 0; background: #fff; color: #17171a;
+  :root {
+    color-scheme: light;
+    --td-accent: #1652f0;
+    --td-accent-hover: #1245d0;
+    --td-accent-tint: #e8eeff;
+    --td-accent-ring: rgba(22,82,240,.28);
+    --td-ink: #1a1a1a;
+    --td-muted: #6b6a66;
+    --td-line: #e8e7e3;
+    --hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  }
+  body { margin: 0; background: #fff; color: var(--td-ink);
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
   main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
   h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .75rem; letter-spacing: -0.02em; }
   h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
   p { margin: 0 0 1rem; }
-  a { color: #1a73e8; }
+  a { color: var(--td-accent); }
   code, pre { background: #f3f3f6; border-radius: 6px; font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
   code { padding: .12em .35em; }
   pre { padding: .8rem 1rem; overflow-x: auto; }
-  .muted { color: #55555f; }
-  button { font: inherit; background: #1a73e8; color: #fff; border: 0; border-radius: 8px;
-    padding: .55rem 1rem; cursor: pointer; }
-  button.secondary { background: #eef0f4; color: #17171a; }
+  .muted { color: var(--td-muted); }
+  button { font: inherit; background: var(--td-accent); color: #fff; border: 0; border-radius: 999px;
+    padding: .55rem 1.1rem; cursor: pointer; font-weight: 650; }
+  button:hover { background: var(--td-accent-hover); }
+  button.secondary { background: #eef0f4; color: var(--td-ink); }
   .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
-  .card { border: 1px solid #e4e4e9; border-radius: 10px; padding: 1rem 1.1rem; margin: 0 0 1rem; }
+  .card { border: 1px solid var(--td-line); border-radius: 10px; padding: 1rem 1.1rem; margin: 0 0 1rem; }
   .err { color: #b3261e; }
   ol { padding-left: 1.3rem; }
-  details.advanced { margin: 2rem 0 0; border-top: 1px solid #ececf1; padding-top: 1rem; }
-  details.advanced > summary { cursor: pointer; color: #55555f; font-weight: 600; list-style: none; }
+  details.advanced { margin: 2rem 0 0; border-top: 1px solid var(--td-line); padding-top: 1rem; }
+  details.advanced > summary { cursor: pointer; color: var(--td-muted); font-weight: 600; list-style: none; }
   details.advanced > summary::-webkit-details-marker { display: none; }
   details.advanced > summary::before { content: "▸ "; }
   details.advanced[open] > summary::before { content: "▾ "; }
-  details.advanced[open] > summary { margin-bottom: .75rem; color: #17171a; }
+  details.advanced[open] > summary { margin-bottom: .75rem; color: var(--td-ink); }
 
   .demo { position: relative; margin: 0 0 .85rem; border: 1px solid #c7c7cc;
-    border-radius: 10px; background: #dee1e6; overflow: hidden;
-    box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+    border-radius: 12px; background: #dee1e6; overflow: hidden;
+    box-shadow: 0 8px 24px rgba(16,18,26,.08); }
   .demo-titlebar { display: flex; align-items: center; gap: .55rem; padding: .45rem .6rem .4rem;
     background: linear-gradient(#f6f6f7, #e8eaed); border-bottom: 1px solid #c7c7cc; }
   .demo-dots { display: flex; gap: .35rem; flex: 0 0 auto; padding-left: .15rem; }
@@ -3819,39 +3830,42 @@ const FEEDBACK_PAGE_CSS = `
   .demo-bm { color: #3c4043; padding: .2rem .45rem; border-radius: 4px; white-space: nowrap; }
   .demo-bm::before { content: ""; display: inline-block; width: .65rem; height: .65rem; margin-right: .3rem;
     border-radius: 2px; background: #dadce0; vertical-align: -1px; }
-  .demo-slot { min-width: 6.5rem; height: 1.35rem; border-radius: 4px; border: 1.5px dashed #1a73e8;
-    background: rgba(26,115,232,.06); box-sizing: border-box;
+  .demo-slot { min-width: 6.5rem; height: 1.35rem; border-radius: 999px; border: 1.5px dashed var(--td-accent);
+    background: var(--td-accent-tint); box-sizing: border-box;
     animation: demo-slot 3.4s ease-in-out infinite; }
-  .demo-page { position: relative; height: 6.4rem; background: #fff;
+  .demo-page { position: relative; height: 7.2rem; background: #fff;
     display: flex; align-items: center; justify-content: center; }
-  .demo-ghost { display: inline-block; background: #1a73e8; color: #fff; font: 650 15px/1.2 system-ui, sans-serif;
-    padding: .7rem 1.25rem; border-radius: 8px; opacity: .22; pointer-events: none; }
-  .bookmarklet { display: inline-block; background: #1a73e8; color: #fff !important; text-decoration: none;
-    font: 650 15px/1.2 system-ui, sans-serif; padding: .7rem 1.25rem; border-radius: 8px; cursor: grab;
-    box-shadow: 0 2px 8px rgba(26,115,232,.28); user-select: none; -webkit-user-drag: element;
+  .demo-ghost { display: inline-block; background: var(--td-accent); color: #fff;
+    font: 650 15px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.01em;
+    padding: .75rem 1.35rem; border-radius: 999px; opacity: .2; pointer-events: none; }
+  .bookmarklet { display: inline-block; background: var(--td-accent); color: #fff !important; text-decoration: none;
+    font: 650 15px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.01em;
+    padding: .75rem 1.35rem; border-radius: 999px; cursor: grab;
+    box-shadow: 0 8px 20px var(--td-accent-ring); user-select: none; -webkit-user-drag: element;
     position: absolute; left: 50%; top: 1.85rem; z-index: 2; white-space: nowrap;
-    transform: translateX(-50%); transform-origin: 50% 80%; }
+    transform: translateX(-50%); transform-origin: 50% 80%; transition: background .12s; }
+  .bookmarklet:hover { background: var(--td-accent-hover); }
   .bookmarklet:active { cursor: grabbing; }
   .bookmarklet.demo-fly {
     animation: demo-drag 3.4s cubic-bezier(.2,.7,.2,1) infinite;
-    filter: drop-shadow(0 4px 10px rgba(0,0,0,.18));
+    filter: drop-shadow(0 4px 10px rgba(22,82,240,.22));
   }
-  /* While the loop is mid-flight the button is hard to grab — freeze it at
-     rest under the pointer and wiggle so click/drag reads as the action. */
   .demo:hover .bookmarklet.demo-fly,
   .bookmarklet.demo-fly:focus-visible {
     animation: wiggle 1.05s ease-in-out infinite;
     top: 1.85rem;
     opacity: 1;
-    filter: drop-shadow(0 6px 14px rgba(26,115,232,.35));
+    filter: drop-shadow(0 10px 22px var(--td-accent-ring));
   }
-  .step-1 { position: absolute; left: calc(50% + 6.9rem); top: 2.25rem; z-index: 2;
-    font: 650 13px/1.2 system-ui, -apple-system, sans-serif; color: #174ea6; white-space: nowrap;
-    pointer-events: none; }
-  .install-steps { margin: 0 0 1rem; padding-left: 1.25rem; color: #3c4043; font-size: .95rem; }
-  .install-steps li { margin: 0 0 .35rem; }
+  .step-1 { position: absolute; left: calc(50% + 7.2rem); top: 1.95rem; z-index: 2;
+    font: 700 1.55rem/1.1 var(--hand); color: var(--td-accent); white-space: nowrap;
+    pointer-events: none; letter-spacing: .01em; transform: rotate(-6deg); }
+  .install-steps { margin: 0 0 1rem; padding-left: 0; list-style: none; color: var(--td-ink); }
+  .install-steps li { margin: 0 0 .45rem; font: 700 1.35rem/1.25 var(--hand); color: var(--td-ink); }
+  .install-steps li strong { color: var(--td-accent); font-weight: 700; }
   .install-steps kbd { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; background: #f1f3f4;
-    border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem; }
+    border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem;
+    vertical-align: .15em; }
 
   .coach[hidden] { display: none !important; }
   .coach { position: fixed; inset: 0; z-index: 10000; }
@@ -3860,17 +3874,18 @@ const FEEDBACK_PAGE_CSS = `
     cursor: pointer; }
   .coach-curve { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
     overflow: visible; z-index: 1; }
-  .coach-copy { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); z-index: 1;
-    pointer-events: none; margin: 0; padding: .65rem .95rem; border-radius: 12px;
-    background: rgba(255,255,255,.94); color: #174ea6;
-    font: 650 13px/1.35 system-ui, -apple-system, sans-serif;
-    box-shadow: 0 6px 20px rgba(0,0,0,.12); text-align: left; min-width: 16rem; }
+  .coach-copy { position: absolute; left: 50%; top: 18px; transform: translateX(-50%) rotate(-2deg); z-index: 1;
+    pointer-events: none; margin: 0; padding: .7rem 1.05rem; border-radius: 14px;
+    background: rgba(255,255,255,.96); color: var(--td-accent);
+    font: 700 1.45rem/1.25 var(--hand);
+    box-shadow: 0 8px 24px rgba(16,18,26,.14); text-align: left; min-width: 17rem; }
   .coach-copy .n { display: inline-flex; align-items: center; justify-content: center;
-    width: 1.15rem; height: 1.15rem; margin-right: .4rem; border-radius: 50%;
-    background: #1a73e8; color: #fff; font: 700 11px/1 system-ui; vertical-align: -1px; }
+    width: 1.35rem; height: 1.35rem; margin-right: .45rem; border-radius: 50%;
+    background: var(--td-accent); color: #fff; font: 700 0.85rem/1 -apple-system, system-ui, sans-serif;
+    vertical-align: .05em; }
   .coach-copy .line { display: block; white-space: nowrap; }
-  .coach-copy .line + .line { margin-top: .35rem; color: #5f6368; font-weight: 500; }
-  .coach-copy .line + .line .n { background: #e8f0fe; color: #174ea6; }
+  .coach-copy .line + .line { margin-top: .3rem; color: var(--td-ink); }
+  .coach-copy .line + .line .n { background: var(--td-accent-tint); color: var(--td-accent); }
 
   body.coaching .demo { position: relative; z-index: 10001; overflow: visible;
     background: transparent; border-color: transparent; box-shadow: none; }
@@ -3883,7 +3898,7 @@ const FEEDBACK_PAGE_CSS = `
   body.coaching .bookmarklet {
     z-index: 10002; animation: wiggle 1.05s ease-in-out infinite !important;
     top: 1.85rem; left: 50%;
-    box-shadow: 0 16px 40px rgba(26,115,232,.45), 0 0 0 6px rgba(26,115,232,.16);
+    box-shadow: 0 16px 40px var(--td-accent-ring), 0 0 0 6px var(--td-accent-tint);
     filter: none;
   }
   body.coaching .install-steps { visibility: hidden; }
@@ -3901,9 +3916,9 @@ const FEEDBACK_PAGE_CSS = `
     80% { transform: translateX(-50%) rotate(5deg) scale(1.06); }
   }
   @keyframes demo-slot {
-    0%, 35% { background: rgba(26,115,232,.04); border-color: #1a73e8; }
-    42%, 62% { background: rgba(26,115,232,.16); border-color: #174ea6; }
-    78%, 100% { background: rgba(26,115,232,.04); border-color: #1a73e8; }
+    0%, 35% { background: var(--td-accent-tint); border-color: var(--td-accent); }
+    42%, 62% { background: color-mix(in srgb, var(--td-accent) 22%, white); border-color: var(--td-accent-hover); }
+    78%, 100% { background: var(--td-accent-tint); border-color: var(--td-accent); }
   }
   @media (prefers-reduced-motion: reduce) {
     .bookmarklet.demo-fly, .demo-slot, .demo:hover .bookmarklet.demo-fly, body.coaching .bookmarklet { animation: none !important; }
@@ -3938,6 +3953,9 @@ function feedbackBookmarkletPage(base, nonce) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tdoc Feedback</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap" rel="stylesheet">
 <style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
 </head>
 <body>
@@ -3959,13 +3977,13 @@ function feedbackBookmarkletPage(base, nonce) {
     <div class="demo-page">
       <span class="demo-ghost" aria-hidden="true">✎ tdoc Feedback</span>
       <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a>
-      <span class="step-1" aria-hidden="true">1 · Click me</span>
+      <span class="step-1" aria-hidden="true">1 · Click Me!</span>
     </div>
   </div>
   <ol class="install-steps">
-    <li><strong>Click me</strong> on the blue button</li>
-    <li><strong>Drag</strong> it up to the bookmarks bar at the very top of the window</li>
-    <li>No bookmarks bar? Press <kbd>⌘⇧B</kbd> — same in Chrome and Safari</li>
+    <li><strong>1 · Click Me!</strong> — that blue pill is the real bookmark</li>
+    <li><strong>2 · Drag me up</strong> — all the way to the top of the window</li>
+    <li><strong>3 · No bar?</strong> Hit <kbd>⌘⇧B</kbd> (Chrome &amp; Safari)</li>
   </ol>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
@@ -3984,15 +4002,15 @@ function feedbackBookmarkletPage(base, nonce) {
   <svg class="coach-curve" aria-hidden="true">
     <defs>
       <marker id="coachHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-        <path d="M0 0 L7 4 L0 8 Z" fill="#1a73e8"/>
+        <path d="M0 0 L7 4 L0 8 Z" fill="#1652f0"/>
       </marker>
     </defs>
-    <path id="coachPath" fill="none" stroke="#1a73e8" stroke-width="2" stroke-linecap="round"
+    <path id="coachPath" fill="none" stroke="#1652f0" stroke-width="2" stroke-linecap="round"
       marker-end="url(#coachHead)"></path>
   </svg>
   <p class="coach-copy">
-    <span class="line"><span class="n">2</span>Drag all the way to the bookmarks bar</span>
-    <span class="line"><span class="n">3</span>No bar? Press ⌘⇧B</span>
+    <span class="line"><span class="n">2</span>Drag me up — all the way</span>
+    <span class="line"><span class="n">3</span>No bar? Hit ⌘⇧B</span>
   </p>
 </div>
 
