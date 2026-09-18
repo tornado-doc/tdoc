@@ -3845,7 +3845,13 @@ const FEEDBACK_PAGE_CSS = `
     opacity: 1;
     transform: translateX(-50%);
   }
-  .bookmark-hint { margin: 0 0 1rem; font-size: .92rem; color: #5f6368; }
+  .step-1 { position: absolute; left: calc(50% + 5.6rem); top: 2.4rem; z-index: 2;
+    font: 650 13px/1.2 system-ui, -apple-system, sans-serif; color: #174ea6; white-space: nowrap;
+    pointer-events: none; }
+  .install-steps { margin: 0 0 1rem; padding-left: 1.25rem; color: #3c4043; font-size: .95rem; }
+  .install-steps li { margin: 0 0 .35rem; }
+  .install-steps kbd { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; background: #f1f3f4;
+    border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem; }
 
   .coach[hidden] { display: none !important; }
   .coach { position: fixed; inset: 0; z-index: 10000; }
@@ -3854,17 +3860,24 @@ const FEEDBACK_PAGE_CSS = `
     cursor: pointer; }
   .coach-curve { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
     overflow: visible; z-index: 1; }
-  .coach-copy { position: absolute; left: 50%; top: 28px; transform: translateX(-50%); z-index: 1;
-    pointer-events: none; margin: 0; padding: .45rem .85rem; border-radius: 999px;
+  .coach-copy { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); z-index: 1;
+    pointer-events: none; margin: 0; padding: .65rem .95rem; border-radius: 12px;
     background: rgba(255,255,255,.94); color: #174ea6;
-    font: 650 13px/1.2 system-ui, -apple-system, sans-serif;
-    box-shadow: 0 6px 20px rgba(0,0,0,.12); white-space: nowrap; }
+    font: 650 13px/1.35 system-ui, -apple-system, sans-serif;
+    box-shadow: 0 6px 20px rgba(0,0,0,.12); text-align: left; min-width: 16rem; }
+  .coach-copy .n { display: inline-flex; align-items: center; justify-content: center;
+    width: 1.15rem; height: 1.15rem; margin-right: .4rem; border-radius: 50%;
+    background: #1a73e8; color: #fff; font: 700 11px/1 system-ui; vertical-align: -1px; }
+  .coach-copy .line { display: block; white-space: nowrap; }
+  .coach-copy .line + .line { margin-top: .35rem; color: #5f6368; font-weight: 500; }
+  .coach-copy .line + .line .n { background: #e8f0fe; color: #174ea6; }
 
   body.coaching .demo { position: relative; z-index: 10001; overflow: visible;
     background: transparent; border-color: transparent; box-shadow: none; }
   body.coaching .demo-titlebar,
   body.coaching .demo-bookmarks,
   body.coaching .demo-ghost { opacity: .18; }
+  body.coaching .step-1 { visibility: hidden; }
   body.coaching .demo-page { background: transparent; }
   body.coaching .demo-slot { animation: none; opacity: .2; }
   body.coaching .bookmarklet {
@@ -3873,7 +3886,7 @@ const FEEDBACK_PAGE_CSS = `
     box-shadow: 0 16px 40px rgba(26,115,232,.45), 0 0 0 6px rgba(26,115,232,.16);
     filter: none;
   }
-  body.coaching .bookmark-hint { visibility: hidden; }
+  body.coaching .install-steps { visibility: hidden; }
 
   @keyframes demo-drag {
     0%, 10% { top: 2.15rem; opacity: 1; transform: translateX(-50%) scale(1); }
@@ -3939,9 +3952,14 @@ function feedbackBookmarkletPage(base, nonce) {
     <div class="demo-page">
       <span class="demo-ghost" aria-hidden="true">✎ tdoc Feedback</span>
       <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a>
+      <span class="step-1" aria-hidden="true">1 · Click me</span>
     </div>
   </div>
-  <p class="bookmark-hint">That blue button is the real bookmark — click it, then drag it up to your browser’s bookmarks bar at the very top of the window (⌘⇧B shows the bar).</p>
+  <ol class="install-steps">
+    <li><strong>Click me</strong> on the blue button</li>
+    <li><strong>Drag</strong> it up to the bookmarks bar at the very top of the window</li>
+    <li>No bookmarks bar? Press <kbd>⌘⇧B</kbd> — same in Chrome and Safari</li>
+  </ol>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
   <h2>Where it goes</h2>
@@ -3965,7 +3983,10 @@ function feedbackBookmarkletPage(base, nonce) {
     <path id="coachPath" fill="none" stroke="#1a73e8" stroke-width="2" stroke-linecap="round"
       marker-end="url(#coachHead)"></path>
   </svg>
-  <p class="coach-copy">Drag all the way to the real bookmarks bar ↑</p>
+  <p class="coach-copy">
+    <span class="line"><span class="n">2</span>Drag all the way to the bookmarks bar</span>
+    <span class="line"><span class="n">3</span>No bar? Press ⌘⇧B</span>
+  </p>
 </div>
 
 <script nonce="${nonce}">
