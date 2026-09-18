@@ -5,6 +5,9 @@ import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
 import chromeCss from '../../server/chrome.css?inline';
+// ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
+// controls keep the browser's default button look on foreign pages.
+import uiCss from '../../shell/src/ui/ui.css?inline';
 
 if (window.top === window && !window.__TDOC_FEEDBACK__) {
   window.__TDOC_FEEDBACK__ = true;
@@ -12,6 +15,7 @@ if (window.top === window && !window.__TDOC_FEEDBACK__) {
   const style = document.createElement('style');
   style.id = 'tdoc-feedback-styles';
   style.textContent = `${chromeCss}
+${uiCss}
     #tdoc-feedback-root { position: fixed; inset: 0; z-index: 2147483640; pointer-events: none; }
     #tdoc-feedback-root * { box-sizing: border-box; }
     #tdoc-feedback-root .tdoc-hover-outline { position: fixed; }

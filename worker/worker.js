@@ -3787,11 +3787,11 @@ const FEEDBACK_PAGE_CSS = `
   code { padding: .12em .35em; }
   pre { padding: .8rem 1rem; overflow-x: auto; }
   .muted { color: #55555f; }
-  .bookmarklet { display: inline-block; background: #2f5bea; color: #fff; text-decoration: none;
-    font-weight: 600; padding: .6rem 1.1rem; border-radius: 8px; cursor: grab;
-    box-shadow: 0 3px 10px rgba(47,91,234,.35); }
+  .bookmarklet { display: inline-block; background: #1a73e8; color: #fff; text-decoration: none;
+    font-weight: 600; padding: .6rem 1.1rem; border-radius: 6px; cursor: grab;
+    box-shadow: 0 1px 2px rgba(0,0,0,.18); }
   .bookmarklet:active { cursor: grabbing; }
-  button { font: inherit; background: #2f5bea; color: #fff; border: 0; border-radius: 8px;
+  button { font: inherit; background: #1a73e8; color: #fff; border: 0; border-radius: 8px;
     padding: .55rem 1rem; cursor: pointer; }
   button.secondary { background: #eef0f4; color: #17171a; }
   .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
@@ -3804,51 +3804,51 @@ const FEEDBACK_PAGE_CSS = `
   details.advanced > summary::before { content: "▸ "; }
   details.advanced[open] > summary::before { content: "▾ "; }
   details.advanced[open] > summary { margin-bottom: .75rem; color: #17171a; }
-  .demo { position: relative; margin: 0 0 1.25rem; border: 1px solid #e4e4e9; border-radius: 12px;
-    background: #f7f7fa; overflow: hidden; user-select: none; pointer-events: none; }
-  .demo-chrome { padding: .55rem .7rem .85rem; }
-  .demo-traffic { display: flex; gap: .35rem; margin-bottom: .55rem; }
-  .demo-traffic span { width: .55rem; height: .55rem; border-radius: 50%; background: #d8d8de; }
-  .demo-bar { position: relative; height: 2rem; border-radius: 6px; background: #fff;
-    border: 1px solid #e4e4e9; display: flex; align-items: center; gap: .45rem; padding: 0 .55rem;
-    color: #8a8a93; font-size: .78rem; }
-  .demo-slot { width: 7.2rem; height: 1.35rem; border-radius: 5px; border: 1.5px dashed #2f5bea;
-    background: rgba(47,91,234,.06); flex: 0 0 auto;
-    animation: demo-slot 3.2s ease-in-out infinite; }
-  .demo-page { margin-top: .7rem; height: 5.5rem; border-radius: 8px; background: #fff;
-    border: 1px solid #e4e4e9; display: flex; align-items: center; justify-content: center;
-    position: relative; }
-  .demo-chip { display: inline-block; background: #2f5bea; color: #fff; font-weight: 600;
-    font-size: .85rem; padding: .45rem .85rem; border-radius: 8px;
-    box-shadow: 0 3px 10px rgba(47,91,234,.35); }
-  .demo-chip.ghost { opacity: .35; }
-  .demo-fly { position: absolute; left: 50%; top: 4.9rem; transform: translateX(-50%);
-    z-index: 2; animation: demo-drag 3.2s ease-in-out infinite; }
-  .demo-caption { margin: 0; padding: .55rem .85rem .7rem; font-size: .88rem; color: #55555f;
-    border-top: 1px solid #e4e4e9; background: #fff; }
-  .demo-hand { position: absolute; width: 1.1rem; height: 1.1rem; margin-left: 3.4rem; margin-top: .55rem;
-    border-radius: 50% 50% 50% 0; border: 2px solid #17171a; background: rgba(255,255,255,.85);
-    transform: rotate(-35deg); animation: demo-hand 3.2s ease-in-out infinite; }
+  .demo { position: relative; margin: 0 0 1.25rem; border: 1px solid #c7c7cc;
+    border-radius: 10px; background: #dee1e6; overflow: hidden; user-select: none; pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+  .demo-win { padding: 0; }
+  .demo-titlebar { display: flex; align-items: center; gap: .55rem; padding: .45rem .6rem .4rem;
+    background: linear-gradient(#f6f6f7, #e8eaed); border-bottom: 1px solid #c7c7cc; }
+  .demo-dots { display: flex; gap: .35rem; flex: 0 0 auto; padding-left: .15rem; }
+  .demo-dots i { display: block; width: .7rem; height: .7rem; border-radius: 50%; }
+  .demo-dots .r { background: #ff5f57; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-dots .y { background: #febc2e; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-dots .g { background: #28c840; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-omnibox { flex: 1 1 auto; height: 1.55rem; border-radius: 999px; background: #fff;
+    border: 1px solid #c7c7cc; color: #3c4043; font: 12px/1.55rem system-ui, -apple-system, sans-serif;
+    padding: 0 .75rem; overflow: hidden; white-space: nowrap; }
+  .demo-bookmarks { display: flex; align-items: center; gap: .15rem; height: 1.85rem;
+    padding: 0 .45rem; background: #fff; border-bottom: 1px solid #dadce0; font: 12px system-ui, sans-serif; }
+  .demo-bm { color: #3c4043; padding: .2rem .45rem; border-radius: 4px; white-space: nowrap; }
+  .demo-bm::before { content: ""; display: inline-block; width: .65rem; height: .65rem; margin-right: .3rem;
+    border-radius: 2px; background: #dadce0; vertical-align: -1px; }
+  .demo-slot { min-width: 6.5rem; height: 1.35rem; border-radius: 4px; border: 1.5px dashed #1a73e8;
+    background: rgba(26,115,232,.06); box-sizing: border-box;
+    animation: demo-slot 3.4s ease-in-out infinite; }
+  .demo-page { height: 6.2rem; background: #fff; display: flex; align-items: center; justify-content: center; }
+  .demo-chip { display: inline-block; background: #1a73e8; color: #fff; font: 600 13px/1.2 system-ui, sans-serif;
+    padding: .5rem .95rem; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+  .demo-chip.ghost { opacity: .28; }
+  .demo-fly { position: absolute; left: 50%; top: 5.55rem; z-index: 3;
+    display: flex; align-items: flex-end; transform: translateX(-50%);
+    animation: demo-drag 3.4s cubic-bezier(.2,.7,.2,1) infinite; filter: drop-shadow(0 4px 10px rgba(0,0,0,.18)); }
+  .demo-cursor { width: 18px; height: 22px; margin: 0 0 -2px -6px; flex: 0 0 auto; }
+  .demo-caption { margin: 0; padding: .55rem .85rem .7rem; font-size: .88rem; color: #5f6368;
+    border-top: 1px solid #dadce0; background: #fff; }
   @keyframes demo-drag {
-    0%, 12% { top: 4.9rem; opacity: 1; transform: translateX(-50%) scale(1); }
-    45%, 62% { top: .95rem; opacity: 1; transform: translateX(-50%) scale(.92); }
-    78%, 100% { top: .95rem; opacity: 0; transform: translateX(-50%) scale(.92); }
-  }
-  @keyframes demo-hand {
-    0%, 12% { opacity: 0; transform: rotate(-35deg) translate(0, 8px); }
-    18% { opacity: 1; transform: rotate(-35deg) translate(0, 0); }
-    45%, 62% { opacity: 1; transform: rotate(-35deg) translate(0, -3.7rem); }
-    78%, 100% { opacity: 0; transform: rotate(-35deg) translate(0, -3.7rem); }
+    0%, 10% { top: 5.55rem; opacity: 1; transform: translateX(-50%) scale(1); }
+    42%, 58% { top: 2.35rem; opacity: 1; transform: translateX(calc(-50% - 2.6rem)) scale(.86); }
+    72%, 100% { top: 2.35rem; opacity: 0; transform: translateX(calc(-50% - 2.6rem)) scale(.86); }
   }
   @keyframes demo-slot {
-    0%, 40% { background: rgba(47,91,234,.06); border-style: dashed; }
-    48%, 70% { background: rgba(47,91,234,.18); border-style: solid; }
-    85%, 100% { background: rgba(47,91,234,.06); border-style: dashed; }
+    0%, 35% { background: rgba(26,115,232,.04); border-color: #1a73e8; }
+    42%, 62% { background: rgba(26,115,232,.16); border-color: #174ea6; }
+    78%, 100% { background: rgba(26,115,232,.04); border-color: #1a73e8; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .demo-fly, .demo-hand, .demo-slot { animation: none; }
-    .demo-fly { top: .95rem; opacity: 1; }
-    .demo-hand { display: none; }
+    .demo-fly, .demo-slot { animation: none; }
+    .demo-fly { top: 2.35rem; opacity: 1; transform: translateX(calc(-50% - 2.6rem)) scale(.86); }
   }
 `;
 
@@ -3888,13 +3888,26 @@ function feedbackBookmarkletPage(base, nonce) {
 
   <h2>Add the bookmark once</h2>
   <div class="demo" aria-hidden="true">
-    <div class="demo-chrome">
-      <div class="demo-traffic" aria-hidden="true"><span></span><span></span><span></span></div>
-      <div class="demo-bar"><span class="demo-slot"></span><span>Bookmarks bar · ⌘⇧B</span></div>
+    <div class="demo-win">
+      <div class="demo-titlebar">
+        <div class="demo-dots" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <div class="demo-omnibox">localhost:3000</div>
+      </div>
+      <div class="demo-bookmarks">
+        <span class="demo-bm">Docs</span>
+        <span class="demo-bm">GitHub</span>
+        <span class="demo-slot"></span>
+      </div>
       <div class="demo-page"><span class="demo-chip ghost">✎ tdoc Feedback</span></div>
     </div>
-    <div class="demo-fly"><span class="demo-chip">✎ tdoc Feedback</span><span class="demo-hand"></span></div>
-    <p class="demo-caption">Drag — don't click. Drop it on the bookmarks bar.</p>
+    <div class="demo-fly">
+      <span class="demo-chip">✎ tdoc Feedback</span>
+      <svg class="demo-cursor" viewBox="0 0 18 22" aria-hidden="true">
+        <path fill="#fff" stroke="#111" stroke-width="1.2" stroke-linejoin="round"
+          d="M1.2 1.2 1.2 16.4 5.1 12.8 8.2 20.2 10.4 19.3 7.3 11.9 12.6 11.9Z"/>
+      </svg>
+    </div>
+    <p class="demo-caption">Drag — don't click. Drop it on the bookmarks bar (⌘⇧B shows the bar).</p>
   </div>
   <p>Drag this button up to your bookmarks bar. Then open your app and click the bookmark.</p>
   <p><a id="bookmarklet" class="bookmarklet" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a></p>
