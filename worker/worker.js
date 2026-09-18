@@ -3824,12 +3824,12 @@ const FEEDBACK_PAGE_CSS = `
     animation: demo-slot 3.4s ease-in-out infinite; }
   .demo-page { position: relative; height: 6.4rem; background: #fff;
     display: flex; align-items: center; justify-content: center; }
-  .demo-ghost { display: inline-block; background: #1a73e8; color: #fff; font: 600 13px/1.2 system-ui, sans-serif;
-    padding: .5rem .95rem; border-radius: 6px; opacity: .22; pointer-events: none; }
+  .demo-ghost { display: inline-block; background: #1a73e8; color: #fff; font: 650 15px/1.2 system-ui, sans-serif;
+    padding: .7rem 1.25rem; border-radius: 8px; opacity: .22; pointer-events: none; }
   .bookmarklet { display: inline-block; background: #1a73e8; color: #fff !important; text-decoration: none;
-    font: 600 13px/1.2 system-ui, sans-serif; padding: .5rem .95rem; border-radius: 6px; cursor: grab;
-    box-shadow: 0 1px 2px rgba(0,0,0,.18); user-select: none; -webkit-user-drag: element;
-    position: absolute; left: 50%; top: 2.15rem; z-index: 2; white-space: nowrap;
+    font: 650 15px/1.2 system-ui, sans-serif; padding: .7rem 1.25rem; border-radius: 8px; cursor: grab;
+    box-shadow: 0 2px 8px rgba(26,115,232,.28); user-select: none; -webkit-user-drag: element;
+    position: absolute; left: 50%; top: 1.85rem; z-index: 2; white-space: nowrap;
     transform: translateX(-50%); transform-origin: 50% 80%; }
   .bookmarklet:active { cursor: grabbing; }
   .bookmarklet.demo-fly {
@@ -3837,15 +3837,15 @@ const FEEDBACK_PAGE_CSS = `
     filter: drop-shadow(0 4px 10px rgba(0,0,0,.18));
   }
   /* While the loop is mid-flight the button is hard to grab — freeze it at
-     rest under the pointer so click/drag always has a stable target. */
+     rest under the pointer and wiggle so click/drag reads as the action. */
   .demo:hover .bookmarklet.demo-fly,
   .bookmarklet.demo-fly:focus-visible {
-    animation: none;
-    top: 2.15rem;
+    animation: wiggle 1.05s ease-in-out infinite;
+    top: 1.85rem;
     opacity: 1;
-    transform: translateX(-50%);
+    filter: drop-shadow(0 6px 14px rgba(26,115,232,.35));
   }
-  .step-1 { position: absolute; left: calc(50% + 5.6rem); top: 2.4rem; z-index: 2;
+  .step-1 { position: absolute; left: calc(50% + 6.9rem); top: 2.25rem; z-index: 2;
     font: 650 13px/1.2 system-ui, -apple-system, sans-serif; color: #174ea6; white-space: nowrap;
     pointer-events: none; }
   .install-steps { margin: 0 0 1rem; padding-left: 1.25rem; color: #3c4043; font-size: .95rem; }
@@ -3881,17 +3881,24 @@ const FEEDBACK_PAGE_CSS = `
   body.coaching .demo-page { background: transparent; }
   body.coaching .demo-slot { animation: none; opacity: .2; }
   body.coaching .bookmarklet {
-    z-index: 10002; animation: none !important;
-    top: 2.15rem; left: 50%; transform: translateX(-50%) scale(1.08);
+    z-index: 10002; animation: wiggle 1.05s ease-in-out infinite !important;
+    top: 1.85rem; left: 50%;
     box-shadow: 0 16px 40px rgba(26,115,232,.45), 0 0 0 6px rgba(26,115,232,.16);
     filter: none;
   }
   body.coaching .install-steps { visibility: hidden; }
 
   @keyframes demo-drag {
-    0%, 10% { top: 2.15rem; opacity: 1; transform: translateX(-50%) scale(1); }
-    42%, 58% { top: -2.55rem; opacity: 1; transform: translateX(calc(-50% - 2.8rem)) scale(.9); }
-    72%, 100% { top: -2.55rem; opacity: 0; transform: translateX(calc(-50% - 2.8rem)) scale(.9); }
+    0%, 10% { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1); }
+    42%, 58% { top: -2.75rem; opacity: 1; transform: translateX(calc(-50% - 2.8rem)) scale(.92); }
+    72%, 100% { top: -2.75rem; opacity: 0; transform: translateX(calc(-50% - 2.8rem)) scale(.92); }
+  }
+  @keyframes wiggle {
+    0%, 100% { transform: translateX(-50%) rotate(0deg) scale(1.06); }
+    20% { transform: translateX(-50%) rotate(-10deg) scale(1.06); }
+    40% { transform: translateX(-50%) rotate(10deg) scale(1.06); }
+    60% { transform: translateX(-50%) rotate(-7deg) scale(1.06); }
+    80% { transform: translateX(-50%) rotate(5deg) scale(1.06); }
   }
   @keyframes demo-slot {
     0%, 35% { background: rgba(26,115,232,.04); border-color: #1a73e8; }
@@ -3899,8 +3906,8 @@ const FEEDBACK_PAGE_CSS = `
     78%, 100% { background: rgba(26,115,232,.04); border-color: #1a73e8; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .bookmarklet.demo-fly, .demo-slot { animation: none; }
-    .bookmarklet.demo-fly { top: 2.15rem; opacity: 1; transform: translateX(-50%); }
+    .bookmarklet.demo-fly, .demo-slot, .demo:hover .bookmarklet.demo-fly, body.coaching .bookmarklet { animation: none !important; }
+    .bookmarklet.demo-fly, body.coaching .bookmarklet { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1.06); }
   }
 `;
 
