@@ -3787,16 +3787,6 @@ const FEEDBACK_PAGE_CSS = `
   code { padding: .12em .35em; }
   pre { padding: .8rem 1rem; overflow-x: auto; }
   .muted { color: #55555f; }
-  .bookmark-stage { position: relative; display: flex; flex-direction: column; align-items: flex-start;
-    gap: .65rem; margin: 0 0 1.25rem; padding: 1.1rem 1.15rem; border: 1px solid #e4e4e9;
-    border-radius: 14px; background: #fafafa; }
-  .bookmarklet { display: inline-block; background: #1a73e8; color: #fff !important; text-decoration: none;
-    font-weight: 650; padding: .7rem 1.2rem; border-radius: 8px; cursor: grab;
-    box-shadow: 0 2px 8px rgba(26,115,232,.28); transform-origin: 50% 80%;
-    position: relative; z-index: 2; user-select: none; -webkit-user-drag: element; }
-  .bookmarklet:active { cursor: grabbing; }
-  .bookmarklet.wiggle { animation: wiggle 2.4s ease-in-out infinite; }
-  .bookmark-hint { margin: 0; font-size: .92rem; color: #5f6368; }
   button { font: inherit; background: #1a73e8; color: #fff; border: 0; border-radius: 8px;
     padding: .55rem 1rem; cursor: pointer; }
   button.secondary { background: #eef0f4; color: #17171a; }
@@ -3811,55 +3801,93 @@ const FEEDBACK_PAGE_CSS = `
   details.advanced[open] > summary::before { content: "▾ "; }
   details.advanced[open] > summary { margin-bottom: .75rem; color: #17171a; }
 
+  .demo { position: relative; margin: 0 0 .85rem; border: 1px solid #c7c7cc;
+    border-radius: 10px; background: #dee1e6; overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+  .demo-titlebar { display: flex; align-items: center; gap: .55rem; padding: .45rem .6rem .4rem;
+    background: linear-gradient(#f6f6f7, #e8eaed); border-bottom: 1px solid #c7c7cc; }
+  .demo-dots { display: flex; gap: .35rem; flex: 0 0 auto; padding-left: .15rem; }
+  .demo-dots i { display: block; width: .7rem; height: .7rem; border-radius: 50%; }
+  .demo-dots .r { background: #ff5f57; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-dots .y { background: #febc2e; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-dots .g { background: #28c840; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-omnibox { flex: 1 1 auto; height: 1.55rem; border-radius: 999px; background: #fff;
+    border: 1px solid #c7c7cc; color: #3c4043; font: 12px/1.55rem system-ui, -apple-system, sans-serif;
+    padding: 0 .75rem; overflow: hidden; white-space: nowrap; }
+  .demo-bookmarks { display: flex; align-items: center; gap: .15rem; height: 1.85rem;
+    padding: 0 .45rem; background: #fff; border-bottom: 1px solid #dadce0; font: 12px system-ui, sans-serif; }
+  .demo-bm { color: #3c4043; padding: .2rem .45rem; border-radius: 4px; white-space: nowrap; }
+  .demo-bm::before { content: ""; display: inline-block; width: .65rem; height: .65rem; margin-right: .3rem;
+    border-radius: 2px; background: #dadce0; vertical-align: -1px; }
+  .demo-slot { min-width: 6.5rem; height: 1.35rem; border-radius: 4px; border: 1.5px dashed #1a73e8;
+    background: rgba(26,115,232,.06); box-sizing: border-box;
+    animation: demo-slot 3.4s ease-in-out infinite; }
+  .demo-page { position: relative; height: 6.4rem; background: #fff;
+    display: flex; align-items: center; justify-content: center; }
+  .demo-ghost { display: inline-block; background: #1a73e8; color: #fff; font: 600 13px/1.2 system-ui, sans-serif;
+    padding: .5rem .95rem; border-radius: 6px; opacity: .22; pointer-events: none; }
+  .bookmarklet { display: inline-block; background: #1a73e8; color: #fff !important; text-decoration: none;
+    font: 600 13px/1.2 system-ui, sans-serif; padding: .5rem .95rem; border-radius: 6px; cursor: grab;
+    box-shadow: 0 1px 2px rgba(0,0,0,.18); user-select: none; -webkit-user-drag: element;
+    position: absolute; left: 50%; top: 2.15rem; z-index: 2; white-space: nowrap;
+    transform: translateX(-50%); transform-origin: 50% 80%; }
+  .bookmarklet:active { cursor: grabbing; }
+  .bookmarklet.demo-fly {
+    animation: demo-drag 3.4s cubic-bezier(.2,.7,.2,1) infinite;
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,.18));
+  }
+  /* While the loop is mid-flight the button is hard to grab — freeze it at
+     rest under the pointer so click/drag always has a stable target. */
+  .demo:hover .bookmarklet.demo-fly,
+  .bookmarklet.demo-fly:focus-visible {
+    animation: none;
+    top: 2.15rem;
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+  .bookmark-hint { margin: 0 0 1rem; font-size: .92rem; color: #5f6368; }
+
   .coach[hidden] { display: none !important; }
   .coach { position: fixed; inset: 0; z-index: 10000; }
   .coach-frost { position: absolute; inset: 0; background: rgba(16, 18, 28, 0.38);
     backdrop-filter: blur(10px) saturate(1.2); -webkit-backdrop-filter: blur(10px) saturate(1.2);
     cursor: pointer; }
-  .coach-top { position: absolute; top: 0; left: 0; right: 0; height: 52px; z-index: 1;
-    display: flex; align-items: center; justify-content: center; gap: .5rem;
-    background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.72));
-    border-bottom: 2px dashed #1a73e8; box-shadow: 0 10px 30px rgba(26,115,232,.18);
-    color: #174ea6; font: 650 14px/1 system-ui, -apple-system, sans-serif; letter-spacing: .01em;
-    pointer-events: none; animation: top-pulse 1.4s ease-in-out infinite; }
-  .coach-top span { opacity: .7; font-weight: 500; }
-  .coach-arrow { position: absolute; left: 50%; top: 56px; width: min(120px, 22vw); height: min(42vh, 320px);
-    transform: translateX(-50%); z-index: 1; pointer-events: none;
-    filter: drop-shadow(0 10px 28px rgba(26,115,232,.45));
-    animation: arrow-lift 1.15s ease-in-out infinite; }
-  .coach-copy { position: absolute; left: 50%; top: calc(56px + min(42vh, 320px) + 8px);
-    transform: translateX(-50%); z-index: 1; pointer-events: none; margin: 0;
-    padding: .55rem .9rem; border-radius: 999px; background: rgba(255,255,255,.92);
-    color: #174ea6; font: 650 14px/1.2 system-ui, -apple-system, sans-serif;
+  .coach-curve { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
+    overflow: visible; z-index: 1; }
+  .coach-copy { position: absolute; left: 50%; top: 28px; transform: translateX(-50%); z-index: 1;
+    pointer-events: none; margin: 0; padding: .45rem .85rem; border-radius: 999px;
+    background: rgba(255,255,255,.94); color: #174ea6;
+    font: 650 13px/1.2 system-ui, -apple-system, sans-serif;
     box-shadow: 0 6px 20px rgba(0,0,0,.12); white-space: nowrap; }
-  body.coaching .bookmarklet {
-    z-index: 10001; animation: none;
-    transform: scale(1.08);
-    box-shadow: 0 16px 40px rgba(26,115,232,.45), 0 0 0 6px rgba(26,115,232,.16);
-  }
-  body.coaching .bookmark-stage {
-    position: relative; z-index: 10001;
-    background: transparent; border-color: transparent;
-  }
 
-  @keyframes wiggle {
-    0%, 68%, 100% { transform: rotate(0deg); }
-    72% { transform: rotate(-9deg); }
-    78% { transform: rotate(9deg); }
-    84% { transform: rotate(-7deg); }
-    90% { transform: rotate(5deg); }
-    95% { transform: rotate(-2deg); }
+  body.coaching .demo { position: relative; z-index: 10001; overflow: visible;
+    background: transparent; border-color: transparent; box-shadow: none; }
+  body.coaching .demo-titlebar,
+  body.coaching .demo-bookmarks,
+  body.coaching .demo-ghost { opacity: .18; }
+  body.coaching .demo-page { background: transparent; }
+  body.coaching .demo-slot { animation: none; opacity: .2; }
+  body.coaching .bookmarklet {
+    z-index: 10002; animation: none !important;
+    top: 2.15rem; left: 50%; transform: translateX(-50%) scale(1.08);
+    box-shadow: 0 16px 40px rgba(26,115,232,.45), 0 0 0 6px rgba(26,115,232,.16);
+    filter: none;
   }
-  @keyframes arrow-lift {
-    0%, 100% { transform: translateX(-50%) translateY(0); }
-    50% { transform: translateX(-50%) translateY(-10px); }
+  body.coaching .bookmark-hint { visibility: hidden; }
+
+  @keyframes demo-drag {
+    0%, 10% { top: 2.15rem; opacity: 1; transform: translateX(-50%) scale(1); }
+    42%, 58% { top: -2.55rem; opacity: 1; transform: translateX(calc(-50% - 2.8rem)) scale(.9); }
+    72%, 100% { top: -2.55rem; opacity: 0; transform: translateX(calc(-50% - 2.8rem)) scale(.9); }
   }
-  @keyframes top-pulse {
-    0%, 100% { box-shadow: 0 10px 30px rgba(26,115,232,.14); background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.72)); }
-    50% { box-shadow: 0 14px 36px rgba(26,115,232,.28); background: linear-gradient(180deg, rgba(232,242,255,.96), rgba(255,255,255,.78)); }
+  @keyframes demo-slot {
+    0%, 35% { background: rgba(26,115,232,.04); border-color: #1a73e8; }
+    42%, 62% { background: rgba(26,115,232,.16); border-color: #174ea6; }
+    78%, 100% { background: rgba(26,115,232,.04); border-color: #1a73e8; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .bookmarklet.wiggle, .coach-arrow, .coach-top { animation: none; }
+    .bookmarklet.demo-fly, .demo-slot { animation: none; }
+    .bookmarklet.demo-fly { top: 2.15rem; opacity: 1; transform: translateX(-50%); }
   }
 `;
 
@@ -3898,10 +3926,22 @@ function feedbackBookmarkletPage(base, nonce) {
   <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent. Nothing to install.</p>
 
   <h2>Add the bookmark once</h2>
-  <div class="bookmark-stage">
-    <a id="bookmarklet" class="bookmarklet wiggle" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a>
-    <p class="bookmark-hint">Click the button, then drag it up to your bookmarks bar. (⌘⇧B shows the bar in Chrome.)</p>
+  <div class="demo" id="demo">
+    <div class="demo-titlebar">
+      <div class="demo-dots" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+      <div class="demo-omnibox">localhost:3000</div>
+    </div>
+    <div class="demo-bookmarks">
+      <span class="demo-bm">Docs</span>
+      <span class="demo-bm">GitHub</span>
+      <span class="demo-slot" aria-hidden="true"></span>
+    </div>
+    <div class="demo-page">
+      <span class="demo-ghost" aria-hidden="true">✎ tdoc Feedback</span>
+      <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a>
+    </div>
   </div>
+  <p class="bookmark-hint">That blue button is the real bookmark — click it, then drag it up to your browser’s bookmarks bar at the very top of the window (⌘⇧B shows the bar).</p>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
   <h2>Where it goes</h2>
@@ -3916,41 +3956,59 @@ function feedbackBookmarkletPage(base, nonce) {
 
 <div id="coach" class="coach" hidden>
   <div class="coach-frost" data-dismiss="1"></div>
-  <div class="coach-top" aria-hidden="true">Bookmarks bar <span>· drop here</span></div>
-  <svg class="coach-arrow" viewBox="0 0 120 220" aria-hidden="true">
+  <svg class="coach-curve" aria-hidden="true">
     <defs>
-      <linearGradient id="coachArrowFill" x1="60" y1="220" x2="60" y2="0" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#8ab4f8"/>
-        <stop offset="1" stop-color="#1a73e8"/>
-      </linearGradient>
+      <marker id="coachHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+        <path d="M0 0 L7 4 L0 8 Z" fill="#1a73e8"/>
+      </marker>
     </defs>
-    <path fill="url(#coachArrowFill)" stroke="#174ea6" stroke-width="3" stroke-linejoin="round"
-      d="M60 10 108 78 78 78 78 208 42 208 42 78 12 78Z"/>
+    <path id="coachPath" fill="none" stroke="#1a73e8" stroke-width="2" stroke-linecap="round"
+      marker-end="url(#coachHead)"></path>
   </svg>
-  <p class="coach-copy">Keep holding — drag up into the bar</p>
+  <p class="coach-copy">Drag all the way to the real bookmarks bar ↑</p>
 </div>
 
 <script nonce="${nonce}">
 (function () {
   var btn = document.getElementById('bookmarklet');
   var coach = document.getElementById('coach');
-  if (!btn || !coach) return;
+  var path = document.getElementById('coachPath');
+  if (!btn || !coach || !path) return;
+
+  function placeArrow() {
+    var r = btn.getBoundingClientRect();
+    var x1 = r.left + r.width / 2;
+    var y1 = r.top + 4;
+    var x2 = Math.min(Math.max(window.innerWidth / 2, 48), window.innerWidth - 48);
+    var y2 = 10;
+    var c1x = x1;
+    var c1y = Math.max(y2 + 40, y1 - (y1 - y2) * 0.55);
+    var c2x = x2 + (x1 < x2 ? -36 : 36);
+    var c2y = y2 + Math.max(48, (y1 - y2) * 0.35);
+    path.setAttribute('d', 'M ' + x1 + ' ' + y1 + ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + x2 + ' ' + y2);
+  }
+
   function openCoach() {
     document.body.classList.add('coaching');
     coach.hidden = false;
-    btn.classList.remove('wiggle');
+    btn.classList.remove('demo-fly');
+    placeArrow();
   }
   function closeCoach() {
     document.body.classList.remove('coaching');
     coach.hidden = true;
-    btn.classList.add('wiggle');
+    btn.classList.add('demo-fly');
   }
+
   // Click teaches the drag; the javascript: href is for the bookmark once dropped.
   btn.addEventListener('click', function (e) {
     e.preventDefault();
     openCoach();
   });
   btn.addEventListener('dragstart', openCoach);
+  window.addEventListener('resize', function () {
+    if (document.body.classList.contains('coaching')) placeArrow();
+  });
   coach.addEventListener('click', function (e) {
     if (e.target && e.target.getAttribute('data-dismiss')) closeCoach();
   });
