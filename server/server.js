@@ -1272,8 +1272,8 @@ const server = http.createServer(async (req, res) => {
     });
   }
   if (p === '/feedback' && req.method === 'GET') {
-    const base = `http://localhost:${PORT}`;
-    const bookmarklet = `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src=${JSON.stringify(`${base}/feedback.js`)}+'?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
+    const base = `http://localhost:${Number(PORT) || 7878}`;
+    const bookmarklet = `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='${base}/feedback.js?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
     return send(res, 200, `<!doctype html><meta charset="utf-8"><title>tdoc Feedback (local)</title>
 <main style="font:16px/1.6 system-ui;max-width:40rem;margin:3rem auto;padding:0 1.5rem">
 <h1>tdoc Feedback</h1>

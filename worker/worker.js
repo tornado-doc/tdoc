@@ -3803,9 +3803,22 @@ const FEEDBACK_PAGE_CSS = `
 // /feedback — where the bookmarklet is picked up, and the one-line install
 // is shown. The bookmarklet is a plain bookmark whose address is script:
 // clicking it drops /feedback.js into whatever page is open.
+// The address of a bookmark is code, and our own origin goes into it. The
+// origin comes off the request, so it is reduced to the characters an origin
+// can be made of before it is spliced in — nothing else can reach the code.
+function feedbackScriptSrc(base) {
+  const origin = String(base || '').replace(/[^A-Za-z0-9:.\-\[\]/]/g, '');
+  if (!/^https?:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.\-]+)(?::\d{1,5})?$/.test(origin)) throw new Error('feedback: bad origin');
+  return `${origin}/feedback.js`;
+}
+
+function feedbackBookmarklet(src) {
+  return `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='${src}?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
+}
+
 function feedbackBookmarkletPage(base, nonce) {
-  const src = `${base}/feedback.js`;
-  const bookmarklet = `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src=${JSON.stringify(src)}+'?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
+  const src = feedbackScriptSrc(base);
+  const bookmarklet = feedbackBookmarklet(src);
   return `<!doctype html>
 <html lang="en">
 <head>

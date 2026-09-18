@@ -78,8 +78,9 @@ const APP_HTML = `<!doctype html>
       const bm = await context.newPage();
       await bm.goto(`${tdocBase}/feedback`);
       const href = await bm.locator('#bookmarklet').getAttribute('href');
-      assert(href.startsWith('javascript:'), 'bookmark is not a javascript: URL');
-      assert(href.includes(`${tdocBase}/feedback.js`), 'bookmark does not load /feedback.js');
+      // The whole address, not a prefix: it is code, and this is what it must be.
+      const expected = `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='${tdocBase}/feedback.js?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
+      assert(href === expected, `bookmark address differs:\n${href}`);
       assert((await bm.content()).includes(`&lt;script src="${tdocBase}/feedback.js"`), 'one-line install is not shown');
       await bm.close();
     });
