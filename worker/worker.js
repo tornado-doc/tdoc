@@ -3983,7 +3983,7 @@ function feedbackBookmarkletPage(base, nonce) {
   <ol class="install-steps">
     <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
     <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
-    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> (Chrome &amp; Safari)</li>
+    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> (Chrome &amp; Safari). Exit fullscreen first — the bar isn’t there while the page owns the whole screen.</li>
   </ol>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
@@ -4008,7 +4008,7 @@ function feedbackBookmarkletPage(base, nonce) {
     <path id="coachPath" fill="none" stroke="#1652f0" stroke-width="2" stroke-linecap="round"
       marker-end="url(#coachHead)"></path>
   </svg>
-  <p class="coach-copy">
+  <p class="coach-copy" id="coachCopy">
     <span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>
     <span class="line"><span class="n">3</span>No bookmarks bar? Hit ⌘⇧B</span>
   </p>
@@ -4019,7 +4019,22 @@ function feedbackBookmarkletPage(base, nonce) {
   var btn = document.getElementById('bookmarklet');
   var coach = document.getElementById('coach');
   var path = document.getElementById('coachPath');
-  if (!btn || !coach || !path) return;
+  var copy = document.getElementById('coachCopy');
+  if (!btn || !coach || !path || !copy) return;
+
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function setCoachCopy(fullscreen) {
+    if (fullscreen) {
+      copy.innerHTML = '<span class="line"><span class="n">!</span>Exit fullscreen first (Esc)</span>'
+        + '<span class="line"><span class="n">2</span>Then drag onto the bookmarks bar ↑</span>';
+    } else {
+      copy.innerHTML = '<span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>'
+        + '<span class="line"><span class="n">3</span>No bookmarks bar? Hit ⌘⇧B</span>';
+    }
+  }
 
   function placeArrow() {
     var r = btn.getBoundingClientRect();
@@ -4038,6 +4053,7 @@ function feedbackBookmarkletPage(base, nonce) {
     document.body.classList.add('coaching');
     coach.hidden = false;
     btn.classList.remove('demo-fly');
+    setCoachCopy(isFullscreen());
     placeArrow();
   }
   function closeCoach() {
@@ -4054,6 +4070,12 @@ function feedbackBookmarkletPage(base, nonce) {
   btn.addEventListener('dragstart', openCoach);
   window.addEventListener('resize', function () {
     if (document.body.classList.contains('coaching')) placeArrow();
+  });
+  document.addEventListener('fullscreenchange', function () {
+    if (document.body.classList.contains('coaching')) setCoachCopy(isFullscreen());
+  });
+  document.addEventListener('webkitfullscreenchange', function () {
+    if (document.body.classList.contains('coaching')) setCoachCopy(isFullscreen());
   });
   coach.addEventListener('click', function (e) {
     if (e.target && e.target.getAttribute('data-dismiss')) closeCoach();
