@@ -3977,13 +3977,13 @@ function feedbackBookmarkletPage(base, nonce) {
     <div class="demo-page">
       <span class="demo-ghost" aria-hidden="true">✎ tdoc Feedback</span>
       <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a>
-      <span class="step-1" aria-hidden="true">Click Me!</span>
+      <span class="step-1" aria-hidden="true">1 · Click Me!</span>
     </div>
   </div>
   <ol class="install-steps">
-    <li><strong>Not fullscreen</strong> — exit it first (Esc / the green window button). Dragging up won’t peek the bookmarks bar open.</li>
     <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
-    <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window. No bar? <kbd>⌘⇧B</kbd> (Chrome &amp; Safari).</li>
+    <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
+    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> (Chrome &amp; Safari). If you’re fullscreen and the top chrome is hidden, exit fullscreen first — dragging usually won’t peek it open.</li>
   </ol>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
@@ -4036,8 +4036,8 @@ function feedbackBookmarkletPage(base, nonce) {
 
   function setCoachCopy(hidden) {
     if (hidden) {
-      copy.innerHTML = '<span class="line"><span class="n">!</span>Exit fullscreen first — drag won’t reveal the bar</span>'
-        + '<span class="line"><span class="n">2</span>Then drag onto the bookmarks bar ↑</span>';
+      copy.innerHTML = '<span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>'
+        + '<span class="line"><span class="n">?</span>Top bar hidden? Exit fullscreen, then try again</span>';
     } else {
       copy.innerHTML = '<span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>'
         + '<span class="line"><span class="n">3</span>No bookmarks bar? Hit ⌘⇧B</span>';
