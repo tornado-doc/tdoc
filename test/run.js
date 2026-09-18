@@ -18,7 +18,7 @@ const OFFLINE = [
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
-  'feedback-extension.test.js', // product feedback extension reuses tdoc probe/comment stack
+  'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
   'event-convergence.test.js',// eid dedup convergence + fold ordering
@@ -110,6 +110,7 @@ const GATED = [
   'artifact-shell.test.js', // playwright: cross-origin iframe shell boundary (RED until the re-arch lands; see PLAN.md)
   'anchor-scenarios.test.js', // #387 everything selectable can carry a comment
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
+  'feedback-browser.test.js', // playwright: #564 bookmarklet on a localhost app → connect popup → pin → doc
 ];
 
 const runAll = process.argv.includes('--all');
