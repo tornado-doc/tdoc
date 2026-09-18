@@ -3983,7 +3983,7 @@ function feedbackBookmarkletPage(base, nonce) {
   <ol class="install-steps">
     <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
     <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
-    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> (Chrome &amp; Safari). If you’re fullscreen and the top chrome is hidden, exit fullscreen first — dragging usually won’t peek it open.</li>
+    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar). If the top chrome is hidden in fullscreen, exit with <kbd>Esc</kbd> or <kbd>⌃⌘F</kbd>, then try again.</li>
   </ol>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
