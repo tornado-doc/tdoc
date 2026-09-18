@@ -3977,13 +3977,13 @@ function feedbackBookmarkletPage(base, nonce) {
     <div class="demo-page">
       <span class="demo-ghost" aria-hidden="true">✎ tdoc Feedback</span>
       <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a>
-      <span class="step-1" aria-hidden="true">1 · Click Me!</span>
+      <span class="step-1" aria-hidden="true">Click Me!</span>
     </div>
   </div>
   <ol class="install-steps">
+    <li><strong>Not fullscreen</strong> — exit it first (Esc / the green window button). Dragging up won’t peek the bookmarks bar open.</li>
     <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
-    <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
-    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> (Chrome &amp; Safari). Exit fullscreen first — the bar isn’t there while the page owns the whole screen.</li>
+    <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window. No bar? <kbd>⌘⇧B</kbd> (Chrome &amp; Safari).</li>
   </ol>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
@@ -4022,13 +4022,21 @@ function feedbackBookmarkletPage(base, nonce) {
   var copy = document.getElementById('coachCopy');
   if (!btn || !coach || !path || !copy) return;
 
-  function isFullscreen() {
-    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  function chromeLikelyHidden() {
+    if (document.fullscreenElement || document.webkitFullscreenElement) return true;
+    // Mac green-button fullscreen / F11: the window fills the display and the
+    // bookmarks bar is off-screen. An in-progress drag usually will not peek it.
+    try {
+      return window.innerHeight >= screen.height - 8
+        || (window.outerHeight >= screen.height - 2 && window.innerHeight >= screen.availHeight - 24);
+    } catch (_) {
+      return false;
+    }
   }
 
-  function setCoachCopy(fullscreen) {
-    if (fullscreen) {
-      copy.innerHTML = '<span class="line"><span class="n">!</span>Exit fullscreen first (Esc)</span>'
+  function setCoachCopy(hidden) {
+    if (hidden) {
+      copy.innerHTML = '<span class="line"><span class="n">!</span>Exit fullscreen first — drag won’t reveal the bar</span>'
         + '<span class="line"><span class="n">2</span>Then drag onto the bookmarks bar ↑</span>';
     } else {
       copy.innerHTML = '<span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>'
@@ -4053,7 +4061,7 @@ function feedbackBookmarkletPage(base, nonce) {
     document.body.classList.add('coaching');
     coach.hidden = false;
     btn.classList.remove('demo-fly');
-    setCoachCopy(isFullscreen());
+    setCoachCopy(chromeLikelyHidden());
     placeArrow();
   }
   function closeCoach() {
@@ -4067,15 +4075,20 @@ function feedbackBookmarkletPage(base, nonce) {
     e.preventDefault();
     openCoach();
   });
-  btn.addEventListener('dragstart', openCoach);
+  btn.addEventListener('dragstart', function () {
+    openCoach();
+    setCoachCopy(chromeLikelyHidden());
+  });
   window.addEventListener('resize', function () {
-    if (document.body.classList.contains('coaching')) placeArrow();
+    if (!document.body.classList.contains('coaching')) return;
+    setCoachCopy(chromeLikelyHidden());
+    placeArrow();
   });
   document.addEventListener('fullscreenchange', function () {
-    if (document.body.classList.contains('coaching')) setCoachCopy(isFullscreen());
+    if (document.body.classList.contains('coaching')) setCoachCopy(chromeLikelyHidden());
   });
   document.addEventListener('webkitfullscreenchange', function () {
-    if (document.body.classList.contains('coaching')) setCoachCopy(isFullscreen());
+    if (document.body.classList.contains('coaching')) setCoachCopy(chromeLikelyHidden());
   });
   coach.addEventListener('click', function (e) {
     if (e.target && e.target.getAttribute('data-dismiss')) closeCoach();
