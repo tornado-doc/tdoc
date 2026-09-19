@@ -3982,6 +3982,7 @@ function feedbackBookmarkletPage(base, nonce) {
   <div class="bookmark-path" id="bookmarkPath">
   <h2>Drag a bookmark</h2>
   <p class="device-note muted">Desktop only — drag the pill onto your bookmarks bar.</p>
+  <p class="chrome-hint"><strong>Fullscreen tip.</strong> In Chrome, <kbd>⌘⇧F</kbd> keeps the top bar visible in fullscreen so the bookmarks bar has somewhere to live — or exit fullscreen, then drag.</p>
   <div class="demo" id="demo">
     <div class="demo-titlebar">
       <div class="demo-dots" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
@@ -4030,7 +4031,7 @@ function feedbackBookmarkletPage(base, nonce) {
   </svg>
   <p class="coach-copy" id="coachCopy">
     <span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>
-    <span class="line"><span class="n">3</span>No bookmarks bar? Hit ⌘⇧B</span>
+    <span class="line"><span class="n">3</span>No bar? ⌘⇧B · fullscreen top bar? ⌘⇧F</span>
   </p>
 </div>
 
