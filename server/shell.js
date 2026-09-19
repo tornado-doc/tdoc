@@ -15,23 +15,23 @@
     const limit = Math.max(40, Math.min(300, Number(maxLen) || 180));
     if (typeof html !== 'string' || !html) return '';
     const text = html
-      .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+      // Close tags may carry whitespace before `>` — match that so a filter
+      // cannot be skipped with `</script >`.
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
+      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\s*>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/&quot;/gi, '"')
-      .replace(/&#39;|&apos;/gi, "'")
+      // Drop entities entirely (to a space) rather than decoding to `&`, which
+      // CodeQL flags as a double-unescape hazard when the string later goes
+      // through HTML escaping for meta attributes.
+      .replace(/&(?:#x?[0-9a-f]+|[a-z]+);/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
     if (!text) return '';
     if (text.length <= limit) return text;
     const cut = text.slice(0, limit - 1);
     const softer = cut.replace(/\s+\S*$/, '');
-    return (softer.length >= 40 ? softer : cut) + '…';
+    return (softer.length >= 40 ? softer : cut) + '\u2026';
   }
 
   function seoHeadHtml(d) {
