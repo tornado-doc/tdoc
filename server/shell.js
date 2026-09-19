@@ -17,9 +17,9 @@
     const text = html
       // Close tags may carry whitespace before `>` — match that so a filter
       // cannot be skipped with `</script >`.
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
-      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\s*>/gi, ' ')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
+      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\b[^>]*>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
       // Drop entities entirely (to a space) rather than decoding to `&`, which
       // CodeQL flags as a double-unescape hazard when the string later goes
