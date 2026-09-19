@@ -3872,16 +3872,17 @@ const FEEDBACK_PAGE_CSS = `
   .chrome-hint[hidden] { display: none !important; }
   .chrome-hint strong { color: var(--td-accent); }
   .device-note { margin: 0 0 1rem; font-size: .92rem; }
-  .script-path { margin: 0 0 2rem; padding: 1rem 1.1rem; border: 1px solid var(--td-line);
+  .phone-only { display: none; margin: 0 0 1.25rem; padding: .85rem 1rem; border-radius: 12px;
+    background: var(--td-accent-tint); border: 1px solid color-mix(in srgb, var(--td-accent) 28%, white);
+    font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--td-ink); }
+  .phone-only strong { color: var(--td-accent); }
+  .script-path { margin: 2rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--td-line);
     border-radius: 12px; background: #fafafa; }
   .script-path h2 { margin-top: 0; }
   .script-path pre { margin: 0; }
   @media (max-width: 720px) {
-    .bookmark-path .demo,
-    .bookmark-path .install-steps,
-    .bookmark-path .chrome-hint,
-    .bookmark-path .step-after { display: none !important; }
-    .bookmark-path h2::after { content: " — desktop"; font-weight: 500; color: var(--td-muted); font-size: .9em; }
+    .phone-only { display: block; }
+    .install-desktop { display: none !important; }
   }
 
   .coach[hidden] { display: none !important; }
@@ -3980,15 +3981,12 @@ function feedbackBookmarkletPage(base, nonce) {
   <h1>Leave feedback on your own app</h1>
   <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent.</p>
 
-  <div class="script-path" id="scriptPath">
-    <h2>One line in the app</h2>
-    <p>Works on desktop and phones — add this once (dev and preview builds only) and anyone who opens the site gets the comment button:</p>
-    <pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre>
-  </div>
+  <p class="phone-only" id="phoneOnly"><strong>Desktop only for now.</strong> Setting this up needs a bookmarks bar (or editing your app’s HTML) — open this page on a computer.</p>
 
+  <div class="install-desktop" id="installDesktop">
   <div class="bookmark-path" id="bookmarkPath">
-  <h2>Or drag a bookmark</h2>
-  <p class="device-note muted">Desktop: drag the pill to your bookmarks bar. Phones can open this page, but there’s no bookmarks bar to drop onto — use the one-line install above.</p>
+  <h2>Drag a bookmark</h2>
+  <p class="device-note muted">Desktop only — drag the pill onto your bookmarks bar.</p>
   <p id="chromeHint" class="chrome-hint" hidden><strong>Top bar looks hidden.</strong> In Chrome fullscreen, press <kbd>⌘⇧F</kbd> to always show the toolbar (so the bookmarks bar has somewhere to live), or exit fullscreen — then drag.</p>
   <div class="demo" id="demo">
     <div class="demo-titlebar">
@@ -4012,6 +4010,13 @@ function feedbackBookmarkletPage(base, nonce) {
     <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar). In Chrome fullscreen, <kbd>⌘⇧F</kbd> toggles whether the top bar stays visible; if it’s hidden, turn that on (or exit fullscreen) so you have somewhere to drop.</li>
   </ol>
   <p class="muted step-after">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
+  </div>
+
+  <div class="script-path" id="scriptPath">
+    <h2>Or one line in the app</h2>
+    <p>Add this once in your HTML (dev and preview builds). Anyone who opens that build — including on a phone — gets the comment button. You still add the line from a computer.</p>
+    <pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre>
+  </div>
   </div>
 
   <h2>Where it goes</h2>
