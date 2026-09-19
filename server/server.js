@@ -905,16 +905,19 @@ refreshStars(); const _starTimer = setInterval(refreshStars, 3600e3); if (_starT
 
 // P1: the shell renders a top bar + embeds the author frame. P2 adds the
 // postMessage anchoring bridge + comment chrome (composer/pins/cards) here.
-function shellDocument(slug, version, nonce) {
+function shellDocument(slug, version, nonce, reqUrl) {
   let title = slug, versions = [{ n: version }];
   let latestVersion = version;
+  let rawHtml = '';
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, slug, 'meta.json'), 'utf8'));
     if (meta && meta.title) title = meta.title;
     if (Array.isArray(meta.versions) && meta.versions.length) versions = meta.versions.map((v) => ({ n: v.n }));
     latestVersion = latestLocalVersion(slug, meta) || version;
   } catch {}
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  try {
+    rawHtml = fs.readFileSync(path.join(ROOT, slug, `v${version}`, 'index.html'), 'utf8');
+  } catch {}
   const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const ident = e2eIdentity();
@@ -945,6 +948,23 @@ function shellDocument(slug, version, nonce) {
     signInToComment: false,
     stars: cachedStars,
   });
+  let pageUrl = '';
+  try {
+    const u = reqUrl ? new URL(reqUrl) : null;
+    if (u) {
+      pageUrl = isLanding && (u.pathname === '/' || u.pathname === '')
+        ? `${u.origin}/`
+        : `${u.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+    }
+  } catch {}
+  const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(rawHtml, 180)) || '';
+  const seo = pageUrl ? {
+    title,
+    description: description || (isLanding ? 'Docs that fix themselves.' : 'A local tdoc.'),
+    url: pageUrl,
+    image: `${new URL(pageUrl).origin}/tdoc_logo.png`,
+    type: isLanding ? 'website' : 'article',
+  } : null;
   return SHELL.shellHtml({
     title,
     nonceAttr,
@@ -960,6 +980,7 @@ function shellDocument(slug, version, nonce) {
     }),
     runtimeJsPath: SHELL_RUNTIME.js.path,
     runtimeCssPath: SHELL_RUNTIME.css.path,
+    seo,
   });
 }
 
@@ -1498,7 +1519,7 @@ const server = http.createServer(async (req, res) => {
     // Single path: every doc renders the cross-origin shell (chrome in the outer
     // document, author content isolated in the /frame iframe). The legacy
     // single-origin overlay-injection path is gone — see the git history / PLAN.md.
-    return send(res, 200, shellDocument(slug, Number(vStr), nonce), {
+    return send(res, 200, shellDocument(slug, Number(vStr), nonce, `http://127.0.0.1${p}`), {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': cspHeader(nonce),
     });

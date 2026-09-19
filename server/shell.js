@@ -8,6 +8,76 @@
   'use strict';
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]); }); }
 
+  // Plain-text excerpt from author HTML for Open Graph / meta description.
+  // Crawlers and share cards never run the sandboxed frame, so the shell has
+  // to carry a short summary itself.
+  function excerptFromHtml(html, maxLen) {
+    const limit = Math.max(40, Math.min(300, Number(maxLen) || 180));
+    if (typeof html !== 'string' || !html) return '';
+    const text = html
+      .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) return '';
+    if (text.length <= limit) return text;
+    const cut = text.slice(0, limit - 1);
+    const softer = cut.replace(/\s+\S*$/, '');
+    return (softer.length >= 40 ? softer : cut) + '…';
+  }
+
+  function seoHeadHtml(d) {
+    const seo = d && d.seo;
+    if (!seo || typeof seo !== 'object') return '';
+    const title = esc(seo.title || d.title || '');
+    const description = esc(seo.description || '');
+    const url = esc(seo.url || '');
+    const image = esc(seo.image || '');
+    const type = esc(seo.type || 'article');
+    const robots = esc(seo.robots || '');
+    let out = '';
+    if (robots) out += '<meta name="robots" content="' + robots + '">\n';
+    if (url) out += '<link rel="canonical" href="' + url + '">\n';
+    if (description) out += '<meta name="description" content="' + description + '">\n';
+    out += '<meta property="og:type" content="' + type + '">\n';
+    out += '<meta property="og:site_name" content="tdoc">\n';
+    if (url) out += '<meta property="og:url" content="' + url + '">\n';
+    if (title) out += '<meta property="og:title" content="' + title + '">\n';
+    if (description) out += '<meta property="og:description" content="' + description + '">\n';
+    if (image) out += '<meta property="og:image" content="' + image + '">\n';
+    // Logo is square; summary (not summary_large_image) matches it.
+    out += '<meta name="twitter:card" content="summary">\n';
+    if (title) out += '<meta name="twitter:title" content="' + title + '">\n';
+    if (description) out += '<meta name="twitter:description" content="' + description + '">\n';
+    if (image) out += '<meta name="twitter:image" content="' + image + '">\n';
+    return out;
+  }
+
+  // Noscript + crawlable summary: share bots use the meta tags above; search
+  // engines that skip JS still get a title and a short plain-text lead without
+  // pulling author HTML out of the sandbox.
+  function seoBodyHtml(d) {
+    const seo = d && d.seo;
+    if (!seo || typeof seo !== 'object') return '';
+    const title = esc(seo.title || d.title || '');
+    const description = esc(seo.description || '');
+    if (!title && !description) return '';
+    let out = '<noscript>\n';
+    if (title) out += '<h1>' + title + '</h1>\n';
+    if (description) out += '<p>' + description + '</p>\n';
+    if (seo.url) out += '<p><a href="' + esc(seo.url) + '">Open on tdoc</a></p>\n';
+    out += '</noscript>\n';
+    return out;
+  }
+
   function shellHtml(d) {
     return '<!doctype html><html lang="en"><head>\n' +
 '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">\n' +
@@ -23,8 +93,10 @@
 '<link rel="apple-touch-icon" href="/apple-touch-icon.png">\n' +
 '<link rel="manifest" href="/site.webmanifest">\n' +
 '<title>' + esc(d.title) + '</title>\n' +
+seoHeadHtml(d) +
 '<link rel="stylesheet" href="' + esc(d.runtimeCssPath) + '">\n' +
 '</head><body>\n' +
+seoBodyHtml(d) +
 '  <div id="tdoc-shell-root"></div>\n' +
 '  <script' + d.nonceAttr + '>window.__TDOC_SHELL__ = ' + d.cfgJson + ';</scr' + 'ipt>\n' +
 '  <script' + d.nonceAttr + '>window.__TDOC_SHELL_BOOT__ = ' + d.bootJson + ';</scr' + 'ipt>\n' +
@@ -46,7 +118,7 @@
       '</body></html>';
   }
 
-  var api = { shellHtml: shellHtml, appHtml: appHtml };
+  var api = { shellHtml: shellHtml, appHtml: appHtml, excerptFromHtml: excerptFromHtml };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.TDOC_SHELL_BUILDER = api;
 })();

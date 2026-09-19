@@ -55,6 +55,44 @@ const bundler = read('bin/tdoc-bundle');
     if (/<iframe|class="tdoc-bar"/.test(doc)) throw new Error('server still renders provider UI');
   });
 
+  await t('shell HTML carries Open Graph / Twitter Card meta for share previews', async () => {
+    const shell = require(path.join(ROOT, 'server/shell.js'));
+    const excerpt = shell.excerptFromHtml(
+      '<html><body><h1>Hello</h1><script>x()</script><p>World of share cards and SEO.</p></body></html>',
+      80,
+    );
+    if (!/^Hello World of share cards/.test(excerpt) || /x\(\)/.test(excerpt)) {
+      throw new Error(`excerptFromHtml failed: ${JSON.stringify(excerpt)}`);
+    }
+    const doc = shell.shellHtml({
+      title: 'Jev brief',
+      nonceAttr: ' nonce="abc"',
+      cfgJson: '{}',
+      bootJson: '{}',
+      runtimeJsPath: '/shell.abc.js',
+      runtimeCssPath: '/shell.abc.css',
+      seo: {
+        title: 'Jev brief',
+        description: 'A model that returns decisions.',
+        url: 'https://tdoc.dev/d/jev-model-brief/v/3',
+        image: 'https://tdoc.dev/tdoc_logo.png',
+        type: 'article',
+      },
+    });
+    for (const needle of [
+      'rel="canonical" href="https://tdoc.dev/d/jev-model-brief/v/3"',
+      'property="og:title" content="Jev brief"',
+      'property="og:description" content="A model that returns decisions."',
+      'property="og:image" content="https://tdoc.dev/tdoc_logo.png"',
+      'name="twitter:card" content="summary"',
+      'name="twitter:title" content="Jev brief"',
+      '<noscript>',
+      '<h1>Jev brief</h1>',
+    ]) {
+      if (!doc.includes(needle)) throw new Error(`SEO shell missing ${needle}`);
+    }
+  });
+
   await t('document entry renders React components and never starts a legacy engine', async () => {
     const entry = read('shell/src/main.jsx');
     if (!entry.includes('createRoot(root).render(<DocumentShell')) throw new Error('DocumentShell render missing');
