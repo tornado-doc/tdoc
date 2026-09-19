@@ -3866,11 +3866,6 @@ const FEEDBACK_PAGE_CSS = `
   .install-steps li strong { color: var(--td-accent); font-weight: 650; }
   .install-steps kbd { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; background: #f1f3f4;
     border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem; }
-  .chrome-hint { margin: 0 0 .85rem; padding: .65rem .85rem; border-radius: 10px;
-    background: var(--td-accent-tint); color: var(--td-ink); font: 500 14px/1.4 -apple-system, "SF Pro Text", system-ui, sans-serif;
-    border: 1px solid color-mix(in srgb, var(--td-accent) 28%, white); }
-  .chrome-hint[hidden] { display: none !important; }
-  .chrome-hint strong { color: var(--td-accent); }
   .device-note { margin: 0 0 1rem; font-size: .92rem; }
   .phone-only { display: none; margin: 0 0 1.25rem; padding: .85rem 1rem; border-radius: 12px;
     background: var(--td-accent-tint); border: 1px solid color-mix(in srgb, var(--td-accent) 28%, white);
@@ -3987,7 +3982,6 @@ function feedbackBookmarkletPage(base, nonce) {
   <div class="bookmark-path" id="bookmarkPath">
   <h2>Drag a bookmark</h2>
   <p class="device-note muted">Desktop only — drag the pill onto your bookmarks bar.</p>
-  <p id="chromeHint" class="chrome-hint" hidden><strong>Top bar looks hidden.</strong> In Chrome fullscreen, press <kbd>⌘⇧F</kbd> to always show the toolbar (so the bookmarks bar has somewhere to live), or exit fullscreen — then drag.</p>
   <div class="demo" id="demo">
     <div class="demo-titlebar">
       <div class="demo-dots" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
@@ -4048,45 +4042,6 @@ function feedbackBookmarkletPage(base, nonce) {
   var copy = document.getElementById('coachCopy');
   if (!btn || !coach || !path || !copy) return;
 
-  var hint = document.getElementById('chromeHint');
-
-  function isPhoneLike() {
-    try {
-      return window.matchMedia('(max-width: 720px), (hover: none) and (pointer: coarse)').matches;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function chromeLikelyHidden() {
-    // Phones fill the screen without a desktop bookmarks bar — don't nag about toolbar.
-    if (isPhoneLike()) return false;
-    if (document.fullscreenElement || document.webkitFullscreenElement) return true;
-    // Mac green-button fullscreen / F11: the window fills the display and the
-    // bookmarks bar is off-screen. An in-progress drag usually will not peek it.
-    try {
-      return window.innerHeight >= screen.height - 8
-        || (window.outerHeight >= screen.height - 2 && window.innerHeight >= screen.availHeight - 24);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function updateChromeHint() {
-    if (!hint) return;
-    hint.hidden = !chromeLikelyHidden();
-  }
-
-  function setCoachCopy(hidden) {
-    if (hidden) {
-      copy.innerHTML = '<span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>'
-        + '<span class="line"><span class="n">?</span>Top bar hidden? ⌘⇧F (Chrome) to show it in fullscreen</span>';
-    } else {
-      copy.innerHTML = '<span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>'
-        + '<span class="line"><span class="n">3</span>No bar? ⌘⇧B (Favorites bar in Safari)</span>';
-    }
-  }
-
   function placeArrow() {
     var r = btn.getBoundingClientRect();
     var x1 = r.left + r.width / 2;
@@ -4104,7 +4059,6 @@ function feedbackBookmarkletPage(base, nonce) {
     document.body.classList.add('coaching');
     coach.hidden = false;
     btn.classList.remove('demo-fly');
-    setCoachCopy(chromeLikelyHidden());
     placeArrow();
   }
   function closeCoach() {
@@ -4120,21 +4074,10 @@ function feedbackBookmarkletPage(base, nonce) {
   });
   btn.addEventListener('dragstart', function () {
     openCoach();
-    setCoachCopy(chromeLikelyHidden());
   });
   window.addEventListener('resize', function () {
-    updateChromeHint();
     if (!document.body.classList.contains('coaching')) return;
-    setCoachCopy(chromeLikelyHidden());
     placeArrow();
-  });
-  document.addEventListener('fullscreenchange', function () {
-    updateChromeHint();
-    if (document.body.classList.contains('coaching')) setCoachCopy(chromeLikelyHidden());
-  });
-  document.addEventListener('webkitfullscreenchange', function () {
-    updateChromeHint();
-    if (document.body.classList.contains('coaching')) setCoachCopy(chromeLikelyHidden());
   });
   coach.addEventListener('click', function (e) {
     if (e.target && e.target.getAttribute('data-dismiss')) closeCoach();
@@ -4142,7 +4085,6 @@ function feedbackBookmarkletPage(base, nonce) {
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeCoach();
   });
-  updateChromeHint();
 })();
 </script>
 </body>
