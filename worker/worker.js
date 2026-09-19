@@ -2697,7 +2697,12 @@ async function indexData(env, session, origin) {
   // recents at all); the BYOK owner column stays a handle comparison, since
   // row.owner is a github_login and always will be for those docs.
   const viewerKey = actorKey(session);
+  // Feedback spaces are real docs (comments/access/@ reuse the same store) but
+  // they are reached from the app float, not hunted in My docs. created_from
+  // is stamped at connect; "use an existing doc" targets are left alone.
+  const isFeedbackSpace = (meta) => meta && meta.created_from === 'feedback';
   const mine = catalog.filter((row) => {
+    if (isFeedbackSpace(row.meta)) return false;
     if (hosted) return isDocOwnerSession(env, session, row.meta);
     return !row.owner || row.owner === viewer;
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
@@ -2709,7 +2714,8 @@ async function indexData(env, session, origin) {
   const bySlug = new Map(catalog.map((row) => [row.slug, row]));
   const savedRows = (items) => items.map((item) => {
     const row = bySlug.get(item.slug);
-    return row && docReadableBy(env, session, row.meta) ? { ...row, at: item.at } : null;
+    if (!row || isFeedbackSpace(row.meta) || !docReadableBy(env, session, row.meta)) return null;
+    return { ...row, at: item.at };
   }).filter(Boolean);
   const ownerDisplay = (row) => {
     if (row.owner) return row.owner;
@@ -3719,7 +3725,7 @@ function feedbackSpaceHtml(origin, base) {
 <main>
   <h1>Feedback · ${escapeHtml(host)}</h1>
   <p>Product feedback left on <a href="${escapeHtml(origin)}">${escapeHtml(origin)}</a>. Every comment here points at the page and the element it was left on.</p>
-  <p class="muted">To leave feedback, open the app and click the tdoc bookmark, or add <code>&lt;script src="${escapeHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app. To share this space, share this link.</p>
+  <p class="muted">To leave feedback, open the app and click the tdoc bookmark, or add <code>&lt;script src="${escapeHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app. Share from the comment button in the app — this space stays out of My docs.</p>
 </main>
 </body>
 </html>
@@ -4015,7 +4021,7 @@ function feedbackBookmarkletPage(base, nonce) {
   </div>
 
   <h2>Where it goes</h2>
-  <p>Comments land in a feedback space on ${host} — a doc named after your app, created for you on first connect. Share that doc’s link the way you share any TDoc; @mention a teammate or an agent from the comment itself.</p>
+  <p>Comments land in a feedback space on ${host} — a doc named after your app, created for you on first connect. It stays out of My docs; share from the comment button in your app (copy link), or open the space on ${host} to manage access.</p>
 </main>
 
 <div id="coach" class="coach" hidden>

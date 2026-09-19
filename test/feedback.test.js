@@ -56,6 +56,14 @@ const APP = 'http://localhost:3000';
     assert(meta.hosted && meta.hosted.github_login === 'julie', 'hosted ownership stamped');
     const html = await (await env.DOCS.get(`docs/${r.body.slug}/v1/index.html`)).text();
     assert(html.includes('Feedback · localhost:3000') && html.includes('/feedback.js'), 'space doc explains itself');
+
+    // Feedback spaces stay off My docs — share is from the app float.
+    const me = await worker.fetch(req('/me', { cookie }), env, {});
+    assert(me.status === 200, `/me: ${me.status}`);
+    const boot = /window\.__TDOC_APP_BOOT__\s*=\s*(\{[\s\S]*?\});/.exec(await me.text());
+    assert(boot, '/me boot missing');
+    const data = JSON.parse(boot[1]);
+    assert(Array.isArray(data.docs) && !data.docs.some((d) => d.slug === r.body.slug), 'feedback space listed in My docs');
   });
 
   await t('the same person connecting the same app again reuses the space; another app gets its own', async () => {

@@ -36,6 +36,23 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-feedback-notice p { color: #ccc; line-height: 1.45; }
     #tdoc-feedback-root .tdoc-feedback-notice a,
     #tdoc-feedback-root .tdoc-feedback-notice button { color: #fff; }
+    #tdoc-feedback-root .tdoc-feedback-dock {
+      position: fixed; right: 18px; bottom: 68px; z-index: 2147483642; pointer-events: auto;
+      display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 999px;
+      background: #fff; color: #1a1a1a; border: 1px solid #e5e5e7;
+      box-shadow: 0 4px 16px rgba(0,0,0,.10); font: 600 12px/1.2 system-ui, -apple-system, sans-serif;
+    }
+    #tdoc-feedback-root .tdoc-feedback-dock .counts { padding: 0 4px; color: #6b6a66; white-space: nowrap; }
+    #tdoc-feedback-root .tdoc-feedback-dock .counts strong { color: #1a1a1a; font-weight: 700; }
+    #tdoc-feedback-root .tdoc-feedback-dock button,
+    #tdoc-feedback-root .tdoc-feedback-dock a {
+      appearance: none; border: 0; background: #f0f0ee; color: #1a1a1a; cursor: pointer;
+      border-radius: 999px; padding: 5px 10px; font: inherit; text-decoration: none;
+    }
+    #tdoc-feedback-root .tdoc-feedback-dock button:hover,
+    #tdoc-feedback-root .tdoc-feedback-dock a:hover { background: #e8eeff; color: #1652f0; }
+    #tdoc-feedback-root .tdoc-feedback-dock button.primary { background: #1652f0; color: #fff; }
+    #tdoc-feedback-root .tdoc-feedback-dock button.primary:hover { background: #1245d0; color: #fff; }
     .ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu {
       z-index: 2147483647 !important;
     }
@@ -281,9 +298,54 @@ ${uiCss}
     }
   }
 
+  async function copyText(value) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch (_) {}
+    try {
+      const area = document.createElement('textarea');
+      area.value = value;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand('copy');
+      area.remove();
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function FeedbackDock({ session, comments, onToggle }) {
+    const [copied, setCopied] = useState(false);
+    if (!session || !session.doc_url) return null;
+    const live = (Array.isArray(comments) ? comments : []).filter((c) => c && !c.deleted);
+    const open = live.filter((c) => c.status !== 'applied').length;
+    const share = async () => {
+      const ok = await copyText(session.doc_url);
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    };
+    return (
+      <div className="tdoc-feedback-dock" role="group" aria-label="tdoc feedback">
+        <span className="counts"><strong>{live.length}</strong>{live.length === 1 ? ' comment' : ' comments'} · <strong>{open}</strong> open</span>
+        <button type="button" className="primary" onClick={share}>{copied ? 'Copied' : 'Share'}</button>
+        <a href={session.doc_url} target="_blank" rel="noopener noreferrer">Open</a>
+        {onToggle ? <button type="button" onClick={onToggle}>Comment</button> : null}
+      </div>
+    );
+  }
+
   function FeedbackApp() {
     const [active, setActive] = useState(false);
     const [surface, setSurface] = useState(null);
+    const [session, setSession] = useState(() => readSession());
     const [hovered, setHovered] = useState(null);
     const [selected, setSelected] = useState(null);
     const [openId, setOpenId] = useState(null);
@@ -294,6 +356,7 @@ ${uiCss}
     const apply = useCallback((result) => {
       if (result?.ok) {
         setSurface(result);
+        if (result.config) setSession((prev) => ({ ...(prev || {}), ...result.config, token: (prev && prev.token) || result.config.token }));
         setNotice(result.signedIn === false ? { status: 401, error: 'Connect your tdoc account to comment here.' } : null);
         return true;
       }
@@ -313,6 +376,23 @@ ${uiCss}
       setHovered(null);
       if (next) await load();
     }, [active, load]);
+
+    // Warm the dock (counts + share URL) without forcing comment mode on.
+    useEffect(() => {
+      let cancelled = false;
+      (async () => {
+        try {
+          const next = await ensureSession();
+          if (cancelled || !next) return;
+          setSession(next);
+          const result = await call({ type: 'tdoc-feedback-load', pageUrl: canonical() });
+          if (!cancelled && result?.ok) apply(result);
+        } catch (_) {
+          // Stay quiet until the person opens the pill — connect needs a click.
+        }
+      })();
+      return () => { cancelled = true; };
+    }, [apply]);
 
     // The bookmarklet's second click, and anything else on the page that
     // wants to drive us, goes through window.tdocFeedback.
@@ -418,14 +498,18 @@ ${uiCss}
 
     if (!active) {
       return (
-        <button className="tdoc-comment-pill tdoc-feedback-mode tdoc-feedback-idle" type="button" title="Leave feedback · tdoc" onClick={toggle}>
-          <MessageSquarePlus aria-hidden="true" />
-        </button>
+        <>
+          <FeedbackDock session={session} comments={surface?.comments} onToggle={toggle} />
+          <button className="tdoc-comment-pill tdoc-feedback-mode tdoc-feedback-idle" type="button" title="Leave feedback · tdoc" onClick={toggle}>
+            <MessageSquarePlus aria-hidden="true" />
+          </button>
+        </>
       );
     }
     const hoverRect = hovered?.getBoundingClientRect();
     return (
       <>
+        <FeedbackDock session={session || surface?.config} comments={comments} />
         {hoverRect ? <div className="tdoc-hover-outline" style={{ left: hoverRect.left, top: hoverRect.top, width: hoverRect.width, height: hoverRect.height }} /> : null}
         {pins.map(({ comment, element }) => {
           if (!element) return null;
