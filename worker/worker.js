@@ -1842,7 +1842,7 @@ function injectReaderCss(html, css) {
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
-function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta, oidc) {
+function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta, oidc, pageUrl) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
   if (!SHELL) return rawHtml;
@@ -1909,6 +1909,21 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
       latestUrl: `/d/${encodeURIComponent(slug)}/v/${latestVersion}`,
     };
   }
+  // Share cards and search engines never enter the sandboxed /frame. Put a
+  // short excerpt + absolute URLs on the shell so Twitter/OG/SEO can work.
+  const origin = (() => {
+    try { return pageUrl ? new URL(pageUrl).origin : ''; } catch (_) { return ''; }
+  })();
+  const access = accessFromMeta(docMeta || {});
+  const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(rawHtml, 180)) || '';
+  const seo = origin ? {
+    title,
+    description: description || (isLanding ? 'Docs that fix themselves.' : `A tdoc by ${author || 'tdoc'}.`),
+    url: pageUrl,
+    image: `${origin}/tdoc_logo.png`,
+    type: isLanding ? 'website' : 'article',
+    robots: access.visibility === 'private' ? 'noindex, nofollow' : '',
+  } : null;
   return SHELL.shellHtml({
     title,
     nonceAttr,
@@ -1919,6 +1934,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     }),
     runtimeJsPath: SHELL_RUNTIME_JS_PATH,
     runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+    seo,
   });
 }
 
@@ -2250,12 +2266,16 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     } catch {}
   }
   const render = shellDocumentWorker;
+  const reqUrl = new URL(req.url);
+  const pageUrl = isLanding && (reqUrl.pathname === '/' || reqUrl.pathname === '')
+    ? `${reqUrl.origin}/`
+    : `${reqUrl.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
   return {
     ok: true,
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', debug: await isDebugAccount(env, session) }), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', debug: await isDebugAccount(env, session) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };

@@ -27,7 +27,7 @@ console.log('hosted title + save flow (#367)');
 t('the worker names a document by its own title, with the slug as fallback', () => {
   const start = worker.indexOf('function shellDocumentWorker(');
   const block = worker.slice(start, worker.indexOf('\nfunction ', start + 20));
-  assert(/function shellDocumentWorker\([^)]*docMeta, oidc\)/.test(worker),
+  assert(/function shellDocumentWorker\([^)]*docMeta, oidc(?:, pageUrl)?\)/.test(worker),
     'shellDocumentWorker never receives the document record the title comes from');
   assert(!/let title = slug;/.test(block), 'the title is still hardcoded to the slug');
   assert(/const title = typeof docTitle === 'string' && docTitle\.trim\(\) \? docTitle\.trim\(\) : slug;/.test(block),
