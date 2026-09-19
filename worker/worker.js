@@ -3872,6 +3872,17 @@ const FEEDBACK_PAGE_CSS = `
   .chrome-hint[hidden] { display: none !important; }
   .chrome-hint strong { color: var(--td-accent); }
   .device-note { margin: 0 0 1rem; font-size: .92rem; }
+  .script-path { margin: 0 0 2rem; padding: 1rem 1.1rem; border: 1px solid var(--td-line);
+    border-radius: 12px; background: #fafafa; }
+  .script-path h2 { margin-top: 0; }
+  .script-path pre { margin: 0; }
+  @media (max-width: 720px) {
+    .bookmark-path .demo,
+    .bookmark-path .install-steps,
+    .bookmark-path .chrome-hint,
+    .bookmark-path .step-after { display: none !important; }
+    .bookmark-path h2::after { content: " — desktop"; font-weight: 500; color: var(--td-muted); font-size: .9em; }
+  }
 
   .coach[hidden] { display: none !important; }
   .coach { position: fixed; inset: 0; z-index: 10000; }
@@ -3967,10 +3978,17 @@ function feedbackBookmarkletPage(base, nonce) {
 <body>
 <main>
   <h1>Leave feedback on your own app</h1>
-  <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent. Nothing to install.</p>
+  <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent.</p>
 
-  <h2>Add the bookmark once</h2>
-  <p class="device-note muted">Desktop browsers only for now — phones don’t have a bookmarks bar you can drag onto. On mobile (or any device), use the one-line script under Advanced: anyone who opens your site gets the comment button.</p>
+  <div class="script-path" id="scriptPath">
+    <h2>One line in the app</h2>
+    <p>Works on desktop and phones — add this once (dev and preview builds only) and anyone who opens the site gets the comment button:</p>
+    <pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre>
+  </div>
+
+  <div class="bookmark-path" id="bookmarkPath">
+  <h2>Or drag a bookmark</h2>
+  <p class="device-note muted">Desktop: drag the pill to your bookmarks bar. Phones can open this page, but there’s no bookmarks bar to drop onto — use the one-line install above.</p>
   <p id="chromeHint" class="chrome-hint" hidden><strong>Top bar looks hidden.</strong> In Chrome fullscreen, press <kbd>⌘⇧F</kbd> to always show the toolbar (so the bookmarks bar has somewhere to live), or exit fullscreen — then drag.</p>
   <div class="demo" id="demo">
     <div class="demo-titlebar">
@@ -3993,16 +4011,11 @@ function feedbackBookmarkletPage(base, nonce) {
     <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
     <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar). In Chrome fullscreen, <kbd>⌘⇧F</kbd> toggles whether the top bar stays visible; if it’s hidden, turn that on (or exit fullscreen) so you have somewhere to drop.</li>
   </ol>
-  <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
+  <p class="muted step-after">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
+  </div>
 
   <h2>Where it goes</h2>
   <p>Comments land in a feedback space on ${host} — a doc named after your app, created for you on first connect. Share that doc’s link the way you share any TDoc; @mention a teammate or an agent from the comment itself.</p>
-
-  <details class="advanced">
-    <summary>Advanced — one line in the app</summary>
-    <p>For an app the whole team opens, add this once (dev and preview builds only) and everyone gets the comment button without a bookmark:</p>
-    <pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre>
-  </details>
 </main>
 
 <div id="coach" class="coach" hidden>
@@ -4032,7 +4045,17 @@ function feedbackBookmarkletPage(base, nonce) {
 
   var hint = document.getElementById('chromeHint');
 
+  function isPhoneLike() {
+    try {
+      return window.matchMedia('(max-width: 720px), (hover: none) and (pointer: coarse)').matches;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function chromeLikelyHidden() {
+    // Phones fill the screen without a desktop bookmarks bar — don't nag about toolbar.
+    if (isPhoneLike()) return false;
     if (document.fullscreenElement || document.webkitFullscreenElement) return true;
     // Mac green-button fullscreen / F11: the window fills the display and the
     // bookmarks bar is off-screen. An in-progress drag usually will not peek it.
