@@ -652,6 +652,37 @@ function latestLocalVersion(slug, meta) {
 // (text/plain, no custom headers) without a preflight; requiring JSON
 // content-type defeats that, and rejecting non-local Origins closes the rest.
 // Returns true if the request is allowed to mutate.
+function isLocalOrigin(origin) {
+  try {
+    const h = new URL(origin).hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
+  } catch { return false; }
+}
+
+// A browser origin, exactly — no path, no trailing slash, http(s) only.
+function feedbackOriginLocal(raw) {
+  try {
+    const u = new URL(String(raw || ''));
+    if (!/^https?:$/.test(u.protocol) || u.origin !== String(raw)) return null;
+    return u.origin;
+  } catch { return null; }
+}
+
+function feedbackSessionLocal(slug) {
+  const meta = readJson(path.join(ROOT, slug, 'meta.json'), { title: slug, versions: [] });
+  const version = Math.max(1, ...(Array.isArray(meta.versions) ? meta.versions.map((v) => Number(v && v.n) || 0) : [0]));
+  const identity = e2eIdentity();
+  return {
+    ok: true,
+    slug,
+    version,
+    title: meta.title || slug,
+    doc_url: `http://localhost:${PORT}/d/${encodeURIComponent(slug)}/v/${version}`,
+    identity,
+    is_owner: Boolean(identity && E2E_OWNER && identity.login.toLowerCase() === E2E_OWNER.toLowerCase()),
+  };
+}
+
 function isLocalMutation(req) {
   const ct = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (ct !== 'application/json') return false;
@@ -1217,6 +1248,95 @@ const server = http.createServer(async (req, res) => {
   // wild: a daemon from another product bound 7878).
   if (p === '/api/ping') return json(res, 200, { ok: true, service: 'tdoc' });
 
+  // The feedback client (#564) runs inside a localhost app on another port
+  // and fetches us cross-origin. Only a local origin is answered, the same
+  // set isLocalMutation trusts; the worker's door is `*`.
+  const requestOrigin = req.headers['origin'];
+  if (requestOrigin && isLocalOrigin(requestOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    res.setHeader('Vary', 'Origin');
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+  }
+
+  // ---- product feedback (#564), the local twin: identity is TDOC_E2E_USER,
+  // the "token" just names the space, and a space is a doc dir like any other.
+  if (p === '/feedback.js' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const file = path.join(__dirname, 'runtime', 'feedback.js');
+    if (!fs.existsSync(file)) return send(res, 404, 'feedback client is not built: npm run build:feedback');
+    return send(res, 200, req.method === 'HEAD' ? '' : fs.readFileSync(file), {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+  if (p === '/feedback' && req.method === 'GET') {
+    const base = `http://localhost:${Number(PORT) || 7878}`;
+    const bookmarklet = `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='${base}/feedback.js?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
+    return send(res, 200, `<!doctype html><meta charset="utf-8"><title>tdoc Feedback (local)</title>
+<main style="font:16px/1.6 system-ui;max-width:40rem;margin:3rem auto;padding:0 1.5rem">
+<h1>tdoc Feedback</h1>
+<p>Drag this to your bookmarks bar, then click it on any page of your app:</p>
+<p><a id="bookmarklet" href="${escHtml(bookmarklet)}" style="display:inline-block;background:#2f5bea;color:#fff;text-decoration:none;font-weight:600;padding:.6rem 1.1rem;border-radius:8px">✎ tdoc Feedback</a></p>
+<p>Or add <code>&lt;script src="${escHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app.</p>
+</main>`, { 'Content-Type': 'text/html; charset=utf-8' });
+  }
+  if (p === '/feedback/connect' && req.method === 'GET') {
+    const origin = feedbackOriginLocal(url.searchParams.get('origin'));
+    if (!origin) return send(res, 400, 'origin required');
+    // No sign-in locally: connect straight away and hand the opener its token.
+    return send(res, 200, `<!doctype html><meta charset="utf-8"><title>Connect tdoc Feedback</title>
+<main style="font:16px/1.6 system-ui;max-width:32rem;margin:3rem auto;padding:0 1.5rem"><h1>tdoc Feedback</h1><p id="status">Connecting…</p></main>
+<script>
+(function () {
+  var origin = ${JSON.stringify(origin)};
+  var status = document.getElementById('status');
+  fetch('/api/feedback/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ origin: origin }) })
+    .then(function (r) { return r.json(); })
+    .then(function (session) {
+      if (!session || !session.token) { status.textContent = (session && session.error) || 'Could not connect'; return; }
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'tdoc-feedback-connected', origin: origin, session: session }, origin);
+        status.textContent = 'Connected. You can close this window.';
+        setTimeout(function () { window.close(); }, 400);
+      } else status.textContent = 'Connected. Go back to your app and click the tdoc button again.';
+    })
+    .catch(function (e) { status.textContent = String(e && e.message || e); });
+})();
+</script>`, { 'Content-Type': 'text/html; charset=utf-8' });
+  }
+  if (p === '/api/feedback/connect' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const origin = feedbackOriginLocal(body.origin);
+    if (!origin) return json(res, 400, { error: 'invalid_origin' });
+    const slug = body.slug ? safeSlug(body.slug) : `feedback-${new URL(origin).host.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
+    if (!slug) return json(res, 400, { error: 'invalid_slug' });
+    const docRoot = path.join(ROOT, slug);
+    if (!fs.existsSync(path.join(docRoot, 'meta.json'))) {
+      if (body.slug) return json(res, 404, { error: 'not_found' });
+      const now = new Date().toISOString();
+      fs.mkdirSync(path.join(docRoot, 'v1'), { recursive: true });
+      fs.writeFileSync(path.join(docRoot, 'v1', 'index.html'), `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Feedback · ${escHtml(new URL(origin).host)}</title></head><body><main style="font:17px/1.75 system-ui;max-width:46rem;margin:0 auto;padding:4.5rem 1.5rem"><h1>Feedback · ${escHtml(new URL(origin).host)}</h1><p>Product feedback left on <a href="${escHtml(origin)}">${escHtml(origin)}</a>.</p></main></body></html>\n`);
+      fs.writeFileSync(path.join(docRoot, 'meta.json'), JSON.stringify({
+        title: `Feedback · ${new URL(origin).host}`,
+        created_from: 'feedback',
+        feedback: { origin },
+        slug,
+        created: now,
+        versions: [{ n: 1, created: now, prompt: `Feedback space for ${origin}`, source: 'browser', ...(E2E_USER ? { author: E2E_USER } : {}) }],
+      }, null, 2) + '\n');
+    }
+    return json(res, 200, { ...feedbackSessionLocal(slug), token: `local_${slug}` });
+  }
+  if (p === '/api/feedback/session' && req.method === 'GET') {
+    const m = /^Bearer\s+local_([a-z0-9-]+)$/i.exec(req.headers['authorization'] || '');
+    const slug = m ? safeSlug(m[1]) : null;
+    if (!slug || !fs.existsSync(path.join(ROOT, slug, 'meta.json'))) return json(res, 401, { error: 'sign_in_required' });
+    return json(res, 200, { ...feedbackSessionLocal(slug), can_comment: true });
+  }
+
   if (p === '/api/notifications' && req.method === 'GET') {
     const ident = e2eIdentity();
     if (!ident) return json(res, 401, { error: 'sign_in_required' });
@@ -1696,7 +1816,12 @@ const server = http.createServer(async (req, res) => {
     if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
     const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
     const viewer = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
-    return json(res, 200, { users: localMentionable(comments).filter((u) => u.login !== viewer) });
+    const identity = e2eIdentity();
+    return json(res, 200, {
+      users: localMentionable(comments).filter((u) => u.login !== viewer),
+      identity,
+      is_owner: Boolean(identity && E2E_OWNER && identity.login.toLowerCase() === E2E_OWNER.toLowerCase()),
+    });
   }
 
   // --- COMMENTS (anonymous) ---

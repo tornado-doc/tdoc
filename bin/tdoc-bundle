@@ -36,6 +36,13 @@ const runtimeJsPath = '/' + runtimeEntry.file;
 const runtimeCssPath = '/' + runtimeEntry.css[0];
 const runtimeJs = fs.readFileSync(path.join(skill, 'server/runtime', runtimeEntry.file), 'utf8');
 const runtimeCss = fs.readFileSync(path.join(skill, 'server/runtime', runtimeEntry.css[0]), 'utf8');
+// The in-page feedback client (feedback/), served whole at /feedback.js.
+const feedbackJsFile = path.join(skill, 'server/runtime/feedback.js');
+if (!fs.existsSync(feedbackJsFile)) {
+  console.error('bundle: server/runtime/feedback.js is missing; run npm run build:feedback');
+  process.exit(1);
+}
+const feedbackJs = fs.readFileSync(feedbackJsFile, 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -50,7 +57,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss].join('\0'));
+const bundleSha = sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, feedbackJs].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -78,6 +85,7 @@ replaced = mustReplace(replaced, /const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RU
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`;/, 'const SHELL_RUNTIME_JS = ' + JSON.stringify(runtimeJs) + ';', 'SHELL_RUNTIME_JS');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";/, 'const SHELL_RUNTIME_CSS_PATH = ' + JSON.stringify(runtimeCssPath) + ';', 'SHELL_RUNTIME_CSS_PATH');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;/, 'const SHELL_RUNTIME_CSS = ' + JSON.stringify(runtimeCss) + ';', 'SHELL_RUNTIME_CSS');
+replaced = mustReplace(replaced, /const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;/, 'const FEEDBACK_JS = ' + JSON.stringify(feedbackJs) + ';', 'FEEDBACK_JS');
 
 let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,

@@ -18,14 +18,14 @@ const bundler = read('bin/tdoc-bundle');
 (async () => {
   console.log('React worker shell architecture\n');
 
-  await t('bundle embeds only the shell builder, frame probe, reader CSS, and Vite runtime', async () => {
-    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__']) {
+  await t('bundle embeds only the shell builder, frame probe, reader CSS, Vite runtime, and feedback client', async () => {
+    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__', '__TDOC_FEEDBACK_JS__']) {
       if (!bundler.includes(marker)) throw new Error(`missing ${marker}`);
     }
     for (const retired of ['CHROME_MODULE', 'CHROME_JS', 'MANAGE_JS', 'SIGNIN_JS', 'ONBOARD_JS']) {
       if (bundler.includes(retired)) throw new Error(`legacy bundle input remains: ${retired}`);
     }
-    if (!bundler.includes('sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss]')) {
+    if (!bundler.includes('sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, feedbackJs]')) {
       throw new Error('bundle hash does not cover the complete runtime input set');
     }
   });
