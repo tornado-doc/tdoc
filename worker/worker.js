@@ -3983,7 +3983,7 @@ function feedbackBookmarkletPage(base, nonce) {
   <ol class="install-steps">
     <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
     <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
-    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar). If the top chrome is hidden in fullscreen, exit with <kbd>Esc</kbd> or <kbd>⌃⌘F</kbd>, then try again.</li>
+    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar). In Chrome fullscreen, <kbd>⌘⇧F</kbd> toggles whether the top bar stays visible; if it’s hidden, turn that on (or exit fullscreen) so you have somewhere to drop.</li>
   </ol>
   <p class="muted">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
 
@@ -4037,10 +4037,10 @@ function feedbackBookmarkletPage(base, nonce) {
   function setCoachCopy(hidden) {
     if (hidden) {
       copy.innerHTML = '<span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>'
-        + '<span class="line"><span class="n">?</span>Top bar hidden? Exit fullscreen, then try again</span>';
+        + '<span class="line"><span class="n">?</span>Top bar hidden? ⌘⇧F (Chrome) to show it in fullscreen</span>';
     } else {
       copy.innerHTML = '<span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>'
-        + '<span class="line"><span class="n">3</span>No bookmarks bar? Hit ⌘⇧B</span>';
+        + '<span class="line"><span class="n">3</span>No bar? ⌘⇧B (Favorites bar in Safari)</span>';
     }
   }
 
