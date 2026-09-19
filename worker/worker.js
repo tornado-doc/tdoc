@@ -4037,7 +4037,7 @@ function feedbackBookmarkletPage(base, nonce) {
   </svg>
   <p class="coach-copy" id="coachCopy">
     <span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>
-    <span class="line"><span class="n">3</span>No bar? ⌘⇧B · fullscreen top bar? ⌘⇧F</span>
+    <span class="line"><span class="n">3</span>No bar? ⌘⇧B · Fullscreen top bar? ⌘⇧F</span>
   </p>
 </div>
 
