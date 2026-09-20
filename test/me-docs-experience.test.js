@@ -123,11 +123,13 @@ function makeEnv(StoreClass, extra = {}) {
   return env;
 }
 
-function req(pathname, { method = 'GET', body = null, cookie = '', host = 'tdoc.dev' } = {}) {
+function req(pathname, { method = 'GET', body = null, cookie = '', host = 'tdoc.dev', token = '', accept = '' } = {}) {
   return new Request(`https://${host}${pathname}`, {
     method,
     headers: {
       ...(cookie ? { Cookie: cookie.includes('=') ? cookie : `tdoc_sid=${cookie}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(accept ? { Accept: accept } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -356,6 +358,64 @@ function bootData(html, name) {
       'folder boot data must carry parent relationships');
     assert(boot.docs.find((doc) => doc.slug === 'deep-doc')?.folder === a.body.folder.id,
       'document boot data must carry its new parent');
+  });
+
+  await t('folder share link: visibility mint, filtered listing, private revoke, bearer agent read', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const cookie = await putSession(env, 'alice');
+    await seedDoc(env, 'open-in-folder', { owner: 'alice', access: { visibility: 'unlisted' } });
+    await seedDoc(env, 'secret-in-folder', {
+      owner: 'alice',
+      access: { visibility: 'private', allowed_users: ['bob'] },
+    });
+    const create = await worker.fetch(req('/api/folders', { method: 'POST', cookie, body: { name: 'Shared pack' } }), env, {});
+    const folder = (await create.json()).folder;
+    assert(folder.visibility === 'private' && !folder.share_id, 'new folders start private with no share id');
+    await worker.fetch(req('/api/folders/move', {
+      method: 'POST', cookie, body: { slugs: ['open-in-folder', 'secret-in-folder'], folder: folder.id },
+    }), env, {});
+
+    const share = await worker.fetch(req('/api/folders', {
+      method: 'PATCH', cookie, body: { id: folder.id, visibility: 'unlisted' },
+    }), env, {});
+    assert(share.status === 200, `share patch ${share.status}`);
+    const shared = (await share.json()).folder;
+    assert(shared.visibility === 'unlisted' && shared.share_id, 'unlisted folder must mint a share id');
+    assert(await env.META.get(`folder-share:${shared.share_id}`), 'share index must exist');
+
+    const anon = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`), env, {});
+    assert(anon.status === 200, `anon shared api ${anon.status}`);
+    const anonBody = await anon.json();
+    assert(anonBody.docs.length === 1 && anonBody.docs[0].slug === 'open-in-folder',
+      `anon must see only link-readable docs, got ${JSON.stringify(anonBody.docs)}`);
+
+    const page = await worker.fetch(req(`/f/${shared.share_id}`), env, {});
+    assert(page.status === 200, `share page ${page.status}`);
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(boot.page === 'folder-share' && boot.folder.name === 'Shared pack', 'share page boot');
+    assert(boot.docs.length === 1 && boot.docs[0].slug === 'open-in-folder', 'share page filters private docs');
+
+    const bobCookie = await putSession(env, 'bob');
+    const bobTok = await worker.fetch(req('/api/hosted/token', {
+      method: 'POST', cookie: bobCookie, body: { label: 'bob-agent' },
+    }), env, {});
+    assert(bobTok.status === 200, `bob token ${bobTok.status}`);
+    const bobToken = (await bobTok.json()).token;
+    const agent = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`, { token: bobToken }), env, {});
+    assert(agent.status === 200, `agent shared api ${agent.status}`);
+    const agentBody = await agent.json();
+    assert(agentBody.docs.map((d) => d.slug).sort().join(',') === 'open-in-folder,secret-in-folder',
+      `invitee agent must see allowlisted private doc too, got ${JSON.stringify(agentBody.docs)}`);
+
+    const privDoc = await worker.fetch(req('/d/secret-in-folder/v/1', { token: bobToken }), env, {});
+    assert(privDoc.status === 200, `invitee bearer must open private doc, got ${privDoc.status}`);
+
+    const lock = await worker.fetch(req('/api/folders', {
+      method: 'PATCH', cookie, body: { id: folder.id, visibility: 'private' },
+    }), env, {});
+    assert(lock.status === 200, `lock ${lock.status}`);
+    const gone = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`), env, {});
+    assert(gone.status === 404, `private folder share must 404, got ${gone.status}`);
   });
 
   await t('doc-page boot carries viewer star state for signed-in viewers only', async () => {

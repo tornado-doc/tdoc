@@ -7,6 +7,7 @@ import {
   deleteFolder as deleteFolderRequest,
   moveDocsToFolder,
   renameFolder,
+  updateFolderAccess,
   setDocumentStar,
 } from '../document/api.js';
 
@@ -192,7 +193,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
       let saved;
       const ok = await run(async () => { saved = (await renameFolder(id, trimmed)).folder; });
       if (!ok) return false;
-      setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, name: saved.name } : item)));
+      setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)));
       return true;
     }
     let created;
@@ -201,6 +202,14 @@ export function useDocsHub({ boot, onUnauthorized }) {
     setFolders((items) => [...items, { ...created, parent: created.parent || '' }]);
     return true;
   }, [folder, run]);
+
+  const setFolderVisibility = useCallback(async (id, visibility) => {
+    let saved;
+    const ok = await run(async () => { saved = (await updateFolderAccess(id, visibility)).folder; });
+    if (!ok) return null;
+    setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)));
+    return saved;
+  }, [run]);
 
   const deleteFolder = useCallback(async (item) => {
     const ok = await run(() => deleteFolderRequest(item.id));
@@ -239,6 +248,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     moveDocs,
     deleteDocs,
     saveFolder,
+    setFolderVisibility,
     deleteFolder,
   };
 }

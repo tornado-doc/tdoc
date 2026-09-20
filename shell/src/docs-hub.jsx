@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
@@ -6,6 +6,7 @@ import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { DebugBar } from './debug-bar.jsx';
+import { copyText } from './document/model.js';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
@@ -48,6 +49,73 @@ function NameDialog({ title, confirmLabel, initialName, maxLength = 60, onSave, 
         onChange={(event) => setName(event.target.value)}
         onKeyDown={(event) => { if (event.key === 'Enter') save(); }}
       />
+    </HubDialog>
+  );
+}
+
+function FolderShareDialog({ folder, onClose, onVisibility }) {
+  const [visibility, setVisibility] = useState(folder.visibility === 'private' ? 'private' : 'unlisted');
+  const [shareId, setShareId] = useState(folder.share_id || '');
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setVisibility(folder.visibility === 'private' ? 'private' : 'unlisted');
+    setShareId(folder.share_id || '');
+  }, [folder.id, folder.visibility, folder.share_id]);
+
+  const shareUrl = shareId && visibility !== 'private'
+    ? `${location.origin}/f/${encodeURIComponent(shareId)}`
+    : '';
+
+  const save = async (next) => {
+    setBusy(true);
+    setStatus('Saving…');
+    const saved = await onVisibility(next);
+    setBusy(false);
+    if (!saved) {
+      setStatus('Could not save.');
+      return;
+    }
+    setVisibility(saved.visibility === 'private' ? 'private' : 'unlisted');
+    setShareId(saved.share_id || '');
+    setStatus('Saved.');
+  };
+
+  return (
+    <HubDialog
+      title="Share folder"
+      onClose={onClose}
+      actions={<button type="button" onClick={onClose}>Close</button>}
+    >
+      <label className="field" htmlFor="tdoc-folder-access">Who has access</label>
+      <select
+        id="tdoc-folder-access"
+        value={visibility}
+        disabled={busy}
+        onChange={(event) => save(event.target.value)}
+      >
+        <option value="private">Only you</option>
+        <option value="unlisted">Anyone with the link</option>
+      </select>
+      <p className="muted" style={{ margin: '8px 0 0' }}>
+        {visibility === 'private'
+          ? 'Only you can open this folder. Docs keep their own access.'
+          : 'Anyone with the link sees docs they already have permission to read. Agents can use the same link with your account token.'}
+      </p>
+      {shareUrl ? (
+        <>
+          <div className="code url" style={{ marginTop: 12 }} onClick={() => copyText(shareUrl)}>
+            {shareUrl}
+          </div>
+          <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
+            <button type="button" className="primary" onClick={() => copyText(shareUrl).then(() => setStatus('Copied.'))}>
+              Copy link
+            </button>
+          </div>
+        </>
+      ) : null}
+      {status ? <p className="muted" style={{ margin: '8px 0 0' }}>{status}</p> : null}
     </HubDialog>
   );
 }
@@ -117,6 +185,7 @@ export function DocsHub({ boot }) {
   ].filter(Boolean);
 
   const folderMenu = (item) => [
+    { label: 'Share', onSelect: () => setModal({ type: 'share-folder', folder: item }) },
     { label: 'Rename', onSelect: () => setModal({ type: 'rename-folder', folder: item }) },
     {
       label: 'Delete folder',
@@ -293,6 +362,13 @@ export function DocsHub({ boot }) {
       {modal?.type === 'rename-folder' ? (
         <NameDialog title="Rename folder" confirmLabel="Save" initialName={modal.folder.name} onClose={closeModal}
           onSave={(name) => closeIf(hub.saveFolder({ id: modal.folder.id, name }))} />
+      ) : null}
+      {modal?.type === 'share-folder' ? (
+        <FolderShareDialog
+          folder={hub.folders.find((item) => item.id === modal.folder.id) || modal.folder}
+          onClose={closeModal}
+          onVisibility={(visibility) => hub.setFolderVisibility(modal.folder.id, visibility)}
+        />
       ) : null}
       {modal?.type === 'move' ? (
         <HubDialog title="Move to folder" onClose={closeModal}>
