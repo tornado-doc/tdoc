@@ -3498,8 +3498,10 @@ function metaPublishTimes(meta) {
 
 // Operator-only pulse: distinct hosted publishers from meta:*, split
 // internal vs external. Answers "did anyone but us actually publish?"
+// Use days>=150 (e.g. 170) when diagnosing a June star-cliff cohort —
+// days=30 only sees "is anyone publishing now".
 async function collectPublisherStats(env, { days = 30 } = {}) {
-  const windowDays = Math.min(365, Math.max(1, Math.floor(Number(days) || 30)));
+  const windowDays = Math.min(400, Math.max(1, Math.floor(Number(days) || 30)));
   const since = Date.now() - windowDays * 86400000;
   const byKey = new Map();
   let scannedDocs = 0;
@@ -3562,6 +3564,17 @@ async function collectPublisherStats(env, { days = 30 } = {}) {
   const external = all.filter((r) => !r.internal);
   const internal = all.filter((r) => r.internal);
   const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
+  const monthKey = (ms) => {
+    const d = new Date(ms);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  };
+  // Kept if they came back ≥7 days later or published a second doc.
+  const retained = (r) => {
+    if (r.docs >= 2) return true;
+    if (r.first_publish == null || r.last_publish == null) return false;
+    return r.last_publish - r.first_publish >= 7 * 86400000;
+  };
+
   const externalInWindow = external
     .filter((r) => r.last_publish != null && r.last_publish >= since)
     .sort((a, b) => (b.last_publish || 0) - (a.last_publish || 0))
@@ -3570,7 +3583,20 @@ async function collectPublisherStats(env, { days = 30 } = {}) {
       docs: r.docs,
       first_publish: iso(r.first_publish),
       last_publish: iso(r.last_publish),
+      retained: retained(r),
     }));
+
+  // Cohort cut: anyone whose first_publish falls in the window, by UTC month.
+  // days=170 covers Apr→now so a June star cliff can be sliced here directly.
+  const cohorts = {};
+  for (const r of external) {
+    if (r.first_publish == null || r.first_publish < since) continue;
+    const m = monthKey(r.first_publish);
+    if (!cohorts[m]) cohorts[m] = { first_publishers: 0, retained: 0, one_and_done: 0 };
+    cohorts[m].first_publishers += 1;
+    if (retained(r)) cohorts[m].retained += 1;
+    else cohorts[m].one_and_done += 1;
+  }
 
   return {
     days: windowDays,
@@ -3579,6 +3605,7 @@ async function collectPublisherStats(env, { days = 30 } = {}) {
     external: summarize(external),
     internal: summarize(internal),
     external_publishers_in_window: externalInWindow,
+    external_cohorts_by_first_month: cohorts,
   };
 }
 

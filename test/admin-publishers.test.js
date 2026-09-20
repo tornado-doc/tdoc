@@ -80,6 +80,29 @@ async function seed(env, slug, { owner, accountId, created, updated }) {
     assert(body.external_publishers_in_window.some((p) => p.login === 'bob'), 'lists bob');
     assert(body.external_publishers_in_window.some((p) => p.login === 'carol' && p.docs === 2), 'lists carol with 2 docs');
     assert(!body.external_publishers_in_window.some((p) => p.login === 'yayashuxue'), 'internal excluded from external list');
+    assert(body.external_cohorts_by_first_month['2026-09'], 'sept cohort present');
+    assert(body.external_cohorts_by_first_month['2026-09'].first_publishers >= 1, 'sept has first publishers');
+  });
+
+  await t('days=170 surfaces a June cohort as retained vs one-and-done', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_OWNER: 'julie' });
+    await seed(env, 'june-once', {
+      owner: 'june1', accountId: 'acct_june1',
+      created: '2026-06-19T12:00:00.000Z',
+      updated: '2026-06-19T12:00:00.000Z',
+    });
+    await seed(env, 'june-kept', {
+      owner: 'june2', accountId: 'acct_june2',
+      created: '2026-06-20T00:00:00.000Z',
+      updated: '2026-08-01T00:00:00.000Z',
+    });
+    const cookie = await putSession(env, 'julie');
+    const r = await worker.fetch(req('/api/admin/publishers?days=170', { cookie }), env, {});
+    assert(r.status === 200, `status ${r.status}`);
+    const body = await r.json();
+    const june = body.external_cohorts_by_first_month['2026-06'];
+    assert(june && june.first_publishers === 2, `june cohort ${JSON.stringify(june)}`);
+    assert(june.one_and_done === 1 && june.retained === 1, `june split ${JSON.stringify(june)}`);
   });
 
   await t('upload token can read the same pulse', async () => {
