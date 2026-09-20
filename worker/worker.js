@@ -5721,7 +5721,10 @@ export default {
             error: true,
             title: 'Sign in required',
             message: 'This folder is private. Sign in with an invited account to open it.',
-            actions: [{ label: 'Sign in', href: '/auth/signin?return=' + encodeURIComponent(`/f/${shareId}`) }],
+            actions: [{
+              label: 'Sign in',
+              href: `/api/auth/oidc/login?return=${encodeURIComponent(`/f/${shareId}`)}`,
+            }],
           });
         }
         return statusPageResponse({
