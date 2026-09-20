@@ -3461,6 +3461,127 @@ async function countHostedDocs(env, accountId, stopAt) {
   return n;
 }
 
+// Logins that are Tornado / Julie / Serena / agent forks — excluded from
+// "external publisher" counts so star-era vanity does not look like users.
+const INTERNAL_PUBLISHER_LOGINS = new Set([
+  'yayashuxue',
+  'julieshi',
+  'juliehshi',
+  'julie',
+  'serena',
+  'serenakeyitan',
+  'julies-claw',
+  'tornado-doc',
+]);
+
+function isInternalPublisherLogin(login, env) {
+  const n = normalizeGithubLogin(login);
+  if (!n) return false; // email-only publishers still count as external
+  if (INTERNAL_PUBLISHER_LOGINS.has(n)) return true;
+  const owner = (env.TDOC_OWNER || '').trim().toLowerCase();
+  return !!(owner && n === owner);
+}
+
+function metaPublishTimes(meta) {
+  const versions = Array.isArray(meta && meta.versions) ? meta.versions : [];
+  const created = meta && meta.created ? Date.parse(meta.created) : NaN;
+  let first = Number.isFinite(created) ? created : NaN;
+  let last = first;
+  for (const v of versions) {
+    const t = v && v.created ? Date.parse(v.created) : NaN;
+    if (!Number.isFinite(t)) continue;
+    if (!Number.isFinite(first) || t < first) first = t;
+    if (!Number.isFinite(last) || t > last) last = t;
+  }
+  return { first, last, versionCount: versions.length };
+}
+
+// Operator-only pulse: distinct hosted publishers from meta:*, split
+// internal vs external. Answers "did anyone but us actually publish?"
+async function collectPublisherStats(env, { days = 30 } = {}) {
+  const windowDays = Math.min(365, Math.max(1, Math.floor(Number(days) || 30)));
+  const since = Date.now() - windowDays * 86400000;
+  const byKey = new Map();
+  let scannedDocs = 0;
+  let cursor;
+  do {
+    const page = await env.META.list({ prefix: 'meta:', cursor });
+    for (const key of page.keys || []) {
+      let meta = null;
+      try {
+        const raw = await env.META.get(key.name);
+        if (raw) meta = JSON.parse(raw);
+      } catch {}
+      if (!meta || typeof meta !== 'object') continue;
+      scannedDocs += 1;
+      const login = hostedGithubLogin(meta) || '';
+      const accountId = meta.hosted && typeof meta.hosted.account_id === 'string'
+        ? meta.hosted.account_id
+        : '';
+      const bucket = accountId || (login ? `login:${login}` : `orphan:${key.name.slice('meta:'.length)}`);
+      const times = metaPublishTimes(meta);
+      let row = byKey.get(bucket);
+      if (!row) {
+        row = {
+          key: bucket,
+          login,
+          account_id: accountId || null,
+          internal: isInternalPublisherLogin(login, env),
+          docs: 0,
+          first_publish: null,
+          last_publish: null,
+        };
+        byKey.set(bucket, row);
+      }
+      if (login && !row.login) row.login = login;
+      row.docs += 1;
+      if (Number.isFinite(times.first)) {
+        if (row.first_publish == null || times.first < row.first_publish) row.first_publish = times.first;
+      }
+      if (Number.isFinite(times.last)) {
+        if (row.last_publish == null || times.last > row.last_publish) row.last_publish = times.last;
+      }
+    }
+    cursor = page.cursor;
+    if (page.list_complete) break;
+  } while (cursor);
+
+  const summarize = (rows) => {
+    const inWindow = rows.filter((r) => r.last_publish != null && r.last_publish >= since);
+    const firstInWindow = rows.filter((r) => r.first_publish != null && r.first_publish >= since);
+    const repeat = inWindow.filter((r) => r.docs >= 2);
+    return {
+      accounts_with_docs: rows.length,
+      publishers_in_window: inWindow.length,
+      first_publish_in_window: firstInWindow.length,
+      repeat_publishers_in_window: repeat.length,
+    };
+  };
+
+  const all = [...byKey.values()];
+  const external = all.filter((r) => !r.internal);
+  const internal = all.filter((r) => r.internal);
+  const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
+  const externalInWindow = external
+    .filter((r) => r.last_publish != null && r.last_publish >= since)
+    .sort((a, b) => (b.last_publish || 0) - (a.last_publish || 0))
+    .map((r) => ({
+      login: r.login || null,
+      docs: r.docs,
+      first_publish: iso(r.first_publish),
+      last_publish: iso(r.last_publish),
+    }));
+
+  return {
+    days: windowDays,
+    since: new Date(since).toISOString(),
+    scanned_docs: scannedDocs,
+    external: summarize(external),
+    internal: summarize(internal),
+    external_publishers_in_window: externalInWindow,
+  };
+}
+
 // The newest doc this account owns. Two callers: the internal state switcher,
 // and the second ask on `/setup?step=doc`. That page cannot read the record
 // for its answer -- `published_first` and `first_doc` are stamped once, so a
@@ -6064,6 +6185,24 @@ export default {
         canSeeMyDocs: canSeeMyDocs(env, s, url.origin),
         authConfigured: true,
       });
+    }
+
+    // Operator pulse: distinct hosted publishers from meta:*. Cookie as
+    // TDOC_OWNER, or the worker upload token. Used to answer "anyone but us?"
+    if (p === '/api/admin/publishers' && method === 'GET') {
+      const s = await getSession(env, req);
+      let allowed = isOwnerSession(env, s);
+      if (!allowed) {
+        const auth = req.headers.get('authorization') || '';
+        const m = auth.match(/^Bearer\s+(.+)$/i);
+        if (m && env.TDOC_UPLOAD_TOKEN && await timingSafeEqual(m[1], env.TDOC_UPLOAD_TOKEN)) {
+          allowed = true;
+        }
+      }
+      if (!allowed) return json({ error: 'forbidden' }, { status: 403 });
+      const days = Number(url.searchParams.get('days') || 30);
+      const stats = await collectPublisherStats(env, { days });
+      return json({ ok: true, ...stats });
     }
 
     // Web redirect flow, step 1: stash where to land afterwards against a CSRF
