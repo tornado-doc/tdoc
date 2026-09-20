@@ -410,12 +410,31 @@ function bootData(html, name) {
     const privDoc = await worker.fetch(req('/d/secret-in-folder/v/1', { token: bobToken }), env, {});
     assert(privDoc.status === 200, `invitee bearer must open private doc, got ${privDoc.status}`);
 
+    const invite = await worker.fetch(req('/api/folders', {
+      method: 'PATCH', cookie, body: {
+        id: folder.id,
+        visibility: 'private',
+        allowed_users: ['bob'],
+      },
+    }), env, {});
+    assert(invite.status === 200, `invite patch ${invite.status}`);
+    const invited = (await invite.json()).folder;
+    assert(invited.visibility === 'private' && invited.share_id === shared.share_id,
+      'private invite keeps the share id for Copy link');
+    assert(invited.allowed_users && invited.allowed_users.includes('bob'), 'allowed_users persisted');
+
+    const lockedAnon = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`), env, {});
+    assert(lockedAnon.status === 401, `private folder anon must 401, got ${lockedAnon.status}`);
+
+    const bobFolder = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`, { cookie: bobCookie }), env, {});
+    assert(bobFolder.status === 200, `invitee cookie must open private folder, got ${bobFolder.status}`);
+
     const lock = await worker.fetch(req('/api/folders', {
-      method: 'PATCH', cookie, body: { id: folder.id, visibility: 'private' },
+      method: 'PATCH', cookie, body: { id: folder.id, visibility: 'private', allowed_users: [] },
     }), env, {});
     assert(lock.status === 200, `lock ${lock.status}`);
-    const gone = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`), env, {});
-    assert(gone.status === 404, `private folder share must 404, got ${gone.status}`);
+    const gone = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`, { cookie: bobCookie }), env, {});
+    assert(gone.status === 404, `uninvited private folder share must 404, got ${gone.status}`);
   });
 
   await t('doc-page boot carries viewer star state for signed-in viewers only', async () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
@@ -7,6 +7,7 @@ import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
+import { InviteField } from './document/owner-access-dialog.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
@@ -53,68 +54,113 @@ function NameDialog({ title, confirmLabel, initialName, maxLength = 60, onSave, 
   );
 }
 
-function FolderShareDialog({ folder, onClose, onVisibility }) {
+function FolderShareDialog({ folder, onClose, onAccess }) {
   const [visibility, setVisibility] = useState(folder.visibility === 'private' ? 'private' : 'unlisted');
+  const [allowedUsers, setAllowedUsers] = useState(() => folder.allowed_users || []);
   const [shareId, setShareId] = useState(folder.share_id || '');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const savedRef = useRef({
+    visibility: folder.visibility === 'private' ? 'private' : 'unlisted',
+    allowed_users: folder.allowed_users || [],
+    share_id: folder.share_id || '',
+  });
 
   useEffect(() => {
-    setVisibility(folder.visibility === 'private' ? 'private' : 'unlisted');
-    setShareId(folder.share_id || '');
-  }, [folder.id, folder.visibility, folder.share_id]);
+    setVisibility(savedRef.current.visibility);
+    setAllowedUsers(savedRef.current.allowed_users);
+    setShareId(savedRef.current.share_id);
+  }, [folder.id]);
 
-  const shareUrl = shareId && visibility !== 'private'
+  const shareUrl = shareId
     ? `${location.origin}/f/${encodeURIComponent(shareId)}`
     : '';
+  const invitedCount = allowedUsers.length;
+  const accessDescription = visibility !== 'private'
+    ? 'Anyone with the link sees docs they already have permission to read.'
+    : invitedCount
+      ? `Only you and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open this folder. Docs keep their own access.`
+      : 'Only you can open this folder. Add people below to invite them.';
 
-  const save = async (next) => {
+  const save = async (patch) => {
+    const previous = { visibility, allowedUsers, shareId };
+    const nextVisibility = patch.visibility ?? visibility;
+    const nextAllowed = patch.allowed_users ?? allowedUsers;
+    setVisibility(nextVisibility);
+    setAllowedUsers(nextAllowed);
     setBusy(true);
     setStatus('Saving…');
-    const saved = await onVisibility(next);
+    const saved = await onAccess({ visibility: nextVisibility, allowed_users: nextAllowed });
     setBusy(false);
     if (!saved) {
+      setVisibility(previous.visibility);
+      setAllowedUsers(previous.allowedUsers);
+      setShareId(previous.shareId);
       setStatus('Could not save.');
       return;
     }
-    setVisibility(saved.visibility === 'private' ? 'private' : 'unlisted');
-    setShareId(saved.share_id || '');
+    const next = {
+      visibility: saved.visibility === 'private' ? 'private' : 'unlisted',
+      allowed_users: saved.allowed_users || [],
+      share_id: saved.share_id || '',
+    };
+    savedRef.current = next;
+    setVisibility(next.visibility);
+    setAllowedUsers(next.allowed_users);
+    setShareId(next.share_id);
     setStatus('Saved.');
   };
 
   return (
     <HubDialog
-      title="Share folder"
+      title="Share"
       onClose={onClose}
       actions={<button type="button" onClick={onClose}>Close</button>}
     >
-      <label className="field" htmlFor="tdoc-folder-access">Who has access</label>
-      <select
-        id="tdoc-folder-access"
-        value={visibility}
-        disabled={busy}
-        onChange={(event) => save(event.target.value)}
-      >
-        <option value="private">Only you</option>
-        <option value="unlisted">Anyone with the link</option>
-      </select>
-      <p className="muted" style={{ margin: '8px 0 0' }}>
-        {visibility === 'private'
-          ? 'Only you can open this folder. Docs keep their own access.'
-          : 'Anyone with the link sees docs they already have permission to read. Agents can use the same link with your account token.'}
-      </p>
       {shareUrl ? (
         <>
-          <div className="code url" style={{ marginTop: 12 }} onClick={() => copyText(shareUrl)}>
+          <div className="code url" onClick={() => copyText(shareUrl)}>
             {shareUrl}
           </div>
-          <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
-            <button type="button" className="primary" onClick={() => copyText(shareUrl).then(() => setStatus('Copied.'))}>
+          <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
+            <button type="button" className="primary" disabled={busy} onClick={() => copyText(shareUrl).then(() => setStatus('Copied.'))}>
               Copy link
             </button>
           </div>
         </>
-      ) : null}
+      ) : (
+        <p className="muted" style={{ marginTop: 0 }}>
+          Choose who has access to mint a share link.
+        </p>
+      )}
+      <p className="muted" style={{ margin: '8px 0 0' }}>
+        {folder.name} · docs keep their own access
+      </p>
+
+      <section className="manage-section">
+        <label className="field" htmlFor="tdoc-folder-access">Who has access</label>
+        <select
+          id="tdoc-folder-access"
+          className="tdoc-select"
+          value={visibility}
+          disabled={busy}
+          onChange={(event) => save({ visibility: event.target.value })}
+        >
+          <option value="private">Only people I invite</option>
+          <option value="unlisted">Anyone with the link</option>
+        </select>
+        <p className="manage-hint">{accessDescription}</p>
+
+        {visibility === 'private' ? (
+          <>
+            <label className="field">Invite by GitHub username</label>
+            <InviteField
+              users={allowedUsers}
+              onChange={(users) => save({ allowed_users: users })}
+            />
+          </>
+        ) : null}
+      </section>
       {status ? <p className="muted" style={{ margin: '8px 0 0' }}>{status}</p> : null}
     </HubDialog>
   );
@@ -367,7 +413,7 @@ export function DocsHub({ boot }) {
         <FolderShareDialog
           folder={hub.folders.find((item) => item.id === modal.folder.id) || modal.folder}
           onClose={closeModal}
-          onVisibility={(visibility) => hub.setFolderVisibility(modal.folder.id, visibility)}
+          onAccess={(patch) => hub.setFolderAccess(modal.folder.id, patch)}
         />
       ) : null}
       {modal?.type === 'move' ? (

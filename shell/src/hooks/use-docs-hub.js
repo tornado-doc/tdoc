@@ -203,9 +203,9 @@ export function useDocsHub({ boot, onUnauthorized }) {
     return true;
   }, [folder, run]);
 
-  const setFolderVisibility = useCallback(async (id, visibility) => {
+  const setFolderAccess = useCallback(async (id, patch) => {
     let saved;
-    const ok = await run(async () => { saved = (await updateFolderAccess(id, visibility)).folder; });
+    const ok = await run(async () => { saved = (await updateFolderAccess(id, patch)).folder; });
     if (!ok) return null;
     setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)));
     return saved;
@@ -248,7 +248,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     moveDocs,
     deleteDocs,
     saveFolder,
-    setFolderVisibility,
+    setFolderAccess,
     deleteFolder,
   };
 }

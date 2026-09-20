@@ -2655,10 +2655,24 @@ async function saveFolderState(env, login, state) {
 
 // Folder link sharing (catalog only). Docs keep their own access; the share
 // page lists whichever of the folder's docs the viewer (cookie or Bearer) may
-// already read. private = owner only; unlisted/public = anyone with the link.
+// already read. unlisted/public = anyone with the link; private = owner +
+// allowlisted invitees (same shape as doc access).
 function folderVisibility(folder) {
   const v = folder && folder.visibility;
   return ACCESS_VISIBILITIES.has(v) ? v : 'private';
+}
+
+function folderAllowedUsers(folder) {
+  const src = folder && Array.isArray(folder.allowed_users) ? folder.allowed_users : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of src) {
+    const login = normalizeInvitee(item);
+    if (!login || seen.has(login)) continue;
+    seen.add(login);
+    out.push(login);
+  }
+  return out;
 }
 
 function publicFolder(folder) {
@@ -2668,9 +2682,22 @@ function publicFolder(folder) {
     name: folder.name,
     parent: folder.parent || '',
     visibility,
+    allowed_users: folderAllowedUsers(folder),
   };
   if (folder.share_id) out.share_id = folder.share_id;
   return out;
+}
+
+function canAccessSharedFolder(folder, session, ownerKey) {
+  const visibility = folderVisibility(folder);
+  if (visibility === 'unlisted' || visibility === 'public') return true;
+  const me = actorKey(session);
+  if (me && normalizeActorKey(ownerKey) && me === normalizeActorKey(ownerKey)) return true;
+  const allowed = folderAllowedUsers(folder);
+  const login = sessionLogin(session);
+  if (login && allowed.includes(login)) return true;
+  const email = normalizeEmail(session && session.email);
+  return !!(email && allowed.includes(email));
 }
 
 async function loadFolderShareIndex(env, shareId) {
@@ -2712,9 +2739,14 @@ async function buildFolderShareListing(env, req, shareId) {
   const state = await loadFolderState(env, index.owner_key);
   const folder = state.folders.find((f) => f.id === index.folder_id);
   if (!folder || folder.share_id !== shareId) return { ok: false, status: 404 };
-  const visibility = folderVisibility(folder);
-  if (visibility === 'private') return { ok: false, status: 404 };
   const session = await getViewerSession(env, req);
+  if (!canAccessSharedFolder(folder, session, index.owner_key)) {
+    if (!sessionPrincipal(session)) {
+      return { ok: false, status: 401 };
+    }
+    return { ok: false, status: 404 };
+  }
+  const visibility = folderVisibility(folder);
   const slugs = Object.entries(state.docs)
     .filter(([, fid]) => fid === folder.id)
     .map(([slug]) => slug);
@@ -5683,6 +5715,15 @@ export default {
       const shareId = decodeURIComponent(folderShareMatch[1]);
       const listing = await buildFolderShareListing(env, req, shareId);
       if (!listing.ok) {
+        if (listing.status === 401) {
+          return statusPageResponse({
+            status: 401,
+            error: true,
+            title: 'Sign in required',
+            message: 'This folder is private. Sign in with an invited account to open it.',
+            actions: [{ label: 'Sign in', href: '/auth/signin?return=' + encodeURIComponent(`/f/${shareId}`) }],
+          });
+        }
         return statusPageResponse({
           status: listing.status || 404,
           error: true,
@@ -6746,7 +6787,10 @@ export default {
       if (!body.id || typeof body.id !== 'string') return json({ error: 'invalid_id' }, { status: 400 });
       const wantsName = 'name' in body;
       const wantsVisibility = 'visibility' in body;
-      if (!wantsName && !wantsVisibility) return json({ error: 'nothing_to_update' }, { status: 400 });
+      const wantsAllowed = 'allowed_users' in body;
+      if (!wantsName && !wantsVisibility && !wantsAllowed) {
+        return json({ error: 'nothing_to_update' }, { status: 400 });
+      }
       const state = await loadFolderState(env, actorKey(s));
       const folder = state.folders.find((f) => f.id === body.id);
       if (!folder) return json({ error: 'not_found' }, { status: 404 });
@@ -6763,9 +6807,26 @@ export default {
           return json({ error: 'invalid_access_value', field: 'visibility' }, { status: 400 });
         }
         folder.visibility = body.visibility;
-        if (body.visibility !== 'private') {
-          await ensureFolderShareId(env, actorKey(s), folder);
+      }
+      if (wantsAllowed) {
+        if (!Array.isArray(body.allowed_users)) {
+          return json({ error: 'invalid_access_value', field: 'allowed_users' }, { status: 400 });
         }
+        const allowed = [];
+        const seen = new Set();
+        for (const item of body.allowed_users) {
+          const login = normalizeInvitee(item);
+          if (!login) return json({ error: 'invalid_access_value', field: 'allowed_users' }, { status: 400 });
+          if (seen.has(login)) continue;
+          seen.add(login);
+          allowed.push(login);
+        }
+        folder.allowed_users = allowed;
+      }
+      // Mint a share id whenever access is touched so Copy link always works
+      // (private invitees still open /f/<id> after sign-in).
+      if (wantsVisibility || wantsAllowed) {
+        await ensureFolderShareId(env, actorKey(s), folder);
       }
       await saveFolderState(env, actorKey(s), state);
       return json({ ok: true, folder: publicFolder(folder) });
