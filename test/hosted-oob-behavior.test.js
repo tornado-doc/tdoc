@@ -50,6 +50,35 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(byokBody.error === 'hosted_registration_disabled', `unexpected ${JSON.stringify(byokBody)}`);
   });
 
+  await t('/me: BYOK non-owner gets clearer notice; forced registration opens workers.dev; HEAD ok', async () => {
+    const byok = makeEnv(mod.CommentsStore, {
+      TDOC_OWNER: 'julie',
+      TDOC_HOSTED_REGISTRATION: '',
+    });
+    const alice = await putSession(byok, 'alice');
+    const bounced = await worker.fetch(req('/me', {
+      cookie: alice, host: 'example.workers.dev',
+    }), byok, {});
+    assert(bounced.status === 302, `BYOK non-owner should bounce, got ${bounced.status}`);
+    assert(bounced.headers.get('Location') === '/?notice=me', `expected notice=me, got ${bounced.headers.get('Location')}`);
+    const landing = await worker.fetch(req('/?notice=me', { host: 'example.workers.dev' }), byok, {});
+    const boot = bootData(await landing.text(), '__TDOC_APP_BOOT__');
+    assert(/self-hosted/.test(boot.notice) && /tdoc\.dev/.test(boot.notice),
+      `notice should point BYOK users at tdoc.dev, got ${JSON.stringify(boot.notice)}`);
+
+    const hosted = makeEnv(mod.CommentsStore, { TDOC_HOSTED_REGISTRATION: '1', TDOC_OWNER: 'julie' });
+    const friend = await putSession(hosted, 'friend');
+    const me = await worker.fetch(req('/me', {
+      cookie: friend, host: 'tdoc.jyshi1107.workers.dev',
+    }), hosted, {});
+    assert(me.status === 200, `forced registration must open /me on workers.dev, got ${me.status}`);
+    const head = await worker.fetch(req('/me', {
+      method: 'HEAD', cookie: friend, host: 'tdoc.jyshi1107.workers.dev',
+    }), hosted, {});
+    assert(head.status === 200, `HEAD /me should 200, got ${head.status}`);
+    assert(!(await head.text()), 'HEAD /me must not return a body');
+  });
+
   await t('missing-meta hosted upload still persists owner; second token cannot overwrite', async () => {
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env, 'a');

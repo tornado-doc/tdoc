@@ -62,9 +62,9 @@ t('tdoc-publish reuses tdoc-bundle (no second copy of the inliner)', () => {
     'the overlay inliner must not remain copy-pasted inside tdoc-publish');
 });
 
-t('CD does not open hosted registration on tdoc.dev', () => {
+t('CD does not open hosted registration via wrangler vars', () => {
   assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(wf),
-    'tdoc.dev CD must not set TDOC_HOSTED_REGISTRATION=1');
+    'tdoc.dev CD must not set TDOC_HOSTED_REGISTRATION=1 (tdoc-cd provenance does)');
 });
 
 t('CD Node matches the pinned wrangler engine (>=22)', () => {

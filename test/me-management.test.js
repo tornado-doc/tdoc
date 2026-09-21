@@ -31,13 +31,14 @@ t('worker computes structured catalog data without access-policy fields', () => 
 });
 
 t('/me route uses the shared React app shell with a CSP nonce', () => {
-  const start = worker.indexOf("if (p === '/me' && method === 'GET')");
+  const start = worker.indexOf("if (p === '/me' && (method === 'GET' || method === 'HEAD'))");
   const end = worker.indexOf('// ---- interactive island', start);
   const route = worker.slice(start, end);
   assert(route.includes("page: 'docs-hub'"), 'Docs Hub boot discriminator missing');
   assert(route.includes('SHELL.appHtml({'), 'shared app shell missing');
   assert(route.includes("'Content-Security-Policy': cspHeader(nonce)"), 'CSP missing');
   assert(route.includes('canSeeMyDocs(env, s, url.origin)'), 'catalog access gate missing');
+  assert(route.includes("method === 'HEAD'"), '/me must accept HEAD without rendering the hub');
   assert(!/injectSiteChrome|indexHtml/.test(route), 'legacy /me renderer remains');
 });
 

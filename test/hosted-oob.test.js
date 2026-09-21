@@ -71,14 +71,16 @@ t('CLI mint and Duplicate share one hosted-account registry', () => {
   assert(!issue.includes('hosted-github:'), 'token mint must not write a second registry');
 });
 
-t('tdoc.dev opens hosted registration by hostname; BYOK template does not', () => {
+t('tdoc.dev opens hosted registration by hostname or tdoc-cd bundle; BYOK template does not', () => {
   const uncommented = wranglerTpl.split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
   assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(uncommented),
     'wrangler template must not set TDOC_HOSTED_REGISTRATION=1 (BYOK stays single-owner /me)');
   assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(deployWf),
-    'tdoc.dev CD must not set TDOC_HOSTED_REGISTRATION=1 (hostname opens it)');
+    'tdoc.dev CD must not set TDOC_HOSTED_REGISTRATION=1 (bundle provenance opens it)');
   assert(worker.includes("origin === 'https://tdoc.dev'"),
     'unset registration must enable on the tdoc.dev origin');
+  assert(worker.includes("generated_by === 'tdoc-cd'"),
+    'tdoc-cd bundles must enable hosted /me on every hostname');
 });
 
 t('Hosted tokens are stored hashed, not in cleartext', () => {
