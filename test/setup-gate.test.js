@@ -106,7 +106,7 @@ t('nothing is put in their account for them', () => {
   // existence made "Create your first tdoc" tick on a doc we wrote.
   assert(!worker.includes('seedOnboardingDocFor') && !worker.includes('SEED_TEMPLATE_SLUG'), 'no seeder');
   assert(!worker.includes("SEED_FOLDER_NAME"), 'and no folder minted on their behalf');
-  const hubRoute = worker.slice(worker.indexOf("if (p === '/me' && method === 'GET')"), worker.indexOf("if (p === '/api/onboarding' && method === 'GET')"));
+  const hubRoute = worker.slice(worker.indexOf("if (p === '/me' && (method === 'GET' || method === 'HEAD'))"), worker.indexOf("if (p === '/api/onboarding' && method === 'GET')"));
   assert(!/seed/i.test(hubRoute), 'the docs page writes nothing when it is opened');
   // What the seeding was really for -- a first comment already on the page, so
   // row 3 is a reply and not a blank -- the publish path does anyway.

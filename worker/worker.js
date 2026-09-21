@@ -2310,7 +2310,7 @@ async function landingResponse(env, req, slug = LANDING_SLUG) {
 // bounce users here from /me or an unknown path.
 function neutralLandingResponse(env, notice) {
   const messages = {
-    me: 'My docs is only available after you sign in as the worker owner.',
+    me: 'This self-hosted tdoc only shows My docs to the worker operator. On https://tdoc.dev every signed-in account gets their own My docs — open that host and sign in again.',
     signin: 'Sign in to continue.',
     notfound: 'That page was not found. Sign in or open a doc from its shared link.',
   };
@@ -3405,11 +3405,14 @@ function requestOrigin(reqOrUrl) {
 }
 
 // Explicit 1/true/yes: on (wrangler dev). Explicit 0/false/no: off.
-// Unset: only the hosted product hostname (tdoc.dev) — BYOK stays single-owner.
+// Unset: hosted product hostname (tdoc.dev) OR a tdoc-cd bundle (the Worker
+// we operate — every hostname it serves, including the workers_dev preview).
+// BYOK (tdoc-publish) stays single-owner unless they set the var themselves.
 function hostedRegistrationEnabled(env, origin) {
   const v = String((env && (env.TDOC_HOSTED_REGISTRATION || env.TDOC_HOSTED_SIGNUP)) || '').toLowerCase();
   if (v === '1' || v === 'true' || v === 'yes') return true;
   if (v === '0' || v === 'false' || v === 'no') return false;
+  if (runtimeInfo().generated_by === 'tdoc-cd') return true;
   return origin === 'https://tdoc.dev';
 }
 
@@ -5502,7 +5505,7 @@ export default {
     // user sees *their* slugs (meta.hosted.github_login). Everyone else is
     // sent to the landing page (with a toast) — never to github.com, and
     // never a public catalog.
-    if (p === '/me' && method === 'GET') {
+    if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
         const notice = sessionPrincipal(s) ? 'me' : 'signin';
@@ -5511,6 +5514,7 @@ export default {
           headers: { Location: `/?notice=${notice}` },
         });
       }
+      if (method === 'HEAD') return new Response(null, { status: 200 });
       const nonce = rand(16);
       const identity = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       const data = await indexData(env, s, url.origin);

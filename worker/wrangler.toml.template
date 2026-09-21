@@ -87,7 +87,11 @@ TDOC_DEBUG_ACCOUNTS = "PLACEHOLDER_DEBUG_ACCOUNTS"
 #   that App's Authorization callback URL to https://<host>/auth/github/callback.
 #   Leave unset to keep the device-code flow (no browser redirect).
 # TDOC_HOSTED_REGISTRATION — leave unset on BYOK so /me stays single-owner.
-# Unset + hostname https://tdoc.dev enables hosted signup; set to "0" to force off.
+# Unset + hostname https://tdoc.dev enables hosted signup; set to "1" to force
+# on for every hostname on this Worker; "0" forces off. The tdoc.dev CD bundle
+# (generated_by=tdoc-cd) also enables hosted /me on every hostname it serves,
+# so friends hitting the workers_dev preview host are not bounced to the BYOK
+# "worker operator" toast.
 # The OIDC provider seat. Values below are hosted tdoc.dev's (Clerk, used
 # strictly as an OIDC provider — never as a session layer, so replacing it is
 # three values and no data migration). A BYOK deploy that wants its own
