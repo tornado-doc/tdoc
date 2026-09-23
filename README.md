@@ -47,6 +47,11 @@ And docs made in chat have no version history — every regeneration overwrites 
 
 `tdoc` gives you both sides: humans comment Google-Docs-style on any sentence/image/chart, the agent reads the same comments as structured input, and every edit is a new version you can flip back to. All free, all yours.
 
+The experimental [tdoc Feedback browser extension](extensions/feedback/README.md)
+brings the same threads, mentions, login, permissions, notifications, storage,
+and agent pull loop onto live apps. Double-tap Option, click a UI element, and
+leave feedback anchored to that element without creating a second inbox.
+
 Think of it as **Google Docs, but for agent-authored HTML documents**:
 multiplayer comments, comment status that stays in sync, full version history,
 and a one-line CLI to drive it all.

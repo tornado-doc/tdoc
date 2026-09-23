@@ -22,6 +22,9 @@ const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RUNTIME_JS_PATH__";
 const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`;
 const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";
 const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;
+// The in-page feedback client (feedback/src/main.jsx → server/runtime/feedback.js),
+// served at /feedback.js for the one-line install and the bookmarklet.
+const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
 
@@ -71,9 +74,45 @@ function parseCookie(req) {
   const m = c.match(/tdoc_sid=([a-f0-9]+)/);
   return m ? m[1] : null;
 }
+// A page on someone else's origin (their app, with feedback.js in it) never
+// carries the tdoc_sid cookie: SameSite=Lax keeps it home, and the CORS door
+// is credential-less. So the connect popup — which runs HERE, with the cookie —
+// mints a bearer token that points back at the same session record. Same
+// person, same permissions; the token only ever unlocks the routes in
+// FEEDBACK_TOKEN_PATHS and only for the doc it was minted for.
+const FEEDBACK_TOKEN_RE = /^Bearer\s+(fb_[a-f0-9]{48})$/;
+const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session']);
+const FEEDBACK_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+function feedbackTokenFrom(req) {
+  const m = (req.headers.get('authorization') || '').match(FEEDBACK_TOKEN_RE);
+  return m ? m[1] : null;
+}
+
+async function feedbackTokenRecord(env, token) {
+  if (!token) return null;
+  const raw = await env.META.get(`feedback:token:${token}`);
+  if (!raw) return null;
+  try {
+    const rec = JSON.parse(raw);
+    return rec && typeof rec.sid === 'string' && typeof rec.slug === 'string' ? rec : null;
+  } catch { return null; }
+}
+
+// A token-bound session may only touch the doc it was minted for.
+function feedbackScopeDenied(session, slug) {
+  return Boolean(session && session.feedback && session.feedback.slug !== slug);
+}
+
 async function getSession(env, req) {
-  const sid = parseCookie(req);
-  if (!sid) return null;
+  let sid = parseCookie(req);
+  let feedback = null;
+  if (!sid) {
+    const rec = await feedbackTokenRecord(env, feedbackTokenFrom(req));
+    if (!rec) return null;
+    sid = rec.sid;
+    feedback = { slug: rec.slug };
+  }
   const raw = await env.META.get(`session:${sid}`);
   if (!raw) return null;
   let session = null;
@@ -97,6 +136,7 @@ async function getSession(env, req) {
       if (id) session.account_id = id;
     } catch {}
   }
+  if (feedback) session.feedback = feedback;
   return session;
 }
 
@@ -2855,7 +2895,12 @@ async function indexData(env, session, origin) {
   // recents at all); the BYOK owner column stays a handle comparison, since
   // row.owner is a github_login and always will be for those docs.
   const viewerKey = actorKey(session);
+  // Feedback spaces are real docs (comments/access/@ reuse the same store) but
+  // they are reached from the app float, not hunted in My docs. created_from
+  // is stamped at connect; "use an existing doc" targets are left alone.
+  const isFeedbackSpace = (meta) => meta && meta.created_from === 'feedback';
   const mine = catalog.filter((row) => {
+    if (isFeedbackSpace(row.meta)) return false;
     if (hosted) return isDocOwnerSession(env, session, row.meta);
     return !row.owner || row.owner === viewer;
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
@@ -2867,7 +2912,8 @@ async function indexData(env, session, origin) {
   const bySlug = new Map(catalog.map((row) => [row.slug, row]));
   const savedRows = (items) => items.map((item) => {
     const row = bySlug.get(item.slug);
-    return row && docReadableBy(env, session, row.meta) ? { ...row, at: item.at } : null;
+    if (!row || isFeedbackSpace(row.meta) || !docReadableBy(env, session, row.meta)) return null;
+    return { ...row, at: item.at };
   }).filter(Boolean);
   const ownerDisplay = (row) => {
     if (row.owner) return row.owner;
@@ -3799,6 +3845,613 @@ function blankDocSlug(bytes) {
 // page rather than instructions meant for its author. They are :empty rules
 // rather than seeded text, so the hints come back whenever a line is cleared.
 // Duplicated in worker.js and server.js; test/no-drift.test.js pins them equal.
+// Mint a doc for a signed-in browser session: the body of "Start from
+// scratch", shared with the feedback space that /api/feedback/connect makes
+// on the person's behalf. Ownership, quota and slug rules are the ones the
+// create-from-scratch path always had; `meta` and `version` are what differs.
+async function createDocForSession(env, req, session, { html, meta, version }) {
+  const ownerCreate = isOwnerSession(env, session);
+  let actor = { kind: 'owner_session' };
+  if (!ownerCreate) {
+    // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
+    // its owner unless it has opted into hosted accounts. tdoc.dev is open.
+    if (!hostedAccountCopiesEnabled(env, req)) {
+      return { ok: false, response: json({
+        error: 'account_create_unavailable',
+        message: 'This host only lets its owner create documents. Publish from the CLI instead.',
+      }, { status: 403 }) };
+    }
+    // Not a precondition — this mints the account on first use. A null here
+    // means the account store itself is unreachable.
+    const acct = sessionLogin(session)
+    ? await hostedAccountForGithub(env, session.login, session && session.email,
+        session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+    : await hostedAccountForEmail(env, session && session.email, session && session.idp);
+    if (!acct) return { ok: false, response: json({ error: 'hosted_account_unavailable' }, { status: 503 }) };
+    actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login,
+      // Without this an email-born account's browser-created doc had no
+      // routable owner — the very path most email users take first.
+      email: normalizeEmail((acct && acct.email) || (session && session.email)) };
+  }
+
+  if (actor.kind === 'hosted') {
+    const maxBytes = hostedMaxUploadBytes(env);
+    const size = utf8ByteLength(html);
+    if (size > maxBytes) return { ok: false, response: json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 }) };
+    const limit = hostedMaxDocs(env);
+    const used = await countHostedDocs(env, actor.account_id, limit);
+    if (used >= limit) return { ok: false, response: json({ error: 'quota_docs', limit, used }, { status: 403 }) };
+  }
+
+  // Opaque ids don't collide in practice; the loop is here so that when one
+  // does, the answer is another id rather than a failed create.
+  let newSlug = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const candidate = blankDocSlug(crypto.getRandomValues(new Uint8Array(8)));
+    const existsMeta = await loadDocMeta(env, candidate);
+    if (existsMeta) continue;
+    const bytes = await docBytesExist(env, candidate);
+    if (!bytes.ok) return { ok: false, response: bytes.response };
+    if (bytes.exists) continue;
+    if (actor.kind === 'hosted') {
+      const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: actor.account_id });
+      if (!claimed.ok) {
+        if (
+          claimed.status === 503
+          || claimed.error === 'hosted_owner_store_unavailable'
+          || claimed.error === 'owner_store_conflict'
+        ) {
+          return { ok: false, response: json({ error: claimed.error || 'hosted_owner_store_unavailable' }, { status: claimed.status || 503 }) };
+        }
+        continue;
+      }
+    }
+    newSlug = candidate;
+    break;
+  }
+  if (!newSlug) return { ok: false, response: json({ error: 'slug_exhausted' }, { status: 409 }) };
+
+  const now = new Date().toISOString();
+  let incoming = {
+    ...meta,
+    slug: newSlug,
+    created: now,
+    versions: [{ n: 1, created: now, ...version }],
+    created_by: session.login,
+  };
+  incoming = stampHostedOwnership(incoming, actor);
+
+  const { html: stampedHtml, sha } = await prepareDocVersion(html);
+  incoming.versions[0].sha = sha;
+  const r2Key = `docs/${newSlug}/v1/index.html`;
+  try {
+    await env.DOCS.put(r2Key, stampedHtml, {
+      httpMetadata: { contentType: 'text/html; charset=utf-8' },
+    });
+  } catch (e) {
+    return { ok: false, response: json({ error: 'r2_put_failed', message: e.message }, { status: 500 }) };
+  }
+  const verify = await env.DOCS.head(r2Key);
+  if (!verify) return { ok: false, response: json({ error: 'r2_write_lost' }, { status: 500 }) };
+  await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
+  return { ok: true, slug: newSlug, actor, meta: incoming };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Product feedback (#564): comments left on someone's own app.
+//
+// The app gets one line — `<script src="https://tdoc.dev/feedback.js">` — or
+// the person clicks the bookmarklet from /feedback. Either way the same
+// client runs inside their page and talks to THIS worker with a feedback
+// token (see getSession). Comments land in a "feedback space": an ordinary
+// doc, created for them the first time they connect from that app origin,
+// so sharing, access, mentions, notifications and the agent pull are the
+// ones every other doc has.
+// ─────────────────────────────────────────────────────────────────────────
+
+// A browser origin, exactly — no path, no trailing slash, http(s) only.
+function feedbackOrigin(raw) {
+  try {
+    const u = new URL(String(raw || ''));
+    if (!/^https?:$/.test(u.protocol) || u.origin !== String(raw)) return null;
+    return u.origin;
+  } catch { return null; }
+}
+
+// Whose space it is. The actor key, not the account id: a session is only
+// stamped with its account after that account exists, and the first connect
+// is often what creates it — keying on it would file the first space under
+// one name and look for it under another.
+function feedbackSpaceOwnerKey(session) {
+  return actorKey(session);
+}
+
+function feedbackSpaceIndexKey(session, origin) {
+  return `feedback:space:${feedbackSpaceOwnerKey(session)}:${origin}`;
+}
+
+// The doc a feedback space lives in. Its body explains itself to whoever
+// opens the link; the comments beside it are the product.
+function feedbackSpaceHtml(origin, base) {
+  const host = new URL(origin).host;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feedback · ${escapeHtml(host)}</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #fff; color: #17171a;
+    font: 17px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 46rem; margin: 0 auto; padding: 4.5rem 1.5rem 8rem; }
+  h1 { font-size: 2.1rem; line-height: 1.25; margin: 0 0 1.5rem; letter-spacing: -0.02em; }
+  p { margin: 0 0 1.15rem; }
+  a { color: #2f5bea; }
+  code { background: #f3f3f6; padding: .12em .35em; border-radius: 4px;
+    font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
+  .muted { color: #55555f; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Feedback · ${escapeHtml(host)}</h1>
+  <p>Product feedback left on <a href="${escapeHtml(origin)}">${escapeHtml(origin)}</a>. Every comment here points at the page and the element it was left on.</p>
+  <p class="muted">To leave feedback, open the app and click the tdoc bookmark, or add <code>&lt;script src="${escapeHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app. Share from the comment button in the app — this space stays out of My docs.</p>
+</main>
+</body>
+</html>
+`;
+}
+
+// Find or create the space for (this person, this origin). A space whose doc
+// has since been deleted is recreated rather than pointed at.
+async function feedbackSpaceFor(env, req, session, origin) {
+  const key = feedbackSpaceIndexKey(session, origin);
+  const known = await env.META.get(key);
+  if (known) {
+    const meta = await loadDocMeta(env, known);
+    if (meta) return { ok: true, slug: known, meta };
+  }
+  const base = new URL(req.url).origin;
+  const made = await createDocForSession(env, req, session, {
+    html: feedbackSpaceHtml(origin, base),
+    meta: {
+      title: `Feedback · ${new URL(origin).host}`,
+      created_from: 'feedback',
+      feedback: { origin },
+      // Anyone holding the link sees the same thread; a name is needed to
+      // write. The owner tightens this in Share like any other doc.
+      access: { visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
+    },
+    version: { prompt: `Feedback space for ${origin}` },
+  });
+  if (!made.ok) return made;
+  await env.META.put(key, made.slug);
+  return { ok: true, slug: made.slug, meta: made.meta };
+}
+
+async function mintFeedbackToken(env, session, slug, origin) {
+  const token = `fb_${rand(24)}`;
+  await env.META.put(`feedback:token:${token}`, JSON.stringify({
+    sid: session.id, slug, origin, created: new Date().toISOString(),
+  }), { expirationTtl: FEEDBACK_TOKEN_TTL_SECONDS });
+  return token;
+}
+
+function feedbackSessionPayload(env, base, session, slug, meta) {
+  const version = Math.max(1, latestVersionNumber(meta));
+  return {
+    ok: true,
+    slug,
+    version,
+    title: (meta && meta.title) || slug,
+    doc_url: `${base}/d/${encodeURIComponent(slug)}/v/${version}`,
+    identity: { login: actorKey(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
+    is_owner: isDocOwnerSession(env, session, meta),
+  };
+}
+
+const FEEDBACK_PAGE_CSS = `
+  :root {
+    color-scheme: light;
+    --td-accent: #1652f0;
+    --td-accent-hover: #1245d0;
+    --td-accent-tint: #e8eeff;
+    --td-accent-ring: rgba(22,82,240,.28);
+    --td-ink: #1a1a1a;
+    --td-muted: #6b6a66;
+    --td-line: #e8e7e3;
+    --hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  }
+  body { margin: 0; background: #fff; color: var(--td-ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+  h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .75rem; letter-spacing: -0.02em; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+  p { margin: 0 0 1rem; }
+  a { color: var(--td-accent); }
+  code, pre { background: #f3f3f6; border-radius: 6px; font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
+  code { padding: .12em .35em; }
+  pre { padding: .8rem 1rem; overflow-x: auto; }
+  .muted { color: var(--td-muted); }
+  button { font: inherit; background: var(--td-accent); color: #fff; border: 0; border-radius: 999px;
+    padding: .55rem 1.1rem; cursor: pointer; font-weight: 650; }
+  button:hover { background: var(--td-accent-hover); }
+  button.secondary { background: #eef0f4; color: var(--td-ink); }
+  .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .card { border: 1px solid var(--td-line); border-radius: 10px; padding: 1rem 1.1rem; margin: 0 0 1rem; }
+  .err { color: #b3261e; }
+  ol { padding-left: 1.3rem; }
+  details.advanced { margin: 2rem 0 0; border-top: 1px solid var(--td-line); padding-top: 1rem; }
+  details.advanced > summary { cursor: pointer; color: var(--td-muted); font-weight: 600; list-style: none; }
+  details.advanced > summary::-webkit-details-marker { display: none; }
+  details.advanced > summary::before { content: "▸ "; }
+  details.advanced[open] > summary::before { content: "▾ "; }
+  details.advanced[open] > summary { margin-bottom: .75rem; color: var(--td-ink); }
+
+  .demo { position: relative; margin: 0 0 .85rem; border: 1px solid #c7c7cc;
+    border-radius: 12px; background: #dee1e6; overflow: hidden;
+    box-shadow: 0 8px 24px rgba(16,18,26,.08); }
+  .demo-titlebar { display: flex; align-items: center; gap: .55rem; padding: .45rem .6rem .4rem;
+    background: linear-gradient(#f6f6f7, #e8eaed); border-bottom: 1px solid #c7c7cc; }
+  .demo-dots { display: flex; gap: .35rem; flex: 0 0 auto; padding-left: .15rem; }
+  .demo-dots i { display: block; width: .7rem; height: .7rem; border-radius: 50%; }
+  .demo-dots .r { background: #ff5f57; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-dots .y { background: #febc2e; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-dots .g { background: #28c840; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+  .demo-omnibox { flex: 1 1 auto; height: 1.55rem; border-radius: 999px; background: #fff;
+    border: 1px solid #c7c7cc; color: #3c4043; font: 12px/1.55rem system-ui, -apple-system, sans-serif;
+    padding: 0 .75rem; overflow: hidden; white-space: nowrap; }
+  .demo-bookmarks { display: flex; align-items: center; gap: .15rem; height: 1.85rem;
+    padding: 0 .45rem; background: #fff; border-bottom: 1px solid #dadce0; font: 12px system-ui, sans-serif; }
+  .demo-bm { color: #3c4043; padding: .2rem .45rem; border-radius: 4px; white-space: nowrap; }
+  .demo-bm::before { content: ""; display: inline-block; width: .65rem; height: .65rem; margin-right: .3rem;
+    border-radius: 2px; background: #dadce0; vertical-align: -1px; }
+  .demo-slot { min-width: 6.5rem; height: 1.35rem; border-radius: 999px; border: 1.5px dashed var(--td-accent);
+    background: var(--td-accent-tint); box-sizing: border-box;
+    animation: demo-slot 3.4s ease-in-out infinite; }
+  .demo-page { position: relative; height: 7.2rem; background: #fff;
+    display: flex; align-items: center; justify-content: center; }
+  .demo-ghost { display: inline-block; background: var(--td-accent); color: #fff;
+    font: 650 15px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.01em;
+    padding: .75rem 1.35rem; border-radius: 999px; opacity: .2; pointer-events: none; }
+  .bookmarklet { display: inline-block; background: var(--td-accent); color: #fff !important; text-decoration: none;
+    font: 650 15px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.01em;
+    padding: .75rem 1.35rem; border-radius: 999px; cursor: grab;
+    box-shadow: 0 8px 20px var(--td-accent-ring); user-select: none; -webkit-user-drag: element;
+    position: absolute; left: 50%; top: 1.85rem; z-index: 2; white-space: nowrap;
+    transform: translateX(-50%); transform-origin: 50% 80%; transition: background .12s; }
+  .bookmarklet:hover { background: var(--td-accent-hover); }
+  .bookmarklet:active { cursor: grabbing; }
+  .bookmarklet.demo-fly {
+    animation: demo-drag 3.4s cubic-bezier(.2,.7,.2,1) infinite;
+    filter: drop-shadow(0 4px 10px rgba(22,82,240,.22));
+  }
+  .demo:hover .bookmarklet.demo-fly,
+  .bookmarklet.demo-fly:focus-visible {
+    animation: wiggle 1.05s ease-in-out infinite;
+    top: 1.85rem;
+    opacity: 1;
+    filter: drop-shadow(0 10px 22px var(--td-accent-ring));
+  }
+  .step-1 { position: absolute; left: calc(50% + 7.2rem); top: 1.95rem; z-index: 2;
+    font: 700 1.55rem/1.1 var(--hand); color: var(--td-accent); white-space: nowrap;
+    pointer-events: none; letter-spacing: .01em; transform: rotate(-6deg); }
+  .install-steps { margin: 0 0 1rem; padding-left: 1.25rem; color: var(--td-ink);
+    font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; }
+  .install-steps li { margin: 0 0 .4rem; }
+  .install-steps li strong { color: var(--td-accent); font-weight: 650; }
+  .install-steps kbd { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; background: #f1f3f4;
+    border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem; }
+  .device-note { margin: 0 0 1rem; font-size: .92rem; }
+  .phone-only { display: none; margin: 0 0 1.25rem; padding: .85rem 1rem; border-radius: 12px;
+    background: var(--td-accent-tint); border: 1px solid color-mix(in srgb, var(--td-accent) 28%, white);
+    font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--td-ink); }
+  .phone-only strong { color: var(--td-accent); }
+  .script-path { margin: 2rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--td-line);
+    border-radius: 12px; background: #fafafa; }
+  .script-path h2 { margin-top: 0; }
+  .script-path pre { margin: 0; }
+  @media (max-width: 720px) {
+    .phone-only { display: block; }
+    .install-desktop { display: none !important; }
+  }
+
+  .coach[hidden] { display: none !important; }
+  .coach { position: fixed; inset: 0; z-index: 10000; }
+  .coach-frost { position: absolute; inset: 0; background: rgba(16, 18, 28, 0.38);
+    backdrop-filter: blur(10px) saturate(1.2); -webkit-backdrop-filter: blur(10px) saturate(1.2);
+    cursor: pointer; }
+  .coach-curve { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
+    overflow: visible; z-index: 1; }
+  .coach-copy { position: absolute; left: 50%; top: 18px; transform: translateX(-50%) rotate(-2deg); z-index: 1;
+    pointer-events: none; margin: 0; padding: .7rem 1.05rem; border-radius: 14px;
+    background: rgba(255,255,255,.96); color: var(--td-accent);
+    font: 700 1.45rem/1.25 var(--hand);
+    box-shadow: 0 8px 24px rgba(16,18,26,.14); text-align: left; min-width: 17rem; }
+  .coach-copy .n { display: inline-flex; align-items: center; justify-content: center;
+    width: 1.35rem; height: 1.35rem; margin-right: .45rem; border-radius: 50%;
+    background: var(--td-accent); color: #fff; font: 700 0.85rem/1 -apple-system, system-ui, sans-serif;
+    vertical-align: .05em; }
+  .coach-copy .line { display: block; white-space: nowrap; }
+  .coach-copy .line + .line { margin-top: .3rem; color: var(--td-ink); }
+  .coach-copy .line + .line .n { background: var(--td-accent-tint); color: var(--td-accent); }
+
+  body.coaching .demo { position: relative; z-index: 10001; overflow: visible;
+    background: transparent; border-color: transparent; box-shadow: none; }
+  body.coaching .demo-titlebar,
+  body.coaching .demo-bookmarks,
+  body.coaching .demo-ghost { opacity: .18; }
+  body.coaching .step-1 { visibility: hidden; }
+  body.coaching .demo-page { background: transparent; }
+  body.coaching .demo-slot { animation: none; opacity: .2; }
+  body.coaching .bookmarklet {
+    z-index: 10002; animation: wiggle 1.05s ease-in-out infinite !important;
+    top: 1.85rem; left: 50%;
+    box-shadow: 0 16px 40px var(--td-accent-ring), 0 0 0 6px var(--td-accent-tint);
+    filter: none;
+  }
+  body.coaching .install-steps { visibility: hidden; }
+
+  @keyframes demo-drag {
+    0%, 10% { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1); }
+    42%, 58% { top: -2.75rem; opacity: 1; transform: translateX(calc(-50% - 2.8rem)) scale(.92); }
+    72%, 100% { top: -2.75rem; opacity: 0; transform: translateX(calc(-50% - 2.8rem)) scale(.92); }
+  }
+  @keyframes wiggle {
+    0%, 100% { transform: translateX(-50%) rotate(0deg) scale(1.06); }
+    20% { transform: translateX(-50%) rotate(-10deg) scale(1.06); }
+    40% { transform: translateX(-50%) rotate(10deg) scale(1.06); }
+    60% { transform: translateX(-50%) rotate(-7deg) scale(1.06); }
+    80% { transform: translateX(-50%) rotate(5deg) scale(1.06); }
+  }
+  @keyframes demo-slot {
+    0%, 35% { background: var(--td-accent-tint); border-color: var(--td-accent); }
+    42%, 62% { background: color-mix(in srgb, var(--td-accent) 22%, white); border-color: var(--td-accent-hover); }
+    78%, 100% { background: var(--td-accent-tint); border-color: var(--td-accent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bookmarklet.demo-fly, .demo-slot, .demo:hover .bookmarklet.demo-fly, body.coaching .bookmarklet { animation: none !important; }
+    .bookmarklet.demo-fly, body.coaching .bookmarklet { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1.06); }
+  }
+`;
+
+// /feedback — where the bookmarklet is picked up, and the one-line install
+// is shown. The bookmarklet is a plain bookmark whose address is script:
+// clicking it drops /feedback.js into whatever page is open.
+// The address of a bookmark is code, and our own origin goes into it. The
+// origin comes off the request, so it is reduced to the characters an origin
+// can be made of before it is spliced in — nothing else can reach the code.
+function feedbackScriptSrc(base) {
+  const origin = String(base || '').replace(/[^A-Za-z0-9:.\-\[\]/]/g, '');
+  if (!/^https?:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.\-]+)(?::\d{1,5})?$/.test(origin)) throw new Error('feedback: bad origin');
+  return `${origin}/feedback.js`;
+}
+
+function feedbackBookmarklet(src) {
+  return `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='${src}?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
+}
+
+function feedbackBookmarkletPage(base, nonce) {
+  const src = feedbackScriptSrc(base);
+  const bookmarklet = feedbackBookmarklet(src);
+  const host = escapeHtml(new URL(base).host);
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc Feedback</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+<style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
+</head>
+<body>
+<main>
+  <h1>Leave feedback on your own app</h1>
+  <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent.</p>
+
+  <p class="phone-only" id="phoneOnly"><strong>Desktop only for now.</strong> Setting this up needs a bookmarks bar (or editing your app’s HTML) — open this page on a computer.</p>
+
+  <div class="install-desktop" id="installDesktop">
+  <div class="bookmark-path" id="bookmarkPath">
+  <h2>Drag a bookmark</h2>
+  <p class="device-note muted">Desktop only — drag the pill onto your bookmarks bar.</p>
+  <p class="chrome-hint"><strong>Fullscreen tip.</strong> In Chrome, <kbd>⌘⇧F</kbd> keeps the top bar visible in fullscreen so the bookmarks bar has somewhere to live — or exit fullscreen, then drag.</p>
+  <div class="demo" id="demo">
+    <div class="demo-titlebar">
+      <div class="demo-dots" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+      <div class="demo-omnibox">localhost:3000</div>
+    </div>
+    <div class="demo-bookmarks">
+      <span class="demo-bm">Docs</span>
+      <span class="demo-bm">GitHub</span>
+      <span class="demo-slot" aria-hidden="true"></span>
+    </div>
+    <div class="demo-page">
+      <span class="demo-ghost" aria-hidden="true">✎ tdoc Feedback</span>
+      <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a>
+      <span class="step-1" aria-hidden="true">1 · Click Me!</span>
+    </div>
+  </div>
+  <ol class="install-steps">
+    <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
+    <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
+    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar)</li>
+  </ol>
+  <p class="muted step-after">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
+  </div>
+
+  <div class="script-path" id="scriptPath">
+    <h2>Or one line in the app</h2>
+    <p>Add this once in your HTML (dev and preview builds). Anyone who opens that build — including on a phone — gets the comment button. You still add the line from a computer.</p>
+    <pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre>
+  </div>
+  </div>
+
+  <h2>Where it goes</h2>
+  <p>Comments land in a feedback space on ${host} — a doc named after your app, created for you on first connect. It stays out of My docs; share from the comment button in your app (copy link), or open the space on ${host} to manage access.</p>
+</main>
+
+<div id="coach" class="coach" hidden>
+  <div class="coach-frost" data-dismiss="1"></div>
+  <svg class="coach-curve" aria-hidden="true">
+    <defs>
+      <marker id="coachHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+        <path d="M0 0 L7 4 L0 8 Z" fill="#1652f0"/>
+      </marker>
+    </defs>
+    <path id="coachPath" fill="none" stroke="#1652f0" stroke-width="2" stroke-linecap="round"
+      marker-end="url(#coachHead)"></path>
+  </svg>
+  <p class="coach-copy" id="coachCopy">
+    <span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>
+    <span class="line"><span class="n">3</span>No bar? ⌘⇧B · Fullscreen top bar? ⌘⇧F</span>
+  </p>
+</div>
+
+<script nonce="${nonce}">
+(function () {
+  var btn = document.getElementById('bookmarklet');
+  var coach = document.getElementById('coach');
+  var path = document.getElementById('coachPath');
+  var copy = document.getElementById('coachCopy');
+  if (!btn || !coach || !path || !copy) return;
+
+  function placeArrow() {
+    var r = btn.getBoundingClientRect();
+    var x1 = r.left + r.width / 2;
+    var y1 = r.top + 4;
+    var x2 = Math.min(Math.max(window.innerWidth / 2, 48), window.innerWidth - 48);
+    var y2 = 10;
+    var c1x = x1;
+    var c1y = Math.max(y2 + 40, y1 - (y1 - y2) * 0.55);
+    var c2x = x2 + (x1 < x2 ? -36 : 36);
+    var c2y = y2 + Math.max(48, (y1 - y2) * 0.35);
+    path.setAttribute('d', 'M ' + x1 + ' ' + y1 + ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + x2 + ' ' + y2);
+  }
+
+  function openCoach() {
+    document.body.classList.add('coaching');
+    coach.hidden = false;
+    btn.classList.remove('demo-fly');
+    placeArrow();
+  }
+  function closeCoach() {
+    document.body.classList.remove('coaching');
+    coach.hidden = true;
+    btn.classList.add('demo-fly');
+  }
+
+  // Click teaches the drag; the javascript: href is for the bookmark once dropped.
+  btn.addEventListener('click', function (e) {
+    e.preventDefault();
+    openCoach();
+  });
+  btn.addEventListener('dragstart', function () {
+    openCoach();
+  });
+  window.addEventListener('resize', function () {
+    if (!document.body.classList.contains('coaching')) return;
+    placeArrow();
+  });
+  coach.addEventListener('click', function (e) {
+    if (e.target && e.target.getAttribute('data-dismiss')) closeCoach();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeCoach();
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
+// /feedback/connect?origin=… — the popup the client opens the first time it
+// runs on an app. Runs on our origin with the cookie: sign in if needed, make
+// or reuse the space, mint a token, hand it back to the opener and close.
+function feedbackConnectPage({ base, origin, nonce, identity, doors, error }) {
+  const host = origin ? new URL(origin).host : '';
+  const returnTo = `/feedback/connect?origin=${encodeURIComponent(origin || '')}`;
+  let body;
+  if (error) {
+    body = `<p class="err">${escapeHtml(error)}</p><p><a href="${escapeHtml(returnTo)}">Try again</a></p>`;
+  } else if (!identity) {
+    const links = [];
+    if (doors.oidc) links.push(`<a href="/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnTo)}"><button type="button">Sign in with ${escapeHtml(doors.oidcLabel || 'Email')}</button></a>`);
+    if (doors.web) links.push(`<a href="/api/auth/web/login?return=${encodeURIComponent(returnTo)}"><button type="button" class="${doors.oidc ? 'secondary' : ''}">Sign in with GitHub</button></a>`);
+    if (!links.length) links.push(`<a href="/?notice=signin" target="_blank" rel="opener"><button type="button">Sign in on ${escapeHtml(new URL(base).host)}</button></a> <a href="${escapeHtml(returnTo)}"><button type="button" class="secondary">I've signed in</button></a>`);
+    body = `<p>Sign in so your feedback on <strong>${escapeHtml(host)}</strong> carries your name.</p><div class="row">${links.join(' ')}</div>`;
+  } else {
+    body = `<p>Signed in as <strong>${escapeHtml(identity.name || identity.login)}</strong>.</p>
+<div class="card">
+  <p>Connect <strong>${escapeHtml(host)}</strong> to a feedback space in your account. One is created for this app the first time.</p>
+  <div class="row"><button type="button" id="connect">Connect</button><span id="status" class="muted"></span></div>
+</div>
+<details><summary class="muted">Use an existing doc instead</summary>
+  <p class="muted">Paste a doc link you can comment on and its comments will hold this app's feedback.</p>
+  <div class="row"><input id="doc" placeholder="https://${escapeHtml(new URL(base).host)}/d/…/v/1" style="flex:1;min-width:14rem;padding:.5rem;border:1px solid #d4d4dc;border-radius:8px;font:inherit"><button type="button" class="secondary" id="connect-doc">Use this doc</button></div>
+</details>`;
+  }
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect tdoc Feedback</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
+</head>
+<body>
+<main>
+  <h1>tdoc Feedback</h1>
+  ${body}
+</main>
+<script nonce="${nonce}">
+(function () {
+  var origin = ${JSON.stringify(origin)};
+  var status = document.getElementById('status');
+  function say(text, bad) { if (status) { status.textContent = text; status.className = bad ? 'err' : 'muted'; } }
+  function deliver(payload) {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: 'tdoc-feedback-connected', origin: origin, session: payload }, origin);
+      say('Connected. You can close this window.');
+      setTimeout(function () { window.close(); }, 400);
+    } else {
+      say('Connected. Go back to your app and click the tdoc button again.');
+    }
+  }
+  function connect(body) {
+    say('Connecting…');
+    fetch('/api/feedback/connect', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(Object.assign({ origin: origin }, body || {})),
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (r) {
+        if (!r.ok) { say((r.body && (r.body.message || r.body.error)) || 'Could not connect', true); return; }
+        deliver(r.body);
+      })
+      .catch(function (e) { say(String(e && e.message || e), true); });
+  }
+  var button = document.getElementById('connect');
+  if (button) button.addEventListener('click', function () { connect(); });
+  var docButton = document.getElementById('connect-doc');
+  if (docButton) docButton.addEventListener('click', function () {
+    var value = (document.getElementById('doc').value || '').trim();
+    var m = /\\/d\\/([^/?#]+)/.exec(value);
+    if (!m) { say('That is not a doc link', true); return; }
+    connect({ slug: decodeURIComponent(m[1]) });
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
 function blankDocHtml() {
   return `<!doctype html>
 <html lang="en">
@@ -5753,6 +6406,12 @@ export default {
 
     if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
+    // Before any route can read it as a session: a feedback token opens the
+    // comment surface of one doc and nothing else (see getSession).
+    if (feedbackTokenFrom(req) && !FEEDBACK_TOKEN_PATHS.has(p)) {
+      return json({ error: 'feedback_token_scope' }, { status: 403 });
+    }
+
     if (p === '/api/ping') return json({ ok: true, service: 'tdoc' });
     if (p === '/api/runtime') return json({ ok: true, runtime: runtimeInfo() });
     if (p === SHELL_RUNTIME_JS_PATH && (method === 'GET' || method === 'HEAD')) {
@@ -6626,101 +7285,99 @@ export default {
     // derived slug, charge it to the caller's hosted quota, write v1 and the
     // meta record. The browser had no way to make a document before this; edit
     // mode could only ever change one that already existed.
+    // ---- product feedback (#564): the client, its pages, and the token door ----
+    if (p === '/feedback.js' && (method === 'GET' || method === 'HEAD')) {
+      return new Response(method === 'HEAD' ? null : FEEDBACK_JS, {
+        headers: {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          // Short: the bookmarklet cache-busts, the script tag should pick up
+          // a fix within minutes without a hashed path in the one line.
+          'Cache-Control': 'public, max-age=300',
+          'X-Content-Type-Options': 'nosniff',
+          ...CORS,
+        },
+      });
+    }
+    if (p === '/feedback' && method === 'GET') {
+      const nonce = rand(16);
+      return html(feedbackBookmarkletPage(url.origin, nonce), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+    }
+    if (p === '/feedback/connect' && method === 'GET') {
+      const nonce = rand(16);
+      const headers = { 'Content-Security-Policy': cspHeader(nonce) };
+      const origin = feedbackOrigin(url.searchParams.get('origin'));
+      if (!origin) {
+        return html(feedbackConnectPage({ base: url.origin, origin: null, nonce, error: 'Open this window from the tdoc button inside your app.' }), { status: 400, headers });
+      }
+      const s = await getSession(env, req);
+      const oidc = oidcConfig(env);
+      return html(feedbackConnectPage({
+        base: url.origin, origin, nonce,
+        identity: sessionPrincipal(s) ? { login: actorKey(s), name: actorDisplayName(s) } : null,
+        doors: { oidc: !!oidc, oidcLabel: oidc && oidc.label, web: !!env.GITHUB_CLIENT_SECRET },
+      }), { headers });
+    }
+    if (p === '/api/feedback/connect' && method === 'POST') {
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const origin = feedbackOrigin(body.origin);
+      if (!origin) return json({ error: 'invalid_origin' }, { status: 400 });
+      let slug;
+      let meta;
+      if (body.slug) {
+        // "Use an existing doc": any doc this person may comment on.
+        if (!isValidSlug(body.slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+        meta = await loadDocMeta(env, body.slug);
+        if (!meta) return json({ error: 'not_found' }, { status: 404 });
+        const access = accessFromMeta(meta);
+        if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+        if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
+        slug = body.slug;
+        await env.META.put(feedbackSpaceIndexKey(s, origin), slug);
+      } else {
+        const space = await feedbackSpaceFor(env, req, s, origin);
+        if (!space.ok) return space.response;
+        slug = space.slug;
+        meta = space.meta;
+      }
+      const token = await mintFeedbackToken(env, s, slug, origin);
+      return json({ ...feedbackSessionPayload(env, url.origin, s, slug, meta), token });
+    }
+    // The client's first call with a stored token: still valid, still allowed,
+    // and where the doc is now.
+    if (p === '/api/feedback/session' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!s || !s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const meta = await loadDocMeta(env, s.feedback.slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      const access = accessFromMeta(meta);
+      if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+      return json({
+        ...feedbackSessionPayload(env, url.origin, s, s.feedback.slug, meta),
+        can_comment: canCommentOnDoc(access, s, env, meta),
+      });
+    }
+
     if (p === '/api/doc/create' && method === 'POST') {
       const session = await getSession(env, req);
       if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
-      const ownerCreate = isOwnerSession(env, session);
-      let actor = { kind: 'owner_session' };
-      if (!ownerCreate) {
-        // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
-        // its owner unless it has opted into hosted accounts. tdoc.dev is open.
-        if (!hostedAccountCopiesEnabled(env, req)) {
-          return json({
-            error: 'account_create_unavailable',
-            message: 'This host only lets its owner create documents. Publish from the CLI instead.',
-          }, { status: 403 });
-        }
-        // Not a precondition — this mints the account on first use. A null here
-        // means the account store itself is unreachable.
-        const acct = sessionLogin(session)
-        ? await hostedAccountForGithub(env, session.login, session && session.email,
-            session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
-        : await hostedAccountForEmail(env, session && session.email, session && session.idp);
-        if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
-        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login,
-          // Without this an email-born account's browser-created doc had no
-          // routable owner — the very path most email users take first.
-          email: normalizeEmail((acct && acct.email) || (session && session.email)) };
-      }
-
-      const html = blankDocHtml();
-      if (actor.kind === 'hosted') {
-        const maxBytes = hostedMaxUploadBytes(env);
-        const size = utf8ByteLength(html);
-        if (size > maxBytes) return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
-        const limit = hostedMaxDocs(env);
-        const used = await countHostedDocs(env, actor.account_id, limit);
-        if (used >= limit) return json({ error: 'quota_docs', limit, used }, { status: 403 });
-      }
-
-      // Opaque ids don't collide in practice; the loop is here so that when one
-      // does, the answer is another id rather than a failed create.
-      let newSlug = null;
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const candidate = blankDocSlug(crypto.getRandomValues(new Uint8Array(8)));
-        const existsMeta = await loadDocMeta(env, candidate);
-        if (existsMeta) continue;
-        const bytes = await docBytesExist(env, candidate);
-        if (!bytes.ok) return bytes.response;
-        if (bytes.exists) continue;
-        if (actor.kind === 'hosted') {
-          const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: actor.account_id });
-          if (!claimed.ok) {
-            if (
-              claimed.status === 503
-              || claimed.error === 'hosted_owner_store_unavailable'
-              || claimed.error === 'owner_store_conflict'
-            ) {
-              return json({ error: claimed.error || 'hosted_owner_store_unavailable' }, { status: claimed.status || 503 });
-            }
-            continue;
-          }
-        }
-        newSlug = candidate;
-        break;
-      }
-      if (!newSlug) return json({ error: 'slug_exhausted' }, { status: 409 });
-
-      const now = new Date().toISOString();
-      let incoming = {
-        // Renamed by the first save that finds a heading in the document, and
-        // by every save after it — see _saveVersion. This is the only kind of
-        // document whose heading is authoritative for its title.
-        title: 'Untitled',
-        created_from: 'blank',
-        slug: newSlug,
-        created: now,
+      const made = await createDocForSession(env, req, session, {
+        html: blankDocHtml(),
+        meta: {
+          // Renamed by the first save that finds a heading in the document, and
+          // by every save after it — see _saveVersion. This is the only kind of
+          // document whose heading is authoritative for its title.
+          title: 'Untitled',
+          created_from: 'blank',
+        },
         // The mark the first save consumes: this v1 is scaffolding, not
         // something an author wrote.
-        versions: [{ n: 1, created: now, prompt: 'Created from scratch in the browser', blank: true }],
-        created_by: session.login,
-      };
-      incoming = stampHostedOwnership(incoming, actor);
-
-      const { html: stampedHtml, sha: blankSha } = await prepareDocVersion(html);
-      incoming.versions[0].sha = blankSha;
-      const r2Key = `docs/${newSlug}/v1/index.html`;
-      try {
-        await env.DOCS.put(r2Key, stampedHtml, {
-          httpMetadata: { contentType: 'text/html; charset=utf-8' },
-        });
-      } catch (e) {
-        return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
-      }
-      const verify = await env.DOCS.head(r2Key);
-      if (!verify) return json({ error: 'r2_write_lost' }, { status: 500 });
-      await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
-      return json({ ok: true, slug: newSlug, version: 1, url: `/d/${newSlug}/v/1?edit=1` });
+        version: { prompt: 'Created from scratch in the browser', blank: true },
+      });
+      if (!made.ok) return made.response;
+      return json({ ok: true, slug: made.slug, version: 1, url: `/d/${made.slug}/v/1?edit=1` });
     }
 
     if (p === '/api/doc/duplicate' && method === 'POST') {
@@ -7709,6 +8366,7 @@ export default {
       // Same read gate as the HTML routes: private docs don't leak comments.
       const gate = await enforceDocAccess(env, req, slug, parseVersionParam(url) || 1);
       if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
+      if (feedbackScopeDenied(gate.session, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       // The agent reading the comments is what bridge 2 waits for. A Bearer
       // token names the agent; `version=all` is the shape only tdoc-pull asks
       // for. Neither ever fails the read.
@@ -7740,6 +8398,7 @@ export default {
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       const slug = url.searchParams.get('slug');
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       const meta = await loadDocMeta(env, slug);
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
@@ -7752,7 +8411,11 @@ export default {
         participants: commentParticipants(list),
         includeAllowed: isAllowlisted(access, s, env, meta),
       }).filter((u) => u.login !== me);
-      return json({ users });
+      return json({
+        users,
+        identity: { login: me, name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
+        is_owner: isDocOwnerSession(env, s, meta),
+      });
     }
 
     if (p === '/api/comments' && method === 'POST') {
@@ -7766,6 +8429,7 @@ export default {
       const commentText = typeof body.text === 'string' ? body.text.trim() : body.text;
       if (!slug || !commentText) return json({ error: 'slug and text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       const meta = await loadDocMeta(env, slug);
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
@@ -7901,6 +8565,7 @@ export default {
       let body = {};
       try { body = await req.json(); } catch {}
       const { slug, id, anchor, version } = body;
+      if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       if (typeof body.resolved === 'boolean') {
         // Marking a thread handled, and taking it back. Same gate as delete and
         // move-anchor: the doc's owner, or whoever wrote the comment — the
@@ -7993,6 +8658,7 @@ export default {
       const slug = url.searchParams.get('slug');
       const id = url.searchParams.get('id');
       if (!slug || !id) return json({ error: 'slug and id required' }, { status: 400 });
+      if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       const V = parseVersionParam(url);
       const stampVersion = Number.isFinite(V) ? V : 999999;  // "forever" if unspecified
       // Auth read up front (canMutate needs session+env): find the target
@@ -8023,6 +8689,7 @@ export default {
       const { slug, comment_id, emoji, version } = body;
       if (!slug || !comment_id || !emoji) return json({ error: 'slug, comment_id, emoji required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       if (typeof emoji !== 'string' || emoji.length > 8 || emoji.length === 0) return json({ error: 'invalid_emoji' }, { status: 400 });
       // `emoji` is used as an object key in the reaction fold; reject keys that
       // would resolve to Object.prototype members (e.g. `valueOf`, `toString`,
