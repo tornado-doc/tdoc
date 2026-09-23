@@ -19,12 +19,12 @@ export function Profile({ boot }) {
           <div>
             <h1>@{login}</h1>
             <p className="loc-hint">
-              {docs.length} public {docs.length === 1 ? 'doc' : 'docs'}
+              {docs.length} {docs.length === 1 ? 'pick' : 'picks'}
             </p>
           </div>
         </div>
         {docs.length === 0 ? (
-          <p className="empty">No public docs yet.</p>
+          <p className="empty">No public picks yet.</p>
         ) : (
           <section className="pane">
             <div className="doc-list">

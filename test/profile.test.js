@@ -187,14 +187,23 @@ function bootData(html, name) {
   return JSON.parse(html.slice(start + marker.length, end));
 }
 
+async function seedPins(env, accountId, pins, extra = {}) {
+  await env.META.put(`account-profile:${accountId}`, JSON.stringify({
+    account_id: accountId,
+    pins,
+    created: '2026-01-01T00:00:00.000Z',
+    ...extra,
+  }));
+}
+
 (async () => {
   const mod = await loadWorker();
   const worker = mod.default;
   console.log('public @handle profiles');
 
-  await t('/@alice lists public + unlisted, hides private and other owners', async () => {
+  await t('/@alice lists only pinned readable docs', async () => {
     const env = makeEnv(mod.CommentsStore);
-    await seedAccount(env, 'alice');
+    const alice = await seedAccount(env, 'alice');
     await seedAccount(env, 'bob');
     await seedDoc(env, 'alice-open', {
       owner: 'alice',
@@ -214,13 +223,20 @@ function bootData(html, name) {
       owner: 'bob',
       access: { visibility: 'public' },
     });
+    // Pin order preserved; private pin is omitted from the public page.
+    await seedPins(env, alice, ['alice-link', 'alice-secret', 'alice-open', 'bob-open']);
+
+    const empty = await worker.fetch(req('/@bob'), env, {});
+    assert(empty.status === 200, `/@bob ${empty.status}`);
+    const emptyBoot = bootData(await empty.text(), '__TDOC_APP_BOOT__');
+    assert(emptyBoot.docs.length === 0, 'unpinned profile is empty');
 
     const r = await worker.fetch(req('/@alice'), env, {});
     assert(r.status === 200, `/@alice ${r.status}`);
     const boot = bootData(await r.text(), '__TDOC_APP_BOOT__');
     assert(boot.page === 'profile' && boot.login === 'alice', 'profile boot');
     assert(boot.docs.map((d) => d.slug).join(',') === 'alice-link,alice-open',
-      `expected unlisted then public by updated, got ${JSON.stringify(boot.docs)}`);
+      `expected pinned public/unlisted only, got ${JSON.stringify(boot.docs)}`);
     assert(boot.docs.every((d) => d.url && d.title), 'rows need url + title');
   });
 
@@ -236,10 +252,12 @@ function bootData(html, name) {
     assert(bad.status === 404, `invalid handle must 404, got ${bad.status}`);
   });
 
-  await t('Accept: application/json returns the same catalog', async () => {
+  await t('Accept: application/json returns pinned catalog', async () => {
     const env = makeEnv(mod.CommentsStore);
-    await seedAccount(env, 'alice');
+    const alice = await seedAccount(env, 'alice');
     await seedDoc(env, 'pub', { owner: 'alice', access: { visibility: 'public' } });
+    await seedDoc(env, 'other', { owner: 'alice', access: { visibility: 'public' } });
+    await seedPins(env, alice, ['pub']);
     const r = await worker.fetch(req('/@alice', { accept: 'application/json' }), env, {});
     assert(r.status === 200, `json ${r.status}`);
     const body = await r.json();
@@ -254,7 +272,7 @@ function bootData(html, name) {
     assert(r.status === 404, `BYOK must 404, got ${r.status}`);
   });
 
-  await t('email account can claim handle and serve /@', async () => {
+  await t('email account can claim handle and pin a doc', async () => {
     const env = makeEnv(mod.CommentsStore);
     const accountId = await seedEmailAccount(env, 'sam@example.com', 'acct-sam');
     await seedDoc(env, 'sam-open', {
@@ -278,17 +296,14 @@ function bootData(html, name) {
     const claimed = await claim.json();
     assert(claimed.ok && claimed.handle === 'sam' && claimed.url === '/@sam', JSON.stringify(claimed));
 
-    const again = await worker.fetch(req('/api/me/handle', {
-      method: 'POST', cookie, body: { handle: 'other' },
-    }), env, {});
-    assert(again.status === 409, `second claim must 409, got ${again.status}`);
+    const empty = await worker.fetch(req('/@sam'), env, {});
+    assert(empty.status === 200, `/@sam ${empty.status}`);
+    assert(bootData(await empty.text(), '__TDOC_APP_BOOT__').docs.length === 0, 'no pins yet');
 
-    const reserved = await worker.fetch(req('/api/me/handle', {
-      method: 'POST',
-      cookie: await putSession(env, { email: 'x@example.com', account_id: 'acct-x' }),
-      body: { handle: 'setup' },
+    const pin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug: 'sam-open', pinned: true },
     }), env, {});
-    assert(reserved.status === 400, `reserved must 400, got ${reserved.status}`);
+    assert(pin.status === 200, `pin ${pin.status} ${await pin.clone().text()}`);
 
     const page = await worker.fetch(req('/@sam'), env, {});
     assert(page.status === 200, `/@sam ${page.status}`);

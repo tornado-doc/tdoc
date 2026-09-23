@@ -2889,29 +2889,23 @@ async function indexData(env, session, origin) {
   };
 }
 
-// Public profile for /@<github-login>: the account's public + unlisted docs.
-// Lookup is read-only (never mint). Filter by account_id when stamped, else
-// by github_login for older meta. Private docs never appear here — owners
-// still use /me for that.
+// Public profile for /@handle: only docs the owner pinned. Visibility still
+// gates whether a visitor can open the link — private pins stay off the
+// public list even if curated.
 async function profileData(env, account) {
   const accountId = account && typeof account.account_id === 'string' ? account.account_id : '';
   const login = normalizeGithubLogin(account && account.github_login);
   if (!accountId && !login) return [];
 
-  let keys = [];
-  let cursor;
-  do {
-    const page = await env.META.list({ prefix: 'meta:', cursor });
-    keys = keys.concat(page.keys);
-    cursor = page.cursor;
-    if (page.list_complete) break;
-  } while (cursor);
+  const pins = accountId
+    ? normalizeProfilePins(await accountProfile(env, accountId))
+    : [];
+  if (!pins.length) return [];
 
   const docs = [];
-  for (const key of keys) {
-    const slug = key.name.slice('meta:'.length);
+  for (const slug of pins) {
     let meta = {};
-    try { meta = JSON.parse(await env.META.get(key.name) || '{}'); } catch { continue; }
+    try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || '{}'); } catch { continue; }
     const hosted = meta && meta.hosted;
     const owns = (accountId && hosted && hosted.account_id === accountId)
       || (login && hostedGithubLogin(meta) === login);
@@ -2929,7 +2923,6 @@ async function profileData(env, account) {
       url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
     });
   }
-  docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
   return docs;
 }
 
@@ -4013,6 +4006,50 @@ async function accountProfile(env, accountId) {
   return null;
 }
 
+const PROFILE_PINS_MAX = 50;
+
+function normalizeProfilePins(rec) {
+  const raw = rec && Array.isArray(rec.pins) ? rec.pins : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const slug = typeof item === 'string' ? item : (item && item.slug);
+    if (typeof slug !== 'string' || !slug || seen.has(slug)) continue;
+    if (!isValidSlug(slug)) continue;
+    seen.add(slug);
+    out.push(slug);
+    if (out.length >= PROFILE_PINS_MAX) break;
+  }
+  return out;
+}
+
+async function putAccountProfile(env, accountId, patch) {
+  const prev = (await accountProfile(env, accountId)) || {};
+  const next = { ...prev, ...patch, account_id: accountId };
+  if (patch.pins === undefined && prev.pins) next.pins = normalizeProfilePins(prev);
+  else if (patch.pins !== undefined) next.pins = normalizeProfilePins({ pins: patch.pins });
+  await env.META.put(`account-profile:${accountId}`, JSON.stringify(next));
+  return next;
+}
+
+async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {}) {
+  if (!accountId || !isValidSlug(slug)) return { error: 'invalid_slug', status: 400 };
+  if (!meta) {
+    try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { meta = null; }
+  }
+  if (!meta) return { error: 'not_found', status: 404 };
+  if (!isDocOwnerSession(env, session, meta)) return { error: 'forbidden', status: 403 };
+  const prev = await accountProfile(env, accountId);
+  let pins = normalizeProfilePins(prev);
+  if (pinned) {
+    if (!pins.includes(slug)) pins = [slug, ...pins].slice(0, PROFILE_PINS_MAX);
+  } else {
+    pins = pins.filter((s) => s !== slug);
+  }
+  await putAccountProfile(env, accountId, { pins });
+  return { ok: true, pins, on_profile: pins.includes(slug) };
+}
+
 async function accountClaimedHandle(env, accountId) {
   const rec = await accountProfile(env, accountId);
   return normalizeGithubLogin(rec && rec.handle);
@@ -4073,11 +4110,13 @@ async function claimAccountHandle(env, accountId, rawHandle, { github_login } = 
     created: now,
     ...(gh ? { github_login: gh } : {}),
   }));
-  await env.META.put(`account-profile:${accountId}`, JSON.stringify({
+  const prev = (await accountProfile(env, accountId)) || {};
+  await putAccountProfile(env, accountId, {
     handle,
-    created: now,
+    created: prev.created || now,
     ...(gh ? { github_login: gh } : {}),
-  }));
+    pins: normalizeProfilePins(prev),
+  });
   if (gh) {
     try {
       const rec = JSON.parse(await env.META.get(`hosted-account:${gh}`));
@@ -4094,12 +4133,13 @@ async function profileBootForSession(env, session) {
   if (!accountId) {
     const login = sessionLogin(session);
     const suggested = login || suggestHandleFromEmail(session && session.email) || null;
-    return { handle: null, suggested };
+    return { handle: null, suggested, pins: [] };
   }
-  const claimed = await accountClaimedHandle(env, accountId);
+  const rec = await accountProfile(env, accountId);
+  const claimed = normalizeGithubLogin(rec && rec.handle);
   const login = sessionLogin(session);
   const suggested = claimed || login || suggestHandleFromEmail(session && session.email) || null;
-  return { handle: claimed, suggested };
+  return { handle: claimed, suggested, pins: normalizeProfilePins(rec) };
 }
 
 // Claim / publish mint an account; bare sign-in does not (spectators stay
@@ -5869,10 +5909,11 @@ export default {
       const profile = hostedRegistrationEnabled(env, url.origin)
         ? await profileBootForSession(env, s)
         : null;
+      const pinSet = new Set((profile && profile.pins) || []);
       return json({
         ok: true,
         identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
-        docs: data.docs,
+        docs: (data.docs || []).map((row) => ({ ...row, on_profile: pinSet.has(row.slug) })),
         folders: data.folders,
         recent: data.recent,
         starred: data.starred,
@@ -5922,6 +5963,30 @@ export default {
       return json({ ok: true, handle: result.handle, url: `/@${result.handle}` });
     }
 
+    if (p === '/api/me/profile/pin' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const acct = await ensureSessionHostedAccount(env, s);
+      const accountId = acct && acct.account_id;
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body && typeof body.slug === 'string' ? body.slug.trim() : '';
+      const pinned = body && body.pinned !== false && body.pinned !== 'false';
+      const result = await setProfilePin(env, accountId, slug, Boolean(pinned), { session: s });
+      if (!result.ok) {
+        return json({ error: result.error }, { status: result.status || 400 });
+      }
+      return json({ ok: true, slug, on_profile: result.on_profile, pins: result.pins });
+    }
+
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
@@ -5938,6 +6003,11 @@ export default {
       const profile = hostedRegistrationEnabled(env, url.origin)
         ? await profileBootForSession(env, s)
         : null;
+      const pinSet = new Set((profile && profile.pins) || []);
+      const docs = (data.docs || []).map((row) => ({
+        ...row,
+        on_profile: pinSet.has(row.slug),
+      }));
       return html(SHELL.appHtml({
         title: 'My docs',
         nonceAttr: ` nonce="${nonce}"`,
@@ -5961,6 +6031,7 @@ export default {
           debug: await isDebugAccount(env, s),
           ...(profile ? { profile } : {}),
           ...data,
+          docs,
         }),
       }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
@@ -5968,7 +6039,7 @@ export default {
     }
 
     // Public profile: /@<handle>. Hosted only. Claimed handle, else GitHub
-    // login (MVP #569). Lists public + unlisted docs for that account.
+    // login fallback. Lists docs the owner pinned (curated), not every public doc.
     const profileMatch = p.match(/^\/@([^/]+)\/?$/);
     if (profileMatch && (method === 'GET' || method === 'HEAD')) {
       if (!hostedRegistrationEnabled(env, url.origin)) {

@@ -274,15 +274,49 @@ export function DocsHub({ boot }) {
   });
   const [tab, setTab] = useState('mine');
   const [modal, setModal] = useState(null);
+  const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
   const openAgentRecipe = () => setModal({ type: 'create-agent' });
+
+  const toggleProfilePin = async (doc) => {
+    if (!doc || !doc.slug || !boot.profile) return;
+    const next = !pins.has(doc.slug);
+    const previous = new Set(pins);
+    setPins((cur) => {
+      const copy = new Set(cur);
+      if (next) copy.add(doc.slug);
+      else copy.delete(doc.slug);
+      return copy;
+    });
+    try {
+      const r = await fetch('/api/me/profile/pin', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: doc.slug, pinned: next }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setPins(previous);
+        return;
+      }
+      if (Array.isArray(body.pins)) setPins(new Set(body.pins));
+    } catch {
+      setPins(previous);
+    }
+  };
 
   const docMenu = (slugs, doc) => [
     doc && (doc.mine || !doc.owner || doc.owner === viewer) ? {
       label: 'Rename',
       className: 'row-rename',
       onSelect: () => setModal({ type: 'rename-doc', doc }),
+    } : null,
+    boot.profile && doc && (doc.mine || !doc.owner || doc.owner === viewer) ? {
+      label: pins.has(doc.slug) ? 'Remove from profile' : 'Show on profile',
+      className: 'row-profile-pin',
+      onSelect: () => toggleProfilePin(doc),
     } : null,
     capabilities.folders ? {
       label: 'Move to folder',
@@ -313,29 +347,14 @@ export function DocsHub({ boot }) {
 
   return (
     <div className="tdoc-app docs-hub">
-      <TopBar identity={boot.identity} />
+      <TopBar
+        identity={boot.identity}
+        profile={boot.profile || null}
+        onClaimProfile={boot.profile ? () => setModal({ type: 'claim-handle' }) : null}
+      />
       <main className="wrap">
         <div className="page-hd">
-          <div>
-            <h1>My docs</h1>
-            {boot.profile?.handle ? (
-              <p className="loc-hint">
-                Public profile ·{' '}
-                <a href={`/@${encodeURIComponent(boot.profile.handle)}`}>
-                  @{boot.profile.handle}
-                </a>
-              </p>
-            ) : null}
-          </div>
-          {boot.profile && !boot.profile.handle ? (
-            <button
-              type="button"
-              className="new-folder-btn"
-              onClick={() => setModal({ type: 'claim-handle' })}
-            >
-              Claim public URL
-            </button>
-          ) : null}
+          <h1>My docs</h1>
           <CreateMenu
             create={hub.createDoc}
             canCreate={capabilities.create}
