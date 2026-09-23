@@ -3,6 +3,16 @@ import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import './docs-hub.css';
 
+const CURATE_WARN_KEY = 'tdoc.curateWarned';
+
+function needsCurateWarn() {
+  try { return localStorage.getItem(CURATE_WARN_KEY) !== '1'; } catch { return true; }
+}
+
+function markCurateWarned() {
+  try { localStorage.setItem(CURATE_WARN_KEY, '1'); } catch { /* ignore */ }
+}
+
 function ProfileDialog({ title, children, confirmLabel, onConfirm, onClose, actions }) {
   return (
     <AppDialog
@@ -102,7 +112,11 @@ export function Profile({ boot }) {
     })));
   };
 
-  const togglePin = async (slug, pinned) => {
+  const togglePin = async (slug, pinned, { confirmed = false } = {}) => {
+    if (pinned && !confirmed && needsCurateWarn()) {
+      setModal({ type: 'curate-warn', slug });
+      return false;
+    }
     setBusy(true);
     try {
       const r = await fetch('/api/me/profile/pin', {
@@ -112,8 +126,16 @@ export function Profile({ boot }) {
         body: JSON.stringify({ slug, pinned }),
       });
       if (!r.ok) return false;
+      const body = await r.json().catch(() => ({}));
+      if (pinned) markCurateWarned();
       const next = catalog.map((row) => (
-        row.slug === slug ? { ...row, on_profile: pinned } : row
+        row.slug === slug
+          ? {
+            ...row,
+            on_profile: pinned,
+            visibility: body.visibility || (pinned ? 'public' : row.visibility),
+          }
+          : row
       ));
       setCatalog(next);
       refreshDocsFromCatalog(next);
@@ -200,7 +222,6 @@ export function Profile({ boot }) {
                     <span className="doc-title">{doc.title || doc.slug}</span>
                     <div className="doc-meta">
                       {doc.slug}
-                      {doc.visibility === 'private' ? ' · private (only you)' : ''}
                     </div>
                   </div>
                 </a>
@@ -228,13 +249,33 @@ export function Profile({ boot }) {
         </ProfileDialog>
       ) : null}
 
+      {modal && modal.type === 'curate-warn' ? (
+        <ProfileDialog
+          title="Show on your profile?"
+          confirmLabel="Show on profile"
+          onConfirm={async () => {
+            const slug = modal.slug;
+            setModal('picks');
+            await togglePin(slug, true, { confirmed: true });
+          }}
+          onClose={() => setModal('picks')}
+        >
+          <p className="manage-hint">
+            This makes the doc public so anyone can open the link from your profile.
+            Taking it down later restores the previous access.
+          </p>
+        </ProfileDialog>
+      ) : null}
+
       {modal === 'picks' ? (
         <ProfileDialog
           title="Public picks"
           onClose={() => setModal(null)}
           actions={<button type="button" onClick={() => setModal(null)}>Done</button>}
         >
-          <p className="manage-hint">Choose docs to show on this profile. Visitors still need link access to open them.</p>
+          <p className="manage-hint">
+            Curating a doc makes it public on your profile. Take it down to restore the previous access.
+          </p>
           {!catalog.length ? (
             <p className="muted">No docs in your catalog yet.</p>
           ) : (

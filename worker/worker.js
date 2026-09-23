@@ -2889,9 +2889,9 @@ async function indexData(env, session, origin) {
   };
 }
 
-// Public profile for /@handle: only docs the owner pinned. Visitors only see
-// public/unlisted pins; the owner sees every pin (so a refresh after "Add a
-// pick" is not an empty page when the doc is still private).
+// Public profile for /@handle: only docs the owner curated (pinned). Curate
+// forces visibility=public; take-down restores the prior visibility. includePrivate
+// is a legacy safety net for pins that predate that rule.
 async function profileData(env, account, { includePrivate = false } = {}) {
   const accountId = account && typeof account.account_id === 'string' ? account.account_id : '';
   const login = normalizeGithubLogin(account && account.github_login);
@@ -4036,29 +4036,47 @@ async function putAccountProfile(env, accountId, patch) {
   return next;
 }
 
+// Curate = author-only doc flag (meta.profile.curated). Pinning sets the doc
+// public and remembers the prior visibility; take-down restores it.
 async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {}) {
   if (!accountId || !isValidSlug(slug)) return { error: 'invalid_slug', status: 400 };
   if (!meta) {
     try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { meta = null; }
   }
   if (!meta) return { error: 'not_found', status: 404 };
+  // Author only — collaborators / folder guests cannot curate someone else's doc.
   if (!isDocOwnerSession(env, session, meta)) return { error: 'forbidden', status: 403 };
-  // Keep the pin list and the doc's hosted.account_id on the same account so
-  // /@ reload (which filters by account_id / github login) still finds it.
-  if (pinned) {
-    const hosted = meta.hosted && typeof meta.hosted === 'object' ? meta.hosted : {};
-    if (hosted.account_id !== accountId) {
-      meta = {
-        ...meta,
-        hosted: {
-          ...hosted,
-          account_id: accountId,
-          ...(sessionLogin(session) ? { github_login: sessionLogin(session) } : {}),
-        },
-      };
-      await env.META.put(`meta:${slug}`, JSON.stringify(meta));
-    }
+
+  const access = accessFromMeta(meta);
+  let nextMeta = { ...meta };
+  const hosted = nextMeta.hosted && typeof nextMeta.hosted === 'object' ? nextMeta.hosted : {};
+  if (hosted.account_id !== accountId) {
+    nextMeta.hosted = {
+      ...hosted,
+      account_id: accountId,
+      ...(sessionLogin(session) ? { github_login: sessionLogin(session) } : {}),
+    };
   }
+
+  if (pinned) {
+    const prior = (nextMeta.profile && nextMeta.profile.restore_visibility)
+      || access.visibility;
+    nextMeta.profile = {
+      curated: true,
+      restore_visibility: ACCESS_VISIBILITIES.has(prior) ? prior : 'unlisted',
+    };
+    nextMeta.access = { ...access, visibility: 'public' };
+  } else {
+    const restore = (nextMeta.profile && nextMeta.profile.restore_visibility) || access.visibility;
+    const { profile: _drop, ...withoutProfile } = nextMeta;
+    nextMeta = withoutProfile;
+    nextMeta.access = {
+      ...access,
+      visibility: ACCESS_VISIBILITIES.has(restore) ? restore : access.visibility,
+    };
+  }
+  await env.META.put(`meta:${slug}`, JSON.stringify(nextMeta));
+
   const prev = await accountProfile(env, accountId);
   let pins = normalizeProfilePins(prev);
   if (pinned) {
@@ -4067,7 +4085,12 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
     pins = pins.filter((s) => s !== slug);
   }
   await putAccountProfile(env, accountId, { pins });
-  return { ok: true, pins, on_profile: pins.includes(slug) };
+  return {
+    ok: true,
+    pins,
+    on_profile: pins.includes(slug),
+    visibility: accessFromMeta(nextMeta).visibility,
+  };
 }
 
 async function accountClaimedHandle(env, accountId) {
@@ -6004,7 +6027,13 @@ export default {
       if (!result.ok) {
         return json({ error: result.error }, { status: result.status || 400 });
       }
-      return json({ ok: true, slug, on_profile: result.on_profile, pins: result.pins });
+      return json({
+        ok: true,
+        slug,
+        on_profile: result.on_profile,
+        pins: result.pins,
+        visibility: result.visibility,
+      });
     }
 
     if (p === '/api/me/profile' && method === 'POST') {

@@ -12,6 +12,15 @@ import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
 const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred']];
+const CURATE_WARN_KEY = 'tdoc.curateWarned';
+
+function needsCurateWarn() {
+  try { return localStorage.getItem(CURATE_WARN_KEY) !== '1'; } catch { return true; }
+}
+
+function markCurateWarned() {
+  try { localStorage.setItem(CURATE_WARN_KEY, '1'); } catch { /* ignore */ }
+}
 
 function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, actions }) {
   return (
@@ -279,9 +288,13 @@ export function DocsHub({ boot }) {
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
   const openAgentRecipe = () => setModal({ type: 'create-agent' });
 
-  const toggleProfilePin = async (doc) => {
-    if (!doc || !doc.slug || !boot.profile) return;
+  const toggleProfilePin = async (doc, { confirmed = false } = {}) => {
+    if (!doc || !doc.slug || !boot.profile || !doc.mine) return;
     const next = !pins.has(doc.slug);
+    if (next && !confirmed && needsCurateWarn()) {
+      setModal({ type: 'curate-warn', doc });
+      return;
+    }
     const previous = new Set(pins);
     setPins((cur) => {
       const copy = new Set(cur);
@@ -301,6 +314,7 @@ export function DocsHub({ boot }) {
         setPins(previous);
         return;
       }
+      if (next) markCurateWarned();
       if (Array.isArray(body.pins)) setPins(new Set(body.pins));
     } catch {
       setPins(previous);
@@ -313,7 +327,8 @@ export function DocsHub({ boot }) {
       className: 'row-rename',
       onSelect: () => setModal({ type: 'rename-doc', doc }),
     } : null,
-    boot.profile && doc && (doc.mine || !doc.owner || doc.owner === viewer) ? {
+    // Author only — curate is a doc permission flag, not a collaborator action.
+    boot.profile && doc && doc.mine ? {
       label: pins.has(doc.slug) ? 'Remove from profile' : 'Show on profile',
       className: 'row-profile-pin',
       onSelect: () => toggleProfilePin(doc),
@@ -537,6 +552,23 @@ export function DocsHub({ boot }) {
               </button>
             ))}
           </div>
+        </HubDialog>
+      ) : null}
+      {modal?.type === 'curate-warn' ? (
+        <HubDialog
+          title="Show on your profile?"
+          confirmLabel="Show on profile"
+          onConfirm={() => {
+            const doc = modal.doc;
+            closeModal();
+            toggleProfilePin(doc, { confirmed: true });
+          }}
+          onClose={closeModal}
+        >
+          <p className="manage-hint">
+            This makes the doc public so anyone can open the link from your profile.
+            Taking it down later restores the previous access. Only you can curate your own docs.
+          </p>
         </HubDialog>
       ) : null}
       {modal?.type === 'delete-docs' ? (

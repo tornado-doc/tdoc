@@ -312,7 +312,7 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(boot.docs.map((d) => d.slug).join(',') === 'sam-open', `docs ${JSON.stringify(boot.docs)}`);
   });
 
-  await t('owner still sees private pins after refresh; public visitors do not', async () => {
+  await t('curate forces public; take-down restores prior visibility', async () => {
     const env = makeEnv(mod.CommentsStore);
     const accountId = await seedAccount(env, 'owner', 'acct-owner');
     await seedDoc(env, 'secret', {
@@ -328,16 +328,43 @@ async function seedPins(env, accountId, pins, extra = {}) {
       method: 'POST', cookie, body: { slug: 'secret', pinned: true },
     }), env, {});
     assert(pin.status === 200, `pin ${pin.status}`);
-
-    const asOwner = await worker.fetch(req('/@owner', { cookie }), env, {});
-    assert(asOwner.status === 200, `owner ${asOwner.status}`);
-    const ownerBoot = bootData(await asOwner.text(), '__TDOC_APP_BOOT__');
-    assert(ownerBoot.mine && ownerBoot.docs.map((d) => d.slug).join(',') === 'secret',
-      `owner should see private pin, got ${JSON.stringify(ownerBoot.docs)}`);
+    const pinnedBody = await pin.json();
+    assert(pinnedBody.visibility === 'public', `curate must publicize, got ${pinnedBody.visibility}`);
+    const metaPinned = JSON.parse(await env.META.get('meta:secret'));
+    assert(metaPinned.profile && metaPinned.profile.curated === true, 'curated flag');
+    assert(metaPinned.profile.restore_visibility === 'private', 'remember private');
+    assert(metaPinned.access.visibility === 'public', 'meta visibility public');
 
     const asPublic = await worker.fetch(req('/@owner'), env, {});
     const pubBoot = bootData(await asPublic.text(), '__TDOC_APP_BOOT__');
-    assert(!pubBoot.mine && pubBoot.docs.length === 0, 'public must not see private pin');
+    assert(pubBoot.docs.map((d) => d.slug).join(',') === 'secret',
+      `public must see curated doc, got ${JSON.stringify(pubBoot.docs)}`);
+
+    const unpin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug: 'secret', pinned: false },
+    }), env, {});
+    assert(unpin.status === 200, `unpin ${unpin.status}`);
+    const unpinnedBody = await unpin.json();
+    assert(unpinnedBody.visibility === 'private', `restore private, got ${unpinnedBody.visibility}`);
+    const metaRestored = JSON.parse(await env.META.get('meta:secret'));
+    assert(!metaRestored.profile, 'curated flag cleared');
+    assert(metaRestored.access.visibility === 'private', 'visibility restored');
+  });
+
+  await t('non-author cannot curate', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const ownerId = await seedAccount(env, 'owner', 'acct-owner');
+    await seedAccount(env, 'guest', 'acct-guest');
+    await seedDoc(env, 'owners-doc', {
+      owner: 'owner',
+      accountId: ownerId,
+      access: { visibility: 'public' },
+    });
+    const guestCookie = await putSession(env, { login: 'guest', account_id: 'acct-guest' });
+    const pin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie: guestCookie, body: { slug: 'owners-doc', pinned: true },
+    }), env, {});
+    assert(pin.status === 403, `guest pin must 403, got ${pin.status}`);
   });
 
   await t('vanity claim works; github login still resolves', async () => {
