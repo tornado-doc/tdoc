@@ -26,6 +26,8 @@ export function TopBar({
   authConfigured = false,
   onSignIn,
   onSwitchAccount,
+  profile = null,
+  onClaimProfile = null,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -65,6 +67,17 @@ export function TopBar({
     if (onNotificationNavigate) onNotificationNavigate(item, target);
     else location.href = target;
   };
+
+  const openPublicProfile = () => {
+    if (profile?.handle) {
+      location.href = `/@${encodeURIComponent(profile.handle)}`;
+      return;
+    }
+    if (onClaimProfile) onClaimProfile();
+  };
+  const publicProfileLabel = profile?.handle
+    ? `Public profile (@${profile.handle})`
+    : 'Claim public profile';
 
   return (
     <header className="tdoc-bar">
@@ -117,6 +130,11 @@ export function TopBar({
                   </>
                 )}
               >
+                {profile || onClaimProfile ? (
+                  <AppMenuItem className="tdoc-action-menu-item" onClick={openPublicProfile}>
+                    <UserRound size={15} /> {publicProfileLabel}
+                  </AppMenuItem>
+                ) : null}
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
                 </AppMenuItem>
@@ -148,6 +166,9 @@ export function TopBar({
               Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
             </AppMenuItem>
             <AppMenuItem onClick={() => { location.href = '/me'; }}>My docs</AppMenuItem>
+            {profile || onClaimProfile ? (
+              <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
+            ) : null}
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
             {onSwitchAccount ? <AppMenuItem onClick={onSwitchAccount}>Switch account</AppMenuItem> : null}
           </AppMenu>

@@ -2889,35 +2889,33 @@ async function indexData(env, session, origin) {
   };
 }
 
-// Public profile for /@<github-login>: the account's public + unlisted docs.
-// Lookup is read-only (never mint). Filter by account_id when stamped, else
-// by github_login for older meta. Private docs never appear here — owners
-// still use /me for that.
-async function profileData(env, account) {
+// Public profile for /@handle: only docs the owner curated (pinned). Curate
+// forces visibility=public; take-down restores the prior visibility. includePrivate
+// is a legacy safety net for pins that predate that rule.
+async function profileData(env, account, { includePrivate = false } = {}) {
   const accountId = account && typeof account.account_id === 'string' ? account.account_id : '';
   const login = normalizeGithubLogin(account && account.github_login);
   if (!accountId && !login) return [];
 
-  let keys = [];
-  let cursor;
-  do {
-    const page = await env.META.list({ prefix: 'meta:', cursor });
-    keys = keys.concat(page.keys);
-    cursor = page.cursor;
-    if (page.list_complete) break;
-  } while (cursor);
+  const pins = accountId
+    ? normalizeProfilePins(await accountProfile(env, accountId))
+    : [];
+  if (!pins.length) return [];
 
   const docs = [];
-  for (const key of keys) {
-    const slug = key.name.slice('meta:'.length);
-    let meta = {};
-    try { meta = JSON.parse(await env.META.get(key.name) || '{}'); } catch { continue; }
-    const hosted = meta && meta.hosted;
+  for (const slug of pins) {
+    let meta = null;
+    try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { continue; }
+    if (!meta || typeof meta !== 'object') continue;
+    const hosted = meta.hosted;
     const owns = (accountId && hosted && hosted.account_id === accountId)
       || (login && hostedGithubLogin(meta) === login);
-    if (!owns) continue;
+    // Owner boot (includePrivate): pin membership is enough — account_id on
+    // older meta can drift from the claim/mint account and used to empty the
+    // page after refresh.
+    if (!owns && !includePrivate) continue;
     const visibility = accessFromMeta(meta).visibility;
-    if (visibility !== 'public' && visibility !== 'unlisted') continue;
+    if (!includePrivate && visibility !== 'public' && visibility !== 'unlisted') continue;
     const versions = Array.isArray(meta.versions) ? meta.versions : [];
     const latest = versions[versions.length - 1]?.n || 1;
     docs.push({
@@ -2929,7 +2927,6 @@ async function profileData(env, account) {
       url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
     });
   }
-  docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
   return docs;
 }
 
@@ -3983,6 +3980,232 @@ async function lookupHostedAccount(env, login) {
       if (rec && typeof rec.account_id === 'string' && rec.account_id) return rec;
     } catch {}
   }
+  return null;
+}
+
+// Public @handles people claim on /me. Same shape as a GitHub login so
+// /@alice stays one parser. Reserved names are first-path segments we already
+// serve (and a few doc/route prefixes) so a claim cannot shadow them.
+const RESERVED_HANDLES = new Set([
+  'me', 'api', 'auth', 'activate', 'setup', 'start', 'templates', 'email',
+  'favicon', 'assets', 'static', 'mac', 'd', 'f', 'publish', 'feedback',
+  'admin', 'www', 'cdn', 'null', 'undefined', 'tdoc',
+]);
+
+function suggestHandleFromEmail(email) {
+  const norm = normalizeEmail(email);
+  if (!norm) return null;
+  const local = norm.split('@')[0] || '';
+  // Drop plus-tags and dots that would fail the github-login regex.
+  const cleaned = local.replace(/\+.*$/, '').replace(/[^a-z0-9-]/g, '');
+  return normalizeGithubLogin(cleaned);
+}
+
+async function accountProfile(env, accountId) {
+  if (!accountId || !env || !env.META) return null;
+  try {
+    const rec = JSON.parse(await env.META.get(`account-profile:${accountId}`));
+    if (rec && typeof rec === 'object') return rec;
+  } catch {}
+  return null;
+}
+
+const PROFILE_PINS_MAX = 50;
+
+function normalizeProfilePins(rec) {
+  const raw = rec && Array.isArray(rec.pins) ? rec.pins : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const slug = typeof item === 'string' ? item : (item && item.slug);
+    if (typeof slug !== 'string' || !slug || seen.has(slug)) continue;
+    if (!isValidSlug(slug)) continue;
+    seen.add(slug);
+    out.push(slug);
+    if (out.length >= PROFILE_PINS_MAX) break;
+  }
+  return out;
+}
+
+async function putAccountProfile(env, accountId, patch) {
+  const prev = (await accountProfile(env, accountId)) || {};
+  const next = { ...prev, ...patch, account_id: accountId };
+  if (patch.pins === undefined && prev.pins) next.pins = normalizeProfilePins(prev);
+  else if (patch.pins !== undefined) next.pins = normalizeProfilePins({ pins: patch.pins });
+  await env.META.put(`account-profile:${accountId}`, JSON.stringify(next));
+  return next;
+}
+
+// Curate = author-only doc flag (meta.profile.curated). Pinning sets the doc
+// public and remembers the prior visibility; take-down restores it.
+async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {}) {
+  if (!accountId || !isValidSlug(slug)) return { error: 'invalid_slug', status: 400 };
+  if (!meta) {
+    try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { meta = null; }
+  }
+  if (!meta) return { error: 'not_found', status: 404 };
+  // Author only — collaborators / folder guests cannot curate someone else's doc.
+  if (!isDocOwnerSession(env, session, meta)) return { error: 'forbidden', status: 403 };
+
+  const access = accessFromMeta(meta);
+  let nextMeta = { ...meta };
+  const hosted = nextMeta.hosted && typeof nextMeta.hosted === 'object' ? nextMeta.hosted : {};
+  if (hosted.account_id !== accountId) {
+    nextMeta.hosted = {
+      ...hosted,
+      account_id: accountId,
+      ...(sessionLogin(session) ? { github_login: sessionLogin(session) } : {}),
+    };
+  }
+
+  if (pinned) {
+    const prior = (nextMeta.profile && nextMeta.profile.restore_visibility)
+      || access.visibility;
+    nextMeta.profile = {
+      curated: true,
+      restore_visibility: ACCESS_VISIBILITIES.has(prior) ? prior : 'unlisted',
+    };
+    nextMeta.access = { ...access, visibility: 'public' };
+  } else {
+    const restore = (nextMeta.profile && nextMeta.profile.restore_visibility) || access.visibility;
+    const { profile: _drop, ...withoutProfile } = nextMeta;
+    nextMeta = withoutProfile;
+    nextMeta.access = {
+      ...access,
+      visibility: ACCESS_VISIBILITIES.has(restore) ? restore : access.visibility,
+    };
+  }
+  await env.META.put(`meta:${slug}`, JSON.stringify(nextMeta));
+
+  const prev = await accountProfile(env, accountId);
+  let pins = normalizeProfilePins(prev);
+  if (pinned) {
+    if (!pins.includes(slug)) pins = [slug, ...pins].slice(0, PROFILE_PINS_MAX);
+  } else {
+    pins = pins.filter((s) => s !== slug);
+  }
+  await putAccountProfile(env, accountId, { pins });
+  return {
+    ok: true,
+    pins,
+    on_profile: pins.includes(slug),
+    visibility: accessFromMeta(nextMeta).visibility,
+  };
+}
+
+async function accountClaimedHandle(env, accountId) {
+  const rec = await accountProfile(env, accountId);
+  return normalizeGithubLogin(rec && rec.handle);
+}
+
+// Resolve /@x: claimed handle first, then the GitHub-login index (MVP #569
+// back-compat). Never mints.
+async function lookupProfileAccount(env, raw) {
+  const handle = normalizeGithubLogin(raw);
+  if (!handle || !env || !env.META) return null;
+  try {
+    const idx = JSON.parse(await env.META.get(`hosted-handle:${handle}`));
+    if (idx && typeof idx.account_id === 'string' && idx.account_id) {
+      return {
+        account_id: idx.account_id,
+        handle,
+        github_login: normalizeGithubLogin(idx.github_login) || null,
+      };
+    }
+  } catch {}
+  const acct = await lookupHostedAccount(env, handle);
+  if (!acct) return null;
+  const claimed = await accountClaimedHandle(env, acct.account_id);
+  return {
+    ...acct,
+    handle: claimed || normalizeGithubLogin(acct.github_login) || handle,
+    github_login: normalizeGithubLogin(acct.github_login) || null,
+  };
+}
+
+// Claim once: first write wins for this account. Changing later is a follow-up.
+async function claimAccountHandle(env, accountId, rawHandle, { github_login } = {}) {
+  if (!accountId || !env || !env.META) return { error: 'sign_in_required', status: 401 };
+  const handle = normalizeGithubLogin(rawHandle);
+  if (!handle) return { error: 'invalid_handle', status: 400 };
+  if (RESERVED_HANDLES.has(handle)) return { error: 'reserved_handle', status: 400 };
+
+  const existing = await accountClaimedHandle(env, accountId);
+  if (existing && existing !== handle) return { error: 'handle_already_set', status: 409, handle: existing };
+  if (existing === handle) return { ok: true, handle };
+
+  try {
+    const taken = JSON.parse(await env.META.get(`hosted-handle:${handle}`));
+    if (taken && typeof taken.account_id === 'string' && taken.account_id
+        && taken.account_id !== accountId) {
+      return { error: 'handle_taken', status: 409 };
+    }
+  } catch {}
+  const ghAcct = await lookupHostedAccount(env, handle);
+  if (ghAcct && ghAcct.account_id !== accountId) {
+    return { error: 'handle_taken', status: 409 };
+  }
+
+  const gh = normalizeGithubLogin(github_login);
+  const now = new Date().toISOString();
+  await env.META.put(`hosted-handle:${handle}`, JSON.stringify({
+    account_id: accountId,
+    created: now,
+    ...(gh ? { github_login: gh } : {}),
+  }));
+  const prev = (await accountProfile(env, accountId)) || {};
+  await putAccountProfile(env, accountId, {
+    handle,
+    created: prev.created || now,
+    ...(gh ? { github_login: gh } : {}),
+    pins: normalizeProfilePins(prev),
+  });
+  if (gh) {
+    try {
+      const rec = JSON.parse(await env.META.get(`hosted-account:${gh}`));
+      if (rec && rec.account_id === accountId) {
+        await env.META.put(`hosted-account:${gh}`, JSON.stringify({ ...rec, handle }));
+      }
+    } catch {}
+  }
+  return { ok: true, handle };
+}
+
+async function profileBootForSession(env, session) {
+  const accountId = await sessionAccountId(env, session);
+  if (!accountId) {
+    const login = sessionLogin(session);
+    const suggested = login || suggestHandleFromEmail(session && session.email) || null;
+    return { handle: null, suggested, pins: [] };
+  }
+  const rec = await accountProfile(env, accountId);
+  const claimed = normalizeGithubLogin(rec && rec.handle);
+  const login = sessionLogin(session);
+  const suggested = claimed || login || suggestHandleFromEmail(session && session.email) || null;
+  return { handle: claimed, suggested, pins: normalizeProfilePins(rec) };
+}
+
+// Claim / publish mint an account; bare sign-in does not (spectators stay
+// account-less until they do something that needs one). Handle claim is that
+// something for email users and vanity pickers.
+async function ensureSessionHostedAccount(env, session) {
+  if (!session || !env || !env.META) return null;
+  const existingId = await sessionAccountId(env, session);
+  const login = sessionLogin(session);
+  const idp = session.idp && typeof session.idp === 'object' ? session.idp : null;
+  if (login) {
+    const ghId = idp && idp.provider === 'github' && idp.sub ? String(idp.sub) : null;
+    const rec = await hostedAccountForGithub(env, login, session.email || null, ghId);
+    if (rec && existingId && rec.account_id !== existingId) {
+      // Session already pointed at an account; don't swap under it.
+      return { account_id: existingId, github_login: login };
+    }
+    return rec;
+  }
+  if (normalizeEmail(session.email)) {
+    return hostedAccountForEmail(env, session.email, idp);
+  }
+  if (existingId) return { account_id: existingId };
   return null;
 }
 
@@ -5726,14 +5949,111 @@ export default {
         });
       }
       const data = await indexData(env, s, url.origin);
+      const profile = hostedRegistrationEnabled(env, url.origin)
+        ? await profileBootForSession(env, s)
+        : null;
+      const pinSet = new Set((profile && profile.pins) || []);
       return json({
         ok: true,
         identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
-        docs: data.docs,
+        docs: (data.docs || []).map((row) => ({ ...row, on_profile: pinSet.has(row.slug) })),
         folders: data.folders,
         recent: data.recent,
         starred: data.starred,
+        ...(profile ? { profile } : {}),
       });
+    }
+
+    // Claim a public @handle once. Hosted only. Email/OIDC users need this
+    // for /@…; GitHub users can keep using their login via fallback or claim
+    // a vanity name here.
+    if (p === '/api/me/handle' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      // Sign-in alone does not mint an account (spectators). Claiming a public
+      // handle does — same door publish uses.
+      const acct = await ensureSessionHostedAccount(env, s);
+      const accountId = acct && acct.account_id;
+      if (!accountId) {
+        return json({ error: 'sign_in_required' }, { status: 401 });
+      }
+      if (s.id && !s.account_id) {
+        try {
+          const raw = JSON.parse(await env.META.get(`session:${s.id}`));
+          if (raw && typeof raw === 'object') {
+            raw.account_id = accountId;
+            await env.META.put(`session:${s.id}`, JSON.stringify(raw), { expirationTtl: 60 * 60 * 24 * 30 });
+          }
+        } catch {}
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const result = await claimAccountHandle(env, accountId, body && body.handle, {
+        github_login: sessionLogin(s) || (acct && acct.github_login) || null,
+      });
+      if (!result.ok) {
+        return json({ error: result.error, ...(result.handle ? { handle: result.handle } : {}) }, {
+          status: result.status || 400,
+        });
+      }
+      return json({ ok: true, handle: result.handle, url: `/@${result.handle}` });
+    }
+
+    if (p === '/api/me/profile/pin' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const acct = await ensureSessionHostedAccount(env, s);
+      const accountId = acct && acct.account_id;
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body && typeof body.slug === 'string' ? body.slug.trim() : '';
+      const pinned = body && body.pinned !== false && body.pinned !== 'false';
+      const result = await setProfilePin(env, accountId, slug, Boolean(pinned), { session: s });
+      if (!result.ok) {
+        return json({ error: result.error }, { status: result.status || 400 });
+      }
+      return json({
+        ok: true,
+        slug,
+        on_profile: result.on_profile,
+        pins: result.pins,
+        visibility: result.visibility,
+      });
+    }
+
+    if (p === '/api/me/profile' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const acct = await ensureSessionHostedAccount(env, s);
+      const accountId = acct && acct.account_id;
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const bio = typeof body.bio === 'string' ? body.bio.replace(/\s+/g, ' ').trim().slice(0, 280) : '';
+      await putAccountProfile(env, accountId, { bio });
+      return json({ ok: true, bio });
     }
 
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
@@ -5749,6 +6069,14 @@ export default {
       const nonce = rand(16);
       const identity = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       const data = await indexData(env, s, url.origin);
+      const profile = hostedRegistrationEnabled(env, url.origin)
+        ? await profileBootForSession(env, s)
+        : null;
+      const pinSet = new Set((profile && profile.pins) || []);
+      const docs = (data.docs || []).map((row) => ({
+        ...row,
+        on_profile: pinSet.has(row.slug),
+      }));
       return html(SHELL.appHtml({
         title: 'My docs',
         nonceAttr: ` nonce="${nonce}"`,
@@ -5770,15 +6098,17 @@ export default {
           // The checklist lives here, so every state reads differently on this
           // page -- it is the one surface that has a face for all six.
           debug: await isDebugAccount(env, s),
+          ...(profile ? { profile } : {}),
           ...data,
+          docs,
         }),
       }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
       });
     }
 
-    // Public profile: /@<github-login>. Hosted only. Handle = GitHub login
-    // (no separate claim). Lists public + unlisted docs for that account.
+    // Public profile: /@<handle>. Hosted only. Claimed handle, else GitHub
+    // login fallback. Lists docs the owner pinned (curated), not every public doc.
     const profileMatch = p.match(/^\/@([^/]+)\/?$/);
     if (profileMatch && (method === 'GET' || method === 'HEAD')) {
       if (!hostedRegistrationEnabled(env, url.origin)) {
@@ -5791,7 +6121,7 @@ export default {
         });
       }
       const login = normalizeGithubLogin(decodeURIComponent(profileMatch[1]));
-      const account = login ? await lookupHostedAccount(env, login) : null;
+      let account = login ? await lookupProfileAccount(env, login) : null;
       if (!account) {
         return statusPageResponse({
           status: 404,
@@ -5799,18 +6129,56 @@ export default {
           title: 'Profile not found',
           message: login
             ? `@${login} has not published on tdoc yet, or that handle is not claimed.`
-            : 'That is not a valid GitHub handle.',
+            : 'That is not a valid handle.',
           actions: [{ label: 'tdoc home', href: '/' }],
         });
       }
       if (method === 'HEAD') return new Response(null, { status: 200 });
-      const handle = normalizeGithubLogin(account.github_login) || login;
-      const docs = await profileData(env, account);
+      const handle = account.handle || login;
+      const session = await getSession(env, req);
+      const viewerId = session ? await sessionAccountId(env, session) : null;
+      const mine = Boolean(
+        (viewerId && account.account_id && viewerId === account.account_id)
+        || (sessionLogin(session) && account.github_login
+            && sessionLogin(session) === account.github_login),
+      );
+      // Enrich github_login from the hosted-account record when the handle
+      // index omitted it — needed so ownership matches docs stamped by login.
+      if (!account.github_login && account.account_id) {
+        const storedLogin = sessionLogin(session);
+        if (mine && storedLogin) account = { ...account, github_login: storedLogin };
+      }
+      const docs = await profileData(env, account, { includePrivate: mine });
+      const stored = account.account_id ? await accountProfile(env, account.account_id) : null;
+      const bio = stored && typeof stored.bio === 'string' ? stored.bio.slice(0, 280) : '';
+      let catalog = [];
+      if (mine && session) {
+        const data = await indexData(env, session, url.origin);
+        const pinned = new Set((stored && normalizeProfilePins(stored)) || []);
+        catalog = (data.docs || [])
+          .filter((row) => row.mine)
+          .map((row) => ({
+            slug: row.slug,
+            title: row.title,
+            on_profile: pinned.has(row.slug),
+          }));
+      }
       const wantsJson = (req.headers.get('accept') || '').includes('application/json');
       if (wantsJson) {
-        return json({ ok: true, login: handle, docs });
+        return json({
+          ok: true,
+          login: handle,
+          handle,
+          github_login: account.github_login || null,
+          bio,
+          docs,
+          ...(mine ? { mine: true, catalog } : {}),
+        });
       }
       const nonce = rand(16);
+      const identity = sessionPrincipal(session)
+        ? { login: actorKey(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
+        : null;
       return html(SHELL.appHtml({
         title: `@${handle} · tdoc`,
         nonceAttr: ` nonce="${nonce}"`,
@@ -5819,7 +6187,12 @@ export default {
         bootJson: safeJsonForScript({
           page: 'profile',
           login: handle,
+          handle,
+          github_login: account.github_login || null,
+          bio,
           docs,
+          mine,
+          ...(mine ? { catalog, identity } : { identity }),
         }),
       }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },

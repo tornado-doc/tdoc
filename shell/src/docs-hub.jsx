@@ -12,6 +12,15 @@ import { useDocsHub } from './hooks/use-docs-hub.js';
 import './docs-hub.css';
 
 const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred']];
+const CURATE_WARN_KEY = 'tdoc.curateWarned';
+
+function needsCurateWarn() {
+  try { return localStorage.getItem(CURATE_WARN_KEY) !== '1'; } catch { return true; }
+}
+
+function markCurateWarned() {
+  try { localStorage.setItem(CURATE_WARN_KEY, '1'); } catch { /* ignore */ }
+}
 
 function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, actions }) {
   return (
@@ -193,6 +202,73 @@ function FlatList({ docs, label, viewer, empty, onToggleStar }) {
   );
 }
 
+// Claim once via the same AppDialog / HubDialog surface as rename + folder
+// share — not a one-off pane. Letters/numbers/hyphens; server enforces once.
+function ClaimHandleDialog({ suggested, onClose }) {
+  const [name, setName] = useState(suggested || '');
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      const r = await fetch('/api/me/handle', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handle: name }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setStatus(
+          body.error === 'handle_taken' ? 'That handle is taken.'
+            : body.error === 'reserved_handle' ? 'That name is reserved.'
+            : body.error === 'invalid_handle' ? 'Use letters, numbers, and hyphens.'
+            : body.error === 'handle_already_set' ? `Already claimed @${body.handle}.`
+            : body.error === 'sign_in_required' ? 'Sign in again, then retry.'
+            : body.error === 'forbidden' ? 'This account cannot claim a handle here.'
+            : body.error ? `Could not claim (${body.error}).`
+            : 'Could not claim handle.',
+        );
+        setBusy(false);
+        return;
+      }
+      location.reload();
+    } catch {
+      setStatus('Could not claim handle.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <HubDialog
+      title="Claim your public URL"
+      confirmLabel={busy ? 'Claiming…' : 'Claim'}
+      onConfirm={save}
+      onClose={onClose}
+    >
+      <p className="manage-hint">
+        Public docs show at tdoc.dev/@handle. Pick once — letters, numbers, hyphens.
+      </p>
+      <label className="field" htmlFor="tdoc-handle-claim">Handle</label>
+      <input
+        id="tdoc-handle-claim"
+        type="text"
+        maxLength={39}
+        autoFocus
+        disabled={busy}
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => { if (event.key === 'Enter') save(); }}
+        placeholder={suggested || 'you'}
+      />
+      {status ? <p className="manage-hint">{status}</p> : null}
+    </HubDialog>
+  );
+}
+
 // Page-level orchestrator for /me. State and mutations live in useDocsHub;
 // rows and menus are the shared docs-hub/rows.jsx components; every modal is
 // the AppDialog facade. This component only decides what is on screen.
@@ -207,15 +283,55 @@ export function DocsHub({ boot }) {
   });
   const [tab, setTab] = useState('mine');
   const [modal, setModal] = useState(null);
+  const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
   const openAgentRecipe = () => setModal({ type: 'create-agent' });
+
+  const toggleProfilePin = async (doc, { confirmed = false } = {}) => {
+    if (!doc || !doc.slug || !boot.profile || !doc.mine) return;
+    const next = !pins.has(doc.slug);
+    if (next && !confirmed && needsCurateWarn()) {
+      setModal({ type: 'curate-warn', doc });
+      return;
+    }
+    const previous = new Set(pins);
+    setPins((cur) => {
+      const copy = new Set(cur);
+      if (next) copy.add(doc.slug);
+      else copy.delete(doc.slug);
+      return copy;
+    });
+    try {
+      const r = await fetch('/api/me/profile/pin', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: doc.slug, pinned: next }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setPins(previous);
+        return;
+      }
+      if (next) markCurateWarned();
+      if (Array.isArray(body.pins)) setPins(new Set(body.pins));
+    } catch {
+      setPins(previous);
+    }
+  };
 
   const docMenu = (slugs, doc) => [
     doc && (doc.mine || !doc.owner || doc.owner === viewer) ? {
       label: 'Rename',
       className: 'row-rename',
       onSelect: () => setModal({ type: 'rename-doc', doc }),
+    } : null,
+    // Author only — curate is a doc permission flag, not a collaborator action.
+    boot.profile && doc && doc.mine ? {
+      label: pins.has(doc.slug) ? 'Remove from profile' : 'Show on profile',
+      className: 'row-profile-pin',
+      onSelect: () => toggleProfilePin(doc),
     } : null,
     capabilities.folders ? {
       label: 'Move to folder',
@@ -246,7 +362,11 @@ export function DocsHub({ boot }) {
 
   return (
     <div className="tdoc-app docs-hub">
-      <TopBar identity={boot.identity} />
+      <TopBar
+        identity={boot.identity}
+        profile={boot.profile || null}
+        onClaimProfile={boot.profile ? () => setModal({ type: 'claim-handle' }) : null}
+      />
       <main className="wrap">
         <div className="page-hd">
           <h1>My docs</h1>
@@ -382,6 +502,12 @@ export function DocsHub({ boot }) {
         ) : null}
       </main>
 
+      {modal?.type === 'claim-handle' ? (
+        <ClaimHandleDialog
+          suggested={boot.profile?.suggested || ''}
+          onClose={closeModal}
+        />
+      ) : null}
       {modal?.type === 'create-agent' ? (
         <HubDialog
           title="Build it with your agent"
@@ -426,6 +552,23 @@ export function DocsHub({ boot }) {
               </button>
             ))}
           </div>
+        </HubDialog>
+      ) : null}
+      {modal?.type === 'curate-warn' ? (
+        <HubDialog
+          title="Show on your profile?"
+          confirmLabel="Show on profile"
+          onConfirm={() => {
+            const doc = modal.doc;
+            closeModal();
+            toggleProfilePin(doc, { confirmed: true });
+          }}
+          onClose={closeModal}
+        >
+          <p className="manage-hint">
+            This makes the doc public so anyone can open the link from your profile.
+            Taking it down later restores the previous access. Only you can curate your own docs.
+          </p>
         </HubDialog>
       ) : null}
       {modal?.type === 'delete-docs' ? (

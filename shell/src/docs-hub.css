@@ -25,6 +25,75 @@
      creates, because nothing here can create a doc — their agent writes it. */
   .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
   .page-hd h1 { margin: 0; }
+  .page-hd .loc-hint { margin: 4px 0 0; font-size: 13px; }
+  .profile-hd { align-items: flex-start; }
+  .profile-avatar { border-radius: 20px; display: block; flex-shrink: 0; width: 40px; height: 40px; object-fit: cover; }
+  .profile-avatar-fallback {
+    display: grid;
+    place-items: center;
+    background: var(--td-accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+    object-fit: unset;
+  }
+  .profile-avatar-logo {
+    padding: 8px;
+    box-sizing: border-box;
+    background: var(--td-surface);
+    object-fit: contain;
+  }
+  .profile-id { min-width: 0; flex: 1 1 auto; }
+  .profile-handle {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--td-ink);
+    line-height: 1.2;
+  }
+  .profile-bio {
+    margin: 6px 0 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--td-muted);
+    max-width: 36em;
+  }
+  .profile-bio a { color: var(--td-accent); }
+  .text-btn {
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    color: var(--td-accent);
+    cursor: pointer;
+  }
+  .text-btn:hover { text-decoration: underline; }
+  .profile-pick-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    text-align: left;
+    padding: 10px 12px;
+    border: 1px solid var(--td-line);
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+  }
+  .profile-pick-row input { margin-top: 3px; }
+  .profile-pick-row span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .profile-pick-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  .profile-pick-row em { font-style: normal; font-size: 12px; color: var(--td-muted); }
+  .tdoc-modal textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    padding: 10px 12px;
+    border: 1px solid var(--td-line);
+    border-radius: 8px;
+    resize: vertical;
+    min-height: 96px;
+  }
   .mk-btn { margin-left: auto; border: 0; border-radius: 999px; background: var(--td-accent); color: #fff;
     font: inherit; font-weight: 650; padding: 9px 16px; cursor: pointer; }
   .mk-bg { position: fixed; inset: 0; background: rgba(16,18,26,.55); display: grid; place-items: center;
