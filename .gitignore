@@ -49,3 +49,4 @@ worker/.dev.vars
 # Gated browser suites write journey scratch into the fixture root.
 test/fixtures/tdocs/.onboarding.json
 test/fixtures/tdocs/.agent-read.json
+.scratch/

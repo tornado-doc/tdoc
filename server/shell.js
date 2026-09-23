@@ -34,6 +34,62 @@
     return (softer.length >= 40 ? softer : cut) + '\u2026';
   }
 
+  // First content image for share / profile cards. Skips data URIs and
+  // obvious chrome (favicon / logo icons).
+  function firstImageFromHtml(html) {
+    if (typeof html !== 'string' || !html) return '';
+    const re = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+    let match;
+    while ((match = re.exec(html))) {
+      const src = String(match[1] || '').trim();
+      if (!src || /^data:/i.test(src)) continue;
+      if (/(?:favicon|apple-touch-icon|tdoc_logo|\.svg(?:\?|$))/i.test(src)) continue;
+      return src;
+    }
+    return '';
+  }
+
+  function resolveDocAssetUrl(src, opts) {
+    if (!src) return '';
+    const s = String(src).trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.startsWith('//')) return 'https:' + s;
+    if (s.startsWith('/')) return s;
+    const slug = opts && opts.slug;
+    const version = opts && opts.version;
+    if (!slug || !version) return '';
+    const rel = s.replace(/^\.\//, '');
+    return '/d/' + encodeURIComponent(slug) + '/v/' + version + '/' + rel;
+  }
+
+  // Cached on meta at publish so /@ and OG do not re-read full HTML.
+  // skipHeading (default true): drop the first <h1> so the card title is not
+  // repeated in the lead — the double-title bug on profile picks.
+  function previewFromHtml(html, opts) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    let source = typeof html === 'string' ? html : '';
+    if (o.skipHeading !== false) {
+      source = source.replace(/<h1\b[^>]*>[\s\S]*?<\/h1\b[^>]*>/i, ' ');
+    }
+    let excerpt = excerptFromHtml(source, o.maxLen || 220);
+    const title = typeof o.title === 'string' ? o.title.trim() : '';
+    if (title && excerpt) {
+      const lower = excerpt.toLowerCase();
+      const needle = title.toLowerCase();
+      // Body sometimes repeats the heading as plain text right after <h1>.
+      if (lower.startsWith(needle + ' ' + needle)) {
+        excerpt = excerpt.slice((title + ' ' + title).length).replace(/^[\s\u2014\u2013\-:·.|]+/, '').trim();
+      } else if (lower.startsWith(needle)) {
+        excerpt = excerpt.slice(title.length).replace(/^[\s\u2014\u2013\-:·.|]+/, '').trim();
+      }
+    }
+    return {
+      excerpt,
+      image: resolveDocAssetUrl(firstImageFromHtml(html), o) || '',
+    };
+  }
+
   function seoHeadHtml(d) {
     const seo = d && d.seo;
     if (!seo || typeof seo !== 'object') return '';
@@ -118,7 +174,14 @@ seoBodyHtml(d) +
       '</body></html>';
   }
 
-  var api = { shellHtml: shellHtml, appHtml: appHtml, excerptFromHtml: excerptFromHtml };
+  var api = {
+    shellHtml: shellHtml,
+    appHtml: appHtml,
+    excerptFromHtml: excerptFromHtml,
+    firstImageFromHtml: firstImageFromHtml,
+    resolveDocAssetUrl: resolveDocAssetUrl,
+    previewFromHtml: previewFromHtml,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.TDOC_SHELL_BUILDER = api;
 })();

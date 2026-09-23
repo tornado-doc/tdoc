@@ -84,6 +84,107 @@
   .profile-pick-row span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .profile-pick-row b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
   .profile-pick-row em { font-style: normal; font-size: 12px; color: var(--td-muted); }
+  .profile-view-toggle .text-btn.is-active {
+    color: var(--td-ink);
+    font-weight: 600;
+  }
+  .profile-picks {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-top: 12px;
+  }
+  .profile-picks.is-compact {
+    gap: 0;
+    margin-top: 8px;
+  }
+  /* Graphic-led preview: first image reads as a doc render, then title once. */
+  .profile-pick-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 0 20px;
+    border-bottom: 1px solid var(--td-line);
+    text-decoration: none;
+    color: inherit;
+  }
+  .profile-picks.is-compact .profile-pick-card {
+    gap: 2px;
+    padding: 13px 0;
+  }
+  .profile-pick-card:last-child { border-bottom: none; padding-bottom: 0; }
+  .profile-picks.is-compact .profile-pick-card:last-child { padding-bottom: 13px; }
+  .profile-pick-media {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--td-surface);
+    border: 1px solid var(--td-line);
+  }
+  .profile-pick-media.is-render {
+    background: #fff;
+  }
+  .profile-pick-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .profile-pick-render {
+    display: flex;
+    align-items: flex-end;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 28px 32px;
+    background: #fff;
+  }
+  .profile-pick-render-title {
+    font-size: clamp(22px, 3.2vw, 34px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    color: var(--td-heading);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .profile-pick-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    padding: 0 2px;
+  }
+  .profile-picks.is-compact .profile-pick-body { gap: 2px; padding: 0; }
+  .profile-pick-title {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--td-heading);
+  }
+  .profile-picks.is-compact .profile-pick-title {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .profile-pick-excerpt {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--td-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .profile-pick-meta {
+    font-size: 12px;
+    color: var(--td-muted);
+  }
+  .profile-pick-card:hover .profile-pick-title { color: var(--td-accent); }
+  .profile-pick-card:hover .profile-pick-media { border-color: var(--td-accent-ring-soft); }
   .tdoc-modal textarea {
     width: 100%;
     box-sizing: border-box;

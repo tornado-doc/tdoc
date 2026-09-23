@@ -1951,11 +1951,20 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   })();
   const access = accessFromMeta(docMeta || {});
   const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(rawHtml, 180)) || '';
+  const cachedImage = docMeta && docMeta.preview && typeof docMeta.preview.image === 'string'
+    ? docMeta.preview.image
+    : '';
+  const fromHtml = (SHELL.previewFromHtml && SHELL.previewFromHtml(rawHtml, {
+    slug, version, maxLen: 180,
+  }).image) || '';
+  let shareImage = cachedImage || fromHtml || '';
+  if (shareImage && shareImage.startsWith('/') && origin) shareImage = origin + shareImage;
+  if (!shareImage && origin) shareImage = `${origin}/tdoc_logo.png`;
   const seo = origin ? {
     title,
     description: description || (isLanding ? 'Docs that fix themselves.' : `A tdoc by ${author || 'tdoc'}.`),
     url: pageUrl,
-    image: `${origin}/tdoc_logo.png`,
+    image: shareImage,
     type: isLanding ? 'website' : 'article',
     robots: access.visibility === 'private' ? 'noindex, nofollow' : '',
   } : null;
@@ -2918,11 +2927,21 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     if (!includePrivate && visibility !== 'public' && visibility !== 'unlisted') continue;
     const versions = Array.isArray(meta.versions) ? meta.versions : [];
     const latest = versions[versions.length - 1]?.n || 1;
+    const published = versions[0]?.created || meta.created || '';
+    const updated = versions[versions.length - 1]?.created || published;
+    // Prefer cached meta.preview (written at publish). Never re-fetch full HTML
+    // on every /@ load — that was the expensive path Julie flagged.
+    const cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
+    const excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
+    const image = cached && typeof cached.image === 'string' ? cached.image : '';
     docs.push({
       slug,
       title: meta.title || slug,
       latest,
-      updated: versions[versions.length - 1]?.created || meta.created || '',
+      published,
+      updated,
+      excerpt,
+      image,
       visibility,
       url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
     });
@@ -4036,6 +4055,31 @@ async function putAccountProfile(env, accountId, patch) {
   return next;
 }
 
+function docPreviewFromHtml(html, { slug, version, title } = {}) {
+  if (!SHELL || typeof SHELL.previewFromHtml !== 'function') {
+    return { excerpt: '', image: '' };
+  }
+  return SHELL.previewFromHtml(html, { slug, version, title, maxLen: 220, skipHeading: true });
+}
+
+async function refreshDocPreview(env, slug, meta) {
+  if (!meta || typeof meta !== 'object' || !env || !env.DOCS) return meta;
+  const versions = Array.isArray(meta.versions) ? meta.versions : [];
+  const latest = versions[versions.length - 1]?.n || 1;
+  try {
+    const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
+    if (!obj) return meta;
+    const preview = docPreviewFromHtml(await obj.text(), {
+      slug,
+      version: latest,
+      title: meta.title || slug,
+    });
+    return { ...meta, preview };
+  } catch {
+    return meta;
+  }
+}
+
 // Curate = author-only doc flag (meta.profile.curated). Pinning sets the doc
 // public and remembers the prior visibility; take-down restores it.
 async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {}) {
@@ -4066,6 +4110,9 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
       restore_visibility: ACCESS_VISIBILITIES.has(prior) ? prior : 'unlisted',
     };
     nextMeta.access = { ...access, visibility: 'public' };
+    // Refresh preview on every curate so old double-title caches get fixed
+    // and first-graphic stays in sync with the latest published HTML.
+    nextMeta = await refreshDocPreview(env, slug, nextMeta);
   } else {
     const restore = (nextMeta.profile && nextMeta.profile.restore_visibility) || access.visibility;
     const { profile: _drop, ...withoutProfile } = nextMeta;
@@ -4123,7 +4170,8 @@ async function lookupProfileAccount(env, raw) {
   };
 }
 
-// Claim once: first write wins for this account. Changing later is a follow-up.
+// Claim or change a public handle. Changing releases the previous
+// hosted-handle index so the old @url frees up.
 async function claimAccountHandle(env, accountId, rawHandle, { github_login } = {}) {
   if (!accountId || !env || !env.META) return { error: 'sign_in_required', status: 401 };
   const handle = normalizeGithubLogin(rawHandle);
@@ -4131,8 +4179,7 @@ async function claimAccountHandle(env, accountId, rawHandle, { github_login } = 
   if (RESERVED_HANDLES.has(handle)) return { error: 'reserved_handle', status: 400 };
 
   const existing = await accountClaimedHandle(env, accountId);
-  if (existing && existing !== handle) return { error: 'handle_already_set', status: 409, handle: existing };
-  if (existing === handle) return { ok: true, handle };
+  if (existing === handle) return { ok: true, handle, changed: false };
 
   try {
     const taken = JSON.parse(await env.META.get(`hosted-handle:${handle}`));
@@ -4153,6 +4200,14 @@ async function claimAccountHandle(env, accountId, rawHandle, { github_login } = 
     created: now,
     ...(gh ? { github_login: gh } : {}),
   }));
+  if (existing && existing !== handle) {
+    try {
+      const old = JSON.parse(await env.META.get(`hosted-handle:${existing}`));
+      if (old && old.account_id === accountId) {
+        await env.META.delete(`hosted-handle:${existing}`);
+      }
+    } catch {}
+  }
   const prev = (await accountProfile(env, accountId)) || {};
   await putAccountProfile(env, accountId, {
     handle,
@@ -4168,7 +4223,7 @@ async function claimAccountHandle(env, accountId, rawHandle, { github_login } = 
       }
     } catch {}
   }
-  return { ok: true, handle };
+  return { ok: true, handle, changed: Boolean(existing) };
 }
 
 async function profileBootForSession(env, session) {
@@ -5490,6 +5545,11 @@ export class CommentsStore {
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions,
+        preview: docPreviewFromHtml(stamped.html, {
+          slug,
+          version: reservation.next,
+          title: nextTitle || meta.title || slug,
+        }),
       }));
       committed = true;
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
@@ -5964,9 +6024,9 @@ export default {
       });
     }
 
-    // Claim a public @handle once. Hosted only. Email/OIDC users need this
-    // for /@…; GitHub users can keep using their login via fallback or claim
-    // a vanity name here.
+    // Claim a public @handle (or change it). Hosted only. Email/OIDC users need
+    // this for /@…; GitHub users can keep using their login via fallback or claim
+    // a vanity name here. Changing frees the previous @handle.
     if (p === '/api/me/handle' && method === 'POST') {
       if (!hostedRegistrationEnabled(env, url.origin)) {
         return json({ error: 'hosted_only' }, { status: 404 });
@@ -6003,7 +6063,12 @@ export default {
           status: result.status || 400,
         });
       }
-      return json({ ok: true, handle: result.handle, url: `/@${result.handle}` });
+      return json({
+        ok: true,
+        handle: result.handle,
+        url: `/@${result.handle}`,
+        changed: Boolean(result.changed),
+      });
     }
 
     if (p === '/api/me/profile/pin' && method === 'POST') {
@@ -8264,6 +8329,11 @@ export default {
             ...(currentMeta || {}),
             ...incoming,
             versions: mergedVersions,
+            preview: docPreviewFromHtml(stampedHtml, {
+              slug,
+              version: verNum,
+              title: (incoming && incoming.title) || (currentMeta && currentMeta.title) || slug,
+            }),
           }));
         } catch (e) {
           try { await finishVersionReservation(false); } catch {}
