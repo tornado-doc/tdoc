@@ -193,41 +193,33 @@ function FlatList({ docs, label, viewer, empty, onToggleStar }) {
   );
 }
 
-// Claim a public @handle once. Email/OIDC users need this for /@…; GitHub
-// users can keep their login via fallback or pick a vanity name here.
-function HandleClaim({ profile }) {
-  const claimed = profile && profile.handle;
-  const [value, setValue] = useState(profile?.suggested || '');
+// Claim once via the same AppDialog / HubDialog surface as rename + folder
+// share — not a one-off pane. Letters/numbers/hyphens; server enforces once.
+function ClaimHandleDialog({ suggested, onClose }) {
+  const [name, setName] = useState(suggested || '');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
-  if (claimed) {
-    return (
-      <p className="muted" style={{ margin: '0 0 16px' }}>
-        Public profile:{' '}
-        <a href={`/@${encodeURIComponent(claimed)}`}>@{claimed}</a>
-      </p>
-    );
-  }
-
-  const claim = async () => {
+  const save = async () => {
+    if (busy) return;
     setBusy(true);
-    setStatus('Saving…');
+    setStatus('');
     try {
       const r = await fetch('/api/me/handle', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ handle: value }),
+        body: JSON.stringify({ handle: name }),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const msg = body.error === 'handle_taken' ? 'That handle is taken.'
-          : body.error === 'reserved_handle' ? 'That name is reserved.'
-          : body.error === 'invalid_handle' ? 'Use letters, numbers, and hyphens.'
-          : body.error === 'handle_already_set' ? `Already claimed @${body.handle}.`
-          : 'Could not claim handle.';
-        setStatus(msg);
+        setStatus(
+          body.error === 'handle_taken' ? 'That handle is taken.'
+            : body.error === 'reserved_handle' ? 'That name is reserved.'
+            : body.error === 'invalid_handle' ? 'Use letters, numbers, and hyphens.'
+            : body.error === 'handle_already_set' ? `Already claimed @${body.handle}.`
+            : 'Could not claim handle.',
+        );
         setBusy(false);
         return;
       }
@@ -239,26 +231,29 @@ function HandleClaim({ profile }) {
   };
 
   return (
-    <div className="pane" style={{ marginBottom: 16, padding: '12px 14px' }}>
-      <label className="field" htmlFor="tdoc-handle-claim">Claim your public URL</label>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span className="muted">tdoc.dev/@</span>
-        <input
-          id="tdoc-handle-claim"
-          type="text"
-          maxLength={39}
-          value={value}
-          disabled={busy}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') claim(); }}
-          style={{ maxWidth: 200 }}
-        />
-        <button type="button" className="primary" disabled={busy || !value.trim()} onClick={claim}>
-          Claim
-        </button>
-      </div>
-      {status ? <p className="muted" style={{ margin: '8px 0 0' }}>{status}</p> : null}
-    </div>
+    <HubDialog
+      title="Claim your public URL"
+      confirmLabel={busy ? 'Claiming…' : 'Claim'}
+      onConfirm={save}
+      onClose={onClose}
+    >
+      <p className="manage-hint">
+        Public docs show at tdoc.dev/@handle. Pick once — letters, numbers, hyphens.
+      </p>
+      <label className="field" htmlFor="tdoc-handle-claim">Handle</label>
+      <input
+        id="tdoc-handle-claim"
+        type="text"
+        maxLength={39}
+        autoFocus
+        disabled={busy}
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => { if (event.key === 'Enter') save(); }}
+        placeholder={suggested || 'you'}
+      />
+      {status ? <p className="manage-hint">{status}</p> : null}
+    </HubDialog>
   );
 }
 
@@ -318,7 +313,26 @@ export function DocsHub({ boot }) {
       <TopBar identity={boot.identity} />
       <main className="wrap">
         <div className="page-hd">
-          <h1>My docs</h1>
+          <div>
+            <h1>My docs</h1>
+            {boot.profile?.handle ? (
+              <p className="loc-hint">
+                Public profile ·{' '}
+                <a href={`/@${encodeURIComponent(boot.profile.handle)}`}>
+                  @{boot.profile.handle}
+                </a>
+              </p>
+            ) : null}
+          </div>
+          {boot.profile && !boot.profile.handle ? (
+            <button
+              type="button"
+              className="new-folder-btn"
+              onClick={() => setModal({ type: 'claim-handle' })}
+            >
+              Claim public URL
+            </button>
+          ) : null}
           <CreateMenu
             create={hub.createDoc}
             canCreate={capabilities.create}
@@ -326,8 +340,6 @@ export function DocsHub({ boot }) {
             trigger={<button className="mk-btn" type="button">Create a doc</button>}
           />
         </div>
-
-        {boot.profile ? <HandleClaim profile={boot.profile} /> : null}
 
         <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
         {/* The checklist is on this page, so all six states show a difference
@@ -453,6 +465,12 @@ export function DocsHub({ boot }) {
         ) : null}
       </main>
 
+      {modal?.type === 'claim-handle' ? (
+        <ClaimHandleDialog
+          suggested={boot.profile?.suggested || ''}
+          onClose={closeModal}
+        />
+      ) : null}
       {modal?.type === 'create-agent' ? (
         <HubDialog
           title="Build it with your agent"

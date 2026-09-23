@@ -12,19 +12,13 @@ export function Profile({ boot }) {
   return (
     <div className="tdoc-app docs-hub">
       <main className="wrap">
-        <div className="page-hd" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div className="page-hd profile-hd">
           {avatar ? (
-            <img
-              src={avatar}
-              alt=""
-              width={48}
-              height={48}
-              style={{ borderRadius: 24, display: 'block' }}
-            />
+            <img className="profile-avatar" src={avatar} alt="" width={48} height={48} />
           ) : null}
           <div>
-            <h1 style={{ margin: 0 }}>@{login}</h1>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
+            <h1>@{login}</h1>
+            <p className="loc-hint">
               {docs.length} public {docs.length === 1 ? 'doc' : 'docs'}
             </p>
           </div>
@@ -33,18 +27,20 @@ export function Profile({ boot }) {
           <p className="empty">No public docs yet.</p>
         ) : (
           <section className="pane">
-            {docs.map((doc) => (
-              <a
-                key={doc.slug}
-                className="doc-row"
-                href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
-              >
-                <div className="doc-info">
-                  <span className="doc-title">{doc.title || doc.slug}</span>
-                  <div className="doc-meta">{doc.slug}</div>
-                </div>
-              </a>
-            ))}
+            <div className="doc-list">
+              {docs.map((doc) => (
+                <a
+                  key={doc.slug}
+                  className="doc-row"
+                  href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
+                >
+                  <div className="doc-info">
+                    <span className="doc-title">{doc.title || doc.slug}</span>
+                    <div className="doc-meta">{doc.slug}</div>
+                  </div>
+                </a>
+              ))}
+            </div>
           </section>
         )}
       </main>

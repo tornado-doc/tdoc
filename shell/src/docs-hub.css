@@ -25,6 +25,9 @@
      creates, because nothing here can create a doc — their agent writes it. */
   .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
   .page-hd h1 { margin: 0; }
+  .page-hd .loc-hint { margin: 4px 0 0; font-size: 13px; }
+  .profile-hd { align-items: center; }
+  .profile-avatar { border-radius: 24px; display: block; flex-shrink: 0; }
   .mk-btn { margin-left: auto; border: 0; border-radius: 999px; background: var(--td-accent); color: #fff;
     font: inherit; font-weight: 650; padding: 9px 16px; cursor: pointer; }
   .mk-bg { position: fixed; inset: 0; background: rgba(16,18,26,.55); display: grid; place-items: center;
