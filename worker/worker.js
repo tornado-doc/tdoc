@@ -2929,11 +2929,20 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     const latest = versions[versions.length - 1]?.n || 1;
     const published = versions[0]?.created || meta.created || '';
     const updated = versions[versions.length - 1]?.created || published;
-    // Prefer cached meta.preview (written at publish). Never re-fetch full HTML
-    // on every /@ load — that was the expensive path Julie flagged.
-    const cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
-    const excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
-    const image = cached && typeof cached.image === 'string' ? cached.image : '';
+    // Prefer cached meta.preview (written at publish / pin). Old pins predate
+    // that field — backfill once from HTML and persist so the next /@ is free.
+    let cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
+    let excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
+    let image = cached && typeof cached.image === 'string' ? cached.image : '';
+    if (!excerpt && !image) {
+      const refreshed = await refreshDocPreview(env, slug, meta);
+      if (refreshed && refreshed.preview && typeof refreshed.preview === 'object') {
+        cached = refreshed.preview;
+        excerpt = typeof cached.excerpt === 'string' ? cached.excerpt : '';
+        image = typeof cached.image === 'string' ? cached.image : '';
+        try { await env.META.put(`meta:${slug}`, JSON.stringify(refreshed)); } catch { /* best-effort */ }
+      }
+    }
     docs.push({
       slug,
       title: meta.title || slug,
