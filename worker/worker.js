@@ -1951,11 +1951,20 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   })();
   const access = accessFromMeta(docMeta || {});
   const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(rawHtml, 180)) || '';
+  const cachedImage = docMeta && docMeta.preview && typeof docMeta.preview.image === 'string'
+    ? docMeta.preview.image
+    : '';
+  const fromHtml = (SHELL.previewFromHtml && SHELL.previewFromHtml(rawHtml, {
+    slug, version, maxLen: 180,
+  }).image) || '';
+  let shareImage = cachedImage || fromHtml || '';
+  if (shareImage && shareImage.startsWith('/') && origin) shareImage = origin + shareImage;
+  if (!shareImage && origin) shareImage = `${origin}/tdoc_logo.png`;
   const seo = origin ? {
     title,
     description: description || (isLanding ? 'Docs that fix themselves.' : `A tdoc by ${author || 'tdoc'}.`),
     url: pageUrl,
-    image: `${origin}/tdoc_logo.png`,
+    image: shareImage,
     type: isLanding ? 'website' : 'article',
     robots: access.visibility === 'private' ? 'noindex, nofollow' : '',
   } : null;
@@ -2920,13 +2929,11 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     const latest = versions[versions.length - 1]?.n || 1;
     const published = versions[0]?.created || meta.created || '';
     const updated = versions[versions.length - 1]?.created || published;
-    let excerpt = '';
-    if (env.DOCS && SHELL && typeof SHELL.excerptFromHtml === 'function') {
-      try {
-        const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
-        if (obj) excerpt = SHELL.excerptFromHtml(await obj.text(), 220) || '';
-      } catch { /* leave empty */ }
-    }
+    // Prefer cached meta.preview (written at publish). Never re-fetch full HTML
+    // on every /@ load — that was the expensive path Julie flagged.
+    const cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
+    const excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
+    const image = cached && typeof cached.image === 'string' ? cached.image : '';
     docs.push({
       slug,
       title: meta.title || slug,
@@ -2934,6 +2941,7 @@ async function profileData(env, account, { includePrivate = false } = {}) {
       published,
       updated,
       excerpt,
+      image,
       visibility,
       url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
     });
@@ -4047,6 +4055,31 @@ async function putAccountProfile(env, accountId, patch) {
   return next;
 }
 
+function docPreviewFromHtml(html, { slug, version } = {}) {
+  if (!SHELL || typeof SHELL.previewFromHtml !== 'function') {
+    return { excerpt: '', image: '' };
+  }
+  return SHELL.previewFromHtml(html, { slug, version, maxLen: 220 });
+}
+
+async function ensureDocPreview(env, slug, meta) {
+  if (!meta || typeof meta !== 'object') return meta;
+  if (meta.preview && typeof meta.preview.excerpt === 'string' && meta.preview.excerpt) {
+    return meta;
+  }
+  if (!env || !env.DOCS) return meta;
+  const versions = Array.isArray(meta.versions) ? meta.versions : [];
+  const latest = versions[versions.length - 1]?.n || 1;
+  try {
+    const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
+    if (!obj) return meta;
+    const preview = docPreviewFromHtml(await obj.text(), { slug, version: latest });
+    return { ...meta, preview };
+  } catch {
+    return meta;
+  }
+}
+
 // Curate = author-only doc flag (meta.profile.curated). Pinning sets the doc
 // public and remembers the prior visibility; take-down restores it.
 async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {}) {
@@ -4077,6 +4110,8 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
       restore_visibility: ACCESS_VISIBILITIES.has(prior) ? prior : 'unlisted',
     };
     nextMeta.access = { ...access, visibility: 'public' };
+    // One-time backfill for docs published before meta.preview existed.
+    nextMeta = await ensureDocPreview(env, slug, nextMeta);
   } else {
     const restore = (nextMeta.profile && nextMeta.profile.restore_visibility) || access.visibility;
     const { profile: _drop, ...withoutProfile } = nextMeta;
@@ -5509,6 +5544,7 @@ export class CommentsStore {
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions,
+        preview: docPreviewFromHtml(stamped.html, { slug, version: reservation.next }),
       }));
       committed = true;
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
@@ -8288,6 +8324,7 @@ export default {
             ...(currentMeta || {}),
             ...incoming,
             versions: mergedVersions,
+            preview: docPreviewFromHtml(stampedHtml, { slug, version: verNum }),
           }));
         } catch (e) {
           try { await finishVersionReservation(false); } catch {}

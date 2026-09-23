@@ -64,6 +64,20 @@ const bundler = read('bin/tdoc-bundle');
     if (!/^Hello World of share cards/.test(excerpt) || /x\(\)/.test(excerpt)) {
       throw new Error(`excerptFromHtml failed: ${JSON.stringify(excerpt)}`);
     }
+    const preview = shell.previewFromHtml(
+      '<p>Lead copy for the card.</p><img src="/ignore.svg"><img src="https://cdn.example/hero.png" alt="hero">',
+      { slug: 'demo', version: 2 },
+    );
+    if (!/^Lead copy/.test(preview.excerpt) || preview.image !== 'https://cdn.example/hero.png') {
+      throw new Error(`previewFromHtml failed: ${JSON.stringify(preview)}`);
+    }
+    const relative = shell.previewFromHtml(
+      '<img src="./shot.jpg"><p>Relative art.</p>',
+      { slug: 'demo', version: 3 },
+    );
+    if (relative.image !== '/d/demo/v/3/shot.jpg') {
+      throw new Error(`relative image resolve failed: ${relative.image}`);
+    }
     const doc = shell.shellHtml({
       title: 'Jev brief',
       nonceAttr: ' nonce="abc"',

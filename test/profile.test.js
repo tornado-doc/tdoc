@@ -178,7 +178,8 @@ async function seedDoc(env, slug, { owner, accountId, created = '2026-01-01T00:0
   for (const v of vs) {
     await env.DOCS.put(
       `docs/${slug}/v${v.n}/index.html`,
-      `<h1>${title || slug}</h1><p>Opening paragraph about ${slug} for profile previews.</p>`,
+      `<h1>${title || slug}</h1><p>Opening paragraph about ${slug} for profile previews.</p>`
+        + `<img src="https://example.com/${slug}.png" alt="">`,
     );
   }
 }
@@ -309,12 +310,18 @@ async function seedPins(env, accountId, pins, extra = {}) {
       method: 'POST', cookie, body: { slug: 'sam-open', pinned: true },
     }), env, {});
     assert(pin.status === 200, `pin ${pin.status} ${await pin.clone().text()}`);
+    const metaAfter = JSON.parse(await env.META.get('meta:sam-open'));
+    assert(metaAfter.preview && /Opening paragraph/.test(metaAfter.preview.excerpt),
+      `preview cached on pin: ${JSON.stringify(metaAfter.preview)}`);
+    assert(metaAfter.preview.image === 'https://example.com/sam-open.png', 'first graphic cached');
 
     const page = await worker.fetch(req('/@sam'), env, {});
     assert(page.status === 200, `/@sam ${page.status}`);
     const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
     assert(boot.page === 'profile' && boot.handle === 'sam', 'claimed profile boot');
     assert(boot.docs.map((d) => d.slug).join(',') === 'sam-open', `docs ${JSON.stringify(boot.docs)}`);
+    assert(/Opening paragraph/.test(boot.docs[0].excerpt || ''), 'boot carries excerpt from meta');
+    assert(boot.docs[0].image === 'https://example.com/sam-open.png', 'boot carries first graphic');
   });
 
   await t('curate forces public; take-down restores prior visibility', async () => {

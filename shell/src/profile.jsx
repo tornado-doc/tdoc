@@ -263,13 +263,20 @@ export function Profile({ boot }) {
             {docs.map((doc) => (
               <a
                 key={doc.slug}
-                className="profile-pick-card"
+                className={`profile-pick-card${doc.image ? ' has-image' : ''}`}
                 href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
               >
-                <span className="profile-pick-title">{doc.title || doc.slug}</span>
-                {doc.excerpt ? <span className="profile-pick-excerpt">{doc.excerpt}</span> : null}
-                <span className="profile-pick-meta">
-                  {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
+                {doc.image ? (
+                  <span className="profile-pick-media" aria-hidden="true">
+                    <img src={doc.image} alt="" loading="lazy" />
+                  </span>
+                ) : null}
+                <span className="profile-pick-body">
+                  <span className="profile-pick-title">{doc.title || doc.slug}</span>
+                  {doc.excerpt ? <span className="profile-pick-excerpt">{doc.excerpt}</span> : null}
+                  <span className="profile-pick-meta">
+                    {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
+                  </span>
                 </span>
               </a>
             ))}

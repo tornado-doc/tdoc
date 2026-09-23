@@ -34,6 +34,44 @@
     return (softer.length >= 40 ? softer : cut) + '\u2026';
   }
 
+  // First content image for share / profile cards. Skips data URIs and
+  // obvious chrome (favicon / logo icons).
+  function firstImageFromHtml(html) {
+    if (typeof html !== 'string' || !html) return '';
+    const re = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+    let match;
+    while ((match = re.exec(html))) {
+      const src = String(match[1] || '').trim();
+      if (!src || /^data:/i.test(src)) continue;
+      if (/(?:favicon|apple-touch-icon|tdoc_logo|\.svg(?:\?|$))/i.test(src)) continue;
+      return src;
+    }
+    return '';
+  }
+
+  function resolveDocAssetUrl(src, opts) {
+    if (!src) return '';
+    const s = String(src).trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.startsWith('//')) return 'https:' + s;
+    if (s.startsWith('/')) return s;
+    const slug = opts && opts.slug;
+    const version = opts && opts.version;
+    if (!slug || !version) return '';
+    const rel = s.replace(/^\.\//, '');
+    return '/d/' + encodeURIComponent(slug) + '/v/' + version + '/' + rel;
+  }
+
+  // Cached on meta at publish so /@ and OG do not re-read full HTML.
+  function previewFromHtml(html, opts) {
+    const o = opts && typeof opts === 'object' ? opts : {};
+    return {
+      excerpt: excerptFromHtml(html, o.maxLen || 220),
+      image: resolveDocAssetUrl(firstImageFromHtml(html), o) || '',
+    };
+  }
+
   function seoHeadHtml(d) {
     const seo = d && d.seo;
     if (!seo || typeof seo !== 'object') return '';
@@ -118,7 +156,14 @@ seoBodyHtml(d) +
       '</body></html>';
   }
 
-  var api = { shellHtml: shellHtml, appHtml: appHtml, excerptFromHtml: excerptFromHtml };
+  var api = {
+    shellHtml: shellHtml,
+    appHtml: appHtml,
+    excerptFromHtml: excerptFromHtml,
+    firstImageFromHtml: firstImageFromHtml,
+    resolveDocAssetUrl: resolveDocAssetUrl,
+    previewFromHtml: previewFromHtml,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.TDOC_SHELL_BUILDER = api;
 })();
