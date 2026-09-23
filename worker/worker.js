@@ -5987,6 +5987,26 @@ export default {
       return json({ ok: true, slug, on_profile: result.on_profile, pins: result.pins });
     }
 
+    if (p === '/api/me/profile' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const acct = await ensureSessionHostedAccount(env, s);
+      const accountId = acct && acct.account_id;
+      if (!accountId) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const bio = typeof body.bio === 'string' ? body.bio.replace(/\s+/g, ' ').trim().slice(0, 280) : '';
+      await putAccountProfile(env, accountId, { bio });
+      return json({ ok: true, bio });
+    }
+
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
@@ -6067,6 +6087,27 @@ export default {
       if (method === 'HEAD') return new Response(null, { status: 200 });
       const handle = account.handle || login;
       const docs = await profileData(env, account);
+      const session = await getSession(env, req);
+      const viewerId = session ? await sessionAccountId(env, session) : null;
+      const mine = Boolean(
+        (viewerId && account.account_id && viewerId === account.account_id)
+        || (sessionLogin(session) && account.github_login
+            && sessionLogin(session) === account.github_login),
+      );
+      const stored = account.account_id ? await accountProfile(env, account.account_id) : null;
+      const bio = stored && typeof stored.bio === 'string' ? stored.bio.slice(0, 280) : '';
+      let catalog = [];
+      if (mine && session) {
+        const data = await indexData(env, session, url.origin);
+        const pinned = new Set((stored && normalizeProfilePins(stored)) || []);
+        catalog = (data.docs || [])
+          .filter((row) => row.mine)
+          .map((row) => ({
+            slug: row.slug,
+            title: row.title,
+            on_profile: pinned.has(row.slug),
+          }));
+      }
       const wantsJson = (req.headers.get('accept') || '').includes('application/json');
       if (wantsJson) {
         return json({
@@ -6074,10 +6115,15 @@ export default {
           login: handle,
           handle,
           github_login: account.github_login || null,
+          bio,
           docs,
+          ...(mine ? { mine: true, catalog } : {}),
         });
       }
       const nonce = rand(16);
+      const identity = sessionPrincipal(session)
+        ? { login: actorKey(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
+        : null;
       return html(SHELL.appHtml({
         title: `@${handle} · tdoc`,
         nonceAttr: ` nonce="${nonce}"`,
@@ -6088,7 +6134,10 @@ export default {
           login: handle,
           handle,
           github_login: account.github_login || null,
+          bio,
           docs,
+          mine,
+          ...(mine ? { catalog, identity } : { identity }),
         }),
       }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
