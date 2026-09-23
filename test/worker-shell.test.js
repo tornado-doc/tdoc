@@ -65,12 +65,19 @@ const bundler = read('bin/tdoc-bundle');
       throw new Error(`excerptFromHtml failed: ${JSON.stringify(excerpt)}`);
     }
     const preview = shell.previewFromHtml(
-      '<h1>Demo Doc</h1><p>Lead copy for the card.</p><img src="/ignore.svg"><img src="https://cdn.example/hero.png" alt="hero">',
+      '<h1>Demo Doc</h1><p>Lead copy for the card.</p><img src="/ignore-favicon.ico"><img src="https://cdn.example/hero.png" alt="hero">',
       { slug: 'demo', version: 2, title: 'Demo Doc' },
     );
     if (!/^Lead copy/.test(preview.excerpt) || /Demo Doc/.test(preview.excerpt)
         || preview.image !== 'https://cdn.example/hero.png') {
       throw new Error(`previewFromHtml failed: ${JSON.stringify(preview)}`);
+    }
+    const fromSvg = shell.previewFromHtml(
+      '<h1>Chart</h1><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="blue"/></svg><p>Lead.</p>',
+      { slug: 'chart', version: 1, title: 'Chart' },
+    );
+    if (!/^data:image\/svg\+xml/.test(fromSvg.image || '')) {
+      throw new Error(`inline svg preview failed: ${JSON.stringify(fromSvg)}`);
     }
     const relative = shell.previewFromHtml(
       '<img src="./shot.jpg"><p>Relative art.</p>',

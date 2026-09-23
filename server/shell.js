@@ -34,8 +34,9 @@
     return (softer.length >= 40 ? softer : cut) + '\u2026';
   }
 
-  // First content image for share / profile cards. Skips data URIs and
-  // obvious chrome (favicon / logo icons).
+  // First content image for share / profile cards. Prefers <img>, then a
+  // compact inline <svg> turned into a data URL (many tdocs draw diagrams
+  // that way — skipping them left profile cards graphic-less).
   function firstImageFromHtml(html) {
     if (typeof html !== 'string' || !html) return '';
     const re = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
@@ -43,8 +44,12 @@
     while ((match = re.exec(html))) {
       const src = String(match[1] || '').trim();
       if (!src || /^data:/i.test(src)) continue;
-      if (/(?:favicon|apple-touch-icon|tdoc_logo|\.svg(?:\?|$))/i.test(src)) continue;
+      if (/(?:favicon|apple-touch-icon|tdoc_logo)/i.test(src)) continue;
       return src;
+    }
+    const svg = html.match(/<svg\b[^>]*>[\s\S]*?<\/svg>/i);
+    if (svg && svg[0].length >= 80 && svg[0].length <= 60000) {
+      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg[0]);
     }
     return '';
   }
@@ -53,7 +58,7 @@
     if (!src) return '';
     const s = String(src).trim();
     if (!s) return '';
-    if (/^https?:\/\//i.test(s)) return s;
+    if (/^https?:\/\//i.test(s) || /^data:/i.test(s)) return s;
     if (s.startsWith('//')) return 'https:' + s;
     if (s.startsWith('/')) return s;
     const slug = opts && opts.slug;
