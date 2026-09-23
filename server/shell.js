@@ -77,7 +77,10 @@
     if (title && excerpt) {
       const lower = excerpt.toLowerCase();
       const needle = title.toLowerCase();
-      if (lower.startsWith(needle)) {
+      // Body sometimes repeats the heading as plain text right after <h1>.
+      if (lower.startsWith(needle + ' ' + needle)) {
+        excerpt = excerpt.slice((title + ' ' + title).length).replace(/^[\s\u2014\u2013\-:·.|]+/, '').trim();
+      } else if (lower.startsWith(needle)) {
         excerpt = excerpt.slice(title.length).replace(/^[\s\u2014\u2013\-:·.|]+/, '').trim();
       }
     }
