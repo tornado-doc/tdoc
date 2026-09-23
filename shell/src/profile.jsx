@@ -55,6 +55,31 @@ function ProfileAvatar({ githubLogin, avatarUrl, name, handle }) {
   );
 }
 
+// Plain bio text with http(s) URLs turned into links. No markdown — just
+// make the obvious thing clickable.
+const BIO_URL = /https?:\/\/[^\s<]+[^\s<.,:;!?)]/g;
+
+function BioText({ text }) {
+  const value = String(text || '');
+  if (!value) return null;
+  const nodes = [];
+  let last = 0;
+  let match;
+  BIO_URL.lastIndex = 0;
+  while ((match = BIO_URL.exec(value))) {
+    if (match.index > last) nodes.push(value.slice(last, match.index));
+    const href = match[0];
+    nodes.push(
+      <a key={`${match.index}-${href}`} href={href} target="_blank" rel="noopener noreferrer">
+        {href}
+      </a>,
+    );
+    last = match.index + href.length;
+  }
+  if (last < value.length) nodes.push(value.slice(last));
+  return <p className="profile-bio">{nodes}</p>;
+}
+
 export function Profile({ boot }) {
   const login = boot.handle || boot.login || '';
   const githubLogin = boot.github_login || '';
@@ -130,7 +155,7 @@ export function Profile({ boot }) {
           />
           <div className="profile-id">
             <h1 className="profile-handle">@{login}</h1>
-            {bio ? <p className="profile-bio">{bio}</p> : null}
+            {bio ? <BioText text={bio} /> : null}
             <p className="loc-hint">
               {docs.length} {docs.length === 1 ? 'pick' : 'picks'}
               {mine ? (

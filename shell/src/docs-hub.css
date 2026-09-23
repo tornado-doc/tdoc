@@ -59,6 +59,7 @@
     color: var(--td-muted);
     max-width: 36em;
   }
+  .profile-bio a { color: var(--td-accent); }
   .text-btn {
     border: 0;
     background: none;
