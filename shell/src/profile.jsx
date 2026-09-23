@@ -306,36 +306,45 @@ export function Profile({ boot }) {
         ) : (
           <section className={`profile-picks is-${pickView}`}>
             {docs.map((doc) => {
-              const showMedia = pickView === 'preview';
+              const isPreview = pickView === 'preview';
               const hasImage = Boolean(doc.image);
-              const showTitleBelow = pickView === 'compact' || hasImage;
+              if (!isPreview) {
+                return (
+                  <a
+                    key={doc.slug}
+                    className="profile-pick-card"
+                    href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
+                  >
+                    <span className="profile-pick-body">
+                      <span className="profile-pick-title">{doc.title || doc.slug}</span>
+                      <span className="profile-pick-meta">
+                        {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
+                      </span>
+                    </span>
+                  </a>
+                );
+              }
               return (
                 <a
                   key={doc.slug}
-                  className={`profile-pick-card${showMedia ? ' has-preview' : ''}`}
+                  className={`profile-pick-card has-preview${hasImage ? ' has-image' : ''}`}
                   href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
                 >
-                  {showMedia ? (
-                    <span className={`profile-pick-media${hasImage ? '' : ' is-render'}`} aria-hidden="true">
-                      {hasImage ? (
+                  <span className="profile-pick-surface">
+                    {hasImage ? (
+                      <span className="profile-pick-media" aria-hidden="true">
                         <img src={doc.image} alt="" loading="lazy" />
-                      ) : (
-                        <span className="profile-pick-render">
-                          <span className="profile-pick-render-title">{doc.title || doc.slug}</span>
-                        </span>
-                      )}
-                    </span>
-                  ) : null}
-                  <span className="profile-pick-body">
-                    {showTitleBelow ? (
+                      </span>
+                    ) : null}
+                    <span className="profile-pick-copy">
                       <span className="profile-pick-title">{doc.title || doc.slug}</span>
-                    ) : null}
-                    {pickView === 'preview' && doc.excerpt ? (
-                      <span className="profile-pick-excerpt">{doc.excerpt}</span>
-                    ) : null}
-                    <span className="profile-pick-meta">
-                      {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
+                      {doc.excerpt ? (
+                        <span className="profile-pick-excerpt">{doc.excerpt}</span>
+                      ) : null}
                     </span>
+                  </span>
+                  <span className="profile-pick-meta">
+                    {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
                   </span>
                 </a>
               );
