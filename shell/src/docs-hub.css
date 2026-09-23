@@ -27,7 +27,22 @@
   .page-hd h1 { margin: 0; }
   .page-hd .loc-hint { margin: 4px 0 0; font-size: 13px; }
   .profile-hd { align-items: flex-start; }
-  .profile-avatar { border-radius: 20px; display: block; flex-shrink: 0; width: 40px; height: 40px; }
+  .profile-avatar { border-radius: 20px; display: block; flex-shrink: 0; width: 40px; height: 40px; object-fit: cover; }
+  .profile-avatar-fallback {
+    display: grid;
+    place-items: center;
+    background: var(--td-accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+    object-fit: unset;
+  }
+  .profile-avatar-logo {
+    padding: 8px;
+    box-sizing: border-box;
+    background: var(--td-surface);
+    object-fit: contain;
+  }
   .profile-id { min-width: 0; flex: 1 1 auto; }
   .profile-handle {
     margin: 0;

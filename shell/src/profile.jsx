@@ -23,6 +23,38 @@ function ProfileDialog({ title, children, confirmLabel, onConfirm, onClose, acti
   );
 }
 
+function ProfileAvatar({ githubLogin, avatarUrl, name, handle }) {
+  const [broken, setBroken] = useState(false);
+  const src = !broken && (avatarUrl
+    || (githubLogin ? `https://github.com/${encodeURIComponent(githubLogin)}.png?size=160` : ''));
+  if (src) {
+    return (
+      <img
+        className="profile-avatar"
+        src={src}
+        alt=""
+        width={40}
+        height={40}
+        onError={() => setBroken(true)}
+      />
+    );
+  }
+  const letter = String(name || handle || '?').replace(/^@/, '').slice(0, 1).toUpperCase();
+  if (letter && letter !== '?') {
+    return <span className="profile-avatar profile-avatar-fallback" aria-hidden="true">{letter}</span>;
+  }
+  return (
+    <img
+      className="profile-avatar profile-avatar-logo"
+      src="/tdoc_logo.svg"
+      alt=""
+      width={40}
+      height={40}
+      data-tdoc-dark="invert"
+    />
+  );
+}
+
 export function Profile({ boot }) {
   const login = boot.handle || boot.login || '';
   const githubLogin = boot.github_login || '';
@@ -33,9 +65,7 @@ export function Profile({ boot }) {
   const [modal, setModal] = useState(null);
   const [bioDraft, setBioDraft] = useState(bio);
   const [busy, setBusy] = useState(false);
-  const avatar = githubLogin
-    ? `https://github.com/${encodeURIComponent(githubLogin)}.png?size=96`
-    : '';
+  const identity = boot.identity || null;
 
   const refreshDocsFromCatalog = (nextCatalog) => {
     const pinned = nextCatalog.filter((row) => row.on_profile);
@@ -89,12 +119,15 @@ export function Profile({ boot }) {
 
   return (
     <div className="tdoc-app docs-hub">
-      <TopBar identity={boot.identity || null} />
+      <TopBar identity={identity} />
       <main className="wrap">
         <div className="page-hd profile-hd">
-          {avatar ? (
-            <img className="profile-avatar" src={avatar} alt="" width={40} height={40} />
-          ) : null}
+          <ProfileAvatar
+            githubLogin={githubLogin}
+            avatarUrl={identity && identity.avatar_url}
+            name={identity && identity.name}
+            handle={login}
+          />
           <div className="profile-id">
             <h1 className="profile-handle">@{login}</h1>
             {bio ? <p className="profile-bio">{bio}</p> : null}
