@@ -73,11 +73,18 @@ const bundler = read('bin/tdoc-bundle');
       throw new Error(`previewFromHtml failed: ${JSON.stringify(preview)}`);
     }
     const fromSvg = shell.previewFromHtml(
-      '<h1>Chart</h1><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="blue"/></svg><p>Lead.</p>',
+      '<h1>Chart</h1>'
+      + '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 5"/></svg>'
+      + '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 672 236" role="img">'
+      + '<rect width="672" height="236" fill="#e8eeff"/><text x="20" y="40">diagram</text></svg>'
+      + '<p>Lead.</p>',
       { slug: 'chart', version: 1, title: 'Chart' },
     );
-    if (!/^data:image\/svg\+xml/.test(fromSvg.image || '')) {
-      throw new Error(`inline svg preview failed: ${JSON.stringify(fromSvg)}`);
+    if (!/^data:image\/svg\+xml/.test(fromSvg.image || '') || !/672/.test(decodeURIComponent(fromSvg.image))) {
+      throw new Error(`inline svg preview failed: ${JSON.stringify(fromSvg).slice(0, 200)}`);
+    }
+    if (/M3 8\.5l3\.5/.test(decodeURIComponent(fromSvg.image))) {
+      throw new Error('checkbox svg must not be chosen as preview');
     }
     const relative = shell.previewFromHtml(
       '<img src="./shot.jpg"><p>Relative art.</p>',

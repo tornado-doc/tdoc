@@ -307,7 +307,6 @@ export function Profile({ boot }) {
           <section className={`profile-picks is-${pickView}`}>
             {docs.map((doc) => {
               const isPreview = pickView === 'preview';
-              const hasImage = Boolean(doc.image);
               if (!isPreview) {
                 return (
                   <a
@@ -324,18 +323,15 @@ export function Profile({ boot }) {
                   </a>
                 );
               }
+              // Preview = title + lead inside the card. No auto-picked graphics
+              // (inline SVGs / task icons were unreliable).
               return (
                 <a
                   key={doc.slug}
-                  className={`profile-pick-card has-preview${hasImage ? ' has-image' : ''}`}
+                  className="profile-pick-card has-preview"
                   href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
                 >
                   <span className="profile-pick-surface">
-                    {hasImage ? (
-                      <span className="profile-pick-media" aria-hidden="true">
-                        <img src={doc.image} alt="" loading="lazy" />
-                      </span>
-                    ) : null}
                     <span className="profile-pick-copy">
                       <span className="profile-pick-title">{doc.title || doc.slug}</span>
                       {doc.excerpt ? (

@@ -34,9 +34,28 @@
     return (softer.length >= 40 ? softer : cut) + '\u2026';
   }
 
-  // First content image for share / profile cards. Prefers <img>, then a
-  // compact inline <svg> turned into a data URL (many tdocs draw diagrams
-  // that way — skipping them left profile cards graphic-less).
+  // True for chrome icons stamped into author HTML (task-list checkboxes are
+  // 16×16). Content diagrams are large viewBoxes (hundreds of px).
+  function isDecorativeSvg(svg) {
+    if (typeof svg !== 'string') return true;
+    const vb = svg.match(/viewBox\s*=\s*["']([^"']+)["']/i);
+    if (vb) {
+      const parts = vb[1].trim().split(/[\s,]+/).map(Number);
+      if (parts.length >= 4) {
+        if (parts[2] <= 32 && parts[3] <= 32) return true;
+        // Large viewBox ⇒ content diagram even if the markup is short.
+        if (parts[2] >= 120 || parts[3] >= 120) return false;
+      }
+    }
+    const w = svg.match(/\bwidth\s*=\s*["']?(\d+)/i);
+    const h = svg.match(/\bheight\s*=\s*["']?(\d+)/i);
+    if (w && h && Number(w[1]) <= 32 && Number(h[1]) <= 32) return true;
+    if (svg.length < 400) return true;
+    return false;
+  }
+
+  // First content image for share / profile cards. Prefers <img>, then the
+  // first non-decorative inline <svg> (skip task-list checkboxes).
   function firstImageFromHtml(html) {
     if (typeof html !== 'string' || !html) return '';
     const re = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
@@ -47,9 +66,11 @@
       if (/(?:favicon|apple-touch-icon|tdoc_logo)/i.test(src)) continue;
       return src;
     }
-    const svg = html.match(/<svg\b[^>]*>[\s\S]*?<\/svg>/i);
-    if (svg && svg[0].length >= 80 && svg[0].length <= 60000) {
-      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg[0]);
+    const svgs = html.match(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi) || [];
+    for (let i = 0; i < svgs.length; i++) {
+      const svg = svgs[i];
+      if (isDecorativeSvg(svg) || svg.length > 60000) continue;
+      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
     }
     return '';
   }
