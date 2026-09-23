@@ -4,6 +4,7 @@ import { AppDialog } from './ui/dialog.jsx';
 import './docs-hub.css';
 
 const CURATE_WARN_KEY = 'tdoc.curateWarned';
+const PICK_VIEW_KEY = 'tdoc.profilePickView';
 
 function needsCurateWarn() {
   try { return localStorage.getItem(CURATE_WARN_KEY) !== '1'; } catch { return true; }
@@ -11,6 +12,19 @@ function needsCurateWarn() {
 
 function markCurateWarned() {
   try { localStorage.setItem(CURATE_WARN_KEY, '1'); } catch { /* ignore */ }
+}
+
+function readPickView() {
+  try {
+    const v = localStorage.getItem(PICK_VIEW_KEY);
+    return v === 'compact' ? 'compact' : 'preview';
+  } catch {
+    return 'preview';
+  }
+}
+
+function writePickView(view) {
+  try { localStorage.setItem(PICK_VIEW_KEY, view); } catch { /* ignore */ }
 }
 
 function day(iso) {
@@ -106,7 +120,13 @@ export function Profile({ boot }) {
   const [handleDraft, setHandleDraft] = useState(login);
   const [handleStatus, setHandleStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pickView, setPickView] = useState(readPickView);
   const identity = boot.identity || null;
+
+  const setView = (view) => {
+    setPickView(view);
+    writePickView(view);
+  };
 
   const refreshDocsFromCatalog = (nextCatalog) => {
     const pinned = nextCatalog.filter((row) => row.on_profile);
@@ -116,6 +136,7 @@ export function Profile({ boot }) {
       visibility: row.visibility,
       published: row.published || row.created || '',
       excerpt: row.excerpt || '',
+      image: row.image || '',
       url: `/d/${encodeURIComponent(row.slug)}`,
     })));
   };
@@ -222,6 +243,30 @@ export function Profile({ boot }) {
             {bio ? <BioText text={bio} /> : null}
             <p className="loc-hint">
               {docs.length} {docs.length === 1 ? 'pick' : 'picks'}
+              {docs.length > 0 ? (
+                <>
+                  {' · '}
+                  <span className="profile-view-toggle" role="group" aria-label="Pick layout">
+                    <button
+                      type="button"
+                      className={`text-btn${pickView === 'compact' ? ' is-active' : ''}`}
+                      aria-pressed={pickView === 'compact'}
+                      onClick={() => setView('compact')}
+                    >
+                      Compact
+                    </button>
+                    <span aria-hidden="true"> / </span>
+                    <button
+                      type="button"
+                      className={`text-btn${pickView === 'preview' ? ' is-active' : ''}`}
+                      aria-pressed={pickView === 'preview'}
+                      onClick={() => setView('preview')}
+                    >
+                      Preview
+                    </button>
+                  </span>
+                </>
+              ) : null}
               {mine ? (
                 <>
                   {' · '}
@@ -259,21 +304,23 @@ export function Profile({ boot }) {
             {mine ? 'No public picks yet. Add one from your docs.' : 'No public picks yet.'}
           </p>
         ) : (
-          <section className="profile-picks">
+          <section className={`profile-picks is-${pickView}`}>
             {docs.map((doc) => (
               <a
                 key={doc.slug}
-                className={`profile-pick-card${doc.image ? ' has-image' : ''}`}
+                className={`profile-pick-card${pickView === 'preview' && doc.image ? ' has-image' : ''}`}
                 href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
               >
-                {doc.image ? (
+                {pickView === 'preview' && doc.image ? (
                   <span className="profile-pick-media" aria-hidden="true">
                     <img src={doc.image} alt="" loading="lazy" />
                   </span>
                 ) : null}
                 <span className="profile-pick-body">
                   <span className="profile-pick-title">{doc.title || doc.slug}</span>
-                  {doc.excerpt ? <span className="profile-pick-excerpt">{doc.excerpt}</span> : null}
+                  {pickView === 'preview' && doc.excerpt ? (
+                    <span className="profile-pick-excerpt">{doc.excerpt}</span>
+                  ) : null}
                   <span className="profile-pick-meta">
                     {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
                   </span>
