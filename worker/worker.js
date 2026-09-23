@@ -2929,25 +2929,32 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     const latest = versions[versions.length - 1]?.n || 1;
     const published = versions[0]?.created || meta.created || '';
     const updated = versions[versions.length - 1]?.created || published;
-    // Prefer cached meta.preview. Backfill when excerpt or image is still
-    // missing (old pins, or pins cached before inline-SVG graphics landed).
+    // Prefer cached meta.preview. Backfill when excerpt/image missing, or when
+    // image is a tiny SVG data URL (checkbox icon mistakenly cached earlier).
     let cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
     let excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
     let image = cached && typeof cached.image === 'string' ? cached.image : '';
-    if (!excerpt || !image) {
+    const weakSvg = typeof image === 'string'
+      && image.startsWith('data:image/svg')
+      && image.length < 2000;
+    if (!excerpt || !image || weakSvg) {
       const refreshed = await refreshDocPreview(env, slug, meta);
       if (refreshed && refreshed.preview && typeof refreshed.preview === 'object') {
         const next = refreshed.preview;
         const nextExcerpt = typeof next.excerpt === 'string' ? next.excerpt : '';
         const nextImage = typeof next.image === 'string' ? next.image : '';
-        const changed = (nextExcerpt && nextExcerpt !== excerpt) || (nextImage && nextImage !== image);
-        if (!excerpt) excerpt = nextExcerpt;
-        if (!image) image = nextImage;
+        const nextExcerptUse = excerpt || nextExcerpt;
+        const nextImageUse = (weakSvg || !image) ? (nextImage || image) : image;
+        const changed = nextExcerptUse !== excerpt || nextImageUse !== image;
+        excerpt = nextExcerptUse;
+        image = nextImageUse;
         if (changed) {
-          try { await env.META.put(`meta:${slug}`, JSON.stringify({
-            ...refreshed,
-            preview: { excerpt, image },
-          })); } catch { /* best-effort */ }
+          try {
+            await env.META.put(`meta:${slug}`, JSON.stringify({
+              ...refreshed,
+              preview: { excerpt, image },
+            }));
+          } catch { /* best-effort */ }
         }
       }
     }
