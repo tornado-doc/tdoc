@@ -39,10 +39,11 @@ id = "PLACEHOLDER_PREVIEW_KV_ID"
 
 [vars]
 GITHUB_CLIENT_ID = "Ov23liZ1UAGOchvKPmlS"
-# Owner login so /me is reviewable on previews: device-code sign-in as this
-# GitHub user unlocks the BYOK operator catalog (all docs on the preview
-# worker). Hosted registration stays off — nobody else can mint tokens here.
+# Preview mirrors hosted tdoc.dev enough to review multi-tenant surfaces
+# (/me claim handle, /@profiles, per-account catalogs). Still no Durable
+# Object (Cloudflare preview URL limit) — comments use the KV fallback.
 TDOC_OWNER = "yayashuxue"
+TDOC_HOSTED_REGISTRATION = "1"
 # KV writes get a 14-day TTL in worker.js when this is "1".
 # R2 objects expire via the bucket lifecycle rule expire-preview-14d.
 TDOC_PREVIEW = "1"
@@ -52,4 +53,3 @@ TDOC_PREVIEW = "1"
 #   for the web OAuth redirect flow. Generate it on the SAME OAuth App as the
 #   preview GITHUB_CLIENT_ID above, with callback URL
 #   https://<preview-host>/auth/github/callback. Unset ⇒ device-code flow.
-# TDOC_HOSTED_REGISTRATION — leave unset.
