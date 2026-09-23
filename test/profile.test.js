@@ -1,0 +1,233 @@
+// Public /@<github-login> profiles: hosted-only, github login IS the handle,
+// public + unlisted docs listed, private excluded. Same worker harness as
+// me-docs-experience.test.js.
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { webcrypto } = require('crypto');
+
+if (typeof globalThis.crypto === 'undefined') globalThis.crypto = webcrypto;
+
+if (typeof Response !== 'undefined' && !Response.json) {
+  Response.json = (body, init = {}) => new Response(JSON.stringify(body), {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+  });
+}
+
+let pass = 0, fail = 0;
+function ok(n) { console.log(`  ✓ ${n}`); pass++; }
+function bad(n, e) { console.log(`  ✗ ${n}\n    ${e && e.message ? e.message : e}`); fail++; }
+async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
+function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
+
+class FakeKV {
+  constructor() { this.map = new Map(); }
+  async get(k) { return this.map.has(k) ? this.map.get(k) : null; }
+  async put(k, v) { this.map.set(k, String(v)); }
+  async delete(k) { this.map.delete(k); }
+  async list({ prefix = '' } = {}) {
+    return {
+      keys: [...this.map.keys()].filter(k => k.startsWith(prefix)).map(name => ({ name })),
+      list_complete: true,
+    };
+  }
+}
+
+class FakeR2 {
+  constructor() { this.map = new Map(); }
+  async put(k, v) { this.map.set(k, String(v)); }
+  async get(k) {
+    if (!this.map.has(k)) return null;
+    const v = this.map.get(k);
+    return { text: async () => v };
+  }
+  async head(k) {
+    if (!this.map.has(k)) return null;
+    return { size: Buffer.byteLength(this.map.get(k)) };
+  }
+  async delete(k) { this.map.delete(k); }
+  async list({ prefix = '' } = {}) {
+    return {
+      objects: [...this.map.keys()].filter(k => k.startsWith(prefix)).map(key => ({ key })),
+      truncated: false,
+    };
+  }
+}
+
+class FakeStorage {
+  constructor() { this.map = new Map(); }
+  async transaction(fn) {
+    const txn = {
+      get: async (k) => this.map.get(k),
+      put: async (k, v) => { this.map.set(k, v); },
+      delete: async (k) => { this.map.delete(k); },
+    };
+    return fn(txn);
+  }
+}
+
+class FakeDurableNamespace {
+  constructor(env, StoreClass) {
+    this.env = env;
+    this.StoreClass = StoreClass;
+    this.states = new Map();
+  }
+  idFromName(name) { return name; }
+  stateFor(id) {
+    if (!this.states.has(id)) this.states.set(id, { storage: new FakeStorage() });
+    return this.states.get(id);
+  }
+  get(id) {
+    return {
+      fetch: async (url, init = {}) => {
+        const store = new this.StoreClass(this.stateFor(id), this.env);
+        return store.fetch(new Request(url, init));
+      },
+    };
+  }
+}
+
+async function loadWorker() {
+  const root = path.join(__dirname, '..');
+  let src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
+  const readerCss = fs.readFileSync(path.join(root, 'server', 'reader.css'), 'utf8');
+  src = src.replace(
+    /const READER_CSS = `__TDOC_READER_CSS__`;/,
+    'const READER_CSS = ' + JSON.stringify(readerCss) + ';'
+  );
+  const shellMod = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
+  const probeJs = require(path.join(root, 'server', 'frame-probe-source.js'))();
+  src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
+  src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
+  const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
+  fs.writeFileSync(tmp, src);
+  const mod = await import(`file://${tmp}`);
+  try { fs.unlinkSync(tmp); } catch {}
+  return mod;
+}
+
+function makeEnv(StoreClass, extra = {}) {
+  const env = {
+    META: new FakeKV(),
+    DOCS: new FakeR2(),
+    TDOC_HOSTED_REGISTRATION: '1',
+    ...extra,
+  };
+  env.COMMENTS = new FakeDurableNamespace(env, StoreClass);
+  return env;
+}
+
+function req(pathname, { method = 'GET', host = 'tdoc.dev', accept = '' } = {}) {
+  return new Request(`https://${host}${pathname}`, {
+    method,
+    headers: {
+      ...(accept ? { Accept: accept } : {}),
+    },
+  });
+}
+
+async function seedAccount(env, login, accountId = `acct-${login}`) {
+  const norm = String(login).toLowerCase();
+  await env.META.put(`hosted-account:${norm}`, JSON.stringify({
+    account_id: accountId,
+    github_login: norm,
+    created: '2026-01-01T00:00:00.000Z',
+  }));
+  return accountId;
+}
+
+async function seedDoc(env, slug, { owner, accountId, created = '2026-01-01T00:00:00.000Z', versions, title, access } = {}) {
+  const vs = versions || [{ n: 1, created }];
+  const meta = { title: title || slug, slug, created, versions: vs };
+  if (owner) {
+    meta.hosted = {
+      account_id: accountId || `acct-${owner}`,
+      github_login: owner,
+    };
+  }
+  if (access) meta.access = access;
+  await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+  for (const v of vs) await env.DOCS.put(`docs/${slug}/v${v.n}/index.html`, `<h1>${slug}</h1>`);
+}
+
+function bootData(html, name) {
+  const marker = `window.${name} = `;
+  const start = html.indexOf(marker);
+  assert(start >= 0, `${name} missing`);
+  const end = html.indexOf(';</script>', start);
+  assert(end >= 0, `${name} script is not terminated`);
+  return JSON.parse(html.slice(start + marker.length, end));
+}
+
+(async () => {
+  const mod = await loadWorker();
+  const worker = mod.default;
+  console.log('public @handle profiles');
+
+  await t('/@alice lists public + unlisted, hides private and other owners', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await seedAccount(env, 'alice');
+    await seedAccount(env, 'bob');
+    await seedDoc(env, 'alice-open', {
+      owner: 'alice',
+      access: { visibility: 'public' },
+      versions: [{ n: 1, created: '2026-02-01T00:00:00.000Z' }],
+    });
+    await seedDoc(env, 'alice-link', {
+      owner: 'alice',
+      access: { visibility: 'unlisted' },
+      versions: [{ n: 1, created: '2026-03-01T00:00:00.000Z' }],
+    });
+    await seedDoc(env, 'alice-secret', {
+      owner: 'alice',
+      access: { visibility: 'private' },
+    });
+    await seedDoc(env, 'bob-open', {
+      owner: 'bob',
+      access: { visibility: 'public' },
+    });
+
+    const r = await worker.fetch(req('/@alice'), env, {});
+    assert(r.status === 200, `/@alice ${r.status}`);
+    const boot = bootData(await r.text(), '__TDOC_APP_BOOT__');
+    assert(boot.page === 'profile' && boot.login === 'alice', 'profile boot');
+    assert(boot.docs.map((d) => d.slug).join(',') === 'alice-link,alice-open',
+      `expected unlisted then public by updated, got ${JSON.stringify(boot.docs)}`);
+    assert(boot.docs.every((d) => d.url && d.title), 'rows need url + title');
+  });
+
+  await t('/@Alice normalizes case; unknown handle 404s', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await seedAccount(env, 'alice');
+    await seedDoc(env, 'only', { owner: 'alice', access: { visibility: 'public' } });
+    const okRes = await worker.fetch(req('/@Alice'), env, {});
+    assert(okRes.status === 200, `case fold ${okRes.status}`);
+    const miss = await worker.fetch(req('/@nobody-here'), env, {});
+    assert(miss.status === 404, `unknown must 404, got ${miss.status}`);
+    const bad = await worker.fetch(req('/@not valid'), env, {});
+    assert(bad.status === 404, `invalid handle must 404, got ${bad.status}`);
+  });
+
+  await t('Accept: application/json returns the same catalog', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await seedAccount(env, 'alice');
+    await seedDoc(env, 'pub', { owner: 'alice', access: { visibility: 'public' } });
+    const r = await worker.fetch(req('/@alice', { accept: 'application/json' }), env, {});
+    assert(r.status === 200, `json ${r.status}`);
+    const body = await r.json();
+    assert(body.ok && body.login === 'alice' && body.docs.length === 1 && body.docs[0].slug === 'pub',
+      `json body ${JSON.stringify(body)}`);
+  });
+
+  await t('BYOK host refuses profiles', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_REGISTRATION: '0' });
+    await seedAccount(env, 'alice');
+    const r = await worker.fetch(req('/@alice', { host: 'alice.workers.dev' }), env, {});
+    assert(r.status === 404, `BYOK must 404, got ${r.status}`);
+  });
+
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });
