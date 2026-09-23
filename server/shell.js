@@ -64,10 +64,25 @@
   }
 
   // Cached on meta at publish so /@ and OG do not re-read full HTML.
+  // skipHeading (default true): drop the first <h1> so the card title is not
+  // repeated in the lead — the double-title bug on profile picks.
   function previewFromHtml(html, opts) {
     const o = opts && typeof opts === 'object' ? opts : {};
+    let source = typeof html === 'string' ? html : '';
+    if (o.skipHeading !== false) {
+      source = source.replace(/<h1\b[^>]*>[\s\S]*?<\/h1\b[^>]*>/i, ' ');
+    }
+    let excerpt = excerptFromHtml(source, o.maxLen || 220);
+    const title = typeof o.title === 'string' ? o.title.trim() : '';
+    if (title && excerpt) {
+      const lower = excerpt.toLowerCase();
+      const needle = title.toLowerCase();
+      if (lower.startsWith(needle)) {
+        excerpt = excerpt.slice(title.length).replace(/^[\s\u2014\u2013\-:·.|]+/, '').trim();
+      }
+    }
     return {
-      excerpt: excerptFromHtml(html, o.maxLen || 220),
+      excerpt,
       image: resolveDocAssetUrl(firstImageFromHtml(html), o) || '',
     };
   }

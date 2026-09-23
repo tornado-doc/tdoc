@@ -311,8 +311,8 @@ async function seedPins(env, accountId, pins, extra = {}) {
     }), env, {});
     assert(pin.status === 200, `pin ${pin.status} ${await pin.clone().text()}`);
     const metaAfter = JSON.parse(await env.META.get('meta:sam-open'));
-    assert(metaAfter.preview && /Opening paragraph/.test(metaAfter.preview.excerpt),
-      `preview cached on pin: ${JSON.stringify(metaAfter.preview)}`);
+    assert(metaAfter.preview && /^Opening paragraph/.test(metaAfter.preview.excerpt),
+      `preview lead without h1: ${JSON.stringify(metaAfter.preview)}`);
     assert(metaAfter.preview.image === 'https://example.com/sam-open.png', 'first graphic cached');
 
     const page = await worker.fetch(req('/@sam'), env, {});

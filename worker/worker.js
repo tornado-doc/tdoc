@@ -4055,25 +4055,25 @@ async function putAccountProfile(env, accountId, patch) {
   return next;
 }
 
-function docPreviewFromHtml(html, { slug, version } = {}) {
+function docPreviewFromHtml(html, { slug, version, title } = {}) {
   if (!SHELL || typeof SHELL.previewFromHtml !== 'function') {
     return { excerpt: '', image: '' };
   }
-  return SHELL.previewFromHtml(html, { slug, version, maxLen: 220 });
+  return SHELL.previewFromHtml(html, { slug, version, title, maxLen: 220, skipHeading: true });
 }
 
-async function ensureDocPreview(env, slug, meta) {
-  if (!meta || typeof meta !== 'object') return meta;
-  if (meta.preview && typeof meta.preview.excerpt === 'string' && meta.preview.excerpt) {
-    return meta;
-  }
-  if (!env || !env.DOCS) return meta;
+async function refreshDocPreview(env, slug, meta) {
+  if (!meta || typeof meta !== 'object' || !env || !env.DOCS) return meta;
   const versions = Array.isArray(meta.versions) ? meta.versions : [];
   const latest = versions[versions.length - 1]?.n || 1;
   try {
     const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
     if (!obj) return meta;
-    const preview = docPreviewFromHtml(await obj.text(), { slug, version: latest });
+    const preview = docPreviewFromHtml(await obj.text(), {
+      slug,
+      version: latest,
+      title: meta.title || slug,
+    });
     return { ...meta, preview };
   } catch {
     return meta;
@@ -4110,8 +4110,9 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
       restore_visibility: ACCESS_VISIBILITIES.has(prior) ? prior : 'unlisted',
     };
     nextMeta.access = { ...access, visibility: 'public' };
-    // One-time backfill for docs published before meta.preview existed.
-    nextMeta = await ensureDocPreview(env, slug, nextMeta);
+    // Refresh preview on every curate so old double-title caches get fixed
+    // and first-graphic stays in sync with the latest published HTML.
+    nextMeta = await refreshDocPreview(env, slug, nextMeta);
   } else {
     const restore = (nextMeta.profile && nextMeta.profile.restore_visibility) || access.visibility;
     const { profile: _drop, ...withoutProfile } = nextMeta;
@@ -5544,7 +5545,11 @@ export class CommentsStore {
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions,
-        preview: docPreviewFromHtml(stamped.html, { slug, version: reservation.next }),
+        preview: docPreviewFromHtml(stamped.html, {
+          slug,
+          version: reservation.next,
+          title: nextTitle || meta.title || slug,
+        }),
       }));
       committed = true;
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
@@ -8324,7 +8329,11 @@ export default {
             ...(currentMeta || {}),
             ...incoming,
             versions: mergedVersions,
-            preview: docPreviewFromHtml(stampedHtml, { slug, version: verNum }),
+            preview: docPreviewFromHtml(stampedHtml, {
+              slug,
+              version: verNum,
+              title: (incoming && incoming.title) || (currentMeta && currentMeta.title) || slug,
+            }),
           }));
         } catch (e) {
           try { await finishVersionReservation(false); } catch {}

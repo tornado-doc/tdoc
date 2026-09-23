@@ -65,10 +65,11 @@ const bundler = read('bin/tdoc-bundle');
       throw new Error(`excerptFromHtml failed: ${JSON.stringify(excerpt)}`);
     }
     const preview = shell.previewFromHtml(
-      '<p>Lead copy for the card.</p><img src="/ignore.svg"><img src="https://cdn.example/hero.png" alt="hero">',
-      { slug: 'demo', version: 2 },
+      '<h1>Demo Doc</h1><p>Lead copy for the card.</p><img src="/ignore.svg"><img src="https://cdn.example/hero.png" alt="hero">',
+      { slug: 'demo', version: 2, title: 'Demo Doc' },
     );
-    if (!/^Lead copy/.test(preview.excerpt) || preview.image !== 'https://cdn.example/hero.png') {
+    if (!/^Lead copy/.test(preview.excerpt) || /Demo Doc/.test(preview.excerpt)
+        || preview.image !== 'https://cdn.example/hero.png') {
       throw new Error(`previewFromHtml failed: ${JSON.stringify(preview)}`);
     }
     const relative = shell.previewFromHtml(
