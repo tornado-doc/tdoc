@@ -2918,11 +2918,22 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     if (!includePrivate && visibility !== 'public' && visibility !== 'unlisted') continue;
     const versions = Array.isArray(meta.versions) ? meta.versions : [];
     const latest = versions[versions.length - 1]?.n || 1;
+    const published = versions[0]?.created || meta.created || '';
+    const updated = versions[versions.length - 1]?.created || published;
+    let excerpt = '';
+    if (env.DOCS && SHELL && typeof SHELL.excerptFromHtml === 'function') {
+      try {
+        const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
+        if (obj) excerpt = SHELL.excerptFromHtml(await obj.text(), 220) || '';
+      } catch { /* leave empty */ }
+    }
     docs.push({
       slug,
       title: meta.title || slug,
       latest,
-      updated: versions[versions.length - 1]?.created || meta.created || '',
+      published,
+      updated,
+      excerpt,
       visibility,
       url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
     });
@@ -4123,7 +4134,8 @@ async function lookupProfileAccount(env, raw) {
   };
 }
 
-// Claim once: first write wins for this account. Changing later is a follow-up.
+// Claim or change a public handle. Changing releases the previous
+// hosted-handle index so the old @url frees up.
 async function claimAccountHandle(env, accountId, rawHandle, { github_login } = {}) {
   if (!accountId || !env || !env.META) return { error: 'sign_in_required', status: 401 };
   const handle = normalizeGithubLogin(rawHandle);
@@ -4131,8 +4143,7 @@ async function claimAccountHandle(env, accountId, rawHandle, { github_login } = 
   if (RESERVED_HANDLES.has(handle)) return { error: 'reserved_handle', status: 400 };
 
   const existing = await accountClaimedHandle(env, accountId);
-  if (existing && existing !== handle) return { error: 'handle_already_set', status: 409, handle: existing };
-  if (existing === handle) return { ok: true, handle };
+  if (existing === handle) return { ok: true, handle, changed: false };
 
   try {
     const taken = JSON.parse(await env.META.get(`hosted-handle:${handle}`));
@@ -4153,6 +4164,14 @@ async function claimAccountHandle(env, accountId, rawHandle, { github_login } = 
     created: now,
     ...(gh ? { github_login: gh } : {}),
   }));
+  if (existing && existing !== handle) {
+    try {
+      const old = JSON.parse(await env.META.get(`hosted-handle:${existing}`));
+      if (old && old.account_id === accountId) {
+        await env.META.delete(`hosted-handle:${existing}`);
+      }
+    } catch {}
+  }
   const prev = (await accountProfile(env, accountId)) || {};
   await putAccountProfile(env, accountId, {
     handle,
@@ -4168,7 +4187,7 @@ async function claimAccountHandle(env, accountId, rawHandle, { github_login } = 
       }
     } catch {}
   }
-  return { ok: true, handle };
+  return { ok: true, handle, changed: Boolean(existing) };
 }
 
 async function profileBootForSession(env, session) {
@@ -5964,9 +5983,9 @@ export default {
       });
     }
 
-    // Claim a public @handle once. Hosted only. Email/OIDC users need this
-    // for /@…; GitHub users can keep using their login via fallback or claim
-    // a vanity name here.
+    // Claim a public @handle (or change it). Hosted only. Email/OIDC users need
+    // this for /@…; GitHub users can keep using their login via fallback or claim
+    // a vanity name here. Changing frees the previous @handle.
     if (p === '/api/me/handle' && method === 'POST') {
       if (!hostedRegistrationEnabled(env, url.origin)) {
         return json({ error: 'hosted_only' }, { status: 404 });
@@ -6003,7 +6022,12 @@ export default {
           status: result.status || 400,
         });
       }
-      return json({ ok: true, handle: result.handle, url: `/@${result.handle}` });
+      return json({
+        ok: true,
+        handle: result.handle,
+        url: `/@${result.handle}`,
+        changed: Boolean(result.changed),
+      });
     }
 
     if (p === '/api/me/profile/pin' && method === 'POST') {

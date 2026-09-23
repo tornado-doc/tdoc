@@ -202,10 +202,11 @@ function FlatList({ docs, label, viewer, empty, onToggleStar }) {
   );
 }
 
-// Claim once via the same AppDialog / HubDialog surface as rename + folder
-// share — not a one-off pane. Letters/numbers/hyphens; server enforces once.
-function ClaimHandleDialog({ suggested, onClose }) {
-  const [name, setName] = useState(suggested || '');
+// Claim or change via the same AppDialog / HubDialog surface as rename +
+// folder share. Letters/numbers/hyphens; changing frees the previous @handle.
+function ClaimHandleDialog({ suggested, current, onClose }) {
+  const changing = Boolean(current);
+  const [name, setName] = useState(suggested || current || '');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -226,7 +227,6 @@ function ClaimHandleDialog({ suggested, onClose }) {
           body.error === 'handle_taken' ? 'That handle is taken.'
             : body.error === 'reserved_handle' ? 'That name is reserved.'
             : body.error === 'invalid_handle' ? 'Use letters, numbers, and hyphens.'
-            : body.error === 'handle_already_set' ? `Already claimed @${body.handle}.`
             : body.error === 'sign_in_required' ? 'Sign in again, then retry.'
             : body.error === 'forbidden' ? 'This account cannot claim a handle here.'
             : body.error ? `Could not claim (${body.error}).`
@@ -235,7 +235,8 @@ function ClaimHandleDialog({ suggested, onClose }) {
         setBusy(false);
         return;
       }
-      location.reload();
+      if (body.url) location.assign(body.url);
+      else location.reload();
     } catch {
       setStatus('Could not claim handle.');
       setBusy(false);
@@ -244,13 +245,15 @@ function ClaimHandleDialog({ suggested, onClose }) {
 
   return (
     <HubDialog
-      title="Claim your public URL"
-      confirmLabel={busy ? 'Claiming…' : 'Claim'}
+      title={changing ? 'Change your public URL' : 'Claim your public URL'}
+      confirmLabel={busy ? (changing ? 'Saving…' : 'Claiming…') : (changing ? 'Save' : 'Claim')}
       onConfirm={save}
       onClose={onClose}
     >
       <p className="manage-hint">
-        Public docs show at tdoc.dev/@handle. Pick once — letters, numbers, hyphens.
+        {changing
+          ? 'Public docs show at tdoc.dev/@handle. Changing frees the old name.'
+          : 'Public docs show at tdoc.dev/@handle. Letters, numbers, hyphens.'}
       </p>
       <label className="field" htmlFor="tdoc-handle-claim">Handle</label>
       <input
@@ -262,7 +265,7 @@ function ClaimHandleDialog({ suggested, onClose }) {
         value={name}
         onChange={(event) => setName(event.target.value)}
         onKeyDown={(event) => { if (event.key === 'Enter') save(); }}
-        placeholder={suggested || 'you'}
+        placeholder={suggested || current || 'you'}
       />
       {status ? <p className="manage-hint">{status}</p> : null}
     </HubDialog>
@@ -472,8 +475,10 @@ export function DocsHub({ boot }) {
                   doc={doc}
                   meta={[
                     ownerLabel(doc, viewer),
-                    `${doc.slug} · v${doc.latest}`,
-                    day(doc.updated) ? `updated ${day(doc.updated)}` : null,
+                    day(doc.created) ? `published ${day(doc.created)}` : null,
+                    day(doc.updated) && day(doc.updated) !== day(doc.created)
+                      ? `updated ${day(doc.updated)}`
+                      : null,
                     doc.folder ? `in ${hub.folderById.get(doc.folder)?.name || ''}` : null,
                   ].filter(Boolean).join(' · ')}
                   selection={{ checked: hub.selected.has(doc.slug), onChange: () => hub.toggleSelected(doc.slug) }}

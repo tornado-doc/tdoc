@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What Jev is made of — and why the clones aren't (yet)</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+  body { background:#fff; }
+  .wrap { font-family:"Inter",system-ui,-apple-system,sans-serif; color:#0a0a0a; font-size:17px; line-height:1.65; }
+  .wrap h1 { font-family:"Inter",system-ui,sans-serif; font-weight:600; font-size:clamp(28px,3.6vw,36px); letter-spacing:-.03em; line-height:1.05; color:#0a0a0a; }
+  .wrap h2 { font-family:"Inter",system-ui,sans-serif; font-weight:600; letter-spacing:-.015em; color:#0a0a0a; margin-top:40px; }
+  .wrap h3 { font-weight:600; margin-top:26px; color:#0a0a0a; }
+  .wrap a { color:rgba(10,10,10,.6); text-decoration:none; border-bottom:1px solid rgba(10,10,10,.2); }
+  .meta { color:#555; font-size:15px; }
+  .note { border-top:1px solid #e5e5e5; padding-top:12px; margin:20px 0; color:#555; font-size:15px; }
+  .diagram-box { overflow-x:auto; margin:26px 0; }
+  .diagram-box svg { display:block; width:100%; height:auto; }
+  .cap { color:#555; font-size:14px; margin:8px 0 0; }
+  .tiles { display:flex; flex-wrap:wrap; gap:12px; margin:24px 0; }
+  .tile { flex:1 1 140px; border:1px solid #111; padding:14px 14px 12px; }
+  .tile b { display:block; font-size:26px; font-weight:600; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .tile span { display:block; color:#555; font-size:13px; margin-top:4px; line-height:1.35; }
+  .tdoc-table-scroll { overflow-x:auto; margin:24px 0; }
+  .wrap table { border-collapse:collapse; width:100%; border:1px solid #e5e5e5; }
+  .wrap th, .wrap td { background:transparent; border-radius:0; text-align:left; padding:9px 12px; border-bottom:1px solid #e5e5e5; font-size:15px; vertical-align:top; }
+  .wrap th { font-family:ui-monospace,"SF Mono",Menlo,monospace; text-transform:uppercase; font-size:10.5px; letter-spacing:.04em; color:#555; font-weight:400; border-bottom:1px solid #0a0a0a; }
+  .num { font-variant-numeric:tabular-nums; }
+  .wrap ul, .wrap ol { padding-left:1.3em; }
+  .wrap li { margin:8px 0; }
+  .callout { border-left:3px solid #111; padding:10px 14px; margin:18px 0; background:#fafafa; }
+</style>
+</head><body>
+<div class="wrap">
+
+<h1>What Jev is made of — and why the clones aren't (yet)</h1>
+<p class="meta">research-claw · 2026-09-21 · Sources: TypeSafe docs, Archer Hume's black-box probe, the clone authors' own READMEs, and one day of measurements on a Mac mini (Apple M4, 16 GB). Every number below carries its source; "we measured" means it ran on that machine on 2026-09-20. Folded into the existing Jev brief as the next version.</p>
+
+<h2>The one-paragraph version</h2>
+<p>Jev is a normal pretrained language model that was trained to <em>stop talking</em>. Instead of writing words one at a time, it reads your input once and answers every question you attached in a single pass, returning a probability for each option you gave it. That is the whole trick: no text generation, calibrated probabilities, many questions per request, up to 64k tokens of input. Six open-source "clones" appeared within 48 hours of launch. On short texts (one sentence, three options) the best of them give the same answers as Jev, on a laptop, for free. On the tasks people are actually excited about — driving a browser or a phone — every clone we tested failed, and not because our Mac is small.</p>
+
+<div class="tiles" data-tdoc-artifact>
+  <div class="tile"><b class="num">64k</b><span>max input tokens (Jev)</span></div>
+  <div class="tile"><b class="num">255</b><span>options per Choice question</span></div>
+  <div class="tile"><b class="num">0.25–0.45s</b><span>typical hosted latency we saw</span></div>
+  <div class="tile"><b class="num">$0.042</b><span>per million input tokens (jev-1.13.0)</span></div>
+</div>
+
+<div class="diagram-box" data-tdoc-artifact>
+<svg viewBox="0 0 720 210" role="img" aria-label="Chat models emit text you parse; Jev fills your form with probabilities in one pass.">
+  <style>
+    .fr{fill:none;stroke:#111;stroke-width:1.3}
+    .lb{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.04em;fill:#555}
+    .tx{font-family:Inter,system-ui,sans-serif;font-size:12px;fill:#0a0a0a}
+    .tn{font-family:Inter,system-ui,sans-serif;font-size:11px;fill:#555}
+    .jv{fill:#dde7f9;stroke:#a9c0ee;stroke-width:1}
+    .jt{font-family:Inter,system-ui,sans-serif;font-size:11.5px;fill:#26407a}
+    .ar{stroke:#111;stroke-width:1.2;fill:none}
+  </style>
+  <defs><marker id="a1" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#111"/></marker></defs>
+  <text x="0" y="14" class="lb">ORDINARY CHAT MODEL</text>
+  <rect class="fr" x="0" y="24" width="130" height="40"/><text x="12" y="48" class="tx">prompt in</text>
+  <line class="ar" x1="130" y1="44" x2="168" y2="44" marker-end="url(#a1)"/>
+  <rect class="fr" x="174" y="24" width="530" height="40"/>
+  <text x="186" y="42" class="tn">words out, one token at a time — you parse the paragraph</text>
+  <text x="186" y="56" class="tn">unrestricted in · unrestricted out</text>
+  <line x1="0" y1="86" x2="720" y2="86" stroke="#e5e5e5"/>
+  <text x="0" y="110" class="lb">JEV</text>
+  <rect class="fr" x="0" y="120" width="130" height="70"/>
+  <text x="12" y="142" class="tx">state + form</text>
+  <text x="12" y="160" class="tn">any text / JSON</text>
+  <text x="12" y="176" class="tn">typed questions</text>
+  <line class="ar" x1="130" y1="155" x2="168" y2="155" marker-end="url(#a1)"/>
+  <rect class="jv" x="174" y="120" width="530" height="70"/>
+  <text x="186" y="142" class="jt">one pass · answers in parallel · no output text</text>
+  <text x="186" y="160" class="jt">team=returns 0.87 · escalate=0.72 · frustration=Frustrated 0.96</text>
+  <text x="186" y="176" class="jt">unrestricted-ish in · restricted out (your options only)</text>
+</svg>
+<p class="cap">Same idea as the earlier brief: Jev fills <em>your</em> form. The confidence next to each answer is the claim — if it says 0.85, that bucket of answers should be right about 85% of the time (calibration over groups, not a guarantee on one row).</p>
+</div>
+
+<h2>1. How Jev is built (known / inferred / secret)</h2>
+
+<h3>1.1 It starts as a language model</h3>
+<p>TypeSafe's own training diagram says it plainly: <em>"Pretrained language models branch into RLHF / RLVR / RLCD."</em> (docs.typesafe.ai/introduction/machine-learning-primer). RLHF turned base models into chatbots; RLVR turned them into reasoners; RLCD — <em>Reinforcement Learning for Calibrated Decisions</em> — is TypeSafe's third branch. Jev is not a new species; it is a familiar backbone with a different post-training objective. TypeSafe's cofounder Diogo Almeida co-invented RLHF, so the family resemblance is not an accident.</p>
+
+<h3>1.2 What the objective changes</h3>
+<p>A chatbot is rewarded for answers people like. Jev is rewarded for <strong>probabilities that are honest</strong>: across many answers tagged "0.8", about 80% should turn out right. The docs are careful to say calibration is a property of <em>groups</em> of answers, not a guarantee about any single one. That number is the confidence score — not "the answer is right."</p>
+
+<h3>1.3 The shape of a request (where the speed comes from)</h3>
+<p>One request = one <code>state</code> (any text or JSON, up to 64k tokens; 32k for state plus the longest single question) + any number of typed questions:</p>
+<ul>
+<li><strong>Choice</strong> — pick one of up to 255 options; you get the choice, a probability per option, and a confidence.</li>
+<li><strong>Score</strong> — rate against ordered levels; you get an expected value and the distribution.</li>
+<li><strong>Noul</strong> — yes/no; you get P(yes).</li>
+</ul>
+<p>The model reads the state once and answers all questions <strong>in parallel, in isolation</strong> (question A cannot see question B). Output tokens are free because there is no output text; you pay $0.042 per million input tokens (jev-1.13.0, docs.typesafe.ai/models). Typical latency in our hands: 0.25–0.45 s per request over the network.</p>
+
+<div class="callout">
+<strong>Framing that still holds:</strong> chat LLMs are unrestricted-in / unrestricted-out. Classical ML is restricted-in / restricted-out. Jev sits in between: fairly free-form state in (prompt + structure you choose), but <em>restricted out</em> — only the options you listed, with a calibrated probability on each.
+</div>
+
+<h3>1.4 What an outside probe found (Archer Hume, "Jev's Architecture Unmasked")</h3>
+<ul>
+<li><strong>Questions really are isolated.</strong> A secret planted inside a sibling question gets 0.00 probability; the same secret in the shared state gets 0.90–0.92.</li>
+<li><strong>State is encoded once.</strong> 1,500 questions with a short state come back in ~610 ms; token accounting is strictly additive (one question 268 tokens, two 276).</li>
+<li><strong>Probabilities are read out directly.</strong> Latency is the same for 2 options or 255; the <code>output_tokens</code> counter doesn't move with the answer values.</li>
+<li><strong>Options interact before the decision</strong> (adding an irrelevant option shifts the odds between existing ones), so this is list-wise scoring, not independent per-option logits.</li>
+<li><strong>Backbone is almost certainly a causal transformer</strong>, because Jev scores 84.6% on MMLU-Pro, which needs frontier-scale pretraining, and RLCD is described as post-training.</li>
+<li><strong>Calibration checks out on one public set:</strong> ECE 0.031 over 1,200 MMLU items.</li>
+</ul>
+<p>Still unknown: the base model (its tokenizer matched none of 192 public tokenizers), dense vs. MoE, the exact loss, and whether RLCD updates the whole network or just the head. TypeSafe's launch FAQ leaves "training algorithm", "training data" and "public benchmarks" blank on purpose — surprise: not even a simple RAG retrieval comparison against chat LLMs or classical ML classifiers on a shared public set.</p>
+
+<h3>1.5 The honest limits (TypeSafe's "jaggedness" page)</h3>
+<p>It reads instructions literally, cannot count or do date arithmetic, degrades when the state is full of irrelevant text, can be steered by adversarial content in the state, and is English-first (CJK "handled but not equally well"). It is not fine-tuned per customer; you shape it through the state and the question wording. The model never learns from you — compaction / pruning that throws context away can discard value you only discover later; Jev can score old steps for whether they still matter before you pay the expensive model again, which is one of the more interesting early use cases.</p>
+
+<h2>2. The clones, and what they actually reproduce</h2>
+<p>All of them copy the <em>interface</em> (typed questions in, probabilities out) using the same recipe Hume reverse-engineered: take an open LLM, pack the state and the options into one sequence, put a small head on the last position, and train it with plain cross-entropy on labelled answers.</p>
+
+<div class="tdoc-table-scroll" data-tdoc-artifact>
+<table>
+<thead><tr><th>Clone</th><th>Base</th><th>Method</th><th>Where it runs</th><th>Authors' own quality claim</th></tr></thead>
+<tbody>
+<tr><td><strong>kev</strong> (jaredpalmer)</td><td>Qwen2.5-0.5B / Qwen3-0.6B / 4B / 8B</td><td>LoRA + pointer readout head, block-causal packing, TypeSafe-compatible API</td><td>Mac (4B needs 32 GB in bf16)</td><td>Out-of-domain: kev-4b 0.76, kev-8b 0.77, Jev 0.86 on the same frozen items</td></tr>
+<tr><td><strong>Bespoke Nimble</strong> (Bespoke Labs)</td><td>Qwen3.5-9B</td><td>LoRA on answer tokens only, 2,676 curated examples; reads one answer-token logit per question</td><td>Mac / NVIDIA, <strong>unquantized only</strong></td><td>90.1% vs Jev 93.2% on its own 324 held-out items; "don't expect a lot of generalization"</td></tr>
+<tr><td><strong>laya / laya-mlx</strong></td><td>ModernBERT-large (421M) + 2 transformer layers</td><td>encoder + PPO; native MLX runtime</td><td>any Apple Silicon</td><td>7–14 ms per decision on M3 Max</td></tr>
+<tr><td>SemIf / OpenJev, DiffusionGemma, Jevlike</td><td>Qwen3.5 NLI head, Gemma diffusion, byte-embedding attention</td><td>various</td><td>–</td><td>not measured by us</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Two things they all inherit from their recipe, by construction: <strong>short context</strong> (kev is trained on ~1–2k-token records; Nimble hard-caps input at 2,048 tokens and enums at 26 choices; laya's ModernBERT sees 512 tokens) and <strong>no calibration training</strong> (Nimble states outright that 0.9 does not mean 90% correct).</p>
+
+<p>What is truly new with Jev as a product category: fixed-output questions are now one-shottable. Before, you trained your own classifier. Now there is an OK one-fit-all baseline for restricted-out questions — and the open clones copy the API shape of that baseline more than the long-context / calibrated behaviour.</p>
+
+<h2>3. What we measured (Mac mini, M4, 16 GB, 2026-09-20)</h2>
+
+<h3>3.1 Easy case: one support ticket, three questions</h3>
+<p>State: <em>"Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card."</em> Questions: which team (returns / shipping / billing), escalate? (yes/no), frustration (Calm / Frustrated / Very angry).</p>
+
+<div class="tdoc-table-scroll" data-tdoc-artifact>
+<table>
+<thead><tr><th>Model</th><th>Runs on 16 GB?</th><th>Latency</th><th>Peak memory</th><th>Team</th><th>Escalate</th><th>Frustration</th></tr></thead>
+<tbody>
+<tr><td>Jev 1.13 (hosted)</td><td>–</td><td class="num">0.30 s</td><td>–</td><td>returns 0.87</td><td class="num">0.72</td><td>Frustrated 0.96</td></tr>
+<tr><td>kev-0.5b</td><td>yes</td><td class="num">0.23 s</td><td class="num">4.6 GB</td><td>returns</td><td class="num">0.74</td><td>Frustrated</td></tr>
+<tr><td>kev-4b (bf16)</td><td>yes</td><td class="num">~0.7 s</td><td class="num">8.8 GB</td><td>returns</td><td class="num">0.74</td><td>Frustrated</td></tr>
+<tr><td>Nimble 9B (4-bit, patched)</td><td>yes, after fixes</td><td class="num">1.87 s</td><td class="num">5.5 GB</td><td>returns 0.92</td><td class="num">0.96</td><td>Very angry 0.79</td></tr>
+<tr><td>laya-mlx</td><td>yes</td><td class="num">0.064 s</td><td class="num">0.9 GB</td><td><strong>shipping 0.40</strong> (returns 0.29, billing 0.32)</td><td class="num">0.12</td><td>Frustrated 0.87</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>On this kind of input, kev and Nimble are genuinely Jev-like. laya is the fastest thing we ran and the only one that got the easy question wrong — its three probabilities are almost flat, which is a model saying "I don't know" while still picking an answer.</p>
+<p>Nimble did not run out of the box: its 9B bf16 weights are 18 GB and its runner refuses quantized weights. Quantizing to 4-bit on the CPU (the GPU path hit the Metal watchdog) and a 52-line patch to dequantize only the candidate rows of the output head made it fit in 5.5 GB.</p>
+
+<h3>3.2 Hard case: driving a real browser (browser-use/jev-ultrafast)</h3>
+<p>Same three Wikipedia tasks, three runs each, decision model swapped behind the same API. One request here is ~4,400 tokens of page text and element table with a 54-option "which element" question.</p>
+
+<div class="tdoc-table-scroll" data-tdoc-artifact>
+<table>
+<thead><tr><th>Decision model</th><th>Success</th><th>Per-decision latency</th><th>What went wrong</th></tr></thead>
+<tbody>
+<tr><td>Jev (hosted)</td><td class="num">5/9</td><td class="num">0.25–0.42 s</td><td>failures were Jev choosing BLOCKED on the main page</td></tr>
+<tr><td>kev-4b</td><td class="num">0/9</td><td class="num">&gt;300 s</td><td>memory climbed to 15 GB and thrashed; no answer in 5 minutes</td></tr>
+<tr><td>kev-0.5b</td><td class="num">0/4</td><td class="num">5–18 s</td><td>answers BLOCKED on step 1</td></tr>
+<tr><td>laya-mlx</td><td class="num">0/9</td><td class="num">0.4–1.2 s</td><td>answers DONE on step 1 — it can only see the first 512 tokens</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Jev also completed the harder Google Flights search 3/3 (16–19 s end to end, of which the decision model is ~0.3 s per step).</p>
+
+<div class="tiles" data-tdoc-artifact>
+  <div class="tile"><b class="num">5/9</b><span>Jev on Wikipedia browser tasks</span></div>
+  <div class="tile"><b class="num">0/9</b><span>kev-4b / laya on the same tasks</span></div>
+  <div class="tile"><b class="num">~4,400</b><span>tokens per browser decision state</span></div>
+  <div class="tile"><b class="num">3/3</b><span>Jev on Google Flights search</span></div>
+</div>
+
+<h3>3.3 Middle case: driving an iPhone simulator</h3>
+<p>iOS 27 simulator, accessibility tree read by sim-use, ~20 candidate actions per screen, ~1,200 input tokens. Task: <em>Settings → General → About</em>, starting from the home screen.</p>
+
+<div class="tdoc-table-scroll" data-tdoc-artifact>
+<table>
+<thead><tr><th>Decision model</th><th>Reached the goal</th><th>Steps</th><th>Per-decision latency</th><th>Said "done" when finished?</th></tr></thead>
+<tbody>
+<tr><td>Jev</td><td>yes</td><td class="num">3–4</td><td class="num">0.26–0.69 s</td><td>yes (confidence 0.77–0.81)</td></tr>
+<tr><td>kev-0.5b</td><td>yes</td><td class="num">3</td><td class="num">0.8–3.6 s</td><td><strong>no</strong> — keeps tapping the page title</td></tr>
+<tr><td>Nimble 9B 4-bit</td><td>yes</td><td class="num">3</td><td class="num">7.3 s</td><td><strong>no</strong> — same</td></tr>
+<tr><td>laya-mlx</td><td>no</td><td>–</td><td>–</td><td>says "done" to everything</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>With Jev, the same stack then went further: on Uber's mobile site it set the dropoff to SFO, typed a pickup address, and stopped correctly at the login wall rather than inventing a phone number. Per-step time is dominated by the simulator controller (1–2 s to read the screen, ~1 s to tap), not the model.</p>
+<p>Phone state sizes we measured, for scale: iOS home screen 18 elements / 1,225 tokens; Safari on amazon.com 38 elements / 2,197 tokens; Safari on Wikipedia 37 / 2,081; desktop browser-use Wikipedia 54 / 4,437. Web pages on a phone already exceed Nimble's 2,048-token cap.</p>
+
+<h2>4. So what is the "problem" with the clones?</h2>
+<ol>
+<li><strong>They were built for a different job than the one people are excited about.</strong> Every clone's benchmark is short-text classification (Banking77, AG News, emotion, one-sentence policy rules). Browser and phone agents need <em>long state + many options in one pass</em>, which is exactly the capability TypeSafe kept: 64k tokens, 255 options, questions answered in parallel. No clone has published a number on that shape of task; the first time we tried it, all of them failed on quality, not just speed.</li>
+<li><strong>They are not calibrated, and it shows in the one place it matters most: knowing when to stop.</strong> On the phone task kev and Nimble navigate perfectly and then never say "done", because they have no trained sense of "the goal is already satisfied". Jev stops at 0.77–0.81 confidence. Nimble's README says the quiet part: a 0.9 does not mean 90%.</li>
+<li><strong>Hardware explains the speed gap, not the mistakes.</strong> Our M4/16 GB is 3–10× slower than the authors' M5/32 GB or H100 machines, and it is why kev-4b thrashed on a 4k-token request. It is not why laya got the ticket wrong, why kev-0.5b answered BLOCKED before looking, or why nothing local says "done".</li>
+<li><strong>What the $40M and the secret data bought.</strong> General zero-shot behaviour across domains, honest probabilities, and long context — three things that come from training data and objective, not from the architecture trick, which the community reproduced in two days.</li>
+</ol>
+
+<h2>5. Practical guidance</h2>
+<ul>
+<li><strong>Fixed labels, short text, you have your own labelled data:</strong> kev-0.5b/4b or Nimble locally is a real option — same answers as Jev, no API bill. Add post-hoc calibration (temperature scaling on a held-out split) before trusting the probabilities.</li>
+<li><strong>Anything agentic (browser, phone, long documents, 20+ options):</strong> use Jev. Today nothing open gets close.</li>
+<li><strong>If you build on Jev:</strong> the model is rarely the bottleneck. Our browser loop spent 90% of its time in the DOM reader and the text helper; the phone loop spent 90% in the simulator controller. Optimise those first.</li>
+<li><strong>The one test nobody has run yet:</strong> calibration on <em>your</em> data. Bucket Jev's confidences on a few thousand of your own decisions and check whether the 0.8 bucket is right 80% of the time. That is the claim everything else rests on.</li>
+</ul>
+
+<p class="note">Repro material: ~/jev-lab on the Mac mini — SMOKE.md per repo, runs/bench.jsonl for the browser benchmark, evidence screenshots and videos for the simulator runs, nimble-quantized-head.patch. Earlier versions of this brief (ELI5 + launch evidence) remain in version history.</p>
+
+</div>
+</body>
+</html>

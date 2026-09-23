@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; }
+  .banner {
+    width: 1500px;
+    height: 500px;
+    box-sizing: border-box;
+    padding: 72px 96px 72px 120px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 18px;
+    background:
+      radial-gradient(900px 420px at 78% 40%, rgba(22, 82, 240, 0.08), transparent 60%),
+      linear-gradient(135deg, #f7f6f2 0%, #eef1f6 55%, #e8edf5 100%);
+    color: #141414;
+    font-family: "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .mark {
+    font-size: 92px;
+    font-weight: 700;
+    letter-spacing: -0.055em;
+    line-height: 0.95;
+  }
+  .line {
+    font-size: 34px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: #1a1a1a;
+    max-width: 980px;
+  }
+  .line em {
+    font-style: normal;
+    color: #1652f0;
+    font-weight: 650;
+  }
+  .hint {
+    margin-top: 10px;
+    font-size: 20px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6b7280;
+    font-weight: 560;
+  }
+</style>
+</head>
+<body>
+  <div class="banner" id="a">
+    <div class="mark">tdoc</div>
+    <div class="line">my takes live at <em>tdoc.dev/@julie</em></div>
+    <div class="hint">try tdoc.dev</div>
+  </div>
+  <div class="banner" id="b" style="margin-top:40px">
+    <div class="mark">tdoc</div>
+    <div class="line">try <em>tdoc.dev</em></div>
+    <div class="hint">writing, in public</div>
+  </div>
+  <div class="banner" id="c" style="margin-top:40px">
+    <div class="mark">tdoc</div>
+    <div class="line">opinions → <em>tdoc.dev/@julie</em></div>
+    <div class="hint">not the timeline</div>
+  </div>
+</body>
+</html>

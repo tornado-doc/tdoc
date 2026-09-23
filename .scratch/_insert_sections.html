@@ -1,0 +1,125 @@
+
+<h2>4. What's known, inferred, and undisclosed</h2>
+<p class="meta">Sources for this section: TypeSafe docs, Archer Hume's black-box probe ("Jev's Architecture Unmasked"), and TypeSafe's own jaggedness / FAQ pages. "Known" means TypeSafe or a public probe stated it; "inferred" is the strongest reading of those probes; "undisclosed" is still blank on purpose.</p>
+
+<div class="tiles" data-tdoc-artifact>
+  <div class="tile"><b>84.6%</b><span>MMLU-Pro (probe / public set)</span></div>
+  <div class="tile"><b>0.031</b><span>ECE over 1,200 MMLU items</span></div>
+  <div class="tile"><b>~610<span style="font-size:14px">ms</span></b><span>1,500 questions, short state</span></div>
+  <div class="tile"><b>0.00</b><span>secret in sibling question (isolation)</span></div>
+</div>
+
+<h3>Known</h3>
+<ul>
+<li>Starts as a pretrained LM; post-training is RLCD (Reinforcement Learning for Calibrated Decisions) — TypeSafe's third branch after RLHF / RLVR (docs.typesafe.ai/introduction/machine-learning-primer).</li>
+<li>One request = one <code>state</code> (up to 64k tokens; 32k for state plus the longest single question) + typed questions answered in parallel, in isolation.</li>
+<li>Question types: Choice (≤255 options), Score, Noul. Output tokens are free; jev-1.13.0 is $0.042 per million input tokens (docs.typesafe.ai/models).</li>
+<li>Typical hosted latency in our hands: 0.25–0.45 s per request over the network.</li>
+<li>Probe: a secret planted in a sibling question gets 0.00 probability; the same secret in shared state gets 0.90–0.92.</li>
+<li>Probe: state is encoded once — token accounting is strictly additive (one question 268 tokens, two 276).</li>
+<li>Probe: latency is the same for 2 options or 255; <code>output_tokens</code> does not move with answer values — probabilities are read out directly.</li>
+<li>Probe: adding an irrelevant option shifts odds between existing ones (list-wise scoring, not independent per-option logits).</li>
+<li>Calibration on one public set: ECE 0.031 over 1,200 MMLU items.</li>
+<li>Jaggedness (TypeSafe): reads instructions literally; cannot count or do date arithmetic; degrades with irrelevant state text; can be steered by adversarial content in state; English-first; not fine-tuned per customer.</li>
+</ul>
+
+<h3>Inferred</h3>
+<ul>
+<li>Backbone is almost certainly a causal transformer: 84.6% on MMLU-Pro needs frontier-scale pretraining, and RLCD is described as post-training.</li>
+<li>Diogo Almeida co-invented RLHF — the family resemblance (LM + new post-training objective) is not an accident.</li>
+</ul>
+
+<h3>Undisclosed</h3>
+<ul>
+<li>Base model (tokenizer matched none of 192 public tokenizers), dense vs. MoE, exact loss, whether RLCD updates the whole network or just the head.</li>
+<li>Launch FAQ leaves "training algorithm", "training data", and "public benchmarks" blank — not even a simple RAG retrieval comparison against chat LLMs or classical ML on a shared public set.</li>
+</ul>
+
+<h2>5. The open-source clones</h2>
+<p>Six open-source "clones" appeared within 48 hours of launch. All of them copy the <em>interface</em> (typed questions in, probabilities out) using the recipe Hume reverse-engineered: take an open LLM, pack state and options into one sequence, put a small head on the last position, train with plain cross-entropy on labelled answers.</p>
+
+<div class="tdoc-table-scroll" data-tdoc-artifact>
+<table>
+  <tr><th>Clone</th><th>Base</th><th>Method</th><th>Where it runs</th><th>Authors' own quality claim</th></tr>
+  <tr><td><strong>kev</strong> (jaredpalmer)</td><td>Qwen2.5-0.5B / Qwen3-0.6B / 4B / 8B</td><td>LoRA + pointer readout head, block-causal packing, TypeSafe-compatible API</td><td>Mac (4B needs 32 GB in bf16)</td><td>Out-of-domain: kev-4b 0.76, kev-8b 0.77, Jev 0.86 on the same frozen items</td></tr>
+  <tr><td><strong>Bespoke Nimble</strong> (Bespoke Labs)</td><td>Qwen3.5-9B</td><td>LoRA on answer tokens only, 2,676 curated examples; reads one answer-token logit per question</td><td>Mac / NVIDIA, <strong>unquantized only</strong></td><td>90.1% vs Jev 93.2% on its own 324 held-out items; "don't expect a lot of generalization"</td></tr>
+  <tr><td><strong>laya / laya-mlx</strong></td><td>ModernBERT-large (421M) + 2 transformer layers</td><td>encoder + PPO; native MLX runtime</td><td>any Apple Silicon</td><td>7–14 ms per decision on M3 Max</td></tr>
+  <tr><td>SemIf / OpenJev, DiffusionGemma, Jevlike</td><td>Qwen3.5 NLI head, Gemma diffusion, byte-embedding attention</td><td>various</td><td>–</td><td>not measured by us</td></tr>
+</table>
+</div>
+
+<p>By construction they inherit <strong>short context</strong> (kev trained on ~1–2k-token records; Nimble hard-caps input at 2,048 tokens and enums at 26 choices; laya's ModernBERT sees 512 tokens) and <strong>no calibration training</strong> (Nimble states outright that 0.9 does not mean 90% correct).</p>
+
+<h2>6. What we measured (Mac mini, M4, 16 GB, 2026-09-20)</h2>
+<p>"We measured" means it ran on that machine on 2026-09-20. Repro: ~/jev-lab — SMOKE.md per repo, runs/bench.jsonl, simulator evidence, nimble-quantized-head.patch.</p>
+
+<h3>6.1 Easy case: one support ticket, three questions</h3>
+<p>State: <em>"Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card."</em> Questions: which team (returns / shipping / billing), escalate? (yes/no), frustration (Calm / Frustrated / Very angry).</p>
+
+<div class="tdoc-table-scroll" data-tdoc-artifact>
+<table>
+  <tr><th>Model</th><th>Runs on 16 GB?</th><th>Latency</th><th>Peak memory</th><th>Team</th><th>Escalate</th><th>Frustration</th></tr>
+  <tr><td>Jev 1.13 (hosted)</td><td>–</td><td class="num">0.30 s</td><td>–</td><td>returns 0.87</td><td class="num">0.72</td><td>Frustrated 0.96</td></tr>
+  <tr><td>kev-0.5b</td><td>yes</td><td class="num">0.23 s</td><td class="num">4.6 GB</td><td>returns</td><td class="num">0.74</td><td>Frustrated</td></tr>
+  <tr><td>kev-4b (bf16)</td><td>yes</td><td class="num">~0.7 s</td><td class="num">8.8 GB</td><td>returns</td><td class="num">0.74</td><td>Frustrated</td></tr>
+  <tr><td>Nimble 9B (4-bit, patched)</td><td>yes, after fixes</td><td class="num">1.87 s</td><td class="num">5.5 GB</td><td>returns 0.92</td><td class="num">0.96</td><td>Very angry 0.79</td></tr>
+  <tr><td>laya-mlx</td><td>yes</td><td class="num">0.064 s</td><td class="num">0.9 GB</td><td><strong>shipping 0.40</strong> (returns 0.29, billing 0.32)</td><td class="num">0.12</td><td>Frustrated 0.87</td></tr>
+</table>
+</div>
+
+<p>On this kind of input, kev and Nimble are genuinely Jev-like. laya is the fastest thing we ran and the only one that got the easy question wrong — its three probabilities are almost flat. Nimble needed a 4-bit CPU quantize plus a 52-line patch (9B bf16 is 18 GB; runner refuses quantized weights out of the box).</p>
+
+<h3>6.2 Hard case: driving a real browser (browser-use/jev-ultrafast)</h3>
+<p>Same three Wikipedia tasks, three runs each. One request ≈ 4,400 tokens of page text and element table with a 54-option "which element" question.</p>
+
+<div class="tdoc-table-scroll" data-tdoc-artifact>
+<table>
+  <tr><th>Decision model</th><th>Success</th><th>Per-decision latency</th><th>What went wrong</th></tr>
+  <tr><td>Jev (hosted)</td><td class="num">5/9</td><td class="num">0.25–0.42 s</td><td>failures were Jev choosing BLOCKED on the main page</td></tr>
+  <tr><td>kev-4b</td><td class="num">0/9</td><td class="num">&gt;300 s</td><td>memory climbed to 15 GB and thrashed; no answer in 5 minutes</td></tr>
+  <tr><td>kev-0.5b</td><td class="num">0/4</td><td class="num">5–18 s</td><td>answers BLOCKED on step 1</td></tr>
+  <tr><td>laya-mlx</td><td class="num">0/9</td><td class="num">0.4–1.2 s</td><td>answers DONE on step 1 — it can only see the first 512 tokens</td></tr>
+</table>
+</div>
+
+<p>Jev also completed the harder Google Flights search 3/3 (16–19 s end to end; decision model ~0.3 s per step).</p>
+
+<div class="tiles" data-tdoc-artifact>
+  <div class="tile"><b class="num">5/9</b><span>Jev on Wikipedia browser tasks</span></div>
+  <div class="tile"><b class="num">0/9</b><span>kev-4b / laya on the same tasks</span></div>
+  <div class="tile"><b class="num">~4,400</b><span>tokens per browser decision state</span></div>
+  <div class="tile"><b class="num">3/3</b><span>Jev on Google Flights search</span></div>
+</div>
+
+<h3>6.3 Middle case: driving an iPhone simulator</h3>
+<p>iOS 27 simulator, accessibility tree via sim-use, ~20 candidate actions per screen, ~1,200 input tokens. Task: <em>Settings → General → About</em> from the home screen.</p>
+
+<div class="tdoc-table-scroll" data-tdoc-artifact>
+<table>
+  <tr><th>Decision model</th><th>Reached the goal</th><th>Steps</th><th>Per-decision latency</th><th>Said "done" when finished?</th></tr>
+  <tr><td>Jev</td><td>yes</td><td class="num">3–4</td><td class="num">0.26–0.69 s</td><td>yes (confidence 0.77–0.81)</td></tr>
+  <tr><td>kev-0.5b</td><td>yes</td><td class="num">3</td><td class="num">0.8–3.6 s</td><td><strong>no</strong> — keeps tapping the page title</td></tr>
+  <tr><td>Nimble 9B 4-bit</td><td>yes</td><td class="num">3</td><td class="num">7.3 s</td><td><strong>no</strong> — same</td></tr>
+  <tr><td>laya-mlx</td><td>no</td><td>–</td><td>–</td><td>says "done" to everything</td></tr>
+</table>
+</div>
+
+<p>With Jev, the same stack then went further on Uber's mobile site: set dropoff to SFO, typed a pickup address, stopped at the login wall rather than inventing a phone number. Per-step time is dominated by the simulator controller (1–2 s read, ~1 s tap), not the model.</p>
+<p>Phone state sizes for scale: iOS home 18 elements / 1,225 tokens; Safari amazon.com 38 / 2,197; Safari Wikipedia 37 / 2,081; desktop browser-use Wikipedia 54 / 4,437. Web pages on a phone already exceed Nimble's 2,048-token cap.</p>
+
+<h3>Takeaways</h3>
+<ol>
+<li><strong>Clones were built for a different job.</strong> Their benches are short-text classification. Browser and phone agents need long state + many options in one pass (64k tokens, 255 options, parallel questions). No clone has published a number on that shape; the first time we tried, all failed on quality, not just speed.</li>
+<li><strong>They are not calibrated — it shows when stopping.</strong> On the phone task kev and Nimble navigate, then never say "done". Jev stops at 0.77–0.81 confidence. Nimble's README: a 0.9 does not mean 90%.</li>
+<li><strong>Hardware explains speed, not mistakes.</strong> M4/16 GB is 3–10× slower than authors' M5/32 GB or H100 machines (why kev-4b thrashed on 4k tokens). It does not explain wrong tickets, BLOCKED-before-looking, or never saying "done".</li>
+<li><strong>What the $40M and secret data bought:</strong> general zero-shot behaviour, honest probabilities, and long context — from training data and objective, not from the architecture trick the community reproduced in two days.</li>
+</ol>
+
+<h3>Practical guidance</h3>
+<ul>
+<li><strong>Fixed labels, short text, own labelled data:</strong> kev-0.5b/4b or Nimble locally is a real option — same answers as Jev, no API bill. Add post-hoc calibration before trusting probabilities.</li>
+<li><strong>Anything agentic (browser, phone, long documents, 20+ options):</strong> use Jev. Today nothing open gets close.</li>
+<li><strong>If you build on Jev:</strong> the model is rarely the bottleneck. Our browser loop spent 90% of time in the DOM reader and text helper; the phone loop spent 90% in the simulator controller.</li>
+<li><strong>The one test nobody has run yet:</strong> calibration on <em>your</em> data — bucket confidences on a few thousand of your own decisions and check whether the 0.8 bucket is right 80% of the time.</li>
+</ul>
+

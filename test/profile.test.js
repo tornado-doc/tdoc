@@ -175,7 +175,12 @@ async function seedDoc(env, slug, { owner, accountId, created = '2026-01-01T00:0
   }
   if (access) meta.access = access;
   await env.META.put(`meta:${slug}`, JSON.stringify(meta));
-  for (const v of vs) await env.DOCS.put(`docs/${slug}/v${v.n}/index.html`, `<h1>${slug}</h1>`);
+  for (const v of vs) {
+    await env.DOCS.put(
+      `docs/${slug}/v${v.n}/index.html`,
+      `<h1>${title || slug}</h1><p>Opening paragraph about ${slug} for profile previews.</p>`,
+    );
+  }
 }
 
 function bootData(html, name) {
@@ -397,6 +402,24 @@ async function seedPins(env, accountId, pins, extra = {}) {
       method: 'POST', cookie, body: { handle: 'alice' },
     }), env, {});
     assert(claim.status === 409, `must 409, got ${claim.status}`);
+  });
+
+  await t('owner can change handle; old @ frees', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'mover', 'acct-mover');
+    const cookie = await putSession(env, { login: 'mover', account_id: accountId });
+    const first = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'first-name' },
+    }), env, {});
+    assert(first.status === 200, `first claim ${first.status}`);
+    const second = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'second-name' },
+    }), env, {});
+    assert(second.status === 200, `change ${second.status} ${await second.clone().text()}`);
+    const body = await second.json();
+    assert(body.handle === 'second-name' && body.changed === true, JSON.stringify(body));
+    assert((await worker.fetch(req('/@second-name'), env, {})).status === 200, 'new handle live');
+    assert((await worker.fetch(req('/@first-name'), env, {})).status === 404, 'old handle freed');
   });
 
   await t('signed-in without account_id still mints and claims', async () => {

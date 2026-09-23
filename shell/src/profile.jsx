@@ -13,6 +13,10 @@ function markCurateWarned() {
   try { localStorage.setItem(CURATE_WARN_KEY, '1'); } catch { /* ignore */ }
 }
 
+function day(iso) {
+  return typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '';
+}
+
 function ProfileDialog({ title, children, confirmLabel, onConfirm, onClose, actions }) {
   return (
     <AppDialog
@@ -99,6 +103,8 @@ export function Profile({ boot }) {
   const [catalog, setCatalog] = useState(() => (Array.isArray(boot.catalog) ? boot.catalog : []));
   const [modal, setModal] = useState(null);
   const [bioDraft, setBioDraft] = useState(bio);
+  const [handleDraft, setHandleDraft] = useState(login);
+  const [handleStatus, setHandleStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const identity = boot.identity || null;
 
@@ -108,6 +114,8 @@ export function Profile({ boot }) {
       slug: row.slug,
       title: row.title,
       visibility: row.visibility,
+      published: row.published || row.created || '',
+      excerpt: row.excerpt || '',
       url: `/d/${encodeURIComponent(row.slug)}`,
     })));
   };
@@ -139,6 +147,8 @@ export function Profile({ boot }) {
       ));
       setCatalog(next);
       refreshDocsFromCatalog(next);
+      // Reload so new picks get server-side excerpts.
+      if (pinned) location.reload();
       return true;
     } catch {
       return false;
@@ -160,6 +170,37 @@ export function Profile({ boot }) {
       if (!r.ok) return;
       setBio(typeof body.bio === 'string' ? body.bio : bioDraft.trim());
       setModal(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveHandle = async () => {
+    if (busy) return;
+    setBusy(true);
+    setHandleStatus('');
+    try {
+      const r = await fetch('/api/me/handle', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handle: handleDraft }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setHandleStatus(
+          body.error === 'handle_taken' ? 'That handle is taken.'
+            : body.error === 'reserved_handle' ? 'That name is reserved.'
+            : body.error === 'invalid_handle' ? 'Use letters, numbers, and hyphens.'
+            : body.error ? `Could not save (${body.error}).`
+            : 'Could not save handle.',
+        );
+        return;
+      }
+      if (body.url) location.assign(body.url);
+      else location.reload();
+    } catch {
+      setHandleStatus('Could not save handle.');
     } finally {
       setBusy(false);
     }
@@ -187,6 +228,14 @@ export function Profile({ boot }) {
                   <button
                     type="button"
                     className="text-btn"
+                    onClick={() => { setHandleDraft(login); setHandleStatus(''); setModal('handle'); }}
+                  >
+                    Change handle
+                  </button>
+                  {' · '}
+                  <button
+                    type="button"
+                    className="text-btn"
                     onClick={() => { setBioDraft(bio); setModal('bio'); }}
                   >
                     {bio ? 'Edit bio' : 'Add bio'}
@@ -210,26 +259,48 @@ export function Profile({ boot }) {
             {mine ? 'No public picks yet. Add one from your docs.' : 'No public picks yet.'}
           </p>
         ) : (
-          <section className="pane">
-            <div className="doc-list">
-              {docs.map((doc) => (
-                <a
-                  key={doc.slug}
-                  className="doc-row"
-                  href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
-                >
-                  <div className="doc-info">
-                    <span className="doc-title">{doc.title || doc.slug}</span>
-                    <div className="doc-meta">
-                      {doc.slug}
-                    </div>
-                  </div>
-                </a>
-              ))}
-            </div>
+          <section className="profile-picks">
+            {docs.map((doc) => (
+              <a
+                key={doc.slug}
+                className="profile-pick-card"
+                href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
+              >
+                <span className="profile-pick-title">{doc.title || doc.slug}</span>
+                {doc.excerpt ? <span className="profile-pick-excerpt">{doc.excerpt}</span> : null}
+                <span className="profile-pick-meta">
+                  {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
+                </span>
+              </a>
+            ))}
           </section>
         )}
       </main>
+
+      {modal === 'handle' ? (
+        <ProfileDialog
+          title="Change your public URL"
+          confirmLabel={busy ? 'Saving…' : 'Save'}
+          onConfirm={saveHandle}
+          onClose={() => setModal(null)}
+        >
+          <p className="manage-hint">
+            Public docs show at tdoc.dev/@handle. Changing frees the old name.
+          </p>
+          <label className="field" htmlFor="tdoc-profile-handle">Handle</label>
+          <input
+            id="tdoc-profile-handle"
+            type="text"
+            maxLength={39}
+            autoFocus
+            disabled={busy}
+            value={handleDraft}
+            onChange={(event) => setHandleDraft(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') saveHandle(); }}
+          />
+          {handleStatus ? <p className="manage-hint">{handleStatus}</p> : null}
+        </ProfileDialog>
+      ) : null}
 
       {modal === 'bio' ? (
         <ProfileDialog
@@ -290,7 +361,11 @@ export function Profile({ boot }) {
                   />
                   <span>
                     <b>{row.title || row.slug}</b>
-                    <em>{row.slug}</em>
+                    <em>
+                      {day(row.created || row.updated)
+                        ? `Published ${day(row.created || row.updated)}`
+                        : row.slug}
+                    </em>
                   </span>
                 </label>
               ))}
