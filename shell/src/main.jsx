@@ -5,6 +5,7 @@ import './ui/ui.css';
 import './shell.css';
 import './setup-gate.css';
 import { DocsHub } from './docs-hub.jsx';
+import { FolderShare } from './folder-share.jsx';
 import { DocumentShell } from './document-shell.jsx';
 import { NeutralLanding } from './neutral-landing.jsx';
 import { StatusPage } from './status-page.jsx';
@@ -17,6 +18,7 @@ const appBoot = window.__TDOC_APP_BOOT__;
 if (appRoot && appBoot) {
   let page;
   if (appBoot.page === 'docs-hub') page = <DocsHub boot={appBoot} />;
+  else if (appBoot.page === 'folder-share') page = <FolderShare boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;
   else if (appBoot.page === 'activate') page = <ActivatePage boot={appBoot} />;
   else if (appBoot.page === 'setup') page = <SetupGate boot={appBoot} />;

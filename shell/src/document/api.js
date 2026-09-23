@@ -231,6 +231,17 @@ export function renameFolder(id, name) {
   });
 }
 
+export function updateFolderAccess(id, { visibility, allowed_users } = {}) {
+  const body = { id };
+  if (visibility !== undefined) body.visibility = visibility;
+  if (allowed_users !== undefined) body.allowed_users = allowed_users;
+  return request('/api/folders', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 export function deleteFolder(id) {
   const query = new URLSearchParams({ id });
   return request(`/api/folders?${query}`, { method: 'DELETE' });

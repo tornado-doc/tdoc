@@ -99,6 +99,33 @@ async function getSession(env, req) {
   }
   return session;
 }
+
+// Cookie session first; else a hosted account Bearer (CLI / agent). The
+// synthetic session is for ACL checks only — no cookie is set and nothing
+// attributes comments to it. Admin upload token maps to TDOC_OWNER when set.
+async function sessionFromHostedBearer(env, req) {
+  const auth = req.headers.get('authorization') || '';
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  if (!m) return null;
+  const token = m[1];
+  if (env.TDOC_UPLOAD_TOKEN && await timingSafeEqual(token, env.TDOC_UPLOAD_TOKEN)) {
+    const login = (env.TDOC_OWNER || '').trim().toLowerCase();
+    return login ? { id: null, login, bearerAdmin: true } : null;
+  }
+  const actor = await hostedTokenActor(env, token);
+  if (!actor) return null;
+  return {
+    id: null,
+    login: actor.github_login || '',
+    email: actor.email || '',
+    account_id: actor.account_id,
+    bearer: true,
+  };
+}
+
+async function getViewerSession(env, req) {
+  return (await getSession(env, req)) || (await sessionFromHostedBearer(env, req));
+}
 // The worker operator = the GitHub login configured in TDOC_OWNER at deploy.
 // On BYOK (hosted registration off) only that signed-in viewer sees /me.
 // On hosted tdoc.dev, /me is per signed-in GitHub user; TDOC_OWNER still
@@ -498,7 +525,7 @@ async function enforceDocAccess(env, req, slug, version) {
   const meta = await loadDocMeta(env, slug);
   // No meta yet (orphan R2 object) — treat as public so legacy uploads still work.
   const access = accessFromMeta(meta || {});
-  const session = await getSession(env, req);
+  let session = await getSession(env, req);
   if (canReadDoc(access, session, env, meta)) {
     return { ok: true, access, session, meta };
   }
@@ -507,6 +534,14 @@ async function enforceDocAccess(env, req, slug, version) {
   // FIRST-DOC.md publishes every new user's first doc as private. See #278.
   if (await docOwnerToken(env, req, meta)) {
     return { ok: true, access, session, meta, ownerToken: true };
+  }
+  // Invitee / same-account agent: hosted Bearer proves the account so a
+  // permitted private doc is readable without a browser cookie.
+  if (!session) {
+    session = await sessionFromHostedBearer(env, req);
+    if (session && canReadDoc(access, session, env, meta)) {
+      return { ok: true, access, session, meta, bearerSession: true };
+    }
   }
   if (!sessionPrincipal(session)) {
     return {
@@ -2618,6 +2653,140 @@ async function saveFolderState(env, login, state) {
   await env.META.put(key, JSON.stringify(normalizeFolderState(state)));
 }
 
+// Folder link sharing (catalog only). Docs keep their own access; the share
+// page lists whichever of the folder's docs the viewer (cookie or Bearer) may
+// already read. unlisted/public = anyone with the link; private = owner +
+// allowlisted invitees (same shape as doc access).
+function folderVisibility(folder) {
+  const v = folder && folder.visibility;
+  return ACCESS_VISIBILITIES.has(v) ? v : 'private';
+}
+
+function folderAllowedUsers(folder) {
+  const src = folder && Array.isArray(folder.allowed_users) ? folder.allowed_users : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of src) {
+    const login = normalizeInvitee(item);
+    if (!login || seen.has(login)) continue;
+    seen.add(login);
+    out.push(login);
+  }
+  return out;
+}
+
+function publicFolder(folder) {
+  const visibility = folderVisibility(folder);
+  const out = {
+    id: folder.id,
+    name: folder.name,
+    parent: folder.parent || '',
+    visibility,
+    allowed_users: folderAllowedUsers(folder),
+  };
+  if (folder.share_id) out.share_id = folder.share_id;
+  return out;
+}
+
+function canAccessSharedFolder(folder, session, ownerKey) {
+  const visibility = folderVisibility(folder);
+  if (visibility === 'unlisted' || visibility === 'public') return true;
+  const me = actorKey(session);
+  if (me && normalizeActorKey(ownerKey) && me === normalizeActorKey(ownerKey)) return true;
+  const allowed = folderAllowedUsers(folder);
+  const login = sessionLogin(session);
+  if (login && allowed.includes(login)) return true;
+  const email = normalizeEmail(session && session.email);
+  return !!(email && allowed.includes(email));
+}
+
+async function loadFolderShareIndex(env, shareId) {
+  if (!shareId || typeof shareId !== 'string') return null;
+  try {
+    const raw = await env.META.get(`folder-share:${shareId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.owner_key !== 'string' || typeof parsed.folder_id !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function putFolderShareIndex(env, shareId, ownerKey, folderId) {
+  await env.META.put(`folder-share:${shareId}`, JSON.stringify({
+    owner_key: ownerKey,
+    folder_id: folderId,
+  }));
+}
+
+async function deleteFolderShareIndex(env, shareId) {
+  if (!shareId) return;
+  try { await env.META.delete(`folder-share:${shareId}`); } catch {}
+}
+
+async function ensureFolderShareId(env, ownerKey, folder) {
+  if (folder.share_id) return folder.share_id;
+  const shareId = `s_${rand(16)}`;
+  folder.share_id = shareId;
+  await putFolderShareIndex(env, shareId, ownerKey, folder.id);
+  return shareId;
+}
+
+async function buildFolderShareListing(env, req, shareId) {
+  const index = await loadFolderShareIndex(env, shareId);
+  if (!index) return { ok: false, status: 404 };
+  const state = await loadFolderState(env, index.owner_key);
+  const folder = state.folders.find((f) => f.id === index.folder_id);
+  if (!folder || folder.share_id !== shareId) return { ok: false, status: 404 };
+  const session = await getViewerSession(env, req);
+  if (!canAccessSharedFolder(folder, session, index.owner_key)) {
+    if (!sessionPrincipal(session)) {
+      return { ok: false, status: 401 };
+    }
+    return { ok: false, status: 404 };
+  }
+  const visibility = folderVisibility(folder);
+  const slugs = Object.entries(state.docs)
+    .filter(([, fid]) => fid === folder.id)
+    .map(([slug]) => slug);
+  const docs = [];
+  for (const slug of slugs) {
+    const meta = await loadDocMeta(env, slug);
+    if (!meta || !docReadableBy(env, session, meta)) continue;
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions[versions.length - 1]?.n || 1;
+    docs.push({
+      slug,
+      title: meta.title || slug,
+      latest,
+      updated: versions[versions.length - 1]?.created || meta.created || '',
+      url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
+    });
+  }
+  docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  return {
+    ok: true,
+    folder: { name: folder.name, visibility, share_id: shareId },
+    docs,
+  };
+}
+
+function folderSharePageResponse(env, listing) {
+  const nonce = rand(16);
+  return html(SHELL.appHtml({
+    title: listing.folder.name,
+    nonceAttr: ` nonce="${nonce}"`,
+    runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+    runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+    bootJson: safeJsonForScript({
+      page: 'folder-share',
+      folder: listing.folder,
+      docs: listing.docs,
+    }),
+  }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+}
+
 function folderDepth(state, id) {
   const byId = new Map(state.folders.map((f) => [f.id, f]));
   let depth = 0;
@@ -2716,11 +2885,7 @@ async function indexData(env, session, origin) {
     docs: mine.map((row) => ({ ...publicRow(row), folder: folderState.docs[row.slug] || '' })),
     recent: savedRows(recentItems).map(publicRow),
     starred: savedRows(starItems).map(publicRow),
-    folders: folderState.folders.map((folder) => ({
-      id: folder.id,
-      name: folder.name,
-      parent: folder.parent || '',
-    })),
+    folders: folderState.folders.map((folder) => publicFolder(folder)),
   };
 }
 
@@ -5505,6 +5670,28 @@ export default {
     // user sees *their* slugs (meta.hosted.github_login). Everyone else is
     // sent to the landing page (with a toast) — never to github.com, and
     // never a public catalog.
+    //
+    // Agents (hosted Bearer) use GET /api/me — same catalog as the HTML /me
+    // hub, without needing a cookie. Cookie sessions also work so browser
+    // tools can fetch JSON.
+    if (p === '/api/me' && method === 'GET') {
+      const s = await getViewerSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const data = await indexData(env, s, url.origin);
+      return json({
+        ok: true,
+        identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
+        docs: data.docs,
+        folders: data.folders,
+        recent: data.recent,
+        starred: data.starred,
+      });
+    }
+
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
@@ -5544,6 +5731,46 @@ export default {
       }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
       });
+    }
+
+    // Shared folder catalog: opaque /f/<share_id>. Lists only docs the
+    // viewer may already read (cookie or hosted Bearer). Agents prefer
+    // /api/folders/shared?id=.
+    const folderShareMatch = p.match(/^\/f\/([^/]+)\/?$/);
+    if (folderShareMatch && method === 'GET') {
+      const shareId = decodeURIComponent(folderShareMatch[1]);
+      const listing = await buildFolderShareListing(env, req, shareId);
+      if (!listing.ok) {
+        if (listing.status === 401) {
+          return statusPageResponse({
+            status: 401,
+            error: true,
+            title: 'Sign in required',
+            message: 'This folder is private. Sign in with an invited account to open it.',
+            actions: [{
+              label: 'Sign in',
+              href: `/api/auth/oidc/login?return=${encodeURIComponent(`/f/${shareId}`)}`,
+            }],
+          });
+        }
+        return statusPageResponse({
+          status: listing.status || 404,
+          error: true,
+          title: 'Folder not found',
+          message: 'This folder link is private, revoked, or does not exist.',
+          actions: [{ label: 'tdoc home', href: '/' }],
+        });
+      }
+      const wantsJson = (req.headers.get('accept') || '').includes('application/json');
+      if (wantsJson) {
+        return json({
+          ok: true,
+          folder: listing.folder,
+          docs: listing.docs,
+          url: `/f/${encodeURIComponent(shareId)}`,
+        });
+      }
+      return folderSharePageResponse(env, listing);
     }
 
     // ---- interactive island (sandboxed widget) ----
@@ -6569,10 +6796,16 @@ export default {
       if (state.folders.some((f) => (f.parent || null) === parentId && f.name.toLowerCase() === name.toLowerCase())) {
         return json({ error: 'duplicate_name' }, { status: 400 });
       }
-      const folder = { id: `f_${Date.now()}_${rand(4)}`, name, created: new Date().toISOString(), ...(parentId ? { parent: parentId } : {}) };
+      const folder = {
+        id: `f_${Date.now()}_${rand(4)}`,
+        name,
+        visibility: 'private',
+        created: new Date().toISOString(),
+        ...(parentId ? { parent: parentId } : {}),
+      };
       state.folders.push(folder);
       await saveFolderState(env, actorKey(s), state);
-      return json({ ok: true, folder: { id: folder.id, name: folder.name, parent: parentId } });
+      return json({ ok: true, folder: publicFolder(folder) });
     }
 
     if (p === '/api/folders' && method === 'PATCH') {
@@ -6580,17 +6813,52 @@ export default {
       if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
-      const name = validFolderName(body.name);
-      if (!name) return json({ error: 'invalid_name' }, { status: 400 });
+      if (!body.id || typeof body.id !== 'string') return json({ error: 'invalid_id' }, { status: 400 });
+      const wantsName = 'name' in body;
+      const wantsVisibility = 'visibility' in body;
+      const wantsAllowed = 'allowed_users' in body;
+      if (!wantsName && !wantsVisibility && !wantsAllowed) {
+        return json({ error: 'nothing_to_update' }, { status: 400 });
+      }
       const state = await loadFolderState(env, actorKey(s));
       const folder = state.folders.find((f) => f.id === body.id);
       if (!folder) return json({ error: 'not_found' }, { status: 404 });
-      if (state.folders.some((f) => f !== folder && (f.parent || null) === (folder.parent || null) && f.name.toLowerCase() === name.toLowerCase())) {
-        return json({ error: 'duplicate_name' }, { status: 400 });
+      if (wantsName) {
+        const name = validFolderName(body.name);
+        if (!name) return json({ error: 'invalid_name' }, { status: 400 });
+        if (state.folders.some((f) => f !== folder && (f.parent || null) === (folder.parent || null) && f.name.toLowerCase() === name.toLowerCase())) {
+          return json({ error: 'duplicate_name' }, { status: 400 });
+        }
+        folder.name = name;
       }
-      folder.name = name;
+      if (wantsVisibility) {
+        if (!ACCESS_VISIBILITIES.has(body.visibility)) {
+          return json({ error: 'invalid_access_value', field: 'visibility' }, { status: 400 });
+        }
+        folder.visibility = body.visibility;
+      }
+      if (wantsAllowed) {
+        if (!Array.isArray(body.allowed_users)) {
+          return json({ error: 'invalid_access_value', field: 'allowed_users' }, { status: 400 });
+        }
+        const allowed = [];
+        const seen = new Set();
+        for (const item of body.allowed_users) {
+          const login = normalizeInvitee(item);
+          if (!login) return json({ error: 'invalid_access_value', field: 'allowed_users' }, { status: 400 });
+          if (seen.has(login)) continue;
+          seen.add(login);
+          allowed.push(login);
+        }
+        folder.allowed_users = allowed;
+      }
+      // Mint a share id whenever access is touched so Copy link always works
+      // (private invitees still open /f/<id> after sign-in).
+      if (wantsVisibility || wantsAllowed) {
+        await ensureFolderShareId(env, actorKey(s), folder);
+      }
       await saveFolderState(env, actorKey(s), state);
-      return json({ ok: true, folder: { id: folder.id, name: folder.name } });
+      return json({ ok: true, folder: publicFolder(folder) });
     }
 
     if (p === '/api/folders' && method === 'DELETE') {
@@ -6618,7 +6886,20 @@ export default {
       }
       state.folders = state.folders.filter((f) => f.id !== id);
       await saveFolderState(env, actorKey(s), state);
+      await deleteFolderShareIndex(env, gone.share_id);
       return json({ ok: true });
+    }
+
+    if (p === '/api/folders/shared' && method === 'GET') {
+      const shareId = url.searchParams.get('id') || '';
+      const listing = await buildFolderShareListing(env, req, shareId);
+      if (!listing.ok) return json({ error: 'not_found' }, { status: listing.status || 404 });
+      return json({
+        ok: true,
+        folder: listing.folder,
+        docs: listing.docs,
+        url: `/f/${encodeURIComponent(shareId)}`,
+      });
     }
 
     if (p === '/api/folders/move' && method === 'POST') {

@@ -694,6 +694,19 @@ Reset `comments.json` to `[]`. Update `meta.json` title to include `(fork)`.
 
 Read each `meta.json` and print: slug, title, latest version, # open comments.
 
+### `/tdoc me` — remote catalog (owned docs + folders)
+
+Same inventory the user sees on `/me` on the published host (not local
+`~/tdocs`). Requires a connected account (`~/.tdoc/published.json`):
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-me"
+# optional: open a folder share link as this account
+bash "$SKILL_DIR/bin/tdoc-me" --shared <share_id>
+```
+
+See **Agent catalog** under Access policy for the ACL rules.
+
 ### `/tdoc serve` — (re)start the server
 
 ```bash
@@ -1178,6 +1191,34 @@ Remote storage holds optional `meta.access`:
 - Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
 - After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
 - `/me` on hosted tdoc.dev lists the signed-in account's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
+
+### Agent catalog: owned docs / folders + shared folder links
+
+Agents must **not** scrape the HTML `/me` page. After the account is connected
+(`tdoc-publish --signin-only` or a normal publish → `~/.tdoc/published.json`):
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-me"
+```
+
+Prints JSON: the same owned `docs` + `folders` the user sees on `/me` (hosted
+Bearer). Open a doc with the usual `/d/<slug>/v/<n>` URL (Bearer still required
+for private).
+
+**Folder share links** (`/f/<share_id>` from My docs → folder ⋮ → Share):
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-me" --shared <share_id>
+```
+
+Access is **intersection / filter**, not union: opening a shared folder does
+not escalate any doc's ACL. The listing only includes docs this viewer may
+already read (folder visibility/invitees first, then each doc's
+`meta.access`). An unlisted folder with a private invitee-only doc shows the
+private doc only to that invitee (cookie or their hosted Bearer).
+
+Underlying APIs (CLI wraps these; prefer the CLI): `GET /api/me`,
+`GET /api/folders/shared?id=<share_id>`.
 
 
 ### Comment anchor stability (important for `/tdoc edit`)

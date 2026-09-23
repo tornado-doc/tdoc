@@ -31,7 +31,7 @@ const HISTORY_OPTIONS = [
   { value: 'public', label: 'Everyone' },
 ];
 
-function InviteField({ users, onChange }) {
+export function InviteField({ users, onChange }) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   // Same GitHub search the @ picker uses — see github-user-search.js.

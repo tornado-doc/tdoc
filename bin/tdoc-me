@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# tdoc-me — list the signed-in account's docs and folders (same catalog as /me).
+#
+# Agents run this instead of scraping the HTML hub. Uses the hosted Bearer in
+# ~/.tdoc/published.json (from `tdoc-publish --signin-only` / publish).
+#
+# Usage:
+#   tdoc-me                 # owned docs + folders (JSON)
+#   tdoc-me --shared <id>   # open a folder share link as this account
+#   tdoc-me --help
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+
+SHARED_ID=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --shared) SHARED_ID="${2:-}"; shift 2 ;;
+    -h|--help)
+      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+CONFIG_FILE="$HOME/.tdoc/published.json"
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "[tdoc] no ~/.tdoc/published.json — run 'tdoc-publish --signin-only' first." >&2
+  exit 1
+fi
+
+PLATFORM="$(json_file_get "$CONFIG_FILE" platform)"; PLATFORM="${PLATFORM:-cloudflare}"
+TOKEN="$(json_file_get "$CONFIG_FILE" upload_token)"
+if [ "$PLATFORM" = "hosted" ] || [ "$PLATFORM" = "vercel" ]; then
+  BASE="$(json_file_get "$CONFIG_FILE" base)"
+else
+  SUBDOMAIN="$(json_file_get "$CONFIG_FILE" subdomain)"
+  WORKER="$(json_file_get "$CONFIG_FILE" worker)"
+  if [ -n "$SUBDOMAIN" ] && [ -n "$WORKER" ]; then
+    BASE="https://${WORKER}.${SUBDOMAIN}.workers.dev"
+  else
+    BASE=""
+  fi
+fi
+
+if [ -z "$TOKEN" ] || [ -z "$BASE" ] || [ "$BASE" = "https://." ]; then
+  echo "[tdoc] $CONFIG_FILE is missing upload_token or base — re-run 'tdoc-publish --signin-only'." >&2
+  exit 1
+fi
+
+if [ -n "$SHARED_ID" ]; then
+  # Accept a bare share id or a full /f/<id> URL pasted from the Share dialog.
+  SHARED_ID="$(printf '%s' "$SHARED_ID" | sed -E 's#.*/f/([^/?#]+).*#\1#')"
+  # Share ids are opaque tokens (s_…); no encoding needed beyond curl's query.
+  URL="${BASE}/api/folders/shared?id=${SHARED_ID}"
+else
+  URL="${BASE}/api/me"
+fi
+
+resp="$(curl -sS --max-time 30 -w $'\n%{http_code}' \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/json" \
+  "$URL" 2>&1)" || {
+    echo "[tdoc] network error calling $URL" >&2
+    exit 1
+  }
+http="${resp##*$'\n'}"
+body="${resp%$'\n'*}"
+printf '%s\n' "$body"
+if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
+  echo "[tdoc] $URL returned HTTP $http" >&2
+  exit 1
+fi
+if err="$(printf '%s' "$body" | json_error)"; then
+  echo "[tdoc] $err" >&2
+  exit 1
+fi
