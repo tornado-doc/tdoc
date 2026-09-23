@@ -329,6 +329,34 @@ function bootData(html, name) {
     assert(claim.status === 409, `must 409, got ${claim.status}`);
   });
 
+  await t('signed-in without account_id still mints and claims', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    // Spectator session: GitHub login + idp, no account_id yet (sign-in does
+    // not mint until publish / claim).
+    const cookie = await putSession(env, {
+      login: 'newbie',
+      // putSession only stores login/email/account_id — write raw session.
+    });
+    const sid = cookie.replace('tdoc_sid=', '');
+    await env.META.put(`session:${sid}`, JSON.stringify({
+      login: 'newbie',
+      name: 'newbie',
+      avatar_url: '',
+      created: '2026-01-01T00:00:00.000Z',
+      idp: { provider: 'github', sub: '999001' },
+    }));
+    const claim = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'julie' },
+    }), env, {});
+    assert(claim.status === 200, `mint+claim ${claim.status} ${await claim.clone().text()}`);
+    const body = await claim.json();
+    assert(body.ok && body.handle === 'julie', JSON.stringify(body));
+    const page = await worker.fetch(req('/@julie'), env, {});
+    assert(page.status === 200, `/@julie after mint ${page.status}`);
+    const sess = JSON.parse(await env.META.get(`session:${sid}`));
+    assert(sess.account_id, 'session should gain account_id');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

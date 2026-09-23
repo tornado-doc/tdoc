@@ -4091,11 +4091,39 @@ async function claimAccountHandle(env, accountId, rawHandle, { github_login } = 
 
 async function profileBootForSession(env, session) {
   const accountId = await sessionAccountId(env, session);
-  if (!accountId) return { handle: null, suggested: null };
+  if (!accountId) {
+    const login = sessionLogin(session);
+    const suggested = login || suggestHandleFromEmail(session && session.email) || null;
+    return { handle: null, suggested };
+  }
   const claimed = await accountClaimedHandle(env, accountId);
   const login = sessionLogin(session);
   const suggested = claimed || login || suggestHandleFromEmail(session && session.email) || null;
   return { handle: claimed, suggested };
+}
+
+// Claim / publish mint an account; bare sign-in does not (spectators stay
+// account-less until they do something that needs one). Handle claim is that
+// something for email users and vanity pickers.
+async function ensureSessionHostedAccount(env, session) {
+  if (!session || !env || !env.META) return null;
+  const existingId = await sessionAccountId(env, session);
+  const login = sessionLogin(session);
+  const idp = session.idp && typeof session.idp === 'object' ? session.idp : null;
+  if (login) {
+    const ghId = idp && idp.provider === 'github' && idp.sub ? String(idp.sub) : null;
+    const rec = await hostedAccountForGithub(env, login, session.email || null, ghId);
+    if (rec && existingId && rec.account_id !== existingId) {
+      // Session already pointed at an account; don't swap under it.
+      return { account_id: existingId, github_login: login };
+    }
+    return rec;
+  }
+  if (normalizeEmail(session.email)) {
+    return hostedAccountForEmail(env, session.email, idp);
+  }
+  if (existingId) return { account_id: existingId };
+  return null;
 }
 
 async function hostedAccountForGithub(env, login, verifiedEmail = null, githubId = null) {
@@ -5865,14 +5893,26 @@ export default {
           status: sessionPrincipal(s) ? 403 : 401,
         });
       }
-      const accountId = await sessionAccountId(env, s);
+      // Sign-in alone does not mint an account (spectators). Claiming a public
+      // handle does — same door publish uses.
+      const acct = await ensureSessionHostedAccount(env, s);
+      const accountId = acct && acct.account_id;
       if (!accountId) {
         return json({ error: 'sign_in_required' }, { status: 401 });
+      }
+      if (s.id && !s.account_id) {
+        try {
+          const raw = JSON.parse(await env.META.get(`session:${s.id}`));
+          if (raw && typeof raw === 'object') {
+            raw.account_id = accountId;
+            await env.META.put(`session:${s.id}`, JSON.stringify(raw), { expirationTtl: 60 * 60 * 24 * 30 });
+          }
+        } catch {}
       }
       let body = {};
       try { body = await req.json(); } catch {}
       const result = await claimAccountHandle(env, accountId, body && body.handle, {
-        github_login: sessionLogin(s),
+        github_login: sessionLogin(s) || (acct && acct.github_login) || null,
       });
       if (!result.ok) {
         return json({ error: result.error, ...(result.handle ? { handle: result.handle } : {}) }, {

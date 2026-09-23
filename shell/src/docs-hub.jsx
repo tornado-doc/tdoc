@@ -218,6 +218,9 @@ function ClaimHandleDialog({ suggested, onClose }) {
             : body.error === 'reserved_handle' ? 'That name is reserved.'
             : body.error === 'invalid_handle' ? 'Use letters, numbers, and hyphens.'
             : body.error === 'handle_already_set' ? `Already claimed @${body.handle}.`
+            : body.error === 'sign_in_required' ? 'Sign in again, then retry.'
+            : body.error === 'forbidden' ? 'This account cannot claim a handle here.'
+            : body.error ? `Could not claim (${body.error}).`
             : 'Could not claim handle.',
         );
         setBusy(false);
