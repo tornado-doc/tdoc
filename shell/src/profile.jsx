@@ -2,9 +2,12 @@ import React from 'react';
 import './docs-hub.css';
 
 export function Profile({ boot }) {
-  const login = boot.login || '';
+  const login = boot.handle || boot.login || '';
+  const githubLogin = boot.github_login || '';
   const docs = Array.isArray(boot.docs) ? boot.docs : [];
-  const avatar = login ? `https://github.com/${encodeURIComponent(login)}.png?size=96` : '';
+  const avatar = githubLogin
+    ? `https://github.com/${encodeURIComponent(githubLogin)}.png?size=96`
+    : '';
 
   return (
     <div className="tdoc-app docs-hub">

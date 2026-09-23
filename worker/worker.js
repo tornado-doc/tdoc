@@ -3986,6 +3986,118 @@ async function lookupHostedAccount(env, login) {
   return null;
 }
 
+// Public @handles people claim on /me. Same shape as a GitHub login so
+// /@alice stays one parser. Reserved names are first-path segments we already
+// serve (and a few doc/route prefixes) so a claim cannot shadow them.
+const RESERVED_HANDLES = new Set([
+  'me', 'api', 'auth', 'activate', 'setup', 'start', 'templates', 'email',
+  'favicon', 'assets', 'static', 'mac', 'd', 'f', 'publish', 'feedback',
+  'admin', 'www', 'cdn', 'null', 'undefined', 'tdoc',
+]);
+
+function suggestHandleFromEmail(email) {
+  const norm = normalizeEmail(email);
+  if (!norm) return null;
+  const local = norm.split('@')[0] || '';
+  // Drop plus-tags and dots that would fail the github-login regex.
+  const cleaned = local.replace(/\+.*$/, '').replace(/[^a-z0-9-]/g, '');
+  return normalizeGithubLogin(cleaned);
+}
+
+async function accountProfile(env, accountId) {
+  if (!accountId || !env || !env.META) return null;
+  try {
+    const rec = JSON.parse(await env.META.get(`account-profile:${accountId}`));
+    if (rec && typeof rec === 'object') return rec;
+  } catch {}
+  return null;
+}
+
+async function accountClaimedHandle(env, accountId) {
+  const rec = await accountProfile(env, accountId);
+  return normalizeGithubLogin(rec && rec.handle);
+}
+
+// Resolve /@x: claimed handle first, then the GitHub-login index (MVP #569
+// back-compat). Never mints.
+async function lookupProfileAccount(env, raw) {
+  const handle = normalizeGithubLogin(raw);
+  if (!handle || !env || !env.META) return null;
+  try {
+    const idx = JSON.parse(await env.META.get(`hosted-handle:${handle}`));
+    if (idx && typeof idx.account_id === 'string' && idx.account_id) {
+      return {
+        account_id: idx.account_id,
+        handle,
+        github_login: normalizeGithubLogin(idx.github_login) || null,
+      };
+    }
+  } catch {}
+  const acct = await lookupHostedAccount(env, handle);
+  if (!acct) return null;
+  const claimed = await accountClaimedHandle(env, acct.account_id);
+  return {
+    ...acct,
+    handle: claimed || normalizeGithubLogin(acct.github_login) || handle,
+    github_login: normalizeGithubLogin(acct.github_login) || null,
+  };
+}
+
+// Claim once: first write wins for this account. Changing later is a follow-up.
+async function claimAccountHandle(env, accountId, rawHandle, { github_login } = {}) {
+  if (!accountId || !env || !env.META) return { error: 'sign_in_required', status: 401 };
+  const handle = normalizeGithubLogin(rawHandle);
+  if (!handle) return { error: 'invalid_handle', status: 400 };
+  if (RESERVED_HANDLES.has(handle)) return { error: 'reserved_handle', status: 400 };
+
+  const existing = await accountClaimedHandle(env, accountId);
+  if (existing && existing !== handle) return { error: 'handle_already_set', status: 409, handle: existing };
+  if (existing === handle) return { ok: true, handle };
+
+  try {
+    const taken = JSON.parse(await env.META.get(`hosted-handle:${handle}`));
+    if (taken && typeof taken.account_id === 'string' && taken.account_id
+        && taken.account_id !== accountId) {
+      return { error: 'handle_taken', status: 409 };
+    }
+  } catch {}
+  const ghAcct = await lookupHostedAccount(env, handle);
+  if (ghAcct && ghAcct.account_id !== accountId) {
+    return { error: 'handle_taken', status: 409 };
+  }
+
+  const gh = normalizeGithubLogin(github_login);
+  const now = new Date().toISOString();
+  await env.META.put(`hosted-handle:${handle}`, JSON.stringify({
+    account_id: accountId,
+    created: now,
+    ...(gh ? { github_login: gh } : {}),
+  }));
+  await env.META.put(`account-profile:${accountId}`, JSON.stringify({
+    handle,
+    created: now,
+    ...(gh ? { github_login: gh } : {}),
+  }));
+  if (gh) {
+    try {
+      const rec = JSON.parse(await env.META.get(`hosted-account:${gh}`));
+      if (rec && rec.account_id === accountId) {
+        await env.META.put(`hosted-account:${gh}`, JSON.stringify({ ...rec, handle }));
+      }
+    } catch {}
+  }
+  return { ok: true, handle };
+}
+
+async function profileBootForSession(env, session) {
+  const accountId = await sessionAccountId(env, session);
+  if (!accountId) return { handle: null, suggested: null };
+  const claimed = await accountClaimedHandle(env, accountId);
+  const login = sessionLogin(session);
+  const suggested = claimed || login || suggestHandleFromEmail(session && session.email) || null;
+  return { handle: claimed, suggested };
+}
+
 async function hostedAccountForGithub(env, login, verifiedEmail = null, githubId = null) {
   const norm = normalizeGithubLogin(login);
   if (!norm || !env || !env.META) return null;
@@ -5726,6 +5838,9 @@ export default {
         });
       }
       const data = await indexData(env, s, url.origin);
+      const profile = hostedRegistrationEnabled(env, url.origin)
+        ? await profileBootForSession(env, s)
+        : null;
       return json({
         ok: true,
         identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
@@ -5733,7 +5848,38 @@ export default {
         folders: data.folders,
         recent: data.recent,
         starred: data.starred,
+        ...(profile ? { profile } : {}),
       });
+    }
+
+    // Claim a public @handle once. Hosted only. Email/OIDC users need this
+    // for /@…; GitHub users can keep using their login via fallback or claim
+    // a vanity name here.
+    if (p === '/api/me/handle' && method === 'POST') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const accountId = await sessionAccountId(env, s);
+      if (!accountId) {
+        return json({ error: 'sign_in_required' }, { status: 401 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const result = await claimAccountHandle(env, accountId, body && body.handle, {
+        github_login: sessionLogin(s),
+      });
+      if (!result.ok) {
+        return json({ error: result.error, ...(result.handle ? { handle: result.handle } : {}) }, {
+          status: result.status || 400,
+        });
+      }
+      return json({ ok: true, handle: result.handle, url: `/@${result.handle}` });
     }
 
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
@@ -5749,6 +5895,9 @@ export default {
       const nonce = rand(16);
       const identity = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       const data = await indexData(env, s, url.origin);
+      const profile = hostedRegistrationEnabled(env, url.origin)
+        ? await profileBootForSession(env, s)
+        : null;
       return html(SHELL.appHtml({
         title: 'My docs',
         nonceAttr: ` nonce="${nonce}"`,
@@ -5770,6 +5919,7 @@ export default {
           // The checklist lives here, so every state reads differently on this
           // page -- it is the one surface that has a face for all six.
           debug: await isDebugAccount(env, s),
+          ...(profile ? { profile } : {}),
           ...data,
         }),
       }), {
@@ -5777,8 +5927,8 @@ export default {
       });
     }
 
-    // Public profile: /@<github-login>. Hosted only. Handle = GitHub login
-    // (no separate claim). Lists public + unlisted docs for that account.
+    // Public profile: /@<handle>. Hosted only. Claimed handle, else GitHub
+    // login (MVP #569). Lists public + unlisted docs for that account.
     const profileMatch = p.match(/^\/@([^/]+)\/?$/);
     if (profileMatch && (method === 'GET' || method === 'HEAD')) {
       if (!hostedRegistrationEnabled(env, url.origin)) {
@@ -5791,7 +5941,7 @@ export default {
         });
       }
       const login = normalizeGithubLogin(decodeURIComponent(profileMatch[1]));
-      const account = login ? await lookupHostedAccount(env, login) : null;
+      const account = login ? await lookupProfileAccount(env, login) : null;
       if (!account) {
         return statusPageResponse({
           status: 404,
@@ -5799,16 +5949,22 @@ export default {
           title: 'Profile not found',
           message: login
             ? `@${login} has not published on tdoc yet, or that handle is not claimed.`
-            : 'That is not a valid GitHub handle.',
+            : 'That is not a valid handle.',
           actions: [{ label: 'tdoc home', href: '/' }],
         });
       }
       if (method === 'HEAD') return new Response(null, { status: 200 });
-      const handle = normalizeGithubLogin(account.github_login) || login;
+      const handle = account.handle || login;
       const docs = await profileData(env, account);
       const wantsJson = (req.headers.get('accept') || '').includes('application/json');
       if (wantsJson) {
-        return json({ ok: true, login: handle, docs });
+        return json({
+          ok: true,
+          login: handle,
+          handle,
+          github_login: account.github_login || null,
+          docs,
+        });
       }
       const nonce = rand(16);
       return html(SHELL.appHtml({
@@ -5819,6 +5975,8 @@ export default {
         bootJson: safeJsonForScript({
           page: 'profile',
           login: handle,
+          handle,
+          github_login: account.github_login || null,
           docs,
         }),
       }), {

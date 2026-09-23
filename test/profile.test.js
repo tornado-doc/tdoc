@@ -1,4 +1,4 @@
-// Public /@<github-login> profiles: hosted-only, github login IS the handle,
+// Public /@<handle> profiles: hosted-only, claimed handle or GitHub login,
 // public + unlisted docs listed, private excluded. Same worker harness as
 // me-docs-experience.test.js.
 
@@ -119,13 +119,30 @@ function makeEnv(StoreClass, extra = {}) {
   return env;
 }
 
-function req(pathname, { method = 'GET', host = 'tdoc.dev', accept = '' } = {}) {
+function req(pathname, { method = 'GET', host = 'tdoc.dev', accept = '', cookie = '', body = null } = {}) {
   return new Request(`https://${host}${pathname}`, {
     method,
     headers: {
       ...(accept ? { Accept: accept } : {}),
+      ...(cookie ? { Cookie: cookie.includes('=') ? cookie : `tdoc_sid=${cookie}` } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
+    body: body ? JSON.stringify(body) : undefined,
   });
+}
+
+async function putSession(env, { login = '', email = '', account_id = '' } = {}) {
+  const id = [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
+  await env.META.put(`session:${id}`, JSON.stringify({
+    ...(login ? { login } : {}),
+    ...(email ? { email } : {}),
+    ...(account_id ? { account_id } : {}),
+    name: login || email || 'user',
+    avatar_url: '',
+    created: new Date().toISOString(),
+  }));
+  return `tdoc_sid=${id}`;
 }
 
 async function seedAccount(env, login, accountId = `acct-${login}`) {
@@ -133,6 +150,15 @@ async function seedAccount(env, login, accountId = `acct-${login}`) {
   await env.META.put(`hosted-account:${norm}`, JSON.stringify({
     account_id: accountId,
     github_login: norm,
+    created: '2026-01-01T00:00:00.000Z',
+  }));
+  return accountId;
+}
+
+async function seedEmailAccount(env, email, accountId = `acct-email`) {
+  await env.META.put(`account-email:${email}`, JSON.stringify({
+    account_id: accountId,
+    email,
     created: '2026-01-01T00:00:00.000Z',
   }));
   return accountId;
@@ -226,6 +252,81 @@ function bootData(html, name) {
     await seedAccount(env, 'alice');
     const r = await worker.fetch(req('/@alice', { host: 'alice.workers.dev' }), env, {});
     assert(r.status === 404, `BYOK must 404, got ${r.status}`);
+  });
+
+  await t('email account can claim handle and serve /@', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedEmailAccount(env, 'sam@example.com', 'acct-sam');
+    await seedDoc(env, 'sam-open', {
+      accountId,
+      access: { visibility: 'public' },
+      versions: [{ n: 1, created: '2026-04-01T00:00:00.000Z' }],
+    });
+    // No github_login on meta — ownership is account_id only.
+    const meta = JSON.parse(await env.META.get('meta:sam-open'));
+    meta.hosted = { account_id: accountId };
+    await env.META.put('meta:sam-open', JSON.stringify(meta));
+
+    const before = await worker.fetch(req('/@sam'), env, {});
+    assert(before.status === 404, 'unclaimed must 404');
+
+    const cookie = await putSession(env, { email: 'sam@example.com', account_id: accountId });
+    const claim = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'sam' },
+    }), env, {});
+    assert(claim.status === 200, `claim ${claim.status} ${await claim.clone().text()}`);
+    const claimed = await claim.json();
+    assert(claimed.ok && claimed.handle === 'sam' && claimed.url === '/@sam', JSON.stringify(claimed));
+
+    const again = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'other' },
+    }), env, {});
+    assert(again.status === 409, `second claim must 409, got ${again.status}`);
+
+    const reserved = await worker.fetch(req('/api/me/handle', {
+      method: 'POST',
+      cookie: await putSession(env, { email: 'x@example.com', account_id: 'acct-x' }),
+      body: { handle: 'setup' },
+    }), env, {});
+    assert(reserved.status === 400, `reserved must 400, got ${reserved.status}`);
+
+    const page = await worker.fetch(req('/@sam'), env, {});
+    assert(page.status === 200, `/@sam ${page.status}`);
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(boot.page === 'profile' && boot.handle === 'sam', 'claimed profile boot');
+    assert(boot.docs.map((d) => d.slug).join(',') === 'sam-open', `docs ${JSON.stringify(boot.docs)}`);
+  });
+
+  await t('vanity claim works; github login still resolves', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'ghuser', 'acct-gh');
+    await seedDoc(env, 'pub', {
+      owner: 'ghuser',
+      accountId,
+      access: { visibility: 'public' },
+    });
+    const cookie = await putSession(env, { login: 'ghuser', account_id: accountId });
+    const claim = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'julie' },
+    }), env, {});
+    assert(claim.status === 200, `vanity claim ${claim.status}`);
+    const vanity = await worker.fetch(req('/@julie'), env, {});
+    assert(vanity.status === 200, `/@julie ${vanity.status}`);
+    const viaGh = await worker.fetch(req('/@ghuser'), env, {});
+    assert(viaGh.status === 200, 'github login fallback still works');
+  });
+
+  await t('cannot claim another account github login', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await seedAccount(env, 'alice', 'acct-alice');
+    const cookie = await putSession(env, {
+      email: 'bob@example.com',
+      account_id: await seedEmailAccount(env, 'bob@example.com', 'acct-bob'),
+    });
+    const claim = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'alice' },
+    }), env, {});
+    assert(claim.status === 409, `must 409, got ${claim.status}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
