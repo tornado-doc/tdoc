@@ -2889,6 +2889,50 @@ async function indexData(env, session, origin) {
   };
 }
 
+// Public profile for /@<github-login>: the account's public + unlisted docs.
+// Lookup is read-only (never mint). Filter by account_id when stamped, else
+// by github_login for older meta. Private docs never appear here — owners
+// still use /me for that.
+async function profileData(env, account) {
+  const accountId = account && typeof account.account_id === 'string' ? account.account_id : '';
+  const login = normalizeGithubLogin(account && account.github_login);
+  if (!accountId && !login) return [];
+
+  let keys = [];
+  let cursor;
+  do {
+    const page = await env.META.list({ prefix: 'meta:', cursor });
+    keys = keys.concat(page.keys);
+    cursor = page.cursor;
+    if (page.list_complete) break;
+  } while (cursor);
+
+  const docs = [];
+  for (const key of keys) {
+    const slug = key.name.slice('meta:'.length);
+    let meta = {};
+    try { meta = JSON.parse(await env.META.get(key.name) || '{}'); } catch { continue; }
+    const hosted = meta && meta.hosted;
+    const owns = (accountId && hosted && hosted.account_id === accountId)
+      || (login && hostedGithubLogin(meta) === login);
+    if (!owns) continue;
+    const visibility = accessFromMeta(meta).visibility;
+    if (visibility !== 'public' && visibility !== 'unlisted') continue;
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions[versions.length - 1]?.n || 1;
+    docs.push({
+      slug,
+      title: meta.title || slug,
+      latest,
+      updated: versions[versions.length - 1]?.created || meta.created || '',
+      visibility,
+      url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
+    });
+  }
+  docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  return docs;
+}
+
 // Agent verdict → emoji, rendered at fold time by snapshotAt (never stored as
 // a reaction event) so the ✅/🟡/❓ on a card is per-version like any status.
 const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
@@ -5727,6 +5771,55 @@ export default {
           // page -- it is the one surface that has a face for all six.
           debug: await isDebugAccount(env, s),
           ...data,
+        }),
+      }), {
+        headers: { 'Content-Security-Policy': cspHeader(nonce) },
+      });
+    }
+
+    // Public profile: /@<github-login>. Hosted only. Handle = GitHub login
+    // (no separate claim). Lists public + unlisted docs for that account.
+    const profileMatch = p.match(/^\/@([^/]+)\/?$/);
+    if (profileMatch && (method === 'GET' || method === 'HEAD')) {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return statusPageResponse({
+          status: 404,
+          error: true,
+          title: 'Profiles unavailable',
+          message: 'Public @handles are only on hosted tdoc.dev.',
+          actions: [{ label: 'tdoc home', href: '/' }],
+        });
+      }
+      const login = normalizeGithubLogin(decodeURIComponent(profileMatch[1]));
+      const account = login ? await lookupHostedAccount(env, login) : null;
+      if (!account) {
+        return statusPageResponse({
+          status: 404,
+          error: true,
+          title: 'Profile not found',
+          message: login
+            ? `@${login} has not published on tdoc yet, or that handle is not claimed.`
+            : 'That is not a valid GitHub handle.',
+          actions: [{ label: 'tdoc home', href: '/' }],
+        });
+      }
+      if (method === 'HEAD') return new Response(null, { status: 200 });
+      const handle = normalizeGithubLogin(account.github_login) || login;
+      const docs = await profileData(env, account);
+      const wantsJson = (req.headers.get('accept') || '').includes('application/json');
+      if (wantsJson) {
+        return json({ ok: true, login: handle, docs });
+      }
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        title: `@${handle} · tdoc`,
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'profile',
+          login: handle,
+          docs,
         }),
       }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },

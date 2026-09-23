@@ -29,6 +29,7 @@ const OFFLINE = [
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
+  'profile.test.js',            // /@handle public profiles
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
   'hosted-oob.test.js',       // hosted token bootstrap + scoped writes
