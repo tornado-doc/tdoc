@@ -324,6 +324,39 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(boot.docs[0].image === 'https://example.com/sam-open.png', 'boot carries first graphic');
   });
 
+  await t('/@ backfills preview onto old pins missing meta.preview', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'backfill', 'acct-backfill');
+    await seedDoc(env, 'old-pin', {
+      owner: 'backfill',
+      accountId,
+      title: 'Old Pin Doc',
+      access: { visibility: 'public' },
+    });
+    // Claim + pin list without going through setProfilePin (no preview write).
+    const cookie = await putSession(env, { login: 'backfill', account_id: accountId });
+    await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'backfill' },
+    }), env, {});
+    await env.META.put(`account-profile:${accountId}`, JSON.stringify({
+      account_id: accountId,
+      handle: 'backfill',
+      pins: ['old-pin'],
+    }));
+    const metaBefore = JSON.parse(await env.META.get('meta:old-pin'));
+    assert(!metaBefore.preview, 'fixture must start without preview');
+
+    const page = await worker.fetch(req('/@backfill'), env, {});
+    assert(page.status === 200, `/@backfill ${page.status}`);
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(boot.docs.length === 1 && boot.docs[0].slug === 'old-pin', JSON.stringify(boot.docs));
+    assert(/Opening paragraph/.test(boot.docs[0].excerpt || ''),
+      `backfilled excerpt: ${JSON.stringify(boot.docs[0])}`);
+    assert(boot.docs[0].image === 'https://example.com/old-pin.png', 'backfilled image');
+    const metaAfter = JSON.parse(await env.META.get('meta:old-pin'));
+    assert(metaAfter.preview && metaAfter.preview.excerpt, 'preview persisted on meta');
+  });
+
   await t('curate forces public; take-down restores prior visibility', async () => {
     const env = makeEnv(mod.CommentsStore);
     const accountId = await seedAccount(env, 'owner', 'acct-owner');
