@@ -5670,6 +5670,28 @@ export default {
     // user sees *their* slugs (meta.hosted.github_login). Everyone else is
     // sent to the landing page (with a toast) — never to github.com, and
     // never a public catalog.
+    //
+    // Agents (hosted Bearer) use GET /api/me — same catalog as the HTML /me
+    // hub, without needing a cookie. Cookie sessions also work so browser
+    // tools can fetch JSON.
+    if (p === '/api/me' && method === 'GET') {
+      const s = await getViewerSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const data = await indexData(env, s, url.origin);
+      return json({
+        ok: true,
+        identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
+        docs: data.docs,
+        folders: data.folders,
+        recent: data.recent,
+        starred: data.starred,
+      });
+    }
+
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {

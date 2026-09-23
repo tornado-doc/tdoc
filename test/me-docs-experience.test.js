@@ -360,6 +360,44 @@ function bootData(html, name) {
       'document boot data must carry its new parent');
   });
 
+  await t('/api/me: cookie and hosted Bearer see the same owned docs/folders', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const cookie = await putSession(env, 'alice');
+    await seedDoc(env, 'alice-owned', { owner: 'alice', access: { visibility: 'private' } });
+    await seedDoc(env, 'bob-owned', { owner: 'bob', access: { visibility: 'public' } });
+    const create = await worker.fetch(req('/api/folders', { method: 'POST', cookie, body: { name: 'Alice pack' } }), env, {});
+    assert(create.status === 200, `create folder ${create.status}`);
+    const folder = (await create.json()).folder;
+    await worker.fetch(req('/api/folders/move', {
+      method: 'POST', cookie, body: { slugs: ['alice-owned'], folder: folder.id },
+    }), env, {});
+
+    const viaCookie = await worker.fetch(req('/api/me', { cookie }), env, {});
+    assert(viaCookie.status === 200, `cookie /api/me ${viaCookie.status}`);
+    const cookieBody = await viaCookie.json();
+    assert(cookieBody.ok && cookieBody.docs.some((d) => d.slug === 'alice-owned' && d.folder === folder.id),
+      `cookie must list owned doc in folder, got ${JSON.stringify(cookieBody.docs)}`);
+    assert(!cookieBody.docs.some((d) => d.slug === 'bob-owned'), 'cookie must not list other accounts');
+    assert(cookieBody.folders.some((f) => f.id === folder.id && f.name === 'Alice pack'),
+      'cookie must list owned folders');
+
+    const tokRes = await worker.fetch(req('/api/hosted/token', {
+      method: 'POST', cookie, body: { label: 'alice-agent' },
+    }), env, {});
+    assert(tokRes.status === 200, `alice token ${tokRes.status}`);
+    const token = (await tokRes.json()).token;
+    const viaBearer = await worker.fetch(req('/api/me', { token }), env, {});
+    assert(viaBearer.status === 200, `bearer /api/me ${viaBearer.status}`);
+    const bearerBody = await viaBearer.json();
+    assert(bearerBody.docs.map((d) => d.slug).sort().join(',') === cookieBody.docs.map((d) => d.slug).sort().join(','),
+      'Bearer catalog must match cookie catalog');
+    assert(bearerBody.folders.map((f) => f.id).sort().join(',') === cookieBody.folders.map((f) => f.id).sort().join(','),
+      'Bearer folders must match cookie folders');
+
+    const anon = await worker.fetch(req('/api/me'), env, {});
+    assert(anon.status === 401, `anon /api/me must 401, got ${anon.status}`);
+  });
+
   await t('folder share link: visibility mint, filtered listing, private revoke, bearer agent read', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'alice');
