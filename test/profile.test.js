@@ -312,6 +312,34 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(boot.docs.map((d) => d.slug).join(',') === 'sam-open', `docs ${JSON.stringify(boot.docs)}`);
   });
 
+  await t('owner still sees private pins after refresh; public visitors do not', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'owner', 'acct-owner');
+    await seedDoc(env, 'secret', {
+      owner: 'owner',
+      accountId,
+      access: { visibility: 'private' },
+    });
+    const cookie = await putSession(env, { login: 'owner', account_id: accountId });
+    await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'owner' },
+    }), env, {});
+    const pin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug: 'secret', pinned: true },
+    }), env, {});
+    assert(pin.status === 200, `pin ${pin.status}`);
+
+    const asOwner = await worker.fetch(req('/@owner', { cookie }), env, {});
+    assert(asOwner.status === 200, `owner ${asOwner.status}`);
+    const ownerBoot = bootData(await asOwner.text(), '__TDOC_APP_BOOT__');
+    assert(ownerBoot.mine && ownerBoot.docs.map((d) => d.slug).join(',') === 'secret',
+      `owner should see private pin, got ${JSON.stringify(ownerBoot.docs)}`);
+
+    const asPublic = await worker.fetch(req('/@owner'), env, {});
+    const pubBoot = bootData(await asPublic.text(), '__TDOC_APP_BOOT__');
+    assert(!pubBoot.mine && pubBoot.docs.length === 0, 'public must not see private pin');
+  });
+
   await t('vanity claim works; github login still resolves', async () => {
     const env = makeEnv(mod.CommentsStore);
     const accountId = await seedAccount(env, 'ghuser', 'acct-gh');

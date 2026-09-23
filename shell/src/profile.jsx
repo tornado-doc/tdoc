@@ -97,6 +97,7 @@ export function Profile({ boot }) {
     setDocs(pinned.map((row) => ({
       slug: row.slug,
       title: row.title,
+      visibility: row.visibility,
       url: `/d/${encodeURIComponent(row.slug)}`,
     })));
   };
@@ -197,7 +198,10 @@ export function Profile({ boot }) {
                 >
                   <div className="doc-info">
                     <span className="doc-title">{doc.title || doc.slug}</span>
-                    <div className="doc-meta">{doc.slug}</div>
+                    <div className="doc-meta">
+                      {doc.slug}
+                      {doc.visibility === 'private' ? ' · private (only you)' : ''}
+                    </div>
                   </div>
                 </a>
               ))}

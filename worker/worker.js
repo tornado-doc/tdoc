@@ -2889,10 +2889,10 @@ async function indexData(env, session, origin) {
   };
 }
 
-// Public profile for /@handle: only docs the owner pinned. Visibility still
-// gates whether a visitor can open the link — private pins stay off the
-// public list even if curated.
-async function profileData(env, account) {
+// Public profile for /@handle: only docs the owner pinned. Visitors only see
+// public/unlisted pins; the owner sees every pin (so a refresh after "Add a
+// pick" is not an empty page when the doc is still private).
+async function profileData(env, account, { includePrivate = false } = {}) {
   const accountId = account && typeof account.account_id === 'string' ? account.account_id : '';
   const login = normalizeGithubLogin(account && account.github_login);
   if (!accountId && !login) return [];
@@ -2904,14 +2904,18 @@ async function profileData(env, account) {
 
   const docs = [];
   for (const slug of pins) {
-    let meta = {};
-    try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || '{}'); } catch { continue; }
-    const hosted = meta && meta.hosted;
+    let meta = null;
+    try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { continue; }
+    if (!meta || typeof meta !== 'object') continue;
+    const hosted = meta.hosted;
     const owns = (accountId && hosted && hosted.account_id === accountId)
       || (login && hostedGithubLogin(meta) === login);
-    if (!owns) continue;
+    // Owner boot (includePrivate): pin membership is enough — account_id on
+    // older meta can drift from the claim/mint account and used to empty the
+    // page after refresh.
+    if (!owns && !includePrivate) continue;
     const visibility = accessFromMeta(meta).visibility;
-    if (visibility !== 'public' && visibility !== 'unlisted') continue;
+    if (!includePrivate && visibility !== 'public' && visibility !== 'unlisted') continue;
     const versions = Array.isArray(meta.versions) ? meta.versions : [];
     const latest = versions[versions.length - 1]?.n || 1;
     docs.push({
@@ -4039,6 +4043,22 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
   }
   if (!meta) return { error: 'not_found', status: 404 };
   if (!isDocOwnerSession(env, session, meta)) return { error: 'forbidden', status: 403 };
+  // Keep the pin list and the doc's hosted.account_id on the same account so
+  // /@ reload (which filters by account_id / github login) still finds it.
+  if (pinned) {
+    const hosted = meta.hosted && typeof meta.hosted === 'object' ? meta.hosted : {};
+    if (hosted.account_id !== accountId) {
+      meta = {
+        ...meta,
+        hosted: {
+          ...hosted,
+          account_id: accountId,
+          ...(sessionLogin(session) ? { github_login: sessionLogin(session) } : {}),
+        },
+      };
+      await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+    }
+  }
   const prev = await accountProfile(env, accountId);
   let pins = normalizeProfilePins(prev);
   if (pinned) {
@@ -6072,7 +6092,7 @@ export default {
         });
       }
       const login = normalizeGithubLogin(decodeURIComponent(profileMatch[1]));
-      const account = login ? await lookupProfileAccount(env, login) : null;
+      let account = login ? await lookupProfileAccount(env, login) : null;
       if (!account) {
         return statusPageResponse({
           status: 404,
@@ -6086,7 +6106,6 @@ export default {
       }
       if (method === 'HEAD') return new Response(null, { status: 200 });
       const handle = account.handle || login;
-      const docs = await profileData(env, account);
       const session = await getSession(env, req);
       const viewerId = session ? await sessionAccountId(env, session) : null;
       const mine = Boolean(
@@ -6094,6 +6113,13 @@ export default {
         || (sessionLogin(session) && account.github_login
             && sessionLogin(session) === account.github_login),
       );
+      // Enrich github_login from the hosted-account record when the handle
+      // index omitted it — needed so ownership matches docs stamped by login.
+      if (!account.github_login && account.account_id) {
+        const storedLogin = sessionLogin(session);
+        if (mine && storedLogin) account = { ...account, github_login: storedLogin };
+      }
+      const docs = await profileData(env, account, { includePrivate: mine });
       const stored = account.account_id ? await accountProfile(env, account.account_id) : null;
       const bio = stored && typeof stored.bio === 'string' ? stored.bio.slice(0, 280) : '';
       let catalog = [];
