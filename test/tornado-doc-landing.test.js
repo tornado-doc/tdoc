@@ -70,7 +70,7 @@ t('hero demo is a static mock, no iframe or author script', () => {
 });
 
 t('carries the SEO head', () => {
-  assert(/<title>[^<]*tdoc[^<]*<\/title>/i.test(html), 'title does not mention tdoc');
+  assert(/<title>[^<]*(tdoc|Tornado)[^<]*<\/title>/i.test(html), 'title does not name the product');
   // Upper bound is Google's snippet truncation (~160 chars) — a longer one is
   // not wrong, it just gets cut mid-sentence in results.
   const desc = metaContent('description');
@@ -96,8 +96,11 @@ t('names tdoc and tornado-doc', () => {
   assert(/tdoc/.test(html), 'does not mention tdoc');
   assert(html.includes('tornado-doc'), 'does not mention tornado-doc');
   assert(!html.includes('Tornado Dog'), 'old Tornado Dog name still present');
-  assert(meta.title === 'tornado-doc', `meta title was ${meta.title}`);
+  assert(meta.title === 'Tornado: AI Native Docs', `meta title was ${meta.title}`);
   assert(meta.slug === 'tornado-doc', `meta slug was ${meta.slug}`);
+  // Hero mark is Julie's square stroke, not the old filled tornado path.
+  assert(/class="brand-mark"[^>]*viewBox="0 0 436 436"/.test(html), 'brand-mark is not the square stroke');
+  assert(!/viewBox="201\.2 205\.2 597\.6 597\.6"/.test(html), 'old filled tornado mark still in landing');
 });
 
 t('links to the GitHub repo and install path', () => {

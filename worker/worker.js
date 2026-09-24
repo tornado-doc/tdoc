@@ -567,18 +567,16 @@ async function enforceDocAccess(env, req, slug, version) {
   };
 }
 const TDOC_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 436 436" role="img" aria-label="tdoc">
-  <!-- Square stroke mark. No background field — ink is currentColor so the
-       page-level dark invert turns it with the surrounding text. Home-screen
-       / OG rasters keep a solid field separately. -->
-  <g fill="none" stroke="currentColor" stroke-width="10.5" stroke-linecap="round">
+  <!-- Tab favicon: mark scaled up so 16px tabs still read. Chrome bar keeps
+       assets/tdoc_logo.svg (unscaled, currentColor + invert). -->
+  <g transform="translate(218 218) scale(1.72) translate(-218 -218)" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round">
     <path d="M 88.5 171.5 L 309.5 130.5"/>
     <path d="M 122.5 200.5 L 279.5 169.5"/>
     <path d="M 148.5 222 L 278.5 222"/>
     <path d="M 158.5 271.5 L 255 252.5"/>
     <path d="M 180.5 306.5 L 243 291.5"/>
   </g>
-</svg>
-`;
+</svg>`;
 
 const TDOC_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 436 436" role="img" aria-label="tdoc">
   <!-- Square stroke mark. No background field — ink is currentColor so the
