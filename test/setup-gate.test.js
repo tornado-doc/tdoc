@@ -774,6 +774,8 @@ t('a config file is a claim, not a fact', () => {
   assert(worker.includes("p === '/api/hosted/whoami'"), 'a credential can be checked');
   assert(worker.includes("return json({ error: 'invalid_token' }, { status: 401 });"), 'and a dead one says so');
   assert(cli.includes('if [ -f "$CONFIG_FILE" ] && hosted_credential_valid; then'), 'signin-only checks before believing');
+  assert(cli.includes('c.upload_token || c.token'), 'validity reads the key write_hosted_config actually writes');
+  assert(cli.includes('[ -n "$base" ] && [ -n "$token" ] || return 1'), 'missing claim is invalid, not valid');
   assert(cli.includes('rm -f "$CONFIG_FILE"'), 'and a stale file is dropped rather than kept');
   // Being offline is not a revoked token: only a clear 401/403 may throw a
   // working credential away.
