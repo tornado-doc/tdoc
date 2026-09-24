@@ -567,9 +567,9 @@ async function enforceDocAccess(env, req, slug, version) {
   };
 }
 const TDOC_FAVICON_SVG = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="2048" viewBox="0 0 436 436" role="img" aria-label="Square logo light mode">
-  <rect width="436" height="436" fill="#FFFFFF"/>
-  <g transform="translate(218 218) scale(1.55) translate(-218 -218)" fill="none" stroke="#101219" stroke-width="12" stroke-linecap="round">
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="2048" viewBox="0 0 436 436" role="img" aria-label="Rounded logo light mode">
+  <rect width="436" height="436" rx="92" ry="92" fill="#FFFFFF"/>
+  <g transform="translate(218 218) scale(1.28) translate(-218 -218)" fill="none" stroke="#101219" stroke-width="11" stroke-linecap="round">
     <path d="M 88.5 171.5 L 309.5 130.5"/>
     <path d="M 122.5 200.5 L 279.5 169.5"/>
     <path d="M 148.5 222 L 278.5 222"/>
