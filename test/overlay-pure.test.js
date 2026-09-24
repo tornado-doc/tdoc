@@ -62,9 +62,9 @@ t('agent avatars map to product marks without the Anthropic company avatar', () 
   assert(box.avatarFor({ kind: 'agent', login: 'grok' }) === '/grok_logo.svg');
   assert(!box.avatarFor({ kind: 'agent', login: 'grok' }).includes('xai-org'), 'never the SpaceXAI org avatar');
   assert(box.avatarFor({ kind: 'agent', login: 'gemini' }).includes('googlegemini'));
-  assert(box.avatarFor({ kind: 'system', login: 'tdoc', avatar_url: '' }) === '/tdoc_logo.svg',
-    'First reader seed shows the global mark even with empty avatar_url');
-  assert(box.avatarFor({ login: 'tdoc' }) === '/tdoc_logo.svg');
+  assert(box.avatarFor({ kind: 'system', login: 'tdoc', avatar_url: '' }) === '/tdoc_logo.png',
+    'First reader seed shows the filled logo tile even with empty avatar_url');
+  assert(box.avatarFor({ login: 'tdoc' }) === '/tdoc_logo.png');
 });
 
 t('notification destinations validate and encode slug/version/comment', () => {

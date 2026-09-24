@@ -93,7 +93,9 @@ function duplicateComment(comments, { author, text, anchor, parent_id, at }, win
 // lands on text the reader can see, and worded to ask for the one gesture the
 // page exists to teach.
 const SEED_COMMENT_TEXT = 'First reader here. Which claim on this page would you defend least? Highlight it and say so.';
-const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '/tdoc_logo.svg', kind: 'system' };
+// Filled light square (white field) — not the stroke-only mark. Avatars need a
+// solid tile; /tdoc_logo.svg is for chrome that follows currentColor/invert.
+const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '/tdoc_logo.png', kind: 'system' };
 function seedCommentAnchor(html) {
   const m = String(html || '').match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
   if (!m) return null;
@@ -968,7 +970,7 @@ function shellDocument(slug, version, nonce, reqUrl) {
     type: isLanding ? 'website' : 'article',
   } : null;
   return SHELL.shellHtml({
-    title,
+    title: isLanding ? 'Tornado: AI Native Docs' : title,
     nonceAttr,
     cfgJson,
     // The same "you're viewing v<n>" strip the worker shows: a doc with a
