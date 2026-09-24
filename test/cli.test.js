@@ -1078,8 +1078,10 @@ t('tdoc-publish --signin-only needs no slug and no-ops when already signed in', 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-signin-'));
   try {
     fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    // Unreachable base: whoami cannot 401, so a network miss keeps the claim
+    // (same offline rule as production). A reachable dead token must re-auth.
     fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
-      platform: 'hosted', base: 'https://tdoc.dev', upload_token: 'tok',
+      platform: 'hosted', base: 'https://127.0.0.1:1', upload_token: 'tok',
     }));
     const r = spawnSync(bin, ['--signin-only'], {
       env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,

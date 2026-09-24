@@ -823,11 +823,14 @@ hosted_credential_valid() {
     try { const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
       process.stdout.write(String(c.base || (c.host ? "https://" + c.host : "") || "")); } catch {}
   ' "$CONFIG_FILE" 2>/dev/null)"
+  # write_hosted_config stores upload_token; accept legacy `token` if present.
   token="$(node -e '
     try { const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-      process.stdout.write(String(c.token || "")); } catch {}
+      process.stdout.write(String(c.upload_token || c.token || "")); } catch {}
   ' "$CONFIG_FILE" 2>/dev/null)"
-  [ -n "$base" ] && [ -n "$token" ] || return 0
+  # Missing keys mean the claim is empty, not valid. (A prior bug treated
+  # empty as valid via `|| return 0`, so --signin-only never re-authed.)
+  [ -n "$base" ] && [ -n "$token" ] || return 1
   http="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 15 \
     -H "Authorization: Bearer $token" "${base%/}/api/hosted/whoami" 2>/dev/null)" || return 0
   case "$http" in
