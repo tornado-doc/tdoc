@@ -190,6 +190,38 @@
   }
   .profile-pick-card:hover .profile-pick-title { color: var(--td-accent); }
   .profile-pick-card:hover .profile-pick-surface { border-color: var(--td-accent-ring-soft); }
+  .profile-share-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 4px 0 12px;
+  }
+  .profile-share-link code {
+    font-size: 13px;
+    padding: 6px 10px;
+    background: var(--td-surface-2);
+    border-radius: 6px;
+  }
+  .profile-poster-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .profile-poster-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 0;
+    border-top: 1px solid var(--td-line);
+  }
+  .profile-poster-list li:last-child { border-bottom: 1px solid var(--td-line); }
+  .profile-poster-list b { display: block; font-weight: 600; font-size: 14px; }
+  .profile-poster-list span { display: block; font-size: 12px; color: var(--td-muted); margin-top: 2px; }
   .tdoc-modal textarea {
     width: 100%;
     box-sizing: border-box;

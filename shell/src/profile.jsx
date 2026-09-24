@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
+import { POSTER_KINDS, downloadHandlePoster, profileUrl } from './profile-posters.js';
 import './docs-hub.css';
 
 const CURATE_WARN_KEY = 'tdoc.curateWarned';
@@ -121,11 +122,30 @@ export function Profile({ boot }) {
   const [handleStatus, setHandleStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [pickView, setPickView] = useState(readPickView);
+  const [shareStatus, setShareStatus] = useState('');
   const identity = boot.identity || null;
+
+  useEffect(() => {
+    if (!mine) return;
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get('share') === '1') setModal('share');
+    } catch { /* ignore */ }
+  }, [mine]);
 
   const setView = (view) => {
     setPickView(view);
     writePickView(view);
+  };
+
+  const copyProfileLink = async () => {
+    const url = profileUrl(login);
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareStatus('Link copied.');
+    } catch {
+      setShareStatus(url);
+    }
   };
 
   const refreshDocsFromCatalog = (nextCatalog) => {
@@ -218,7 +238,7 @@ export function Profile({ boot }) {
         );
         return;
       }
-      if (body.url) location.assign(body.url);
+      if (body.url) location.assign(body.url.includes('?') ? `${body.url}&share=1` : `${body.url}?share=1`);
       else location.reload();
     } catch {
       setHandleStatus('Could not save handle.');
@@ -269,6 +289,14 @@ export function Profile({ boot }) {
               ) : null}
               {mine ? (
                 <>
+                  {' · '}
+                  <button
+                    type="button"
+                    className="text-btn"
+                    onClick={() => { setShareStatus(''); setModal('share'); }}
+                  >
+                    Share
+                  </button>
                   {' · '}
                   <button
                     type="button"
@@ -389,6 +417,40 @@ export function Profile({ boot }) {
             onChange={(event) => setBioDraft(event.target.value)}
             placeholder="What you write about…"
           />
+        </ProfileDialog>
+      ) : null}
+
+      {modal === 'share' ? (
+        <ProfileDialog
+          title="Share your profile"
+          onClose={() => setModal(null)}
+          actions={<button type="button" className="primary" onClick={() => setModal(null)}>Done</button>}
+        >
+          <p className="manage-hint">
+            Copy the link, or download a white big-type poster with your handle filled in.
+          </p>
+          <div className="profile-share-link">
+            <code>{profileUrl(login)}</code>
+            <button type="button" className="text-btn" onClick={copyProfileLink}>Copy link</button>
+          </div>
+          {shareStatus ? <p className="manage-hint">{shareStatus}</p> : null}
+          <ul className="profile-poster-list">
+            {POSTER_KINDS.map((kind) => (
+              <li key={kind.id}>
+                <div>
+                  <b>{kind.label}</b>
+                  <span>{kind.hint}</span>
+                </div>
+                <button
+                  type="button"
+                  className="text-btn"
+                  onClick={() => downloadHandlePoster(login, kind.id)}
+                >
+                  Download PNG
+                </button>
+              </li>
+            ))}
+          </ul>
         </ProfileDialog>
       ) : null}
 
