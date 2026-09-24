@@ -52,13 +52,14 @@ fs.writeFileSync(path.join(out, 'meta.json'), JSON.stringify({
   title: meta.title,
   created: meta.created,
   versions: [{ n: 1, created: latest.created, prompt: 'tdoc landing page' }],
-  // /api/upload applies this. A homepage is public by definition, and
-  // commenting stays open because being commentable is the pitch. History
-  // is owner-only: there is one version, and nobody needs our archive.
+  // Commenting stays OFF on the shipped homepage: real review threads made
+  // tdoc.dev/ look like somebody else's working doc. The page still demos
+  // the product with its static in-page mock (no login). Visitors who want
+  // a live thread publish their own doc.
   access: {
     visibility: 'public',
     history_visibility: 'owner',
-    commenting: 'signed_in',
+    commenting: 'off',
     allowed_users: [],
   },
 }, null, 2) + '\n');

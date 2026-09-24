@@ -8047,6 +8047,16 @@ export default {
           kind: 'publish_merge', slug, localComments: localComments || [], aids, version: verNum,
         });
         mergedLocal = (res.body && res.body.mergedComments) || 0;
+        // Homepage replace: the release payload ships an empty thread, but
+        // merge is add-only — old review comments would stick forever. Wipe
+        // so tdoc.dev/ stays a product page with the static demo, not a live
+        // collaborative doc.
+        if (replace && slug === LANDING_SLUG && auth.actor && auth.actor.kind === 'admin') {
+          const wiped = await mutateComments(env, slug, { kind: 'wipe', slug });
+          if (!(wiped && wiped.body && wiped.body.ok !== false) && wiped.status && wiped.status >= 400) {
+            console.error('[upload] landing comment wipe failed (non-fatal):', wiped.status, wiped.body);
+          }
+        }
       } catch (e) {
         console.error('[upload] comment merge/reconcile failed (non-fatal):', e.message);
       }
