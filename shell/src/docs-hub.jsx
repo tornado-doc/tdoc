@@ -235,7 +235,7 @@ function ClaimHandleDialog({ suggested, current, onClose }) {
         setBusy(false);
         return;
       }
-      if (body.url) location.assign(body.url);
+      if (body.url) location.assign(body.url.includes('?') ? `${body.url}&share=1` : `${body.url}?share=1`);
       else location.reload();
     } catch {
       setStatus('Could not claim handle.');
