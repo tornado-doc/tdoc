@@ -1,5 +1,5 @@
 {
- "title": "tornado-doc",
+ "title": "Tornado: AI Native Docs",
  "slug": "tornado-doc",
  "created": "2026-08-15T00:00:00Z",
  "versions": [
@@ -222,6 +222,11 @@
    "n": 44,
    "created": "2026-08-27T00:00:00Z",
    "prompt": "Swap the brand mark for the tornado: transparent line art, 192px, so the page-level dark invert turns it white"
+  },
+  {
+   "n": 45,
+   "created": "2026-09-24T08:00:00Z",
+   "prompt": "Replace old filled tornado brand with Julie square stroke mark; refresh embedded favicons; enlarge tab favicon in assets"
   }
  ],
  "access": {
