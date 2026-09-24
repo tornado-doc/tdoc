@@ -959,8 +959,10 @@ function shellDocument(slug, version, nonce, reqUrl) {
   } catch {}
   const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(rawHtml, 180)) || '';
   const seo = pageUrl ? {
-    title,
-    description: description || (isLanding ? 'Docs that fix themselves.' : 'A local tdoc.'),
+    title: isLanding ? 'Tornado: AI Native Docs' : title,
+    description: isLanding
+      ? 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.'
+      : (description || 'A local tdoc.'),
     url: pageUrl,
     image: `${new URL(pageUrl).origin}/tdoc_logo.png`,
     type: isLanding ? 'website' : 'article',

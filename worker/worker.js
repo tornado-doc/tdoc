@@ -1577,9 +1577,18 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   let shareImage = cachedImage || fromHtml || '';
   if (shareImage && shareImage.startsWith('/') && origin) shareImage = origin + shareImage;
   if (!shareImage && origin) shareImage = `${origin}/tdoc_logo.png`;
+  // Homepage share cards: never use the slug title or the first inline SVG
+  // (brand mark) — crawlers only see the shell SEO, not the framed landing.
+  let seoTitle = title;
+  let seoDescription = description || (isLanding ? 'Docs that fix themselves.' : `A tdoc by ${author || 'tdoc'}.`);
+  if (isLanding) {
+    seoTitle = 'Tornado: AI Native Docs';
+    seoDescription = 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.';
+    shareImage = origin ? `${origin}/tdoc_logo.png` : '/tdoc_logo.png';
+  }
   const seo = origin ? {
-    title,
-    description: description || (isLanding ? 'Docs that fix themselves.' : `A tdoc by ${author || 'tdoc'}.`),
+    title: seoTitle,
+    description: seoDescription,
     url: pageUrl,
     image: shareImage,
     type: isLanding ? 'website' : 'article',
