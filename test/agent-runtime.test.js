@@ -115,6 +115,24 @@ t('tdoc_logo.svg is the vector SoT; PNG stays for Open Graph', () => {
   assert(fs.readFileSync(pngPath, { flag: 'r' })[0] === 0x89, 'not a PNG');
 });
 
+t('worker favicon + homescreen icons match assets (no stale embed)', () => {
+  // Tab SVG and Add-to-Home-Screen PNGs are both embedded in the worker.
+  // Updating only assets/ (or only the SVG const) left the phone icon on the
+  // old mark — pin all four so they cannot diverge again.
+  const fav = fs.readFileSync(path.join(__dirname, '..', 'assets', 'favicon.svg'), 'utf8');
+  const mFav = src.match(/const TDOC_FAVICON_SVG = `([\s\S]*?)`;/);
+  assert(mFav, 'TDOC_FAVICON_SVG missing');
+  assert(mFav[1] === fav, 'worker favicon SVG drifted from assets/favicon.svg');
+  assert(/rx="/.test(fav), 'favicon must be the rounded field');
+  const home = src.match(/const TDOC_HOME_ICONS = \{([\s\S]*?)\n\};/);
+  assert(home, 'TDOC_HOME_ICONS missing');
+  for (const name of ['apple-touch-icon.png', 'icon-192.png', 'icon-512.png']) {
+    const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', name));
+    const b64 = asset.toString('base64');
+    assert(home[1].includes(b64), `worker TDOC_HOME_ICONS drifted from assets/${name}`);
+  }
+});
+
 t('worker TDOC_LOGO_SVG matches assets/tdoc_logo.svg', () => {
   const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', 'tdoc_logo.svg'), 'utf8');
   const m = src.match(/const TDOC_LOGO_SVG = `([\s\S]*?)`;/);
