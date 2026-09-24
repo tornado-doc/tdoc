@@ -395,7 +395,7 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
 t('release payload carries the homepage access policy', () => {
   // /api/upload writes meta.access. Without it, tdoc-publish defaults a
   // brand-new access block to unlisted, and whoever publishes the homepage
-  // has to remember --visibility public --history owner --commenting signed_in.
+  // has to remember --visibility public --history owner --commenting off.
   // The payload states the policy so the flags are not load-bearing.
   const { execFileSync } = require('child_process');
   const script = path.join(root, 'bin', 'tdoc-landing-release');
@@ -409,8 +409,8 @@ t('release payload carries the homepage access policy', () => {
     `homepage must be public, got ${relMeta.access.visibility}`);
   assert(relMeta.access.history_visibility === 'owner',
     `homepage history must be owner-only, got ${relMeta.access.history_visibility}`);
-  assert(relMeta.access.commenting === 'signed_in',
-    `homepage commenting must be signed_in, got ${relMeta.access.commenting}`);
+  assert(relMeta.access.commenting === 'off',
+    `homepage commenting must be off (demo is static), got ${relMeta.access.commenting}`);
   assert(Array.isArray(relMeta.access.allowed_users) && relMeta.access.allowed_users.length === 0,
     `homepage allowlist must be empty, got ${JSON.stringify(relMeta.access.allowed_users)}`);
 
