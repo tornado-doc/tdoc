@@ -172,7 +172,7 @@
    Android takes the manifest's PNGs. Both sit on the reader's wallpaper, so
    unlike the mark itself they carry a field — the same reason tdoc_logo.png
    keeps one for Open Graph. */
-'<link rel="apple-touch-icon" href="/apple-touch-icon.png">\n' +
+'<link rel="apple-touch-icon" href="/apple-touch-icon-v3.png">\n' +
 '<link rel="manifest" href="/site.webmanifest">\n' +
 '<title>' + esc(d.title) + '</title>\n' +
 seoHeadHtml(d) +
@@ -190,7 +190,7 @@ seoBodyHtml(d) +
     return '<!doctype html><html lang="en"><head>\n' +
       '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">\n' +
       '<link rel="icon" href="/favicon.svg" type="image/svg+xml">\n' +
-      '<link rel="apple-touch-icon" href="/apple-touch-icon.png">\n' +
+      '<link rel="apple-touch-icon" href="/apple-touch-icon-v3.png">\n' +
       '<link rel="manifest" href="/site.webmanifest">\n' +
       '<title>' + esc(d.title) + '</title>\n' +
       '<link rel="stylesheet" href="' + esc(d.runtimeCssPath) + '">\n' +

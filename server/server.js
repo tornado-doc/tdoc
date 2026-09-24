@@ -1292,8 +1292,11 @@ const server = http.createServer(async (req, res) => {
   // Home-screen icons and the manifest that points at them (server/shell.js).
   const HOME_ICONS = {
     '/apple-touch-icon.png': ['apple-touch-icon.png', 'image/png'],
+    '/apple-touch-icon-v3.png': ['apple-touch-icon-v3.png', 'image/png'],
     '/icon-192.png': ['icon-192.png', 'image/png'],
+    '/icon-192-v3.png': ['icon-192-v3.png', 'image/png'],
     '/icon-512.png': ['icon-512.png', 'image/png'],
+    '/icon-512-v3.png': ['icon-512-v3.png', 'image/png'],
     '/site.webmanifest': ['site.webmanifest', 'application/manifest+json; charset=utf-8'],
   };
   if (HOME_ICONS[p]) {
