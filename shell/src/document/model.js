@@ -18,6 +18,11 @@ export const QUICK_REACTIONS = [
 
 export function avatarFor(author) {
   const key = String(author?.login || author?.name || '').toLowerCase();
+  // Product seed ("First reader here") and other system/tdoc rows use the
+  // global mark — even when older comments stored an empty avatar_url.
+  if (key === 'tdoc' || author?.kind === 'system') {
+    return author?.avatar_url || '/tdoc_logo.svg';
+  }
   if (author?.kind !== 'agent') return author?.avatar_url || '';
   if (key.includes('claude') || key.includes('anthropic')) {
     return 'https://cdn.simpleicons.org/claude/d97757';
