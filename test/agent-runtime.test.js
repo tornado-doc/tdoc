@@ -126,11 +126,20 @@ t('worker favicon + homescreen icons match assets (no stale embed)', () => {
   assert(/rx="/.test(fav), 'favicon must be the rounded field');
   const home = src.match(/const TDOC_HOME_ICONS = \{([\s\S]*?)\n\};/);
   assert(home, 'TDOC_HOME_ICONS missing');
-  for (const name of ['apple-touch-icon.png', 'icon-192.png', 'icon-512.png']) {
+  for (const name of [
+    'apple-touch-icon.png', 'apple-touch-icon-v3.png',
+    'icon-192.png', 'icon-192-v3.png',
+    'icon-512.png', 'icon-512-v3.png',
+  ]) {
     const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', name));
     const b64 = asset.toString('base64');
     assert(home[1].includes(b64), `worker TDOC_HOME_ICONS drifted from assets/${name}`);
   }
+  // Head links must point at the versioned apple-touch so iOS cannot keep a
+  // forever-cached /apple-touch-icon.png from an earlier mark.
+  const shell = fs.readFileSync(path.join(__dirname, '..', 'server/shell.js'), 'utf8');
+  assert(shell.includes('apple-touch-icon-v3.png'), 'shell head must cache-bust apple-touch');
+  assert(!/href="\/apple-touch-icon\.png"/.test(shell), 'unversioned apple-touch href left in shell');
 });
 
 t('worker TDOC_LOGO_SVG matches assets/tdoc_logo.svg', () => {
