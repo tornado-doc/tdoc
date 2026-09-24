@@ -103,18 +103,11 @@ t('tdoc_logo.svg is the vector SoT; PNG stays for Open Graph', () => {
   const svg = fs.readFileSync(svgPath, 'utf8');
   assert(/<svg[\s>]/.test(svg), 'not an SVG');
   assert(/<path[\s>]/.test(svg), 'SVG has no path');
-  assert(/currentColor/.test(svg), 'SVG must follow currentColor');
-  // The mark carries no background field. It used to sit on an opaque white
-  // rect, which stayed invisible in both themes because the page-level
-  // `filter: invert(1)` flips the rect and the page background together. That
-  // only holds while the mark sits on the page's own background: on a tinted
-  // surface, a favicon, or somebody else's README the white box shows. Line
-  // art in currentColor needs no field — it follows the text in light mode and
-  // inverts to white with it in dark.
-  assert(!/<rect[^>]*fill="#(fff|ffffff)"/i.test(svg), 'the mark must not carry a background field');
-  assert(svg.indexOf('fill="#ffffff"') < svg.indexOf('fill="currentColor"'),
-    'the field must be painted before the ink, or it covers the drawing');
-  assert(/fill-rule\s*=\s*["']evenodd["']/.test(svg), 'outline holes need evenodd');
+  assert(/stroke="currentColor"/.test(svg), 'SVG must follow currentColor');
+  // No background field: home-screen / OG rasters carry the square field;
+  // the vector mark inverts with the page via currentColor + dark invert.
+  assert(!/<rect[^>]*fill="#(fff|ffffff|000|000000)"/i.test(svg),
+    'the mark must not carry a background field');
   assert(!/<image[\s>]/i.test(svg), 'embedded <image> not allowed');
   assert(!/data:image\//i.test(svg), 'embedded bitmap not allowed');
   assert(!/<script[\s>]/i.test(svg), 'SVG must be inert');
