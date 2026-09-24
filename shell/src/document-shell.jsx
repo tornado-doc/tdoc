@@ -230,6 +230,8 @@ export function DocumentShell({ boot, config }) {
     slug: config.slug,
     version: config.version,
     onUnauthorized: signIn,
+    demo: !!config.demoComments,
+    identity: config.identity,
   });
 
   const [invited, setInvited] = useState(null);
