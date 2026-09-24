@@ -2111,7 +2111,7 @@ function duplicateComment(comments, { author, text, anchor, parent_id, at }, win
 // really for -- a first comment already on the page, so row 3 is a reply and
 // not a blank -- the publish path does anyway, on their own first doc.
 const SEED_COMMENT_TEXT = 'First reader here. Which claim on this page would you defend least? Highlight it and say so.';
-const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '', kind: 'system' };
+const SEED_COMMENT_AUTHOR = { login: 'tdoc', name: 'tdoc', avatar_url: '/tdoc_logo.svg', kind: 'system' };
 function seedCommentAnchor(html) {
   const m = String(html || '').match(/<p\b[^>]*>([\s\S]*?)<\/p>/i);
   if (!m) return null;
