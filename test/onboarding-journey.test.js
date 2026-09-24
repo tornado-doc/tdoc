@@ -83,7 +83,7 @@ t('the seed comment anchors to the first paragraph the reader can see', () => {
   assert(anchorFor('<div>no paragraphs</div>') === null, 'no paragraph, no anchor — the comment still posts unanchored');
   assert(worker.includes("const SEED_COMMENT_TEXT = 'First reader here. Which claim on this page would you defend least? Highlight it and say so.'"),
     'the seed comment asks for the one gesture the page teaches');
-  assert(/SEED_COMMENT_AUTHOR = \{ login: 'tdoc', name: 'tdoc', avatar_url: '\/tdoc_logo\.svg', kind: 'system' \}/.test(worker),
+  assert(/SEED_COMMENT_AUTHOR = \{ login: 'tdoc', name: 'tdoc', avatar_url: '\/tdoc_logo\.png', kind: 'system' \}/.test(worker),
     'signed as tdoc with the global mark');
 });
 

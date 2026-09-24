@@ -21,7 +21,9 @@ export function avatarFor(author) {
   // Product seed ("First reader here") and other system/tdoc rows use the
   // global mark — even when older comments stored an empty avatar_url.
   if (key === 'tdoc' || author?.kind === 'system') {
-    return author?.avatar_url || '/tdoc_logo.svg';
+    // Filled light square (white field). Empty avatar_url on older seed rows
+    // must not fall back to the stroke-only chrome mark.
+    return author?.avatar_url || '/tdoc_logo.png';
   }
   if (author?.kind !== 'agent') return author?.avatar_url || '';
   if (key.includes('claude') || key.includes('anthropic')) {
