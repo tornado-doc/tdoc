@@ -924,7 +924,7 @@ When the user reports a problem, check these first:
 - Sandboxed-safe: the author document renders inside a sandboxed, opaque-origin iframe (`/frame`), so don't rely on top-level navigation, `window.parent`, cookies, or `localStorage`.
 - Comment chrome lives in the reader shell, outside your document — **don't** add commenting UI yourself.
 - Don't add a "made with tdoc" footer, version selector, or share button. The shell handles those.
-- Use SVG snapshots for inline diagrams (commentable text, and CSS can animate it). Excalidraw is optional: choose per diagram using `$SKILL_DIR/authoring/visuals.md` and the artifact contract in `$SKILL_DIR/authoring/structure/components.md`. **Don't use `<canvas>` in the host** — nothing can draw to it without JS. Draw inside a widget island if needed.
+- Use SVG snapshots for inline diagrams (commentable text, and CSS can animate it). For editable Excalidraw diagrams, see the artifact contract in `$SKILL_DIR/authoring/structure/components.md`. **Don't use `<canvas>` in the host** — nothing can draw to it without JS. Draw inside a widget island if needed.
 - Default font stack: `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`. Mono: `ui-monospace, "SF Mono", Menlo, monospace`.
 
 ### Interactivity: CSS only

@@ -234,8 +234,6 @@ in a sandboxed widget island.
 
 The provider loads the official `@excalidraw/excalidraw` React editor on demand.
 Do not add React, script tags, an editor iframe, or a CDN import to author HTML.
-Choose whether to use this artifact using `../visuals.md`; ordinary SVG does
-not require it.
 
 ```html
 <figure id="value-flow" data-tdoc-artifact="Value flow"
@@ -254,6 +252,8 @@ supports shapes, text, lines, arrows and freehand drawings, not embedded web
 pages or image elements. Use native text/container and arrow bindings so labels
 and connectors follow their shapes. Include a responsive, accessible SVG
 snapshot even when no JavaScript is available. Keep scene and snapshot in sync.
+After manual edits, update the saved scene while preserving element IDs and
+positions rather than regenerating a layout that discards those edits.
 
 The source and snapshot live in the same HTML version: existing write, publish,
 pull, duplicate and download flows carry both. Owners choose Apply to document

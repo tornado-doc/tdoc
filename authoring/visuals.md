@@ -38,19 +38,10 @@ competitor analysis wants stat tiles + a positioning map + a comparison matrix
 + maybe a bar chart. A technical design wants an architecture diagram + a
 sequence + a metrics row. Reach for the variety the content earns.
 
-## Optional Excalidraw diagrams
+## Excalidraw
 
-Excalidraw is an optional diagram tool, not a document requirement. Choose it
-per diagram when editable nodes, connectors, grouping, or manual layout would
-help (for example value flows or architecture diagrams). Simple SVG/CSS and
-data charts remain valid choices. A document can mix these freely. User
-instructions take precedence; do not convert existing diagrams just to use
-Excalidraw. Preserve their format unless a change is requested or justified.
-
-When choosing it, follow the Excalidraw artifact contract in
-`structure/components.md`: include both editable scene JSON and a readable SVG.
-After manual edits, the saved scene is authoritative; update existing element
-IDs and positions instead of regenerating a layout that discards the edits.
+The official Excalidraw editor is available. Its scene and SVG snapshot format
+is documented in `structure/components.md`.
 
 ## The style owns the look, not the choice
 
