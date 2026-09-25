@@ -98,9 +98,8 @@ t('names tdoc and tornado-doc', () => {
   assert(!html.includes('Tornado Dog'), 'old Tornado Dog name still present');
   assert(meta.title === 'Tornado: AI Native Docs', `meta title was ${meta.title}`);
   assert(meta.slug === 'tornado-doc', `meta slug was ${meta.slug}`);
-  // Hero no longer duplicates the big stroke mark — the shell top bar already
-  // carries the logo, and the in-page brand block was visual noise.
-  assert(!/class="brand-mark"/.test(html), 'hero still has the large brand-mark block');
+  // Hero mark is Julie's square stroke, not the old filled tornado path.
+  assert(/class="brand-mark"[^>]*viewBox="0 0 436 436"/.test(html), 'brand-mark is not the square stroke');
   assert(!/viewBox="201\.2 205\.2 597\.6 597\.6"/.test(html), 'old filled tornado mark still in landing');
 });
 
@@ -349,10 +348,14 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage must not receive the document Share/Copy/Download actions');
   assert(/demo: !!config\.demoComments/.test(documentShell),
     'homepage shell must wire demoComments into useComments');
-  assert(/Try @torvalds/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
-    'demo composer placeholder should invite tagging a popular GitHub handle');
+  assert(/Type @name/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
+    'demo composer placeholder should invite tagging by @name');
   assert(/@you@email\.com/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
     'demo composer placeholder should also show email tagging');
+  assert(/elementComment: !config\.isLanding/.test(documentShell),
+    'landing must turn off block/artifact hover chrome');
+  assert(/var elementComment = true/.test(fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8')),
+    'frame probe must gate element/block hover');
   assert(/tdoc-demo-chip/.test(fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8')),
     'demo chip style must exist');
 });

@@ -1,16 +1,14 @@
 import { useEffect, useState } from 'react';
 import { listMentionableUsers } from '../document/api.js';
 
-// Homepage demo: people the visitor can try tagging without hitting /api/mentions.
-// Pick a handle everyone recognizes as "on GitHub" — the point is the affordance.
-export const DEMO_MENTIONABLE = [
-  { login: 'torvalds', name: 'Linus Torvalds' },
-];
+// Homepage demo: seed nobody famous — the placeholder teaches the affordance,
+// and typing `@` still opens GitHub search for real people.
+export const DEMO_MENTIONABLE = [];
 
 // The people this session may name after `@` on this doc. Refetched as the
 // conversation grows, so whoever just commented becomes someone you can answer
 // by name. Empty for a reader who cannot comment here — the server answers 403
-// and there is nobody to offer. `demo` skips the API and offers DEMO_MENTIONABLE.
+// and there is nobody to offer. `demo` skips the API (no write path on landing).
 export function useMentionable(slug, enabled, participantCount, { demo = false } = {}) {
   const [people, setPeople] = useState(demo ? DEMO_MENTIONABLE : []);
 

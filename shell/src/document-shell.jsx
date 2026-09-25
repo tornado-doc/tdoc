@@ -362,7 +362,7 @@ export function DocumentShell({ boot, config }) {
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       bridge.send({ type: 'tdoc:theme', theme: nextTheme });
-      bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read' });
+      bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding });
       comments.refresh();
     },
     'tdoc:editState': (message) => editorRef.current?.frameHandlers.editState(message),
