@@ -153,6 +153,58 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 404, `expected 404, got ${r.status}`);
   });
 
+  // ---- linking an agent to an account ----
+  // The link code and the upload token are deliberately different credentials.
+  // These pin that neither one alone gets anywhere.
+  async function pendingLink(env, code = 'lk_test', body = {}) {
+    await env.META.put(`raft-link:${code}`, JSON.stringify({
+      provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', agent_name: 'xiaocc', ...body,
+    }));
+    return code;
+  }
+  const link = (env, token, body) => worker.fetch(req('/api/notify/link', { method: 'POST', token, body }), env, {});
+
+  await t('a link code plus an account token binds the agent as a fallback recipient', async () => {
+    const { env, token, slug } = await seed();
+    const code = await pendingLink(env);
+    const r = await link(env, token, { link_code: code });
+    const body = await r.json();
+    assert(r.status === 200 && body.ok, `link ${r.status}: ${JSON.stringify(body)}`);
+    assert(body.target.agent_sub === 'uuid-a', 'the bound target is the agent that signed in');
+    // A doc nobody has touched now resolves to the account fallback.
+    const targets = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(targets.default && targets.default.source === 'account', `expected the account fallback, got ${JSON.stringify(targets.default)}`);
+  });
+
+  await t('a link code alone is worthless without a token', async () => {
+    const { env } = await seed();
+    const code = await pendingLink(env);
+    const r = await worker.fetch(req('/api/notify/link', { method: 'POST', body: { link_code: code } }), env, {});
+    assert(r.status === 401, `expected 401 without a token, got ${r.status}`);
+    assert(await env.META.get(`raft-link:${code}`), 'a refused attempt must not burn the code');
+  });
+
+  await t('a token alone cannot invent an agent that never signed in', async () => {
+    const { env, token } = await seed();
+    const r = await link(env, token, { link_code: 'lk_never_issued' });
+    assert(r.status === 404, `expected 404 for an unissued code, got ${r.status}`);
+  });
+
+  await t('a link code is single use', async () => {
+    const { env, token } = await seed();
+    const code = await pendingLink(env);
+    assert((await link(env, token, { link_code: code })).status === 200, 'first redemption works');
+    const again = await link(env, token, { link_code: code });
+    assert(again.status === 404, `a redeemed code must not work twice, got ${again.status}`);
+  });
+
+  await t('relinking the same agent does not duplicate it', async () => {
+    const { env, token } = await seed();
+    await link(env, token, { link_code: await pendingLink(env, 'lk_a') });
+    const body = await (await link(env, token, { link_code: await pendingLink(env, 'lk_b') })).json();
+    assert(body.targets === 1, `expected one target, got ${body.targets}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

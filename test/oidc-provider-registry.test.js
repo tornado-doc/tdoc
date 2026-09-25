@@ -49,6 +49,7 @@ function stubIssuers(userinfo) {
         return Response.json({ access_token: `at:${iss}`, redirect });
       }
       if (url === `${iss}/userinfo`) return Response.json(userinfo[iss] || {});
+      if (url === `${iss}/api/oauth/serverinfo`) return Response.json({ id: 'S1', slug: 'acme' });
     }
     return realFetch(input, init);
   };
@@ -83,14 +84,31 @@ const cb = (path, cookie) => new Request(`https://tdoc.dev${path}`, cookie ? { h
     assert(!setCookie.includes('tdoc_oidcst='), 'raft login must not touch the generic seat cookie');
   });
 
-  await t('stateless raft callback with an AGENT identity reaches the raft seat', async () => {
-    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
-    stubIssuers({ [RAFT]: { sub: 'agent_1', type: 'agent', name: '小c' } });
-    const r = await worker.fetch(cb('/auth/raft/callback?code=agentcode'), env, {});
-    assert(r.status === 501, `expected the not-yet-wired seat (501), got ${r.status} ${await r.clone().text()}`);
+  await t('stateless raft callback with an AGENT identity gets a link code and NO session cookie', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...RAFT_ENV, RAFT_API_BASE: RAFT });
+    stubIssuers({ [RAFT]: { sub: 'agent-uuid-a', type: 'agent', name: 'xiaocc' } });
+    const r = await worker.fetch(cb('/auth/raft/callback?code=c'), env, {});
     const body = await r.json();
-    assert(body.error === 'raft_signin_not_wired' && body.type === 'agent', JSON.stringify(body));
-    assert(calls.includes(`${RAFT}/token`), 'code was never exchanged');
+    assert(r.status === 200 && body.ok && body.link_code, `expected a link code, got ${r.status}: ${JSON.stringify(body)}`);
+    // The invariant the stateless path rests on: skipping the state check is
+    // only safe while there is no browser session to walk a victim onto.
+    assert(!r.headers.get('set-cookie'), 'an agent sign-in must never mint a session cookie');
+    assert(body.agent.server_id === 'S1', 'the server comes from the issuer, not the agent');
+  });
+
+  await t('the server id is taken from the issuer, not from anything the agent said', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...RAFT_ENV, RAFT_API_BASE: RAFT });
+    // userinfo claims a different server; serverinfo is the only source read.
+    stubIssuers({ [RAFT]: { sub: 'agent-uuid-a', type: 'agent', name: 'x', server_id: 'ATTACKER' } });
+    const body = await (await worker.fetch(cb('/auth/raft/callback?code=c'), env, {})).json();
+    assert(body.agent.server_id === 'S1', `server_id should be S1 from serverinfo, got ${body.agent.server_id}`);
+  });
+
+  await t('no serverinfo means no link code — it does not guess', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...RAFT_ENV, RAFT_API_BASE: 'https://unreachable.example' });
+    stubIssuers({ [RAFT]: { sub: 'agent-uuid-a', type: 'agent', name: 'x' } });
+    const r = await worker.fetch(cb('/auth/raft/callback?code=c'), env, {});
+    assert(r.status === 502, `expected 502, got ${r.status}`);
   });
 
   await t('stateless raft callback with a HUMAN identity is refused', async () => {

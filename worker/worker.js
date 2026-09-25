@@ -2332,12 +2332,69 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
   ]);
 }
 
-// Login with Raft — the registry seat is wired (routes, state, agent-only
-// stateless gate); what a Raft identity becomes on our side (the
-// account-idp:raft:<sub> link, session vs notify target) lands with the
-// notification work. Until then a verified Raft sign-in stops here.
-async function completeRaftSignIn(env, { user }) {
-  return json({ error: 'raft_signin_not_wired', type: user && user.type === 'agent' ? 'agent' : 'user' }, { status: 501 });
+// Login with Raft.
+//
+// A Raft sign-in answers "WHICH AGENT is this", and nothing else. It is not an
+// authority to write: that stays the upload token, exactly as it is for a
+// person publishing from their laptop. Keeping the two apart is what makes the
+// linking step below safe to expose — binding an agent to an account needs
+// BOTH credentials, so a Raft identity alone can never reach somebody's docs
+// and an upload token alone can never invent an agent that did not sign in.
+//
+// INVARIANT: the stateless path must never mint a browser session. Skipping
+// the state check is only defensible because there is no browser in this flow
+// to be logged in; hand it a session cookie and the skipped check becomes a
+// login-CSRF hole, where a victim's browser is walked onto somebody else's
+// identity. An agent gets a one-time link code, never a cookie.
+const RAFT_LINK_TTL = 600;
+
+async function completeRaftSignIn(env, { user, tok, stateless, ret, clearState }) {
+  const sub = user && user.sub ? String(user.sub) : '';
+  if (!sub) {
+    return authStatusResponse('This sign-in carried no stable identifier, so it cannot be used here.', { error: true, status: 403 });
+  }
+  // A human signing in with Raft is a P1 seat. Refusing is the honest answer;
+  // falling through to the agent path would hand a person an agent's linking
+  // code, which is the one thing this function exists to keep separate.
+  if (!stateless || !(user && user.type === 'agent')) {
+    return authStatusResponse('Signing in to tdoc with a Raft account is not available yet.', { error: true, status: 501 });
+  }
+  // The server the agent belongs to comes from the ISSUER, never from the
+  // agent: the token is bound to one server, so asking the issuer is the only
+  // reading a caller cannot shape. Without it an agent could name a server it
+  // has no standing in and be delivered notifications meant for that server.
+  const server = await raftServerInfo(env, tok && tok.access_token);
+  if (!server || !server.id) {
+    return authStatusResponse('Raft did not say which server this identity belongs to, so the sign-in cannot be completed.', { error: true, status: 502 });
+  }
+  const code = rand(16);
+  await env.META.put(`raft-link:${code}`, JSON.stringify({
+    provider: 'raft',
+    server_id: String(server.id),
+    agent_sub: sub,
+    agent_name: typeof user.name === 'string' ? user.name.slice(0, 80) : '',
+    at: new Date().toISOString(),
+  }), { expirationTtl: RAFT_LINK_TTL });
+  // JSON, not a redirect: the caller is a CLI holding an HTTP response, and
+  // no Set-Cookie on this path by construction.
+  return json({
+    ok: true,
+    link_code: code,
+    expires_in: RAFT_LINK_TTL,
+    agent: { server_id: String(server.id), agent_sub: sub, agent_name: user.name || '' },
+  });
+}
+
+async function raftServerInfo(env, accessToken) {
+  if (!accessToken) return null;
+  const base = env.RAFT_API_BASE || 'https://api.raft.build';
+  try {
+    const r = await fetch(`${base}/api/oauth/serverinfo`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'User-Agent': 'tdoc-worker' },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
 }
 
 function authStatusResponse(message, { error = false, status = 200 } = {}) {
@@ -7127,7 +7184,7 @@ export default {
         if (stateless && !(user && user.type === 'agent')) {
           return authStatusResponse('Only an agent may sign in without a browser session. Please start sign-in again.', { error: true, status: 403 });
         }
-        return await cfg.complete(env, { user, ret, stateless, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
+        return await cfg.complete(env, { user, tok, disc, ret, stateless, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
       } catch (e) {
         return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
       }
@@ -8006,6 +8063,40 @@ export default {
         });
       }
       return json(res.body, { status: res.status });
+    }
+
+    // Bind an agent that signed in with Raft to THIS account, as a fallback
+    // recipient for docs with nobody following them.
+    //
+    // This is the one place the two credentials meet, and it needs both: the
+    // link code proves which agent signed in (the issuer said so), the upload
+    // token proves whose account is being written to. Either alone is inert —
+    // which is the whole reason an agent may sign in without a browser.
+    if (p === '/api/notify/link' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) {
+        return json({ error: 'account_token_required' }, { status: 403 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const code = typeof body.link_code === 'string' ? body.link_code : '';
+      if (!code) return json({ error: 'link_code required' }, { status: 400 });
+      let pending = null;
+      try { pending = JSON.parse((await env.META.get(`raft-link:${code}`)) || 'null'); } catch {}
+      if (!pending) return json({ error: 'link_code_invalid_or_expired' }, { status: 404 });
+      // One use. A link code that survives its redemption is a bearer token
+      // for somebody else's account sitting in a log somewhere.
+      await env.META.delete(`raft-link:${code}`);
+      const target = normalizeNotifyTarget(pending);
+      if (!target) return json({ error: 'unsupported_target' }, { status: 400 });
+      const existing = await accountNotifyTargets(env, auth.actor.account_id);
+      const next = [
+        { ...target, last_touched: new Date().toISOString() },
+        ...existing.filter(t => !sameNotifyTarget(t, target)),
+      ].slice(0, NOTIFY_AGENTS_MAX);
+      await env.META.put(`account-notify:${auth.actor.account_id}`, JSON.stringify(next));
+      return json({ ok: true, target, targets: next.length });
     }
 
     // ---- outbound notification: handoff to the doc's follow-up agent ----
