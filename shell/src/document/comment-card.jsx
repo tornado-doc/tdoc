@@ -6,6 +6,19 @@ import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 
+function authorLine(author) {
+  if (!author) return 'anonymous';
+  if (author.kind === 'agent') {
+    // §4: brand stays on the avatar; the text line is handle · principal.
+    const handle = author.handle || null;
+    const principal = author.principal?.display || null;
+    if (handle && principal) return `${handle} · ${principal}`;
+    if (principal) return principal;
+    if (handle) return handle;
+  }
+  return author.name || author.login || 'anonymous';
+}
+
 function Author({ author, timestamp }) {
   if (!author) {
     return (
@@ -19,11 +32,14 @@ function Author({ author, timestamp }) {
   }
 
   const avatar = avatarFor(author);
+  const title = author.kind === 'agent' && author.principal?.terminal
+    ? author.principal.terminal
+    : undefined;
   return (
-    <div className={`author${author.kind === 'agent' ? ' tdoc-agent-author' : ''}`}>
+    <div className={`author${author.kind === 'agent' ? ' tdoc-agent-author' : ''}`} title={title}>
       {avatar ? <img src={avatar} alt="" /> : null}
       <span className="tdoc-cc-who">
-        <span className="login">{author.name || author.login || 'anonymous'}</span>
+        <span className="login">{authorLine(author)}</span>
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
       </span>
     </div>
@@ -462,6 +478,9 @@ export function CommentCard({
   // Bridge 2, on the owner's own doc: { line, state, onCopy }. Shown under
   // every thread the agent has not answered yet — one paste covers them all.
   handoff = null,
+  // Connected-App notify: owner can push this thread to an agent.
+  onSendToAgent = null,
+  sendToAgentBusy = false,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
   const [replyTarget, setReplyTarget] = useState(null);
@@ -604,6 +623,12 @@ export function CommentCard({
             : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
         </span>
       ) : null}
+      {comment.handoff_status === 'sent' ? (
+        <span className="tdoc-handoff-chip">Sent to agent</span>
+      ) : null}
+      {comment.handoff_status === 'resolved' ? (
+        <span className="tdoc-handoff-chip is-resolved">Agent resolved</span>
+      ) : null}
 
       <header className="tdoc-cc-head">
         <Author
@@ -623,7 +648,7 @@ export function CommentCard({
               <Check size={16} />
             </button>
           ) : null}
-          {isMine || canDelete || canMutate ? (
+          {isMine || canDelete || canMutate || onSendToAgent ? (
             <AppMenu
               trigger={(
                 <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
@@ -650,6 +675,14 @@ export function CommentCard({
                   onClick={() => onReanchor(comment.id)}
                 >
                   {unanchored ? 'Re-anchor' : 'Move anchor'}
+                </AppMenuItem>
+              ) : null}
+              {onSendToAgent && comment.status !== 'applied' ? (
+                <AppMenuItem
+                  disabled={sendToAgentBusy}
+                  onClick={() => onSendToAgent(comment.id)}
+                >
+                  Send to agent
                 </AppMenuItem>
               ) : null}
               {canDelete ? (
@@ -713,11 +746,11 @@ export function CommentCard({
             ) : null}
             {handoff.open || handoff.state !== 'idle' ? (
               <div className="tdoc-handoff-status" role="status" aria-live="polite">
-                {handoff.state === 'idle' ? 'Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.' : null}
+                {handoff.state === 'idle' ? 'Paste into your agent to address each comment and publish an update.' : null}
                 {handoff.state === 'waiting' && handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />{COPY_FALLBACK}</> : null}
                 {handoff.state === 'waiting' && !handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
-                {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading this</> : null}
-                {handoff.state === 'stuck' ? 'Still waiting — did you paste it into your agent?' : null}
+                {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading…</> : null}
+                {handoff.state === 'stuck' ? 'Check your agent’s window.' : null}
               </div>
             ) : null}
           </div>

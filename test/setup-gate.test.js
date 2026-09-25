@@ -448,7 +448,7 @@ t('a row being watched stops being a button', () => {
   assert(hint.includes('{still ? null : ('), 'and neither a wait nor a tick offers a button');
   // The card already says these. Said twice in two voices, a reader starts to
   // wonder whether they are two different waits.
-  for (const line of ['Waiting for your agent…', 'Your agent is reading this', 'Still waiting — did you paste it into your agent?']) {
+  for (const line of ['Waiting for your agent…', 'Your agent is reading…', 'Check your agent’s window.']) {
     assert(hint.includes(line) && card.includes(line), `"${line}" is the card's own wording`);
   }
 });
@@ -515,7 +515,7 @@ t('the gesture is spelled out', () => {
   // "Highlight a sentence" names it in the product's own vocabulary, which is
   // no help to somebody who has not made a highlight yet. The literal version
   // says what to do with a mouse and what will happen when they do.
-  assert(hint.includes("comment: 'Select any sentence to comment on it.'"), 'the literal gesture, and what it produces');
+  assert(hint.includes("comment: 'Select a sentence to comment.'"), 'the literal gesture, and what it produces');
   // One label for both rows, because it is one behaviour: open the card that
   // carries the next thing. A button naming its destination would name two.
   assert(hint.includes("const GO = 'Show me';"), 'and one way in');

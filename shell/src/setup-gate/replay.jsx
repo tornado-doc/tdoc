@@ -530,7 +530,7 @@ function DocTurns({ t, s, prompt, slug }) {
       {doc > 0 ? (
         <>
           <Answer>
-            <p>Published. Your first tdoc is live.</p>
+            <p>Published.</p>
             <p><a href="#">{url}</a></p>
             <ul>
               <li>Anyone with the link can read it</li>

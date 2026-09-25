@@ -2348,15 +2348,15 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
 // login-CSRF hole, where a victim's browser is walked onto somebody else's
 // identity. An agent gets a one-time link code, never a cookie.
 const RAFT_LINK_TTL = 600;
+const AGENT_SESSION_TTL = 60 * 60 * 24 * 30;
 
-async function completeRaftSignIn(env, { user, tok, stateless, ret, clearState }) {
+async function completeRaftSignIn(env, { user, tok, stateless }) {
   const sub = user && user.sub ? String(user.sub) : '';
   if (!sub) {
     return authStatusResponse('This sign-in carried no stable identifier, so it cannot be used here.', { error: true, status: 403 });
   }
   // A human signing in with Raft is a P1 seat. Refusing is the honest answer;
-  // falling through to the agent path would hand a person an agent's linking
-  // code, which is the one thing this function exists to keep separate.
+  // falling through would hand a person an agent session.
   if (!stateless || !(user && user.type === 'agent')) {
     return authStatusResponse('Signing in to tdoc with a Raft account is not available yet.', { error: true, status: 501 });
   }
@@ -2368,22 +2368,61 @@ async function completeRaftSignIn(env, { user, tok, stateless, ret, clearState }
   if (!server || !server.id) {
     return authStatusResponse('Raft did not say which server this identity belongs to, so the sign-in cannot be completed.', { error: true, status: 502 });
   }
-  const code = rand(16);
-  await env.META.put(`raft-link:${code}`, JSON.stringify({
+  const identity = {
     provider: 'raft',
     server_id: String(server.id),
+    ...(server.slug ? { server_slug: String(server.slug) } : {}),
     agent_sub: sub,
     agent_name: typeof user.name === 'string' ? user.name.slice(0, 80) : '',
     at: new Date().toISOString(),
-  }), { expirationTtl: RAFT_LINK_TTL });
-  // JSON, not a redirect: the caller is a CLI holding an HTTP response, and
-  // no Set-Cookie on this path by construction.
+  };
+  const asid = rand(24);
+  await env.META.put(`agent-session:${asid}`, JSON.stringify(identity), { expirationTtl: AGENT_SESSION_TTL });
+  // A one-time code as well, so a caller that cannot hold cookies still has a
+  // way through. Same identity, same two-credential rule at redemption.
+  const code = rand(16);
+  await env.META.put(`raft-link:${code}`, JSON.stringify(identity), { expirationTtl: RAFT_LINK_TTL });
   return json({
     ok: true,
     link_code: code,
     expires_in: RAFT_LINK_TTL,
-    agent: { server_id: String(server.id), agent_sub: sub, agent_name: user.name || '' },
+    agent: { server_id: identity.server_id, server_slug: identity.server_slug || null, agent_sub: sub, agent_name: identity.agent_name },
+  }, {
+    // SECURITY — read this before changing the cookie.
+    //
+    // Agent sign-in skips the OIDC state check because there is no browser in
+    // the flow to protect, and an earlier version therefore refused to set any
+    // cookie at all. That was the wrong conclusion drawn from the right worry,
+    // and it broke Login with Raft outright: the protocol IS a service session
+    // the caller keeps.
+    //
+    // What makes a stateless-issued cookie safe is not its absence but its
+    // emptiness. THIS SESSION CARRIES NO AUTHORITY. It names an agent and
+    // nothing else: it is stored under its own key, read by its own helper,
+    // and no route treats it as a tdoc account. A browser tricked into holding
+    // one has gained an answer to "which agent", which is not a secret and not
+    // a capability. Acting on an account still needs the upload token, so the
+    // two credentials stay orthogonal exactly as designed.
+    //
+    // The invariant to keep: never let this cookie widen into account access,
+    // and never merge it into `tdoc_sid`. If a future change needs an agent to
+    // act on an account, that change needs the token too — not a bigger cookie.
+    headers: {
+      'Set-Cookie': `tdoc_agent_sid=${asid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${AGENT_SESSION_TTL}`,
+    },
   });
+}
+
+// Resolve the agent behind a request, if any. Deliberately separate from
+// getSession: an agent session is not a tdoc account and must never be
+// mistaken for one by a caller reaching for "who is this".
+async function getAgentSession(env, req) {
+  const m = (req.headers.get('cookie') || '').match(/(?:^|;\s*)tdoc_agent_sid=([a-f0-9]+)/);
+  if (!m) return null;
+  try {
+    const raw = await env.META.get(`agent-session:${m[1]}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
 }
 
 async function raftServerInfo(env, accessToken) {
@@ -5277,7 +5316,11 @@ const NOTIFY_PROVIDERS = {
       const server_id = typeof t.server_id === 'string' ? t.server_id.trim() : '';
       const agent_sub = typeof t.agent_sub === 'string' ? t.agent_sub.trim() : '';
       if (!server_id || !agent_sub) return null;
-      return { server_id, agent_sub };
+      // The slug is what addresses a server when REQUESTING access; the id is
+      // what the resource URN is built from. They are different strings and
+      // the API rejects each in the other's place, so a target carries both.
+      const server_slug = typeof t.server_slug === 'string' ? t.server_slug.trim() : '';
+      return { server_id, agent_sub, ...(server_slug ? { server_slug } : {}) };
     },
     // Three legs: request → resource-bound token → event. The token is bound
     // to (server, agent-inbound) so it cannot address a different server.
@@ -5287,25 +5330,37 @@ const NOTIFY_PROVIDERS = {
       }
       const base = env.RAFT_API_BASE || 'https://api.raft.build';
       try {
+        // Addressed by SLUG, not id. Passing the server's uuid here answers
+        // 404, which reads like a missing endpoint and is really a missing
+        // server — the reason a target keeps both strings.
+        if (!target.server_slug) return { status: 'failed', error: 'target_missing_server_slug' };
         const reqRes = await fetch(`${base}/api/oauth/requests/agent`, {
           method: 'POST',
           headers: raftAuthHeaders(env),
           body: JSON.stringify({
-            serverSlug: target.server_id,
+            serverSlug: target.server_slug,
             agentName: target.agent_name || target.agent_sub,
             scopes: ['agent:notification:write'],
           }),
         });
         if (!reqRes.ok) return { status: 'failed', error: `request_${reqRes.status}` };
-        const { request_id } = await reqRes.json();
+        const reqBody = await reqRes.json().catch(() => ({}));
+        // The response is camelCase. Reading `request_id` here silently sent
+        // `undefined` to the token endpoint.
+        const requestId = reqBody.requestId || reqBody.request_id;
+        if (!requestId) return { status: 'failed', error: 'request_id_missing' };
+        // "built from the returned agent.serverId exactly as shown" — take the
+        // id the API just handed back rather than the one we stored, so a
+        // stale record cannot address the wrong server's inbox.
+        const serverId = (reqBody.agent && reqBody.agent.serverId) || target.server_id;
 
         const tokRes = await fetch(`${base}/api/oauth/token`, {
           method: 'POST',
           headers: raftAuthHeaders(env),
           body: JSON.stringify({
             grant_type: 'urn:slock:grant-type:agent_request',
-            request_id,
-            resource: `urn:raft:server:${target.server_id}:agent-inbound`,
+            request_id: requestId,
+            resource: `urn:raft:server:${serverId}:agent-inbound`,
           }),
         });
         if (!tokRes.ok) return { status: 'failed', error: `token_${tokRes.status}` };
@@ -5374,12 +5429,22 @@ async function resolveNotifyTargets(env, slug) {
       default: { ...docTargets[0], source: 'doc' },
       candidates: docTargets.slice(1).map(t => ({ ...t, source: 'doc' })),
       fallback,
+      reason: null,
     };
   }
+  // With no recipient the caller has to tell a person WHY, and the honest
+  // answer differs by case. Saying "this agent has notifications off" when we
+  // simply have nobody bound would be a guess presented as a fact — tdoc
+  // cannot see whether the App is installed on the Raft side until it tries a
+  // delivery. So this reports the one thing it actually knows — nobody is
+  // bound — and a delivery that was attempted and failed speaks for itself
+  // through its own recorded error, which is the case that must NOT disable
+  // the button: that would remove the only way to retry.
   return {
     default: fallback ? { ...fallback, source: 'account' } : null,
     candidates: fallbackList.slice(1).map(t => ({ ...t, source: 'account' })),
     fallback,
+    reason: fallback ? null : 'no_agent_bound',
   };
 }
 
@@ -8125,14 +8190,22 @@ export default {
       }
       let body = {};
       try { body = await req.json(); } catch {}
+      // Either credential shape proves the SAME thing — which agent signed in
+      // with Raft — and neither proves anything about an account. The upload
+      // token checked above is what says which account, and it is required on
+      // both paths, so the two-credential rule holds whichever is used.
       const code = typeof body.link_code === 'string' ? body.link_code : '';
-      if (!code) return json({ error: 'link_code required' }, { status: 400 });
       let pending = null;
-      try { pending = JSON.parse((await env.META.get(`raft-link:${code}`)) || 'null'); } catch {}
-      if (!pending) return json({ error: 'link_code_invalid_or_expired' }, { status: 404 });
-      // One use. A link code that survives its redemption is a bearer token
-      // for somebody else's account sitting in a log somewhere.
-      await env.META.delete(`raft-link:${code}`);
+      if (code) {
+        try { pending = JSON.parse((await env.META.get(`raft-link:${code}`)) || 'null'); } catch {}
+        if (!pending) return json({ error: 'link_code_invalid_or_expired' }, { status: 404 });
+        // One use. A link code that survives its redemption is a bearer token
+        // sitting in a log somewhere.
+        await env.META.delete(`raft-link:${code}`);
+      } else {
+        pending = await getAgentSession(env, req);
+        if (!pending) return json({ error: 'link_code_or_agent_session_required' }, { status: 400 });
+      }
       const target = normalizeNotifyTarget(pending);
       if (!target) return json({ error: 'unsupported_target' }, { status: 400 });
       const existing = await accountNotifyTargets(env, auth.actor.account_id);
@@ -8269,6 +8342,14 @@ export default {
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
+      // Answering a comment is following the doc. This is the whole of the
+      // "who gets the handoff" bookkeeping: nobody maintains a list, an agent
+      // earns the seat by doing the work, and an agent that takes over from
+      // one that went away becomes the default the first time it replies.
+      // Silent by design — a Raft identity is optional and its absence must
+      // not fail a reply that is otherwise fine.
+      const replyingAgent = await getAgentSession(env, req);
+      if (replyingAgent) { try { await touchDocAgent(env, slug, replyingAgent); } catch {} }
       // One answer per human turn. A round that re-reads comments.json after
       // somebody deleted the agent's reply would otherwise post the same words
       // in the same place; the log remembers what the fold forgot. `force`
@@ -8558,6 +8639,17 @@ export default {
           // repairs the cursor from META; never report this committed version
           // as failed and invite an unsafe retry.
           console.error('[upload] version cursor finalize failed (recoverable):', e.message || String(e));
+        }
+        // Publishing a version is following the doc. Same bookkeeping as
+        // answering a comment: the seat is earned by doing the work, so no
+        // list has to be maintained and a successor becomes the default the
+        // first time it publishes. After the commit point and swallowed on
+        // failure — nobody's publish should fail over who gets notified.
+        try {
+          const publishingAgent = await getAgentSession(env, req);
+          if (publishingAgent) await touchDocAgent(env, slug, publishingAgent);
+        } catch (e) {
+          console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
         }
       } else {
         // History backfill (re-uploading v1..vN-1) stores freshly-prepared

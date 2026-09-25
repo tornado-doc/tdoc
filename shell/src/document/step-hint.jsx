@@ -54,11 +54,11 @@ export function docStep(record, slug, canHandoff = true) {
 // which is no help to somebody who has not made a highlight yet. The literal
 // version says what to do with a mouse and what will happen when they do.
 const LINES = {
-  comment: 'Select any sentence to comment on it.',
-  handoff: 'Now tell your agent to fix it.',
+  comment: 'Select a sentence to comment.',
+  handoff: 'Ask your agent to fix it.',
   waiting: 'Waiting for your agent…',
-  reading: 'Your agent is reading this',
-  stuck: 'Still waiting — did you paste it into your agent?',
+  reading: 'Your agent is reading…',
+  stuck: 'Check your agent’s window.',
 };
 // What a row says once it is behind them. Present tense would be a lie by the
 // time it is struck through.

@@ -51,6 +51,7 @@ import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
+import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { DebugBar } from './debug-bar.jsx';
 
 function useNarrowViewport() {
@@ -137,8 +138,8 @@ const exitLine = (answered, version) => (
   // at zero, and "answered 0 comments" reads as a report that the product
   // failed. The version is still real and still worth sending; say that.
   answered
-    ? `Your agent answered ${answered} ${answered === 1 ? 'comment' : 'comments'} in v${version}. Send it to a real reader:`
-    : `v${version} is published. Send it to a real reader:`
+    ? `Answered ${answered} ${answered === 1 ? 'comment' : 'comments'} in v${version}. Share it.`
+    : `v${version} published. Share it.`
 );
 
 export function DocumentShell({ boot, config }) {
@@ -158,6 +159,11 @@ export function DocumentShell({ boot, config }) {
   // waiting for a reload. The boot config stays the source it starts from.
   const [title, setTitle] = useState(config.title || '');
   const [dialog, setDialog] = useState(null);
+  // Connected-App notify panel (doc-level send). Separate from onboarding
+  // copy-paste handoff below.
+  const [notifyOpen, setNotifyOpen] = useState(false);
+  const [notifyCommentIds, setNotifyCommentIds] = useState(null);
+  const [sendToAgentBusy, setSendToAgentBusy] = useState(false);
   const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
   // which are painted in the danger tone and stay long enough to read.
@@ -682,6 +688,47 @@ export function DocumentShell({ boot, config }) {
     if (!comments.latest.current.some((c) => c.id === openCommentId)) setOpenCommentId(null);
   };
 
+  const notifyEnabled = Boolean(config.isOwner && !config.isLanding && config.mode !== 'local');
+  const notifyTargets = useNotifyTargets(config.slug, notifyEnabled);
+  const canSendToAgent = Boolean(
+    notifyEnabled
+    && notifyTargets.ready
+    && notifyTargets.available
+    && notifyTargets.reason !== 'no_agent_bound'
+    && (notifyTargets.default || (notifyTargets.candidates || []).length || notifyTargets.fallback),
+  );
+  const openNotifyPanel = (ids) => {
+    setNotifyCommentIds(ids);
+    setNotifyOpen(true);
+  };
+  const openDocNotify = () => {
+    const openIds = shownComments
+      .filter((c) => c.status !== 'applied' && !c.deleted)
+      .map((c) => c.id);
+    openNotifyPanel(openIds);
+  };
+  const sendToAgent = async (commentId) => {
+    if (!canSendToAgent || sendToAgentBusy) return;
+    setSendToAgentBusy(true);
+    try {
+      const body = await sendOneCommentToAgent(config.slug, commentId);
+      const failed = body?.delivery?.status === 'failed';
+      showToast(failed
+        ? `Sent — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
+        : 'Sent to agent');
+      await comments.refresh();
+    } catch (err) {
+      if (err.status === 404) {
+        // Stub not up yet — fall back to the panel so the owner sees why.
+        openNotifyPanel([commentId]);
+      } else {
+        showToast(err.message || 'Could not send');
+      }
+    } finally {
+      setSendToAgentBusy(false);
+    }
+  };
+
   const removeAnchor = async () => {
     if (!(await attempt(() => comments.moveAnchor(reanchorId, { kind: 'none' }))).ok) return;
     setReanchorId(null);
@@ -997,6 +1044,7 @@ export function DocumentShell({ boot, config }) {
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
             onShare={() => setDialog({ type: 'share' })}
+            onSendToAgent={notifyEnabled ? openDocNotify : null}
             onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
             onDuplicate={duplicate}
             onDownload={download}
@@ -1062,9 +1110,9 @@ export function DocumentShell({ boot, config }) {
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
-          <span>{sharedNow ? 'Link copied — send it to someone.' : exitLine(answered, config.version)}</span>
+          <span>{sharedNow ? 'Link copied.' : exitLine(answered, config.version)}</span>
           {sharedNow
-            ? <a href="/me">Back to my docs</a>
+            ? <a href="/me">My docs</a>
             : <button type="button" onClick={copyExitLink}>Copy link</button>}
         </div>
       ) : null}
@@ -1156,6 +1204,8 @@ export function DocumentShell({ boot, config }) {
           onResolve={resolveComment}
           onReanchor={setReanchorId}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          onSendToAgent={canSendToAgent ? sendToAgent : null}
+          sendToAgentBusy={sendToAgentBusy}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -1187,6 +1237,8 @@ export function DocumentShell({ boot, config }) {
           onResolve={resolveComment}
           onReanchor={setReanchorId}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          onSendToAgent={canSendToAgent ? sendToAgent : null}
+          sendToAgentBusy={sendToAgentBusy}
         />
       )}
 
@@ -1207,6 +1259,17 @@ export function DocumentShell({ boot, config }) {
         onOpenChange={(open) => !open && setInvited(null)}
         onCopied={() => { setInvited(null); showToast('Link copied'); }}
       />
+
+
+      {notifyEnabled ? (
+        <NotifyHandoffPanel
+          slug={config.slug}
+          open={notifyOpen}
+          commentIds={notifyCommentIds || []}
+          onClose={() => setNotifyOpen(false)}
+          onSent={async () => { await comments.refresh(); }}
+        />
+      ) : null}
 
       <PublishDialog
         open={dialog?.type === 'publish'}

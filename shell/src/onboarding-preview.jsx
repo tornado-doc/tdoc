@@ -21,8 +21,8 @@ function TutorialPreview({ state }) {
   const noop = () => {};
   return <div className="op-tutorial">
     {done ? <div className="tdoc-onboard-banner" role="status">
-      <span>{shared ? 'Link copied — send it to someone.' : 'Your agent answered 1 comment in v2. Send it to a real reader:'}</span>
-      {shared ? <a href="/me">Back to my docs</a> : <button onClick={() => setShared(true)}>Copy link</button>}
+      <span>{shared ? 'Link copied.' : 'Answered 1 comment in v2. Share it.'}</span>
+      {shared ? <a href="/me">My docs</a> : <button onClick={() => setShared(true)}>Copy link</button>}
     </div> : <DocStepHint step={state === 'Tutorial comment' ? 'comment' : 'handoff'} agentState={['waiting', 'reading', 'stuck'].includes(agentState) ? agentState : 'idle'} onGo={noop} />}
     <div className="op-tutorial-card"><CommentCard comment={comment} currentUser="alex" onReply={noop} onReact={noop} onDelete={noop} onResolve={noop} onEdit={noop}
       handoff={state === 'Tutorial comment' || done ? null : {threadId:comment.id, open, line:'Read https://tdoc.dev/d/my-first-tdoc and fix the comments.', state:['waiting','reading','stuck'].includes(agentState) ? agentState : 'idle', onCopy:()=>setAgentState('waiting'), onToggle:()=>setOpen(value=>!value)}} />
@@ -43,7 +43,7 @@ export default function OnboardingPreview() {
     screen = <StatusPage boot={state === 'Sign-in complete' ? { title: 'Signed in', message: 'Your account is connected. You can return to your agent.', actions: [{ label: 'Go to my docs', href: '/me', primary: true }] } : { title: 'Sign-in expired', message: 'This sign-in request has expired. Start again from your agent.', error: true, actions: [{ label: 'Return to tdoc', href: '/', primary: true }] }} />;
   } else if (state === 'GitHub dialog') {
     screen = <div className="op-dialog-stage"><button onClick={() => setDialogOpen(true)}>Open sign-in dialog</button>
-      <SignInDialog open={dialogOpen} onOpenChange={setDialogOpen} onSuccess={() => {}} preview={{device:{user_code:'ABCD-1234',verification_uri:'https://github.com/login/device'},status:'Open GitHub to approve, then return to this tab.'}} />
+      <SignInDialog open={dialogOpen} onOpenChange={setDialogOpen} onSuccess={() => {}} preview={{device:{user_code:'ABCD-1234',verification_uri:'https://github.com/login/device'},status:'Approve on GitHub, then return here.'}} />
     </div>;
   } else if (['Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published'].includes(state)) {
     screen = <SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: ['Connected', 'First document', 'Document published'].includes(state), elapsed: state === 'Connection help' ? 65000 : 0 }} />;
@@ -60,7 +60,7 @@ export default function OnboardingPreview() {
     }
   };
   return <div className="op-preview" onClickCapture={keepInPreview}>
-    <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding spacing preview</strong><span>Original UI · sample data</span></div><label>Screen <select value={state} onChange={e => {setState(e.target.value);setDialogOpen(true);setNotice('');}}>{states.map(s => <option key={s}>{s}</option>)}</select></label></nav>
+    <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding preview</strong><span>Original UI · sample data</span></div><label>Screen <select value={state} onChange={e => {setState(e.target.value);setDialogOpen(true);setNotice('');}}>{states.map(s => <option key={s}>{s}</option>)}</select></label></nav>
     {notice ? <p className="op-notice" role="status">{notice}</p> : null}
     {screen}
   </div>;

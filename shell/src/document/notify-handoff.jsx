@@ -1,0 +1,261 @@
+// CI: keep width+notify on same tip.
+// Doc-level "send to agent" panel. Uses /api/notify/* (Raft is the first
+// provider). Single-comment send reuses postNotifyHandoff with one id.
+
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  listNotifyHandoffs,
+  listNotifyTargets,
+  postNotifyHandoff,
+  resendNotifyHandoff,
+} from './api.js';
+
+function targetLabel(t) {
+  if (!t) return '';
+  return t.agent_name || t.agent_sub || 'agent';
+}
+
+function sameTarget(a, b) {
+  if (!a || !b) return false;
+  return a.provider === b.provider
+    && a.server_id === b.server_id
+    && a.agent_sub === b.agent_sub;
+}
+
+export function useNotifyTargets(slug, enabled) {
+  const [state, setState] = useState({
+    ready: false,
+    available: false,
+    default: null,
+    candidates: [],
+    fallback: null,
+    reason: null,
+  });
+
+  const refresh = useCallback(async () => {
+    if (!enabled || !slug) {
+      setState((s) => ({ ...s, ready: true, available: false, reason: null }));
+      return;
+    }
+    try {
+      const body = await listNotifyTargets(slug);
+      setState({
+        ready: true,
+        available: true,
+        default: body.default || null,
+        candidates: Array.isArray(body.candidates) ? body.candidates : [],
+        fallback: body.fallback || null,
+        reason: body.reason || null,
+      });
+    } catch (err) {
+      // 404 = worker stub not shipped yet; hide the panel rather than alarm.
+      setState({
+        ready: true,
+        available: err.status !== 404,
+        default: null,
+        candidates: [],
+        fallback: null,
+        reason: null,
+      });
+    }
+  }, [slug, enabled]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  return { ...state, refresh };
+}
+
+function noAgentBoundReason(reason) {
+  return reason === 'no_agent_bound'
+    ? 'No agent is following this doc yet, so there is nowhere to send.'
+    : null;
+}
+
+export function NotifyHandoffPanel({
+  slug,
+  open,
+  onClose,
+  commentIds,
+  onSent,
+}) {
+  const targets = useNotifyTargets(slug, open);
+  const [selected, setSelected] = useState(null);
+  const [instruction, setInstruction] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+  const [recent, setRecent] = useState([]);
+
+  useEffect(() => {
+    if (!open) return;
+    setSelected(targets.default);
+    setInstruction('');
+    setStatus('');
+  }, [open, targets.default]);
+
+  useEffect(() => {
+    if (!open || !targets.available) return undefined;
+    let cancelled = false;
+    listNotifyHandoffs(slug, 5)
+      .then((body) => {
+        if (!cancelled) setRecent(Array.isArray(body.handoffs) ? body.handoffs : []);
+      })
+      .catch(() => { if (!cancelled) setRecent([]); });
+    return () => { cancelled = true; };
+  }, [open, slug, targets.available]);
+
+  if (!open) return null;
+  if (targets.ready && !targets.available) {
+    return (
+      <div className="tdoc-notify-panel" role="dialog" aria-label="Send to agent">
+        <header className="tdoc-notify-panel-head">
+          <b>Send to agent</b>
+          <button type="button" className="text-btn" onClick={onClose}>Close</button>
+        </header>
+        <p className="manage-hint">Notify is not available on this host yet.</p>
+      </div>
+    );
+  }
+
+  const choices = [];
+  if (targets.default) choices.push(targets.default);
+  for (const c of targets.candidates) {
+    if (!choices.some((x) => sameTarget(x, c))) choices.push(c);
+  }
+  if (targets.fallback && !choices.some((x) => sameTarget(x, targets.fallback))) {
+    choices.push(targets.fallback);
+  }
+
+  const ids = Array.isArray(commentIds) ? commentIds.filter(Boolean) : [];
+  const boundHint = noAgentBoundReason(targets.reason);
+  const canSubmit = !busy && ids.length > 0 && choices.length > 0 && (selected || targets.default);
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      const body = await postNotifyHandoff({
+        slug,
+        comment_ids: ids,
+        instruction: instruction.trim(),
+        recipient: selected || undefined,
+      });
+      const failed = body?.delivery?.status === 'failed';
+      setStatus(failed
+        ? `Sent ${body.sent || ids.length} — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
+        : `Sent ${body.sent || ids.length} to agent`);
+      if (onSent) onSent(body);
+      try {
+        const next = await listNotifyHandoffs(slug, 5);
+        setRecent(Array.isArray(next.handoffs) ? next.handoffs : []);
+      } catch { /* ignore */ }
+    } catch (err) {
+      setStatus(err.message || 'Could not send');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resend = async (handoffId) => {
+    setBusy(true);
+    setStatus('');
+    try {
+      const body = await resendNotifyHandoff({ slug, handoff_id: handoffId });
+      const failed = body?.delivery?.status === 'failed';
+      setStatus(failed ? 'Resend failed to deliver' : 'Resent');
+      if (onSent) onSent(body);
+    } catch (err) {
+      setStatus(err.message || 'Could not resend');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const last = recent[0];
+  const lastFailed = last?.delivery?.status === 'failed';
+
+  return (
+    <div className="tdoc-notify-panel" role="dialog" aria-label="Send to agent">
+      <header className="tdoc-notify-panel-head">
+        <b>Send to agent</b>
+        <button type="button" className="text-btn" onClick={onClose}>Close</button>
+      </header>
+
+      {last ? (
+        <p className="tdoc-notify-last">
+          Last handoff: {(last.comment_ids || []).length} comment{(last.comment_ids || []).length === 1 ? '' : 's'}
+          {lastFailed ? ' · not delivered' : ''}
+          {lastFailed && last.handoff_id ? (
+            <>
+              {' · '}
+              <button type="button" className="text-btn" disabled={busy} onClick={() => resend(last.handoff_id)}>
+                Resend
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+
+      <p className="manage-hint">
+        {ids.length === 1
+          ? 'Sending 1 comment.'
+          : `Sending ${ids.length || 0} open comments.`}
+        {' '}One recipient per handoff.
+      </p>
+
+      {choices.length ? (
+        <ul className="tdoc-notify-targets">
+          {choices.map((t) => {
+            const id = `${t.provider}:${t.server_id}:${t.agent_sub}`;
+            const checked = sameTarget(selected || targets.default, t);
+            return (
+              <li key={id}>
+                <label>
+                  <input
+                    type="radio"
+                    name="tdoc-notify-target"
+                    checked={checked}
+                    onChange={() => setSelected(t)}
+                  />
+                  <span>
+                    <b>{targetLabel(t)}</b>
+                    {t.source ? <span className="tdoc-muted"> · {t.source}</span> : null}
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="manage-hint" title={boundHint || undefined}>
+          {boundHint || 'No agent has touched this doc yet. Pick one after an agent publishes or replies.'}
+        </p>
+      )}
+
+      <textarea
+        className="tdoc-notify-instruction"
+        rows={2}
+        maxLength={500}
+        placeholder="Optional instruction…"
+        value={instruction}
+        onChange={(e) => setInstruction(e.target.value)}
+      />
+
+      <div className="tdoc-notify-actions">
+        <button
+          type="button"
+          className="primary"
+          disabled={!canSubmit}
+          title={!choices.length ? (boundHint || 'No agent to send to') : undefined}
+          onClick={submit}
+        >
+          {busy ? 'Sending…' : 'Send'}
+        </button>
+        {status ? <span className="manage-hint">{status}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+export async function sendOneCommentToAgent(slug, commentId) {
+  return postNotifyHandoff({ slug, comment_ids: [commentId], instruction: '' });
+}
