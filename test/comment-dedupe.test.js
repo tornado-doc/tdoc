@@ -67,7 +67,7 @@ t('both hosts check before they write', () => {
   assert(server.includes("const dup = duplicateComment(comments, { author: e2eIdentity(), text, anchor, parent_id, at: created });") && server.includes('duplicate_of: dup.id'), 'server');
 });
 t('the composer submits once at a time, and says so', () => {
-  assert(composer.includes('if (busy || !text.trim()) return;') && composer.includes("{busy ? 'Posting…' : (sendToAgent ? 'Comment + send' : 'Comment')}") && composer.includes('disabled={busy}'), 'no busy guard');
+  assert(composer.includes('if (busy || !text.trim()) return;') && composer.includes("{busy ? 'Posting…' : 'Comment'}") && composer.includes("{busy ? 'Posting…' : '@agent'}") && composer.includes('disabled={busy}'), 'no busy guard');
 });
 t('the reply form submits once at a time too', () => {
   const card = read('shell/src/document/comment-card.jsx');

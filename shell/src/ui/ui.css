@@ -160,9 +160,6 @@ button.tdoc-cluster-row {
   gap: 8px;
   flex-wrap: wrap;
 }
-.tdoc-popup .foot .tdoc-switch {
-  margin: 0;
-}
 
 button.tdoc-pin {
   padding: 0;
