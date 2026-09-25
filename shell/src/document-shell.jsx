@@ -24,6 +24,7 @@ import {
   DocumentBreadcrumbs,
   DocumentOverflowActions,
   DocumentPrimaryAction,
+  DocumentWidthControl,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -40,7 +41,7 @@ import {
   OwnerAccessDialog,
 } from './document/owner-access-dialog.jsx';
 import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
-import { readStored } from './safe-storage.js';
+import { readStored, writeStored } from './safe-storage.js';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -164,6 +165,9 @@ export function DocumentShell({ boot, config }) {
   const [theme, setTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
   ));
+  const [readerWidth, setReaderWidth] = useState('narrow');
+  const [supportsWidth, setSupportsWidth] = useState(false);
+  const [inlineWidth, setInlineWidth] = useState(false);
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
   const [deepTarget, setDeepTarget] = useState(() => (
@@ -381,6 +385,11 @@ export function DocumentShell({ boot, config }) {
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       bridge.send({ type: 'tdoc:theme', theme: nextTheme });
+      const savedWidth = readStored(`tdoc-width:${config.slug}`);
+      const nextWidth = savedWidth === 'wide' || savedWidth === 'narrow' ? savedWidth : message.defaultWidth === 'wide' ? 'wide' : 'narrow';
+      setSupportsWidth(Boolean(message.supportsWidth));
+      setReaderWidth(nextWidth);
+      if (savedWidth === 'wide' || savedWidth === 'narrow') bridge.send({ type: 'tdoc:width', width: nextWidth });
       bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding });
       comments.refresh();
     },
@@ -906,6 +915,13 @@ export function DocumentShell({ boot, config }) {
     && new URLSearchParams(location.search).get('comment') !== openComment.id
   ) || (arrival === 'revised' && Boolean(openComment));
 
+  const toggleReaderWidth = () => {
+    const next = readerWidth === 'wide' ? 'narrow' : 'wide';
+    writeStored(`tdoc-width:${config.slug}`, next);
+    setReaderWidth(next);
+    bridge.send({ type: 'tdoc:width', width: next });
+  };
+
   return (
     <div
       className="tdoc-document-app"
@@ -952,6 +968,8 @@ export function DocumentShell({ boot, config }) {
         overflowActions={config.isLanding ? null : (
           <DocumentOverflowActions
             config={config}
+            readerWidth={supportsWidth && !inlineWidth ? readerWidth : null}
+            onToggleWidth={toggleReaderWidth}
             starred={starred}
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
@@ -966,6 +984,10 @@ export function DocumentShell({ boot, config }) {
             onToggleResolved={toggleResolved}
           />
         )}
+        appearanceActions={!config.isLanding && supportsWidth ? (
+          <DocumentWidthControl readerWidth={readerWidth} inline={inlineWidth}
+            onPlacementChange={setInlineWidth} onToggle={toggleReaderWidth} />
+        ) : null}
         onThemeChange={(nextTheme) => {
           setTheme(nextTheme);
           bridge.send({ type: 'tdoc:theme', theme: nextTheme });

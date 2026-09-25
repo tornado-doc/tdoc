@@ -3,8 +3,8 @@
 // single pass/fail. This is what `npm test` and CI invoke, so "run the tests"
 // is one command instead of N hand-run files (finding: no-test-runner-or-ci).
 //
-// Offline suite = no network, no live Cloudflare, no playwright. These run in
-// CI with zero secrets. Tests that need a live deploy or playwright are listed
+// Offline suite = no network or live Cloudflare. CLI gates use local Chromium; run
+// npm ci && npx playwright install chromium first. Additional UI suites are listed
 // under NETWORK/BROWSER and skipped here (run them with their own env).
 //
 // Usage:
@@ -13,6 +13,7 @@
 
 const { spawnSync } = require('child_process');
 const path = require('path');
+require('./helpers/pin-browser-cache');
 
 const OFFLINE = [
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
@@ -66,6 +67,8 @@ const OFFLINE = [
   'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader
   'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it
   'web-oauth.test.js',        // web redirect flow: sanitizeReturn open-redirect guard + flow wiring + device fallback
+  'layout-preflight.test.js', // real Raft geometry and mandatory CLI gates
+  'table-layout.test.js',    // shared provider policy, independent geometry, all tables in full doc
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard
   'coverage.test.js',         // migration, bundle inlining, pull-merge, rich fold
@@ -105,6 +108,8 @@ const OFFLINE = [
 const GATED = [
   'onboarding.test.js',  // doctor flow
   'publish.test.js',     // dry-publish + (gated) real publish
+  'reader-width-ui.test.js', // actual shell toggle and provider-only serialization
+  'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright
   'csp-xss.test.js',     // playwright: author <script>/onclick blocked, overlay still works

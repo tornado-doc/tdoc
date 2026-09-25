@@ -955,9 +955,52 @@
   var _geoTimer = null;
   function rereportPins() { if (_geoTimer) clearTimeout(_geoTimer); _geoTimer = setTimeout(function () { _view = null; _rangeCache = {}; reportPins(_lastComments); }, 150); }
   window.addEventListener('load', rereportPins);
+  // The provider owns table readability for old and newly-authored versions.
+  // Recompute from content/fonts/container geometry, not only window width:
+  // a reader width toggle, an opened <details>, or an edit can change it.
+  var tableLayoutTimer = null;
+  function refreshTableLayout() {
+    if (tableLayoutTimer) clearTimeout(tableLayoutTimer);
+    tableLayoutTimer = setTimeout(function () {
+      layoutTables();
+      rereportPins();
+      reportScroll();
+    }, 80);
+  }
+  layoutTables();
+  window.addEventListener('resize', refreshTableLayout);
+  window.addEventListener('load', refreshTableLayout);
+  document.addEventListener('toggle', refreshTableLayout, true);
+  document.addEventListener('input', refreshTableLayout);
+  if (document.fonts) {
+    document.fonts.ready.then(refreshTableLayout);
+    document.fonts.addEventListener('loadingdone', refreshTableLayout);
+  }
   if (typeof ResizeObserver !== 'undefined') {
     try { new ResizeObserver(rereportPins).observe(document.body); } catch (e) {}
+    try {
+      var tableWidths = new WeakMap();
+      var tableResize = new ResizeObserver(function (entries) {
+        entries.forEach(function (entry) {
+          var width = entry.contentRect.width;
+          if (tableWidths.get(entry.target) !== width) {
+            tableWidths.set(entry.target, width); refreshTableLayout();
+          }
+        });
+      });
+      tableResize.observe(document.body);
+      document.querySelectorAll('body>.wrap,body>main,body>article,body>.content,body>.container').forEach(function (root) { tableResize.observe(root); });
+    } catch (e) {}
   }
+  new MutationObserver(function (records) {
+    if (records.some(function (record) {
+      var el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      if (el && el.closest('table')) return true;
+      return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(function (node) {
+        return node.nodeType === 1 && (node.matches('table') || node.querySelector('table'));
+      });
+    })) refreshTableLayout();
+  }).observe(document.body, { childList:true, characterData:true, subtree:true });
 
   // Doc → Markdown (verbatim port of overlay.js htmlToMarkdown 4176-4253). Runs
   // in the frame (the only place with the doc DOM) on a tdoc:copyDoc request.
@@ -1317,6 +1360,10 @@
       try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
+    else if (d.type === 'tdoc:width') {
+      applyReaderWidth(d.width);
+      requestAnimationFrame(function () { layoutTables(); rereportPins(); reportScroll(); });
+    }
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode, d);
     else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:diagramApply') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!applyDiagram(d) });
@@ -1331,6 +1378,7 @@
         var restoredDirty = restoredHtml !== editBaselineHtml;
         setDirty(restoredDirty, false);
         post({ type: 'tdoc:editSnapshot', bodyHtml: restoredHtml, dirty: restoredDirty });
+        refreshTableLayout();
         rereportPins();
       }
     }
@@ -1359,6 +1407,8 @@
   }, { passive: true });
 
   prepareDiagrams();
-  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
+  var widthRoot = document.querySelector('body > .wrap, body > main, body > article, body > .content, body > .container');
+  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null,
+    supportsWidth: !!widthRoot, defaultWidth: widthRoot && widthRoot.getAttribute('data-tdoc-width') === 'wide' ? 'wide' : 'narrow' });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();

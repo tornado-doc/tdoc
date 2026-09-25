@@ -968,6 +968,25 @@ EOF
   exit 1
 fi
 
+# Validate the newest version BEFORE sign-in/deployment or any remote write.
+# Recheck here: files can have changed since tdoc-write. Historical versions
+# remain historical; a bad old version must not prevent publishing a repair.
+LAYOUT_HTML="$(node -e '
+  const fs=require("fs"), path=require("path"), dir=process.argv[1];
+  const m=JSON.parse(fs.readFileSync(path.join(dir,"meta.json"),"utf8"));
+  const n=Math.max(...(m.versions||[]).map(v=>Number(v.n)).filter(Number.isFinite));
+  if (!Number.isInteger(n)||n<1) process.exit(1);
+  process.stdout.write(path.join(dir,`v${n}`,"index.html"));
+' "$DOC_DIR")" || { echo '[tdoc] Cannot determine the version to validate' >&2; exit 1; }
+LAYOUT_REPORT="$(mktemp -t tdoc-layout.XXXXXX)"
+if ! node "$(cd "$(dirname "$0")" && pwd)/tdoc-check-layout" "$LAYOUT_HTML" >"$LAYOUT_REPORT"; then
+  cat "$LAYOUT_REPORT" >&2
+  rm -f "$LAYOUT_REPORT"
+  echo '[tdoc] Rendered layout validation failed; nothing uploaded. Fix the reported elements and retry.' >&2
+  exit 1
+fi
+rm -f "$LAYOUT_REPORT"
+
 # --- bundle overlay.js into worker source ---
 # Writes _worker.bundled.js into $1 (defaults to the wrangler worker dir; the
 # vercel path passes its own app dir). Shared with the tdoc.dev CD workflow.
