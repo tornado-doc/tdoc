@@ -139,12 +139,28 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     await paintFrame.waitForFunction(() => CSS.highlights.get('tdoc-anchor')?.size === 1);
     const code = paintFrame.locator('pre');
     const before = await code.screenshot();
+    const paintCollections = await paintFrame.evaluateHandle(() => ({
+      normal: CSS.highlights.get('tdoc-anchor'), moved: CSS.highlights.get('tdoc-anchor-moved'),
+    }));
     await toggle();
     await paintFrame.waitForFunction(() => CSS.highlights.get('tdoc-anchor-moved')?.size > 0);
     assert(!before.equals(await code.screenshot()), 'resolved moved highlight must actually paint');
     await toggle();
     await paintFrame.waitForFunction(() => !CSS.highlights.get('tdoc-anchor-moved')?.size);
     assert(before.equals(await code.screenshot()), 'resolved moved highlight must disappear from pixels, not only the registry');
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await toggle();
+      await paintFrame.waitForFunction(() => CSS.highlights.get('tdoc-anchor-moved')?.size > 0);
+      await toggle();
+      await paintFrame.waitForFunction(() => !CSS.highlights.get('tdoc-anchor-moved')?.size);
+      assert(await paintFrame.evaluate((owned) => (
+        CSS.highlights.get('tdoc-anchor') === owned.normal
+        && CSS.highlights.get('tdoc-anchor-moved') === owned.moved
+        && owned.moved.size === 0
+      ), paintCollections), 'the renderer must clear its registered ranges without replacing their owning Highlight');
+      assert(before.equals(await code.screenshot()), 'repeated OFF must remove painted code ranges');
+    }
+    await paintCollections.dispose();
     assert.deepEqual(errors, []);
     console.log('  ✓ Resolved hides paint, targets and selected cards; restores on demand; persists on mobile; deep links still work');
   } finally { await browser.close(); await target.stop(); }

@@ -834,6 +834,15 @@
   // the whole doc + re-scanning every anchor (O(N + C·D)) every time.
   var _view = null, _rangeCache = {}, _anchorTargets = {}, _activeAnchorId = null;
   var _lastComments = [];   // re-report pins when layout settles (images/fonts)
+  // The renderer owns these collections for the frame's lifetime. Mutate the
+  // registered ranges so removal invalidates their old painted area. Replacing
+  // a Highlight with a new empty object can leave stale pixels in Safari.
+  var _anchorHighlight = HL ? new Highlight() : null;
+  var _movedHighlight = HL ? new Highlight() : null;
+  if (HL) {
+    CSS.highlights.set('tdoc-anchor', _anchorHighlight);
+    CSS.highlights.set('tdoc-anchor-moved', _movedHighlight);
+  }
   function docView() { return _view || (_view = collectTextNodes()); }
   function anchorIdAtPoint(x, y) {
     var ids = Object.keys(_anchorTargets);
@@ -864,7 +873,9 @@
   function reportPins(comments) {
     _lastComments = comments || [];
     _anchorTargets = {};
-    var pins = [], hl = HL ? new Highlight() : null, hlMoved = HL ? new Highlight() : null;
+    var pins = [], hl = _anchorHighlight, hlMoved = _movedHighlight;
+    if (hl) hl.clear();
+    if (hlMoved) hlMoved.clear();
     // An anchor that cannot be placed still deserves a seat. Without a pin the
     // desktop rail has no coordinate to draw the card at, so the comment sits in
     // the data and nowhere on screen — while the phone drawer, which renders the
@@ -936,8 +947,6 @@
       if (approximate && !rect.width && !rect.height) return seat(c);
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
-    if (HL) CSS.highlights.set('tdoc-anchor', hl);
-    if (HL) CSS.highlights.set('tdoc-anchor-moved', hlMoved);
     setActiveAnchor(_activeAnchorId, false);
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
