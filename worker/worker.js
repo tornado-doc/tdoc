@@ -8342,6 +8342,14 @@ export default {
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
+      // Answering a comment is following the doc. This is the whole of the
+      // "who gets the handoff" bookkeeping: nobody maintains a list, an agent
+      // earns the seat by doing the work, and an agent that takes over from
+      // one that went away becomes the default the first time it replies.
+      // Silent by design — a Raft identity is optional and its absence must
+      // not fail a reply that is otherwise fine.
+      const replyingAgent = await getAgentSession(env, req);
+      if (replyingAgent) { try { await touchDocAgent(env, slug, replyingAgent); } catch {} }
       // One answer per human turn. A round that re-reads comments.json after
       // somebody deleted the agent's reply would otherwise post the same words
       // in the same place; the log remembers what the fold forgot. `force`
@@ -8631,6 +8639,17 @@ export default {
           // repairs the cursor from META; never report this committed version
           // as failed and invite an unsafe retry.
           console.error('[upload] version cursor finalize failed (recoverable):', e.message || String(e));
+        }
+        // Publishing a version is following the doc. Same bookkeeping as
+        // answering a comment: the seat is earned by doing the work, so no
+        // list has to be maintained and a successor becomes the default the
+        // first time it publishes. After the commit point and swallowed on
+        // failure — nobody's publish should fail over who gets notified.
+        try {
+          const publishingAgent = await getAgentSession(env, req);
+          if (publishingAgent) await touchDocAgent(env, slug, publishingAgent);
+        } catch (e) {
+          console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
         }
       } else {
         // History backfill (re-uploading v1..vN-1) stores freshly-prepared

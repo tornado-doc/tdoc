@@ -389,6 +389,46 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.delivery.error === 'target_missing_server_slug', `error: ${r.delivery.error}`);
   });
 
+  // ---- following a doc is earned, not configured ----
+  // touchDocAgent existed but nothing called it, so "the follow-up agent
+  // continues automatically" was true of the design and false of the build.
+  // These call the real routes with an agent session attached.
+  await t('publishing a version makes you the doc\'s follow-up agent', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    const cookie = await withAgentSession(env);
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token, cookie,
+      body: { slug: 'follow-doc', version: 1, html: '<h1>d</h1><p>a sentence here</p>' },
+    }), env, {});
+    const t2 = await (await worker.fetch(req('/api/notify/targets?slug=follow-doc', { token: tok.token }), env, {})).json();
+    assert(t2.default && t2.default.source === 'doc', `expected a doc-level agent, got ${JSON.stringify(t2.default)}`);
+    assert(t2.default.agent_sub === 'uuid-a', `wrong agent: ${t2.default.agent_sub}`);
+  });
+
+  await t('answering a comment does the same', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const cookie = await withAgentSession(env);
+    await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token, cookie,
+      body: { slug, parent_id: commentId, text: 'done', status: 'applied', applied_in: 1, agent_login: 'claude' },
+    }), env, {});
+    const t2 = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(t2.default && t2.default.source === 'doc', `expected a doc-level agent, got ${JSON.stringify(t2.default)}`);
+  });
+
+  await t('publishing without a Raft identity binds nobody and still succeeds', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'plain-doc', version: 1, html: '<h1>d</h1><p>a sentence here</p>' },
+    }), env, {});
+    assert(up.status === 200, `publish must not depend on having a Raft identity: ${up.status}`);
+    const t2 = await (await worker.fetch(req('/api/notify/targets?slug=plain-doc', { token: tok.token }), env, {})).json();
+    assert(t2.default === null && t2.reason === 'no_agent_bound', `expected nobody bound, got ${JSON.stringify(t2)}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
