@@ -348,9 +348,9 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage must not receive the document Share/Copy/Download actions');
   assert(/demo: !!config\.demoComments/.test(documentShell),
     'homepage shell must wire demoComments into useComments');
-  assert(/Type @name/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
-    'demo composer placeholder should invite tagging by @name');
-  assert(/@you@email\.com/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
+  assert(/Type a GitHub @/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
+    'demo composer placeholder should invite a GitHub @');
+  assert(/@email/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
     'demo composer placeholder should also show email tagging');
   assert(/elementComment: !config\.isLanding/.test(documentShell),
     'landing must turn off block/artifact hover chrome');
