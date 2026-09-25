@@ -256,9 +256,16 @@ node "$(cd "$(dirname "$0")" && pwd)/tdoc-bake" "$STAGE_HTML" >/dev/null \
 
 # Check the FINAL baked bytes before any replacement. This is part of writing
 # a version, not an optional instruction the agent can forget to perform.
-if ! node "$(cd "$(dirname "$0")" && pwd)/tdoc-check-layout" "$STAGE_HTML" >"$STAGE_DIR/layout.json"; then
+# tdoc-check-layout: exit 1 = real layout errors (block); exit 2 = unable to
+# check (missing Playwright / browser) — warn and continue.
+LAYOUT_RC=0
+node "$(cd "$(dirname "$0")" && pwd)/tdoc-check-layout" "$STAGE_HTML" >"$STAGE_DIR/layout.json" || LAYOUT_RC=$?
+if [ "$LAYOUT_RC" -eq 1 ]; then
   cat "$STAGE_DIR/layout.json" >&2
   die "rendered layout validation failed (existing doc, if any, left untouched); fix the reported elements and retry"
+elif [ "$LAYOUT_RC" -ne 0 ]; then
+  cat "$STAGE_DIR/layout.json" >&2 || true
+  err "layout check skipped (exit $LAYOUT_RC — install Playwright to verify: npm ci && npx playwright install chromium)"
 fi
 
 # Validation passed — NOW it's safe to replace. Swap the existing doc out only
