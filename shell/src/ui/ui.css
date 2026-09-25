@@ -841,3 +841,6 @@ button.tdoc-pin {
   .tdoc-activate-page { padding: 40px 24px; }
   .tdoc-activate-stack { gap: 24px; }
 }
+@media (max-width: 380px) {
+  .tdoc-activate-details > div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
