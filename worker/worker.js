@@ -5531,7 +5531,7 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
 // agent. Resolution is per comment id, so a partially-resolved handoff shows
 // exactly which of its comments are done.
 function withHandoffStatus(list, handoffs) {
-  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_delivery: null };
+  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_acked_at: null, handoff_delivery: null };
   if (!Array.isArray(list) || !Array.isArray(handoffs) || !handoffs.length) {
     return Array.isArray(list) ? list.map(c => ({ ...c, ...bare })) : list;
   }
@@ -5550,6 +5550,10 @@ function withHandoffStatus(list, handoffs) {
         // "has this been long enough to chase" by. Delivered-but-silent is the
         // common case and the original design had no way to show it at all.
         handoff_at: h.at || null,
+        // When an agent said it picked this up. null means only that we have
+        // not heard — an agent that cannot ack is indistinguishable from one
+        // that has not, so the UI must say "no response yet", never "not working".
+        handoff_acked_at: h.acked_at || null,
         handoff_delivery: h.delivery ? { status: h.delivery.status, error: h.delivery.error || null } : null,
       });
     }
@@ -8319,6 +8323,30 @@ export default {
     // Called by the agent once it has applied a batch. Upload-token authed:
     // an agent resolving its own handoff is the owner writing through a tool,
     // the same reading /api/agent/reply already takes.
+    // An agent saying "I have picked this up". Delivery only proves the event
+    // reached an inbox; an agent may be asleep, busy, or start an hour later.
+    // Without this, "it died" and "it is thinking" look identical to whoever is
+    // waiting, and those call for opposite actions.
+    if (p === '/api/notify/ack' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const { slug, handoff_id } = body;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
+      const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
+      if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      // First ack wins. The useful fact is when work STARTED, not when an agent
+      // last pinged, so a re-ack must not push the clock forward.
+      if (prev.acked_at) {
+        return json({ ok: true, handoff_id: prev.handoff_id, acked_at: prev.acked_at, already: true });
+      }
+      const rec = await putHandoff(env, slug, { ...prev, acked_at: new Date().toISOString() });
+      return json({ ok: true, handoff_id: rec.handoff_id, acked_at: rec.acked_at, already: false });
+    }
+
     if (p === '/api/notify/resolve' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
