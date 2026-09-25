@@ -738,4 +738,72 @@
   .tdoc-footer a:hover { color: var(--td-accent); text-decoration: underline; }
   .tdoc-footer .sep { color: #ccc; }
   @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
-  
+
+/* Connected-App notify handoff (Send to agent) */
+  .tdoc-handoff-chip {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #5a5a56;
+    background: #f0efea;
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin: 0 0 6px;
+  }
+  .tdoc-handoff-chip.is-resolved { color: #2f6b3a; background: #e7f3ea; }
+  .tdoc-notify-panel {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 80;
+    width: min(360px, calc(100vw - 32px));
+    background: var(--td-surface, #fff);
+    border: 1px solid var(--td-line, #e6e4dc);
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.12);
+    padding: 14px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .tdoc-notify-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .tdoc-notify-panel-head b { font-size: 14px; }
+  .tdoc-notify-last { margin: 0; font-size: 12px; color: var(--td-muted, #6b6a66); }
+  .tdoc-notify-targets {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 160px;
+    overflow: auto;
+  }
+  .tdoc-notify-targets label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .tdoc-notify-targets .tdoc-muted { color: var(--td-muted, #6b6a66); font-weight: 400; }
+  .tdoc-notify-instruction {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--td-line, #e6e4dc);
+    border-radius: 6px;
+    resize: vertical;
+  }
+  .tdoc-notify-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
