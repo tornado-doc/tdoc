@@ -980,7 +980,8 @@ LAYOUT_HTML="$(node -e '
 ' "$DOC_DIR")" || { echo '[tdoc] Cannot determine the version to validate' >&2; exit 1; }
 LAYOUT_REPORT="$(mktemp -t tdoc-layout.XXXXXX)"
 # tdoc-check-layout: exit 1 = real layout errors (block); exit 2 = unable to
-# check (missing Playwright / browser) — warn and continue.
+# check (missing Playwright / browser). Soft-skip exit 2 by default; set
+# TDOC_LAYOUT_REQUIRE=1 to hard-fail when the checker cannot run.
 LAYOUT_RC=0
 node "$(cd "$(dirname "$0")" && pwd)/tdoc-check-layout" "$LAYOUT_HTML" >"$LAYOUT_REPORT" || LAYOUT_RC=$?
 if [ "$LAYOUT_RC" -eq 1 ]; then
@@ -991,6 +992,10 @@ if [ "$LAYOUT_RC" -eq 1 ]; then
 elif [ "$LAYOUT_RC" -ne 0 ]; then
   cat "$LAYOUT_REPORT" >&2 || true
   rm -f "$LAYOUT_REPORT"
+  if [ "${TDOC_LAYOUT_REQUIRE:-0}" = "1" ]; then
+    echo "[tdoc] Layout check required but unavailable (exit $LAYOUT_RC). Install Playwright: npm ci && npx playwright install chromium." >&2
+    exit 1
+  fi
   echo "[tdoc] Layout check skipped (exit $LAYOUT_RC — install Playwright to verify: npm ci && npx playwright install chromium)." >&2
 else
   rm -f "$LAYOUT_REPORT"
