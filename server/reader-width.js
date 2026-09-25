@@ -1,5 +1,5 @@
-// Shared by the provider frame and the authoring preflight. This is a reader
-// preference: never rewrite the author's root or serialize it into a version.
+// Authoring preflight only: exercise constrained and expanded content layouts.
+// These temporary styles are never injected into the live reader or saved HTML.
 function applyReaderWidth(mode) {
   const selector = 'body > .wrap, body > main, body > article, body > .content, body > .container';
   let style = document.querySelector('style#tdoc-reader-width[data-tdoc-provider]');
