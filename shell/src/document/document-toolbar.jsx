@@ -131,7 +131,15 @@ export function DocumentPrimaryAction({
   config,
   onPublish,
   onShare,
+  onSendToAgent = null,
 }) {
+  if (onSendToAgent) {
+    return (
+      <button id="tdoc-send-agent-btn" type="button" className="primary tdoc-document-primary" aria-label="Send to agent" onClick={onSendToAgent}>
+        <Bot size={14} /> <span>Send to agent</span>
+      </button>
+    );
+  }
   return config.mode === 'local' ? (
     <button id="tdoc-publish-btn" type="button" className="primary tdoc-document-primary" aria-label="Publish" onClick={onPublish}>
       <Upload size={14} /> <span>Publish</span>
@@ -149,7 +157,7 @@ export function DocumentOverflowActions({
   onToggleStar,
   onPublish,
   onShare,
-  onSendToAgent,
+  demotePrimary = false,
   onCopyMarkdown,
   onDuplicate,
   onDownload,
@@ -162,19 +170,22 @@ export function DocumentOverflowActions({
   return (
     <>
       {config.mode === 'local' ? (
-        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
+        <AppMenuItem
+          className={`tdoc-action-menu-item${demotePrimary ? '' : ' tdoc-mobile-overflow-only'}`}
+          data-action="publish"
+          onClick={onPublish}
+        >
           <Upload size={15} /> Publish
         </AppMenuItem>
       ) : (
-        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="share" onClick={onShare}>
+        <AppMenuItem
+          className={`tdoc-action-menu-item${demotePrimary ? '' : ' tdoc-mobile-overflow-only'}`}
+          data-action="share"
+          onClick={onShare}
+        >
           <Share2 size={15} /> Share
         </AppMenuItem>
       )}
-      {onSendToAgent ? (
-        <AppMenuItem className="tdoc-action-menu-item" data-action="send-to-agent" onClick={onSendToAgent}>
-          <Bot size={15} /> Send to agent
-        </AppMenuItem>
-      ) : null}
       {(config.versions || []).length > 1 ? (
         <AppSubmenu
           className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-version-submenu-trigger"
