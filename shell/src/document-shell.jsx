@@ -395,7 +395,7 @@ export function DocumentShell({ boot, config }) {
       });
     },
     'tdoc:anchorClick': (message) => {
-      if (!message.id) return;
+      if (!visibleCommentsById.has(message.id)) return;
       setOpenCommentId(message.id);
       setOpenClusterKey(null);
       if (narrow) setDrawerOpen(true);
@@ -465,6 +465,10 @@ export function DocumentShell({ boot, config }) {
       ? comments.comments
       : comments.comments.filter((comment) => comment.status !== 'applied')
   ), [comments.comments, showResolved]);
+  const visibleCommentsById = useMemo(
+    () => new Map(shownComments.map((comment) => [comment.id, comment])),
+    [shownComments],
+  );
   // Lost pins are seats, not anchors: they give the card somewhere to be drawn
   // while it still reads — and styles — as unanchored, with the way back.
   const pinIds = useMemo(
@@ -936,7 +940,7 @@ export function DocumentShell({ boot, config }) {
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
     window.innerWidth - 34,
   );
-  const openComment = commentsById.get(openCommentId);
+  const openComment = visibleCommentsById.get(openCommentId);
   const openCluster = clusters.find((cluster) => (
     cluster.items.some(({ comment }) => comment.id === openCommentId)
   ));

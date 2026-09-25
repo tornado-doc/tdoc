@@ -76,8 +76,14 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     await page.waitForTimeout(250); // Allow the cross-origin click message to reach React.
     assert.equal(await page.locator('.tdoc-margin-comment').count(), 0, 'hidden words have no click target');
     await settled(false);
+    // A click already queued by the iframe before the filter changed must
+    // not reopen a now-hidden thread or revive it when the filter is restored.
+    await frame.evaluate(() => parent.postMessage({ source: 'tdoc-frame', type: 'tdoc:anchorClick', id: 'moved' }, '*'));
+    await page.waitForTimeout(250);
+    assert.equal(await page.locator('.tdoc-margin-comment').count(), 0, 'stale anchor click cannot bypass visibility');
     await toggle();
     await settled(true);
+    assert.equal(await page.locator('.tdoc-margin-comment').count(), 0, 'a rejected hidden click cannot revive later');
     assert.equal(((await highlights())['tdoc-anchor-active'] || []).length, 0, 'showing again does not restore selection');
     await page.locator('.tdoc-pin[data-id="resolved"]').click();
     await frame.waitForFunction(() => CSS.highlights.get('tdoc-anchor-active')?.size > 0);
