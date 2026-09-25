@@ -47,5 +47,12 @@ t('a comment whose words were rewritten marks the block that replaced them', () 
   assert(chrome.includes('::highlight(tdoc-anchor-moved)'), 'no style for the moved mark');
 });
 
+t('lost seats are stepped so a rewrite pile does not collapse to one Y', () => {
+  assert(probe.includes('seatY - seated * seatStep') && probe.includes('var seated = 0'),
+    'lost seats must step up the page instead of sharing one seatY');
+  assert(probe.includes('function findSurvivingFragment'),
+    'partial rewrites should try a surviving fragment of the original text before seating');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
