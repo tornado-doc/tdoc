@@ -170,6 +170,8 @@
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
   /* Parent-level resolved chip (distinct from the per-reply status chip). */
   .tdoc-resolved-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #e8f5ed; color: #1a7340; }
+  /* Homepage in-memory comment demo — same chip shape, quiet amber. */
+  .tdoc-demo-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #f5efe0; color: #7a5c14; }
   /* Re-anchor is a ⋯ menu item now. Its old inline-button dress — 10px, grey,
      uppercase, and display:none until the card was active — followed it into
      the menu and made one row shout while the others whispered. The menu item
@@ -495,9 +497,10 @@
   /* fixed, not absolute: absolute ties the card to the document, and iOS
      scrolls the document to reveal a focused textarea. See comment-composer.jsx. */
   .tdoc-popup { position: fixed; background: #0a0a0a; color: #fff; border-radius: 10px; padding: 14px; width: 320px; box-shadow: 0 12px 40px rgba(0,0,0,0.4); z-index: 999998; font: 13px system-ui, sans-serif; }
-  .tdoc-popup .head { display: flex; justify-content: space-between; margin-bottom: 8px; }
-  .tdoc-popup .head .h { color: #aaa; }
+  .tdoc-popup .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .tdoc-popup .head .h { flex: 1; min-width: 0; color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
+  .tdoc-popup .tdoc-demo-chip { margin: 0; flex-shrink: 0; background: #3a3424; color: #e8d5a3; }
   .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
   /* iOS Safari zooms the page whenever a focused field's text is smaller than
      16px, and every comment input was 13px — tapping one threw the reader out

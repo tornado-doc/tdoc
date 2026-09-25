@@ -346,6 +346,18 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage bar must show the star count beside the mark');
   assert(/config\.isLanding \? <LandingActions stars=\{config\.stars\} \/> : \(/.test(documentShell),
     'homepage must not receive the document Share/Copy/Download actions');
+  assert(/demo: !!config\.demoComments/.test(documentShell),
+    'homepage shell must wire demoComments into useComments');
+  assert(/Type a GitHub @/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
+    'demo composer placeholder should invite a GitHub @');
+  assert(/@email/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
+    'demo composer placeholder should also show email tagging');
+  assert(/elementComment: !config\.isLanding/.test(documentShell),
+    'landing must turn off block/artifact hover chrome');
+  assert(/var elementComment = true/.test(fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8')),
+    'frame probe must gate element/block hover');
+  assert(/tdoc-demo-chip/.test(fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8')),
+    'demo chip style must exist');
 });
 
 console.log('tdoc.dev / release payload');
@@ -410,7 +422,7 @@ t('release payload carries the homepage access policy', () => {
   assert(relMeta.access.history_visibility === 'owner',
     `homepage history must be owner-only, got ${relMeta.access.history_visibility}`);
   assert(relMeta.access.commenting === 'off',
-    `homepage commenting must be off (demo is static), got ${relMeta.access.commenting}`);
+    `homepage commenting must be off (no KV writes; shell demo is in-memory), got ${relMeta.access.commenting}`);
   assert(Array.isArray(relMeta.access.allowed_users) && relMeta.access.allowed_users.length === 0,
     `homepage allowlist must be empty, got ${JSON.stringify(relMeta.access.allowed_users)}`);
 
@@ -432,6 +444,11 @@ t('release payload carries the homepage access policy', () => {
   const workerSrc = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   assert(/if \(incoming\.access\)/.test(workerSrc) && /incoming\.access = normalizeAccess\(validatedAccess\.access/.test(workerSrc),
     '/api/upload no longer applies incoming.access; the payload policy would be dropped');
+  // Shell opens the real sidebar on landing without enabling the API.
+  assert(/canComment: !!commentWritesEnabled \|\| !!isLanding/.test(workerSrc),
+    'landing must expose canComment for the in-memory demo');
+  assert(/demoComments: !!isLanding/.test(workerSrc),
+    'landing must set demoComments so the shell skips /api/comments');
 });
 
 t('shipping the homepage ships content, not just worker code', () => {

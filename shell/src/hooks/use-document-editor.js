@@ -93,8 +93,8 @@ export function useDocumentEditor({
   }, [storeKey, legacyKey]);
 
   useEffect(() => {
-    send({ type: 'tdoc:mode', mode });
-  }, [mode, send]);
+    send({ type: 'tdoc:mode', mode, elementComment: !config.isLanding });
+  }, [mode, send, config.isLanding]);
 
   useEffect(() => {
     if (!sessionReady) return undefined;

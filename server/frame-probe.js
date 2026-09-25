@@ -23,6 +23,11 @@
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
   var interactionMode = 'read';
+  // Block/artifact hover outline. Off on the homepage — landing sections are
+  // huge commentable boxes and the dashed chrome gets in the way. Text
+  // selection commenting still works. Shell sets this via tdoc:mode.
+  var elementComment = true;
+
   // Whether the shell currently has a comment card, cluster, or composer open.
   // While something is open, the next click anywhere in the document only
   // dismisses it — it must not open a different comment or start a new one.
@@ -461,7 +466,7 @@
     hideHover();
   }
   document.addEventListener('mousemove', function (e) {
-    if (interactionMode !== 'comment') { if (hoverEl) hideHover(); return; }
+    if (interactionMode !== 'comment' || !elementComment) { if (hoverEl) hideHover(); return; }
     var t = e.target;
     if (isProbeUI(t)) return; // keep the pill/outline up while the cursor is on them
     var art = artifactFor(t);
@@ -1155,15 +1160,16 @@
     document.documentElement.removeAttribute('data-tdoc-editing');
     savedRange = null;
   }
-  function setInteractionMode(mode) {
+  function setInteractionMode(mode, opts) {
     var next = /^(read|comment|edit)$/.test(mode) ? mode : 'read';
     if (interactionMode === 'edit' && next !== 'edit') disableEditing();
     interactionMode = next;
+    if (opts && typeof opts.elementComment === 'boolean') elementComment = opts.elementComment;
     document.documentElement.setAttribute('data-tdoc-interaction-mode', next);
     clearSelectingCursor();
     if (HL && next !== 'comment') CSS.highlights.delete('tdoc-selecting');
-    if (next === 'edit') { hideHover(); enableEditing(); }
-    else if (next !== 'comment') hideHover();
+    if (next === 'edit' || next !== 'comment' || !elementComment) { hideHover(); }
+    if (next === 'edit') enableEditing();
   }
   function restoreSelection() {
     if (!savedRange) return;
@@ -1220,7 +1226,7 @@
       try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
-    else if (d.type === 'tdoc:mode') setInteractionMode(d.mode);
+    else if (d.type === 'tdoc:mode') setInteractionMode(d.mode, d);
     else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
     else if (d.type === 'tdoc:editRestore') {

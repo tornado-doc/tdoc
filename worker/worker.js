@@ -1521,7 +1521,11 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     author,
     isOwner: !!isOwner,
     canEdit: !!versionWritesEnabled && !!isOwner && !isLanding,
-    canComment: !!commentWritesEnabled,
+    // Landing keeps meta.commenting off (no KV writes) but still opens the
+    // real sidebar so visitors can try highlight / reply. The shell stores
+    // those in memory only — see demoComments.
+    canComment: !!commentWritesEnabled || !!isLanding,
+    demoComments: !!isLanding,
     canSeeMyDocs: !!canSeeMyDocsFlag,
     isLanding: !!isLanding,
     isCatalog: !!isCatalog,

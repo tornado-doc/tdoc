@@ -53,9 +53,9 @@ fs.writeFileSync(path.join(out, 'meta.json'), JSON.stringify({
   created: meta.created,
   versions: [{ n: 1, created: latest.created, prompt: 'tdoc landing page' }],
   // Commenting stays OFF on the shipped homepage: real review threads made
-  // tdoc.dev/ look like somebody else's working doc. The page still demos
-  // the product with its static in-page mock (no login). Visitors who want
-  // a live thread publish their own doc.
+  // tdoc.dev/ look like somebody else's working doc, and nothing writes to
+  // KV. The shell still opens Comment mode when isLanding (demoComments):
+  // highlight / reply stay in memory and vanish on refresh.
   access: {
     visibility: 'public',
     history_visibility: 'owner',
