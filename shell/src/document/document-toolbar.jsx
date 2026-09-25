@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -139,6 +139,60 @@ export function DocumentPrimaryAction({
   ) : (
     <button id="tdoc-share-btn" type="button" className="primary tdoc-document-primary" aria-label="Share" onClick={onShare}>
       <Share2 size={14} /> <span>Share</span>
+    </button>
+  );
+}
+
+export function DocumentWidthControl({ readerWidth, inline, onPlacementChange, onToggle }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const button = ref.current;
+    const bar = button.closest('.tdoc-bar');
+    const left = bar.querySelector('.tdoc-bar-left');
+    const right = bar.querySelector('.tdoc-bar-right');
+    let frame = 0, disposed = false;
+    const measure = () => {
+      if (disposed) return;
+      const children = [...left.children].filter(el => getComputedStyle(el).display !== 'none');
+      const title = left.querySelector('.doc-title');
+      const naturalLeft = children.reduce((total, el) => {
+        const css = getComputedStyle(el);
+        return total + el.getBoundingClientRect().width + parseFloat(css.marginLeft) + parseFloat(css.marginRight)
+          + (el === title ? Math.max(0, el.scrollWidth - el.clientWidth) : 0);
+      }, 0) + Math.max(0, children.length - 1) * parseFloat(getComputedStyle(left).columnGap || 0);
+      const required = button.getBoundingClientRect().width + parseFloat(getComputedStyle(button.parentElement).columnGap || 0);
+      // Add our footprint back before comparing, so appearing/disappearing
+      // cannot change the answer and cause an oscillating toolbar.
+      const available = left.getBoundingClientRect().width - naturalLeft + (inline ? required : 0);
+      onPlacementChange(window.innerWidth > 700 && available >= required + 8);
+    };
+    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); };
+    const resize = new ResizeObserver(schedule);
+    [bar, left, right, button, ...left.children].forEach(el => resize.observe(el));
+    // A truncated title can change its intrinsic width without changing its
+    // current box. Account/title/action text must also trigger a measurement.
+    const mutations = new MutationObserver(schedule);
+    mutations.observe(bar, { childList:true, characterData:true, subtree:true });
+    window.addEventListener('resize', schedule);
+    document.fonts?.ready.then(schedule);
+    measure();
+    return () => {
+      disposed = true; cancelAnimationFrame(frame); resize.disconnect(); mutations.disconnect();
+      window.removeEventListener('resize', schedule);
+    };
+  }, [inline, onPlacementChange]);
+  const label = readerWidth === 'wide' ? 'Narrow width' : 'Wide width';
+  return (
+    <button ref={ref} id="tdoc-width-btn" type="button"
+      className={`tdoc-width-action${inline ? '' : ' tdoc-width-measure'}`}
+      aria-label={label} title={label} aria-hidden={!inline} tabIndex={inline ? 0 : -1} onClick={onToggle}>
+      <Columns2 size={15} />
+      <span className="tdoc-width-labels">
+        {/* Reserve the larger label's natural width in both states. */}
+        {['Wide width', 'Narrow width'].map(text => (
+          <span key={text} aria-hidden={text !== label} className={text === label ? '' : 'tdoc-width-label-hidden'}>{text}</span>
+        ))}
+      </span>
     </button>
   );
 }

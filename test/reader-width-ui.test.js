@@ -15,10 +15,33 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await frame.locator('.wrap').waitFor();
     assert.equal(await width(), 720);
     const switchTo = async label => {
+      const direct = page.getByRole('button', { name: label, exact: true });
+      if (await direct.isVisible()) { await direct.click(); return; }
       await page.getByRole('button', { name: 'More actions', exact: true }).click();
       await page.getByRole('menuitem', { name: label, exact: true }).click();
     };
-    await switchTo('Wide width');
+    await page.getByRole('button', { name: 'Wide width', exact:true }).waitFor();
+    await page.getByRole('button', { name:'More actions', exact:true }).click();
+    assert.equal(await page.getByRole('menuitem', {name:'Wide width',exact:true}).count(),0,
+      'wide toolbar must not duplicate its control in More');
+    await page.keyboard.press('Escape');
+
+    // Same viewport, different title length: placement is based on actual
+    // available room, not a second fixed desktop breakpoint.
+    await page.setViewportSize({width:900,height:900});
+    await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
+    const originalTitle = await page.locator('.doc-title').textContent();
+    await page.locator('.doc-title').evaluate(el=>{el.textContent='A long document title that needs the toolbar space '.repeat(6)});
+    await page.locator('#tdoc-width-btn').waitFor({state:'hidden'});
+    await page.getByRole('button', {name:'More actions',exact:true}).click();
+    await page.getByRole('menuitem', {name:'Wide width',exact:true}).waitFor();
+    await page.keyboard.press('Escape');
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+    await page.locator('.doc-title').evaluate((el,title)=>{el.textContent=title},originalTitle);
+    await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
+    await page.setViewportSize({width:1440,height:900});
+    await page.getByRole('button', {name:'Wide width',exact:true}).focus();
+    await page.keyboard.press('Enter');
     await frame.locator('#tdoc-reader-width').waitFor({ state: 'attached' });
     assert(await width() > 1200);
     // The generic fixture's SVG has no fluid width; model a responsive author
@@ -67,10 +90,12 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert(!serialized.includes('id="tdoc-provider-table-layout"'), 'computed table widths must not become author HTML');
     assert(serialized.includes('id="added-table"'), 'table content must survive serialization');
     await page.setViewportSize({ width: 375, height: 800 });
+    await page.locator('#tdoc-width-btn').waitFor({state:'hidden'});
     await switchTo('Wide width');
     assert(await frame.locator('html').evaluate(e => e.scrollWidth <= innerWidth+1));
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth+1));
     assert.deepEqual(failures, []);
-    console.log('  ✓ live shell toggles, remembers and resizes visuals without changing saved content or overflowing phones');
+    console.log('  ✓ width control uses toolbar capacity, falls back to More, supports keyboard, persists and resizes visuals');
+    console.log('  ✓ dynamic tables and saved content remain intact without phone overflow');
   } finally { await browser.close(); await target.stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

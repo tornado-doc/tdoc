@@ -990,7 +990,8 @@ root layout with arbitrary CSS. Width is a separate template choice:
   **not** require `--custom-template` or a different aesthetic.
 
 The root width is the author's default, not the only size readers will use:
-readers can switch Narrow width / Wide width in the page's More actions menu.
+readers can switch Narrow width / Wide width directly in the top toolbar when
+there is room; the control moves into More actions when space is limited.
 The preference is per document in that browser and never changes saved HTML.
 At the standard 720px root, 24px padding per side leaves **672px for content**;
 on a 375px phone there are about **311px**. Design for the content box, not the

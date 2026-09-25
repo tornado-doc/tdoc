@@ -24,6 +24,7 @@ import {
   DocumentBreadcrumbs,
   DocumentOverflowActions,
   DocumentPrimaryAction,
+  DocumentWidthControl,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -166,6 +167,7 @@ export function DocumentShell({ boot, config }) {
   ));
   const [readerWidth, setReaderWidth] = useState('narrow');
   const [supportsWidth, setSupportsWidth] = useState(false);
+  const [inlineWidth, setInlineWidth] = useState(false);
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
   const [deepTarget, setDeepTarget] = useState(() => (
@@ -913,6 +915,13 @@ export function DocumentShell({ boot, config }) {
     && new URLSearchParams(location.search).get('comment') !== openComment.id
   ) || (arrival === 'revised' && Boolean(openComment));
 
+  const toggleReaderWidth = () => {
+    const next = readerWidth === 'wide' ? 'narrow' : 'wide';
+    writeStored(`tdoc-width:${config.slug}`, next);
+    setReaderWidth(next);
+    bridge.send({ type: 'tdoc:width', width: next });
+  };
+
   return (
     <div
       className="tdoc-document-app"
@@ -949,6 +958,10 @@ export function DocumentShell({ boot, config }) {
               onSignIn={signIn}
               onChange={editor.changeMode}
             />
+            {supportsWidth ? (
+              <DocumentWidthControl readerWidth={readerWidth} inline={inlineWidth}
+                onPlacementChange={setInlineWidth} onToggle={toggleReaderWidth} />
+            ) : null}
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
@@ -959,13 +972,8 @@ export function DocumentShell({ boot, config }) {
         overflowActions={config.isLanding ? null : (
           <DocumentOverflowActions
             config={config}
-            readerWidth={supportsWidth ? readerWidth : null}
-            onToggleWidth={() => {
-              const next = readerWidth === 'wide' ? 'narrow' : 'wide';
-              writeStored(`tdoc-width:${config.slug}`, next);
-              setReaderWidth(next);
-              bridge.send({ type: 'tdoc:width', width: next });
-            }}
+            readerWidth={supportsWidth && !inlineWidth ? readerWidth : null}
+            onToggleWidth={toggleReaderWidth}
             starred={starred}
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
