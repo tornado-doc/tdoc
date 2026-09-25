@@ -224,18 +224,26 @@ if [ -z "${TDOC_MOCK_NOT_PUBLISHED:-}" ] && [ -f "$CONFIG_FILE" ]; then
   fi
 fi
 
+# A rendered-layout gate is mandatory for creation and publishing. Probe the
+# browser that the current checkout will use, not an unrelated global install.
+layout_ok=false
+LAYOUT_SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+if $node_ok && node "$LAYOUT_SKILL_DIR/bin/tdoc-check-layout" --doctor >/dev/null 2>&1; then
+  layout_ok=true
+fi
+
 # --- ready_to_publish derived flag (per target) ---
-# Publishing to hosted tdoc.dev needs Node, curl and jq. It does NOT need
+# Publishing to hosted tdoc.dev needs Node, curl and the layout browser. It does NOT need
 # wrangler, a Cloudflare login, a workers.dev subdomain, or R2 — demanding
 # those of a hosted user was #236.
 ready_to_publish=false
 case "$target" in
   hosted)
-    if $node_ok && $curl_ok; then ready_to_publish=true; fi ;;
+    if $node_ok && $layout_ok && $curl_ok; then ready_to_publish=true; fi ;;
   vercel)
-    if $node_ok && $curl_ok && $vercel_ok; then ready_to_publish=true; fi ;;
+    if $node_ok && $layout_ok && $curl_ok && $vercel_ok; then ready_to_publish=true; fi ;;
   cloudflare)
-    if $node_ok && $curl_ok && $jq_ok && $wrangler_ok && $cf_logged_in \
+    if $node_ok && $layout_ok && $curl_ok && $jq_ok && $wrangler_ok && $cf_logged_in \
        && $cf_publish_token_ok && $cf_subdomain_ok && $cf_r2_enabled; then
       ready_to_publish=true
     fi ;;
@@ -251,6 +259,8 @@ add_step() { steps="${steps}${1}	${2}	${3}	${4}
 "; }
 
 $node_ok || add_step node "Install Node 18+" install "brew install node"
+layout_install_cmd="$(printf 'cd %q && npm ci && npx playwright install chromium' "$LAYOUT_SKILL_DIR")"
+$layout_ok || add_step layout_browser "Install the document layout checker and Chromium" install "$layout_install_cmd"
 $curl_ok || add_step curl "Install curl" install "brew install curl"
 
 # A credential that exists but cannot be used. Publish already refuses these
@@ -325,6 +335,7 @@ report_json="$(node -e '
     deps: {
       node: { ok: f.node, version: nodeVer },
       curl: { ok: f.curl },
+      layout_browser: { ok: f.layout_browser },
       wrangler: { ok: f.wrangler, version: wranglerVer },
       vercel: { ok: f.vercel },
       jq: { ok: f.jq },
@@ -344,7 +355,7 @@ report_json="$(node -e '
   }, null, 2));
 ' "$target" "$node_ver" "$wrangler_ver" "$cf_account_id" "$cf_subdomain" \
   "$publish_subdomain" "$publish_worker" \
-  "{\"node\":$node_ok,\"curl\":$curl_ok,\"wrangler\":$wrangler_ok,\"vercel\":$vercel_ok,\"jq\":$jq_ok,\"gh\":$gh_ok,\"cf_logged_in\":$cf_logged_in,\"cf_token\":$cf_publish_token_ok,\"cf_subdomain\":$cf_subdomain_ok,\"cf_r2\":$cf_r2_enabled,\"published\":$published,\"ready\":$ready_to_publish}" \
+  "{\"layout_browser\":$layout_ok,\"node\":$node_ok,\"curl\":$curl_ok,\"wrangler\":$wrangler_ok,\"vercel\":$vercel_ok,\"jq\":$jq_ok,\"gh\":$gh_ok,\"cf_logged_in\":$cf_logged_in,\"cf_token\":$cf_publish_token_ok,\"cf_subdomain\":$cf_subdomain_ok,\"cf_r2\":$cf_r2_enabled,\"published\":$published,\"ready\":$ready_to_publish}" \
   "$missing_json" "$update_json" "$credential_problem")"
 
 if [ "$JSON_MODE" = "1" ]; then

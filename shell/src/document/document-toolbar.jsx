@@ -8,6 +8,7 @@ import {
   Download,
   FileDown,
   History,
+  Columns2,
   Share2,
   Star,
   Trash2,
@@ -144,6 +145,8 @@ export function DocumentPrimaryAction({
 
 export function DocumentOverflowActions({
   config,
+  readerWidth,
+  onToggleWidth,
   starred,
   onToggleStar,
   onPublish,
@@ -159,6 +162,11 @@ export function DocumentOverflowActions({
 }) {
   return (
     <>
+      {readerWidth ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="width" onClick={onToggleWidth}>
+          <Columns2 size={15} /> {readerWidth === 'wide' ? 'Narrow width' : 'Wide width'}
+        </AppMenuItem>
+      ) : null}
       {config.mode === 'local' ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
           <Upload size={15} /> Publish

@@ -95,16 +95,22 @@ After writing/baking each version, run:
 node "$SKILL_DIR/bin/tdoc-check-layout" <version>/index.html --screenshots <output-dir>
 ```
 
-This renders the self-contained host at 375px and 1440px, fails page overflow
-and SVG text outside the viewBox or overlapping other labels, and warns about
-small text and desktop-only scrolling. It keeps local table/diagram scrolling
+This renders narrow and wide reader modes at 375px, 768px and 1440px. It fails
+page overflow, compressed prose columns, SVG text below 9 rendered pixels,
+text outside the viewBox and overlapping labels. Desktop local scrolling is
+reported for inspection. It keeps local table/diagram scrolling
 intact. Missing Playwright/browser support is an error, not a successful check.
 Author JavaScript and remote assets are disabled; separately verify sandboxed
 widgets and externally loaded fonts in the served reader.
 
-Open both screenshots and inspect every figure. The checker cannot establish
+The write gateway runs this after baking, before replacing a version; publishing
+rechecks the newest version before account setup or upload. No browser means
+no verification and a non-zero exit, with installation instructions from doctor.
+
+Open all six screenshots and inspect every figure. The checker cannot establish
 whether text belongs inside a particular node, whether arrows mean the right
-thing, or whether table columns read comfortably. Break long SVG text into
+thing, or whether every table reads comfortably. The column heuristic detects severe
+compression; it is not a substitute for reviewing the document. Break long SVG text into
 `tspan` lines and size the node for those lines; do not shrink the whole drawing
 until the words are unreadable. On phones use local scrolling only where the
 content needs it, with a visible hint when the next panel is off-screen. Never

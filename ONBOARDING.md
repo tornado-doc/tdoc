@@ -10,7 +10,7 @@
 - `/tdoc publish <slug>` → publish to **hosted tdoc.dev**; the first publish signs in once via a short code approved in the browser (email, Google, or GitHub)
 - Share the live URL; commenters sign in with email, Google, or GitHub
 
-**Publishing is hosted by default and needs no Cloudflare account, no card, and nothing to click in a dashboard.** On a machine that already has Node, there is usually nothing to install at all. Self-hosting on your own Cloudflare or Vercel is still fully supported — it is at the end of this file, and you only go there if the user asks for it.
+**Publishing is hosted by default and needs no Cloudflare account, no card, and nothing to click in a dashboard.** Authoring and publishing also require the local Chromium layout checker; doctor reports the installation step. Self-hosting on your own Cloudflare or Vercel is still fully supported — it is at the end of this file, and you only go there if the user asks for it.
 
 The first doc a new user gets is specified in [FIRST-DOC.md](FIRST-DOC.md); this file installs tdoc, that file builds the doc.
 
@@ -129,7 +129,7 @@ confirmed the provider configuration.
 
 ## Step 4 — Walk the user through `missing_steps`
 
-**On the hosted default this list is usually empty** — hosted publishing needs only Node 18+ and curl. If `ready_to_publish` is `true`, go straight to Step 5. Do not install wrangler, do not run `wrangler login`, and do not send the user to the Cloudflare dashboard; none of that is part of publishing to tdoc.dev.
+**The hosted default needs Node 18+, curl, and the local Chromium layout checker.** Run the `layout_browser` installation step when doctor reports it. If `ready_to_publish` is `true`, go straight to Step 5. Do not install wrangler, do not run `wrangler login`, and do not send the user to the Cloudflare dashboard; none of that is part of publishing to tdoc.dev.
 
 Otherwise, iterate over `missing_steps` **in order**. Each step has a `kind`:
 
@@ -266,7 +266,7 @@ Publish with the platform named: `bin/tdoc-publish --platform cloudflare <slug>`
 
 ## What to skip if the user just wants local
 
-If the user says they only want local docs (no publishing, no Cloudflare), stop after Step 2. The local skill works with zero setup beyond Node 18+.
+If the user says they only want local docs (no publishing, no Cloudflare), stop after Step 2. Local document creation also needs the Chromium layout checker (`npm ci` and `npx playwright install chromium` in the skill checkout).
 
 ```bash
 # Test that local works

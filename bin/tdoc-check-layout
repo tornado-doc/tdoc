@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const { applyReaderWidth } = require('../server/reader-width');
 
 function measureLayout() {
   const errors = [], warnings = [];
@@ -12,6 +13,28 @@ function measureLayout() {
     errors.push(`page overflow: ${document.documentElement.scrollWidth}px > ${width}px`);
   }
   const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+  // Table auto-layout protects long code's min-content width, but CJK prose
+  // can break at every character. A table may fit (or scroll correctly) while
+  // another column becomes a vertical ribbon. Measure actual wrapped lines,
+  // not row height, which is shared with taller neighbouring cells.
+  for (const [i, table] of [...document.querySelectorAll('table')].entries()) {
+    if (!visible(table)) continue;
+    for (const cell of table.querySelectorAll('th,td')) {
+      if (cell.closest('table') !== table || !visible(cell)) continue;
+      const css = getComputedStyle(cell), font = parseFloat(css.fontSize);
+      const space = cell.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+      const text = cell.textContent.trim();
+      if (space >= font * 3 || text.replace(/\s/g, '').length < 6) continue;
+      const tops = [], walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        if (!walker.currentNode.textContent.trim()) continue;
+        const range = document.createRange(); range.selectNodeContents(walker.currentNode);
+        for (const rect of range.getClientRects()) if (rect.width > 0) tops.push(rect.top);
+      }
+      const lines = tops.sort((a,b) => a-b).filter((top, j, all) => !j || top-all[j-1] > font * .6);
+      if (lines.length >= 3) errors.push(`table ${i+1}, column ${cell.cellIndex+1}: compressed table column (${Math.round(space)}px, ${lines.length} lines): ${text.slice(0,70)}`);
+    }
+  }
   for (const [i, svg] of [...document.querySelectorAll('svg[viewBox]')].entries()) {
     if (!visible(svg)) continue;
     const frame = svg.getBoundingClientRect();
@@ -24,7 +47,7 @@ function measureLayout() {
       }
       const matrix = el.getScreenCTM();
       const size = parseFloat(getComputedStyle(el).fontSize) * Math.hypot(matrix.a, matrix.b);
-      if (size < 9) warnings.push(`${label}: small rendered text (${size.toFixed(1)}px): ${el.textContent.slice(0,60)}`);
+      if (size < 9) errors.push(`${label}: small rendered text (${size.toFixed(1)}px): ${el.textContent.slice(0,60)}`);
     }
     for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++) {
       const x = boxes[a], y = boxes[b];
@@ -45,11 +68,13 @@ function measureLayout() {
   return { width, scrollWidth: document.documentElement.scrollWidth, errors: [...new Set(errors)], warnings: [...new Set(warnings)], scrollers };
 }
 
-async function checkLayout(file, { screenshotDir, widths = [375, 1440] } = {}) {
+async function checkLayout(file, { screenshotDir, widths = [375, 768, 1440], modes = ['narrow', 'wide'] } = {}) {
   let chromium;
   try { ({ chromium } = require('playwright')); }
   catch { throw new Error('Playwright is required: run npm install in the tdoc checkout, then npx playwright install chromium. Layout has NOT been verified.'); }
   const browser = await chromium.launch({ headless: true });
+  // A document that never settles must not leave creation/publishing hung.
+  const deadline = setTimeout(() => { void browser.close(); }, 60000);
   try {
     const context = await browser.newContext({ javaScriptEnabled: false });
     const page = await context.newPage();
@@ -58,28 +83,44 @@ async function checkLayout(file, { screenshotDir, widths = [375, 1440] } = {}) {
     const blocked = new Set();
     await page.route(/^https?:/, route => { blocked.add(route.request().url()); return route.abort(); });
     const reports = [];
-    for (const width of widths) {
+    for (const width of widths) for (const mode of modes) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(pathToFileURL(path.resolve(file)).href);
+      // Match /frame's fallback for hand-written uploads that have not passed
+      // through tdoc-write yet. Do not replace an existing frozen template.
+      if (!await page.locator('style#tdoc-reader').count()) {
+        await page.evaluate(css => {
+          const style = document.createElement('style');
+          style.textContent = css;
+          document.head.appendChild(style);
+        }, fs.readFileSync(path.join(__dirname, '../server/reader.css'), 'utf8'));
+      }
+      await page.evaluate(applyReaderWidth, mode);
       await page.evaluate(() => document.fonts.ready);
       const report = await page.evaluate(measureLayout);
+      report.mode = mode;
       if (blocked.size) report.warnings.push(`${blocked.size} remote asset request(s) blocked; verify external fonts/assets in the served reader`);
       if (screenshotDir) {
         fs.mkdirSync(screenshotDir, { recursive: true });
-        const target = path.resolve(screenshotDir, `layout-${width}.png`);
+        const target = path.resolve(screenshotDir, `layout-${width}-${mode}.png`);
         await page.screenshot({ path: target, fullPage: true });
         report.screenshot = target;
       }
       reports.push(report);
     }
     return reports;
-  } finally { await browser.close(); }
+  } finally { clearTimeout(deadline); await browser.close(); }
 }
 
 async function main() {
   const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === '--doctor') {
+    const browser = await require('playwright').chromium.launch({ headless: true });
+    await browser.close();
+    return 0;
+  }
   if (!args.length || args.includes('--help')) {
-    console.log('Usage: node bin/tdoc-check-layout <baked.html> [--screenshots <directory>]\nChecks 375px and 1440px; exits 1 for layout errors, 2 if unable to check. Inspect screenshots too: geometry cannot judge design quality.');
+    console.log('Usage: node bin/tdoc-check-layout <baked.html> [--screenshots <directory>]\nChecks narrow and wide reader modes at 375px, 768px and 1440px; exits 1 for layout errors, 2 if unable to check. Inspect screenshots too: geometry cannot judge design quality.');
     return args.length ? 0 : 2;
   }
   if (args.length !== 1 && !(args.length === 3 && args[1] === '--screenshots')) throw new Error('Expected <baked.html> [--screenshots <directory>]');

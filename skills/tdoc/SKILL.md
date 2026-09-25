@@ -416,16 +416,21 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
 
    If it exits non-zero, fix the host and run it again; nothing has been
    written. Do not open, publish, or report the document as complete.
-5. **Render and inspect the written version before publishing.** Run the static
-   validator AND the browser layout check; parsing CSS is not visual QA:
+5. **Inspect the rendered version before publishing.** `tdoc-write` now runs
+   the browser layout gate after baking and before writing; `tdoc-publish`
+   rechecks the newest bytes before uploading. Errors block both commands.
+   If Chromium is unavailable, follow the `layout_browser` step from
+   `tdoc-doctor` (`npm ci` then `npx playwright install chromium` in this
+   checkout). Do not bypass the gate. Generate screenshots for visual review:
 
    ```bash
    node "$SKILL_DIR/bin/tdoc-check-layout" ~/tdocs/<slug>/v1/index.html \
      --screenshots /tmp/<slug>-layout
    ```
 
-   Fix reported errors, inspect both screenshots (375px and 1440px), and
-   address warnings about tiny labels or desktop scrolling. Check table column
+   Fix reported errors and inspect all six screenshots: narrow and wide modes
+   at 375px, 768px and 1440px. Tiny SVG labels, squeezed table columns,
+   overlap and clipping are errors; intentional local scrolling is allowed. Check table column
    balance, diagram labels inside their boxes, connector crossings, and local
    scroll areas. A missing browser is an unverified result, never a pass.
    The check disables author JS and remote assets; verify widgets and external
@@ -1099,6 +1104,17 @@ root layout with arbitrary CSS. Width is a separate template choice:
   column comfortably, or when the user asks for a full-width document. It does
   **not** require `--custom-template` or a different aesthetic.
 
+The root width is the author's default, not the only size readers will use:
+readers can switch Narrow width / Wide width in the page's More actions menu.
+The preference is per document in that browser and never changes saved HTML.
+At the standard 720px root, 24px padding per side leaves **672px for content**;
+on a 375px phone there are about **311px**. Design for the content box, not the
+browser window. Use container queries for layout changes inside that root.
+Tables must allocate readable columns even with long identifiers; a fixed table
+minimum width alone does not do that. Give dense columns meaningful minimums
+or deliberately reflow the table. SVG labels must fit their nodes and viewBox
+at every size: use line breaks/reflow or readable local scrolling, not tiny type.
+
 Keep one primary root. Do not add viewport-width children, negative margins,
 or hide page overflow to simulate wide mode. Comment placement measures the
 actual root; desktop pins stay inside the viewport, and phones use the
@@ -1179,7 +1195,7 @@ Every doc must work on mobile out of the box. The baked template carries defensi
   - (Canvas isn't an option — see "Interactivity: CSS only". Without JS there is nothing to draw into the buffer.)
 - **Tables**: wrap in `<div style="overflow-x:auto">` so they scroll instead of overflowing.
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
-- **Test in a real browser at 375px and 1440px** with `bin/tdoc-check-layout`,
+- **Test both reader widths at 375px, 768px and 1440px** with `bin/tdoc-check-layout`,
   then inspect the screenshots before publishing or claiming done. Check the
   document frame as well as the shell: a fitting shell can hide an overflowing
   iframe. Wide figures/tables may scroll locally; the whole page must not.

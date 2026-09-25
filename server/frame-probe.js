@@ -1267,6 +1267,10 @@
       try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
+    else if (d.type === 'tdoc:width') {
+      applyReaderWidth(d.width);
+      requestAnimationFrame(function () { rereportPins(); reportScroll(); });
+    }
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode, d);
     else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
@@ -1306,6 +1310,8 @@
     requestAnimationFrame(function () { ticking = false; reportScroll(); });
   }, { passive: true });
 
-  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
+  var widthRoot = document.querySelector('body > .wrap, body > main, body > article, body > .content, body > .container');
+  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null,
+    supportsWidth: !!widthRoot, defaultWidth: widthRoot && widthRoot.getAttribute('data-tdoc-width') === 'wide' ? 'wide' : 'narrow' });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();

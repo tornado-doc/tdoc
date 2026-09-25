@@ -254,6 +254,13 @@ fi
 node "$(cd "$(dirname "$0")" && pwd)/tdoc-bake" "$STAGE_HTML" >/dev/null \
   || die "reader-template bake failed (existing doc, if any, left untouched)"
 
+# Check the FINAL baked bytes before any replacement. This is part of writing
+# a version, not an optional instruction the agent can forget to perform.
+if ! node "$(cd "$(dirname "$0")" && pwd)/tdoc-check-layout" "$STAGE_HTML" >"$STAGE_DIR/layout.json"; then
+  cat "$STAGE_DIR/layout.json" >&2
+  die "rendered layout validation failed (existing doc, if any, left untouched); fix the reported elements and retry"
+fi
+
 # Validation passed — NOW it's safe to replace. Swap the existing doc out only
 # at this point. (Same-filesystem mv under TDOC_DIR, so this is atomic-ish.)
 if [ "$VERSION_N" = "1" ]; then
