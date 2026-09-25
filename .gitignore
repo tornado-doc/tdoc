@@ -50,6 +50,3 @@ worker/.dev.vars
 test/fixtures/tdocs/.onboarding.json
 test/fixtures/tdocs/.agent-read.json
 .scratch/
-
-# Python developer benchmark cache
-__pycache__/
