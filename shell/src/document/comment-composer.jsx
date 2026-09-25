@@ -103,7 +103,7 @@ export function CommentComposer({ selection, onSubmit, onClose, mentionable = []
       <MentionField
         autoFocus
         placeholder={demo
-          ? 'What should change? Try tagging @tibo'
+          ? 'What should change? Try @torvalds — or @you@email.com'
           : 'What should change? Type @ to notify someone'}
         value={text}
         people={mentionable}

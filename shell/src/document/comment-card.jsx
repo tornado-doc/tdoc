@@ -115,7 +115,7 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable, demo = false }
         // clicking Reply put a composer on screen and left the caret wherever
         // it was, so the first thing you do is click the thing you just opened.
         autoFocus
-        placeholder={demo ? 'Reply… try @tibo' : 'Reply… (@ to notify someone)'}
+        placeholder={demo ? 'Reply… try @torvalds or @you@email.com' : 'Reply… (@ to notify someone)'}
         value={text}
         people={mentionable}
         onChange={setText}

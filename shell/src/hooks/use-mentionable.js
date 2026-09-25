@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { listMentionableUsers } from '../document/api.js';
 
 // Homepage demo: people the visitor can try tagging without hitting /api/mentions.
+// Pick a handle everyone recognizes as "on GitHub" — the point is the affordance.
 export const DEMO_MENTIONABLE = [
-  { login: 'tibo', name: 'Tibo' },
+  { login: 'torvalds', name: 'Linus Torvalds' },
 ];
 
 // The people this session may name after `@` on this doc. Refetched as the
