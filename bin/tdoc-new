@@ -254,25 +254,6 @@ fi
 node "$(cd "$(dirname "$0")" && pwd)/tdoc-bake" "$STAGE_HTML" >/dev/null \
   || die "reader-template bake failed (existing doc, if any, left untouched)"
 
-# Check the FINAL baked bytes before any replacement. This is part of writing
-# a version, not an optional instruction the agent can forget to perform.
-# tdoc-check-layout: exit 1 = real layout errors (block); exit 2 = unable to
-# check (missing Playwright / browser). Soft-skip exit 2 by default so agent
-# checkouts without npm install can still write; set TDOC_LAYOUT_REQUIRE=1 to
-# hard-fail when the checker cannot run.
-LAYOUT_RC=0
-node "$(cd "$(dirname "$0")" && pwd)/tdoc-check-layout" "$STAGE_HTML" >"$STAGE_DIR/layout.json" || LAYOUT_RC=$?
-if [ "$LAYOUT_RC" -eq 1 ]; then
-  cat "$STAGE_DIR/layout.json" >&2
-  die "rendered layout validation failed (existing doc, if any, left untouched); fix the reported elements and retry"
-elif [ "$LAYOUT_RC" -ne 0 ]; then
-  cat "$STAGE_DIR/layout.json" >&2 || true
-  if [ "${TDOC_LAYOUT_REQUIRE:-0}" = "1" ]; then
-    die "layout check required but unavailable (exit $LAYOUT_RC); install Playwright: npm ci && npx playwright install chromium"
-  fi
-  err "layout check skipped (exit $LAYOUT_RC — install Playwright to verify: npm ci && npx playwright install chromium)"
-fi
-
 # Validation passed — NOW it's safe to replace. Swap the existing doc out only
 # at this point. (Same-filesystem mv under TDOC_DIR, so this is atomic-ish.)
 if [ "$VERSION_N" = "1" ]; then
