@@ -467,16 +467,17 @@ export function DocumentShell({ boot, config }) {
     () => comments.comments.filter((comment) => comment.status === 'applied').length,
     [comments.comments],
   );
-  // What the margin shows. A thread the *human* resolved is out of the way
-  // until asked for — except the one being looked at. Agent-applied work
-  // (no resolved_by) stays visible: hiding it the moment the agent finishes
-  // removes the only proof they did anything before anyone can look.
+  // What the margin shows. A resolved thread (human ✓ or agent applied) is out
+  // of the way until asked for — except the one being looked at. A deep link
+  // opens its card before deepTarget is consumed, so without the openCommentId
+  // clause the card would sit there with no pin under it the moment the target
+  // cleared. (#629 tried to keep agent-applied visible by exempting
+  // !resolved_by; that made Resolved(N) lie and the switch look broken.)
   const shownComments = useMemo(() => (
     showResolved
       ? comments.comments
       : comments.comments.filter((comment) => (
         comment.status !== 'applied'
-        || !comment.resolved_by
         || comment.id === openCommentId
         || comment.id === deepTarget
         || comment.replies?.some((reply) => reply.id === deepTarget)
