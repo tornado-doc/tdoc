@@ -2,7 +2,7 @@
 // preference: never rewrite the author's root or serialize it into a version.
 function applyReaderWidth(mode) {
   const selector = 'body > .wrap, body > main, body > article, body > .content, body > .container';
-  let style = document.getElementById('tdoc-reader-width');
+  let style = document.querySelector('style#tdoc-reader-width[data-tdoc-provider]');
   if (!style) {
     style = document.createElement('style');
     style.id = 'tdoc-reader-width';
