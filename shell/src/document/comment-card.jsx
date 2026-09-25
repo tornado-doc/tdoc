@@ -620,8 +620,10 @@ export function CommentCard({
             : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
         </span>
       ) : null}
-      {comment.handoff_status === 'sent' ? (
-        <span className="tdoc-handoff-chip">Sent to agent</span>
+      {comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed' ? (
+        <span className="tdoc-handoff-chip is-failed" title={comment.handoff_delivery?.error || undefined}>
+          Not delivered
+        </span>
       ) : null}
       {comment.handoff_status === 'resolved' ? (
         <span className="tdoc-handoff-chip is-resolved">Agent resolved</span>
