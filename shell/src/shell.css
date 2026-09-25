@@ -245,3 +245,8 @@ body.tdoc-narrow .tdoc-pin {
 .tdoc-diagram-dialog .ui-dialog-body { min-height: 0; }
 .tdoc-excalidraw-canvas { height: min(65vh, 700px); min-height: 280px; color-scheme: light; }
 @media (max-width: 700px) { .ui-dialog-popup.tdoc-diagram-dialog { padding: 12px; } .tdoc-excalidraw-canvas { height: 60dvh; } }
+@media (max-width: 700px) {
+  .ui-dialog-viewport:has(.tdoc-diagram-dialog) { padding: 8px; }
+  body.tdoc-narrow .ui-dialog-popup.tdoc-diagram-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); padding: 12px; }
+  .tdoc-diagram-dialog .actions { flex-wrap: wrap; }
+}
