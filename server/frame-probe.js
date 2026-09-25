@@ -666,6 +666,34 @@
     return null;
   }
 
+  // Partial rewrites often leave a phrase of the original selection alive even
+  // when the whole sentence no longer matches. Prefer a unique surviving run
+  // of the anchor text over dumping the comment at the foot of the page.
+  function findSurvivingFragment(anchor, view) {
+    if (!anchor || !view || !view.norm) return null;
+    var text = normalizeContext(anchor.text).trim();
+    if (text.length < NEAR_CONTEXT_MIN) return null;
+    var best = null;
+    for (var len = Math.min(text.length, 64); len >= NEAR_CONTEXT_MIN; len--) {
+      for (var start = 0; start + len <= text.length; start++) {
+        var slice = text.slice(start, start + len);
+        var i = view.norm.indexOf(slice);
+        if (i === -1) continue;
+        if (view.norm.indexOf(slice, i + 1) !== -1) continue;
+        best = { at: i, len: len };
+        break;
+      }
+      if (best) break;
+    }
+    if (!best) return null;
+    var candidate = rangeFromNorm(view, best.at, best.len);
+    if (!candidate) return null;
+    var box = candidate.getBoundingClientRect();
+    if (!(box.width || box.height)) return null;
+    candidate.tdocSide = 'after';
+    return candidate;
+  }
+
   // The words a comment sat on are gone, but the block that replaced them is
   // right there — after the surviving context_before, or before the surviving
   // context_after. That block is what the comment is now about, so it gets a
@@ -796,18 +824,25 @@
     // the data and nowhere on screen — while the phone drawer, which renders the
     // list directly, shows it.
     //
-    // The seat goes at the END of the document, not the top. At the top a stack
-    // of comments from an older version is the first thing beside the title,
-    // which reads as "these matter most"; at the end it reads as what it is —
-    // what the last revision left behind. Everything downstream is unchanged:
-    // clustering, the rail, the dashed unanchored card, and the Re-anchor that
-    // puts one back where it belongs.
+    // Prefer the shell's remembered position from a version where this comment
+    // still resolved (pinHint): scale that Y into the new document height. That
+    // is an estimate, so the card still reads unanchored — but it stays near
+    // where the thread used to live instead of jumping to the foot of the page
+    // after an ordinary rewrite. Only with no hint does the seat fall back to
+    // the end of the document (what a full delete-and-replace left behind).
     // Not the very last pixel: the rail culls a pin that falls outside the
     // viewport, and a seat pinned to the document's final row is never on
     // screen even when you scroll all the way down. Sit just above the end.
-    var seatY = Math.max(0, document.documentElement.scrollHeight - 160);
+    var docH = document.documentElement.scrollHeight;
+    var seatY = Math.max(0, docH - 160);
     function seat(c, extra) {
-      var pin = { id: c.id, docY: seatY, lost: true, login: (c.author && c.author.login) || null,
+      var y = seatY;
+      var hint = c && c.pinHint;
+      if (hint && Number(hint.docHeight) > 0 && typeof hint.docY === 'number') {
+        y = Math.round((Number(hint.docY) / Number(hint.docHeight)) * docH);
+        y = Math.max(0, Math.min(y, seatY));
+      }
+      var pin = { id: c.id, docY: y, lost: true, seated: true, login: (c.author && c.author.login) || null,
         avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null,
         resolved: c.status === 'applied', deleted: !!c.deleted };
       if (extra) for (var k in extra) pin[k] = extra[k];
@@ -837,6 +872,10 @@
       var approximate = false;
       if (!r) {
         r = findNearContext(c.anchor, docView());
+        approximate = !!r;
+      }
+      if (!r) {
+        r = findSurvivingFragment(c.anchor, docView());
         approximate = !!r;
       }
       if (!r) return c.hidden ? undefined : seat(c);

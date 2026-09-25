@@ -465,14 +465,42 @@ export function DocumentShell({ boot, config }) {
     [bridge.layout.docHeight, bridge.layout.pins],
   );
 
+  // Remember where each comment last resolved on this slug, so a later version
+  // that cannot re-find the text can still seat the pin near that place.
+  const pinHintKey = `tdoc-pin-hints:${config.slug}`;
+  useEffect(() => {
+    const pins = bridge.layout.pins;
+    const docHeight = bridge.layout.docHeight;
+    if (!pins.length || !docHeight) return;
+    let hints = {};
+    try { hints = JSON.parse(sessionStorage.getItem(pinHintKey) || '{}') || {}; } catch { hints = {}; }
+    let changed = false;
+    for (const pin of pins) {
+      // Pure fallback seats must not overwrite a real prior position.
+      if (pin.seated) continue;
+      if (typeof pin.docY !== 'number') continue;
+      hints[pin.id] = { docY: pin.docY, docHeight };
+      changed = true;
+    }
+    if (changed) {
+      try { sessionStorage.setItem(pinHintKey, JSON.stringify(hints)); } catch {}
+    }
+  }, [bridge.layout.docHeight, bridge.layout.pins, pinHintKey]);
+
   // Every thread goes to the frame. The ones the margin is not showing —
   // resolved, with the switch off — go flagged `hidden`: no pin, a lighter
   // mark on their sentence, and a click on it opens the thread (the open
   // card is always shown, whatever the switch says).
   const anchorsForFrame = useMemo(() => {
     const shown = new Set(shownComments.map((comment) => comment.id));
-    return comments.comments.map((comment) => (shown.has(comment.id) ? comment : { ...comment, hidden: true }));
-  }, [comments.comments, shownComments]);
+    let hints = {};
+    try { hints = JSON.parse(sessionStorage.getItem(pinHintKey) || '{}') || {}; } catch { hints = {}; }
+    return comments.comments.map((comment) => {
+      const base = shown.has(comment.id) ? comment : { ...comment, hidden: true };
+      const hint = hints[comment.id];
+      return hint ? { ...base, pinHint: hint } : base;
+    });
+  }, [comments.comments, pinHintKey, shownComments]);
   useEffect(() => {
     bridge.send({ type: 'tdoc:anchors', comments: anchorsForFrame });
     if (!comments.loading) document.body.dataset.tdocReady = '1';
