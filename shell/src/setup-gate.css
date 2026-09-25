@@ -33,7 +33,7 @@
 
 /* ------------------------------------------------------------ the left pane */
 .sg-pane-form { display: flex; flex-direction: column; padding: 26px 38px 34px; background: #fff; }
-.sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: -4px; border-radius: 8px; text-decoration: none; }
+.sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: max(-4px, calc((100% - 440px) / 2 - 4px)); border-radius: 8px; text-decoration: none; }
 .sg-brand:hover { background: var(--td-surface, #f4f4f2); }
 /* The column is anchored, not centred. Centring meant every change to the
    answer moved the question: picking the choice that needs a subject typed
@@ -362,9 +362,18 @@
   .sg-pane-form { padding: 24px 22px 30px; }
   .sg-mid { padding-top: 26px; }
   .sg-col { max-width: 520px; margin: 0 auto; }
+  .sg-brand { margin-left: max(-4px, calc((100% - 520px) / 2 - 4px)); }
   .sg-h1 { font-size: 26px; }
 }
 
 /* Internal testing only, and dressed so it can never be mistaken for product:
    dashed, off to one corner, and it always says which branch is real. */
 
+
+/* Preserve the original layout and height breakpoints; normalize text spacing. */
+.sg-eyebrow { margin: 0; }
+.sg-choice-text { gap: 4px; }
+.sg-choice-text span { line-height: 1.5; }
+.sg-steps { gap: 12px; }
+.sg-steps li { line-height: 1.5; }
+.sg-account { margin-top: 0; line-height: 1.5; }

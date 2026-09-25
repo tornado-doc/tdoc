@@ -355,7 +355,7 @@ t('nothing is drawn before the server has answered once', () => {
   // An empty record reads as "not connected", so a page asked for the doc step
   // paints the connect step for a beat first. Same class of flicker as the one
   // the old wizard had: a guess rendered while the answer is in flight.
-  assert(gate.includes('const [loaded, setLoaded] = useState(false);') && gate.includes('if (!cancelled) setLoaded(true);'),
+  assert(gate.includes('const [loaded, setLoaded] = useState(Boolean(preview));') && gate.includes('preview = null') && gate.includes('if (!cancelled) setLoaded(true);'),
     'the first poll is what opens the page');
   assert(gate.includes("{signedIn && !loaded ? null : ("), 'the heading waits for it');
   assert(gate.includes("{signedIn && !loaded ? null : signedIn ? ("), 'and so does the column under it');

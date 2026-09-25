@@ -276,6 +276,7 @@ jobs:
           ### Preview
           **Open this:** https://${PREVIEW_HOST}/ — the homepage, this PR's code
           carrying the landing version in this PR's checkout.
+          **Onboarding UI:** https://${PREVIEW_HOST}/__preview/onboarding
           **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1
           **Or a document:** https://${PREVIEW_HOST}/d/conway-life/v/2
 

@@ -27,15 +27,15 @@ function cleanCode(raw) {
   return v.length > 4 ? `${v.slice(0, 4)}-${v.slice(4)}` : v;
 }
 
-export function ActivatePage({ boot }) {
+export function ActivatePage({ boot, preview = null }) {
   const [code, setCode] = useState(boot.code || '');
   const [signInOpen, setSignInOpen] = useState(false);
   const [identity, setIdentity] = useState(boot.identity);
   // idle → looked-up (terminal named, confirm offered) → approved | error
-  const [pending, setPending] = useState(null);
-  const [approved, setApproved] = useState(false);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(preview?.pending || null);
+  const [approved, setApproved] = useState(Boolean(preview?.approved));
+  const [error, setError] = useState(preview?.error || '');
+  const [busy, setBusy] = useState(Boolean(preview?.busy));
 
   const signIn = () => {
     if (boot.webAuth) {
@@ -52,6 +52,7 @@ export function ActivatePage({ boot }) {
   }, []);
 
   const lookup = async () => {
+    if (preview) { setPending({ label: 'Preview terminal' }); setError(''); return; }
     setBusy(true);
     setError('');
     const { status, data } = await post('/api/cli/pair/lookup', { user_code: code });
@@ -66,6 +67,7 @@ export function ActivatePage({ boot }) {
   };
 
   const approve = async () => {
+    if (preview) { setApproved(true); return; }
     setBusy(true);
     setError('');
     const { status, data } = await post('/api/cli/pair/approve', { user_code: code });
@@ -83,7 +85,7 @@ export function ActivatePage({ boot }) {
   // return leg of the sign-in redirect) should land one click from done, not
   // re-type what the URL already carried.
   useEffect(() => {
-    if (identity && code.length === 9 && !pending && !approved && !busy) lookup();
+    if (!preview && identity && code.length === 9 && !pending && !approved && !busy) lookup();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity]);
 
