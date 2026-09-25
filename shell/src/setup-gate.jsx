@@ -186,22 +186,22 @@ function SceneStuck() {
 
 // ------------------------------------------------------------------ the gate
 
-export function SetupGate({ boot }) {
-  const [record, setRecord] = useState(null);
-  const [paired, setPaired] = useState(false);
+export function SetupGate({ boot, preview = null }) {
+  const [record, setRecord] = useState(preview?.record || null);
+  const [paired, setPaired] = useState(Boolean(preview?.paired));
   // The choice, and the subject it may carry. Nothing is chosen on arrival:
   // pre-selecting one would answer the only question this screen asks.
   const [choice, setChoice] = useState(null);
   // Nothing in the form column is drawn until the server has answered once.
   // Before that the record is empty, which reads as "not connected" and paints
   // the connect step for a beat on a page that was asked for the doc step.
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(Boolean(preview));
   const [subject, setSubject] = useState('');
   const subjectRef = useRef(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const promptRef = useRef(null);
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
   const waitingSince = useRef(null);
@@ -272,7 +272,7 @@ export function SetupGate({ boot }) {
 
   // The record is the only thing that moves this page.
   useEffect(() => {
-    if (!signedIn) return undefined;
+    if (!signedIn || preview) return undefined;
     let cancelled = false;
     let timer = null;
     const tick = async () => {
@@ -301,6 +301,7 @@ export function SetupGate({ boot }) {
   // OIDC provider and back to /setup. Signing in is signing up, so there is no
   // second door to offer.
   const signIn = () => {
+    if (preview) return;
     const here = wantsDoc ? '/setup?step=doc' : '/setup';
     location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(here)}`;
   };
@@ -310,6 +311,7 @@ export function SetupGate({ boot }) {
     setCopied(ok !== false);
     setCopyFailed(ok === false);
     if (ok === false) selectContents(promptRef.current);
+    if (preview) return;
     if (!stamped.current) { stamped.current = true; postOnboardingEvent('door_own_agent').catch(() => {}); }
     postOnboardingEvent('copy_clicked').catch(() => {});
   };
@@ -364,13 +366,13 @@ export function SetupGate({ boot }) {
                     same numbers the row above a doc wears. Two screens saying
                     "step 2" about the same act is the only way a reader can
                     tell the gate and the list are one journey and not two. */}
-                <p className="sg-eyebrow">
+                <header className="sg-heading"><p className="sg-eyebrow">
                   <span className="sg-step-n">{step === 'doc' ? 2 : 1}</span>
                   Step {step === 'doc' ? 2 : 1} of 4
                 </p>
                 <h1 className="sg-h1">
                   {step !== 'doc' ? 'Connect your agent' : 'Make your first tdoc'}
-                </h1>
+                </h1></header>
               </>
             )}
 

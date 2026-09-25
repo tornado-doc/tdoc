@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../server/chrome.css';
 import './ui/ui.css';
@@ -13,12 +13,15 @@ import { StatusPage } from './status-page.jsx';
 import { ActivatePage } from './activate-page.jsx';
 import { SetupGate } from './setup-gate.jsx';
 
+const OnboardingPreview = lazy(() => import('./onboarding-preview.jsx'));
+
 const appRoot = document.getElementById('tdoc-app-root');
 const appBoot = window.__TDOC_APP_BOOT__;
 
 if (appRoot && appBoot) {
   let page;
-  if (appBoot.page === 'docs-hub') page = <DocsHub boot={appBoot} />;
+  if (appBoot.page === 'onboarding-preview') page = <Suspense fallback={<p>Loading preview…</p>}><OnboardingPreview /></Suspense>;
+  else if (appBoot.page === 'docs-hub') page = <DocsHub boot={appBoot} />;
   else if (appBoot.page === 'folder-share') page = <FolderShare boot={appBoot} />;
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;

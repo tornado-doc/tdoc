@@ -32,7 +32,7 @@ t('only an HTTPS github.com URL is linked', () => {
 
 t('nothing opens GitHub automatically', () => {
   assert(!/window\.open|\bopen\(/.test(src), 'dialog opens GitHub itself');
-  assert(/onClick=\{\(\) => device\?\.user_code && copyText/.test(src), 'anchor tap should copy the device code');
+  assert(src.includes('onClick={onCopy}') && src.includes('onCopy={() => copyText(device.user_code).then(setCopied)}'), 'anchor tap should copy the device code through the shared content callback');
 });
 
 t('polling continues after the handoff and can be cancelled', () => {

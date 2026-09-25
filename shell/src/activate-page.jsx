@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { Check } from 'lucide-react';
 import { SignInDialog } from './sign-in-dialog.jsx';
 
 // The pairing approval page (/activate). A terminal showed the visitor a
@@ -87,110 +88,72 @@ export function ActivatePage({ boot }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity]);
 
-  if (approved) {
-    return (
-      <main className="tdoc-status-page tdoc-activate-page">
-        <div className="tdoc-activate-stack">
-        <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-        <h1>Device login approved</h1>
-        {/* What happens next, not what this page cannot do. `window.close()`
-            is ignored by every browser on a tab the script did not open --
-            which is every tab reached from a link in a terminal -- so the
-            button did nothing, and the line under it ("if this tab stays
-            open, close it manually") was an apology for that. A page whose
-            main action visibly fails and then explains itself is the thing
-            that reads as untrustworthy, on the one screen that is supposed to
-            confirm a credential was granted.
+  const switchAccount = () => {
+    location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate${code ? `?code=${code}` : ''}`)}`;
+  };
+  const beginSignIn = () => {
+    if (boot.oidcAuth) return switchAccount();
+    signIn();
+  };
+  return <>
+    <ActivateView {...{ code, identity, pending, approved, error, busy }}
+      canSignIn={boot.oidcAuth || boot.authConfigured}
+      signInLabel={boot.oidcAuth ? 'Sign in' : 'Sign in with GitHub'}
+      onCodeChange={(value) => setCode(cleanCode(value))}
+      onSignIn={beginSignIn} onContinue={lookup} onApprove={approve} onSwitchAccount={switchAccount} />
+    <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={completeSignIn} />
+  </>;
+}
 
-            So: say what the terminal is doing, and offer the one place worth
-            going instead. */}
-        <p>Your terminal is finishing sign-in on its own. Nothing else is needed here.</p>
-        <div className="tdoc-status-actions">
-          <a className="primary" href="/me">Go to my docs</a>
-        </div>
-        <p className="tdoc-activate-hint">You can close this tab.</p>
-        </div>
-      </main>
-    );
-  }
-
+// The same view is used by the preview gallery, without running an auth flow.
+export function ActivateView({ code = '', identity, pending, approved, error, busy,
+  canSignIn, signInLabel = 'Sign in', onCodeChange, onSignIn, onContinue, onApprove, onSwitchAccount }) {
+  const account = identity?.email || identity?.name || identity?.login;
   return (
     <main className="tdoc-status-page tdoc-activate-page">
       <div className="tdoc-activate-stack">
-      <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-      <h1>Approve Device Login</h1>
-      {!identity ? (
-        <>
-          <p>{code
-            ? 'A terminal wants to publish to your tdoc account. Sign in, then approve the code it showed you.'
-            : 'Sign in to connect a terminal to your tdoc account.'}</p>
-          <p className="tdoc-activate-hint">
-            First time here? Signing in creates your account automatically — there is no separate sign-up.
-          </p>
-          {boot.oidcAuth ? (
-            // One action, one surface: every sign-in method — GitHub
-            // included — lives in the provider's own modal. Legacy GitHub
-            // accounts are reconnected server-side through the provider's
-            // record of which GitHub identity the visitor connected, so no
-            // second button has to exist for their sake.
-            <button
-              type="button"
-              className="primary"
-              onClick={() => {
-                const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
-                location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(back)}`;
-              }}
-            >
-              Sign in
-            </button>
-          ) : boot.authConfigured ? (
-            <button type="button" className="primary" onClick={signIn}>Sign in with GitHub</button>
-          ) : (
-            <p>Sign-in is not configured on this host.</p>
-          )}
-        </>
-      ) : !pending ? (
-        <>
-          <p className="tdoc-activate-grant">
-            Signed in as <b>{identity.email || identity.name || identity.login}</b>.
-          </p>
-          <input
-            className="tdoc-activate-code"
-            value={code}
-            onChange={(e) => setCode(cleanCode(e.target.value))}
-            placeholder="XXXX-XXXX"
-            autoFocus
-            spellCheck={false}
-            aria-label="Device code"
-          />
-          <button type="button" className="primary" disabled={busy || code.length !== 9} onClick={lookup}>
-            Continue
-          </button>
-          <button type="button" className="secondary" onClick={() => {
-            location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate${code ? `?code=${code}` : ''}`)}`;
-          }}>
-            Use Another Account
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="tdoc-activate-grant">
-            Signed in as <b>{identity.email || identity.name || identity.login}</b>.
-          </p>
-          <div className="tdoc-activate-codeshow">{code}</div>
-          <button type="button" className="primary" disabled={busy} onClick={approve}>
-            Approve Device Login
-          </button>
-          <button type="button" className="secondary" onClick={() => {
-            location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate?code=${code}`)}`;
-          }}>
-            Use Another Account
-          </button>
-        </>
-      )}
-      {error ? <p role="alert" className="tdoc-activate-error">{error}</p> : null}
+        <header className="tdoc-activate-header">
+          {approved ? <span className="tdoc-activate-success" aria-hidden="true"><Check size={28} strokeWidth={2} /></span>
+            : <img src="/tdoc_logo.svg" width="40" height="40" alt="tdoc" />}
+          <h1>{approved ? 'Device login approved' : 'Connect your agent'}</h1>
+          <p>{approved ? 'Your terminal is finishing sign-in. You can return to your agent.'
+            : !identity ? 'Sign in to connect your agent to your tdoc account.'
+              : pending ? 'Allow this device to publish documents to your tdoc account.'
+                : 'Enter the code shown by your agent.'}</p>
+        </header>
+        {approved ? (
+          <div className="tdoc-activate-actions">
+            <a className="primary" href="/me">Go to my docs</a>
+            <p className="tdoc-activate-hint">You can close this tab.</p>
+          </div>
+        ) : !identity ? (
+          <div className="tdoc-activate-actions">
+            {canSignIn ? <button type="button" className="primary" onClick={onSignIn}>{signInLabel}</button>
+              : <p>Sign-in is not configured on this host.</p>}
+            <p className="tdoc-activate-hint">New to tdoc? Signing in creates your account.</p>
+          </div>
+        ) : (
+          <>
+            <dl className="tdoc-activate-details">
+              {pending ? <div><dt>Device</dt><dd>{pending.label || 'Your terminal'}</dd></div> : null}
+              <div><dt>Account</dt><dd>{account}</dd></div>
+            </dl>
+            {pending ? <div className="tdoc-activate-codegroup"><span>Device code</span><div className="tdoc-activate-codeshow">{code}</div></div>
+              : <label className="tdoc-activate-codegroup" htmlFor="device-code"><span>Device code</span>
+                <input id="device-code" className="tdoc-activate-code" value={code}
+                  onChange={(event) => onCodeChange(event.target.value)} placeholder="XXXX-XXXX"
+                  autoFocus autoComplete="off" spellCheck={false} aria-describedby={error ? 'pairing-error' : undefined} aria-invalid={Boolean(error)} />
+                </label>}
+            <div className="tdoc-activate-actions">
+              <button type="button" className="primary" disabled={busy || (!pending && code.length !== 9)} onClick={pending ? onApprove : onContinue}>
+                {busy ? (pending ? 'Approving…' : 'Checking code…') : pending ? 'Approve device login' : 'Continue'}
+              </button>
+              <button type="button" className="secondary" onClick={onSwitchAccount}>Use another account</button>
+            </div>
+          </>
+        )}
+        {error ? <p id="pairing-error" role="alert" className="tdoc-activate-error">{error}</p> : null}
       </div>
-      <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={completeSignIn} />
     </main>
   );
 }

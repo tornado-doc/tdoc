@@ -23,9 +23,10 @@
   --sg-dot: rgba(22,82,240,0.16);
   --sg-wash: rgba(22,82,240,0.055);
   --sg-agent: #d97757;
-  min-height: 100vh;
+  min-height: 100svh;
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  line-height: 1.5;
   background: #fff;
   color: var(--td-ink, #1a1a1a);
   font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
@@ -33,7 +34,7 @@
 
 /* ------------------------------------------------------------ the left pane */
 .sg-pane-form { display: flex; flex-direction: column; padding: 26px 38px 34px; background: #fff; }
-.sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: -4px; border-radius: 8px; text-decoration: none; }
+.sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: max(-4px, calc((100% - 440px) / 2 - 4px)); border-radius: 8px; text-decoration: none; }
 .sg-brand:hover { background: var(--td-surface, #f4f4f2); }
 /* The column is anchored, not centred. Centring meant every change to the
    answer moved the question: picking the choice that needs a subject typed
@@ -46,39 +47,14 @@
   /* The step number added a row above everything, which on a laptop-height
      window pushed the one button on the screen past the bottom of it. The
      column hangs from a fixed top, so the top is where the room comes from. */
-  padding-top: clamp(28px, 11vh, 108px);
+  padding-top: clamp(32px, 6vh, 64px);
 }
-.sg-col { width: 100%; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.sg-col { width: 100%; max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 
-/* The tallest this column ever gets is the second ask with a subject typed
-   into it: eyebrow, heading, two choices, a field, the composed line, three
-   steps, a status row, the button, the way out. Everything in that list has a
-   height of its own that cannot be argued with -- 537px of it -- so the only
-   room to find is the air: the gaps between the rows, the margin above them,
-   and the strip the internal bar reserves.
-   Measured on tdoc.dev at 863px: 753px needed, of which 126 was seven 18px
-   gaps and 64 was that strip. Below ~760px of window the button goes under the
-   fold, and a page whose only action has to be scrolled to is a page that
-   looks finished when it is not.
-   So the air comes out in steps, and the rows stay the size they are.
-
-   Order matters here and got this wrong once already: the collapse used to be
-   written ABOVE the `.sg-col` base rule, so the base's own `gap: 18px` -- same
-   specificity, later in the file -- won at every height and the media query
-   did nothing. It measured 18px on a window it was supposed to have tightened.
-   Base first, overrides after. */
-@media (max-height: 870px) {
-  .sg-mid { padding-top: 26px; }
-  .sg-col { gap: 15px; }
-}
-@media (max-height: 790px) {
-  .sg-mid { padding-top: 20px; }
-  .sg-col { gap: 12px; }
-}
-@media (max-height: 710px) {
-  .sg-mid { padding-top: 15px; }
-  .sg-col { gap: 10px; }
-}
+/* Keep a readable rhythm at every height; short windows scroll naturally. */
+.sg-heading { display: grid; gap: 12px; }
+.sg-heading .sg-eyebrow { margin: 0; }
+.sg-split :is(button, a):focus-visible { outline: 3px solid var(--td-accent-ring); outline-offset: 3px; }
 
 /* Where you are, above what to do. Same disc and same count as the checklist
    on My docs, so the two read as one list. */
@@ -95,10 +71,10 @@
      exemption from it. */
   width: 24px; height: 24px; border-radius: 50%;
   background: var(--td-accent, #1652f0); color: #fff;
-  font: 700 13px/1 inherit; font-variant-numeric: tabular-nums;
+  font: 700 13px/1 var(--td-font-display); font-variant-numeric: tabular-nums;
 }
 
-.sg-h1 { margin: 0 0 2px; font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
+.sg-h1 { margin: 0; color: var(--td-ink); font-size: 30px; line-height: 1.16; font-weight: 700; letter-spacing: -0.024em; text-wrap: balance; }
 
 /* The prompt is the message you are about to send your agent, so it is drawn
    like the box you would send it from: white, one hairline, a large radius and
@@ -128,7 +104,7 @@
   border: 1.5px solid #cfcec9; border-radius: 50%; background: #fff;
 }
 .sg-choice.on .sg-radio { border: 5px solid var(--td-accent, #1652f0); }
-.sg-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sg-choice-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .sg-choice-text b { font: 600 14px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; }
 .sg-choice-text span { font-size: 13px; color: var(--td-muted, #6b6a66); }
 
@@ -158,14 +134,14 @@
    the sunburst reads smaller than the knot inside the same box. Two palettes
    only fight in a crowded line; given a row of their own, with the label held
    back in grey, they read as what they are. */
-.sg-works { display: flex; align-items: center; gap: 9px; margin: -4px 0 -2px; font-size: 12.5px; color: #9a9a95; }
+.sg-works { display: flex; align-items: center; gap: 9px; margin: -8px 0 0; font-size: 12.5px; color: #9a9a95; }
 
 .sg-works svg { display: block; }
 .sg-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 .sg-prompt-copy {
   flex: 0 0 auto;
-  height: 30px; padding: 0 14px;
+  min-height: 40px; padding: 0 14px;
   border: 1px solid var(--td-accent, #1652f0); border-radius: 9px;
   background: transparent; color: var(--td-accent, #1652f0);
   cursor: pointer;
@@ -178,7 +154,7 @@
 .sg-prompt-copy.copied { border-color: #1a7340; color: #1a7340; background: transparent; cursor: default; }
 
 .sg-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; counter-reset: sgs; }
-.sg-steps li { display: grid; grid-template-columns: 19px 1fr; gap: 11px; align-items: start; font-size: 13.5px; line-height: 1.4; color: var(--td-ink, #1a1a1a); }
+.sg-steps li { display: grid; grid-template-columns: 19px 1fr; gap: 11px; align-items: start; font-size: 14px; line-height: 1.55; color: var(--td-ink, #1a1a1a); }
 .sg-steps li::before {
   counter-increment: sgs; content: counter(sgs);
   width: 19px; height: 19px; border-radius: 5px; margin-top: 0;
@@ -189,7 +165,7 @@
 }
 
 /* Reserved for its tallest state so the button below never moves. */
-.sg-status-slot { display: flex; align-items: flex-start; min-height: 62px; padding-top: 4px; }
+.sg-status-slot { display: flex; align-items: flex-start; min-height: 44px; padding-top: 4px; }
 .sg-status {
   flex: 1 1 auto; display: flex; align-items: flex-start; gap: 10px;
   font: 12.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
@@ -210,11 +186,11 @@
 .sg-status.done b { font-weight: 600; }
 .sg-status .found { color: var(--td-muted, #6b6a66); }
 
-.sg-split .sg-primary { display: flex; align-items: center; justify-content: center; text-decoration: none; width: 100%; border: 0; border-radius: 12px; height: 46px; cursor: pointer; background: var(--td-accent, #1652f0); color: #fff; font: 650 15px inherit; letter-spacing: -0.01em; }
+.sg-split .sg-primary { display: flex; align-items: center; justify-content: center; text-decoration: none; width: 100%; border: 0; border-radius: 12px; min-height: 48px; padding: 12px 20px; box-sizing: border-box; cursor: pointer; background: var(--td-accent, #1652f0); color: #fff; font: 650 15px var(--td-font-display); letter-spacing: -0.01em; }
 .sg-split .sg-primary:hover { background: var(--td-accent-hover, #1245d0); }
 .sg-split .sg-primary.off { opacity: .3; pointer-events: none; }
-.sg-account { margin: -4px 0 0; font-size: 13px; text-align: center; }
-.sg-account a { color: var(--td-accent, #1652f0); }
+.sg-account { margin: -12px 0 0; font-size: 13px; text-align: center; }
+.sg-account a { display: inline-flex; align-items: center; min-height: 44px; color: var(--td-accent, #1652f0); }
 
 /* ----------------------------------------------------------- the right pane */
 /* Centred in the viewport, not in the grid row -- which is the same mistake
@@ -254,7 +230,7 @@
 .sg-chat-bar { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 13px; background: #fbfbfa; border-bottom: 1px solid var(--p-bar-line); }
 .sg-lights { display: flex; gap: 6px; }
 .sg-lights i { width: 11px; height: 11px; border-radius: 50%; display: block; background: #dcdcdf; }
-.sg-chat-name { flex: 1 1 auto; text-align: center; font: 600 12.5px inherit; color: var(--p-icon); }
+.sg-chat-name { flex: 1 1 auto; text-align: center; font: 600 12.5px var(--td-font-display); color: var(--p-icon); }
 .sg-chat-body { padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 13px; min-height: 268px; }
 
 .sg-msg { display: flex; gap: 10px; align-items: flex-start; }
@@ -262,11 +238,11 @@
 .sg-av { width: 24px; height: 24px; border-radius: 6px; flex: 0 0 auto; display: block; }
 .sg-av.you { background: linear-gradient(140deg, #6f8bb5, #46617f); border-radius: 50%; }
 .sg-av.bot { background: var(--sg-agent); }
-.sg-txt { margin: 0; font: 14px/1.55 inherit; color: #24242a; min-width: 0; }
+.sg-txt { margin: 0; font: 14px/1.55 var(--td-font-display); color: #24242a; min-width: 0; }
 .sg-msg.me .sg-txt { background: var(--p-chip); border-radius: 12px; padding: 9px 12px; }
 
 /* the agent's own running notes: one bullet per action */
-.sg-run { font: 13px/1.65 inherit; color: #4a4a52; display: flex; gap: 8px; }
+.sg-run { font: 13px/1.65 var(--td-font-display); color: #4a4a52; display: flex; gap: 8px; }
 .sg-run .b { color: var(--sg-agent); flex: 0 0 auto; }
 .sg-run .b.ok { color: #1a7340; }
 .sg-run .b.bad { color: #b42318; }
@@ -274,7 +250,7 @@
 
 .sg-composer { margin-top: auto; border: 1px solid #d9d9d6; border-radius: 14px; padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 9px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.03); }
 .sg-composer.live { border-color: var(--p-ink); }
-.sg-field { font: 14px/1.5 inherit; color: #24242a; min-height: 21px; }
+.sg-field { font: 14px/1.5 var(--td-font-display); color: #24242a; min-height: 21px; }
 .sg-ph { color: #9a9a96; }
 .sg-tools { display: flex; align-items: center; gap: 8px; color: #9a9a96; font-size: 13px; }
 .sg-sp { flex: 1 1 auto; }
@@ -307,7 +283,7 @@
 .sg-res { display: inline-flex; align-items: center; gap: 6px; color: #444; font-size: 12.5px; }
 .sg-sw { width: 26px; height: 15px; border-radius: 999px; background: var(--td-accent, #1652f0); position: relative; }
 .sg-sw::after { content: ""; position: absolute; right: 2px; top: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; }
-.sg-btn { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; border-radius: 8px; font: 600 12.5px inherit; }
+.sg-btn { display: inline-flex; align-items: center; gap: 5px; min-height: 40px; padding: 0 11px; border-radius: 8px; font: 600 12.5px var(--td-font-display); }
 .sg-btn.tint { background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); }
 .sg-btn.solid { background: var(--td-accent, #1652f0); color: #fff; }
 .sg-ic { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--p-icon); }
@@ -318,8 +294,8 @@
 /* A doc that was published a moment ago has no comments on it yet, so the
    margin column is not hidden — it does not exist. */
 .sg-page.bare { grid-template-columns: minmax(0, 1fr); padding-right: 56px; }
-.sg-doc h2 { margin: 0 0 14px; font: 700 28px/1.2 inherit; letter-spacing: -0.028em; max-width: 17ch; }
-.sg-doc p { margin: 0 0 11px; font: 15px/1.62 inherit; color: #24242a; max-width: 54ch; }
+.sg-doc h2 { margin: 0 0 14px; font: 700 28px/1.2 var(--td-font-display); letter-spacing: -0.028em; max-width: 17ch; }
+.sg-doc p { margin: 0 0 11px; font: 15px/1.62 var(--td-font-display); color: #24242a; max-width: 54ch; }
 .sg-doc p.faint { color: var(--td-muted, #6b6a66); }
 .sg-anchor { background-color: var(--p-anchor); }
 .sg-scene.run .sg-anchor { animation: sg-sweep .55s ease-out 1.35s both; }
@@ -362,6 +338,7 @@
   .sg-pane-form { padding: 24px 22px 30px; }
   .sg-mid { padding-top: 26px; }
   .sg-col { max-width: 520px; margin: 0 auto; }
+  .sg-brand { margin-left: max(-4px, calc((100% - 520px) / 2 - 4px)); }
   .sg-h1 { font-size: 26px; }
 }
 

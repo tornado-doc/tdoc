@@ -74,15 +74,24 @@ export function SignInDialog({ open, onOpenChange, onSuccess }) {
     };
   }, [open, onSuccess]);
 
-  const verificationUrl = device?.verification_uri_complete || device?.verification_uri;
 
   return (
     <AppDialog
       open={open}
       onOpenChange={onOpenChange}
       title="Sign in with GitHub"
+      className="tdoc-sign-in-dialog"
+      description="Connect your account in three steps."
       actions={<button type="button" onClick={() => onOpenChange(false)}>Cancel</button>}
     >
+      <DeviceSignInContent {...{ device, copied, error, status }} onCopy={() => copyText(device.user_code).then(setCopied)} />
+    </AppDialog>
+  );
+}
+
+export function DeviceSignInContent({ device, copied, error, status, onCopy }) {
+  const verificationUrl = device?.verification_uri_complete || device?.verification_uri;
+  return <div className="tds-content">
       <div className="tds-step"><span className="tds-n">1</span><span>Copy this code:</span></div>
       <div className="tds-codewrap">
         <div className="tds-code" id="tds-code">{device?.user_code || '…'}</div>
@@ -90,7 +99,7 @@ export function SignInDialog({ open, onOpenChange, onSuccess }) {
           type="button"
           className={`tds-copy${copied ? ' done' : ''}`}
           disabled={!device?.user_code}
-          onClick={() => copyText(device.user_code).then(setCopied)}
+          onClick={onCopy}
         >
           {copied ? 'Copied' : 'Copy'}
         </button>
@@ -103,7 +112,7 @@ export function SignInDialog({ open, onOpenChange, onSuccess }) {
             href={verificationUrl}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={() => device?.user_code && copyText(device.user_code)}
+            onClick={onCopy}
           >
             Open GitHub <ExternalLink size={14} />
           </a>
@@ -113,6 +122,5 @@ export function SignInDialog({ open, onOpenChange, onSuccess }) {
         <span className="tds-n">3</span>
         <span className={`tds-status${error ? ' tds-err' : ''}`}>{error || status}</span>
       </div>
-    </AppDialog>
-  );
+  </div>;
 }
