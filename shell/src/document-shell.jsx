@@ -137,8 +137,8 @@ const exitLine = (answered, version) => (
   // at zero, and "answered 0 comments" reads as a report that the product
   // failed. The version is still real and still worth sending; say that.
   answered
-    ? `Your agent answered ${answered} ${answered === 1 ? 'comment' : 'comments'} in v${version}. Send it to a real reader:`
-    : `v${version} is published. Send it to a real reader:`
+    ? `Answered ${answered} ${answered === 1 ? 'comment' : 'comments'} in v${version}. Share it.`
+    : `v${version} published. Share it.`
 );
 
 export function DocumentShell({ boot, config }) {
@@ -1051,9 +1051,9 @@ export function DocumentShell({ boot, config }) {
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
-          <span>{sharedNow ? 'Link copied — send it to someone.' : exitLine(answered, config.version)}</span>
+          <span>{sharedNow ? 'Link copied.' : exitLine(answered, config.version)}</span>
           {sharedNow
-            ? <a href="/me">Back to my docs</a>
+            ? <a href="/me">My docs</a>
             : <button type="button" onClick={copyExitLink}>Copy link</button>}
         </div>
       ) : null}

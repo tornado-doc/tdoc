@@ -17,8 +17,8 @@ export const ANOTHER_DOC_RECIPE = 'Use tdoc to write a doc about what it should 
 export const handoffLine = (docUrl) => `Read all comments on ${docUrl} and fix them`;
 export const AGENT_DEFINITION = 'An AI that runs on your computer and can read and write files.';
 export const AGENT_NAMES = 'Claude Code · Codex · Claude Cowork · ChatGPT Work';
-export const NOTHING_YET = 'Taking a while? Check your agent’s window.';
-export const COPY_FALLBACK = 'Copy the selected line by hand.';
+export const NOTHING_YET = 'Check your agent’s window.';
+export const COPY_FALLBACK = 'Copy the selected line.';
 
 // Select the text of an element, for the person to copy by hand when the
 // clipboard refused. Never throws.

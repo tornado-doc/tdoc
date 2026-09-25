@@ -106,9 +106,9 @@ export function ActivatePage({ boot, preview = null }) {
 
             So: say what the terminal is doing, and offer the one place worth
             going instead. */}
-        <p>Your terminal is finishing sign-in on its own. Nothing else is needed here.</p>
+        <p>Your terminal is finishing sign-in.</p>
         <div className="tdoc-status-actions">
-          <a className="primary" href="/me">Go to my docs</a>
+          <a className="primary" href="/me">My docs</a>
         </div>
         <p className="tdoc-activate-hint">You can close this tab.</p>
         </div>
@@ -124,10 +124,10 @@ export function ActivatePage({ boot, preview = null }) {
       {!identity ? (
         <>
           <p>{code
-            ? 'A terminal wants to publish to your tdoc account. Sign in, then approve the code it showed you.'
-            : 'Sign in to connect a terminal to your tdoc account.'}</p>
+            ? 'Sign in, then approve this terminal to publish to your account.'
+            : 'Sign in to connect your terminal.'}</p>
           <p className="tdoc-activate-hint">
-            First time here? Signing in creates your account automatically — there is no separate sign-up.
+            New here? Signing in creates your account.
           </p>
           {boot.oidcAuth ? (
             // One action, one surface: every sign-in method — GitHub

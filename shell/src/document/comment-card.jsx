@@ -713,11 +713,11 @@ export function CommentCard({
             ) : null}
             {handoff.open || handoff.state !== 'idle' ? (
               <div className="tdoc-handoff-status" role="status" aria-live="polite">
-                {handoff.state === 'idle' ? 'Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.' : null}
+                {handoff.state === 'idle' ? 'Paste into your agent to address each comment and publish an update.' : null}
                 {handoff.state === 'waiting' && handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />{COPY_FALLBACK}</> : null}
                 {handoff.state === 'waiting' && !handoff.copyFailed ? <><span className="tdoc-wait-dot" aria-hidden="true" />Waiting for your agent…</> : null}
-                {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading this</> : null}
-                {handoff.state === 'stuck' ? 'Still waiting — did you paste it into your agent?' : null}
+                {handoff.state === 'reading' ? <><span className="tdoc-wait-dot" aria-hidden="true" />Your agent is reading…</> : null}
+                {handoff.state === 'stuck' ? 'Check your agent’s window.' : null}
               </div>
             ) : null}
           </div>
