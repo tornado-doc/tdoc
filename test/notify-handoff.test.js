@@ -300,6 +300,135 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.default && r.reason === null, `expected a recipient and no reason, got ${JSON.stringify(r.reason)}`);
   });
 
+  // ---- the Raft wire format ----
+  //
+  // Every earlier test stubbed delivery out, so three wire-level bugs shipped
+  // and only surfaced against the live API: the request leg was addressed by
+  // server id instead of slug (404), the response was read as `request_id`
+  // when it is `requestId` (undefined sent onward), and the resource was built
+  // from our stored id rather than the one the API returns. These drive the
+  // provider against a recorded transcript so the shape is pinned.
+  const realFetch = globalThis.fetch;
+  function stubRaft(handler) {
+    const calls = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input && input.url ? input.url : input);
+      const body = init && init.body ? JSON.parse(init.body) : null;
+      calls.push({ url, body });
+      const r = handler(url, body);
+      return r || realFetch(input, init);
+    };
+    return calls;
+  }
+  const RAFT_ENV = { RAFT_CLIENT_ID: 'tdoc-7a927d', RAFT_CLIENT_SECRET: 'sec', RAFT_API_BASE: 'https://api.raft.test' };
+  const fullTarget = { provider: 'raft', server_id: 'srv-uuid', server_slug: 'acme', agent_sub: 'uuid-a', agent_name: 'xiaocc' };
+
+  async function seedWith(env) {
+    const tok = await issue(worker, env, 'owner');
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'wire-doc', version: 1, html: '<h1>d</h1><p>a sentence to comment on</p>' },
+    }), env, {});
+    const reader = await putSession(env, 'reader');
+    const c = await (await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: reader,
+      body: { slug: 'wire-doc', version: 1, text: 'x', anchor: { kind: 'text', text: 'a sentence' } },
+    }), env, {})).json();
+    return { token: tok.token, commentId: c.id };
+  }
+
+  await t('the access request is addressed by server SLUG, not id', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    const calls = stubRaft((url) => {
+      if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq1', agent: { serverId: 'srv-uuid' } });
+      if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
+      if (url.endsWith('/api/oauth/agent-events')) return Response.json({ ok: true });
+      return null;
+    });
+    try {
+      const r = await (await worker.fetch(req('/api/notify/handoff', {
+        method: 'POST', token, body: { slug: 'wire-doc', comment_ids: [commentId], recipient: fullTarget },
+      }), env, {})).json();
+      assert(r.delivery.status === 'delivered', `delivery: ${JSON.stringify(r.delivery)}`);
+      const reqCall = calls.find(c => c.url.endsWith('/api/oauth/requests/agent'));
+      assert(reqCall.body.serverSlug === 'acme', `sent serverSlug=${reqCall.body.serverSlug}; the uuid here is a 404`);
+      assert(reqCall.body.scopes.includes('agent:notification:write'), 'scope');
+    } finally { globalThis.fetch = realFetch; }
+  });
+
+  await t('requestId is read camelCase and the resource uses the returned serverId', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    const calls = stubRaft((url) => {
+      // The API answers with a DIFFERENT serverId than we stored; the resource
+      // must follow the API, not our record.
+      if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq-real', agent: { serverId: 'srv-from-api' } });
+      if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
+      if (url.endsWith('/api/oauth/agent-events')) return Response.json({ ok: true });
+      return null;
+    });
+    try {
+      await worker.fetch(req('/api/notify/handoff', {
+        method: 'POST', token, body: { slug: 'wire-doc', comment_ids: [commentId], recipient: fullTarget },
+      }), env, {});
+      const tokCall = calls.find(c => c.url.endsWith('/api/oauth/token'));
+      assert(tokCall.body.request_id === 'rq-real', `request_id: ${tokCall.body.request_id}`);
+      assert(tokCall.body.resource === 'urn:raft:server:srv-from-api:agent-inbound', `resource: ${tokCall.body.resource}`);
+      assert(tokCall.body.grant_type === 'urn:slock:grant-type:agent_request', 'grant_type');
+    } finally { globalThis.fetch = realFetch; }
+  });
+
+  await t('a target with no slug fails clearly instead of 404-ing', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    const r = await (await worker.fetch(req('/api/notify/handoff', {
+      method: 'POST', token,
+      body: { slug: 'wire-doc', comment_ids: [commentId], recipient: { ...fullTarget, server_slug: undefined } },
+    }), env, {})).json();
+    assert(r.delivery.error === 'target_missing_server_slug', `error: ${r.delivery.error}`);
+  });
+
+  // ---- following a doc is earned, not configured ----
+  // touchDocAgent existed but nothing called it, so "the follow-up agent
+  // continues automatically" was true of the design and false of the build.
+  // These call the real routes with an agent session attached.
+  await t('publishing a version makes you the doc\'s follow-up agent', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    const cookie = await withAgentSession(env);
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token, cookie,
+      body: { slug: 'follow-doc', version: 1, html: '<h1>d</h1><p>a sentence here</p>' },
+    }), env, {});
+    const t2 = await (await worker.fetch(req('/api/notify/targets?slug=follow-doc', { token: tok.token }), env, {})).json();
+    assert(t2.default && t2.default.source === 'doc', `expected a doc-level agent, got ${JSON.stringify(t2.default)}`);
+    assert(t2.default.agent_sub === 'uuid-a', `wrong agent: ${t2.default.agent_sub}`);
+  });
+
+  await t('answering a comment does the same', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const cookie = await withAgentSession(env);
+    await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token, cookie,
+      body: { slug, parent_id: commentId, text: 'done', status: 'applied', applied_in: 1, agent_login: 'claude' },
+    }), env, {});
+    const t2 = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(t2.default && t2.default.source === 'doc', `expected a doc-level agent, got ${JSON.stringify(t2.default)}`);
+  });
+
+  await t('publishing without a Raft identity binds nobody and still succeeds', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'plain-doc', version: 1, html: '<h1>d</h1><p>a sentence here</p>' },
+    }), env, {});
+    assert(up.status === 200, `publish must not depend on having a Raft identity: ${up.status}`);
+    const t2 = await (await worker.fetch(req('/api/notify/targets?slug=plain-doc', { token: tok.token }), env, {})).json();
+    assert(t2.default === null && t2.reason === 'no_agent_bound', `expected nobody bound, got ${JSON.stringify(t2)}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
