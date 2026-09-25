@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -242,7 +243,7 @@ export function DocumentOverflowActions({
       )}
       {onSendToAgent ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="send-to-agent" onClick={onSendToAgent}>
-          Send to agent
+          <Bot size={15} /> Send to agent
         </AppMenuItem>
       ) : null}
       {(config.versions || []).length > 1 ? (

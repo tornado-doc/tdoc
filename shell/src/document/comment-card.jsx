@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
-import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
+import { Bot, Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
@@ -648,7 +648,7 @@ export function CommentCard({
               <Check size={16} />
             </button>
           ) : null}
-          {isMine || canDelete || canMutate || onSendToAgent ? (
+          {isMine || canDelete || canMutate ? (
             <AppMenu
               trigger={(
                 <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
@@ -675,14 +675,6 @@ export function CommentCard({
                   onClick={() => onReanchor(comment.id)}
                 >
                   {unanchored ? 'Re-anchor' : 'Move anchor'}
-                </AppMenuItem>
-              ) : null}
-              {onSendToAgent && comment.status !== 'applied' ? (
-                <AppMenuItem
-                  disabled={sendToAgentBusy}
-                  onClick={() => onSendToAgent(comment.id)}
-                >
-                  Send to agent
                 </AppMenuItem>
               ) : null}
               {canDelete ? (
@@ -775,6 +767,18 @@ export function CommentCard({
           </button>
           {!reactionCount ? (
             <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
+          ) : null}
+          {/* Primary notify action — not buried in ⋯. Same row as Reply. */}
+          {onSendToAgent && comment.status !== 'applied' ? (
+            <button
+              type="button"
+              className="tdoc-send-agent-btn"
+              disabled={sendToAgentBusy}
+              onClick={() => onSendToAgent(comment.id)}
+            >
+              <Bot size={14} aria-hidden="true" />
+              {sendToAgentBusy ? 'Sending…' : 'Send to agent'}
+            </button>
           ) : null}
         </span>
       </div>
