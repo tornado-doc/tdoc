@@ -1357,7 +1357,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  const runtimeAsset = [SHELL_RUNTIME.js, SHELL_RUNTIME.css].find((asset) => asset.path === p);
+  const runtimeAsset = SHELL_RUNTIME.all.find((asset) => asset.path === p);
   if (runtimeAsset && (req.method === 'GET' || req.method === 'HEAD')) {
     const body = req.method === 'HEAD' ? '' : fs.readFileSync(runtimeAsset.file);
     return send(res, 200, body, {

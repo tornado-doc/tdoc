@@ -239,3 +239,9 @@ body.tdoc-narrow .tdoc-pin {
 .tdoc-fab {
   display: none;
 }
+
+/* Opt-in diagram editor uses the shared AppDialog surface. */
+.ui-dialog-popup.tdoc-diagram-dialog { width: min(1200px, 96vw); max-width: 96vw; }
+.tdoc-diagram-dialog .ui-dialog-body { min-height: 0; }
+.tdoc-excalidraw-canvas { height: min(65vh, 700px); min-height: 280px; color-scheme: light; }
+@media (max-width: 700px) { .ui-dialog-popup.tdoc-diagram-dialog { padding: 12px; } .tdoc-excalidraw-canvas { height: 60dvh; } }
