@@ -40,7 +40,7 @@ When you add to the docs or write release notes, keep the credit prominent. `tdo
 A single runner drives everything. Offline suites run by default; browser/network suites are gated.
 
 ```bash
-npm test            # all offline suites — no network, no browser. Covers:
+npm test            # all offline suites — no network; CLI gates use Chromium. Covers:
                     #   worker comment fold + cross-version history, anchor reconcile,
                     #   event-log convergence, security (injection/authz/CSRF/path-traversal),
                     #   P3 hardening (XSS escaping, corrupt-value resilience),
@@ -53,7 +53,7 @@ npm run test:all    # also runs the gated suites:
                     #   TDOC_INTEGRATION=1 → real Cloudflare round-trip
 ```
 
-Install the optional browser dep with `npm i -D playwright && npx playwright install chromium`.
+Install dependencies and the layout browser with `npm ci && npx playwright install chromium`. CLI tests exercise the mandatory render gate even in the offline suite.
 
 `npm test` must be green before any commit to `main`.
 

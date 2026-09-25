@@ -55,6 +55,10 @@ jobs:
             exit 1
           fi
 
+      - name: Install layout preflight browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
       - name: Offline test suite
         run: npm test
 
@@ -224,6 +228,17 @@ jobs:
           seed 1 test/fixtures/tdocs/sample-doc/v1/index.html
           seed 2 test/fixtures/tdocs/sample-doc/v2/index.html
 
+          # Per-PR diagram fixture: shared preview storage must not mix scenes
+          # from two concurrently reviewed branches.
+          DIAGRAM_SLUG="excalidraw-pr-${{ github.event.pull_request.number }}"
+          reset_preview_slug "$DIAGRAM_SLUG"
+          jq -n --arg slug "$DIAGRAM_SLUG" --rawfile html test/fixtures/excalidraw/index.html \
+            '{slug:$slug,version:1,html:$html,meta:{title:"Editable diagrams in tdoc",slug:$slug,versions:[{n:1}],access:{visibility:"public",commenting:"signed_in",history_visibility:"public",allowed_users:[]}}}' \
+            > /tmp/tdoc-preview-diagram.json
+          curl -sf --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \
+            -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
+            --data-binary @/tmp/tdoc-preview-diagram.json | jq -e '.ok == true'
+
           # The homepage is itself a tdoc (LANDING_SLUG = tornado-doc, served
           # at `/`). Without it a preview answers `/` with the neutral page, so
           # anything touching site chrome — a mark, a bar control, a theme —
@@ -261,6 +276,8 @@ jobs:
           ### Preview
           **Open this:** https://${PREVIEW_HOST}/ — the homepage, this PR's code
           carrying the landing version in this PR's checkout.
+          **Onboarding UI:** https://${PREVIEW_HOST}/__preview/onboarding
+          **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1
           **Or a document:** https://${PREVIEW_HOST}/d/conway-life/v/2
 
           This link is unique to this PR. New commits update the same URL. It is not [tdoc.dev](https://tdoc.dev).

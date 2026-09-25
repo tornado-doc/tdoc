@@ -24,6 +24,7 @@ import {
   DocumentBreadcrumbs,
   DocumentOverflowActions,
   DocumentPrimaryAction,
+  DocumentWidthControl,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -40,7 +41,7 @@ import {
   OwnerAccessDialog,
 } from './document/owner-access-dialog.jsx';
 import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
-import { readStored } from './safe-storage.js';
+import { readStored, writeStored } from './safe-storage.js';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -48,6 +49,8 @@ import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
+import { parseDiagramScene } from './document/excalidraw-scene.mjs';
+import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { DebugBar } from './debug-bar.jsx';
 
 function useNarrowViewport() {
@@ -143,6 +146,8 @@ export function DocumentShell({ boot, config }) {
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
   const editorRef = useRef(null);
+  const diagramApplyRef = useRef(null);
+  const [diagram, setDiagram] = useState(null);
   const [composer, setComposer] = useState(null);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
@@ -160,6 +165,9 @@ export function DocumentShell({ boot, config }) {
   const [theme, setTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
   ));
+  const [readerWidth, setReaderWidth] = useState('narrow');
+  const [supportsWidth, setSupportsWidth] = useState(false);
+  const [inlineWidth, setInlineWidth] = useState(false);
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
   const [deepTarget, setDeepTarget] = useState(() => (
@@ -352,6 +360,21 @@ export function DocumentShell({ boot, config }) {
 
   const bridge = useFrameBridge({
     'tdoc:selection': selectFromFrame,
+    'tdoc:diagramApplied': (message) => {
+      const pending = diagramApplyRef.current;
+      if (!pending || pending.id !== message.requestId) return;
+      clearTimeout(pending.timer);
+      diagramApplyRef.current = null;
+      if (message.ok) pending.resolve();
+      else pending.reject(new Error('The diagram could not be applied. Your edits are still in the editor.'));
+    },
+    'tdoc:diagramOpen': (message) => {
+      try {
+        if (typeof message.json !== 'string' || message.json.length > 2_000_000) throw new Error();
+        const scene = parseDiagramScene(message.json);
+        setDiagram({ id: message.id, title: message.title, scene });
+      } catch (error) { showToast(error.message || 'This diagram has invalid source data', true); }
+    },
     'tdoc:cleared': () => {
       if (!document.querySelector('.tdoc-popup textarea:focus')) setComposer(null);
       setOpenCommentId(null);
@@ -362,6 +385,11 @@ export function DocumentShell({ boot, config }) {
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       bridge.send({ type: 'tdoc:theme', theme: nextTheme });
+      const savedWidth = readStored(`tdoc-width:${config.slug}`);
+      const nextWidth = savedWidth === 'wide' || savedWidth === 'narrow' ? savedWidth : message.defaultWidth === 'wide' ? 'wide' : 'narrow';
+      setSupportsWidth(Boolean(message.supportsWidth));
+      setReaderWidth(nextWidth);
+      if (savedWidth === 'wide' || savedWidth === 'narrow') bridge.send({ type: 'tdoc:width', width: nextWidth });
       bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding });
       comments.refresh();
     },
@@ -887,6 +915,13 @@ export function DocumentShell({ boot, config }) {
     && new URLSearchParams(location.search).get('comment') !== openComment.id
   ) || (arrival === 'revised' && Boolean(openComment));
 
+  const toggleReaderWidth = () => {
+    const next = readerWidth === 'wide' ? 'narrow' : 'wide';
+    writeStored(`tdoc-width:${config.slug}`, next);
+    setReaderWidth(next);
+    bridge.send({ type: 'tdoc:width', width: next });
+  };
+
   return (
     <div
       className="tdoc-document-app"
@@ -933,6 +968,8 @@ export function DocumentShell({ boot, config }) {
         overflowActions={config.isLanding ? null : (
           <DocumentOverflowActions
             config={config}
+            readerWidth={supportsWidth && !inlineWidth ? readerWidth : null}
+            onToggleWidth={toggleReaderWidth}
             starred={starred}
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
@@ -947,6 +984,10 @@ export function DocumentShell({ boot, config }) {
             onToggleResolved={toggleResolved}
           />
         )}
+        appearanceActions={!config.isLanding && supportsWidth ? (
+          <DocumentWidthControl readerWidth={readerWidth} inline={inlineWidth}
+            onPlacementChange={setInlineWidth} onToggle={toggleReaderWidth} />
+        ) : null}
         onThemeChange={(nextTheme) => {
           setTheme(nextTheme);
           bridge.send({ type: 'tdoc:theme', theme: nextTheme });
@@ -981,6 +1022,19 @@ export function DocumentShell({ boot, config }) {
         />
       </TopBar>
 
+      <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
+        onApply={async (json, svg) => {
+          if (!config.canEdit) return;
+          editor.changeMode('edit');
+          await new Promise((resolve, reject) => {
+            const id = crypto.randomUUID();
+            const timer = setTimeout(() => { diagramApplyRef.current = null; reject(new Error('The document did not respond. Try again.')); }, 5000);
+            diagramApplyRef.current = { id, timer, resolve, reject };
+            bridge.send({ type: 'tdoc:diagramApply', requestId: id, id: diagram.id, json, svg });
+          });
+          setDiagram(null);
+          showToast('Diagram applied. Save the document to publish a new version.');
+        }} />
       <OldVersionNotice value={boot.oldVersion} />
 
       {showExitBanner ? (

@@ -83,6 +83,10 @@ jobs:
           TDOC_SOURCE_SHA: ${{ github.sha }}
         run: node bin/tdoc-bundle
 
+      - name: Install layout preflight browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
       - name: Offline test suite
         run: npm test
 

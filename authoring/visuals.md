@@ -11,8 +11,8 @@ a tradeoff in it, **draw it** — prose is the connective tissue between visuals
 not the main body. Aim for a visual roughly every screenful, wherever in the
 doc the material earns one.
 
-Everything here is buildable as inline SVG or CSS — the host runs no author
-JS, so no chart library. An SVG chart is also a commentable artifact, which is
+The host runs no author JavaScript. Use SVG/CSS for inline visuals; optional
+provider-owned editors can also supply a static SVG snapshot. An SVG chart is also a commentable artifact, which is
 the point of tdoc. Draw honestly: real numbers, labeled axes, no chartjunk.
 
 ## Match the visual to the data
@@ -37,6 +37,11 @@ Most non-trivial docs carry **several different types**, not one repeated. A
 competitor analysis wants stat tiles + a positioning map + a comparison matrix
 + maybe a bar chart. A technical design wants an architecture diagram + a
 sequence + a metrics row. Reach for the variety the content earns.
+
+## Excalidraw
+
+The official Excalidraw editor is available. Its scene and SVG snapshot format
+is documented in `structure/components.md`.
 
 ## The style owns the look, not the choice
 
@@ -80,3 +85,52 @@ Wrap wide charts in `<div class="diagram-box">` (or `tdoc-table-scroll` for
 tables) so they scroll on a phone instead of overflowing. Tag an author-built
 figure `data-tdoc-artifact` if it is a composed block rather than a single
 `<svg>`, so a reader can comment on it as a unit.
+
+
+## Width and visual verification
+
+Width is independent of house style. Use the default reading column for prose;
+use `<div class="wrap" data-tdoc-width="wide">` for a diagram-heavy design or
+comparison that needs the available page width. Both keep template spacing.
+A larger page does not fix labels that overlap or escape their SVG boxes.
+
+After writing/baking each version, run:
+
+```bash
+node "$SKILL_DIR/bin/tdoc-check-layout" <version>/index.html --screenshots <output-dir>
+```
+
+This renders narrow and wide reader modes at 375px, 768px and 1440px, with the
+same table protection used by the live provider. It reports every protected
+cell and fails unresolved compressed columns (including short values), page
+overflow, SVG text below 9 rendered pixels,
+text outside the viewBox and overlapping labels. Desktop local scrolling is
+reported for inspection. It keeps local table/diagram scrolling
+intact. Missing Playwright/browser support is an error, not a successful check.
+Author JavaScript and remote assets are disabled; separately verify sandboxed
+widgets and externally loaded fonts in the served reader.
+
+The write gateway runs this after baking, before replacing a version; publishing
+rechecks the newest version before account setup or upload. No browser means
+no verification and a non-zero exit, with installation instructions from doctor.
+
+Use `data-tdoc-cell="value"` on atomic amounts/units, statuses or identifiers.
+Keep prose wrappable. The shared table policy measures each cell's unwrapped
+ink, reserves its natural width up to a 12em prose reading measure (uncapped
+for explicit values), and allows the wrapper to scroll when needed. It does
+not guess meaning from a column number, header label or language. Existing
+explicit line breaks, merged cells and author card reflows remain intact.
+The policy protects hosted readers, including old versions and browser edits;
+its transient style is not serialized into author HTML. Check standalone
+exports separately. Direct HTTP uploads/browser saves do not run the full CLI
+Chromium gate; their readers do receive table protection. Do not call those
+write paths preflight-verified.
+
+Open all six screenshots and inspect every table and figure. The checker cannot establish
+whether text belongs inside a particular node, whether arrows mean the right
+thing, or whether every table reads comfortably. Geometry has a measurable
+safety floor; it is not a substitute for reviewing the document. Break long SVG text into
+`tspan` lines and size the node for those lines; do not shrink the whole drawing
+until the words are unreadable. On phones use local scrolling only where the
+content needs it, with a visible hint when the next panel is off-screen. Never
+use page-level `overflow-x:hidden` as the repair: that hides inaccessible content.

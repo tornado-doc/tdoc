@@ -22,6 +22,7 @@ const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RUNTIME_JS_PATH__";
 const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`;
 const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";
 const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;
+const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
 
@@ -1445,7 +1446,7 @@ function wrapBareTables(html) {
   return out;
 }
 
-const READER_PATCH_CSS = '.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+const READER_PATCH_CSS = ':where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}:where(body>.wrap,body>main,body>article,body>.content,body>.container)[data-tdoc-width="wide"]{max-width:none}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
 }
@@ -5888,6 +5889,11 @@ export default {
         },
       });
     }
+    if (SHELL_RUNTIME_EXTRA_ASSETS && typeof SHELL_RUNTIME_EXTRA_ASSETS === 'object' && Object.hasOwn(SHELL_RUNTIME_EXTRA_ASSETS, p) && (method === 'GET' || method === 'HEAD')) {
+      const asset = SHELL_RUNTIME_EXTRA_ASSETS[p];
+      const body = method === 'HEAD' ? null : asset.binary ? Uint8Array.from(atob(asset.body), (c) => c.charCodeAt(0)) : asset.body;
+      return new Response(body, { headers: { 'Content-Type': asset.type, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' } });
+    }
     if (p === '/favicon.svg' && method === 'GET') {
       return new Response(TDOC_FAVICON_SVG, {
         headers: {
@@ -5990,6 +5996,17 @@ export default {
           oidcAuth: !!oidcConfig(env),
           oidcLabel: (oidcConfig(env) || {}).label || '',
         }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+    }
+
+    // Isolated design review; no session, credentials, or auth actions.
+    if (p === '/__preview/onboarding' && (method === 'GET' || method === 'HEAD')) {
+      if (runtimeInfo().generated_by !== 'tdoc-preview') return json({ error: 'not_found' }, { status: 404 });
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        title: 'tdoc onboarding preview', nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH, runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({ page: 'onboarding-preview' }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
 

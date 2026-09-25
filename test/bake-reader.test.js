@@ -55,6 +55,12 @@ try {
     if (n !== 1) throw new Error(`expected 1 tdoc-reader block after re-bake guard, got ${n}`);
   });
 
+  t('wide is a supported house-template choice without custom-template', () => {
+    const out = runNew(tmp, 'bake-wide', FIXTURE.replace('class="wrap"', 'class="wrap" data-tdoc-width="wide"'));
+    if (!out.includes('class="wrap" data-tdoc-width="wide"')) throw new Error('wide choice was lost');
+    if (!out.includes('[data-tdoc-width="wide"]')) throw new Error('wide template rule was not baked');
+  });
+
   t('the baked doc still passes tdoc-validate-template', () => {
     const f = path.join(tmp, 'tdocs', 'bake-a', 'v1', 'index.html');
     cp.execFileSync('python3', [path.join(ROOT, 'bin', 'tdoc-validate-template'), f, '--style', 'default'], { stdio: ['ignore', 'ignore', 'pipe'] });

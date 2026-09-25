@@ -76,6 +76,10 @@ jobs:
 
       # A broken homepage is worse than a stale one. The landing suite checks
       # the page itself and the release payload it produces.
+      - name: Install layout preflight browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
       - name: Offline test suite
         run: npm test
 

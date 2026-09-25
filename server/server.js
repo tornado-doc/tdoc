@@ -886,7 +886,7 @@ function wrapBareTables(html) {
   return out;
 }
 
-const READER_PATCH_CSS = '.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+const READER_PATCH_CSS = ':where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}:where(body>.wrap,body>main,body>article,body>.content,body>.container)[data-tdoc-width="wide"]{max-width:none}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {
@@ -1357,7 +1357,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  const runtimeAsset = [SHELL_RUNTIME.js, SHELL_RUNTIME.css].find((asset) => asset.path === p);
+  const runtimeAsset = SHELL_RUNTIME.all.find((asset) => asset.path === p);
   if (runtimeAsset && (req.method === 'GET' || req.method === 'HEAD')) {
     const body = req.method === 'HEAD' ? '' : fs.readFileSync(runtimeAsset.file);
     return send(res, 200, body, {

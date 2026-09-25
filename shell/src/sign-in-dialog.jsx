@@ -13,14 +13,14 @@ function isGitHubUrl(value) {
   }
 }
 
-export function SignInDialog({ open, onOpenChange, onSuccess }) {
-  const [device, setDevice] = useState(null);
-  const [status, setStatus] = useState('Starting…');
+export function SignInDialog({ open, onOpenChange, onSuccess, preview = null }) {
+  const [device, setDevice] = useState(preview?.device || null);
+  const [status, setStatus] = useState(preview?.status || 'Starting…');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || preview) return undefined;
     let cancelled = false;
     let timer;
     let interval = 5;

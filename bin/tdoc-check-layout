@@ -1,0 +1,135 @@
+#!/usr/bin/env node
+// Check the rendered, self-contained version before publishing it. No author
+// JavaScript is executed. Missing browser support is an error, not a pass.
+const fs = require('fs');
+const path = require('path');
+const { pathToFileURL } = require('url');
+const { applyReaderWidth } = require('../server/reader-width');
+const { layoutTables } = require('../server/table-layout');
+
+function measureGeometry() {
+  const errors = [], warnings = [];
+  const width = document.documentElement.clientWidth;
+  if (document.documentElement.scrollWidth > width + 1) {
+    errors.push(`page overflow: ${document.documentElement.scrollWidth}px > ${width}px`);
+  }
+  const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+  for (const [i, svg] of [...document.querySelectorAll('svg[viewBox]')].entries()) {
+    if (!visible(svg)) continue;
+    const frame = svg.getBoundingClientRect();
+    const label = svg.getAttribute('aria-label') || `figure ${i + 1}`;
+    const texts = [...svg.querySelectorAll('text')].filter(visible);
+    const boxes = texts.map(el => ({ el, r: el.getBoundingClientRect() }));
+    for (const { el, r } of boxes) {
+      if (r.left < frame.left - 1 || r.right > frame.right + 1 || r.top < frame.top - 1 || r.bottom > frame.bottom + 1) {
+        errors.push(`${label}: text outside SVG viewBox: ${el.textContent.slice(0,90)}`);
+      }
+      const matrix = el.getScreenCTM();
+      const size = parseFloat(getComputedStyle(el).fontSize) * Math.hypot(matrix.a, matrix.b);
+      if (size < 9) errors.push(`${label}: small rendered text (${size.toFixed(1)}px): ${el.textContent.slice(0,60)}`);
+    }
+    for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++) {
+      const x = boxes[a], y = boxes[b];
+      // Axis-aligned bounding boxes are not reliable for rotated labels.
+      if (Math.abs(x.el.getScreenCTM().b) > .001 || Math.abs(y.el.getScreenCTM().b) > .001) continue;
+      if (Math.min(x.r.right, y.r.right) - Math.max(x.r.left, y.r.left) > 1 &&
+          Math.min(x.r.bottom, y.r.bottom) - Math.max(x.r.top, y.r.top) > 1) {
+        errors.push(`${label}: overlapping labels: ${x.el.textContent.slice(0,45)} / ${y.el.textContent.slice(0,45)}`);
+      }
+    }
+  }
+  const scrollers = [...document.querySelectorAll('.tdoc-table-scroll,.diagram-box,pre')]
+    .filter(el => visible(el) && el.scrollWidth > el.clientWidth + 1)
+    .map(el => ({ type: el.tagName === 'PRE' ? 'pre' : el.className, width: el.clientWidth, contentWidth: el.scrollWidth }));
+  if (width >= 1000) for (const s of scrollers.filter(s => s.type !== 'pre')) {
+    warnings.push(`desktop ${s.type} scrolls ${s.contentWidth}px inside ${s.width}px; consider a wide column or reflow`);
+  }
+  return { width, scrollWidth: document.documentElement.scrollWidth, errors: [...new Set(errors)], warnings: [...new Set(warnings)], scrollers };
+}
+
+// Inline the trusted shared policy into a self-contained browser function.
+// Playwright serializes functions without their Node lexical scope; callers
+// can still page.evaluate(measureLayout) without installing globals/scripts.
+const measureLayout = new Function(`return function measureLayout() {
+  const layoutTables = ${layoutTables.toString()};
+  const measureGeometry = ${measureGeometry.toString()};
+  const report = measureGeometry();
+  report.errors.push(...layoutTables({ apply:false }).errors);
+  return report;
+}`)();
+
+async function checkLayout(file, { screenshotDir, widths = [375, 768, 1440], modes = ['narrow', 'wide'] } = {}) {
+  let chromium;
+  try { ({ chromium } = require('playwright')); }
+  catch { throw new Error('Playwright is required: run npm install in the tdoc checkout, then npx playwright install chromium. Layout has NOT been verified.'); }
+  const browser = await chromium.launch({ headless: true });
+  // A document that never settles must not leave creation/publishing hung.
+  const deadline = setTimeout(() => { void browser.close(); }, 60000);
+  try {
+    const context = await browser.newContext({ javaScriptEnabled: false });
+    const page = await context.newPage();
+    // Local author assets are allowed; a check must not run remote requests
+    // embedded in an untrusted document or send its contents elsewhere.
+    const blocked = new Set();
+    await page.route(/^https?:/, route => { blocked.add(route.request().url()); return route.abort(); });
+    const reports = [];
+    for (const width of widths) for (const mode of modes) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(pathToFileURL(path.resolve(file)).href);
+      // Match /frame's fallback for hand-written uploads that have not passed
+      // through tdoc-write yet. Do not replace an existing frozen template.
+      if (!await page.locator('style#tdoc-reader').count()) {
+        await page.evaluate(css => {
+          const style = document.createElement('style');
+          style.textContent = css;
+          document.head.appendChild(style);
+        }, fs.readFileSync(path.join(__dirname, '../server/reader.css'), 'utf8'));
+      }
+      await page.evaluate(applyReaderWidth, mode);
+      await page.evaluate(() => document.fonts.ready);
+      // Match the provider's table wrappers before applying the same policy.
+      await page.evaluate(() => {
+        for (const table of document.querySelectorAll('table')) {
+          if (table.parentElement.classList.contains('tdoc-table-scroll')) continue;
+          const wrapper = document.createElement('div');
+          wrapper.className = 'tdoc-table-scroll';
+          table.replaceWith(wrapper); wrapper.appendChild(table);
+        }
+      });
+      const tableLayout = await page.evaluate(layoutTables);
+      const report = await page.evaluate(measureLayout);
+      report.tableLayout = { tables: tableLayout.tables, adjustments: tableLayout.adjustments };
+      if (tableLayout.adjustments.length) report.warnings.push(`reader protected ${tableLayout.adjustments.length} compressed table cell(s); inspect all tables for an appropriate author layout`);
+      report.mode = mode;
+      if (blocked.size) report.warnings.push(`${blocked.size} remote asset request(s) blocked; verify external fonts/assets in the served reader`);
+      if (screenshotDir) {
+        fs.mkdirSync(screenshotDir, { recursive: true });
+        const target = path.resolve(screenshotDir, `layout-${width}-${mode}.png`);
+        await page.screenshot({ path: target, fullPage: true });
+        report.screenshot = target;
+      }
+      reports.push(report);
+    }
+    return reports;
+  } finally { clearTimeout(deadline); await browser.close(); }
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === '--doctor') {
+    const browser = await require('playwright').chromium.launch({ headless: true });
+    await browser.close();
+    return 0;
+  }
+  if (!args.length || args.includes('--help')) {
+    console.log('Usage: node bin/tdoc-check-layout <baked.html> [--screenshots <directory>]\nChecks narrow and wide reader modes at 375px, 768px and 1440px; exits 1 for layout errors, 2 if unable to check. Inspect screenshots too: geometry cannot judge design quality.');
+    return args.length ? 0 : 2;
+  }
+  if (args.length !== 1 && !(args.length === 3 && args[1] === '--screenshots')) throw new Error('Expected <baked.html> [--screenshots <directory>]');
+  const reports = await checkLayout(args[0], { screenshotDir: args[2] });
+  console.log(JSON.stringify(reports, null, 2));
+  return reports.some(r => r.errors.length) ? 1 : 0;
+}
+
+module.exports = { checkLayout, measureLayout };
+if (require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(`tdoc-check-layout: ${e.message}`); process.exitCode = 2; });

@@ -16,6 +16,7 @@
 // that no suite has to guess a free port. See startStub() below for why.
 
 const fs = require('fs');
+require('./pin-browser-cache');
 const os = require('os');
 const path = require('path');
 const net = require('net');

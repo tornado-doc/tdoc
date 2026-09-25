@@ -30,10 +30,16 @@ jobs:
       # jq is needed by the CLI tests that drive bin/tdoc-* hermetically.
       - name: Ensure jq
         run: jq --version || sudo apt-get update && sudo apt-get install -y jq
-      # No npm install — the offline suite has zero dependencies (pure node +
-      # bash + jq). Runs with no Cloudflare secrets.
+      - name: Install layout preflight browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
       - name: Run offline tests
         run: npm test
+      - name: Reader width and layout regressions
+        run: |
+          node test/reader-width-ui.test.js
+          node test/reader-layout.test.js
       # Manifest schema guard: plugin.json + marketplace.json must match the
       # field types Claude Code validates at load/install time. This class of
       # bug shipped to users 4x (#36 owner, #42 repository) — keep it pinned.

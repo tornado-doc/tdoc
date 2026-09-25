@@ -106,6 +106,23 @@ numerals (`<span class="num">$1.4B</span>`), not on the cell that contains them.
 `bin/tdoc-validate-template` fails a cell class that narrows type or forbids
 wrapping while sitting on prose, on the custom-template path too.
 
+**Atomic values and prose have different wrapping needs.** Tabular numerals
+do not keep a number together with its unit. For a cell that is one value, use
+`<td data-tdoc-cell="value"><span class="num">5</span> days</td>`.
+Use the same attribute for a price, date, compact status or identifier; do not
+mark a paragraph as a value. Keep paragraph cells normally wrappable. Do not
+assign one first-column percentage to every table: an ID column and a prose
+column have different intrinsic widths.
+
+The provider and CLI preview share a content-based safety floor for native
+tables. Each cell reserves its natural unwrapped width up to a 12em prose
+reading measure; explicit value cells reserve the complete value. Insufficient
+space becomes local scrolling, not one-character columns or reduced type.
+This also covers old documents that have no value annotations. It does not
+replace reviewing all tables in both reader widths, and does not run in a
+standalone HTML file opened without the provider. Author card reflows keep
+their own layout; the provider does not guess whether a matrix is a record list.
+
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`.
 
@@ -228,3 +245,35 @@ works. A toggle is `:checked` plus sibling selectors; motion is CSS
 `@keyframes` with a `prefers-reduced-motion` guard; SVG styling goes in a
 `<style>` *inside* the `<svg>`. Anything that genuinely needs to compute belongs
 in a sandboxed widget island.
+
+
+## Optional Excalidraw artifact
+
+The provider loads the official `@excalidraw/excalidraw` React editor on demand.
+Do not add React, script tags, an editor iframe, or a CDN import to author HTML.
+
+```html
+<figure id="value-flow" data-tdoc-artifact="Value flow"
+  aria-label="Value flow" data-tdoc-excalidraw="HTML-ATTRIBUTE-ESCAPED SCENE JSON">
+  <div class="diagram-box" data-tdoc-diagram-snapshot>
+    <!-- the SVG exported from the same scene -->
+  </div>
+  <figcaption>What the diagram shows.</figcaption>
+</figure>
+```
+
+Give every figure a unique stable ID. Store valid Excalidraw JSON (`type`,
+`version`, `elements`, `appState`, `files`) in the attribute, escaping `&`, `"`,
+`<` and `>` for HTML. Source limit: 2 MB and 5,000 elements. This first version
+supports shapes, text, lines, arrows and freehand drawings, not embedded web
+pages or image elements. Use native text/container and arrow bindings so labels
+and connectors follow their shapes. Include a responsive, accessible SVG
+snapshot even when no JavaScript is available. Keep scene and snapshot in sync.
+After manual edits, update the saved scene while preserving element IDs and
+positions rather than regenerating a layout that discards those edits.
+
+The source and snapshot live in the same HTML version: existing write, publish,
+pull, duplicate and download flows carry both. Owners choose Apply to document
+then Save, using the normal permission and base-version conflict checks. Readers
+may edit a temporary copy and download it; they cannot apply it to the source
+document. Comments attach to the figure, not individual Excalidraw elements.
