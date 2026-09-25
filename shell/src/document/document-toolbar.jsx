@@ -155,6 +155,12 @@ export function DocumentWidthControl({ readerWidth, inline, onPlacementChange, o
     let frame = 0, disposed = false;
     const measure = () => {
       if (disposed) return;
+      // The chrome collapse ladder gives width the lowest priority. Space
+      // released by later stages must not bring this optional action back.
+      if (getComputedStyle(bar).getPropertyValue('--tdoc-inline-width-allowed').trim() === '0') {
+        onPlacementChange(false);
+        return;
+      }
       const children = [...left.children].filter(el => getComputedStyle(el).display !== 'none');
       const title = left.querySelector('.doc-title');
       const naturalLeft = children.reduce((total, el) => {

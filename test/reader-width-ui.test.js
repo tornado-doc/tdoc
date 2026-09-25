@@ -27,8 +27,8 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await page.keyboard.press('Escape');
 
     // Same viewport, different title length: placement is based on actual
-    // available room, not a second fixed desktop breakpoint.
-    await page.setViewportSize({width:900,height:900});
+    // available room before the toolbar's progressive collapse starts.
+    await page.setViewportSize({width:1100,height:900});
     await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
     const originalTitle = await page.locator('.doc-title').textContent();
     await page.locator('.doc-title').evaluate(el=>{el.textContent='A long document title that needs the toolbar space '.repeat(6)});
@@ -39,10 +39,21 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     await page.locator('.doc-title').evaluate((el,title)=>{el.textContent=title},originalTitle);
     await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
-    await page.setViewportSize({width:640,height:900});
-    await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
-    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),
-      'a compact toolbar with enough space can expose width without overflowing');
+    // Width folds before theme/primary/version and stays folded when later
+    // collapse stages release space. Growing the bar restores the icon.
+    for (const viewportWidth of [944, 901, 900, 701, 700, 640, 375]) {
+      await page.setViewportSize({width:viewportWidth,height:900});
+      await page.locator('#tdoc-width-btn').waitFor({state:'hidden'});
+      if (viewportWidth > 700) {
+        assert(await page.locator('#tdoc-theme-btn').isVisible());
+        assert(await page.locator('.tdoc-document-primary').isVisible());
+        assert(await page.locator('#tdoc-version-toggle').isVisible());
+      }
+      await page.getByRole('button', {name:'More actions',exact:true}).click();
+      await page.getByRole('menuitem', {name:'Wide width',exact:true}).waitFor();
+      await page.keyboard.press('Escape');
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+    }
     await page.setViewportSize({width:1440,height:900});
     await page.getByRole('button', {name:'Wide width',exact:true}).focus();
     await page.keyboard.press('Enter');
@@ -94,7 +105,7 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert(!serialized.includes('id="tdoc-provider-table-layout"'), 'computed table widths must not become author HTML');
     assert(serialized.includes('id="added-table"'), 'table content must survive serialization');
     await page.setViewportSize({ width: 375, height: 800 });
-    // The compact icon can fit here; switchTo also covers constrained More.
+    await page.locator('#tdoc-width-btn').waitFor({state:'hidden'});
     await switchTo('Wide width');
     assert(await frame.locator('html').evaluate(e => e.scrollWidth <= innerWidth+1));
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth+1));
