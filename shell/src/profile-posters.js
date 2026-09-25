@@ -1,7 +1,7 @@
 // Client-side share posters for a claimed handle. White big-type cards
 // filled with tdoc.dev/@handle — no server render.
-// X header matches the hand-tuned banner: Caveat annotation with white
-// stroke + blue fill, stroked curly arrow, blue @handle.
+// All sizes: Caveat annotation (white stroke + blue fill), blue @handle.
+// Optional curly arrow; annotation lines are caller-editable.
 
 export const POSTER_KINDS = [
   {
@@ -26,6 +26,8 @@ export const POSTER_KINDS = [
     height: 1080,
   },
 ];
+
+export const DEFAULT_ANNOTATION_LINES = ['my thoughts are here', '@ ai native doc'];
 
 const ACCENT = '#1652f0';
 const INK = '#1a1a1a';
@@ -87,7 +89,6 @@ function drawCurlyArrow(ctx, fromX, fromY, toX, toY) {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // Approximate the hand-tuned curve: from under annotation down-left onto @handle.
   const c1x = fromX - (fromX - toX) * 0.15;
   const c1y = fromY + (toY - fromY) * 0.35;
   const c2x = toX + (fromX - toX) * 0.35;
@@ -97,7 +98,6 @@ function drawCurlyArrow(ctx, fromX, fromY, toX, toY) {
   ctx.bezierCurveTo(c1x, c1y, c2x, c2y, toX, toY);
   ctx.stroke();
 
-  // Arrowhead along the final tangent of the curve.
   const tx = toX - c2x;
   const ty = toY - c2y;
   const len = Math.hypot(tx, ty) || 1;
@@ -133,20 +133,27 @@ function drawHandLine(ctx, text, x, y, size, rotateRad) {
   ctx.restore();
 }
 
-function drawAnnotation(ctx, width, height, handleX, urlY) {
-  // Hand-tuned HTML: anno at left 900 / top 48 on a 1500×500 canvas.
+function normalizeAnnotationLines(lines) {
+  const raw = Array.isArray(lines) ? lines : DEFAULT_ANNOTATION_LINES;
+  const cleaned = raw.map((line) => String(line || '').trim()).filter(Boolean).slice(0, 3);
+  return cleaned.length ? cleaned : DEFAULT_ANNOTATION_LINES;
+}
+
+function drawAnnotation(ctx, width, height, handleX, urlY, { lines, showArrow }) {
   const ax = width * 0.6;
   const ay = height * 0.096;
-  const annSize = Math.max(28, Math.round(height * 0.064));
+  const annSize = Math.max(22, Math.round(height * (height > 600 ? 0.04 : 0.064)));
   const lineGap = annSize * 1.2;
   const tilt = (-5 * Math.PI) / 180;
+  const textLines = normalizeAnnotationLines(lines);
 
-  drawHandLine(ctx, 'my thoughts are here', ax, ay, annSize, tilt);
-  drawHandLine(ctx, '@ ai native doc', ax, ay + lineGap, annSize, tilt);
+  textLines.forEach((line, i) => {
+    drawHandLine(ctx, line, ax, ay + i * lineGap, annSize, tilt);
+  });
 
-  // Arrow from under "here" toward the blue @handle.
+  if (!showArrow) return;
   const fromX = ax + annSize * 2.8;
-  const fromY = ay + lineGap * 1.55;
+  const fromY = ay + textLines.length * lineGap * 0.85;
   const toX = handleX;
   const toY = urlY - Math.max(14, height * 0.04);
   drawCurlyArrow(ctx, fromX, fromY, toX, toY);
@@ -166,16 +173,22 @@ function drawHandleUrl(ctx, width, cy, size, handle) {
   ctx.fillText(prefix, startX, cy);
   ctx.fillStyle = ACCENT;
   ctx.fillText(suffix, startX + prefixW, cy);
-  // Midpoint of the @handle — arrow lands here.
   return startX + prefixW + suffixW * 0.45;
 }
 
-/** @returns {HTMLCanvasElement} */
-export function renderHandlePoster(handle, kindId) {
+/**
+ * @param {string} handle
+ * @param {string} kindId
+ * @param {{ annotationLines?: string[], showArrow?: boolean }} [opts]
+ * @returns {HTMLCanvasElement}
+ */
+export function renderHandlePoster(handle, kindId, opts = {}) {
   const kind = POSTER_KINDS.find((k) => k.id === kindId) || POSTER_KINDS[0];
   const h = normalizeHandle(handle);
   const line = `tdoc.dev/@${h || 'you'}`;
   const { width, height } = kind;
+  const showArrow = opts.showArrow !== false;
+  const annotationLines = normalizeAnnotationLines(opts.annotationLines);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -183,53 +196,46 @@ export function renderHandlePoster(handle, kindId) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
 
-  // X header crops edges + bottom-left avatar; keep copy in a safe band.
   const padX = kind.id === 'x-header' ? width * 0.12 : width * 0.1;
   const maxW = width - padX * 2;
   const maxPx = kind.id === 'square' ? Math.round(height * 0.09) : Math.round(height * 0.16);
   const minPx = Math.round(height * 0.06);
   const size = fitText(ctx, line, maxW, maxPx, minPx);
 
-  // Slightly above center so X avatar / bottom crop does not eat the URL.
-  // X header sits a bit lower to leave room for the annotation + arrow above.
-  const cy = kind.id === 'x-header' ? height * 0.52 : height * 0.48;
+  // Leave room above for annotation on every size.
+  const cy = kind.id === 'square' ? height * 0.52 : height * 0.52;
+  const handleX = drawHandleUrl(ctx, width, cy, size, h);
+  drawAnnotation(ctx, width, height, handleX, cy - size * 0.35, {
+    lines: annotationLines,
+    showArrow,
+  });
 
-  if (kind.id === 'x-header') {
-    const handleX = drawHandleUrl(ctx, width, cy, size, h);
-    drawAnnotation(ctx, width, height, handleX, cy - size * 0.35);
-
-    ctx.fillStyle = MUTED;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `500 ${Math.max(18, Math.round(height * 0.048))}px ${UI_STACK}`;
-    ctx.fillText('writing, in public', width / 2, cy + size * 0.72);
-  } else {
-    ctx.fillStyle = INK;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `700 ${size}px ${UI_STACK}`;
-    ctx.fillText(line, width / 2, cy);
-
-    ctx.fillStyle = MUTED;
-    ctx.font = `500 ${Math.max(14, Math.round(height * 0.035))}px ${UI_STACK}`;
-    ctx.fillText('tdoc', width / 2, height - Math.round(height * 0.08));
-  }
+  ctx.fillStyle = MUTED;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const subSize = Math.max(14, Math.round(height * (kind.id === 'x-header' ? 0.048 : 0.035)));
+  ctx.font = `500 ${subSize}px ${UI_STACK}`;
+  ctx.fillText(
+    kind.id === 'x-header' ? 'writing, in public' : 'tdoc',
+    width / 2,
+    kind.id === 'x-header' ? cy + size * 0.72 : height - Math.round(height * 0.08),
+  );
 
   return canvas;
 }
 
-export function posterPreviewDataUrl(handle, kindId) {
+export function posterPreviewDataUrl(handle, kindId, opts) {
   try {
-    return renderHandlePoster(handle, kindId).toDataURL('image/png');
+    return renderHandlePoster(handle, kindId, opts).toDataURL('image/png');
   } catch {
     return '';
   }
 }
 
-export function downloadHandlePoster(handle, kindId) {
+export function downloadHandlePoster(handle, kindId, opts) {
   const kind = POSTER_KINDS.find((k) => k.id === kindId) || POSTER_KINDS[0];
   const h = normalizeHandle(handle);
-  const canvas = renderHandlePoster(h, kind.id);
+  const canvas = renderHandlePoster(h, kind.id, opts);
   const a = document.createElement('a');
   a.download = `tdoc-${h || 'handle'}-${kind.id}.png`;
   a.href = canvas.toDataURL('image/png');

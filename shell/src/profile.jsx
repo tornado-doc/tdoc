@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { LayoutGrid, Rows3, Share2, UserRoundPen, PencilLine } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import {
+  DEFAULT_ANNOTATION_LINES,
   POSTER_KINDS,
   consumeShareAfterNav,
   downloadHandlePoster,
@@ -132,6 +134,8 @@ export function Profile({ boot }) {
   const [pickView, setPickView] = useState(readPickView);
   const [shareStatus, setShareStatus] = useState('');
   const [posterFontsReady, setPosterFontsReady] = useState(false);
+  const [posterArrow, setPosterArrow] = useState(true);
+  const [posterAnnotation, setPosterAnnotation] = useState(() => DEFAULT_ANNOTATION_LINES.join('\n'));
   const identity = boot.identity || null;
 
   useEffect(() => {
@@ -296,54 +300,60 @@ export function Profile({ boot }) {
               {docs.length > 0 ? (
                 <>
                   {' · '}
-                  <span className="profile-view-toggle" role="group" aria-label="Pick layout">
+                  <span className="profile-view-switch" role="group" aria-label="Pick layout">
                     <button
                       type="button"
-                      className={`text-btn${pickView === 'compact' ? ' is-active' : ''}`}
+                      className={`profile-icon-btn${pickView === 'compact' ? ' is-active' : ''}`}
                       aria-pressed={pickView === 'compact'}
+                      title="Compact"
                       onClick={() => setView('compact')}
                     >
-                      Compact
+                      <Rows3 size={15} aria-hidden="true" />
+                      <span className="ui-sr-only">Compact</span>
                     </button>
-                    <span aria-hidden="true"> / </span>
                     <button
                       type="button"
-                      className={`text-btn${pickView === 'preview' ? ' is-active' : ''}`}
+                      className={`profile-icon-btn${pickView === 'preview' ? ' is-active' : ''}`}
                       aria-pressed={pickView === 'preview'}
+                      title="Preview"
                       onClick={() => setView('preview')}
                     >
-                      Preview
+                      <LayoutGrid size={15} aria-hidden="true" />
+                      <span className="ui-sr-only">Preview</span>
                     </button>
                   </span>
                 </>
               ) : null}
               {mine ? (
-                <>
-                  {' · '}
+                <span className="profile-owner-actions">
                   <button
                     type="button"
-                    className="text-btn"
+                    className="profile-icon-btn"
+                    title="Share"
+                    aria-label="Share"
                     onClick={() => { setShareStatus(''); setModal('share'); }}
                   >
-                    Share
+                    <Share2 size={15} aria-hidden="true" />
                   </button>
-                  {' · '}
                   <button
                     type="button"
-                    className="text-btn"
+                    className="profile-icon-btn"
+                    title="Change handle"
+                    aria-label="Change handle"
                     onClick={() => { setHandleDraft(login); setHandleStatus(''); setModal('handle'); }}
                   >
-                    Change handle
+                    <UserRoundPen size={15} aria-hidden="true" />
                   </button>
-                  {' · '}
                   <button
                     type="button"
-                    className="text-btn"
+                    className="profile-icon-btn"
+                    title={bio ? 'Edit bio' : 'Add bio'}
+                    aria-label={bio ? 'Edit bio' : 'Add bio'}
                     onClick={() => { setBioDraft(bio); setModal('bio'); }}
                   >
-                    {bio ? 'Edit bio' : 'Add bio'}
+                    <PencilLine size={15} aria-hidden="true" />
                   </button>
-                </>
+                </span>
               ) : null}
             </p>
           </div>
@@ -457,16 +467,40 @@ export function Profile({ boot }) {
           actions={<button type="button" className="primary" onClick={() => setModal(null)}>Done</button>}
         >
           <p className="manage-hint">
-            Copy the link, or download a white big-type poster with your handle filled in.
+            Copy the link, or download a poster with your handle filled in.
           </p>
           <div className="profile-share-link">
             <code>{profileUrl(login)}</code>
             <button type="button" className="text-btn" onClick={copyProfileLink}>Copy link</button>
           </div>
           {shareStatus ? <p className="manage-hint">{shareStatus}</p> : null}
+          <label className="profile-poster-field">
+            <span>Annotation</span>
+            <textarea
+              rows={2}
+              maxLength={120}
+              value={posterAnnotation}
+              onChange={(event) => setPosterAnnotation(event.target.value)}
+              placeholder={DEFAULT_ANNOTATION_LINES.join('\n')}
+            />
+          </label>
+          <label className="profile-poster-toggle">
+            <input
+              type="checkbox"
+              checked={posterArrow}
+              onChange={(event) => setPosterArrow(event.target.checked)}
+            />
+            <span>Curly arrow</span>
+          </label>
           <ul className="profile-poster-list">
             {POSTER_KINDS.map((kind) => {
-              const preview = posterFontsReady ? posterPreviewDataUrl(login, kind.id) : '';
+              const posterOpts = {
+                showArrow: posterArrow,
+                annotationLines: posterAnnotation.split('\n'),
+              };
+              const preview = posterFontsReady
+                ? posterPreviewDataUrl(login, kind.id, posterOpts)
+                : '';
               return (
                 <li key={kind.id}>
                   {preview ? (
@@ -486,7 +520,7 @@ export function Profile({ boot }) {
                       className="text-btn"
                       onClick={async () => {
                         await ensurePosterFonts();
-                        downloadHandlePoster(login, kind.id);
+                        downloadHandlePoster(login, kind.id, posterOpts);
                       }}
                     >
                       Download PNG
