@@ -87,6 +87,17 @@ node test/visual/hosted-compare.mjs /tmp/cmp-hosted /tmp/wb-old/_worker.bundled.
 The rule for a migration or restyle: match the old chrome where it can be
 matched; where it cannot, the new one still has to look finished.
 
+**Reuse the components; do not improvise beside them.** The primitives are
+wrapped once in `shell/src/ui/` — `AppDialog`, `AppMenu`/`AppMenuItem`/
+`AppSubmenu`/`AppMenuSeparator`, `SegmentedControl`, `AppSwitch`, `CommentIcon`
+— and colour comes from the `--td-*` tokens declared at the top of
+`server/chrome.css` (the same names the Docs Hub uses in
+`shell/src/docs-hub.css`). A new dialog shape, a second kind of switch, or a
+raw hex next to a token that already means that colour is how the chrome stops
+being one thing. Before building, grep for the facade, the token, the helper
+that is already there: extending what exists is the default, and a new one
+needs a reason the existing one cannot carry.
+
 Both harnesses serve the real homepage — the newest `landing/tornado-doc/vN`
 out of the checkout — so site chrome can be judged where it ships rather than
 against the neutral fallback. PR previews seed it too, so the preview's `/` is
