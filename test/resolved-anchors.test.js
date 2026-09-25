@@ -16,9 +16,9 @@ const chrome = read('server/chrome.css');
 
 console.log('resolved visibility and anchor fallback contracts');
 
-t('the shell sends every thread, flagging the ones the margin hides', () => {
-  assert(shell.includes("return comments.comments.map((comment) => (shown.has(comment.id) ? comment : { ...comment, hidden: true }));"), 'no hidden flag');
-  assert(shell.includes("bridge.send({ type: 'tdoc:anchors', comments: anchorsForFrame });"), 'the frame is not sent the full set');
+t('the shell sends the same visible set to the frame and the margin', () => {
+  assert(shell.includes("bridge.send({ type: 'tdoc:anchors', comments: shownComments });"), 'the frame bypasses comment visibility');
+  assert(shell.includes('comments={shownComments}'), 'the margin bypasses comment visibility');
 });
 t('hidden threads are excluded before any targets or highlights are registered', () => {
   const start = probe.indexOf('(comments || []).forEach(function (c)');

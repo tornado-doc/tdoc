@@ -111,14 +111,20 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     assert((await reloaded.evaluate(() => [...CSS.highlights.get('tdoc-anchor-active')].map(r => r.toString()))).includes(openText), 'selected open thread keeps its highlight');
     assert.equal(await page.locator('.tdoc-margin-comment').count(), 1, 'selected open card stays open');
 
-    // An explicit comment link remains a deliberate exception to the default filter.
+    // A comment link must reveal resolved threads by enabling the filter,
+    // never by painting a resolved thread while the switch still says OFF.
     await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto(`${target.url}?comment=resolved`);
     await page.locator('.tdoc-margin-comment').waitFor();
-    assert.equal(await page.getByRole('switch', { name: /Resolved/ }).getAttribute('aria-checked'), 'false');
-    await toggle();
+    assert.equal(await page.getByRole('switch', { name: /Resolved/ }).getAttribute('aria-checked'), 'true', 'resolved deep link must agree with the visibility switch');
     await toggle();
     await page.locator('.tdoc-margin-comment').waitFor({ state: 'detached' });
+    await page.goto(`${target.url}?comment=moved`);
+    const linkedFrame = await getFrame();
+    await linkedFrame.waitForFunction(() => CSS.highlights.get('tdoc-anchor-moved')?.size > 0);
+    assert.equal(await page.getByRole('switch', { name: /Resolved/ }).getAttribute('aria-checked'), 'true', 'moved resolved highlight cannot bypass the switch');
+    await toggle();
+    await linkedFrame.waitForFunction(() => !CSS.highlights.get('tdoc-anchor-moved')?.size && !CSS.highlights.get('tdoc-anchor-active')?.size);
     // Inspect the rendered pixels as well as the registry: older Safari can
     // retain a painted highlight after CSS.highlights.set replaces its ranges.
     await page.setViewportSize({ width: 1600, height: 1600 });

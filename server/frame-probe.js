@@ -936,15 +936,8 @@
       if (approximate && !rect.width && !rect.height) return seat(c);
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
-    if (HL) {
-      // Older Safari does not reliably invalidate the old ranges when set()
-      // replaces an existing highlight (WebKit #321567). Delete first so
-      // hiding a thread also clears its painted pixels, including moved text.
-      CSS.highlights.delete('tdoc-anchor');
-      CSS.highlights.delete('tdoc-anchor-moved');
-      CSS.highlights.set('tdoc-anchor', hl);
-      CSS.highlights.set('tdoc-anchor-moved', hlMoved);
-    }
+    if (HL) CSS.highlights.set('tdoc-anchor', hl);
+    if (HL) CSS.highlights.set('tdoc-anchor-moved', hlMoved);
     setActiveAnchor(_activeAnchorId, false);
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
