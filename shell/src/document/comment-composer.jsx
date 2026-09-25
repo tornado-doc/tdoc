@@ -120,10 +120,14 @@ export function CommentComposer({
         value={text}
         people={mentionable}
         onChange={setText}
-        onSubmit={() => submit(false)}
+        onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
       <div className="foot">
-        <span className="hint">{demo ? 'Demo — refresh clears it' : '⌘+Enter to submit'}</span>
+        <span className="hint">
+          {demo
+            ? 'Demo — refresh clears it'
+            : (canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : '⌘+Enter to submit')}
+        </span>
         <div className="tdoc-composer-foot-actions">
           {canSendToAgent ? (
             <button
