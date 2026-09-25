@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
 import { AppSwitch } from './ui/switch.jsx';
 import {
@@ -805,6 +805,18 @@ export function DocumentShell({ boot, config }) {
     && onboardingRecord.first_doc === config.slug
     && (!onboardingRecord.shared || sharedNow),
   );
+  const exitBannerRef = useRef(null);
+  const [exitBannerHeight, setExitBannerHeight] = useState(36);
+  useLayoutEffect(() => {
+    const banner = exitBannerRef.current;
+    if (!showExitBanner || !banner) return undefined;
+    // Wrapped tutorial copy needs breathing room; pins follow its actual height.
+    const measure = () => setExitBannerHeight(banner.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(banner);
+    return () => observer.disconnect();
+  }, [showExitBanner]);
   // The owner's own first words are the gesture — a comment of their own, or
   // the reply the seeded card asks for. The handoff appears once they exist,
   // not on an untouched seeded card.
@@ -884,7 +896,7 @@ export function DocumentShell({ boot, config }) {
   // Every comment card and pin is placed from the top of the document, so
   // anything docked above it moves all of them. STEP_HINT_HEIGHT is the bar's
   // own height in step-hint.css.
-  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? 36 : 0)
+  const frameTop = TOP_BAR_HEIGHT + (boot.oldVersion ? 28 : 0) + (showExitBanner ? exitBannerHeight : 0)
     + (hintBar ? STEP_HINT_HEIGHT : 0) + (editor.mode === 'edit' ? 46 : 0);
   const pinLeft = Math.min(
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
@@ -1038,7 +1050,7 @@ export function DocumentShell({ boot, config }) {
       <OldVersionNotice value={boot.oldVersion} />
 
       {showExitBanner ? (
-        <div className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
+        <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
           <span>{sharedNow ? 'Link copied — send it to someone.' : exitLine(answered, config.version)}</span>
           {sharedNow
             ? <a href="/me">Back to my docs</a>
