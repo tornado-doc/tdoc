@@ -230,6 +230,76 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(!body.includes('super_secret_value'), 'the manifest is public — a secret must never reach it');
   });
 
+  // ---- the agent session carries no authority ----
+  //
+  // Agent sign-in skips the OIDC state check, so this cookie can be issued to
+  // a browser that was walked onto the callback. That is only tolerable while
+  // holding it buys nothing. These are the tests that keep it worthless: if
+  // one of them starts failing because the cookie "works", the sign-in path
+  // has quietly become a login-CSRF hole.
+  const AGENT_COOKIE = 'tdoc_agent_sid=aa11bb22';
+  async function withAgentSession(env, body = {}) {
+    await env.META.put('agent-session:aa11bb22', JSON.stringify({
+      provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', agent_name: 'xiaocc', ...body,
+    }));
+    return AGENT_COOKIE;
+  }
+
+  await t('the agent cookie alone cannot hand comments to an agent', async () => {
+    const { env, slug, commentId } = await seed();
+    const cookie = await withAgentSession(env);
+    const r = await worker.fetch(req('/api/notify/handoff', {
+      method: 'POST', cookie, body: { slug, comment_ids: [commentId], recipient: target },
+    }), env, {});
+    assert(r.status === 401 || r.status === 403, `agent cookie drove a handoff (${r.status}) — it must carry no authority`);
+  });
+
+  await t('the agent cookie alone cannot bind itself to an account', async () => {
+    const { env } = await seed();
+    const cookie = await withAgentSession(env);
+    const r = await worker.fetch(req('/api/notify/link', { method: 'POST', cookie, body: {} }), env, {});
+    assert(r.status === 401, `linking without the upload token returned ${r.status}; both credentials are required`);
+  });
+
+  await t('the agent cookie alone cannot read a private doc', async () => {
+    const { env, token, slug } = await seed();
+    await worker.fetch(req('/api/doc/access', {
+      method: 'PATCH', token, body: { slug, access: { visibility: 'private' } },
+    }), env, {});
+    const cookie = await withAgentSession(env);
+    const r = await worker.fetch(req(`/d/${slug}/v/1`, { cookie }), env, {});
+    assert(r.status === 403 || r.status === 401 || r.status === 404,
+      `a private doc answered ${r.status} to a bare agent cookie`);
+  });
+
+  await t('with the upload token as well, the agent session does bind', async () => {
+    const { env, token, slug } = await seed();
+    const cookie = await withAgentSession(env);
+    const r = await worker.fetch(req('/api/notify/link', { method: 'POST', token, cookie, body: {} }), env, {});
+    const body = await r.json();
+    assert(r.status === 200 && body.ok, `link with both credentials failed: ${r.status} ${JSON.stringify(body)}`);
+    assert(body.target.agent_sub === 'uuid-a', 'bound the agent that signed in');
+    const targets = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(targets.default && targets.default.source === 'account', 'it became the account fallback');
+  });
+
+  // ---- why the button is disabled ----
+  // The UI renders a sentence from `reason`, so a wrong reason is a wrong
+  // sentence shown to a person. Only report what is actually known.
+  await t('no recipient reports a reason the UI can render', async () => {
+    const { env, token, slug } = await seed();
+    const r = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(r.default === null, 'nobody is bound yet');
+    assert(r.reason === 'no_agent_bound', `reason: ${r.reason}`);
+  });
+
+  await t('a bound recipient reports no reason at all', async () => {
+    const { env, token, slug } = await seed();
+    await link(env, token, { link_code: await pendingLink(env, 'lk_reason') });
+    const r = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(r.default && r.reason === null, `expected a recipient and no reason, got ${JSON.stringify(r.reason)}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

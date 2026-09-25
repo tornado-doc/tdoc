@@ -84,15 +84,19 @@ const cb = (path, cookie) => new Request(`https://tdoc.dev${path}`, cookie ? { h
     assert(!setCookie.includes('tdoc_oidcst='), 'raft login must not touch the generic seat cookie');
   });
 
-  await t('stateless raft callback with an AGENT identity gets a link code and NO session cookie', async () => {
+  await t('stateless raft callback with an AGENT identity gets an authority-free agent session', async () => {
     const env = makeEnv(mod.CommentsStore, { ...RAFT_ENV, RAFT_API_BASE: RAFT });
     stubIssuers({ [RAFT]: { sub: 'agent-uuid-a', type: 'agent', name: 'xiaocc' } });
     const r = await worker.fetch(cb('/auth/raft/callback?code=c'), env, {});
     const body = await r.json();
     assert(r.status === 200 && body.ok && body.link_code, `expected a link code, got ${r.status}: ${JSON.stringify(body)}`);
-    // The invariant the stateless path rests on: skipping the state check is
-    // only safe while there is no browser session to walk a victim onto.
-    assert(!r.headers.get('set-cookie'), 'an agent sign-in must never mint a session cookie');
+    // Login with Raft IS a service session the caller keeps, so a cookie is
+    // required. What keeps a stateless-issued cookie safe is that it carries
+    // no authority — pinned in notify-handoff.test.js — not that it is absent.
+    const cookie = r.headers.get('set-cookie') || '';
+    assert(/tdoc_agent_sid=/.test(cookie), `expected an agent session cookie, got: ${cookie}`);
+    assert(!/tdoc_sid=/.test(cookie), 'an agent must never be handed the human account session');
+    assert(/HttpOnly/.test(cookie) && /Secure/.test(cookie), `cookie flags: ${cookie}`);
     assert(body.agent.server_id === 'S1', 'the server comes from the issuer, not the agent');
   });
 
