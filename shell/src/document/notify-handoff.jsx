@@ -235,13 +235,13 @@ export function NotifyHandoffPanel({
             </p>
           )}
 
-          <label className="field" htmlFor="tdoc-notify-instruction">Optional instruction</label>
+          <label className="field" htmlFor="tdoc-notify-instruction">Instruction</label>
           <textarea
             id="tdoc-notify-instruction"
             className="tdoc-select"
             rows={2}
             maxLength={500}
-            placeholder="Optional instruction…"
+            placeholder="A line for the agent…"
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
           />
