@@ -3,6 +3,8 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { AppDialog } from '../ui/dialog.jsx';
+import { SegmentedControl } from '../ui/segmented-control.jsx';
 import {
   listNotifyHandoffs,
   listNotifyTargets,
@@ -13,6 +15,11 @@ import {
 function targetLabel(t) {
   if (!t) return '';
   return t.agent_name || t.agent_sub || 'agent';
+}
+
+function targetKey(t) {
+  if (!t) return '';
+  return `${t.provider}:${t.server_id}:${t.agent_sub}`;
 }
 
 function sameTarget(a, b) {
@@ -102,19 +109,6 @@ export function NotifyHandoffPanel({
     return () => { cancelled = true; };
   }, [open, slug, targets.available]);
 
-  if (!open) return null;
-  if (targets.ready && !targets.available) {
-    return (
-      <div className="tdoc-notify-panel" role="dialog" aria-label="Send to agent">
-        <header className="tdoc-notify-panel-head">
-          <b>Send to agent</b>
-          <button type="button" className="text-btn" onClick={onClose}>Close</button>
-        </header>
-        <p className="manage-hint">Notify is not available on this host yet.</p>
-      </div>
-    );
-  }
-
   const choices = [];
   if (targets.default) choices.push(targets.default);
   for (const c of targets.candidates) {
@@ -127,6 +121,7 @@ export function NotifyHandoffPanel({
   const ids = Array.isArray(commentIds) ? commentIds.filter(Boolean) : [];
   const boundHint = noAgentBoundReason(targets.reason);
   const canSubmit = !busy && ids.length > 0 && choices.length > 0 && (selected || targets.default);
+  const selectedKey = targetKey(selected || targets.default);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -172,87 +167,89 @@ export function NotifyHandoffPanel({
 
   const last = recent[0];
   const lastFailed = last?.delivery?.status === 'failed';
+  const unavailable = targets.ready && !targets.available;
 
   return (
-    <div className="tdoc-notify-panel" role="dialog" aria-label="Send to agent">
-      <header className="tdoc-notify-panel-head">
-        <b>Send to agent</b>
-        <button type="button" className="text-btn" onClick={onClose}>Close</button>
-      </header>
-
-      {last ? (
-        <p className="tdoc-notify-last">
-          Last handoff: {(last.comment_ids || []).length} comment{(last.comment_ids || []).length === 1 ? '' : 's'}
-          {lastFailed ? ' · not delivered' : ''}
-          {lastFailed && last.handoff_id ? (
-            <>
-              {' · '}
-              <button type="button" className="text-btn" disabled={busy} onClick={() => resend(last.handoff_id)}>
-                Resend
-              </button>
-            </>
+    <AppDialog
+      open={open}
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title="Send to agent"
+      description={unavailable
+        ? 'Notify is not available on this host yet.'
+        : (ids.length === 1
+          ? 'Sending 1 comment. One recipient per handoff.'
+          : `Sending ${ids.length || 0} open comments. One recipient per handoff.`)}
+      actions={(
+        <>
+          <button type="button" onClick={onClose}>Close</button>
+          {!unavailable ? (
+            <button
+              type="button"
+              className="primary"
+              disabled={!canSubmit}
+              title={!choices.length ? (boundHint || 'No agent to send to') : undefined}
+              onClick={submit}
+            >
+              {busy ? 'Sending…' : 'Send'}
+            </button>
           ) : null}
-        </p>
-      ) : null}
-
-      <p className="manage-hint">
-        {ids.length === 1
-          ? 'Sending 1 comment.'
-          : `Sending ${ids.length || 0} open comments.`}
-        {' '}One recipient per handoff.
-      </p>
-
-      {choices.length ? (
-        <ul className="tdoc-notify-targets">
-          {choices.map((t) => {
-            const id = `${t.provider}:${t.server_id}:${t.agent_sub}`;
-            const checked = sameTarget(selected || targets.default, t);
-            return (
-              <li key={id}>
-                <label>
-                  <input
-                    type="radio"
-                    name="tdoc-notify-target"
-                    checked={checked}
-                    onChange={() => setSelected(t)}
-                  />
-                  <span>
-                    <b>{targetLabel(t)}</b>
-                    {t.source ? <span className="tdoc-muted"> · {t.source}</span> : null}
-                  </span>
-                </label>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p className="manage-hint" title={boundHint || undefined}>
-          {boundHint || 'No agent has touched this doc yet. Pick one after an agent publishes or replies.'}
-        </p>
+        </>
       )}
+    >
+      {unavailable ? null : (
+        <>
+          {last ? (
+            <p className="manage-hint">
+              Last handoff: {(last.comment_ids || []).length} comment{(last.comment_ids || []).length === 1 ? '' : 's'}
+              {lastFailed ? ' · not delivered' : ''}
+              {lastFailed && last.handoff_id ? (
+                <>
+                  {' · '}
+                  <button type="button" className="text-btn" disabled={busy} onClick={() => resend(last.handoff_id)}>
+                    Resend
+                  </button>
+                </>
+              ) : null}
+            </p>
+          ) : null}
 
-      <textarea
-        className="tdoc-notify-instruction"
-        rows={2}
-        maxLength={500}
-        placeholder="Optional instruction…"
-        value={instruction}
-        onChange={(e) => setInstruction(e.target.value)}
-      />
+          {choices.length ? (
+            <section className="manage-section">
+              <label className="field">Recipient</label>
+              <SegmentedControl
+                ariaLabel="Recipient"
+                value={selectedKey}
+                options={choices.map((t) => ({
+                  value: targetKey(t),
+                  label: targetLabel(t),
+                }))}
+                onChange={(key) => {
+                  const next = choices.find((t) => targetKey(t) === key);
+                  if (next) setSelected(next);
+                }}
+              />
+            </section>
+          ) : (
+            <p className="manage-hint" title={boundHint || undefined}>
+              {boundHint || 'No agent has touched this doc yet. Pick one after an agent publishes or replies.'}
+            </p>
+          )}
 
-      <div className="tdoc-notify-actions">
-        <button
-          type="button"
-          className="primary"
-          disabled={!canSubmit}
-          title={!choices.length ? (boundHint || 'No agent to send to') : undefined}
-          onClick={submit}
-        >
-          {busy ? 'Sending…' : 'Send'}
-        </button>
-        {status ? <span className="manage-hint">{status}</span> : null}
-      </div>
-    </div>
+          <label className="field" htmlFor="tdoc-notify-instruction">Optional instruction</label>
+          <textarea
+            id="tdoc-notify-instruction"
+            className="tdoc-select"
+            rows={2}
+            maxLength={500}
+            placeholder="Optional instruction…"
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+          />
+
+          <p className="status" role="status">{status || '\u00a0'}</p>
+        </>
+      )}
+    </AppDialog>
   );
 }
 
