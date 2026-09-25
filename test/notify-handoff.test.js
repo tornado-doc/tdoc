@@ -429,6 +429,39 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(t2.default === null && t2.reason === 'no_agent_bound', `expected nobody bound, got ${JSON.stringify(t2)}`);
   });
 
+  // ---- a sent comment must say WHEN, and whether it landed ----
+  // Julie: "if it's been sent and I see no response, should I be able to send
+  // again? should I see 'sent X min ago' and a resend?" — none of that was
+  // renderable: a comment carried only status + id.
+  await t('a sent comment carries its time and delivery outcome', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const before = Date.now();
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: target });
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_status === 'sent', `status ${c.handoff_status}`);
+    assert(c.handoff_at && Date.parse(c.handoff_at) >= before - 1000, `handoff_at missing/bogus: ${c.handoff_at}`);
+    // Delivery failed here (no provider configured) and the UI must be able to
+    // tell that apart from "delivered, agent has not answered yet".
+    assert(c.handoff_delivery && c.handoff_delivery.status === 'failed', `delivery: ${JSON.stringify(c.handoff_delivery)}`);
+    assert(c.handoff_delivery.error === 'provider_not_configured', `error: ${c.handoff_delivery.error}`);
+  });
+
+  await t('an untouched comment carries nulls, not stale values', async () => {
+    const { env, slug } = await seed();
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_at === null && c.handoff_delivery === null, `expected nulls, got ${JSON.stringify([c.handoff_at, c.handoff_delivery])}`);
+  });
+
+  await t('handing the same comment over again supersedes the earlier record', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const first = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const second = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    assert(first.handoff_id !== second.handoff_id, 'chasing a silent agent is a NEW handoff, not a resend of the old one');
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_id === second.handoff_id, `comment should point at the latest handoff, got ${c.handoff_id}`);
+    assert(c.handoff_status === 'sent', 'and still be sent');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

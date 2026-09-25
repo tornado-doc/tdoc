@@ -5512,8 +5512,9 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
 // agent. Resolution is per comment id, so a partially-resolved handoff shows
 // exactly which of its comments are done.
 function withHandoffStatus(list, handoffs) {
+  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_delivery: null };
   if (!Array.isArray(list) || !Array.isArray(handoffs) || !handoffs.length) {
-    return Array.isArray(list) ? list.map(c => ({ ...c, handoff_status: 'note', handoff_id: null })) : list;
+    return Array.isArray(list) ? list.map(c => ({ ...c, ...bare })) : list;
   }
   const byComment = new Map();
   // Oldest first so a later handoff of the same comment wins.
@@ -5521,10 +5522,20 @@ function withHandoffStatus(list, handoffs) {
     if (!h || !Array.isArray(h.comment_ids)) continue;
     const done = new Set(Array.isArray(h.resolved_ids) ? h.resolved_ids : []);
     for (const id of h.comment_ids) {
-      byComment.set(id, { handoff_status: done.has(id) ? 'resolved' : 'sent', handoff_id: h.handoff_id });
+      byComment.set(id, {
+        handoff_status: done.has(id) ? 'resolved' : 'sent',
+        handoff_id: h.handoff_id,
+        // WHEN it went, and whether it landed. Without both, "sent" is a dead
+        // end for the reader: they cannot tell an agent that is still thinking
+        // from one that never got the message, and they have nothing to judge
+        // "has this been long enough to chase" by. Delivered-but-silent is the
+        // common case and the original design had no way to show it at all.
+        handoff_at: h.at || null,
+        handoff_delivery: h.delivery ? { status: h.delivery.status, error: h.delivery.error || null } : null,
+      });
     }
   }
-  return list.map(c => ({ ...c, ...(byComment.get(c.id) || { handoff_status: 'note', handoff_id: null }) }));
+  return list.map(c => ({ ...c, ...(byComment.get(c.id) || bare) }));
 }
 
 async function mutateComments(env, slug, op) {
