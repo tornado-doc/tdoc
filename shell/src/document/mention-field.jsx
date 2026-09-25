@@ -131,7 +131,10 @@ export function MentionField({
       }
     }
     if (event.isComposing || event.keyCode === 229) return;
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') onSubmit?.();
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      onSubmit?.({ sendToAgent: event.shiftKey });
+    }
   };
 
   return (
