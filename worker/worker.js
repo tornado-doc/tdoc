@@ -8065,6 +8065,34 @@ export default {
       return json(res.body, { status: res.status });
     }
 
+    // ---- Raft agent behavior manifest ----
+    //
+    // Raft fetches this to learn what tdoc is and how an agent signs in. It is
+    // registered on the App, so it has to exist before Login with Raft works
+    // at all — a registration pointing at a 404 is an App nothing can use.
+    //
+    // `actions` is deliberately empty. An action is invoked with the agent's
+    // Raft-derived session, and every mutating endpoint tdoc has today is
+    // authed with the upload token instead, so declaring one here would
+    // advertise a call that cannot succeed. Linking an agent needs both
+    // credentials and is driven from the agent's own machine, where the token
+    // already is — it is not an action Raft brokers. Actions arrive with the
+    // session-authed read/reply endpoints, which is what lets an agent with no
+    // local tdoc token work at all.
+    if (p === '/.well-known/raft-agent-manifest.json' && method === 'GET') {
+      const origin = `${url.protocol}//${url.host}`;
+      return json({
+        schema: 'raft-agent-manifest.v0',
+        name: 'tdoc',
+        description: 'Prompt-native HTML documents. Comments on a doc are handed to the agent that follows it, so review feedback arrives instead of being polled for.',
+        service: env.RAFT_CLIENT_ID || 'tdoc',
+        app_origin: origin,
+        execution: { mode: 'http_api', base_url: origin },
+        auth: { type: 'login_with_raft' },
+        actions: [],
+      }, { headers: { 'Cache-Control': 'public, max-age=300' } });
+    }
+
     // Bind an agent that signed in with Raft to THIS account, as a fallback
     // recipient for docs with nobody following them.
     //

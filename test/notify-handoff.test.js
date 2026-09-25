@@ -205,6 +205,31 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(body.targets === 1, `expected one target, got ${body.targets}`);
   });
 
+  // ---- the agent behaviour manifest ----
+  // Registered on the Raft App, so a 404 here means Login with Raft cannot
+  // work at all. It was missed in the first pass and the App was registered
+  // pointing at it, which is exactly the failure this test exists to catch.
+  await t('the manifest is served as JSON at the registered well-known path', async () => {
+    const env = makeEnv(mod.CommentsStore, { RAFT_CLIENT_ID: 'tdoc-7a927d' });
+    const r = await worker.fetch(req('/.well-known/raft-agent-manifest.json'), env, {});
+    assert(r.status === 200, `manifest ${r.status}`);
+    // The CLI refuses a manifest that is not application/json, so the
+    // content-type is part of the contract, not a detail.
+    assert(/application\/json/.test(r.headers.get('content-type') || ''), `content-type: ${r.headers.get('content-type')}`);
+    const m = await r.json();
+    assert(m.schema === 'raft-agent-manifest.v0', `schema: ${m.schema}`);
+    assert(m.auth && m.auth.type === 'login_with_raft', 'auth type');
+    assert(m.service === 'tdoc-7a927d', `service should follow the registered client key, got ${m.service}`);
+    assert(m.execution && m.execution.base_url === 'https://tdoc.dev', `base_url: ${m.execution && m.execution.base_url}`);
+    assert(Array.isArray(m.actions), 'actions must be an array even while empty');
+  });
+
+  await t('the manifest carries no credential', async () => {
+    const env = makeEnv(mod.CommentsStore, { RAFT_CLIENT_ID: 'tdoc-7a927d', RAFT_CLIENT_SECRET: 'super_secret_value' });
+    const body = await (await worker.fetch(req('/.well-known/raft-agent-manifest.json'), env, {})).text();
+    assert(!body.includes('super_secret_value'), 'the manifest is public — a secret must never reach it');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
