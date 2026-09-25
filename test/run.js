@@ -107,7 +107,7 @@ const OFFLINE = [
 const BROWSER = [
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection
-  'reader-width-ui.test.js', // actual shell toggle and provider-only serialization
+  'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
 ];
 

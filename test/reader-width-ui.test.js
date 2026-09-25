@@ -9,69 +9,33 @@ const { resolveTarget } = require('./helpers/fixture-server');
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const failures = [];
     page.on('pageerror', e => failures.push(e.message));
+    // Ignore preferences left behind by the removed reader-width switch.
+    await page.addInitScript(() => {
+      if (window === window.top) localStorage.setItem('tdoc-width:sample-doc', 'wide');
+    });
     await page.goto(target.url);
     const frame = page.frameLocator('iframe[aria-label="Document content"]');
     const width = () => frame.locator('.wrap').evaluate(e => Math.round(e.getBoundingClientRect().width));
     await frame.locator('.wrap').waitFor();
     assert.equal(await width(), 720);
-    const switchTo = async label => {
-      const direct = page.getByRole('button', { name: label, exact: true });
-      if (await direct.isVisible()) { await direct.click(); return; }
-      await page.getByRole('button', { name: 'More actions', exact: true }).click();
-      await page.getByRole('menuitem', { name: label, exact: true }).click();
-    };
-    await page.getByRole('button', { name: 'Wide width', exact:true }).waitFor();
-    await page.getByRole('button', { name:'More actions', exact:true }).click();
-    assert.equal(await page.getByRole('menuitem', {name:'Wide width',exact:true}).count(),0,
-      'wide toolbar must not duplicate its control in More');
-    await page.keyboard.press('Escape');
-
-    // Same viewport, different title length: placement is based on actual
-    // available room before the toolbar's progressive collapse starts.
-    await page.setViewportSize({width:1100,height:900});
-    await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
-    const originalTitle = await page.locator('.doc-title').textContent();
-    await page.locator('.doc-title').evaluate(el=>{el.textContent='A long document title that needs the toolbar space '.repeat(6)});
-    await page.locator('#tdoc-width-btn').waitFor({state:'hidden'});
-    await page.getByRole('button', {name:'More actions',exact:true}).click();
-    await page.getByRole('menuitem', {name:'Wide width',exact:true}).waitFor();
-    await page.keyboard.press('Escape');
-    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
-    await page.locator('.doc-title').evaluate((el,title)=>{el.textContent=title},originalTitle);
-    await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
-    // Width folds before theme/primary/version and stays folded when later
-    // collapse stages release space. Growing the bar restores the icon.
-    for (const viewportWidth of [944, 901, 900, 701, 700, 640, 375]) {
+    for (const viewportWidth of [1440, 1100, 944, 900, 700, 375]) {
       await page.setViewportSize({width:viewportWidth,height:900});
-      await page.locator('#tdoc-width-btn').waitFor({state:'hidden'});
-      if (viewportWidth > 700) {
-        assert(await page.locator('#tdoc-theme-btn').isVisible());
-        assert(await page.locator('.tdoc-document-primary').isVisible());
-        assert(await page.locator('#tdoc-version-toggle').isVisible());
-      }
+      assert.equal(await page.locator('#tdoc-width-btn').count(), 0, 'width toggle is removed');
       await page.getByRole('button', {name:'More actions',exact:true}).click();
-      await page.getByRole('menuitem', {name:'Wide width',exact:true}).waitFor();
+      assert.equal(await page.getByRole('menuitem', {name:/^(Wide|Narrow) width$/}).count(), 0,
+        'More has no width mode');
       await page.keyboard.press('Escape');
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     }
     await page.setViewportSize({width:1440,height:900});
-    await page.getByRole('button', {name:'Wide width',exact:true}).focus();
-    await page.keyboard.press('Enter');
-    await frame.locator('#tdoc-reader-width').waitFor({ state: 'attached' });
-    assert(await width() > 1200);
-    // The generic fixture's SVG has no fluid width; model a responsive author
-    // figure explicitly, as the Raft document declares it.
-    await frame.locator('svg').first().evaluate(e => { e.style.width = '100%'; });
-    const wideSvg = await frame.locator('svg').first().evaluate(e => e.getBoundingClientRect().width);
     await page.reload();
-    await frame.locator('#tdoc-reader-width').waitFor({ state: 'attached' });
-    await frame.locator('svg').first().evaluate(e => { e.style.width = '100%'; });
-    assert(await width() > 1200, 'preference survives reload');
-    await switchTo('Narrow width');
-    await page.waitForFunction(() => localStorage.getItem('tdoc-width:sample-doc') === 'narrow');
-    await frame.locator('.wrap').evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
-    assert.equal(await width(), 720);
-    assert(await frame.locator('svg').first().evaluate(e => e.getBoundingClientRect().width) < wideSvg, 'visual follows the content width');
+    await frame.locator('.wrap').waitFor();
+    assert.equal(await width(), 720, 'old wide preference cannot override the document layout');
+    await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage(
+      {source:'tdoc-shell', type:'tdoc:width', width:'wide'}, '*'));
+    await frame.locator('.wrap').evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(await width(), 720, 'removed width messages cannot change the layout');
+    assert.equal(await frame.locator('#tdoc-reader-width').count(), 0);
 
     // Editing/adding a table must engage the same provider policy without a
     // page reload or an author running a CLI. Mutation observer + real probe.
@@ -105,12 +69,10 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert(!serialized.includes('id="tdoc-provider-table-layout"'), 'computed table widths must not become author HTML');
     assert(serialized.includes('id="added-table"'), 'table content must survive serialization');
     await page.setViewportSize({ width: 375, height: 800 });
-    await page.locator('#tdoc-width-btn').waitFor({state:'hidden'});
-    await switchTo('Wide width');
     assert(await frame.locator('html').evaluate(e => e.scrollWidth <= innerWidth+1));
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth+1));
     assert.deepEqual(failures, []);
-    console.log('  ✓ width control uses toolbar capacity, falls back to More, supports keyboard, persists and resizes visuals');
+    console.log('  ✓ reader uses document layout with no width switch or saved width override');
     console.log('  ✓ dynamic tables and saved content remain intact without phone overflow');
   } finally { await browser.close(); await target.stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

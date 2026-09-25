@@ -42,7 +42,6 @@
    spans): keep the semantics, drop the UA button box. */
 .tdoc-margin-comment button.del,
 .tdoc-margin-comment button.tdoc-reply-toggle,
-.tdoc-margin-comment button.tdoc-send-agent-btn,
 .tdoc-margin-comment button.tdoc-resolve-toggle,
 .tdoc-margin-comment button.tdoc-edit-toggle,
 .tdoc-margin-comment button.tdoc-replies-toggle,
@@ -80,17 +79,7 @@ button.tdoc-cluster-row {
 /* edit sits next to Reply and is the same kind of thing — a control on your
    own comment — so it reads the same, not as a second colour. */
 .tdoc-margin-comment button.tdoc-reply-toggle,
-.tdoc-margin-comment button.tdoc-send-agent-btn,
 .tdoc-margin-comment button.tdoc-edit-toggle { color: var(--td-accent); }
-.tdoc-margin-comment button.tdoc-send-agent-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.tdoc-margin-comment button.tdoc-send-agent-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 /* resolve is the one action that changes the thread's state rather than its
    content, and it carries the same green the resolved chip and pin ring use. */
 /* The tick is the accent, not a traffic light: it is the card's one primary
@@ -163,6 +152,31 @@ button.tdoc-cluster-row {
 
 .tdoc-popup .head button.x:hover {
   color: #fff;
+}
+
+.tdoc-popup .foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tdoc-popup .tdoc-agent-toggle {
+  appearance: none;
+  border: 1px solid var(--td-line, #e8e7e3);
+  background: transparent;
+  color: var(--td-muted, #6b6a66);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: 650 12px/1.2 inherit;
+  cursor: pointer;
+}
+.tdoc-popup .tdoc-agent-toggle.is-on {
+  border-color: var(--td-accent, #1652f0);
+  background: var(--td-accent-tint, #e8eeff);
+  color: var(--td-accent, #1652f0);
+}
+.tdoc-popup .tdoc-agent-toggle:hover {
+  color: var(--td-ink, #1a1a1a);
 }
 
 button.tdoc-pin {

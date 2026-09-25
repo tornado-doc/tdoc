@@ -976,10 +976,7 @@ root layout with arbitrary CSS. Width is a separate template choice:
   column comfortably, or when the user asks for a full-width document. It does
   **not** require `--custom-template` or a different aesthetic.
 
-The root width is the author's default, not the only size readers will use:
-readers can switch Narrow width / Wide width directly in the top toolbar when
-there is room; the control moves into More actions when space is limited.
-The preference is per document in that browser and never changes saved HTML.
+The document uses the author's layout; readers do not choose a width mode.
 At the standard 720px root, 24px padding per side leaves **672px for content**;
 on a 375px phone there are about **311px**. Design for the content box, not the
 browser window. Use container queries for layout changes inside that root.
@@ -1082,7 +1079,7 @@ Every doc must work on mobile out of the box. The baked template carries defensi
   Native tables get the same content-width protection in the provider and CLI
   preview. An intentional card reflow remains the author's responsibility.
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
-- **Design for narrow and wide reader modes at phone, tablet and desktop widths.**
+- **Design for constrained and expanded content at phone, tablet and desktop widths.**
   When previewing, inspect the document frame as well as the shell: a fitting
   shell can hide an overflowing iframe. Wide figures/tables may scroll locally;
   the whole page must not. Static validation does not prove rendered layout.

@@ -24,7 +24,6 @@ import {
   DocumentBreadcrumbs,
   DocumentOverflowActions,
   DocumentPrimaryAction,
-  DocumentWidthControl,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -41,7 +40,7 @@ import {
   OwnerAccessDialog,
 } from './document/owner-access-dialog.jsx';
 import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
-import { readStored, writeStored } from './safe-storage.js';
+import { readStored } from './safe-storage.js';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -171,9 +170,6 @@ export function DocumentShell({ boot, config }) {
   const [theme, setTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
   ));
-  const [readerWidth, setReaderWidth] = useState('narrow');
-  const [supportsWidth, setSupportsWidth] = useState(false);
-  const [inlineWidth, setInlineWidth] = useState(false);
   const [starred, setStarred] = useState(Boolean(config.viewerStar?.starred));
   const [signInOpen, setSignInOpen] = useState(false);
   const [deepTarget, setDeepTarget] = useState(() => (
@@ -391,11 +387,6 @@ export function DocumentShell({ boot, config }) {
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
       bridge.send({ type: 'tdoc:theme', theme: nextTheme });
-      const savedWidth = readStored(`tdoc-width:${config.slug}`);
-      const nextWidth = savedWidth === 'wide' || savedWidth === 'narrow' ? savedWidth : message.defaultWidth === 'wide' ? 'wide' : 'narrow';
-      setSupportsWidth(Boolean(message.supportsWidth));
-      setReaderWidth(nextWidth);
-      if (savedWidth === 'wide' || savedWidth === 'narrow') bridge.send({ type: 'tdoc:width', width: nextWidth });
       bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding });
       comments.refresh();
     },
@@ -631,7 +622,7 @@ export function DocumentShell({ boot, config }) {
     ));
   };
 
-  const postComment = async (text) => {
+  const postComment = async (text, opts = {}) => {
     const { ok, value } = await attempt(() => comments.addComment(composer, text));
     if (!ok) return;
     markCommented();
@@ -639,6 +630,21 @@ export function DocumentShell({ boot, config }) {
     reportMentions(value);
     // The new card opens: it is where the next instruction lives.
     if (value?.id) setOpenCommentId(value.id);
+    if (opts.sendToAgent && value?.id && canSendToAgent) {
+      setSendToAgentBusy(true);
+      try {
+        const body = await sendOneCommentToAgent(config.slug, value.id);
+        const failed = body?.delivery?.status === 'failed';
+        showToast(failed
+          ? `Sent — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
+          : 'Sent to agent');
+        await comments.refresh();
+      } catch (err) {
+        showToast(err.message || 'Comment posted — could not send to agent');
+      } finally {
+        setSendToAgentBusy(false);
+      }
+    }
   };
 
   const replyTo = async (parentId, text) => {
@@ -696,28 +702,6 @@ export function DocumentShell({ boot, config }) {
       .map((c) => c.id);
     openNotifyPanel(openIds);
   };
-  const sendToAgent = async (commentId) => {
-    if (!canSendToAgent || sendToAgentBusy) return;
-    setSendToAgentBusy(true);
-    try {
-      const body = await sendOneCommentToAgent(config.slug, commentId);
-      const failed = body?.delivery?.status === 'failed';
-      showToast(failed
-        ? `Sent — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
-        : 'Sent to agent');
-      await comments.refresh();
-    } catch (err) {
-      if (err.status === 404) {
-        // Stub not up yet — fall back to the panel so the owner sees why.
-        openNotifyPanel([commentId]);
-      } else {
-        showToast(err.message || 'Could not send');
-      }
-    } finally {
-      setSendToAgentBusy(false);
-    }
-  };
-
   const removeAnchor = async () => {
     if (!(await attempt(() => comments.moveAnchor(reanchorId, { kind: 'none' }))).ok) return;
     setReanchorId(null);
@@ -974,13 +958,6 @@ export function DocumentShell({ boot, config }) {
     && new URLSearchParams(location.search).get('comment') !== openComment.id
   ) || (arrival === 'revised' && Boolean(openComment));
 
-  const toggleReaderWidth = () => {
-    const next = readerWidth === 'wide' ? 'narrow' : 'wide';
-    writeStored(`tdoc-width:${config.slug}`, next);
-    setReaderWidth(next);
-    bridge.send({ type: 'tdoc:width', width: next });
-  };
-
   return (
     <div
       className="tdoc-document-app"
@@ -1027,8 +1004,6 @@ export function DocumentShell({ boot, config }) {
         overflowActions={config.isLanding ? null : (
           <DocumentOverflowActions
             config={config}
-            readerWidth={supportsWidth && !inlineWidth ? readerWidth : null}
-            onToggleWidth={toggleReaderWidth}
             starred={starred}
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
@@ -1044,10 +1019,6 @@ export function DocumentShell({ boot, config }) {
             onToggleResolved={toggleResolved}
           />
         )}
-        appearanceActions={!config.isLanding && supportsWidth ? (
-          <DocumentWidthControl readerWidth={readerWidth} inline={inlineWidth}
-            onPlacementChange={setInlineWidth} onToggle={toggleReaderWidth} />
-        ) : null}
         onThemeChange={(nextTheme) => {
           setTheme(nextTheme);
           bridge.send({ type: 'tdoc:theme', theme: nextTheme });
@@ -1193,8 +1164,6 @@ export function DocumentShell({ boot, config }) {
           onResolve={resolveComment}
           onReanchor={setReanchorId}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
-          onSendToAgent={canSendToAgent ? sendToAgent : null}
-          sendToAgentBusy={sendToAgentBusy}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -1226,8 +1195,6 @@ export function DocumentShell({ boot, config }) {
           onResolve={resolveComment}
           onReanchor={setReanchorId}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
-          onSendToAgent={canSendToAgent ? sendToAgent : null}
-          sendToAgentBusy={sendToAgentBusy}
         />
       )}
 
@@ -1236,6 +1203,12 @@ export function DocumentShell({ boot, config }) {
           selection={composer}
           mentionable={mentionable}
           demo={!!config.demoComments}
+          canSendToAgent={canSendToAgent}
+          sendToAgentDisabledReason={
+            notifyTargets.reason === 'no_agent_bound'
+              ? 'No agent is following this doc yet'
+              : null
+          }
           onSubmit={postComment}
           onClose={closeComposer}
         />
