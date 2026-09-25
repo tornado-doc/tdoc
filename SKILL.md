@@ -313,7 +313,7 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
      --screenshots /tmp/<slug>-layout
    ```
 
-   Fix reported errors and inspect all six screenshots: narrow and wide modes
+   Fix reported errors and inspect all six screenshots: constrained and expanded content layouts
    at 375px, 768px and 1440px. Tiny SVG labels, squeezed table columns,
    overlap and clipping are errors; intentional local scrolling is allowed. Check table column
    balance, diagram labels inside their boxes, connector crossings, and local
@@ -989,10 +989,7 @@ root layout with arbitrary CSS. Width is a separate template choice:
   column comfortably, or when the user asks for a full-width document. It does
   **not** require `--custom-template` or a different aesthetic.
 
-The root width is the author's default, not the only size readers will use:
-readers can switch Narrow width / Wide width directly in the top toolbar when
-there is room; the control moves into More actions when space is limited.
-The preference is per document in that browser and never changes saved HTML.
+The document uses the author's layout; readers do not choose a width mode.
 At the standard 720px root, 24px padding per side leaves **672px for content**;
 on a 375px phone there are about **311px**. Design for the content box, not the
 browser window. Use container queries for layout changes inside that root.
@@ -1095,7 +1092,7 @@ Every doc must work on mobile out of the box. The baked template carries defensi
   Native tables get the same content-width protection in the provider and CLI
   preview. An intentional card reflow remains the author's responsibility.
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
-- **Test both reader widths at 375px, 768px and 1440px** with `bin/tdoc-check-layout`,
+- **Test both content widths at 375px, 768px and 1440px** with `bin/tdoc-check-layout`,
   then inspect the screenshots before publishing or claiming done. Check the
   document frame as well as the shell: a fitting shell can hide an overflowing
   iframe. Wide figures/tables may scroll locally; the whole page must not.

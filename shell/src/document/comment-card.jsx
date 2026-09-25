@@ -478,9 +478,6 @@ export function CommentCard({
   // Bridge 2, on the owner's own doc: { line, state, onCopy }. Shown under
   // every thread the agent has not answered yet — one paste covers them all.
   handoff = null,
-  // Connected-App notify: owner can push this thread to an agent.
-  onSendToAgent = null,
-  sendToAgentBusy = false,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
   const [replyTarget, setReplyTarget] = useState(null);
@@ -648,7 +645,7 @@ export function CommentCard({
               <Check size={16} />
             </button>
           ) : null}
-          {isMine || canDelete || canMutate || onSendToAgent ? (
+          {isMine || canDelete || canMutate ? (
             <AppMenu
               trigger={(
                 <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
@@ -675,14 +672,6 @@ export function CommentCard({
                   onClick={() => onReanchor(comment.id)}
                 >
                   {unanchored ? 'Re-anchor' : 'Move anchor'}
-                </AppMenuItem>
-              ) : null}
-              {onSendToAgent && comment.status !== 'applied' ? (
-                <AppMenuItem
-                  disabled={sendToAgentBusy}
-                  onClick={() => onSendToAgent(comment.id)}
-                >
-                  Send to agent
                 </AppMenuItem>
               ) : null}
               {canDelete ? (

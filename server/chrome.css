@@ -612,11 +612,6 @@
        ≥ 900px: logo · v · title · author …… identity · share · ⋯
        < 900px: logo · v · title ……………… avatar   · share · ⋯  (author + name hide)
        < 700px: logo ·     title ………………            share · ⋯  (version+identity+resolved into ⋯) */
-  /* Width is the first optional action to fold. Reserve its 32px target,
-     4px gap and 8px breathing room before the next 900px collapse stage. */
-  @media (max-width: 944px) {
-    .tdoc-bar { --tdoc-inline-width-allowed: 0; }
-  }
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }

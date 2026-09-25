@@ -111,7 +111,7 @@ const GATED = [
   'onboarding.test.js',  // doctor flow
   'publish.test.js',     // dry-publish + (gated) real publish
   'resolved-visibility-ui.test.js', // real resolved filter, highlights and pointer behavior
-  'reader-width-ui.test.js', // actual shell toggle and provider-only serialization
+  'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright

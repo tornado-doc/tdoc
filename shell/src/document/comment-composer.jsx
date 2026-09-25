@@ -55,8 +55,17 @@ export function composerPosition(rect, viewport) {
   return { top, left };
 }
 
-export function CommentComposer({ selection, onSubmit, onClose, mentionable = [], demo = false }) {
+export function CommentComposer({
+  selection,
+  onSubmit,
+  onClose,
+  mentionable = [],
+  demo = false,
+  canSendToAgent = false,
+  sendToAgentDisabledReason = null,
+}) {
   const [text, setText] = useState('');
+  const [sendToAgent, setSendToAgent] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
 
   useEffect(() => {
@@ -86,7 +95,11 @@ export function CommentComposer({ selection, onSubmit, onClose, mentionable = []
   const submit = async () => {
     if (busy || !text.trim()) return;
     setBusy(true);
-    try { await onSubmit(text); } finally { setBusy(false); }
+    try {
+      await onSubmit(text, { sendToAgent: canSendToAgent && sendToAgent });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -111,8 +124,21 @@ export function CommentComposer({ selection, onSubmit, onClose, mentionable = []
         onSubmit={submit}
       />
       <div className="foot">
+        {canSendToAgent ? (
+          <button
+            type="button"
+            className={`tdoc-agent-toggle${sendToAgent ? ' is-on' : ''}`}
+            aria-pressed={sendToAgent}
+            title={sendToAgentDisabledReason || 'Hand this comment to the following agent on submit'}
+            onClick={() => setSendToAgent((v) => !v)}
+          >
+            @agent
+          </button>
+        ) : null}
         <span className="hint">{demo ? 'Demo — refresh clears it' : '⌘+Enter to submit'}</span>
-        <button className="submit" type="button" onClick={submit} disabled={busy}>{busy ? 'Posting…' : 'Comment'}</button>
+        <button className="submit" type="button" onClick={submit} disabled={busy}>
+          {busy ? 'Posting…' : (sendToAgent ? 'Comment + send' : 'Comment')}
+        </button>
       </div>
     </div>
   );

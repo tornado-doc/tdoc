@@ -55,10 +55,17 @@ const run = (name, args, env = {}) => spawnSync('bash', [path.join(root, 'bin', 
     console.log('  ✓ publishing rechecks edited bytes before any account setup or upload');
 
     result = run('tdoc-write', [...baseArgs, '--html-file', good, '--force'], { PLAYWRIGHT_BROWSERS_PATH: path.join(temp, 'missing-browser') });
+    assert.equal(result.status, 0, result.stderr);
+    assert(result.stderr.includes('layout check skipped'), result.stderr);
+    assert(fs.readFileSync(path.join(dir,'v1/index.html'),'utf8').includes('Existing document'));
+    console.log('  ✓ unavailable browser soft-skips by default (warn, still write)');
+    result = run('tdoc-write', [...baseArgs, '--html-file', good, '--force'], {
+      PLAYWRIGHT_BROWSERS_PATH: path.join(temp, 'missing-browser'),
+      TDOC_LAYOUT_REQUIRE: '1',
+    });
     assert.notEqual(result.status, 0);
-    assert(result.stderr.includes('rendered layout validation failed'));
-    assert.equal(fs.readFileSync(path.join(dir,'v1/index.html'),'utf8'), fs.readFileSync(bad,'utf8'));
-    console.log('  ✓ unavailable browser is a failure, never an unchecked success');
+    assert(result.stderr.includes('layout check required but unavailable'), result.stderr);
+    console.log('  ✓ TDOC_LAYOUT_REQUIRE=1 hard-fails when the browser is missing');
     result = run('tdoc-doctor', ['--json'], {
       PLAYWRIGHT_BROWSERS_PATH: path.join(temp, 'missing-browser'),
       TDOC_MOCK_NOT_PUBLISHED: '1', TDOC_SKIP_UPDATE_CHECK: '1',

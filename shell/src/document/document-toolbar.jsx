@@ -1,5 +1,6 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -8,9 +9,6 @@ import {
   Download,
   FileDown,
   History,
-  Columns2,
-  Minimize,
-  Maximize,
   Share2,
   Star,
   Trash2,
@@ -145,71 +143,8 @@ export function DocumentPrimaryAction({
   );
 }
 
-export function DocumentWidthControl({ readerWidth, inline, onPlacementChange, onToggle }) {
-  const ref = useRef(null);
-  useLayoutEffect(() => {
-    const button = ref.current;
-    const bar = button.closest('.tdoc-bar');
-    const left = bar.querySelector('.tdoc-bar-left');
-    const right = bar.querySelector('.tdoc-bar-right');
-    let frame = 0, disposed = false;
-    const measure = () => {
-      if (disposed) return;
-      // The chrome collapse ladder gives width the lowest priority. Space
-      // released by later stages must not bring this optional action back.
-      if (getComputedStyle(bar).getPropertyValue('--tdoc-inline-width-allowed').trim() === '0') {
-        onPlacementChange(false);
-        return;
-      }
-      const children = [...left.children].filter(el => getComputedStyle(el).display !== 'none');
-      const title = left.querySelector('.doc-title');
-      const naturalLeft = children.reduce((total, el) => {
-        const css = getComputedStyle(el);
-        let width = el.getBoundingClientRect().width;
-        if (el === title && el.tagName !== 'INPUT') {
-          // Compact mode lets the title grow into all spare space. Measure
-          // its text, not that expanded box (or a clipped desktop box).
-          const range = document.createRange(); range.selectNodeContents(el);
-          width = range.getBoundingClientRect().width + parseFloat(css.paddingLeft) + parseFloat(css.paddingRight)
-            + parseFloat(css.borderLeftWidth) + parseFloat(css.borderRightWidth);
-        }
-        return total + width + parseFloat(css.marginLeft) + parseFloat(css.marginRight);
-      }, 0) + Math.max(0, children.length - 1) * parseFloat(getComputedStyle(left).columnGap || 0);
-      const required = button.getBoundingClientRect().width + parseFloat(getComputedStyle(button.parentElement).columnGap || 0);
-      // Add our footprint back before comparing, so appearing/disappearing
-      // cannot change the answer and cause an oscillating toolbar.
-      const available = left.getBoundingClientRect().width - naturalLeft + (inline ? required : 0);
-      onPlacementChange(available >= required + 8);
-    };
-    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); };
-    const resize = new ResizeObserver(schedule);
-    [bar, left, right, button, ...left.children].forEach(el => resize.observe(el));
-    // A truncated title can change its intrinsic width without changing its
-    // current box. Account/title/action text must also trigger a measurement.
-    const mutations = new MutationObserver(schedule);
-    mutations.observe(bar, { childList:true, characterData:true, subtree:true });
-    window.addEventListener('resize', schedule);
-    document.fonts?.ready.then(schedule);
-    measure();
-    return () => {
-      disposed = true; cancelAnimationFrame(frame); resize.disconnect(); mutations.disconnect();
-      window.removeEventListener('resize', schedule);
-    };
-  }, [inline, onPlacementChange]);
-  const label = readerWidth === 'wide' ? 'Narrow width' : 'Wide width';
-  return (
-    <button ref={ref} id="tdoc-width-btn" type="button"
-      className={`tdoc-width-action${inline ? '' : ' tdoc-width-measure'}`}
-      aria-label={label} title={label} aria-hidden={!inline} tabIndex={inline ? 0 : -1} onClick={onToggle}>
-      {readerWidth === 'wide' ? <Minimize size={16} /> : <Maximize size={16} />}
-    </button>
-  );
-}
-
 export function DocumentOverflowActions({
   config,
-  readerWidth,
-  onToggleWidth,
   starred,
   onToggleStar,
   onPublish,
@@ -226,11 +161,6 @@ export function DocumentOverflowActions({
 }) {
   return (
     <>
-      {readerWidth ? (
-        <AppMenuItem className="tdoc-action-menu-item" data-action="width" onClick={onToggleWidth}>
-          <Columns2 size={15} /> {readerWidth === 'wide' ? 'Narrow width' : 'Wide width'}
-        </AppMenuItem>
-      ) : null}
       {config.mode === 'local' ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
           <Upload size={15} /> Publish
@@ -242,7 +172,7 @@ export function DocumentOverflowActions({
       )}
       {onSendToAgent ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="send-to-agent" onClick={onSendToAgent}>
-          Send to agent
+          <Bot size={15} /> Send to agent
         </AppMenuItem>
       ) : null}
       {(config.versions || []).length > 1 ? (

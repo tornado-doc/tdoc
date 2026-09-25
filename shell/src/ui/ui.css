@@ -154,6 +154,31 @@ button.tdoc-cluster-row {
   color: #fff;
 }
 
+.tdoc-popup .foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tdoc-popup .tdoc-agent-toggle {
+  appearance: none;
+  border: 1px solid var(--td-line, #e8e7e3);
+  background: transparent;
+  color: var(--td-muted, #6b6a66);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: 650 12px/1.2 inherit;
+  cursor: pointer;
+}
+.tdoc-popup .tdoc-agent-toggle.is-on {
+  border-color: var(--td-accent, #1652f0);
+  background: var(--td-accent-tint, #e8eeff);
+  color: var(--td-accent, #1652f0);
+}
+.tdoc-popup .tdoc-agent-toggle:hover {
+  color: var(--td-ink, #1a1a1a);
+}
+
 button.tdoc-pin {
   padding: 0;
   margin: 0;

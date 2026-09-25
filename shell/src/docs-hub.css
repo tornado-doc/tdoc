@@ -88,6 +88,56 @@
     color: var(--td-ink);
     font-weight: 600;
   }
+  .profile-view-switch,
+  .profile-owner-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .profile-owner-actions { margin-left: 8px; }
+  .profile-icon-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--td-muted);
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .profile-icon-btn:hover { color: var(--td-ink); background: var(--td-surface-2); }
+  .profile-icon-btn.is-active {
+    color: var(--td-accent);
+    background: var(--td-accent-tint);
+  }
+  .profile-poster-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 8px 0 10px;
+    font-size: 13px;
+    color: var(--td-muted);
+  }
+  .profile-poster-field textarea {
+    min-height: 64px;
+  }
+  .profile-poster-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--td-ink);
+    cursor: pointer;
+    user-select: none;
+  }
+  .profile-poster-toggle input { accent-color: var(--td-accent); }
   .profile-picks {
     display: flex;
     flex-direction: column;

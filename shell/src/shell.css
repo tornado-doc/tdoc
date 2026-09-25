@@ -66,10 +66,6 @@ body,
 .tdoc-mode-item.current { font-weight: 650; }
 .tdoc-mode-check { margin-left: auto; color: var(--td-accent); }
 
-.tdoc-bar button.tdoc-width-action { width: 32px; height: 32px; padding: 6px; flex: none; justify-content: center; }
-/* Still measurable, but absent from flex layout, hit testing and tab order. */
-.tdoc-bar button.tdoc-width-measure { position: absolute; right: 0; visibility: hidden; pointer-events: none; }
-
 .tdoc-editor-toolbar {
   box-sizing: border-box;
   display: flex;
