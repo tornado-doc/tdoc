@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
-import { Bot, Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
+import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
@@ -478,9 +478,6 @@ export function CommentCard({
   // Bridge 2, on the owner's own doc: { line, state, onCopy }. Shown under
   // every thread the agent has not answered yet — one paste covers them all.
   handoff = null,
-  // Connected-App notify: owner can push this thread to an agent.
-  onSendToAgent = null,
-  sendToAgentBusy = false,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
   const [replyTarget, setReplyTarget] = useState(null);
@@ -767,18 +764,6 @@ export function CommentCard({
           </button>
           {!reactionCount ? (
             <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
-          ) : null}
-          {/* Primary notify action — not buried in ⋯. Same row as Reply. */}
-          {onSendToAgent && comment.status !== 'applied' ? (
-            <button
-              type="button"
-              className="tdoc-send-agent-btn"
-              disabled={sendToAgentBusy}
-              onClick={() => onSendToAgent(comment.id)}
-            >
-              <Bot size={14} aria-hidden="true" />
-              {sendToAgentBusy ? 'Sending…' : 'Send to agent'}
-            </button>
           ) : null}
         </span>
       </div>
