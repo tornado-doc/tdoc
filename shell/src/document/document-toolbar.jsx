@@ -214,6 +214,7 @@ export function DocumentOverflowActions({
   onToggleStar,
   onPublish,
   onShare,
+  onSendToAgent,
   onCopyMarkdown,
   onDuplicate,
   onDownload,
@@ -239,6 +240,11 @@ export function DocumentOverflowActions({
           <Share2 size={15} /> Share
         </AppMenuItem>
       )}
+      {onSendToAgent ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="send-to-agent" onClick={onSendToAgent}>
+          Send to agent
+        </AppMenuItem>
+      ) : null}
       {(config.versions || []).length > 1 ? (
         <AppSubmenu
           className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-version-submenu-trigger"

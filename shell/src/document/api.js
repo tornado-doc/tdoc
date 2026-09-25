@@ -180,6 +180,37 @@ export function listNotifications(offset = 0) {
   return request(`/api/notifications?${query}`);
 }
 
+// Raft / provider notify handoff (Connected App). Same endpoint for doc-level
+// and single-comment "send to agent" — comment_ids length is what differs.
+export function listNotifyTargets(slug) {
+  const query = new URLSearchParams({ slug });
+  return request(`/api/notify/targets?${query}`);
+}
+
+export function listNotifyHandoffs(slug, limit = 10) {
+  const query = new URLSearchParams({ slug, limit: String(limit) });
+  return request(`/api/notify/handoffs?${query}`);
+}
+
+export function postNotifyHandoff({ slug, comment_ids, instruction, recipient }) {
+  const body = { slug, comment_ids: comment_ids || [] };
+  if (instruction != null) body.instruction = instruction;
+  if (recipient) body.recipient = recipient;
+  return request('/api/notify/handoff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function resendNotifyHandoff({ slug, handoff_id }) {
+  return request('/api/notify/handoff/resend', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, handoff_id }),
+  });
+}
+
 export function getUnreadNotificationCount() {
   return request('/api/notifications/unread');
 }
