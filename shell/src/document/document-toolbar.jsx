@@ -9,8 +9,8 @@ import {
   FileDown,
   History,
   Columns2,
-  FoldHorizontal,
-  UnfoldHorizontal,
+  Minimize,
+  Maximize,
   Share2,
   Star,
   Trash2,
@@ -195,7 +195,7 @@ export function DocumentWidthControl({ readerWidth, inline, onPlacementChange, o
     <button ref={ref} id="tdoc-width-btn" type="button"
       className={`tdoc-width-action${inline ? '' : ' tdoc-width-measure'}`}
       aria-label={label} title={label} aria-hidden={!inline} tabIndex={inline ? 0 : -1} onClick={onToggle}>
-      {readerWidth === 'wide' ? <FoldHorizontal size={16} /> : <UnfoldHorizontal size={16} />}
+      {readerWidth === 'wide' ? <Minimize size={16} /> : <Maximize size={16} />}
     </button>
   );
 }
