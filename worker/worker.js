@@ -2371,6 +2371,7 @@ async function completeRaftSignIn(env, { user, tok, stateless }) {
   const identity = {
     provider: 'raft',
     server_id: String(server.id),
+    ...(server.slug ? { server_slug: String(server.slug) } : {}),
     agent_sub: sub,
     agent_name: typeof user.name === 'string' ? user.name.slice(0, 80) : '',
     at: new Date().toISOString(),
@@ -2385,7 +2386,7 @@ async function completeRaftSignIn(env, { user, tok, stateless }) {
     ok: true,
     link_code: code,
     expires_in: RAFT_LINK_TTL,
-    agent: { server_id: identity.server_id, agent_sub: sub, agent_name: identity.agent_name },
+    agent: { server_id: identity.server_id, server_slug: identity.server_slug || null, agent_sub: sub, agent_name: identity.agent_name },
   }, {
     // SECURITY — read this before changing the cookie.
     //
@@ -5315,7 +5316,11 @@ const NOTIFY_PROVIDERS = {
       const server_id = typeof t.server_id === 'string' ? t.server_id.trim() : '';
       const agent_sub = typeof t.agent_sub === 'string' ? t.agent_sub.trim() : '';
       if (!server_id || !agent_sub) return null;
-      return { server_id, agent_sub };
+      // The slug is what addresses a server when REQUESTING access; the id is
+      // what the resource URN is built from. They are different strings and
+      // the API rejects each in the other's place, so a target carries both.
+      const server_slug = typeof t.server_slug === 'string' ? t.server_slug.trim() : '';
+      return { server_id, agent_sub, ...(server_slug ? { server_slug } : {}) };
     },
     // Three legs: request → resource-bound token → event. The token is bound
     // to (server, agent-inbound) so it cannot address a different server.
@@ -5325,25 +5330,37 @@ const NOTIFY_PROVIDERS = {
       }
       const base = env.RAFT_API_BASE || 'https://api.raft.build';
       try {
+        // Addressed by SLUG, not id. Passing the server's uuid here answers
+        // 404, which reads like a missing endpoint and is really a missing
+        // server — the reason a target keeps both strings.
+        if (!target.server_slug) return { status: 'failed', error: 'target_missing_server_slug' };
         const reqRes = await fetch(`${base}/api/oauth/requests/agent`, {
           method: 'POST',
           headers: raftAuthHeaders(env),
           body: JSON.stringify({
-            serverSlug: target.server_id,
+            serverSlug: target.server_slug,
             agentName: target.agent_name || target.agent_sub,
             scopes: ['agent:notification:write'],
           }),
         });
         if (!reqRes.ok) return { status: 'failed', error: `request_${reqRes.status}` };
-        const { request_id } = await reqRes.json();
+        const reqBody = await reqRes.json().catch(() => ({}));
+        // The response is camelCase. Reading `request_id` here silently sent
+        // `undefined` to the token endpoint.
+        const requestId = reqBody.requestId || reqBody.request_id;
+        if (!requestId) return { status: 'failed', error: 'request_id_missing' };
+        // "built from the returned agent.serverId exactly as shown" — take the
+        // id the API just handed back rather than the one we stored, so a
+        // stale record cannot address the wrong server's inbox.
+        const serverId = (reqBody.agent && reqBody.agent.serverId) || target.server_id;
 
         const tokRes = await fetch(`${base}/api/oauth/token`, {
           method: 'POST',
           headers: raftAuthHeaders(env),
           body: JSON.stringify({
             grant_type: 'urn:slock:grant-type:agent_request',
-            request_id,
-            resource: `urn:raft:server:${target.server_id}:agent-inbound`,
+            request_id: requestId,
+            resource: `urn:raft:server:${serverId}:agent-inbound`,
           }),
         });
         if (!tokRes.ok) return { status: 'failed', error: `token_${tokRes.status}` };
@@ -8325,6 +8342,14 @@ export default {
 
       const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
+      // Answering a comment is following the doc. This is the whole of the
+      // "who gets the handoff" bookkeeping: nobody maintains a list, an agent
+      // earns the seat by doing the work, and an agent that takes over from
+      // one that went away becomes the default the first time it replies.
+      // Silent by design — a Raft identity is optional and its absence must
+      // not fail a reply that is otherwise fine.
+      const replyingAgent = await getAgentSession(env, req);
+      if (replyingAgent) { try { await touchDocAgent(env, slug, replyingAgent); } catch {} }
       // One answer per human turn. A round that re-reads comments.json after
       // somebody deleted the agent's reply would otherwise post the same words
       // in the same place; the log remembers what the fold forgot. `force`
@@ -8614,6 +8639,17 @@ export default {
           // repairs the cursor from META; never report this committed version
           // as failed and invite an unsafe retry.
           console.error('[upload] version cursor finalize failed (recoverable):', e.message || String(e));
+        }
+        // Publishing a version is following the doc. Same bookkeeping as
+        // answering a comment: the seat is earned by doing the work, so no
+        // list has to be maintained and a successor becomes the default the
+        // first time it publishes. After the commit point and swallowed on
+        // failure — nobody's publish should fail over who gets notified.
+        try {
+          const publishingAgent = await getAgentSession(env, req);
+          if (publishingAgent) await touchDocAgent(env, slug, publishingAgent);
+        } catch (e) {
+          console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
         }
       } else {
         // History backfill (re-uploading v1..vN-1) stores freshly-prepared
