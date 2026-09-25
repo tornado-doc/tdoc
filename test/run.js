@@ -104,6 +104,7 @@ const OFFLINE = [
 const GATED = [
   'onboarding.test.js',  // doctor flow
   'publish.test.js',     // dry-publish + (gated) real publish
+  'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright
   'csp-xss.test.js',     // playwright: author <script>/onclick blocked, overlay still works

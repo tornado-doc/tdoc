@@ -416,7 +416,22 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
 
    If it exits non-zero, fix the host and run it again; nothing has been
    written. Do not open, publish, or report the document as complete.
-5. **Publish and hand over the link.**
+5. **Render and inspect the written version before publishing.** Run the static
+   validator AND the browser layout check; parsing CSS is not visual QA:
+
+   ```bash
+   node "$SKILL_DIR/bin/tdoc-check-layout" ~/tdocs/<slug>/v1/index.html \
+     --screenshots /tmp/<slug>-layout
+   ```
+
+   Fix reported errors, inspect both screenshots (375px and 1440px), and
+   address warnings about tiny labels or desktop scrolling. Check table column
+   balance, diagram labels inside their boxes, connector crossings, and local
+   scroll areas. A missing browser is an unverified result, never a pass.
+   The check disables author JS and remote assets; verify widgets and external
+   fonts separately in the served reader. See `authoring/visuals.md`.
+
+6. **Publish and hand over the link.**
 
    *Hosted (the default).* Confirm the background sign-in from Step 0 finished,
    then publish:
@@ -577,6 +592,8 @@ silently is the #1 source of regression complaints.
      is based on a possibly-stale cache.
 
    Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
+   Run `bin/tdoc-check-layout` on the new baked version and inspect its desktop
+   and phone screenshots before publishing, just as on `/tdoc new`.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice, and
@@ -1073,7 +1090,19 @@ The template is modeled after the `conway-life` doc ("What if a doc could think?
 entry's CSS as written. Add only the
 house style's components and tightly scoped CSS for content-specific charts,
 diagrams, and controls. Do not invent additional bare-element rules or change
-the content root's width, margins, or padding.
+root layout with arbitrary CSS. Width is a separate template choice:
+
+- **Default:** `<div class="wrap">` keeps the centered 720px reading column.
+- **Wide:** `<div class="wrap" data-tdoc-width="wide">` uses the available
+  page width with the same padding, typography, and chosen house style. Use
+  it for diagram-heavy designs or wide comparisons that cannot fit the normal
+  column comfortably, or when the user asks for a full-width document. It does
+  **not** require `--custom-template` or a different aesthetic.
+
+Keep one primary root. Do not add viewport-width children, negative margins,
+or hide page overflow to simulate wide mode. Comment placement measures the
+actual root; desktop pins stay inside the viewport, and phones use the
+existing comment drawer.
 
 A different file in `$SKILL_DIR/authoring/style/` applies only when the user
 names it. A presentation or landing page may replace the reading aesthetic
@@ -1106,9 +1135,10 @@ What to write:
 ```
 
 The baked template's `:where()` rules handle:
-- Centered article column (`max-width: 720px`, padded) — **do not restate it**;
-  writing your own root width is rejected by the validator, because the
-  reading column is also what `frame-probe.js` measures to place comment pins
+- Centered article column (`max-width: 720px`, padded) by default; opt into
+  the available full width with `data-tdoc-width="wide"` on the root.
+  Do not restate root sizing in CSS: the template owns spacing, and
+  `frame-probe.js` measures the result to place comments
 - All heading sizes, weights, spacing
 - Paragraph + list spacing
 - Code/pre, blockquote, table styling
@@ -1124,7 +1154,7 @@ Wrap the doc content in a single container element with one of these selectors: 
 - Anchor the article to the LEFT when there are comments (so growing/shrinking the window preserves the right-side comment column)
 - Calculate where comment cards land
 
-Note: the container should **not** set its own width, margin or padding. The baked template centers it, and the resulting column is what the probe measures to park comment pins in the gutter beside it.
+Note: select the column with `data-tdoc-width="wide"` when needed; do not set arbitrary root width, margin or padding. The template supplies spacing, and the probe measures the resulting column for comment placement.
 
 ### Required: explicit body background
 
@@ -1137,7 +1167,11 @@ Always set `body { background: #fff; }` (or your chosen color) so the page doesn
 Every doc must work on mobile out of the box. The baked template carries defensive caps for media, but the document itself has to be authored responsively — it is a file that will also be read outside tdoc:
 
 - **Always include** `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`. Nothing adds it for you — the frame serves your HTML as written — and the validator rejects a document without it.
-- **Use fluid widths**, not hardcoded pixels. **Do not set width, margin or padding on the content root at all** — the baked template gives you a 720px column with 24px of side padding, so your usable canvas is **672px**. Size figures against that number. If you need custom inner spacing, put it on a child element inside the container.
+- **Use fluid widths**, not hardcoded pixels. The default 720px column has a
+  **672px** usable canvas; select `data-tdoc-width="wide"` on the root when
+  the content needs more room. Keep root spacing in the template. On phones
+  both layouts shrink to the viewport. Grid text tracks should use
+  `minmax(0, 1fr)`; long inline identifiers must be able to wrap.
 - **SVG / images**: do NOT hardcode width=N height=M. Either:
   - Use `width="100%"` + CSS aspect-ratio (`aspect-ratio: 16/9`), or
   - Use a wrapper with `max-width: 100%` and let the artifact scale.
@@ -1145,7 +1179,10 @@ Every doc must work on mobile out of the box. The baked template carries defensi
   - (Canvas isn't an option — see "Interactivity: CSS only". Without JS there is nothing to draw into the buffer.)
 - **Tables**: wrap in `<div style="overflow-x:auto">` so they scroll instead of overflowing.
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
-- **Test at 375px wide** in your head before claiming done. If anything overflows the viewport on a phone, fix it before writing meta.json.
+- **Test in a real browser at 375px and 1440px** with `bin/tdoc-check-layout`,
+  then inspect the screenshots before publishing or claiming done. Check the
+  document frame as well as the shell: a fitting shell can hide an overflowing
+  iframe. Wide figures/tables may scroll locally; the whole page must not.
 
 The baked template carries `:where()` defensive defaults (media elements are capped at `max-width: 100%`), but that cap only applies where tdoc serves the document. Author responsively so the file is correct wherever it is read.
 
@@ -1161,7 +1198,8 @@ The baked template carries `:where()` defensive defaults (media elements are cap
 Agents generate arbitrary HTML. The baked template is **`:where()` zero-specificity** so **author CSS always wins** — property by property: what you name is yours, what you leave alone keeps the default. That also means a bad author rule silently breaks layout (e.g. `padding: 0 24px` on the content root wiped the top reading space — #96). Contract:
 
 - One primary content container: `.wrap` (preferred), `main`, `article`, `.content`, or `.container`.
-- **No** top-level container width / `margin` / `padding` — the baked template owns the reading column, and the probe measures it to place comment pins.
+- Select default or `data-tdoc-width="wide"` on the primary root. **No arbitrary**
+  root width / `margin` / `padding` overrides — the template owns column spacing.
 - Treat `tdoc-*` classes/ids as reserved.
 - Scope document UI rules to the document (never global `button:hover`).
 - Prefer fluid/`max-width` layouts over fixed pixel shells.
