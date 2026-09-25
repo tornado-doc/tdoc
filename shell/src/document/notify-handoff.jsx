@@ -3,6 +3,7 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import {
@@ -40,14 +41,9 @@ function readableHandle(t) {
 function providerMeta(t) {
   const p = String(t?.provider || 'raft').trim().toLowerCase();
   if (p === 'raft') {
-    return {
-      key: 'raft',
-      label: 'Raft',
-      // Published mark on raft.build (same asset the product site uses).
-      icon: 'https://raft.build/raft-logo.svg',
-    };
+    return { key: 'raft', label: 'Raft', mark: 'raft' };
   }
-  return { key: p || 'agent', label: p ? p[0].toUpperCase() + p.slice(1) : 'agent', icon: '' };
+  return { key: p || 'agent', label: p ? p[0].toUpperCase() + p.slice(1) : 'agent', mark: '' };
 }
 
 // What the reader needs: where this goes (provider), not which UUID. Handle is
@@ -71,11 +67,9 @@ function sameTarget(a, b) {
     && a.agent_sub === b.agent_sub;
 }
 
-function ProviderMark({ target, size = 16 }) {
+function ProviderMark({ target, size = 18 }) {
   const meta = providerMeta(target);
-  if (meta.icon) {
-    return <img className="tdoc-notify-provider-icon" src={meta.icon} width={size} height={size} alt="" />;
-  }
+  if (meta.mark === 'raft') return <RaftMark size={size} />;
   return <span className="tdoc-notify-provider-fallback" aria-hidden="true">{meta.label.slice(0, 1)}</span>;
 }
 
@@ -85,7 +79,7 @@ function RecipientLine({ target }) {
   return (
     <p className="tdoc-notify-recipient" aria-label="Recipient">
       <span className="tdoc-notify-recipient-avatar" aria-hidden="true">
-        <ProviderMark target={target} size={16} />
+        <ProviderMark target={target} size={18} />
       </span>
       <span className="tdoc-notify-recipient-copy">
         <strong>{primary}</strong>
@@ -305,7 +299,7 @@ export function NotifyHandoffPanel({
                     value: targetKey(t),
                     label: (
                       <span className="tdoc-notify-recipient-opt" title={handle || undefined}>
-                        <ProviderMark target={t} size={14} />
+                        <ProviderMark target={t} size={16} />
                         {handle || meta.label}
                       </span>
                     ),
