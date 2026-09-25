@@ -95,8 +95,10 @@ After writing/baking each version, run:
 node "$SKILL_DIR/bin/tdoc-check-layout" <version>/index.html --screenshots <output-dir>
 ```
 
-This renders narrow and wide reader modes at 375px, 768px and 1440px. It fails
-page overflow, compressed prose columns, SVG text below 9 rendered pixels,
+This renders narrow and wide reader modes at 375px, 768px and 1440px, with the
+same table protection used by the live provider. It reports every protected
+cell and fails unresolved compressed columns (including short values), page
+overflow, SVG text below 9 rendered pixels,
 text outside the viewBox and overlapping labels. Desktop local scrolling is
 reported for inspection. It keeps local table/diagram scrolling
 intact. Missing Playwright/browser support is an error, not a successful check.
@@ -107,10 +109,22 @@ The write gateway runs this after baking, before replacing a version; publishing
 rechecks the newest version before account setup or upload. No browser means
 no verification and a non-zero exit, with installation instructions from doctor.
 
-Open all six screenshots and inspect every figure. The checker cannot establish
+Use `data-tdoc-cell="value"` on atomic amounts/units, statuses or identifiers.
+Keep prose wrappable. The shared table policy measures each cell's unwrapped
+ink, reserves its natural width up to a 12em prose reading measure (uncapped
+for explicit values), and allows the wrapper to scroll when needed. It does
+not guess meaning from a column number, header label or language. Existing
+explicit line breaks, merged cells and author card reflows remain intact.
+The policy protects hosted readers, including old versions and browser edits;
+its transient style is not serialized into author HTML. Check standalone
+exports separately. Direct HTTP uploads/browser saves do not run the full CLI
+Chromium gate; their readers do receive table protection. Do not call those
+write paths preflight-verified.
+
+Open all six screenshots and inspect every table and figure. The checker cannot establish
 whether text belongs inside a particular node, whether arrows mean the right
-thing, or whether every table reads comfortably. The column heuristic detects severe
-compression; it is not a substitute for reviewing the document. Break long SVG text into
+thing, or whether every table reads comfortably. Geometry has a measurable
+safety floor; it is not a substitute for reviewing the document. Break long SVG text into
 `tspan` lines and size the node for those lines; do not shrink the whole drawing
 until the words are unreadable. On phones use local scrolling only where the
 content needs it, with a visible hint when the next panel is off-screen. Never

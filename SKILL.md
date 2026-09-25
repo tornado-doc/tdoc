@@ -1111,8 +1111,18 @@ At the standard 720px root, 24px padding per side leaves **672px for content**;
 on a 375px phone there are about **311px**. Design for the content box, not the
 browser window. Use container queries for layout changes inside that root.
 Tables must allocate readable columns even with long identifiers; a fixed table
-minimum width alone does not do that. Give dense columns meaningful minimums
-or deliberately reflow the table. SVG labels must fit their nodes and viewBox
+minimum width alone does not do that. Mark atomic values (amount + unit, dates,
+statuses, identifiers) with `<td data-tdoc-cell="value">5 days</td>`; leave
+paragraphs wrappable. Do not apply a single first-column percentage to unrelated
+tables. Use the chosen style's table component or deliberately reflow the table.
+The provider protects native table cells using measured content: short values
+reserve their natural width; prose reserves up to a 12em reading measure;
+explicit value cells remain unbroken. If columns cannot fit, the table scrolls
+inside its wrapper. This applies to every native table, including old documents,
+and recomputes after reader-width changes and edits. It is a safety floor, not
+an author layout or an aesthetic pass. Review the checker's reported adjustments
+and **every table**, including short values and the final table in the document.
+SVG labels must fit their nodes and viewBox
 at every size: use line breaks/reflow or readable local scrolling, not tiny type.
 
 Keep one primary root. Do not add viewport-width children, negative margins,
@@ -1193,14 +1203,22 @@ Every doc must work on mobile out of the box. The baked template carries defensi
   - Use a wrapper with `max-width: 100%` and let the artifact scale.
   - For SVG, give the `<svg>` a `viewBox` and size it in CSS (`width: 100%; height: auto`). If the drawing needs more room than a phone gives it, put the `<svg>` in a wrapper with `overflow-x: auto` and a `min-width` on the SVG so it scrolls rather than squashing.
   - (Canvas isn't an option — see "Interactivity: CSS only". Without JS there is nothing to draw into the buffer.)
-- **Tables**: wrap in `<div style="overflow-x:auto">` so they scroll instead of overflowing.
+- **Tables**: wrap in `<div class="tdoc-table-scroll">`. Preserve semantic
+  `<table>` / `<th>` / `<td>` relationships; mark atomic cells with
+  `data-tdoc-cell="value"`. Do not use page clipping or shrinking text to fit.
+  Native tables get the same content-width protection in the provider and CLI
+  preview. An intentional card reflow remains the author's responsibility.
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
 - **Test both reader widths at 375px, 768px and 1440px** with `bin/tdoc-check-layout`,
   then inspect the screenshots before publishing or claiming done. Check the
   document frame as well as the shell: a fitting shell can hide an overflowing
   iframe. Wide figures/tables may scroll locally; the whole page must not.
 
-The baked template carries `:where()` defensive defaults (media elements are capped at `max-width: 100%`), but that cap only applies where tdoc serves the document. Author responsively so the file is correct wherever it is read.
+The baked template carries `:where()` defensive defaults (media elements are
+capped at `max-width: 100%`). Provider-computed table geometry is transient and
+is not written into saved author HTML. If delivering a standalone HTML export,
+verify that export separately; the hosted reader's safety floor is not proof
+that a file opened without the provider will have the same layout.
 
 ### Don't conflict with the reader
 

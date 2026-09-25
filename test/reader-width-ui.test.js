@@ -35,6 +35,24 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert.equal(await width(), 720);
     assert(await frame.locator('svg').first().evaluate(e => e.getBoundingClientRect().width) < wideSvg, 'visual follows the content width');
 
+    // Editing/adding a table must engage the same provider policy without a
+    // page reload or an author running a CLI. Mutation observer + real probe.
+    await frame.locator('.wrap').evaluate(root => {
+      root.insertAdjacentHTML('beforeend', '<table id="added-table" style="table-layout:fixed;width:100%"><tr><th style="width:90%">Description</th><th>Value</th></tr><tr><td>New table from an edit</td><td id="short-value">1 天 + 审核</td></tr></table>');
+    });
+    await frame.locator('#short-value').evaluate(cell => new Promise((resolve,reject) => {
+      const until = Date.now()+5000;
+      function check() {
+        const range=document.createRange();range.selectNodeContents(cell);
+        const lines=new Set([...range.getClientRects()].filter(r=>r.width).map(r=>Math.round(r.top))).size;
+        if(lines===1) return resolve();
+        if(Date.now()>until) return reject(new Error('new table short value remains split'));
+        requestAnimationFrame(check);
+      } check();
+    }));
+    assert(await frame.locator('#added-table').evaluate(t=>t.parentElement.classList.contains('tdoc-table-scroll')),
+      'tables inserted without an author wrapper still scroll locally');
+
     const serialized = await page.evaluate(() => new Promise(resolve => {
       const iframe = document.querySelector('iframe[aria-label="Document content"]');
       const listener = e => {
@@ -46,6 +64,8 @@ const { resolveTarget } = require('./helpers/fixture-server');
       iframe.contentWindow.postMessage({ source:'tdoc-shell', type:'tdoc:editSerialize', requestId:1 }, '*');
     }));
     assert(!serialized.includes('id="tdoc-reader-width"'), 'reader preference must not become author HTML');
+    assert(!serialized.includes('id="tdoc-provider-table-layout"'), 'computed table widths must not become author HTML');
+    assert(serialized.includes('id="added-table"'), 'table content must survive serialization');
     await page.setViewportSize({ width: 375, height: 800 });
     await switchTo('Wide width');
     assert(await frame.locator('html').evaluate(e => e.scrollWidth <= innerWidth+1));

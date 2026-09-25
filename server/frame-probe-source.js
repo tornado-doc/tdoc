@@ -6,6 +6,8 @@ const path = require('path');
 module.exports = function frameProbeSource() {
   return fs.readFileSync(path.join(__dirname, 'reader-width.js'), 'utf8')
     + '\n'
+    + fs.readFileSync(path.join(__dirname, 'table-layout.js'), 'utf8')
+    + '\n'
     + fs.readFileSync(path.join(__dirname, 'edit-markdown.js'), 'utf8')
     + '\n'
     + fs.readFileSync(path.join(__dirname, 'frame-probe.js'), 'utf8');

@@ -20,11 +20,12 @@ const run = (name, args, env = {}) => spawnSync('bash', [path.join(root, 'bin', 
     assert.equal(reports.length, 6);
     const narrow = reports.find(r => r.width === 1440 && r.mode === 'narrow');
     const wide = reports.find(r => r.width === 1440 && r.mode === 'wide');
-    assert(narrow.errors.some(e => e.includes('compressed table column')));
+    assert(narrow.tableLayout.adjustments.length > 0, 'provider must report protecting squeezed cells');
+    assert(!narrow.errors.some(e => e.includes('compressed table column')));
     assert(narrow.errors.some(e => e.includes('small rendered text')));
     assert(wide.errors.some(e => e.includes('outside SVG')));
     assert(!wide.errors.some(e => e.includes('compressed table column')));
-    console.log('  ✓ original Raft table/SVG fail; wider page alone leaves the bad label');
+    console.log('  ✓ shared provider protects original Raft table; bad SVG still fails the gate');
 
     const good = path.join(temp, 'good.html');
     fs.writeFileSync(good, '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:white}</style></head><body><div class="wrap"><h1>Existing document</h1><p>Keep my content.</p></div></body></html>');
@@ -37,7 +38,7 @@ const run = (name, args, env = {}) => spawnSync('bash', [path.join(root, 'bin', 
     for (const versionArgs of [['--force'], ['--version', 'next']]) {
       result = run('tdoc-write', [...baseArgs, '--html-file', bad, ...versionArgs]);
       assert.notEqual(result.status, 0);
-      assert(result.stderr.includes('compressed table column'), result.stderr);
+      assert(result.stderr.includes('small rendered text'), result.stderr);
       assert.deepEqual(['v1/index.html', 'meta.json', 'comments.json'].map(f => fs.readFileSync(path.join(dir,f),'utf8')), before);
       assert(!fs.existsSync(path.join(dir, 'v2')));
     }
@@ -49,7 +50,7 @@ const run = (name, args, env = {}) => spawnSync('bash', [path.join(root, 'bin', 
     result = run('tdoc-publish', ['sample']);
     assert.notEqual(result.status, 0);
     assert(result.stderr.includes('nothing uploaded'), result.stderr);
-    assert(result.stderr.includes('compressed table column'), result.stderr);
+    assert(result.stderr.includes('small rendered text'), result.stderr);
     assert(!fs.existsSync(path.join(temp, '.tdoc/published.json')));
     console.log('  ✓ publishing rechecks edited bytes before any account setup or upload');
 

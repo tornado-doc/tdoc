@@ -73,6 +73,9 @@
   :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
   :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
   :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
+  /* Author intent for atomic values: keep amount/unit, status or identifier
+     together. Prose remains normally wrappable. Also works in exported HTML. */
+  :where(body th[data-tdoc-cell="value"], body td[data-tdoc-cell="value"]) { white-space: nowrap; }
   :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
   :where(body) ::selection { background: var(--td-selection); }
   /* Task lists: circle checkboxes, Claude Code style. Works for raw

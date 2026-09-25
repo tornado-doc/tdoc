@@ -5,36 +5,15 @@ const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { applyReaderWidth } = require('../server/reader-width');
+const { layoutTables } = require('../server/table-layout');
 
-function measureLayout() {
+function measureGeometry() {
   const errors = [], warnings = [];
   const width = document.documentElement.clientWidth;
   if (document.documentElement.scrollWidth > width + 1) {
     errors.push(`page overflow: ${document.documentElement.scrollWidth}px > ${width}px`);
   }
   const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
-  // Table auto-layout protects long code's min-content width, but CJK prose
-  // can break at every character. A table may fit (or scroll correctly) while
-  // another column becomes a vertical ribbon. Measure actual wrapped lines,
-  // not row height, which is shared with taller neighbouring cells.
-  for (const [i, table] of [...document.querySelectorAll('table')].entries()) {
-    if (!visible(table)) continue;
-    for (const cell of table.querySelectorAll('th,td')) {
-      if (cell.closest('table') !== table || !visible(cell)) continue;
-      const css = getComputedStyle(cell), font = parseFloat(css.fontSize);
-      const space = cell.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
-      const text = cell.textContent.trim();
-      if (space >= font * 3 || text.replace(/\s/g, '').length < 6) continue;
-      const tops = [], walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
-      while (walker.nextNode()) {
-        if (!walker.currentNode.textContent.trim()) continue;
-        const range = document.createRange(); range.selectNodeContents(walker.currentNode);
-        for (const rect of range.getClientRects()) if (rect.width > 0) tops.push(rect.top);
-      }
-      const lines = tops.sort((a,b) => a-b).filter((top, j, all) => !j || top-all[j-1] > font * .6);
-      if (lines.length >= 3) errors.push(`table ${i+1}, column ${cell.cellIndex+1}: compressed table column (${Math.round(space)}px, ${lines.length} lines): ${text.slice(0,70)}`);
-    }
-  }
   for (const [i, svg] of [...document.querySelectorAll('svg[viewBox]')].entries()) {
     if (!visible(svg)) continue;
     const frame = svg.getBoundingClientRect();
@@ -68,6 +47,17 @@ function measureLayout() {
   return { width, scrollWidth: document.documentElement.scrollWidth, errors: [...new Set(errors)], warnings: [...new Set(warnings)], scrollers };
 }
 
+// Inline the trusted shared policy into a self-contained browser function.
+// Playwright serializes functions without their Node lexical scope; callers
+// can still page.evaluate(measureLayout) without installing globals/scripts.
+const measureLayout = new Function(`return function measureLayout() {
+  const layoutTables = ${layoutTables.toString()};
+  const measureGeometry = ${measureGeometry.toString()};
+  const report = measureGeometry();
+  report.errors.push(...layoutTables({ apply:false }).errors);
+  return report;
+}`)();
+
 async function checkLayout(file, { screenshotDir, widths = [375, 768, 1440], modes = ['narrow', 'wide'] } = {}) {
   let chromium;
   try { ({ chromium } = require('playwright')); }
@@ -97,7 +87,19 @@ async function checkLayout(file, { screenshotDir, widths = [375, 768, 1440], mod
       }
       await page.evaluate(applyReaderWidth, mode);
       await page.evaluate(() => document.fonts.ready);
+      // Match the provider's table wrappers before applying the same policy.
+      await page.evaluate(() => {
+        for (const table of document.querySelectorAll('table')) {
+          if (table.parentElement.classList.contains('tdoc-table-scroll')) continue;
+          const wrapper = document.createElement('div');
+          wrapper.className = 'tdoc-table-scroll';
+          table.replaceWith(wrapper); wrapper.appendChild(table);
+        }
+      });
+      const tableLayout = await page.evaluate(layoutTables);
       const report = await page.evaluate(measureLayout);
+      report.tableLayout = { tables: tableLayout.tables, adjustments: tableLayout.adjustments };
+      if (tableLayout.adjustments.length) report.warnings.push(`reader protected ${tableLayout.adjustments.length} compressed table cell(s); inspect all tables for an appropriate author layout`);
       report.mode = mode;
       if (blocked.size) report.warnings.push(`${blocked.size} remote asset request(s) blocked; verify external fonts/assets in the served reader`);
       if (screenshotDir) {
