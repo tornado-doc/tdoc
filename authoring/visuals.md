@@ -100,7 +100,7 @@ After writing/baking each version, run:
 node "$SKILL_DIR/bin/tdoc-check-layout" <version>/index.html --screenshots <output-dir>
 ```
 
-This renders narrow and wide reader modes at 375px, 768px and 1440px, with the
+This renders constrained and expanded content layouts at 375px, 768px and 1440px, with the
 same table protection used by the live provider. It reports every protected
 cell and fails unresolved compressed columns (including short values), page
 overflow, SVG text below 9 rendered pixels,

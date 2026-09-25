@@ -119,7 +119,7 @@ tables. Each cell reserves its natural unwrapped width up to a 12em prose
 reading measure; explicit value cells reserve the complete value. Insufficient
 space becomes local scrolling, not one-character columns or reduced type.
 This also covers old documents that have no value annotations. It does not
-replace reviewing all tables in both reader widths, and does not run in a
+replace reviewing all tables in both content widths, and does not run in a
 standalone HTML file opened without the provider. Author card reflows keep
 their own layout; the provider does not guess whether a matrix is a record list.
 
