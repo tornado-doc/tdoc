@@ -604,7 +604,7 @@ button.tdoc-pin {
   box-sizing: border-box;
   place-content: center;
   justify-items: center;
-  gap: 8px;
+  gap: 12px;
   padding: 24px;
   color: var(--td-ink);
   font-family: var(--td-font-display);
@@ -615,6 +615,9 @@ button.tdoc-pin {
 .tdoc-status-page p {
   margin: 0;
 }
+
+.tdoc-status-page > p { line-height: 1.6; }
+.tdoc-status-page > .tdoc-status-actions { margin-top: 8px; }
 
 .tdoc-status-page h1 {
   font-size: 22px;
@@ -783,12 +786,16 @@ button.tdoc-pin {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  height: 36px;
-  padding: 0 12px;
+  min-height: 36px;
+  padding: 8px 12px;
   background: var(--td-accent);
   color: #fff;
   font-size: 13px;
+  line-height: 1.5;
 }
+
+.tdoc-onboard-banner > button,
+.tdoc-onboard-banner > a { flex-shrink: 0; white-space: nowrap; }
 
 .tdoc-onboard-banner button {
   appearance: none;
@@ -818,7 +825,7 @@ button.tdoc-pin {
    mark, the heading and the account line are one thing; the code is what you
    came to check; the two buttons are one choice. Tight inside a group, open
    between them. */
-.tdoc-activate-page { padding: 32px 24px; }
+.tdoc-activate-page { width: 100%; grid-template-columns: minmax(0, 1fr); padding: 32px 24px; }
 .tdoc-activate-stack {
   width: 320px; max-width: 100%;
   display: flex; flex-direction: column; align-items: stretch; gap: 0;
