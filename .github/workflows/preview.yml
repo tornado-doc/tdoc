@@ -55,6 +55,10 @@ jobs:
             exit 1
           fi
 
+      - name: Install layout preflight browser
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
       - name: Offline test suite
         run: npm test
 

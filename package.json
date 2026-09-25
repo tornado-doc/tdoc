@@ -9,14 +9,12 @@
     "test": "node test/run.js",
     "test:all": "node test/run.js --all"
   },
-  "//devDependencies": "playwright is optional \u2014 only needed for the gated UI suites (ui/responsive/dimensions). Without it they skip loudly. Install with: npm i -D playwright && npx playwright install chromium",
-  "optionalDependencies": {
-    "playwright": "^1.60.0"
-  },
+  "//devDependencies": "playwright and Chromium are required by document creation/publishing preflight. Install with: npm ci && npx playwright install chromium",
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@excalidraw/excalidraw": "0.18.1",
     "lucide-react": "^1.34.0",
+    "playwright": "^1.60.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

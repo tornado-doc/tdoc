@@ -834,6 +834,7 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
                         errors.append(
                             f"content root selector '{selector.strip()}' overrides reader layout: "
                             + ", ".join(forbidden)
+                            + '; use data-tdoc-width="wide" on the root for a wide house-style document'
                         )
                 elif selector_is_global(normalized):
                     notes.append(f"global selector '{selector.strip()}' overrides the default template")

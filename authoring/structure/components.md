@@ -106,6 +106,23 @@ numerals (`<span class="num">$1.4B</span>`), not on the cell that contains them.
 `bin/tdoc-validate-template` fails a cell class that narrows type or forbids
 wrapping while sitting on prose, on the custom-template path too.
 
+**Atomic values and prose have different wrapping needs.** Tabular numerals
+do not keep a number together with its unit. For a cell that is one value, use
+`<td data-tdoc-cell="value"><span class="num">5</span> days</td>`.
+Use the same attribute for a price, date, compact status or identifier; do not
+mark a paragraph as a value. Keep paragraph cells normally wrappable. Do not
+assign one first-column percentage to every table: an ID column and a prose
+column have different intrinsic widths.
+
+The provider and CLI preview share a content-based safety floor for native
+tables. Each cell reserves its natural unwrapped width up to a 12em prose
+reading measure; explicit value cells reserve the complete value. Insufficient
+space becomes local scrolling, not one-character columns or reduced type.
+This also covers old documents that have no value annotations. It does not
+replace reviewing all tables in both reader widths, and does not run in a
+standalone HTML file opened without the provider. Author card reflows keep
+their own layout; the provider does not guess whether a matrix is a record list.
+
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`.
 

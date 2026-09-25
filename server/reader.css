@@ -8,10 +8,11 @@
    (extracted from overlay.js). Consumed by: tdoc-bake (creation-time bake),
    /frame fallback, /export.
 
-   Two rules are deliberately not zero-specificity, and neither competes with
-   an author for a property they would set: `.tdoc-table-scroll` names tdoc's
-   own wrapper class, and the `@media print` block below only applies to
-   printing. Everything an author might style is inside :where(). */
+   The wrapper, explicit width choice, and print rules are deliberately not
+   zero-specificity: `.tdoc-table-scroll` names tdoc's
+   own wrapper class, [data-tdoc-width="wide"] opts into the wide column, and
+   the `@media print` block below only applies to printing. Other defaults
+   remain inside :where(). */
 :where(:root) {
     --td-accent: #1652f0;
     --td-accent-hover: #1245d0;
@@ -40,6 +41,9 @@
   }
   /* Default template ("Classic" = original tdoc look), all colors via tokens. */
   :where(body) {
+    /* Long URLs / identifiers must also shrink a grid item's min-content
+       size. break-word wraps ink but leaves that intrinsic width unchanged. */
+    overflow-wrap: anywhere;
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     font-size: 17px;
     line-height: 1.6;
@@ -69,6 +73,9 @@
   :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
   :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
   :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
+  /* Author intent for atomic values: keep amount/unit, status or identifier
+     together. Prose remains normally wrappable. Also works in exported HTML. */
+  :where(body th[data-tdoc-cell="value"], body td[data-tdoc-cell="value"]) { white-space: nowrap; }
   :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
   :where(body) ::selection { background: var(--td-selection); }
   /* Task lists: circle checkboxes, Claude Code style. Works for raw
@@ -88,12 +95,13 @@
   /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
      buttons / cards keep their inline layout instead of stacking to 16px tall. */
   :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(.tdo *):not(.tds *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
-  /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
+  /* Reading column default (JUL-21): doc content is a centered 720px
      column, wrapper or not. Two halves: (a) recognized wrappers get max-width
      AND margin:auto (previously margin was missing, so wrapped docs without
      their own margin rule sat left-aligned); (b) docs with no wrapper at all
      get the same column applied to body itself via :has(). :where() keeps both
-     at zero specificity so a doc that truly wants full-bleed can override. */
+     at zero specificity. The explicit wide option below keeps the template's
+     padding and typography while using the available width. */
   :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
     max-width: 720px;
     margin-left: auto;
@@ -109,6 +117,13 @@
     box-sizing: border-box;
   }
   /* End default template. ====================================================== */
+
+  /* An author chooses width independently of the house style. Keep the
+     attribute outside :where() so it also beats an older baked column when
+     supplied by the serve-time patch before the old template. */
+  :where(body > .wrap, body > main, body > article, body > .content, body > .container)[data-tdoc-width="wide"] {
+    max-width: none;
+  }
 
   /* Defensive responsive defaults for artifacts. Docs sometimes hardcode pixel
      widths (e.g. <canvas width="640">) that overflow on phones. These rules
@@ -126,7 +141,9 @@
      discards real table layout for anonymous-box fixup (uneven row heights).
      Scroll a wrapper instead of the table element. NOTE: no backticks in
      comments here — this CSS lives inside a JS template literal. */
-  :where(body table) { max-width: 100%; }
+  /* Tables retain their natural column widths inside a local scroller. The
+     prose wrapping fallback must not squeeze identifiers into tiny cells. */
+  :where(body table) { max-width: 100%; overflow-wrap: normal; }
   .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .tdoc-table-scroll > table { max-width: none; }
 

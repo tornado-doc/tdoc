@@ -20,6 +20,7 @@ export function TopBar({
   children,
   actions,
   overflowActions,
+  appearanceActions,
   theme,
   onThemeChange,
   onNotificationNavigate,
@@ -151,6 +152,7 @@ export function TopBar({
             </AppMenuItem>
           ) : null}
         </AppMenu>
+        {appearanceActions}
         <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
           {dark ? <Sun size={14} /> : <Moon size={14} />}
         </button>
