@@ -142,6 +142,51 @@ t('worker favicon + homescreen icons match assets (no stale embed)', () => {
   assert(!/href="\/apple-touch-icon\.png"/.test(shell), 'unversioned apple-touch href left in shell');
 });
 
+t('every worker brand embed matches its asset (full rescan gate)', () => {
+  // Manual "full rescan" failed twice: SVG locked, OG PNG / other rasters did
+  // not. One table — if it is embedded, CI compares it to assets/.
+  const assetsDir = path.join(__dirname, '..', 'assets');
+  const svgConsts = [
+    ['TDOC_LOGO_SVG', 'tdoc_logo.svg'],
+    ['TDOC_FAVICON_SVG', 'favicon.svg'],
+    ['GROK_LOGO_SVG', 'grok_logo.svg'],
+  ];
+  for (const [name, file] of svgConsts) {
+    const asset = fs.readFileSync(path.join(assetsDir, file), 'utf8');
+    const m = src.match(new RegExp(`const ${name} = \`([\\s\\S]*?)\`;`));
+    assert(m, `${name} missing from worker.js`);
+    assert(m[1] === asset, `worker ${name} drifted from assets/${file}`);
+  }
+  const pngConsts = [
+    ['TDOC_LOGO_PNG_B64', 'tdoc_logo.png'],
+    ['TDOC_MAC_WALLPAPER', 'mac-wallpaper.jpg'],
+  ];
+  for (const [name, file] of pngConsts) {
+    const asset = fs.readFileSync(path.join(assetsDir, file));
+    const m = src.match(new RegExp(`const ${name} = '([^']+)'`));
+    assert(m, `${name} missing from worker.js`);
+    assert(Buffer.from(m[1], 'base64').equals(asset), `worker ${name} drifted from assets/${file}`);
+  }
+  const home = src.match(/const TDOC_HOME_ICONS = \{([\s\S]*?)\n\};/);
+  assert(home, 'TDOC_HOME_ICONS missing');
+  for (const name of [
+    'apple-touch-icon.png', 'apple-touch-icon-v3.png',
+    'icon-192.png', 'icon-192-v3.png',
+    'icon-512.png', 'icon-512-v3.png',
+  ]) {
+    const b64 = fs.readFileSync(path.join(assetsDir, name)).toString('base64');
+    assert(home[1].includes(b64), `TDOC_HOME_ICONS drifted from assets/${name}`);
+  }
+  const mac = src.match(/const TDOC_MAC_ICONS = \{([\s\S]*?)\n\};/);
+  assert(mac, 'TDOC_MAC_ICONS missing');
+  for (const name of [
+    'finder', 'safari', 'messages', 'trash', 'claude', 'codex', 'grok', 'downloads',
+  ]) {
+    const b64 = fs.readFileSync(path.join(assetsDir, `mac-${name}.png`)).toString('base64');
+    assert(mac[1].includes(b64), `TDOC_MAC_ICONS drifted from assets/mac-${name}.png`);
+  }
+});
+
 t('worker TDOC_LOGO_SVG matches assets/tdoc_logo.svg', () => {
   const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', 'tdoc_logo.svg'), 'utf8');
   const m = src.match(/const TDOC_LOGO_SVG = `([\s\S]*?)`;/);
