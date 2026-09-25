@@ -2122,19 +2122,79 @@ async function clerkExternalGithub(env, sub) {
   }
 }
 
-function oidcConfig(env) {
-  const issuer = String(env && env.OIDC_ISSUER || '').trim().replace(/\/$/, '');
-  const clientId = String(env && env.OIDC_CLIENT_ID || '').trim();
-  const clientSecret = String(env && env.OIDC_CLIENT_SECRET || '').trim();
+// Sign-in providers that speak plain OIDC: discovery, code exchange,
+// userinfo. Adding one is an entry here — the login/callback routes, state
+// handling and token exchange are shared. `id` is the route segment
+// (/api/auth/<id>/login, /auth/<id>/callback) and the account-idp namespace;
+// `complete` turns a userinfo response into a session. GitHub is not here:
+// it predates this and keeps its own first-party flow.
+const OIDC_PROVIDERS = {
+  // The generic human seat (Clerk in production): email-verified sign-in.
+  oidc: {
+    config: (env) => ({
+      issuer: env.OIDC_ISSUER,
+      clientId: env.OIDC_CLIENT_ID,
+      clientSecret: env.OIDC_CLIENT_SECRET,
+      label: env.OIDC_LABEL || 'Email',
+    }),
+    scope: 'openid email profile',
+    statelessAgents: false,
+    complete: completeEmailSignIn,
+  },
+  // Login with Raft. Agents sign in with no state (userinfo type "agent");
+  // humans go through the normal state-checked browser flow. Dormant until
+  // the Raft app is registered and RAFT_CLIENT_ID/SECRET are set.
+  raft: {
+    config: (env) => ({
+      issuer: env.RAFT_OIDC_ISSUER || 'https://api.raft.build',
+      clientId: env.RAFT_CLIENT_ID,
+      clientSecret: env.RAFT_CLIENT_SECRET,
+      label: 'Raft',
+    }),
+    scope: 'openid profile',
+    statelessAgents: true,
+    complete: completeRaftSignIn,
+  },
+};
+const OIDC_PROVIDER_IDS = Object.keys(OIDC_PROVIDERS).join('|');
+const OIDC_LOGIN_ROUTE = new RegExp(`^/api/auth/(${OIDC_PROVIDER_IDS})/login$`);
+const OIDC_CALLBACK_ROUTE = new RegExp(`^/auth/(${OIDC_PROVIDER_IDS})/callback$`);
+
+// A configured provider, or null when unknown or missing any of issuer
+// (https only), client id or client secret — an unconfigured provider's
+// routes bow out and no button is advertised.
+function oidcProvider(env, id) {
+  const def = Object.prototype.hasOwnProperty.call(OIDC_PROVIDERS, id) ? OIDC_PROVIDERS[id] : null;
+  if (!def) return null;
+  const raw = def.config(env || {});
+  const issuer = String(raw.issuer || '').trim().replace(/\/$/, '');
+  const clientId = String(raw.clientId || '').trim();
+  const clientSecret = String(raw.clientSecret || '').trim();
   if (!/^https:\/\//.test(issuer) || !clientId || !clientSecret) return null;
-  return { issuer, clientId, clientSecret, label: String(env.OIDC_LABEL || 'Email').trim() || 'Email' };
+  return {
+    id, issuer, clientId, clientSecret,
+    label: String(raw.label || '').trim() || 'Email',
+    scope: def.scope,
+    statelessAgents: def.statelessAgents,
+    complete: def.complete,
+    callbackPath: `/auth/${id}/callback`,
+    // The generic seat keeps its original cookie name so in-flight sign-ins
+    // survive the deploy that introduced the registry.
+    stateCookie: id === 'oidc' ? 'tdoc_oidcst' : `tdoc_${id}st`,
+  };
 }
 
-// Per-isolate discovery cache. Discovery is static config on the issuer's
-// side; refetching it per sign-in would add a round trip for nothing.
-let OIDC_DISCOVERY = { issuer: null, doc: null };
+// The human "Sign in" button — the generic seat.
+function oidcConfig(env) {
+  return oidcProvider(env, 'oidc');
+}
+
+// Per-isolate discovery cache, per issuer. Discovery is static config on the
+// issuer's side; refetching it per sign-in would add a round trip for nothing.
+const OIDC_DISCOVERY = new Map();
 async function oidcDiscovery(cfg) {
-  if (OIDC_DISCOVERY.issuer === cfg.issuer && OIDC_DISCOVERY.doc) return OIDC_DISCOVERY.doc;
+  const cached = OIDC_DISCOVERY.get(cfg.issuer);
+  if (cached) return cached;
   const r = await fetch(`${cfg.issuer}/.well-known/openid-configuration`, {
     headers: { 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
   });
@@ -2143,8 +2203,141 @@ async function oidcDiscovery(cfg) {
   if (!doc || !doc.authorization_endpoint || !doc.token_endpoint || !doc.userinfo_endpoint) {
     throw new Error('oidc discovery incomplete');
   }
-  OIDC_DISCOVERY = { issuer: cfg.issuer, doc };
+  OIDC_DISCOVERY.set(cfg.issuer, doc);
   return doc;
+}
+
+// The generic seat's sign-in: a verified email resolves (never mints) an
+// account and becomes a session.
+async function completeEmailSignIn(env, { user, ret, clearState }) {
+  const email = normalizeEmail(user && user.email);
+  // Verified only — the account-takeover rule, same as everywhere else.
+  if (!email || user.email_verified !== true) {
+    return authStatusResponse('This sign-in did not come with a verified email, so it cannot be used here.', { error: true, status: 403 });
+  }
+  // Resolve-don't-mint, same as GitHub sign-in: an account exists only
+  // once something is published.
+  //
+  // The issuer's `sub` IS stored, and is checked first. An earlier
+  // version deliberately refused to, reasoning that storing a vendor's
+  // id is lock-in — which had it backwards. Lock-in is about who owns
+  // the ACCOUNT, and account_id is ours; `sub` is just the one
+  // identifier a provider guarantees never changes and never reuses,
+  // which is exactly what an address does not guarantee. Without it,
+  // a mailbox handed to a new person hands them the old owner's docs.
+  const sub = user && user.sub ? String(user.sub) : null;
+  const idpRec = sub ? await accountIdpRecord(env, 'oidc', sub) : null;
+  let account_id = idpRec ? idpRec.account_id : null;
+  // No idp link yet: this provider is new to an existing account, so
+  // the verified address is the merge hint that connects them. Used
+  // once — the link written at mint time makes later sign-ins exact.
+  if (!account_id) account_id = await accountIdByEmail(env, email);
+  // Still nothing, and the visitor may be a legacy GitHub publisher
+  // whose account predates the email index. Ask the provider which
+  // GitHub identity they connected and resolve through that.
+  // The provider is asked about a connected GitHub identity at most
+  // once per sign-in, whichever of the consumers below needs it first.
+  let ghProbe;
+  const probeGithub = async () => {
+    if (ghProbe === undefined) ghProbe = sub ? await clerkExternalGithub(env, sub) : null;
+    return ghProbe;
+  };
+  let bridged = null;
+  if (!account_id && sub) {
+    bridged = await probeGithub();
+    if (bridged) {
+      // The numeric id, and only the numeric id — the claim-by-handle
+      // window for records with no recorded id is retired (records were
+      // backfilled), same as the direct GitHub flow.
+      if (bridged.ghId) account_id = await accountIdByIdp(env, 'github', bridged.ghId);
+      if (account_id) {
+        // Write the links NOW, not at mint: the whole point is that the
+        // very next sign-in resolves exactly, and this person may read
+        // and comment for weeks before they ever mint a token.
+        let rec = bridged.handle ? await lookupHostedAccount(env, bridged.handle) : null;
+        if (!rec || rec.account_id !== account_id) rec = { account_id, created: new Date().toISOString() };
+        if (bridged.ghId) rec = await linkIdentity(env, rec, { provider: 'github', sub: bridged.ghId, email, handle: bridged.handle || undefined });
+        rec = await linkIdentity(env, rec, { provider: 'oidc', sub, email });
+        // The verified handle rides on the oidc link so every LATER
+        // sign-in (which resolves by sub and never re-runs the bridge)
+        // can restore it into the session.
+        await env.META.put(idpKey('oidc', sub), JSON.stringify({
+          account_id, created: new Date().toISOString(), handle: bridged.handle || undefined,
+        }));
+        if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
+      }
+    }
+  }
+  // The session's GitHub handle, from the strongest source available.
+  // This is identity for WORDS, not for documents — comments, @mention
+  // routing and handle invites key on it, while account resolution
+  // above never rests on it (numeric ids only). It must survive the
+  // provider door for commenters exactly as it does for publishers: a
+  // commenter is not a publisher, but their words are still theirs,
+  // and the first-party GitHub flow always carried the handle.
+  let ghHandle = (bridged && bridged.handle)
+    || (account_id && idpRec && normalizeGithubLogin(idpRec.handle))
+    || null;
+  if (!ghHandle && sub) {
+    const gh = await probeGithub();
+    if (gh && gh.handle) {
+      if (!account_id) {
+        // No account in play: the provider attested which GitHub
+        // account this person connected, and that is exactly the trust
+        // the old first-party flow extended to GitHub's /user.
+        ghHandle = gh.handle;
+      } else {
+        // An account resolved by email or by a link that predates the
+        // bridge (or was written by a mint) carries no handle. Restore
+        // only what this account already owns: the handle must resolve
+        // to THIS account, and if the account records a stable GitHub
+        // owner it must be the id the provider just attested — a
+        // recycled name pointing anywhere else stays where it is.
+        const named = await lookupHostedAccount(env, gh.handle);
+        const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
+        if (named && named.account_id === account_id
+            && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
+          ghHandle = gh.handle;
+          // Written back so the heal is permanent — but only onto a
+          // link that already exists. An email-resolved sign-in stays
+          // resolve-don't-mint: its durable link is written at mint,
+          // not smuggled in here.
+          if (idpRec) {
+            idpRec.handle = gh.handle;
+            await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
+          }
+        }
+      }
+    }
+  }
+  const sid = rand(24);
+  const session = {
+    name: (user.name || user.given_name || email.split('@')[0]),
+    avatar_url: typeof user.picture === 'string' ? user.picture : '',
+    email,
+    oidc: true,
+    created: new Date().toISOString(),
+    ...(account_id ? { account_id } : {}),
+    ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
+    // The verified handle becomes the session login, so the actor key
+    // stays handle-shaped: old comments stay editable, handle invites
+    // keep matching, @handle still reaches them. Truthful — the
+    // provider attested which GitHub account this person connected.
+    ...(ghHandle ? { login: ghHandle } : {}),
+  };
+  await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+  return redirectTo(ret, [
+    `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+    clearState,
+  ]);
+}
+
+// Login with Raft — the registry seat is wired (routes, state, agent-only
+// stateless gate); what a Raft identity becomes on our side (the
+// account-idp:raft:<sub> link, session vs notify target) lands with the
+// notification work. Until then a verified Raft sign-in stops here.
+async function completeRaftSignIn(env, { user }) {
+  return json({ error: 'raft_signin_not_wired', type: user && user.type === 'agent' ? 'agent' : 'user' }, { status: 501 });
 }
 
 function authStatusResponse(message, { error = false, status = 200 } = {}) {
@@ -6628,19 +6821,22 @@ export default {
       return json({ ok: true, label: record.label || '' });
     }
 
-    if (p === '/api/auth/oidc/login' && method === 'GET') {
-      const cfg = oidcConfig(env);
+    // OIDC sign-in, one pair of routes for every registered provider
+    // (OIDC_PROVIDERS). GitHub keeps its own first-party flow above.
+    const oidcLoginMatch = method === 'GET' && p.match(OIDC_LOGIN_ROUTE);
+    if (oidcLoginMatch) {
+      const cfg = oidcProvider(env, oidcLoginMatch[1]);
       if (!cfg) return redirectTo('/?notice=signin');
       const nonce = rand(16);
       const ret = sanitizeReturn(url.searchParams.get('return'));
-      await env.META.put(`oauthstate:oidc:${nonce}`, ret, { expirationTtl: 600 });
+      await env.META.put(`oauthstate:${cfg.id}:${nonce}`, ret, { expirationTtl: 600 });
       let auth;
       try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
       catch (e) { return authStatusResponse('Sign-in is not available right now: ' + e.message, { error: true, status: 502 }); }
       auth.searchParams.set('client_id', cfg.clientId);
-      auth.searchParams.set('redirect_uri', `${url.origin}/auth/oidc/callback`);
+      auth.searchParams.set('redirect_uri', `${url.origin}${cfg.callbackPath}`);
       auth.searchParams.set('response_type', 'code');
-      auth.searchParams.set('scope', 'openid email profile');
+      auth.searchParams.set('scope', cfg.scope);
       auth.searchParams.set('state', nonce);
       // The provider remembers its own session, so a returning visitor is
       // signed straight through — correct as a default, bewildering when you
@@ -6649,21 +6845,30 @@ export default {
       // anything else.
       if (url.searchParams.get('prompt') === 'login') auth.searchParams.set('prompt', 'login');
       return redirectTo(auth.toString(), [
-        `tdoc_oidcst=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+        `${cfg.stateCookie}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
     }
 
-    if (p === '/auth/oidc/callback' && method === 'GET') {
-      const cfg = oidcConfig(env);
+    const oidcCallbackMatch = method === 'GET' && p.match(OIDC_CALLBACK_ROUTE);
+    if (oidcCallbackMatch) {
+      const cfg = oidcProvider(env, oidcCallbackMatch[1]);
       if (!cfg) return redirectTo('/?notice=signin');
       const code = url.searchParams.get('code');
       const state = String(url.searchParams.get('state') || '');
-      const cookieState = (req.headers.get('cookie') || '').match(/(?:^|;\s*)tdoc_oidcst=([a-f0-9]+)/);
-      if (!code || !state || !cookieState || cookieState[1] !== state) {
+      const cookieState = (req.headers.get('cookie') || '').match(new RegExp(`(?:^|;\\s*)${cfg.stateCookie}=([a-f0-9]+)`));
+      // Agent sign-in (Raft) carries no state: there is no browser to hold
+      // the cookie. Only a provider that opts in may take that path, and the
+      // userinfo check below then insists the identity really is an agent —
+      // otherwise this would be a CSRF-able login for humans.
+      const stateless = !state && !cookieState && cfg.statelessAgents;
+      if (!code || (!stateless && (!state || !cookieState || cookieState[1] !== state))) {
         return authStatusResponse('Sign-in could not be verified (state mismatch). Please try again.', { error: true, status: 400 });
       }
-      const ret = sanitizeReturn(await env.META.get(`oauthstate:oidc:${state}`));
-      await env.META.delete(`oauthstate:oidc:${state}`);
+      let ret = '/';
+      if (!stateless) {
+        ret = sanitizeReturn(await env.META.get(`oauthstate:${cfg.id}:${state}`));
+        await env.META.delete(`oauthstate:${cfg.id}:${state}`);
+      }
       try {
         const disc = await oidcDiscovery(cfg);
         const tr = await fetch(disc.token_endpoint, {
@@ -6672,7 +6877,7 @@ export default {
           body: new URLSearchParams({
             grant_type: 'authorization_code',
             code,
-            redirect_uri: `${url.origin}/auth/oidc/callback`,
+            redirect_uri: `${url.origin}${cfg.callbackPath}`,
             client_id: cfg.clientId,
             client_secret: cfg.clientSecret,
           }).toString(),
@@ -6688,126 +6893,10 @@ export default {
           headers: { 'Authorization': `Bearer ${tok.access_token}`, 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
         });
         const user = await ur.json().catch(() => null);
-        const email = normalizeEmail(user && user.email);
-        // Verified only — the account-takeover rule, same as everywhere else.
-        if (!email || user.email_verified !== true) {
-          return authStatusResponse('This sign-in did not come with a verified email, so it cannot be used here.', { error: true, status: 403 });
+        if (stateless && !(user && user.type === 'agent')) {
+          return authStatusResponse('Only an agent may sign in without a browser session. Please start sign-in again.', { error: true, status: 403 });
         }
-        // Resolve-don't-mint, same as GitHub sign-in: an account exists only
-        // once something is published.
-        //
-        // The issuer's `sub` IS stored, and is checked first. An earlier
-        // version deliberately refused to, reasoning that storing a vendor's
-        // id is lock-in — which had it backwards. Lock-in is about who owns
-        // the ACCOUNT, and account_id is ours; `sub` is just the one
-        // identifier a provider guarantees never changes and never reuses,
-        // which is exactly what an address does not guarantee. Without it,
-        // a mailbox handed to a new person hands them the old owner's docs.
-        const sub = user && user.sub ? String(user.sub) : null;
-        const idpRec = sub ? await accountIdpRecord(env, 'oidc', sub) : null;
-        let account_id = idpRec ? idpRec.account_id : null;
-        // No idp link yet: this provider is new to an existing account, so
-        // the verified address is the merge hint that connects them. Used
-        // once — the link written at mint time makes later sign-ins exact.
-        if (!account_id) account_id = await accountIdByEmail(env, email);
-        // Still nothing, and the visitor may be a legacy GitHub publisher
-        // whose account predates the email index. Ask the provider which
-        // GitHub identity they connected and resolve through that.
-        // The provider is asked about a connected GitHub identity at most
-        // once per sign-in, whichever of the consumers below needs it first.
-        let ghProbe;
-        const probeGithub = async () => {
-          if (ghProbe === undefined) ghProbe = sub ? await clerkExternalGithub(env, sub) : null;
-          return ghProbe;
-        };
-        let bridged = null;
-        if (!account_id && sub) {
-          bridged = await probeGithub();
-          if (bridged) {
-            // The numeric id, and only the numeric id — the claim-by-handle
-            // window for records with no recorded id is retired (records were
-            // backfilled), same as the direct GitHub flow.
-            if (bridged.ghId) account_id = await accountIdByIdp(env, 'github', bridged.ghId);
-            if (account_id) {
-              // Write the links NOW, not at mint: the whole point is that the
-              // very next sign-in resolves exactly, and this person may read
-              // and comment for weeks before they ever mint a token.
-              let rec = bridged.handle ? await lookupHostedAccount(env, bridged.handle) : null;
-              if (!rec || rec.account_id !== account_id) rec = { account_id, created: new Date().toISOString() };
-              if (bridged.ghId) rec = await linkIdentity(env, rec, { provider: 'github', sub: bridged.ghId, email, handle: bridged.handle || undefined });
-              rec = await linkIdentity(env, rec, { provider: 'oidc', sub, email });
-              // The verified handle rides on the oidc link so every LATER
-              // sign-in (which resolves by sub and never re-runs the bridge)
-              // can restore it into the session.
-              await env.META.put(idpKey('oidc', sub), JSON.stringify({
-                account_id, created: new Date().toISOString(), handle: bridged.handle || undefined,
-              }));
-              if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
-            }
-          }
-        }
-        // The session's GitHub handle, from the strongest source available.
-        // This is identity for WORDS, not for documents — comments, @mention
-        // routing and handle invites key on it, while account resolution
-        // above never rests on it (numeric ids only). It must survive the
-        // provider door for commenters exactly as it does for publishers: a
-        // commenter is not a publisher, but their words are still theirs,
-        // and the first-party GitHub flow always carried the handle.
-        let ghHandle = (bridged && bridged.handle)
-          || (account_id && idpRec && normalizeGithubLogin(idpRec.handle))
-          || null;
-        if (!ghHandle && sub) {
-          const gh = await probeGithub();
-          if (gh && gh.handle) {
-            if (!account_id) {
-              // No account in play: the provider attested which GitHub
-              // account this person connected, and that is exactly the trust
-              // the old first-party flow extended to GitHub's /user.
-              ghHandle = gh.handle;
-            } else {
-              // An account resolved by email or by a link that predates the
-              // bridge (or was written by a mint) carries no handle. Restore
-              // only what this account already owns: the handle must resolve
-              // to THIS account, and if the account records a stable GitHub
-              // owner it must be the id the provider just attested — a
-              // recycled name pointing anywhere else stays where it is.
-              const named = await lookupHostedAccount(env, gh.handle);
-              const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
-              if (named && named.account_id === account_id
-                  && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
-                ghHandle = gh.handle;
-                // Written back so the heal is permanent — but only onto a
-                // link that already exists. An email-resolved sign-in stays
-                // resolve-don't-mint: its durable link is written at mint,
-                // not smuggled in here.
-                if (idpRec) {
-                  idpRec.handle = gh.handle;
-                  await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
-                }
-              }
-            }
-          }
-        }
-        const sid = rand(24);
-        const session = {
-          name: (user.name || user.given_name || email.split('@')[0]),
-          avatar_url: typeof user.picture === 'string' ? user.picture : '',
-          email,
-          oidc: true,
-          created: new Date().toISOString(),
-          ...(account_id ? { account_id } : {}),
-          ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
-          // The verified handle becomes the session login, so the actor key
-          // stays handle-shaped: old comments stay editable, handle invites
-          // keep matching, @handle still reaches them. Truthful — the
-          // provider attested which GitHub account this person connected.
-          ...(ghHandle ? { login: ghHandle } : {}),
-        };
-        await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
-        return redirectTo(ret, [
-          `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
-          'tdoc_oidcst=; Path=/; Max-Age=0',
-        ]);
+        return await cfg.complete(env, { user, ret, stateless, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
       } catch (e) {
         return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
       }
