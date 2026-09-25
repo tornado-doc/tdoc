@@ -27,6 +27,7 @@ const OFFLINE = [
   'agent-status-emoji.test.js',// agent verdict emoji constant must exist (v>=2 folds)
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
+  'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
   'me-management.test.js',    // /me remote SoT management UI guard
@@ -41,6 +42,7 @@ const OFFLINE = [
   'provider-observability.test.js', // privacy-minimized hosted onboarding funnel in Worker logs (#397)
   'pair-signin-cli.test.js',  // phase-2 CLI: pairing-first, 404 fallback, probe-first resume
   'oidc-provider-seat.test.js', // phase-3: OIDC seat — verified-email sessions, email-born accounts, sub never a key
+  'oidc-provider-registry.test.js', // provider registry: raft seat, agent-only stateless callback
   'email-identity-surface.test.js', // phase-4: actor keys — email identities comment, are invited, own their words
   'identity-recycling.test.js', // renamed handles and recycled addresses must not inherit an account
   'duplicate-download.test.js', // #146 Duplicate vs Download chrome + route contract

@@ -2123,19 +2123,79 @@ async function clerkExternalGithub(env, sub) {
   }
 }
 
-function oidcConfig(env) {
-  const issuer = String(env && env.OIDC_ISSUER || '').trim().replace(/\/$/, '');
-  const clientId = String(env && env.OIDC_CLIENT_ID || '').trim();
-  const clientSecret = String(env && env.OIDC_CLIENT_SECRET || '').trim();
+// Sign-in providers that speak plain OIDC: discovery, code exchange,
+// userinfo. Adding one is an entry here — the login/callback routes, state
+// handling and token exchange are shared. `id` is the route segment
+// (/api/auth/<id>/login, /auth/<id>/callback) and the account-idp namespace;
+// `complete` turns a userinfo response into a session. GitHub is not here:
+// it predates this and keeps its own first-party flow.
+const OIDC_PROVIDERS = {
+  // The generic human seat (Clerk in production): email-verified sign-in.
+  oidc: {
+    config: (env) => ({
+      issuer: env.OIDC_ISSUER,
+      clientId: env.OIDC_CLIENT_ID,
+      clientSecret: env.OIDC_CLIENT_SECRET,
+      label: env.OIDC_LABEL || 'Email',
+    }),
+    scope: 'openid email profile',
+    statelessAgents: false,
+    complete: completeEmailSignIn,
+  },
+  // Login with Raft. Agents sign in with no state (userinfo type "agent");
+  // humans go through the normal state-checked browser flow. Dormant until
+  // the Raft app is registered and RAFT_CLIENT_ID/SECRET are set.
+  raft: {
+    config: (env) => ({
+      issuer: env.RAFT_OIDC_ISSUER || 'https://api.raft.build',
+      clientId: env.RAFT_CLIENT_ID,
+      clientSecret: env.RAFT_CLIENT_SECRET,
+      label: 'Raft',
+    }),
+    scope: 'openid profile',
+    statelessAgents: true,
+    complete: completeRaftSignIn,
+  },
+};
+const OIDC_PROVIDER_IDS = Object.keys(OIDC_PROVIDERS).join('|');
+const OIDC_LOGIN_ROUTE = new RegExp(`^/api/auth/(${OIDC_PROVIDER_IDS})/login$`);
+const OIDC_CALLBACK_ROUTE = new RegExp(`^/auth/(${OIDC_PROVIDER_IDS})/callback$`);
+
+// A configured provider, or null when unknown or missing any of issuer
+// (https only), client id or client secret — an unconfigured provider's
+// routes bow out and no button is advertised.
+function oidcProvider(env, id) {
+  const def = Object.prototype.hasOwnProperty.call(OIDC_PROVIDERS, id) ? OIDC_PROVIDERS[id] : null;
+  if (!def) return null;
+  const raw = def.config(env || {});
+  const issuer = String(raw.issuer || '').trim().replace(/\/$/, '');
+  const clientId = String(raw.clientId || '').trim();
+  const clientSecret = String(raw.clientSecret || '').trim();
   if (!/^https:\/\//.test(issuer) || !clientId || !clientSecret) return null;
-  return { issuer, clientId, clientSecret, label: String(env.OIDC_LABEL || 'Email').trim() || 'Email' };
+  return {
+    id, issuer, clientId, clientSecret,
+    label: String(raw.label || '').trim() || 'Email',
+    scope: def.scope,
+    statelessAgents: def.statelessAgents,
+    complete: def.complete,
+    callbackPath: `/auth/${id}/callback`,
+    // The generic seat keeps its original cookie name so in-flight sign-ins
+    // survive the deploy that introduced the registry.
+    stateCookie: id === 'oidc' ? 'tdoc_oidcst' : `tdoc_${id}st`,
+  };
 }
 
-// Per-isolate discovery cache. Discovery is static config on the issuer's
-// side; refetching it per sign-in would add a round trip for nothing.
-let OIDC_DISCOVERY = { issuer: null, doc: null };
+// The human "Sign in" button — the generic seat.
+function oidcConfig(env) {
+  return oidcProvider(env, 'oidc');
+}
+
+// Per-isolate discovery cache, per issuer. Discovery is static config on the
+// issuer's side; refetching it per sign-in would add a round trip for nothing.
+const OIDC_DISCOVERY = new Map();
 async function oidcDiscovery(cfg) {
-  if (OIDC_DISCOVERY.issuer === cfg.issuer && OIDC_DISCOVERY.doc) return OIDC_DISCOVERY.doc;
+  const cached = OIDC_DISCOVERY.get(cfg.issuer);
+  if (cached) return cached;
   const r = await fetch(`${cfg.issuer}/.well-known/openid-configuration`, {
     headers: { 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
   });
@@ -2144,8 +2204,198 @@ async function oidcDiscovery(cfg) {
   if (!doc || !doc.authorization_endpoint || !doc.token_endpoint || !doc.userinfo_endpoint) {
     throw new Error('oidc discovery incomplete');
   }
-  OIDC_DISCOVERY = { issuer: cfg.issuer, doc };
+  OIDC_DISCOVERY.set(cfg.issuer, doc);
   return doc;
+}
+
+// The generic seat's sign-in: a verified email resolves (never mints) an
+// account and becomes a session.
+async function completeEmailSignIn(env, { user, ret, clearState }) {
+  const email = normalizeEmail(user && user.email);
+  // Verified only — the account-takeover rule, same as everywhere else.
+  if (!email || user.email_verified !== true) {
+    return authStatusResponse('This sign-in did not come with a verified email, so it cannot be used here.', { error: true, status: 403 });
+  }
+  // Resolve-don't-mint, same as GitHub sign-in: an account exists only
+  // once something is published.
+  //
+  // The issuer's `sub` IS stored, and is checked first. An earlier
+  // version deliberately refused to, reasoning that storing a vendor's
+  // id is lock-in — which had it backwards. Lock-in is about who owns
+  // the ACCOUNT, and account_id is ours; `sub` is just the one
+  // identifier a provider guarantees never changes and never reuses,
+  // which is exactly what an address does not guarantee. Without it,
+  // a mailbox handed to a new person hands them the old owner's docs.
+  const sub = user && user.sub ? String(user.sub) : null;
+  const idpRec = sub ? await accountIdpRecord(env, 'oidc', sub) : null;
+  let account_id = idpRec ? idpRec.account_id : null;
+  // No idp link yet: this provider is new to an existing account, so
+  // the verified address is the merge hint that connects them. Used
+  // once — the link written at mint time makes later sign-ins exact.
+  if (!account_id) account_id = await accountIdByEmail(env, email);
+  // Still nothing, and the visitor may be a legacy GitHub publisher
+  // whose account predates the email index. Ask the provider which
+  // GitHub identity they connected and resolve through that.
+  // The provider is asked about a connected GitHub identity at most
+  // once per sign-in, whichever of the consumers below needs it first.
+  let ghProbe;
+  const probeGithub = async () => {
+    if (ghProbe === undefined) ghProbe = sub ? await clerkExternalGithub(env, sub) : null;
+    return ghProbe;
+  };
+  let bridged = null;
+  if (!account_id && sub) {
+    bridged = await probeGithub();
+    if (bridged) {
+      // The numeric id, and only the numeric id — the claim-by-handle
+      // window for records with no recorded id is retired (records were
+      // backfilled), same as the direct GitHub flow.
+      if (bridged.ghId) account_id = await accountIdByIdp(env, 'github', bridged.ghId);
+      if (account_id) {
+        // Write the links NOW, not at mint: the whole point is that the
+        // very next sign-in resolves exactly, and this person may read
+        // and comment for weeks before they ever mint a token.
+        let rec = bridged.handle ? await lookupHostedAccount(env, bridged.handle) : null;
+        if (!rec || rec.account_id !== account_id) rec = { account_id, created: new Date().toISOString() };
+        if (bridged.ghId) rec = await linkIdentity(env, rec, { provider: 'github', sub: bridged.ghId, email, handle: bridged.handle || undefined });
+        rec = await linkIdentity(env, rec, { provider: 'oidc', sub, email });
+        // The verified handle rides on the oidc link so every LATER
+        // sign-in (which resolves by sub and never re-runs the bridge)
+        // can restore it into the session.
+        await env.META.put(idpKey('oidc', sub), JSON.stringify({
+          account_id, created: new Date().toISOString(), handle: bridged.handle || undefined,
+        }));
+        if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
+      }
+    }
+  }
+  // The session's GitHub handle, from the strongest source available.
+  // This is identity for WORDS, not for documents — comments, @mention
+  // routing and handle invites key on it, while account resolution
+  // above never rests on it (numeric ids only). It must survive the
+  // provider door for commenters exactly as it does for publishers: a
+  // commenter is not a publisher, but their words are still theirs,
+  // and the first-party GitHub flow always carried the handle.
+  let ghHandle = (bridged && bridged.handle)
+    || (account_id && idpRec && normalizeGithubLogin(idpRec.handle))
+    || null;
+  if (!ghHandle && sub) {
+    const gh = await probeGithub();
+    if (gh && gh.handle) {
+      if (!account_id) {
+        // No account in play: the provider attested which GitHub
+        // account this person connected, and that is exactly the trust
+        // the old first-party flow extended to GitHub's /user.
+        ghHandle = gh.handle;
+      } else {
+        // An account resolved by email or by a link that predates the
+        // bridge (or was written by a mint) carries no handle. Restore
+        // only what this account already owns: the handle must resolve
+        // to THIS account, and if the account records a stable GitHub
+        // owner it must be the id the provider just attested — a
+        // recycled name pointing anywhere else stays where it is.
+        const named = await lookupHostedAccount(env, gh.handle);
+        const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
+        if (named && named.account_id === account_id
+            && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
+          ghHandle = gh.handle;
+          // Written back so the heal is permanent — but only onto a
+          // link that already exists. An email-resolved sign-in stays
+          // resolve-don't-mint: its durable link is written at mint,
+          // not smuggled in here.
+          if (idpRec) {
+            idpRec.handle = gh.handle;
+            await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
+          }
+        }
+      }
+    }
+  }
+  const sid = rand(24);
+  const session = {
+    name: (user.name || user.given_name || email.split('@')[0]),
+    avatar_url: typeof user.picture === 'string' ? user.picture : '',
+    email,
+    oidc: true,
+    created: new Date().toISOString(),
+    ...(account_id ? { account_id } : {}),
+    ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
+    // The verified handle becomes the session login, so the actor key
+    // stays handle-shaped: old comments stay editable, handle invites
+    // keep matching, @handle still reaches them. Truthful — the
+    // provider attested which GitHub account this person connected.
+    ...(ghHandle ? { login: ghHandle } : {}),
+  };
+  await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+  return redirectTo(ret, [
+    `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
+    clearState,
+  ]);
+}
+
+// Login with Raft.
+//
+// A Raft sign-in answers "WHICH AGENT is this", and nothing else. It is not an
+// authority to write: that stays the upload token, exactly as it is for a
+// person publishing from their laptop. Keeping the two apart is what makes the
+// linking step below safe to expose — binding an agent to an account needs
+// BOTH credentials, so a Raft identity alone can never reach somebody's docs
+// and an upload token alone can never invent an agent that did not sign in.
+//
+// INVARIANT: the stateless path must never mint a browser session. Skipping
+// the state check is only defensible because there is no browser in this flow
+// to be logged in; hand it a session cookie and the skipped check becomes a
+// login-CSRF hole, where a victim's browser is walked onto somebody else's
+// identity. An agent gets a one-time link code, never a cookie.
+const RAFT_LINK_TTL = 600;
+
+async function completeRaftSignIn(env, { user, tok, stateless, ret, clearState }) {
+  const sub = user && user.sub ? String(user.sub) : '';
+  if (!sub) {
+    return authStatusResponse('This sign-in carried no stable identifier, so it cannot be used here.', { error: true, status: 403 });
+  }
+  // A human signing in with Raft is a P1 seat. Refusing is the honest answer;
+  // falling through to the agent path would hand a person an agent's linking
+  // code, which is the one thing this function exists to keep separate.
+  if (!stateless || !(user && user.type === 'agent')) {
+    return authStatusResponse('Signing in to tdoc with a Raft account is not available yet.', { error: true, status: 501 });
+  }
+  // The server the agent belongs to comes from the ISSUER, never from the
+  // agent: the token is bound to one server, so asking the issuer is the only
+  // reading a caller cannot shape. Without it an agent could name a server it
+  // has no standing in and be delivered notifications meant for that server.
+  const server = await raftServerInfo(env, tok && tok.access_token);
+  if (!server || !server.id) {
+    return authStatusResponse('Raft did not say which server this identity belongs to, so the sign-in cannot be completed.', { error: true, status: 502 });
+  }
+  const code = rand(16);
+  await env.META.put(`raft-link:${code}`, JSON.stringify({
+    provider: 'raft',
+    server_id: String(server.id),
+    agent_sub: sub,
+    agent_name: typeof user.name === 'string' ? user.name.slice(0, 80) : '',
+    at: new Date().toISOString(),
+  }), { expirationTtl: RAFT_LINK_TTL });
+  // JSON, not a redirect: the caller is a CLI holding an HTTP response, and
+  // no Set-Cookie on this path by construction.
+  return json({
+    ok: true,
+    link_code: code,
+    expires_in: RAFT_LINK_TTL,
+    agent: { server_id: String(server.id), agent_sub: sub, agent_name: user.name || '' },
+  });
+}
+
+async function raftServerInfo(env, accessToken) {
+  if (!accessToken) return null;
+  const base = env.RAFT_API_BASE || 'https://api.raft.build';
+  try {
+    const r = await fetch(`${base}/api/oauth/serverinfo`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'User-Agent': 'tdoc-worker' },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
 }
 
 function authStatusResponse(message, { error = false, status = 200 } = {}) {
@@ -4981,6 +5231,237 @@ async function deliverInbox(env, recipientLogin, ev) {
   }
 }
 
+// ===========================================================================
+// Outbound notification — provider-neutral fan-out to an external inbox.
+//
+// PROBLEM: deliverInbox() writes tdoc's OWN inbox, which nobody is watching.
+// An agent only learns a comment exists by polling (`tdoc-pull`), so review
+// feedback sits until someone remembers to go look.
+//
+// SHAPE: one provider-neutral layer here, and providers that know a wire
+// format. Raft is the first; nothing below names it outside NOTIFY_PROVIDERS.
+// A second provider is a new entry in that object and nothing else.
+//
+// WHAT THIS IS NOT: it is not a second inbox and not a retry engine. The
+// internal inbox still gets every event; this fires only when a HUMAN hands
+// work over. Delivery failure is reported, never retried — a handoff that did
+// not land shows a marker and a resend button, because an agent woken by a
+// replay of a comment the human already dealt with is worse than one not woken
+// at all.
+// ===========================================================================
+
+// A target names one agent on one provider. `agent_sub` is the stable key:
+// agent_name is a display string the provider may rename under us.
+function normalizeNotifyTarget(t) {
+  if (!t || typeof t !== 'object') return null;
+  const provider = typeof t.provider === 'string' ? t.provider.trim().toLowerCase() : '';
+  if (!NOTIFY_PROVIDERS[provider]) return null;
+  const out = NOTIFY_PROVIDERS[provider].validateTarget(t);
+  if (!out) return null;
+  return {
+    provider,
+    ...out,
+    agent_name: typeof t.agent_name === 'string' ? t.agent_name.slice(0, 80) : '',
+    last_touched: typeof t.last_touched === 'string' ? t.last_touched : '',
+  };
+}
+
+function sameNotifyTarget(a, b) {
+  return !!a && !!b && a.provider === b.provider
+    && a.server_id === b.server_id && a.agent_sub === b.agent_sub;
+}
+
+const NOTIFY_PROVIDERS = {
+  raft: {
+    validateTarget(t) {
+      const server_id = typeof t.server_id === 'string' ? t.server_id.trim() : '';
+      const agent_sub = typeof t.agent_sub === 'string' ? t.agent_sub.trim() : '';
+      if (!server_id || !agent_sub) return null;
+      return { server_id, agent_sub };
+    },
+    // Three legs: request → resource-bound token → event. The token is bound
+    // to (server, agent-inbound) so it cannot address a different server.
+    async send(env, target, event) {
+      if (!env.RAFT_CLIENT_ID || !env.RAFT_CLIENT_SECRET) {
+        return { status: 'failed', error: 'provider_not_configured' };
+      }
+      const base = env.RAFT_API_BASE || 'https://api.raft.build';
+      try {
+        const reqRes = await fetch(`${base}/api/oauth/requests/agent`, {
+          method: 'POST',
+          headers: raftAuthHeaders(env),
+          body: JSON.stringify({
+            serverSlug: target.server_id,
+            agentName: target.agent_name || target.agent_sub,
+            scopes: ['agent:notification:write'],
+          }),
+        });
+        if (!reqRes.ok) return { status: 'failed', error: `request_${reqRes.status}` };
+        const { request_id } = await reqRes.json();
+
+        const tokRes = await fetch(`${base}/api/oauth/token`, {
+          method: 'POST',
+          headers: raftAuthHeaders(env),
+          body: JSON.stringify({
+            grant_type: 'urn:slock:grant-type:agent_request',
+            request_id,
+            resource: `urn:raft:server:${target.server_id}:agent-inbound`,
+          }),
+        });
+        if (!tokRes.ok) return { status: 'failed', error: `token_${tokRes.status}` };
+        const { access_token } = await tokRes.json();
+
+        const evRes = await fetch(`${base}/api/oauth/agent-events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${access_token}` },
+          body: JSON.stringify(event),
+        });
+        if (!evRes.ok) return { status: 'failed', error: `event_${evRes.status}` };
+        return { status: 'delivered', error: null };
+      } catch (e) {
+        return { status: 'failed', error: String((e && e.message) || e).slice(0, 200) };
+      }
+    },
+  },
+};
+
+function raftAuthHeaders(env) {
+  const basic = btoa(`${env.RAFT_CLIENT_ID}:${env.RAFT_CLIENT_SECRET}`);
+  return { 'Content-Type': 'application/json', Authorization: `Basic ${basic}` };
+}
+
+// ─────────────────────── who follows this doc ───────────────────────
+//
+// The list is not hand-maintained. An agent writes itself in whenever it
+// publishes a version or answers a comment, so "who is on this doc" is a
+// consequence of doing the work rather than a setting somebody has to
+// remember. Replacement is therefore automatic: when an agent goes away, the
+// one that picks the doc up becomes the default the first time it touches it.
+const NOTIFY_AGENTS_MAX = 8;
+
+async function touchDocAgent(env, slug, target) {
+  const t = normalizeNotifyTarget(target);
+  if (!t) return false;
+  const meta = await loadDocMeta(env, slug);
+  if (!meta) return false;
+  const prev = Array.isArray(meta.notify_agents) ? meta.notify_agents : [];
+  const rest = prev.map(normalizeNotifyTarget).filter(x => x && !sameNotifyTarget(x, t));
+  const next = [{ ...t, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX);
+  await env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, notify_agents: next }));
+  return true;
+}
+
+async function accountNotifyTargets(env, accountId) {
+  if (!accountId) return [];
+  try {
+    const raw = await env.META.get(`account-notify:${accountId}`);
+    const list = raw ? JSON.parse(raw) : [];
+    return (Array.isArray(list) ? list : []).map(normalizeNotifyTarget).filter(Boolean);
+  } catch { return []; }
+}
+
+// doc first, account second. Returns what the handoff panel renders: one
+// preselected recipient, the other recent ones as switchable candidates.
+async function resolveNotifyTargets(env, slug) {
+  const meta = await loadDocMeta(env, slug);
+  const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
+  const docTargets = (Array.isArray(meta && meta.notify_agents) ? meta.notify_agents : [])
+    .map(normalizeNotifyTarget).filter(Boolean).sort(byRecency);
+  const fallbackList = await accountNotifyTargets(env, meta && meta.hosted && meta.hosted.account_id);
+  const fallback = fallbackList[0] || null;
+  if (docTargets.length) {
+    return {
+      default: { ...docTargets[0], source: 'doc' },
+      candidates: docTargets.slice(1).map(t => ({ ...t, source: 'doc' })),
+      fallback,
+    };
+  }
+  return {
+    default: fallback ? { ...fallback, source: 'account' } : null,
+    candidates: fallbackList.slice(1).map(t => ({ ...t, source: 'account' })),
+    fallback,
+  };
+}
+
+// ─────────────────────────── handoffs ───────────────────────────
+const HANDOFF_MAX = 50;
+
+async function loadHandoffs(env, slug) {
+  try {
+    const raw = await env.META.get(`handoffs:${slug}`);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+async function putHandoff(env, slug, record) {
+  const list = await loadHandoffs(env, slug);
+  const next = [record, ...list.filter(h => h && h.handoff_id !== record.handoff_id)].slice(0, HANDOFF_MAX);
+  await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+  return record;
+}
+
+// The payload carries a summary and a link, never comment bodies: a delivery
+// surface we do not control should not become a copy of the document.
+function handoffEvent({ slug, docTitle, handoffId, commentIds, instruction, publicHost }) {
+  const n = commentIds.length;
+  return {
+    kind: 'notification',
+    summary: n === 1
+      ? `tdoc: 1 comment handed to you on "${docTitle || slug}"`
+      : `tdoc: ${n} comments handed to you on "${docTitle || slug}"`,
+    externalEventId: `tdoc:${slug}:${handoffId}`,
+    ttlSeconds: 86400,
+    payload: {
+      source: 'tdoc',
+      slug,
+      handoff_id: handoffId,
+      comment_ids: commentIds,
+      instruction: instruction || '',
+      url: `https://${publicHost || 'tdoc.dev'}/d/${slug}`,
+    },
+  };
+}
+
+async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recipient, publicHost }) {
+  const handoffId = `h_${Date.now()}_${rand(3)}`;
+  const target = normalizeNotifyTarget(recipient);
+  const event = handoffEvent({
+    slug, docTitle: meta && meta.title, handoffId, commentIds, instruction, publicHost,
+  });
+  const delivery = target
+    ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
+    : { status: 'failed', error: 'no_recipient' };
+  return putHandoff(env, slug, {
+    handoff_id: handoffId,
+    at: new Date().toISOString(),
+    recipient: target,
+    comment_ids: commentIds,
+    instruction: instruction || '',
+    delivery: { ...delivery, at: new Date().toISOString() },
+  });
+}
+
+// Decorate a folded comment list with handoff state. `note` is the default:
+// a comment nobody handed over is a note for a human, not work queued for an
+// agent. Resolution is per comment id, so a partially-resolved handoff shows
+// exactly which of its comments are done.
+function withHandoffStatus(list, handoffs) {
+  if (!Array.isArray(list) || !Array.isArray(handoffs) || !handoffs.length) {
+    return Array.isArray(list) ? list.map(c => ({ ...c, handoff_status: 'note', handoff_id: null })) : list;
+  }
+  const byComment = new Map();
+  // Oldest first so a later handoff of the same comment wins.
+  for (const h of [...handoffs].reverse()) {
+    if (!h || !Array.isArray(h.comment_ids)) continue;
+    const done = new Set(Array.isArray(h.resolved_ids) ? h.resolved_ids : []);
+    for (const id of h.comment_ids) {
+      byComment.set(id, { handoff_status: done.has(id) ? 'resolved' : 'sent', handoff_id: h.handoff_id });
+    }
+  }
+  return list.map(c => ({ ...c, ...(byComment.get(c.id) || { handoff_status: 'note', handoff_id: null }) }));
+}
+
 async function mutateComments(env, slug, op) {
   if (env.COMMENTS) {
     const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
@@ -6645,19 +7126,22 @@ export default {
       return json({ ok: true, label: record.label || '' });
     }
 
-    if (p === '/api/auth/oidc/login' && method === 'GET') {
-      const cfg = oidcConfig(env);
+    // OIDC sign-in, one pair of routes for every registered provider
+    // (OIDC_PROVIDERS). GitHub keeps its own first-party flow above.
+    const oidcLoginMatch = method === 'GET' && p.match(OIDC_LOGIN_ROUTE);
+    if (oidcLoginMatch) {
+      const cfg = oidcProvider(env, oidcLoginMatch[1]);
       if (!cfg) return redirectTo('/?notice=signin');
       const nonce = rand(16);
       const ret = sanitizeReturn(url.searchParams.get('return'));
-      await env.META.put(`oauthstate:oidc:${nonce}`, ret, { expirationTtl: 600 });
+      await env.META.put(`oauthstate:${cfg.id}:${nonce}`, ret, { expirationTtl: 600 });
       let auth;
       try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
       catch (e) { return authStatusResponse('Sign-in is not available right now: ' + e.message, { error: true, status: 502 }); }
       auth.searchParams.set('client_id', cfg.clientId);
-      auth.searchParams.set('redirect_uri', `${url.origin}/auth/oidc/callback`);
+      auth.searchParams.set('redirect_uri', `${url.origin}${cfg.callbackPath}`);
       auth.searchParams.set('response_type', 'code');
-      auth.searchParams.set('scope', 'openid email profile');
+      auth.searchParams.set('scope', cfg.scope);
       auth.searchParams.set('state', nonce);
       // The provider remembers its own session, so a returning visitor is
       // signed straight through — correct as a default, bewildering when you
@@ -6666,21 +7150,30 @@ export default {
       // anything else.
       if (url.searchParams.get('prompt') === 'login') auth.searchParams.set('prompt', 'login');
       return redirectTo(auth.toString(), [
-        `tdoc_oidcst=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+        `${cfg.stateCookie}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
     }
 
-    if (p === '/auth/oidc/callback' && method === 'GET') {
-      const cfg = oidcConfig(env);
+    const oidcCallbackMatch = method === 'GET' && p.match(OIDC_CALLBACK_ROUTE);
+    if (oidcCallbackMatch) {
+      const cfg = oidcProvider(env, oidcCallbackMatch[1]);
       if (!cfg) return redirectTo('/?notice=signin');
       const code = url.searchParams.get('code');
       const state = String(url.searchParams.get('state') || '');
-      const cookieState = (req.headers.get('cookie') || '').match(/(?:^|;\s*)tdoc_oidcst=([a-f0-9]+)/);
-      if (!code || !state || !cookieState || cookieState[1] !== state) {
+      const cookieState = (req.headers.get('cookie') || '').match(new RegExp(`(?:^|;\\s*)${cfg.stateCookie}=([a-f0-9]+)`));
+      // Agent sign-in (Raft) carries no state: there is no browser to hold
+      // the cookie. Only a provider that opts in may take that path, and the
+      // userinfo check below then insists the identity really is an agent —
+      // otherwise this would be a CSRF-able login for humans.
+      const stateless = !state && !cookieState && cfg.statelessAgents;
+      if (!code || (!stateless && (!state || !cookieState || cookieState[1] !== state))) {
         return authStatusResponse('Sign-in could not be verified (state mismatch). Please try again.', { error: true, status: 400 });
       }
-      const ret = sanitizeReturn(await env.META.get(`oauthstate:oidc:${state}`));
-      await env.META.delete(`oauthstate:oidc:${state}`);
+      let ret = '/';
+      if (!stateless) {
+        ret = sanitizeReturn(await env.META.get(`oauthstate:${cfg.id}:${state}`));
+        await env.META.delete(`oauthstate:${cfg.id}:${state}`);
+      }
       try {
         const disc = await oidcDiscovery(cfg);
         const tr = await fetch(disc.token_endpoint, {
@@ -6689,7 +7182,7 @@ export default {
           body: new URLSearchParams({
             grant_type: 'authorization_code',
             code,
-            redirect_uri: `${url.origin}/auth/oidc/callback`,
+            redirect_uri: `${url.origin}${cfg.callbackPath}`,
             client_id: cfg.clientId,
             client_secret: cfg.clientSecret,
           }).toString(),
@@ -6705,126 +7198,10 @@ export default {
           headers: { 'Authorization': `Bearer ${tok.access_token}`, 'Accept': 'application/json', 'User-Agent': 'tdoc-worker' },
         });
         const user = await ur.json().catch(() => null);
-        const email = normalizeEmail(user && user.email);
-        // Verified only — the account-takeover rule, same as everywhere else.
-        if (!email || user.email_verified !== true) {
-          return authStatusResponse('This sign-in did not come with a verified email, so it cannot be used here.', { error: true, status: 403 });
+        if (stateless && !(user && user.type === 'agent')) {
+          return authStatusResponse('Only an agent may sign in without a browser session. Please start sign-in again.', { error: true, status: 403 });
         }
-        // Resolve-don't-mint, same as GitHub sign-in: an account exists only
-        // once something is published.
-        //
-        // The issuer's `sub` IS stored, and is checked first. An earlier
-        // version deliberately refused to, reasoning that storing a vendor's
-        // id is lock-in — which had it backwards. Lock-in is about who owns
-        // the ACCOUNT, and account_id is ours; `sub` is just the one
-        // identifier a provider guarantees never changes and never reuses,
-        // which is exactly what an address does not guarantee. Without it,
-        // a mailbox handed to a new person hands them the old owner's docs.
-        const sub = user && user.sub ? String(user.sub) : null;
-        const idpRec = sub ? await accountIdpRecord(env, 'oidc', sub) : null;
-        let account_id = idpRec ? idpRec.account_id : null;
-        // No idp link yet: this provider is new to an existing account, so
-        // the verified address is the merge hint that connects them. Used
-        // once — the link written at mint time makes later sign-ins exact.
-        if (!account_id) account_id = await accountIdByEmail(env, email);
-        // Still nothing, and the visitor may be a legacy GitHub publisher
-        // whose account predates the email index. Ask the provider which
-        // GitHub identity they connected and resolve through that.
-        // The provider is asked about a connected GitHub identity at most
-        // once per sign-in, whichever of the consumers below needs it first.
-        let ghProbe;
-        const probeGithub = async () => {
-          if (ghProbe === undefined) ghProbe = sub ? await clerkExternalGithub(env, sub) : null;
-          return ghProbe;
-        };
-        let bridged = null;
-        if (!account_id && sub) {
-          bridged = await probeGithub();
-          if (bridged) {
-            // The numeric id, and only the numeric id — the claim-by-handle
-            // window for records with no recorded id is retired (records were
-            // backfilled), same as the direct GitHub flow.
-            if (bridged.ghId) account_id = await accountIdByIdp(env, 'github', bridged.ghId);
-            if (account_id) {
-              // Write the links NOW, not at mint: the whole point is that the
-              // very next sign-in resolves exactly, and this person may read
-              // and comment for weeks before they ever mint a token.
-              let rec = bridged.handle ? await lookupHostedAccount(env, bridged.handle) : null;
-              if (!rec || rec.account_id !== account_id) rec = { account_id, created: new Date().toISOString() };
-              if (bridged.ghId) rec = await linkIdentity(env, rec, { provider: 'github', sub: bridged.ghId, email, handle: bridged.handle || undefined });
-              rec = await linkIdentity(env, rec, { provider: 'oidc', sub, email });
-              // The verified handle rides on the oidc link so every LATER
-              // sign-in (which resolves by sub and never re-runs the bridge)
-              // can restore it into the session.
-              await env.META.put(idpKey('oidc', sub), JSON.stringify({
-                account_id, created: new Date().toISOString(), handle: bridged.handle || undefined,
-              }));
-              if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
-            }
-          }
-        }
-        // The session's GitHub handle, from the strongest source available.
-        // This is identity for WORDS, not for documents — comments, @mention
-        // routing and handle invites key on it, while account resolution
-        // above never rests on it (numeric ids only). It must survive the
-        // provider door for commenters exactly as it does for publishers: a
-        // commenter is not a publisher, but their words are still theirs,
-        // and the first-party GitHub flow always carried the handle.
-        let ghHandle = (bridged && bridged.handle)
-          || (account_id && idpRec && normalizeGithubLogin(idpRec.handle))
-          || null;
-        if (!ghHandle && sub) {
-          const gh = await probeGithub();
-          if (gh && gh.handle) {
-            if (!account_id) {
-              // No account in play: the provider attested which GitHub
-              // account this person connected, and that is exactly the trust
-              // the old first-party flow extended to GitHub's /user.
-              ghHandle = gh.handle;
-            } else {
-              // An account resolved by email or by a link that predates the
-              // bridge (or was written by a mint) carries no handle. Restore
-              // only what this account already owns: the handle must resolve
-              // to THIS account, and if the account records a stable GitHub
-              // owner it must be the id the provider just attested — a
-              // recycled name pointing anywhere else stays where it is.
-              const named = await lookupHostedAccount(env, gh.handle);
-              const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
-              if (named && named.account_id === account_id
-                  && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
-                ghHandle = gh.handle;
-                // Written back so the heal is permanent — but only onto a
-                // link that already exists. An email-resolved sign-in stays
-                // resolve-don't-mint: its durable link is written at mint,
-                // not smuggled in here.
-                if (idpRec) {
-                  idpRec.handle = gh.handle;
-                  await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
-                }
-              }
-            }
-          }
-        }
-        const sid = rand(24);
-        const session = {
-          name: (user.name || user.given_name || email.split('@')[0]),
-          avatar_url: typeof user.picture === 'string' ? user.picture : '',
-          email,
-          oidc: true,
-          created: new Date().toISOString(),
-          ...(account_id ? { account_id } : {}),
-          ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
-          // The verified handle becomes the session login, so the actor key
-          // stays handle-shaped: old comments stay editable, handle invites
-          // keep matching, @handle still reaches them. Truthful — the
-          // provider attested which GitHub account this person connected.
-          ...(ghHandle ? { login: ghHandle } : {}),
-        };
-        await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
-        return redirectTo(ret, [
-          `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
-          'tdoc_oidcst=; Path=/; Max-Age=0',
-        ]);
+        return await cfg.complete(env, { user, tok, disc, ret, stateless, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
       } catch (e) {
         return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
       }
@@ -7381,7 +7758,11 @@ export default {
       // `?version=all` returns every comment across all versions (lossless,
       // used by tdoc-pull). A numeric/absent version returns that version's
       // snapshot (used by the overlay viewing a specific /v/<n>).
-      return json(V === 'all' ? historyList(list) : snapshotList(list, V));
+      const folded = V === 'all' ? historyList(list) : snapshotList(list, V);
+      // Handoff state is derived from the handoff records, not stored on the
+      // comment: the comment log stays a log of what people said, and "has
+      // this been handed over" is a fact about the handoff, not the comment.
+      return json(withHandoffStatus(folded, await loadHandoffs(env, slug)));
     }
 
     // Who the composer offers after `@`. Same gate as posting a comment: if
@@ -7699,6 +8080,161 @@ export default {
         });
       }
       return json(res.body, { status: res.status });
+    }
+
+    // ---- Raft agent behavior manifest ----
+    //
+    // Raft fetches this to learn what tdoc is and how an agent signs in. It is
+    // registered on the App, so it has to exist before Login with Raft works
+    // at all — a registration pointing at a 404 is an App nothing can use.
+    //
+    // `actions` is deliberately empty. An action is invoked with the agent's
+    // Raft-derived session, and every mutating endpoint tdoc has today is
+    // authed with the upload token instead, so declaring one here would
+    // advertise a call that cannot succeed. Linking an agent needs both
+    // credentials and is driven from the agent's own machine, where the token
+    // already is — it is not an action Raft brokers. Actions arrive with the
+    // session-authed read/reply endpoints, which is what lets an agent with no
+    // local tdoc token work at all.
+    if (p === '/.well-known/raft-agent-manifest.json' && method === 'GET') {
+      const origin = `${url.protocol}//${url.host}`;
+      return json({
+        schema: 'raft-agent-manifest.v0',
+        name: 'tdoc',
+        description: 'Prompt-native HTML documents. Comments on a doc are handed to the agent that follows it, so review feedback arrives instead of being polled for.',
+        service: env.RAFT_CLIENT_ID || 'tdoc',
+        app_origin: origin,
+        execution: { mode: 'http_api', base_url: origin },
+        auth: { type: 'login_with_raft' },
+        actions: [],
+      }, { headers: { 'Cache-Control': 'public, max-age=300' } });
+    }
+
+    // Bind an agent that signed in with Raft to THIS account, as a fallback
+    // recipient for docs with nobody following them.
+    //
+    // This is the one place the two credentials meet, and it needs both: the
+    // link code proves which agent signed in (the issuer said so), the upload
+    // token proves whose account is being written to. Either alone is inert —
+    // which is the whole reason an agent may sign in without a browser.
+    if (p === '/api/notify/link' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) {
+        return json({ error: 'account_token_required' }, { status: 403 });
+      }
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const code = typeof body.link_code === 'string' ? body.link_code : '';
+      if (!code) return json({ error: 'link_code required' }, { status: 400 });
+      let pending = null;
+      try { pending = JSON.parse((await env.META.get(`raft-link:${code}`)) || 'null'); } catch {}
+      if (!pending) return json({ error: 'link_code_invalid_or_expired' }, { status: 404 });
+      // One use. A link code that survives its redemption is a bearer token
+      // for somebody else's account sitting in a log somewhere.
+      await env.META.delete(`raft-link:${code}`);
+      const target = normalizeNotifyTarget(pending);
+      if (!target) return json({ error: 'unsupported_target' }, { status: 400 });
+      const existing = await accountNotifyTargets(env, auth.actor.account_id);
+      const next = [
+        { ...target, last_touched: new Date().toISOString() },
+        ...existing.filter(t => !sameNotifyTarget(t, target)),
+      ].slice(0, NOTIFY_AGENTS_MAX);
+      await env.META.put(`account-notify:${auth.actor.account_id}`, JSON.stringify(next));
+      return json({ ok: true, target, targets: next.length });
+    }
+
+    // ---- outbound notification: handoff to the doc's follow-up agent ----
+    // Gated by authorizeOwnerMutation, which is the whole permission model:
+    // driving an agent needs the doc owner's session or their upload token, so
+    // a reader who can comment still cannot make somebody's agent do work.
+    if (p === '/api/notify/targets' && method === 'GET') {
+      const slug = url.searchParams.get('slug');
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const gate = await authorizeOwnerMutation(req, env, slug);
+      if (!gate.ok) return gate.response;
+      return json(await resolveNotifyTargets(env, slug));
+    }
+
+    if (p === '/api/notify/handoffs' && method === 'GET') {
+      const slug = url.searchParams.get('slug');
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const gate = await authorizeOwnerMutation(req, env, slug);
+      if (!gate.ok) return gate.response;
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
+      return json({ handoffs: (await loadHandoffs(env, slug)).slice(0, limit) });
+    }
+
+    if (p === '/api/notify/handoff' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const { slug, comment_ids, instruction, recipient } = body;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const ids = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : [];
+      if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
+      const gate = await authorizeOwnerMutation(req, env, slug);
+      if (!gate.ok) return gate.response;
+      const resolved = await resolveNotifyTargets(env, slug);
+      const target = recipient ? normalizeNotifyTarget(recipient) : resolved.default;
+      // No recipient is a 200 with a failed delivery, not a 4xx: the handoff
+      // is a real record either way, and the panel renders "not delivered"
+      // the same for "nobody bound" as for "Raft was down".
+      const rec = await dispatchHandoff(env, {
+        slug, meta: gate.meta, commentIds: ids,
+        instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
+        recipient: target, publicHost: env.PUBLIC_HOST,
+      });
+      return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery });
+    }
+
+    if (p === '/api/notify/handoff/resend' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const { slug, handoff_id } = body;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const gate = await authorizeOwnerMutation(req, env, slug);
+      if (!gate.ok) return gate.response;
+      const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
+      if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      // A resend reuses the original externalEventId, so a provider that did
+      // receive the first attempt drops the duplicate instead of waking the
+      // agent twice for the same batch.
+      const event = handoffEvent({
+        slug, docTitle: gate.meta && gate.meta.title, handoffId: prev.handoff_id,
+        commentIds: prev.comment_ids, instruction: prev.instruction, publicHost: env.PUBLIC_HOST,
+      });
+      const target = normalizeNotifyTarget(prev.recipient);
+      const delivery = target
+        ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
+        : { status: 'failed', error: 'no_recipient' };
+      const rec = await putHandoff(env, slug, {
+        ...prev, delivery: { ...delivery, at: new Date().toISOString() },
+      });
+      return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery });
+    }
+
+    // Called by the agent once it has applied a batch. Upload-token authed:
+    // an agent resolving its own handoff is the owner writing through a tool,
+    // the same reading /api/agent/reply already takes.
+    if (p === '/api/notify/resolve' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const { slug, handoff_id, comment_ids } = body;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
+      const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
+      if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      const asked = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : null;
+      // Resolving without a list means "all of them"; a list resolves only
+      // what it names, so an agent can report partial progress honestly.
+      const resolvedIds = asked && asked.length
+        ? [...new Set([...(prev.resolved_ids || []), ...asked.filter(id => prev.comment_ids.includes(id))])]
+        : [...prev.comment_ids];
+      const rec = await putHandoff(env, slug, { ...prev, resolved_ids: resolvedIds });
+      return json({ ok: true, handoff_id: rec.handoff_id, resolved: resolvedIds.length, of: prev.comment_ids.length });
     }
 
     // ---- agent reply (from `tdoc edit` after applying a comment) ----
