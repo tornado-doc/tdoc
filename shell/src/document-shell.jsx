@@ -24,6 +24,7 @@ import {
   DocumentBreadcrumbs,
   DocumentOverflowActions,
   DocumentPrimaryAction,
+  DocumentSendAgentAction,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -995,11 +996,16 @@ export function DocumentShell({ boot, config }) {
               onSignIn={signIn}
               onChange={editor.changeMode}
             />
+            {notifyEnabled ? (
+              <DocumentSendAgentAction
+                count={shownComments.filter((c) => c.status !== 'applied' && !c.deleted).length}
+                onClick={openDocNotify}
+              />
+            ) : null}
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
               onShare={() => setDialog({ type: 'share' })}
-              onSendToAgent={notifyEnabled ? openDocNotify : null}
             />
           </>
         )}
@@ -1010,7 +1016,6 @@ export function DocumentShell({ boot, config }) {
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
             onShare={() => setDialog({ type: 'share' })}
-            demotePrimary={notifyEnabled}
             onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
             onDuplicate={duplicate}
             onDownload={download}
@@ -1236,20 +1241,13 @@ export function DocumentShell({ boot, config }) {
 
 
       {notifyEnabled ? (
-        <>
-          <div className="tdoc-agent-bar">
-            <button type="button" className="primary" onClick={openDocNotify}>
-              Send to agent
-            </button>
-          </div>
-          <NotifyHandoffPanel
-            slug={config.slug}
-            open={notifyOpen}
-            commentIds={notifyCommentIds || []}
-            onClose={() => setNotifyOpen(false)}
-            onSent={async () => { await comments.refresh(); }}
-          />
-        </>
+        <NotifyHandoffPanel
+          slug={config.slug}
+          open={notifyOpen}
+          commentIds={notifyCommentIds || []}
+          onClose={() => setNotifyOpen(false)}
+          onSent={async () => { await comments.refresh(); }}
+        />
       ) : null}
 
       <PublishDialog

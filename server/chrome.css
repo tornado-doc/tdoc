@@ -791,34 +791,37 @@
   }
   .tdoc-handoff-banner.is-failed .text-btn { color: #8a3b2b; }
 
-  /* Mobile primary entry for doc-level send — bar is hidden on desktop where
-     the top-bar primary button carries it. */
-  .tdoc-agent-bar {
-    display: none;
+  /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
+  .tdoc-bar .tdoc-send-agent-action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--td-ink, #1a1a1a);
+    cursor: pointer;
+    flex-shrink: 0;
   }
-  @media (max-width: 700px) {
-    .tdoc-agent-bar {
-      display: flex;
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 70;
-      padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
-      background: var(--td-surface, #fff);
-      border-top: 1px solid var(--td-line, #e6e4dc);
-      box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.06);
-      box-sizing: border-box;
-    }
-    .tdoc-agent-bar .primary {
-      flex: 1;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      min-height: 44px;
-    }
-    body.tdoc-narrow:has(.tdoc-agent-bar) .tdoc-fab {
-      bottom: calc(68px + env(safe-area-inset-bottom, 0px));
-    }
+  .tdoc-bar .tdoc-send-agent-action:hover {
+    background: var(--td-accent-tint, #e8eeff);
+    color: var(--td-accent, #1652f0);
+  }
+  .tdoc-bar .tdoc-send-agent-badge {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--td-accent, #1652f0);
+    color: #fff;
+    font: 650 10px/16px inherit;
+    text-align: center;
+    box-sizing: border-box;
   }
