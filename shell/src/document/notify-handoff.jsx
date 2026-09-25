@@ -3,7 +3,6 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bot } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import {
@@ -27,16 +26,37 @@ function shortAgentName(name) {
   return (cut || name).slice(0, 48);
 }
 
-function targetLabel(t) {
+// Readable agent handle when we have one. Empty is fine — the UI falls back
+// to the provider line so we never render "Hand to " with a blank.
+function readableHandle(t) {
   if (!t) return '';
   const name = (t.agent_name || '').trim();
   const sub = (t.agent_sub || '').trim();
-  // Never lead with a UUID `agent_sub`. Prefer a human name/handle; strip a
-  // trailing bio after an em dash when the provider stuffed both into name.
   if (name && !opaqueAgentId(name)) return shortAgentName(name);
   if (sub && !opaqueAgentId(sub)) return sub;
-  if (name) return shortAgentName(name);
-  return 'agent';
+  return '';
+}
+
+function providerMeta(t) {
+  const p = String(t?.provider || 'raft').trim().toLowerCase();
+  if (p === 'raft') {
+    return {
+      key: 'raft',
+      label: 'Raft',
+      // Published mark on raft.build (same asset the product site uses).
+      icon: 'https://raft.build/raft-logo.svg',
+    };
+  }
+  return { key: p || 'agent', label: p ? p[0].toUpperCase() + p.slice(1) : 'agent', icon: '' };
+}
+
+// What the reader needs: where this goes (provider), not which UUID. Handle is
+// secondary detail when we have a readable one.
+function recipientPrimary(t) {
+  const { label } = providerMeta(t);
+  return readableHandle(t)
+    ? `Send to ${label}`
+    : `Send to your ${label} agent`;
 }
 
 function targetKey(t) {
@@ -49,6 +69,30 @@ function sameTarget(a, b) {
   return a.provider === b.provider
     && a.server_id === b.server_id
     && a.agent_sub === b.agent_sub;
+}
+
+function ProviderMark({ target, size = 16 }) {
+  const meta = providerMeta(target);
+  if (meta.icon) {
+    return <img className="tdoc-notify-provider-icon" src={meta.icon} width={size} height={size} alt="" />;
+  }
+  return <span className="tdoc-notify-provider-fallback" aria-hidden="true">{meta.label.slice(0, 1)}</span>;
+}
+
+function RecipientLine({ target }) {
+  const handle = readableHandle(target);
+  const primary = recipientPrimary(target);
+  return (
+    <p className="tdoc-notify-recipient" aria-label="Recipient">
+      <span className="tdoc-notify-recipient-avatar" aria-hidden="true">
+        <ProviderMark target={target} size={16} />
+      </span>
+      <span className="tdoc-notify-recipient-copy">
+        <strong>{primary}</strong>
+        {handle ? <span className="tdoc-notify-recipient-handle">{handle}</span> : null}
+      </span>
+    </p>
+  );
 }
 
 export function useNotifyTargets(slug, enabled) {
@@ -246,34 +290,27 @@ export function NotifyHandoffPanel({
 
           {choices.length === 1 ? (
             <section className="manage-section">
-              <p className="tdoc-notify-recipient" aria-label="Recipient">
-                <span className="tdoc-notify-recipient-avatar" aria-hidden="true">
-                  <Bot size={16} strokeWidth={2} />
-                </span>
-                <span>
-                  Hand to
-                  {' '}
-                  <strong title={(choices[0].agent_name || '').trim() || undefined}>
-                    {targetLabel(choices[0])}
-                  </strong>
-                </span>
-              </p>
+              <RecipientLine target={choices[0]} />
             </section>
           ) : choices.length > 1 ? (
             <section className="manage-section">
-              <label className="field">Recipient</label>
+              <label className="field">Send via</label>
               <SegmentedControl
                 ariaLabel="Recipient"
                 value={selectedKey}
-                options={choices.map((t) => ({
-                  value: targetKey(t),
-                  label: (
-                    <span className="tdoc-notify-recipient-opt" title={(t.agent_name || '').trim() || undefined}>
-                      <Bot size={14} strokeWidth={2} aria-hidden="true" />
-                      {targetLabel(t)}
-                    </span>
-                  ),
-                }))}
+                options={choices.map((t) => {
+                  const handle = readableHandle(t);
+                  const meta = providerMeta(t);
+                  return {
+                    value: targetKey(t),
+                    label: (
+                      <span className="tdoc-notify-recipient-opt" title={handle || undefined}>
+                        <ProviderMark target={t} size={14} />
+                        {handle || meta.label}
+                      </span>
+                    ),
+                  };
+                })}
                 onChange={(key) => {
                   const next = choices.find((t) => targetKey(t) === key);
                   if (next) setSelected(next);
