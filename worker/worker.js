@@ -4980,6 +4980,237 @@ async function deliverInbox(env, recipientLogin, ev) {
   }
 }
 
+// ===========================================================================
+// Outbound notification — provider-neutral fan-out to an external inbox.
+//
+// PROBLEM: deliverInbox() writes tdoc's OWN inbox, which nobody is watching.
+// An agent only learns a comment exists by polling (`tdoc-pull`), so review
+// feedback sits until someone remembers to go look.
+//
+// SHAPE: one provider-neutral layer here, and providers that know a wire
+// format. Raft is the first; nothing below names it outside NOTIFY_PROVIDERS.
+// A second provider is a new entry in that object and nothing else.
+//
+// WHAT THIS IS NOT: it is not a second inbox and not a retry engine. The
+// internal inbox still gets every event; this fires only when a HUMAN hands
+// work over. Delivery failure is reported, never retried — a handoff that did
+// not land shows a marker and a resend button, because an agent woken by a
+// replay of a comment the human already dealt with is worse than one not woken
+// at all.
+// ===========================================================================
+
+// A target names one agent on one provider. `agent_sub` is the stable key:
+// agent_name is a display string the provider may rename under us.
+function normalizeNotifyTarget(t) {
+  if (!t || typeof t !== 'object') return null;
+  const provider = typeof t.provider === 'string' ? t.provider.trim().toLowerCase() : '';
+  if (!NOTIFY_PROVIDERS[provider]) return null;
+  const out = NOTIFY_PROVIDERS[provider].validateTarget(t);
+  if (!out) return null;
+  return {
+    provider,
+    ...out,
+    agent_name: typeof t.agent_name === 'string' ? t.agent_name.slice(0, 80) : '',
+    last_touched: typeof t.last_touched === 'string' ? t.last_touched : '',
+  };
+}
+
+function sameNotifyTarget(a, b) {
+  return !!a && !!b && a.provider === b.provider
+    && a.server_id === b.server_id && a.agent_sub === b.agent_sub;
+}
+
+const NOTIFY_PROVIDERS = {
+  raft: {
+    validateTarget(t) {
+      const server_id = typeof t.server_id === 'string' ? t.server_id.trim() : '';
+      const agent_sub = typeof t.agent_sub === 'string' ? t.agent_sub.trim() : '';
+      if (!server_id || !agent_sub) return null;
+      return { server_id, agent_sub };
+    },
+    // Three legs: request → resource-bound token → event. The token is bound
+    // to (server, agent-inbound) so it cannot address a different server.
+    async send(env, target, event) {
+      if (!env.RAFT_CLIENT_ID || !env.RAFT_CLIENT_SECRET) {
+        return { status: 'failed', error: 'provider_not_configured' };
+      }
+      const base = env.RAFT_API_BASE || 'https://api.raft.build';
+      try {
+        const reqRes = await fetch(`${base}/api/oauth/requests/agent`, {
+          method: 'POST',
+          headers: raftAuthHeaders(env),
+          body: JSON.stringify({
+            serverSlug: target.server_id,
+            agentName: target.agent_name || target.agent_sub,
+            scopes: ['agent:notification:write'],
+          }),
+        });
+        if (!reqRes.ok) return { status: 'failed', error: `request_${reqRes.status}` };
+        const { request_id } = await reqRes.json();
+
+        const tokRes = await fetch(`${base}/api/oauth/token`, {
+          method: 'POST',
+          headers: raftAuthHeaders(env),
+          body: JSON.stringify({
+            grant_type: 'urn:slock:grant-type:agent_request',
+            request_id,
+            resource: `urn:raft:server:${target.server_id}:agent-inbound`,
+          }),
+        });
+        if (!tokRes.ok) return { status: 'failed', error: `token_${tokRes.status}` };
+        const { access_token } = await tokRes.json();
+
+        const evRes = await fetch(`${base}/api/oauth/agent-events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${access_token}` },
+          body: JSON.stringify(event),
+        });
+        if (!evRes.ok) return { status: 'failed', error: `event_${evRes.status}` };
+        return { status: 'delivered', error: null };
+      } catch (e) {
+        return { status: 'failed', error: String((e && e.message) || e).slice(0, 200) };
+      }
+    },
+  },
+};
+
+function raftAuthHeaders(env) {
+  const basic = btoa(`${env.RAFT_CLIENT_ID}:${env.RAFT_CLIENT_SECRET}`);
+  return { 'Content-Type': 'application/json', Authorization: `Basic ${basic}` };
+}
+
+// ─────────────────────── who follows this doc ───────────────────────
+//
+// The list is not hand-maintained. An agent writes itself in whenever it
+// publishes a version or answers a comment, so "who is on this doc" is a
+// consequence of doing the work rather than a setting somebody has to
+// remember. Replacement is therefore automatic: when an agent goes away, the
+// one that picks the doc up becomes the default the first time it touches it.
+const NOTIFY_AGENTS_MAX = 8;
+
+async function touchDocAgent(env, slug, target) {
+  const t = normalizeNotifyTarget(target);
+  if (!t) return false;
+  const meta = await loadDocMeta(env, slug);
+  if (!meta) return false;
+  const prev = Array.isArray(meta.notify_agents) ? meta.notify_agents : [];
+  const rest = prev.map(normalizeNotifyTarget).filter(x => x && !sameNotifyTarget(x, t));
+  const next = [{ ...t, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX);
+  await env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, notify_agents: next }));
+  return true;
+}
+
+async function accountNotifyTargets(env, accountId) {
+  if (!accountId) return [];
+  try {
+    const raw = await env.META.get(`account-notify:${accountId}`);
+    const list = raw ? JSON.parse(raw) : [];
+    return (Array.isArray(list) ? list : []).map(normalizeNotifyTarget).filter(Boolean);
+  } catch { return []; }
+}
+
+// doc first, account second. Returns what the handoff panel renders: one
+// preselected recipient, the other recent ones as switchable candidates.
+async function resolveNotifyTargets(env, slug) {
+  const meta = await loadDocMeta(env, slug);
+  const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
+  const docTargets = (Array.isArray(meta && meta.notify_agents) ? meta.notify_agents : [])
+    .map(normalizeNotifyTarget).filter(Boolean).sort(byRecency);
+  const fallbackList = await accountNotifyTargets(env, meta && meta.hosted && meta.hosted.account_id);
+  const fallback = fallbackList[0] || null;
+  if (docTargets.length) {
+    return {
+      default: { ...docTargets[0], source: 'doc' },
+      candidates: docTargets.slice(1).map(t => ({ ...t, source: 'doc' })),
+      fallback,
+    };
+  }
+  return {
+    default: fallback ? { ...fallback, source: 'account' } : null,
+    candidates: fallbackList.slice(1).map(t => ({ ...t, source: 'account' })),
+    fallback,
+  };
+}
+
+// ─────────────────────────── handoffs ───────────────────────────
+const HANDOFF_MAX = 50;
+
+async function loadHandoffs(env, slug) {
+  try {
+    const raw = await env.META.get(`handoffs:${slug}`);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+async function putHandoff(env, slug, record) {
+  const list = await loadHandoffs(env, slug);
+  const next = [record, ...list.filter(h => h && h.handoff_id !== record.handoff_id)].slice(0, HANDOFF_MAX);
+  await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+  return record;
+}
+
+// The payload carries a summary and a link, never comment bodies: a delivery
+// surface we do not control should not become a copy of the document.
+function handoffEvent({ slug, docTitle, handoffId, commentIds, instruction, publicHost }) {
+  const n = commentIds.length;
+  return {
+    kind: 'notification',
+    summary: n === 1
+      ? `tdoc: 1 comment handed to you on "${docTitle || slug}"`
+      : `tdoc: ${n} comments handed to you on "${docTitle || slug}"`,
+    externalEventId: `tdoc:${slug}:${handoffId}`,
+    ttlSeconds: 86400,
+    payload: {
+      source: 'tdoc',
+      slug,
+      handoff_id: handoffId,
+      comment_ids: commentIds,
+      instruction: instruction || '',
+      url: `https://${publicHost || 'tdoc.dev'}/d/${slug}`,
+    },
+  };
+}
+
+async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recipient, publicHost }) {
+  const handoffId = `h_${Date.now()}_${rand(3)}`;
+  const target = normalizeNotifyTarget(recipient);
+  const event = handoffEvent({
+    slug, docTitle: meta && meta.title, handoffId, commentIds, instruction, publicHost,
+  });
+  const delivery = target
+    ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
+    : { status: 'failed', error: 'no_recipient' };
+  return putHandoff(env, slug, {
+    handoff_id: handoffId,
+    at: new Date().toISOString(),
+    recipient: target,
+    comment_ids: commentIds,
+    instruction: instruction || '',
+    delivery: { ...delivery, at: new Date().toISOString() },
+  });
+}
+
+// Decorate a folded comment list with handoff state. `note` is the default:
+// a comment nobody handed over is a note for a human, not work queued for an
+// agent. Resolution is per comment id, so a partially-resolved handoff shows
+// exactly which of its comments are done.
+function withHandoffStatus(list, handoffs) {
+  if (!Array.isArray(list) || !Array.isArray(handoffs) || !handoffs.length) {
+    return Array.isArray(list) ? list.map(c => ({ ...c, handoff_status: 'note', handoff_id: null })) : list;
+  }
+  const byComment = new Map();
+  // Oldest first so a later handoff of the same comment wins.
+  for (const h of [...handoffs].reverse()) {
+    if (!h || !Array.isArray(h.comment_ids)) continue;
+    const done = new Set(Array.isArray(h.resolved_ids) ? h.resolved_ids : []);
+    for (const id of h.comment_ids) {
+      byComment.set(id, { handoff_status: done.has(id) ? 'resolved' : 'sent', handoff_id: h.handoff_id });
+    }
+  }
+  return list.map(c => ({ ...c, ...(byComment.get(c.id) || { handoff_status: 'note', handoff_id: null }) }));
+}
+
 async function mutateComments(env, slug, op) {
   if (env.COMMENTS) {
     const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
@@ -7364,7 +7595,11 @@ export default {
       // `?version=all` returns every comment across all versions (lossless,
       // used by tdoc-pull). A numeric/absent version returns that version's
       // snapshot (used by the overlay viewing a specific /v/<n>).
-      return json(V === 'all' ? historyList(list) : snapshotList(list, V));
+      const folded = V === 'all' ? historyList(list) : snapshotList(list, V);
+      // Handoff state is derived from the handoff records, not stored on the
+      // comment: the comment log stays a log of what people said, and "has
+      // this been handed over" is a fact about the handoff, not the comment.
+      return json(withHandoffStatus(folded, await loadHandoffs(env, slug)));
     }
 
     // Who the composer offers after `@`. Same gate as posting a comment: if
@@ -7682,6 +7917,99 @@ export default {
         });
       }
       return json(res.body, { status: res.status });
+    }
+
+    // ---- outbound notification: handoff to the doc's follow-up agent ----
+    // Gated by authorizeOwnerMutation, which is the whole permission model:
+    // driving an agent needs the doc owner's session or their upload token, so
+    // a reader who can comment still cannot make somebody's agent do work.
+    if (p === '/api/notify/targets' && method === 'GET') {
+      const slug = url.searchParams.get('slug');
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const gate = await authorizeOwnerMutation(req, env, slug);
+      if (!gate.ok) return gate.response;
+      return json(await resolveNotifyTargets(env, slug));
+    }
+
+    if (p === '/api/notify/handoffs' && method === 'GET') {
+      const slug = url.searchParams.get('slug');
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const gate = await authorizeOwnerMutation(req, env, slug);
+      if (!gate.ok) return gate.response;
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
+      return json({ handoffs: (await loadHandoffs(env, slug)).slice(0, limit) });
+    }
+
+    if (p === '/api/notify/handoff' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const { slug, comment_ids, instruction, recipient } = body;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const ids = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : [];
+      if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
+      const gate = await authorizeOwnerMutation(req, env, slug);
+      if (!gate.ok) return gate.response;
+      const resolved = await resolveNotifyTargets(env, slug);
+      const target = recipient ? normalizeNotifyTarget(recipient) : resolved.default;
+      // No recipient is a 200 with a failed delivery, not a 4xx: the handoff
+      // is a real record either way, and the panel renders "not delivered"
+      // the same for "nobody bound" as for "Raft was down".
+      const rec = await dispatchHandoff(env, {
+        slug, meta: gate.meta, commentIds: ids,
+        instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
+        recipient: target, publicHost: env.PUBLIC_HOST,
+      });
+      return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery });
+    }
+
+    if (p === '/api/notify/handoff/resend' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const { slug, handoff_id } = body;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const gate = await authorizeOwnerMutation(req, env, slug);
+      if (!gate.ok) return gate.response;
+      const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
+      if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      // A resend reuses the original externalEventId, so a provider that did
+      // receive the first attempt drops the duplicate instead of waking the
+      // agent twice for the same batch.
+      const event = handoffEvent({
+        slug, docTitle: gate.meta && gate.meta.title, handoffId: prev.handoff_id,
+        commentIds: prev.comment_ids, instruction: prev.instruction, publicHost: env.PUBLIC_HOST,
+      });
+      const target = normalizeNotifyTarget(prev.recipient);
+      const delivery = target
+        ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
+        : { status: 'failed', error: 'no_recipient' };
+      const rec = await putHandoff(env, slug, {
+        ...prev, delivery: { ...delivery, at: new Date().toISOString() },
+      });
+      return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery });
+    }
+
+    // Called by the agent once it has applied a batch. Upload-token authed:
+    // an agent resolving its own handoff is the owner writing through a tool,
+    // the same reading /api/agent/reply already takes.
+    if (p === '/api/notify/resolve' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const { slug, handoff_id, comment_ids } = body;
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
+      const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
+      if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      const asked = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : null;
+      // Resolving without a list means "all of them"; a list resolves only
+      // what it names, so an agent can report partial progress honestly.
+      const resolvedIds = asked && asked.length
+        ? [...new Set([...(prev.resolved_ids || []), ...asked.filter(id => prev.comment_ids.includes(id))])]
+        : [...prev.comment_ids];
+      const rec = await putHandoff(env, slug, { ...prev, resolved_ids: resolvedIds });
+      return json({ ok: true, handoff_id: rec.handoff_id, resolved: resolvedIds.length, of: prev.comment_ids.length });
     }
 
     // ---- agent reply (from `tdoc edit` after applying a comment) ----
