@@ -958,10 +958,6 @@ export function DocumentShell({ boot, config }) {
               onSignIn={signIn}
               onChange={editor.changeMode}
             />
-            {supportsWidth ? (
-              <DocumentWidthControl readerWidth={readerWidth} inline={inlineWidth}
-                onPlacementChange={setInlineWidth} onToggle={toggleReaderWidth} />
-            ) : null}
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
@@ -988,6 +984,10 @@ export function DocumentShell({ boot, config }) {
             onToggleResolved={toggleResolved}
           />
         )}
+        appearanceActions={!config.isLanding && supportsWidth ? (
+          <DocumentWidthControl readerWidth={readerWidth} inline={inlineWidth}
+            onPlacementChange={setInlineWidth} onToggle={toggleReaderWidth} />
+        ) : null}
         onThemeChange={(nextTheme) => {
           setTheme(nextTheme);
           bridge.send({ type: 'tdoc:theme', theme: nextTheme });

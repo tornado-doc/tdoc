@@ -94,7 +94,7 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert(!serialized.includes('id="tdoc-provider-table-layout"'), 'computed table widths must not become author HTML');
     assert(serialized.includes('id="added-table"'), 'table content must survive serialization');
     await page.setViewportSize({ width: 375, height: 800 });
-    await page.locator('#tdoc-width-btn').waitFor({state:'hidden'});
+    // The compact icon can fit here; switchTo also covers constrained More.
     await switchTo('Wide width');
     assert(await frame.locator('html').evaluate(e => e.scrollWidth <= innerWidth+1));
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth+1));

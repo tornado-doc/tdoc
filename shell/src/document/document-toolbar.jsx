@@ -9,6 +9,8 @@ import {
   FileDown,
   History,
   Columns2,
+  FoldHorizontal,
+  UnfoldHorizontal,
   Share2,
   Star,
   Trash2,
@@ -193,13 +195,7 @@ export function DocumentWidthControl({ readerWidth, inline, onPlacementChange, o
     <button ref={ref} id="tdoc-width-btn" type="button"
       className={`tdoc-width-action${inline ? '' : ' tdoc-width-measure'}`}
       aria-label={label} title={label} aria-hidden={!inline} tabIndex={inline ? 0 : -1} onClick={onToggle}>
-      <Columns2 size={15} />
-      <span className="tdoc-width-labels">
-        {/* Reserve the larger label's natural width in both states. */}
-        {['Wide width', 'Narrow width'].map(text => (
-          <span key={text} aria-hidden={text !== label} className={text === label ? '' : 'tdoc-width-label-hidden'}>{text}</span>
-        ))}
-      </span>
+      {readerWidth === 'wide' ? <FoldHorizontal size={16} /> : <UnfoldHorizontal size={16} />}
     </button>
   );
 }
