@@ -111,10 +111,7 @@ its transient style is not serialized into author HTML. Check standalone
 exports separately. The reader protection applies to CLI uploads, direct HTTP
 uploads and browser saves; it is not proof that every author layout is correct.
 
-When reviewing a preview, inspect every table and figure: text must belong
-inside the intended node, arrows must mean the right thing, and tables must
-read comfortably. Break long SVG text into
-`tspan` lines and size the node for those lines; do not shrink the whole drawing
-until the words are unreadable. On phones use local scrolling only where the
-content needs it, with a visible hint when the next panel is off-screen. Never
-use page-level `overflow-x:hidden` as the repair: that hides inaccessible content.
+Use the figure sizing and text rules in `authoring/structure/components.md`.
+In a preview, inspect label fit, arrow meaning and table readability. On phones,
+keep necessary scrolling local and hint when content continues off-screen.
+Never hide page overflow: that makes content inaccessible.

@@ -1066,13 +1066,12 @@ Every doc must work on mobile out of the box. The baked template carries defensi
 - **Use fluid widths**, not hardcoded pixels. The default 720px column has a
   **672px** usable canvas; select `data-tdoc-width="wide"` on the root when
   the content needs more room. Keep root spacing in the template. On phones
-  both layouts shrink to the viewport. Grid text tracks should use
-  `minmax(0, 1fr)`; long inline identifiers must be able to wrap.
-- **SVG / images**: do NOT hardcode width=N height=M. Either:
-  - Use `width="100%"` + CSS aspect-ratio (`aspect-ratio: 16/9`), or
-  - Use a wrapper with `max-width: 100%` and let the artifact scale.
-  - For SVG, give the `<svg>` a `viewBox` and size it in CSS (`width: 100%; height: auto`). If the drawing needs more room than a phone gives it, put the `<svg>` in a wrapper with `overflow-x: auto` and a `min-width` on the SVG so it scrolls rather than squashing.
-  - (Canvas isn't an option — see "Interactivity: CSS only". Without JS there is nothing to draw into the buffer.)
+  both layouts shrink to the viewport. Use `minmax(0, 1fr)` for grid text tracks,
+  `min-width: 0` on their children and `overflow-wrap: anywhere` for long identifiers;
+  stack text-heavy columns on small screens.
+- **SVG / images**: use fluid sizing (`width: 100%; height: auto`) and an SVG
+  `viewBox`. Follow the figure rules in `$SKILL_DIR/authoring/structure/components.md`
+  for readable labels, HTML captions and intentional local scrolling.
 - **Tables**: wrap in `<div class="tdoc-table-scroll">`. Preserve semantic
   `<table>` / `<th>` / `<td>` relationships; mark atomic cells with
   `data-tdoc-cell="value"`. Do not use page clipping or shrinking text to fit.
