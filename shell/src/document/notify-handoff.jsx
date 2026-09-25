@@ -3,6 +3,7 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import {
@@ -12,9 +13,46 @@ import {
   resendNotifyHandoff,
 } from './api.js';
 
-function targetLabel(t) {
+function opaqueAgentId(s) {
+  if (!s) return true;
+  // Raft `sub` is often a UUID / long hex — fine as a key, useless as a label.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
+  if (/^[0-9a-f]{24,}$/i.test(s)) return true;
+  return false;
+}
+
+function shortAgentName(name) {
+  // "handle — bio…" / "handle - bio…" → keep the handle side.
+  const cut = name.split(/\s+[—–-]\s+/)[0].trim();
+  return (cut || name).slice(0, 48);
+}
+
+// Readable agent handle when we have one. Empty is fine — the UI falls back
+// to the provider line so we never render "Hand to " with a blank.
+function readableHandle(t) {
   if (!t) return '';
-  return t.agent_name || t.agent_sub || 'agent';
+  const name = (t.agent_name || '').trim();
+  const sub = (t.agent_sub || '').trim();
+  if (name && !opaqueAgentId(name)) return shortAgentName(name);
+  if (sub && !opaqueAgentId(sub)) return sub;
+  return '';
+}
+
+function providerMeta(t) {
+  const p = String(t?.provider || 'raft').trim().toLowerCase();
+  if (p === 'raft') {
+    return { key: 'raft', label: 'Raft', mark: 'raft' };
+  }
+  return { key: p || 'agent', label: p ? p[0].toUpperCase() + p.slice(1) : 'agent', mark: '' };
+}
+
+// What the reader needs: where this goes (provider), not which UUID. Handle is
+// secondary detail when we have a readable one.
+function recipientPrimary(t) {
+  const { label } = providerMeta(t);
+  return readableHandle(t)
+    ? `Send to ${label}`
+    : `Send to your ${label} agent`;
 }
 
 function targetKey(t) {
@@ -27,6 +65,28 @@ function sameTarget(a, b) {
   return a.provider === b.provider
     && a.server_id === b.server_id
     && a.agent_sub === b.agent_sub;
+}
+
+function ProviderMark({ target, size = 18 }) {
+  const meta = providerMeta(target);
+  if (meta.mark === 'raft') return <RaftMark size={size} />;
+  return <span className="tdoc-notify-provider-fallback" aria-hidden="true">{meta.label.slice(0, 1)}</span>;
+}
+
+function RecipientLine({ target }) {
+  const handle = readableHandle(target);
+  const primary = recipientPrimary(target);
+  return (
+    <p className="tdoc-notify-recipient" aria-label="Recipient">
+      <span className="tdoc-notify-recipient-avatar" aria-hidden="true">
+        <ProviderMark target={target} size={18} />
+      </span>
+      <span className="tdoc-notify-recipient-copy">
+        <strong>{primary}</strong>
+        {handle ? <span className="tdoc-notify-recipient-handle">{handle}</span> : null}
+      </span>
+    </p>
+  );
 }
 
 export function useNotifyTargets(slug, enabled) {
@@ -77,6 +137,11 @@ function noAgentBoundReason(reason) {
     : null;
 }
 
+function defaultInstruction(commentIds) {
+  const n = Array.isArray(commentIds) ? commentIds.filter(Boolean).length : 0;
+  return n === 1 ? 'address this comment' : 'address my new comments';
+}
+
 export function NotifyHandoffPanel({
   slug,
   open,
@@ -86,7 +151,7 @@ export function NotifyHandoffPanel({
 }) {
   const targets = useNotifyTargets(slug, open);
   const [selected, setSelected] = useState(null);
-  const [instruction, setInstruction] = useState('');
+  const [instruction, setInstruction] = useState(() => defaultInstruction(commentIds));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [recent, setRecent] = useState([]);
@@ -94,9 +159,13 @@ export function NotifyHandoffPanel({
   useEffect(() => {
     if (!open) return;
     setSelected(targets.default);
-    setInstruction('');
-    setStatus('');
   }, [open, targets.default]);
+
+  useEffect(() => {
+    if (!open) return;
+    setInstruction(defaultInstruction(commentIds));
+    setStatus('');
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- only reset when the dialog opens
 
   useEffect(() => {
     if (!open || !targets.available) return undefined;
@@ -213,16 +282,29 @@ export function NotifyHandoffPanel({
             </p>
           ) : null}
 
-          {choices.length ? (
+          {choices.length === 1 ? (
             <section className="manage-section">
-              <label className="field">Recipient</label>
+              <RecipientLine target={choices[0]} />
+            </section>
+          ) : choices.length > 1 ? (
+            <section className="manage-section">
+              <label className="field">Send via</label>
               <SegmentedControl
                 ariaLabel="Recipient"
                 value={selectedKey}
-                options={choices.map((t) => ({
-                  value: targetKey(t),
-                  label: targetLabel(t),
-                }))}
+                options={choices.map((t) => {
+                  const handle = readableHandle(t);
+                  const meta = providerMeta(t);
+                  return {
+                    value: targetKey(t),
+                    label: (
+                      <span className="tdoc-notify-recipient-opt" title={handle || undefined}>
+                        <ProviderMark target={t} size={16} />
+                        {handle || meta.label}
+                      </span>
+                    ),
+                  };
+                })}
                 onChange={(key) => {
                   const next = choices.find((t) => targetKey(t) === key);
                   if (next) setSelected(next);
@@ -235,13 +317,13 @@ export function NotifyHandoffPanel({
             </p>
           )}
 
-          <label className="field" htmlFor="tdoc-notify-instruction">Optional instruction</label>
+          <label className="field" htmlFor="tdoc-notify-instruction">Instruction</label>
           <textarea
             id="tdoc-notify-instruction"
-            className="tdoc-select"
+            className="tdoc-notify-instruction"
             rows={2}
             maxLength={500}
-            placeholder="Optional instruction…"
+            placeholder="A line for the agent…"
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
           />
@@ -254,5 +336,9 @@ export function NotifyHandoffPanel({
 }
 
 export async function sendOneCommentToAgent(slug, commentId) {
-  return postNotifyHandoff({ slug, comment_ids: [commentId], instruction: '' });
+  return postNotifyHandoff({
+    slug,
+    comment_ids: [commentId],
+    instruction: 'address this comment',
+  });
 }

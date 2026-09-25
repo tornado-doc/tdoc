@@ -100,6 +100,28 @@ const cb = (path, cookie) => new Request(`https://tdoc.dev${path}`, cookie ? { h
     assert(body.agent.server_id === 'S1', 'the server comes from the issuer, not the agent');
   });
 
+  await t('the agent label prefers the handle over a bio-shaped display name', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...RAFT_ENV, RAFT_API_BASE: RAFT });
+    stubIssuers({ [RAFT]: {
+      sub: 'agent-uuid-a', type: 'agent',
+      preferred_username: 'smarter-tdoc-claw',
+      // What a Raft agent's `name` actually looks like: a multi-line bio.
+      name: 'not just a worker but a orchestrator.\nwill handover tasks.\n\n1. DO NOT SPECIAL FORMAT LINK',
+    } });
+    const body = await (await worker.fetch(cb('/auth/raft/callback?code=c'), env, {})).json();
+    assert(body.agent.agent_name === 'smarter-tdoc-claw', `got ${JSON.stringify(body.agent.agent_name)}`);
+  });
+
+  await t('a bio with no handle does not leak a paragraph as the name', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...RAFT_ENV, RAFT_API_BASE: RAFT });
+    stubIssuers({ [RAFT]: {
+      sub: 'agent-uuid-b', type: 'agent',
+      name: 'a very long self description that goes on and on and should never be shown as if it were somebody\u2019s name',
+    } });
+    const body = await (await worker.fetch(cb('/auth/raft/callback?code=c'), env, {})).json();
+    assert(body.agent.agent_name === '', `expected empty rather than a bio, got ${JSON.stringify(body.agent.agent_name)}`);
+  });
+
   await t('the server id is taken from the issuer, not from anything the agent said', async () => {
     const env = makeEnv(mod.CommentsStore, { ...RAFT_ENV, RAFT_API_BASE: RAFT });
     // userinfo claims a different server; serverinfo is the only source read.

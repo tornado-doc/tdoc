@@ -511,10 +511,14 @@
     .tdoc-edit-form textarea,
     .tdoc-margin-comment input[type="text"] { font-size: 16px; }
   }
-  .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
+  .tdoc-popup .tdoc-composer-foot-actions { display: flex; align-items: center; gap: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
   .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
   .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
+  /* Secondary action on the dark composer — same shape as Comment, quieter fill. */
+  .tdoc-popup .submit.agent { background: #2c2c2c; color: #f0f0f0; border: 1px solid #4a4a4a; }
+  .tdoc-popup .submit.agent:hover { background: #3a3a3a; }
   .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
 
   /* @mention picker + chips. The field wrapper is the positioning context for
@@ -600,6 +604,16 @@
      disclosure for the secondary axes, and a de-emphasised danger row. */
   .tdoc-modal .tdoc-select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 10px; font: inherit; color: inherit; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
   .tdoc-modal .tdoc-select:focus { outline: none; border-color: var(--td-accent); }
+  /* Notify instruction is a real textarea — do not reuse .tdoc-select (dropdown arrow). */
+  .tdoc-modal textarea.tdoc-notify-instruction { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 48px; background: #fff; cursor: text; }
+  .tdoc-modal textarea.tdoc-notify-instruction:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-modal .tdoc-notify-recipient { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; color: #222; }
+  .tdoc-modal .tdoc-notify-recipient-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: #141111; color: #555; flex: none; overflow: hidden; }
+  .tdoc-modal .tdoc-notify-provider-fallback { font-size: 12px; font-weight: 700; color: #555; }
+  .tdoc-modal .tdoc-notify-recipient-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .tdoc-modal .tdoc-notify-recipient-copy strong { font-weight: 650; }
+  .tdoc-modal .tdoc-notify-recipient-handle { font-size: 12px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-modal .tdoc-notify-recipient-opt { display: inline-flex; align-items: center; gap: 6px; }
   .tdoc-modal .tdoc-adv { margin: 16px 0 0; border-top: 1px solid #eee; padding-top: 6px; }
   .tdoc-modal .tdoc-adv > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #555; padding: 6px 0; }
   .tdoc-modal .tdoc-adv > summary:hover { color: #222; }
@@ -788,34 +802,37 @@
   }
   .tdoc-handoff-banner.is-failed .text-btn { color: #8a3b2b; }
 
-  /* Mobile primary entry for doc-level send — bar is hidden on desktop where
-     the top-bar primary button carries it. */
-  .tdoc-agent-bar {
-    display: none;
+  /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
+  .tdoc-bar .tdoc-send-agent-action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--td-ink, #1a1a1a);
+    cursor: pointer;
+    flex-shrink: 0;
   }
-  @media (max-width: 700px) {
-    .tdoc-agent-bar {
-      display: flex;
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 70;
-      padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
-      background: var(--td-surface, #fff);
-      border-top: 1px solid var(--td-line, #e6e4dc);
-      box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.06);
-      box-sizing: border-box;
-    }
-    .tdoc-agent-bar .primary {
-      flex: 1;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      min-height: 44px;
-    }
-    body.tdoc-narrow:has(.tdoc-agent-bar) .tdoc-fab {
-      bottom: calc(68px + env(safe-area-inset-bottom, 0px));
-    }
+  .tdoc-bar .tdoc-send-agent-action:hover {
+    background: var(--td-accent-tint, #e8eeff);
+    color: var(--td-accent, #1652f0);
+  }
+  .tdoc-bar .tdoc-send-agent-badge {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--td-accent, #1652f0);
+    color: #fff;
+    font: 650 10px/16px inherit;
+    text-align: center;
+    box-sizing: border-box;
   }

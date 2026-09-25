@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { AppSwitch } from '../ui/switch.jsx';
 import { MentionField } from './mention-field.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
 
@@ -66,7 +65,6 @@ export function CommentComposer({
   sendToAgentDisabledReason = null,
 }) {
   const [text, setText] = useState('');
-  const [sendToAgent, setSendToAgent] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
 
   useEffect(() => {
@@ -90,10 +88,10 @@ export function CommentComposer({
     ? selection.label || 'Selected element'
     : `"${quoted.slice(0, 80)}${quoted.length > 80 ? '…' : ''}"`;
 
-  // One submit at a time. ⌘+Enter and the button both land here, and a second
+  // One submit at a time. ⌘+Enter and the buttons both land here, and a second
   // press while the first post is still in flight used to post a twin.
   const [busy, setBusy] = useState(false);
-  const submit = async () => {
+  const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
@@ -122,23 +120,30 @@ export function CommentComposer({
         value={text}
         people={mentionable}
         onChange={setText}
-        onSubmit={submit}
+        onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
       <div className="foot">
-        {canSendToAgent ? (
-          <span title={sendToAgentDisabledReason || 'Hand this comment to the following agent on submit'}>
-            <AppSwitch
-              id="tdoc-composer-agent"
-              checked={sendToAgent}
-              onCheckedChange={setSendToAgent}
-              label="@agent"
-            />
-          </span>
-        ) : null}
-        <span className="hint">{demo ? 'Demo — refresh clears it' : '⌘+Enter to submit'}</span>
-        <button className="submit" type="button" onClick={submit} disabled={busy}>
-          {busy ? 'Posting…' : (sendToAgent ? 'Comment + send' : 'Comment')}
-        </button>
+        <span className="hint">
+          {demo
+            ? 'Demo — refresh clears it'
+            : (canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : '⌘+Enter to submit')}
+        </span>
+        <div className="tdoc-composer-foot-actions">
+          {canSendToAgent ? (
+            <button
+              className="submit agent"
+              type="button"
+              onClick={() => submit(true)}
+              disabled={busy}
+              title={sendToAgentDisabledReason || 'Comment and hand to the following agent'}
+            >
+              {busy ? 'Posting…' : '@agent'}
+            </button>
+          ) : null}
+          <button className="submit" type="button" onClick={() => submit(false)} disabled={busy}>
+            {busy ? 'Posting…' : 'Comment'}
+          </button>
+        </div>
       </div>
     </div>
   );

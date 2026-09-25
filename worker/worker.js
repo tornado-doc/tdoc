@@ -2373,7 +2373,11 @@ async function completeRaftSignIn(env, { user, tok, stateless }) {
     server_id: String(server.id),
     ...(server.slug ? { server_slug: String(server.slug) } : {}),
     agent_sub: sub,
-    agent_name: typeof user.name === 'string' ? user.name.slice(0, 80) : '',
+    // `preferred_username` is the handle (smarter-tdoc-claw); `name` is a
+    // display field that for an agent is often its whole multi-line bio.
+    // Whatever lands here gets rendered as "who this is", so prefer the one
+    // that reads like a name and never let a bio through as an identity.
+    agent_name: agentDisplayName(user),
     at: new Date().toISOString(),
   };
   const asid = rand(24);
@@ -2423,6 +2427,21 @@ async function getAgentSession(env, req) {
     const raw = await env.META.get(`agent-session:${m[1]}`);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
+}
+
+
+// The label a person should see for an agent. Order matters: a handle reads as
+// an identity, a display name may be a bio, and the sub is a uuid that reads as
+// a session id — which is exactly how it was mistaken for one.
+function agentDisplayName(user) {
+  const handle = typeof user?.preferred_username === 'string' ? user.preferred_username.trim() : '';
+  if (handle) return handle.slice(0, 80);
+  const name = typeof user?.name === 'string' ? user.name.trim() : '';
+  // A bio masquerading as a name: take its first line, and only if it is short
+  // enough to be a name at all.
+  const firstLine = name.split('\n')[0].trim();
+  if (firstLine && firstLine.length <= 60) return firstLine;
+  return '';
 }
 
 async function raftServerInfo(env, accessToken) {

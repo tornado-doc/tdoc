@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Bot,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -10,6 +9,7 @@ import {
   FileDown,
   History,
   Share2,
+  Send,
   Star,
   Trash2,
   Upload,
@@ -131,15 +131,7 @@ export function DocumentPrimaryAction({
   config,
   onPublish,
   onShare,
-  onSendToAgent = null,
 }) {
-  if (onSendToAgent) {
-    return (
-      <button id="tdoc-send-agent-btn" type="button" className="primary tdoc-document-primary" aria-label="Send to agent" onClick={onSendToAgent}>
-        <Bot size={14} /> <span>Send to agent</span>
-      </button>
-    );
-  }
   return config.mode === 'local' ? (
     <button id="tdoc-publish-btn" type="button" className="primary tdoc-document-primary" aria-label="Publish" onClick={onPublish}>
       <Upload size={14} /> <span>Publish</span>
@@ -151,13 +143,33 @@ export function DocumentPrimaryAction({
   );
 }
 
+// Always-visible Send to agent entry (desktop + mobile). Badge = open comments
+// waiting to be handed over. Prefer a paper-plane over a bottom strip.
+export function DocumentSendAgentAction({ count = 0, onClick }) {
+  const label = count > 0 ? `Send to agent (${count} open)` : 'Send to agent';
+  return (
+    <button
+      id="tdoc-send-agent-btn"
+      type="button"
+      className="tdoc-send-agent-action"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <Send size={16} aria-hidden="true" />
+      {count > 0 ? (
+        <span className="tdoc-send-agent-badge">{count > 99 ? '99+' : count}</span>
+      ) : null}
+    </button>
+  );
+}
+
 export function DocumentOverflowActions({
   config,
   starred,
   onToggleStar,
   onPublish,
   onShare,
-  demotePrimary = false,
   onCopyMarkdown,
   onDuplicate,
   onDownload,
@@ -170,19 +182,11 @@ export function DocumentOverflowActions({
   return (
     <>
       {config.mode === 'local' ? (
-        <AppMenuItem
-          className={`tdoc-action-menu-item${demotePrimary ? '' : ' tdoc-mobile-overflow-only'}`}
-          data-action="publish"
-          onClick={onPublish}
-        >
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
           <Upload size={15} /> Publish
         </AppMenuItem>
       ) : (
-        <AppMenuItem
-          className={`tdoc-action-menu-item${demotePrimary ? '' : ' tdoc-mobile-overflow-only'}`}
-          data-action="share"
-          onClick={onShare}
-        >
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="share" onClick={onShare}>
           <Share2 size={15} /> Share
         </AppMenuItem>
       )}
