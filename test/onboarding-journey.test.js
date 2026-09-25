@@ -269,7 +269,7 @@ t('the exit is a line on a revised doc, owed until the link is copied', () => {
   // nothing to do with onboarding.
   assert(/showExitBanner = Boolean\([\s\S]{0,240}?onboardingRecord\.first_doc === config\.slug/.test(shell),
     'the closing banner belongs to the journey doc, not to every doc the account owns');
-  assert(shell.includes('(showExitBanner ? 36 : 0)'), 'the frame moves down under it');
+  assert(shell.includes('(showExitBanner ? exitBannerHeight : 0)'), 'the frame follows the banner when tutorial copy wraps');
   // Round-4: copying the link used to unmount the banner, shift the frame and
   // close the card — the doc looked comment-free the moment it was shared.
   assert(shell.includes("(!onboardingRecord.shared || sharedNow)") && shell.includes("'Link copied — send it to someone.'"), 'the banner stays as the confirmation');
