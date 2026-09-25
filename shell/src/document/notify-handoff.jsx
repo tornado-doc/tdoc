@@ -13,12 +13,30 @@ import {
   resendNotifyHandoff,
 } from './api.js';
 
+function opaqueAgentId(s) {
+  if (!s) return true;
+  // Raft `sub` is often a UUID / long hex — fine as a key, useless as a label.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
+  if (/^[0-9a-f]{24,}$/i.test(s)) return true;
+  return false;
+}
+
+function shortAgentName(name) {
+  // "handle — bio…" / "handle - bio…" → keep the handle side.
+  const cut = name.split(/\s+[—–-]\s+/)[0].trim();
+  return (cut || name).slice(0, 48);
+}
+
 function targetLabel(t) {
   if (!t) return '';
-  // Prefer the short stable handle; provider display names are often long bios.
-  const sub = (t.agent_sub || '').trim();
   const name = (t.agent_name || '').trim();
-  return sub || name || 'agent';
+  const sub = (t.agent_sub || '').trim();
+  // Never lead with a UUID `agent_sub`. Prefer a human name/handle; strip a
+  // trailing bio after an em dash when the provider stuffed both into name.
+  if (name && !opaqueAgentId(name)) return shortAgentName(name);
+  if (sub && !opaqueAgentId(sub)) return sub;
+  if (name) return shortAgentName(name);
+  return 'agent';
 }
 
 function targetKey(t) {
