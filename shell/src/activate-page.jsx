@@ -118,7 +118,7 @@ export function ActivatePage({ boot, preview = null }) {
 
   return (
     <main className="tdoc-status-page tdoc-activate-page">
-      <div className="tdoc-activate-stack">
+      <div className={`tdoc-activate-stack${!identity ? ' tdoc-activate-signin' : ''}`}>
       <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
       <h1>Approve Device Login</h1>
       {!identity ? (

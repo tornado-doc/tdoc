@@ -10,7 +10,7 @@ import './docs-hub.css';
 import './onboarding-preview.css';
 
 const identity = { name: 'Alex Morgan', email: 'alex.morgan@example.com' };
-const states = ['Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
+const states = ['Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
 
 function TutorialPreview({ state }) {
   const [agentState, setAgentState] = useState(state.replace('Tutorial ', ''));
@@ -50,7 +50,7 @@ export default function OnboardingPreview() {
   } else if (state.startsWith('Checklist')) {
     screen = <div className="docs-hub op-checklist"><OnboardingChecklist key={state} record={{started:true, agent_connected:true, first_doc:state === 'Checklist' ? null : 'my-first-tdoc', commented:state === 'Checklist after commenting'}} docs={state === 'Checklist' ? [] : [{slug:'my-first-tdoc',title:'My first tdoc'}]} /></div>;
   } else {
-    screen = <ActivatePage key={state} boot={{code:'ABCD-1234',identity:state === 'Sign in' ? null : state === 'Long account' ? {email:'alex.morgan.research-and-development@example.com'} : identity,oidcAuth:true}}
+    screen = <ActivatePage key={state} boot={{code:state === 'Sign in' ? '' : 'ABCD-1234',identity:['Sign in','Sign in with code'].includes(state) ? null : state === 'Long account' ? {email:'alex.morgan.research-and-development@example.com'} : identity,oidcAuth:true}}
       preview={{approved:state === 'Approved',pending:['Confirm device','Approving','Long account'].includes(state) ? {label:'Preview terminal'} : null,busy:state === 'Approving',error:state === 'Expired code' ? 'This code has expired. Ask your agent to connect again.' : ''}} />;
   }
   const keepInPreview = event => {

@@ -832,6 +832,8 @@ button.tdoc-pin {
   text-align: center;
 }
 .tdoc-activate-stack > img { align-self: center; }
+.tdoc-activate-signin { width: 100%; }
+.tdoc-activate-signin > button.primary { max-width: 320px; align-self: center; }
 .tdoc-activate-stack > h1 { margin: 12px 0 0; font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; }
 .tdoc-activate-page .tdoc-activate-grant { margin: 8px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--td-muted, #6b6a66); }
 .tdoc-activate-page .tdoc-activate-grant b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
