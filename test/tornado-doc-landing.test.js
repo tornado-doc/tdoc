@@ -98,8 +98,9 @@ t('names tdoc and tornado-doc', () => {
   assert(!html.includes('Tornado Dog'), 'old Tornado Dog name still present');
   assert(meta.title === 'Tornado: AI Native Docs', `meta title was ${meta.title}`);
   assert(meta.slug === 'tornado-doc', `meta slug was ${meta.slug}`);
-  // Hero mark is Julie's square stroke, not the old filled tornado path.
-  assert(/class="brand-mark"[^>]*viewBox="0 0 436 436"/.test(html), 'brand-mark is not the square stroke');
+  // Hero no longer duplicates the big stroke mark — the shell top bar already
+  // carries the logo, and the in-page brand block was visual noise.
+  assert(!/class="brand-mark"/.test(html), 'hero still has the large brand-mark block');
   assert(!/viewBox="201\.2 205\.2 597\.6 597\.6"/.test(html), 'old filled tornado mark still in landing');
 });
 
