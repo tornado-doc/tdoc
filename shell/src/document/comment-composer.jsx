@@ -29,7 +29,9 @@ function readViewport() {
 }
 
 export const COMPOSER_WIDTH = 320;
-export const COMPOSER_HEIGHT = 190;
+// Foot is two rows when @agent is available (switch + actions), so reserve
+// enough height that the keyboard clamp does not hide the switch on phones.
+export const COMPOSER_HEIGHT = 220;
 
 // Where the card goes, as arithmetic — no DOM, so the keyboard cases are unit
 // tested rather than staged in a browser that has no keyboard.
@@ -126,19 +128,24 @@ export function CommentComposer({
       />
       <div className="foot">
         {canSendToAgent ? (
-          <span title={sendToAgentDisabledReason || 'Hand this comment to the following agent on submit'}>
+          <div
+            className="tdoc-composer-agent-row"
+            title={sendToAgentDisabledReason || 'Hand this comment to the following agent on submit'}
+          >
             <AppSwitch
               id="tdoc-composer-agent"
               checked={sendToAgent}
               onCheckedChange={setSendToAgent}
               label="@agent"
             />
-          </span>
+          </div>
         ) : null}
-        <span className="hint">{demo ? 'Demo — refresh clears it' : '⌘+Enter to submit'}</span>
-        <button className="submit" type="button" onClick={submit} disabled={busy}>
-          {busy ? 'Posting…' : (sendToAgent ? 'Comment + send' : 'Comment')}
-        </button>
+        <div className="tdoc-composer-foot-actions">
+          <span className="hint">{demo ? 'Demo — refresh clears it' : '⌘+Enter to submit'}</span>
+          <button className="submit" type="button" onClick={submit} disabled={busy}>
+            {busy ? 'Posting…' : (sendToAgent ? 'Comment + send' : 'Comment')}
+          </button>
+        </div>
       </div>
     </div>
   );
