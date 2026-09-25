@@ -33,7 +33,7 @@ t('a comment whose words were rewritten marks the block that replaced them', () 
   // this, v2 showed a pin beside an unmarked paragraph.
   assert(probe.includes("best = { at: i + lb, len: lb, side: 'before' }") && probe.includes("best = { at: j, len: la, side: 'after' }") && probe.includes('candidate.tdocSide = best.side;'), 'the neighbourhood match does not say which side the words were on');
   assert(probe.includes('function blockForMoved(r)') && probe.includes("if (!block || block.matches(CONTENT_ROOT_SEL)) return null;"), 'no block finder, or it can paint the whole document');
-  assert(probe.includes("if (approximate && hlMoved && !c.deleted) { var mv = blockForMoved(r); if (mv) hlMoved.add(mv); }") && probe.includes("CSS.highlights.set('tdoc-anchor-moved', hlMoved);"), 'the replaced block is not painted');
+  assert(probe.includes("if (approximate && hlMoved && !c.deleted) { var mv = blockForMoved(r); if (mv) hlMoved.add(mv); }") && probe.includes("CSS.highlights.set('tdoc-anchor-moved', _movedHighlight);"), 'the replaced block is not painted');
   assert(chrome.includes('::highlight(tdoc-anchor-moved)'), 'no style for the moved mark');
 });
 
