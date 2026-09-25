@@ -27,6 +27,7 @@ const OFFLINE = [
   'agent-status-emoji.test.js',// agent verdict emoji constant must exist (v>=2 folds)
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
+  'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
