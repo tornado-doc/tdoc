@@ -25,7 +25,7 @@ const bundler = read('bin/tdoc-bundle');
     for (const retired of ['CHROME_MODULE', 'CHROME_JS', 'MANAGE_JS', 'SIGNIN_JS', 'ONBOARD_JS']) {
       if (bundler.includes(retired)) throw new Error(`legacy bundle input remains: ${retired}`);
     }
-    if (!bundler.includes('sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss]')) {
+    if (!bundler.includes('sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets)]')) {
       throw new Error('bundle hash does not cover the complete runtime input set');
     }
   });

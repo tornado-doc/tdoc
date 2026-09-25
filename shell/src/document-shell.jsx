@@ -48,6 +48,8 @@ import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
+import { parseDiagramScene } from './document/excalidraw-scene.mjs';
+import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { DebugBar } from './debug-bar.jsx';
 
 function useNarrowViewport() {
@@ -143,6 +145,8 @@ export function DocumentShell({ boot, config }) {
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
   const editorRef = useRef(null);
+  const diagramApplyRef = useRef(null);
+  const [diagram, setDiagram] = useState(null);
   const [composer, setComposer] = useState(null);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
@@ -354,6 +358,21 @@ export function DocumentShell({ boot, config }) {
 
   const bridge = useFrameBridge({
     'tdoc:selection': selectFromFrame,
+    'tdoc:diagramApplied': (message) => {
+      const pending = diagramApplyRef.current;
+      if (!pending || pending.id !== message.requestId) return;
+      clearTimeout(pending.timer);
+      diagramApplyRef.current = null;
+      if (message.ok) pending.resolve();
+      else pending.reject(new Error('The diagram could not be applied. Your edits are still in the editor.'));
+    },
+    'tdoc:diagramOpen': (message) => {
+      try {
+        if (typeof message.json !== 'string' || message.json.length > 2_000_000) throw new Error();
+        const scene = parseDiagramScene(message.json);
+        setDiagram({ id: message.id, title: message.title, scene });
+      } catch (error) { showToast(error.message || 'This diagram has invalid source data', true); }
+    },
     'tdoc:cleared': () => {
       if (!document.querySelector('.tdoc-popup textarea:focus')) setComposer(null);
       setOpenCommentId(null);
@@ -995,6 +1014,19 @@ export function DocumentShell({ boot, config }) {
         />
       </TopBar>
 
+      <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
+        onApply={async (json, svg) => {
+          if (!config.canEdit) return;
+          editor.changeMode('edit');
+          await new Promise((resolve, reject) => {
+            const id = crypto.randomUUID();
+            const timer = setTimeout(() => { diagramApplyRef.current = null; reject(new Error('The document did not respond. Try again.')); }, 5000);
+            diagramApplyRef.current = { id, timer, resolve, reject };
+            bridge.send({ type: 'tdoc:diagramApply', requestId: id, id: diagram.id, json, svg });
+          });
+          setDiagram(null);
+          showToast('Diagram applied. Save the document to publish a new version.');
+        }} />
       <OldVersionNotice value={boot.oldVersion} />
 
       {showExitBanner ? (
