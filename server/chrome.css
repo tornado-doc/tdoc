@@ -603,6 +603,12 @@
      disclosure for the secondary axes, and a de-emphasised danger row. */
   .tdoc-modal .tdoc-select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 10px; font: inherit; color: inherit; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
   .tdoc-modal .tdoc-select:focus { outline: none; border-color: var(--td-accent); }
+  /* Notify instruction is a real textarea — do not reuse .tdoc-select (dropdown arrow). */
+  .tdoc-modal textarea.tdoc-notify-instruction { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 48px; background: #fff; cursor: text; }
+  .tdoc-modal textarea.tdoc-notify-instruction:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-modal .tdoc-notify-recipient { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; color: #222; }
+  .tdoc-modal .tdoc-notify-recipient-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #f2f4f7; color: #555; flex: none; }
+  .tdoc-modal .tdoc-notify-recipient-opt { display: inline-flex; align-items: center; gap: 6px; }
   .tdoc-modal .tdoc-adv { margin: 16px 0 0; border-top: 1px solid #eee; padding-top: 6px; }
   .tdoc-modal .tdoc-adv > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #555; padding: 6px 0; }
   .tdoc-modal .tdoc-adv > summary:hover { color: #222; }

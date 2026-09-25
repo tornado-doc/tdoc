@@ -3,6 +3,7 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { Bot } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import {
@@ -14,7 +15,10 @@ import {
 
 function targetLabel(t) {
   if (!t) return '';
-  return t.agent_name || t.agent_sub || 'agent';
+  // Prefer the short stable handle; provider display names are often long bios.
+  const sub = (t.agent_sub || '').trim();
+  const name = (t.agent_name || '').trim();
+  return sub || name || 'agent';
 }
 
 function targetKey(t) {
@@ -77,6 +81,11 @@ function noAgentBoundReason(reason) {
     : null;
 }
 
+function defaultInstruction(commentIds) {
+  const n = Array.isArray(commentIds) ? commentIds.filter(Boolean).length : 0;
+  return n === 1 ? 'address this comment' : 'address my new comments';
+}
+
 export function NotifyHandoffPanel({
   slug,
   open,
@@ -86,7 +95,7 @@ export function NotifyHandoffPanel({
 }) {
   const targets = useNotifyTargets(slug, open);
   const [selected, setSelected] = useState(null);
-  const [instruction, setInstruction] = useState('');
+  const [instruction, setInstruction] = useState(() => defaultInstruction(commentIds));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [recent, setRecent] = useState([]);
@@ -94,9 +103,13 @@ export function NotifyHandoffPanel({
   useEffect(() => {
     if (!open) return;
     setSelected(targets.default);
-    setInstruction('');
-    setStatus('');
   }, [open, targets.default]);
+
+  useEffect(() => {
+    if (!open) return;
+    setInstruction(defaultInstruction(commentIds));
+    setStatus('');
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- only reset when the dialog opens
 
   useEffect(() => {
     if (!open || !targets.available) return undefined;
@@ -213,7 +226,22 @@ export function NotifyHandoffPanel({
             </p>
           ) : null}
 
-          {choices.length ? (
+          {choices.length === 1 ? (
+            <section className="manage-section">
+              <p className="tdoc-notify-recipient" aria-label="Recipient">
+                <span className="tdoc-notify-recipient-avatar" aria-hidden="true">
+                  <Bot size={16} strokeWidth={2} />
+                </span>
+                <span>
+                  Hand to
+                  {' '}
+                  <strong title={(choices[0].agent_name || '').trim() || undefined}>
+                    {targetLabel(choices[0])}
+                  </strong>
+                </span>
+              </p>
+            </section>
+          ) : choices.length > 1 ? (
             <section className="manage-section">
               <label className="field">Recipient</label>
               <SegmentedControl
@@ -221,7 +249,12 @@ export function NotifyHandoffPanel({
                 value={selectedKey}
                 options={choices.map((t) => ({
                   value: targetKey(t),
-                  label: targetLabel(t),
+                  label: (
+                    <span className="tdoc-notify-recipient-opt" title={(t.agent_name || '').trim() || undefined}>
+                      <Bot size={14} strokeWidth={2} aria-hidden="true" />
+                      {targetLabel(t)}
+                    </span>
+                  ),
                 }))}
                 onChange={(key) => {
                   const next = choices.find((t) => targetKey(t) === key);
@@ -238,7 +271,7 @@ export function NotifyHandoffPanel({
           <label className="field" htmlFor="tdoc-notify-instruction">Instruction</label>
           <textarea
             id="tdoc-notify-instruction"
-            className="tdoc-select"
+            className="tdoc-notify-instruction"
             rows={2}
             maxLength={500}
             placeholder="A line for the agent…"
@@ -254,5 +287,9 @@ export function NotifyHandoffPanel({
 }
 
 export async function sendOneCommentToAgent(slug, commentId) {
-  return postNotifyHandoff({ slug, comment_ids: [commentId], instruction: '' });
+  return postNotifyHandoff({
+    slug,
+    comment_ids: [commentId],
+    instruction: 'address this comment',
+  });
 }
