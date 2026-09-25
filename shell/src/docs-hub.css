@@ -409,16 +409,16 @@
    with no sidebar to put a rail in. */
 .onb-card {
   margin: 0 0 20px;
-  padding: 24px;
+  padding: 18px 20px 16px;
   border: 1px solid var(--td-line, #e8e7e3);
   border-radius: 18px;
   background: #fff;
 }
 .onb-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .onb-card h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.015em; }
-.onb-card header p { margin: 6px 0 0; line-height: 1.5; font-size: 13px; color: var(--td-muted, #6b6a66); font-variant-numeric: tabular-nums; }
-.onb-acts { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; align-self: flex-start; margin: -8px -8px 0 0; }
-.onb-acts button { border: 0; background: none; padding: 10px; min-width: 36px; min-height: 36px; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; color: #b0b0ab; display: flex; }
+.onb-card header p { margin: 4px 0 0; line-height: 1.5; font-size: 13px; color: var(--td-muted, #6b6a66); font-variant-numeric: tabular-nums; }
+.onb-acts { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; align-self: flex-start; margin: -6px -8px 0 0; }
+.onb-acts button { border: 0; background: none; padding: 5px; border-radius: 8px; cursor: pointer; color: #b0b0ab; display: flex; }
 .onb-acts button:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
 
 /* The track is thicker than a hairline now because something stands on it:
@@ -455,7 +455,7 @@
   padding: 4px 0; text-decoration: none; color: inherit;
 }
 .onb-card li a:hover .onb-label { text-decoration: underline; }
-.onb-label { min-width: 0; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.onb-label { font-size: 14px; line-height: 1.5; }
 .onb-card li a .onb-label { color: var(--td-accent, #1652f0); }
 .onb-card li.done .onb-label { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
 /* A finished row is still a link, so hovering must not trade its strike for an
@@ -598,11 +598,4 @@
   min-width: 30px; height: 20px; padding: 0 7px; border-radius: 999px;
   background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0);
   font-weight: 650; font-size: 12px; font-variant-numeric: tabular-nums;
-}
-
-@media (max-width: 480px) {
-  .onb-card { padding: 20px; }
-  .onb-acts button { min-width: 44px; min-height: 44px; }
-  .onb-card li a, .onb-card li .onb-row { grid-template-columns: 18px minmax(0, 1fr); gap: 12px; min-height: 56px; }
-  .onb-card .onb-thumb { display: none; }
 }

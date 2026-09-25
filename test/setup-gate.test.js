@@ -790,7 +790,12 @@ t('a finished gate stops asking, and the column fits a laptop', () => {
   // three seconds for as long as the tab stayed open.
   assert(gate.includes('if (!settled.current) timer = window.setTimeout(tick, POLL_MS);'), 'the loop ends when the answer arrives');
   assert(gate.includes("settled.current = state === 'done';"), 'and it reads the current state, not the one the effect closed over');
-  assert(gateCss.includes('min-height: 100svh;'), 'the gate follows the visible viewport without a fixed content height');
+  // The tallest this column gets -- the second ask with a subject typed into
+  // it -- was measured 32px past the bottom of an 800px window, which put the
+  // only button on the screen out of sight. A vh clamp cannot buy that back:
+  // the overflow is one fixed column against a shrinking window.
+  assert(/@media \(max-height: 870px\) \{[^}]*\.sg-mid \{ padding-top: 26px; \}/s.test(gateCss),
+    'a short window gets the top margin back');
 });
 
 t('one window, drawn from a real one', () => {
@@ -883,9 +888,24 @@ t('every replay is wound up before it is started', () => {
   assert(!/\btype: \[t0/.test(replay), 'and nothing re-types what the reader already typed');
 });
 
-t('onboarding keeps readable spacing instead of squeezing short windows', () => {
-  assert(!gateCss.includes('@media (max-height:'), 'height changes must not collapse the reading rhythm');
-  assert(gateCss.includes('.sg-heading') && gate.includes('className="sg-heading"'), 'the step and heading are a stable group');
+t('the one button on the gate is never below the fold', () => {
+  // Every row in this column has a height that cannot be argued with -- 537px
+  // of it at the tallest ask -- so the only room to find on a short window is
+  // the air: the gaps, the top margin, and the strip the internal bar reserves.
+  const base = gateCss.indexOf('.sg-col { width: 100%');
+  const collapse = gateCss.indexOf('@media (max-height: 870px)');
+  assert(base > 0 && collapse > 0, 'both rules exist');
+  // This was wrong once: the collapse sat ABOVE the base rule, so the base's
+  // own `gap: 18px` -- same specificity, later in the file -- won at every
+  // height, and a media query that was supposed to tighten the column measured
+  // 18px on the window it was written for.
+  assert(base < collapse, 'the base rule comes first, or the overrides do nothing');
+  for (const h of [870, 790, 710]) {
+    assert(gateCss.includes(`@media (max-height: ${h}px)`), `a step at ${h}px`);
+  }
+  const dbg = read('shell/src/debug-bar.css');
+  assert(/@media \(max-height: 710px\) \{ \.sg-split:has\(\.sg-debug\)/.test(dbg),
+    'and the internal strip yields too, rather than pushing the button off');
 });
 
 t('the checklist shows up for a walk that never opened /setup', () => {

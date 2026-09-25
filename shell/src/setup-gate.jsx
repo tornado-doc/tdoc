@@ -366,13 +366,13 @@ export function SetupGate({ boot, preview = null }) {
                     same numbers the row above a doc wears. Two screens saying
                     "step 2" about the same act is the only way a reader can
                     tell the gate and the list are one journey and not two. */}
-                <header className="sg-heading"><p className="sg-eyebrow">
+                <p className="sg-eyebrow">
                   <span className="sg-step-n">{step === 'doc' ? 2 : 1}</span>
                   Step {step === 'doc' ? 2 : 1} of 4
                 </p>
                 <h1 className="sg-h1">
                   {step !== 'doc' ? 'Connect your agent' : 'Make your first tdoc'}
-                </h1></header>
+                </h1>
               </>
             )}
 
