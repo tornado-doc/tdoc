@@ -616,8 +616,13 @@
   /* Notify instruction is a real textarea — do not reuse .tdoc-select (dropdown arrow). */
   .tdoc-modal textarea.tdoc-notify-instruction { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 48px; background: #fff; cursor: text; }
   .tdoc-modal textarea.tdoc-notify-instruction:focus { outline: none; border-color: var(--td-accent); }
-  .tdoc-modal .tdoc-notify-recipient { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; color: #222; }
-  .tdoc-modal .tdoc-notify-recipient-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #f2f4f7; color: #555; flex: none; }
+  .tdoc-modal .tdoc-notify-recipient { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; color: #222; }
+  .tdoc-modal .tdoc-notify-recipient-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #f2f4f7; color: #555; flex: none; overflow: hidden; }
+  .tdoc-modal .tdoc-notify-provider-icon { display: block; width: 16px; height: 16px; object-fit: contain; }
+  .tdoc-modal .tdoc-notify-provider-fallback { font-size: 12px; font-weight: 700; color: #555; }
+  .tdoc-modal .tdoc-notify-recipient-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .tdoc-modal .tdoc-notify-recipient-copy strong { font-weight: 650; }
+  .tdoc-modal .tdoc-notify-recipient-handle { font-size: 12px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-modal .tdoc-notify-recipient-opt { display: inline-flex; align-items: center; gap: 6px; }
   .tdoc-modal .tdoc-adv { margin: 16px 0 0; border-top: 1px solid #eee; padding-top: 6px; }
   .tdoc-modal .tdoc-adv > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #555; padding: 6px 0; }
