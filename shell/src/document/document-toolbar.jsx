@@ -157,14 +157,21 @@ export function DocumentWidthControl({ readerWidth, inline, onPlacementChange, o
       const title = left.querySelector('.doc-title');
       const naturalLeft = children.reduce((total, el) => {
         const css = getComputedStyle(el);
-        return total + el.getBoundingClientRect().width + parseFloat(css.marginLeft) + parseFloat(css.marginRight)
-          + (el === title ? Math.max(0, el.scrollWidth - el.clientWidth) : 0);
+        let width = el.getBoundingClientRect().width;
+        if (el === title && el.tagName !== 'INPUT') {
+          // Compact mode lets the title grow into all spare space. Measure
+          // its text, not that expanded box (or a clipped desktop box).
+          const range = document.createRange(); range.selectNodeContents(el);
+          width = range.getBoundingClientRect().width + parseFloat(css.paddingLeft) + parseFloat(css.paddingRight)
+            + parseFloat(css.borderLeftWidth) + parseFloat(css.borderRightWidth);
+        }
+        return total + width + parseFloat(css.marginLeft) + parseFloat(css.marginRight);
       }, 0) + Math.max(0, children.length - 1) * parseFloat(getComputedStyle(left).columnGap || 0);
       const required = button.getBoundingClientRect().width + parseFloat(getComputedStyle(button.parentElement).columnGap || 0);
       // Add our footprint back before comparing, so appearing/disappearing
       // cannot change the answer and cause an oscillating toolbar.
       const available = left.getBoundingClientRect().width - naturalLeft + (inline ? required : 0);
-      onPlacementChange(window.innerWidth > 700 && available >= required + 8);
+      onPlacementChange(available >= required + 8);
     };
     const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); };
     const resize = new ResizeObserver(schedule);

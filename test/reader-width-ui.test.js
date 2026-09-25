@@ -39,6 +39,10 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     await page.locator('.doc-title').evaluate((el,title)=>{el.textContent=title},originalTitle);
     await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
+    await page.setViewportSize({width:640,height:900});
+    await page.getByRole('button', {name:'Wide width',exact:true}).waitFor();
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),
+      'a compact toolbar with enough space can expose width without overflowing');
     await page.setViewportSize({width:1440,height:900});
     await page.getByRole('button', {name:'Wide width',exact:true}).focus();
     await page.keyboard.press('Enter');
