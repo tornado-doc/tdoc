@@ -1,6 +1,7 @@
 // Client-side share posters for a claimed handle. White big-type cards
-// (Feedback-page vibe), filled with tdoc.dev/@handle — no server render.
-// X header keeps the curly-arrow annotation from the hand-tuned banner.
+// filled with tdoc.dev/@handle — no server render.
+// X header matches the hand-tuned banner: Caveat annotation with white
+// stroke + blue fill, stroked curly arrow, blue @handle.
 
 export const POSTER_KINDS = [
   {
@@ -26,65 +27,147 @@ export const POSTER_KINDS = [
   },
 ];
 
+const ACCENT = '#1652f0';
+const INK = '#1a1a1a';
+const MUTED = '#6b6a66';
+const HAND_STACK = '"Caveat", "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive';
+const UI_STACK = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+
 function normalizeHandle(handle) {
   return String(handle || '').replace(/^@/, '').trim().toLowerCase();
+}
+
+let fontsPromise = null;
+
+/** Load Caveat so canvas paint matches the hand-tuned banner. */
+export function ensurePosterFonts() {
+  if (typeof document === 'undefined') return Promise.resolve();
+  if (fontsPromise) return fontsPromise;
+  fontsPromise = (async () => {
+    if (!document.getElementById('tdoc-poster-fonts')) {
+      const link = document.createElement('link');
+      link.id = 'tdoc-poster-fonts';
+      link.rel = 'stylesheet';
+      link.href = 'https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap';
+      document.head.appendChild(link);
+    }
+    try {
+      if (document.fonts && document.fonts.load) {
+        await document.fonts.load(`700 32px ${HAND_STACK}`);
+        await document.fonts.ready;
+      }
+    } catch {
+      /* system cursive fallback still paints */
+    }
+  })();
+  return fontsPromise;
+}
+
+if (typeof document !== 'undefined') {
+  ensurePosterFonts();
 }
 
 function fitText(ctx, text, maxWidth, maxPx, minPx) {
   let size = maxPx;
   while (size > minPx) {
-    ctx.font = `700 ${size}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.font = `700 ${size}px ${UI_STACK}`;
     if (ctx.measureText(text).width <= maxWidth) return size;
     size -= 2;
   }
-  ctx.font = `700 ${minPx}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.font = `700 ${minPx}px ${UI_STACK}`;
   return minPx;
 }
 
-/** Curly arrow from annotation down onto the handle URL (X banner). */
+/** Stroked curly arrow (hand-tuned SVG path, scaled to canvas). */
 function drawCurlyArrow(ctx, fromX, fromY, toX, toY) {
   ctx.save();
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.fillStyle = '#1a1a1a';
-  ctx.lineWidth = Math.max(3, (toY - fromY) * 0.04);
+  ctx.strokeStyle = ACCENT;
+  ctx.fillStyle = ACCENT;
+  ctx.lineWidth = Math.max(3.4, (toY - fromY) * 0.045);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  const midY = fromY + (toY - fromY) * 0.55;
-  const pull = (toX - fromX) * 0.35;
+
+  // Approximate the hand-tuned curve: from under annotation down-left onto @handle.
+  const c1x = fromX - (fromX - toX) * 0.15;
+  const c1y = fromY + (toY - fromY) * 0.35;
+  const c2x = toX + (fromX - toX) * 0.35;
+  const c2y = fromY + (toY - fromY) * 0.75;
   ctx.beginPath();
   ctx.moveTo(fromX, fromY);
-  ctx.bezierCurveTo(fromX + pull, fromY + 8, toX - pull * 0.2, midY, toX, toY);
+  ctx.bezierCurveTo(c1x, c1y, c2x, c2y, toX, toY);
   ctx.stroke();
 
-  // Arrowhead pointing down toward the URL.
-  const head = Math.max(10, ctx.lineWidth * 3.2);
+  // Arrowhead along the final tangent of the curve.
+  const tx = toX - c2x;
+  const ty = toY - c2y;
+  const len = Math.hypot(tx, ty) || 1;
+  const ux = tx / len;
+  const uy = ty / len;
+  const head = Math.max(12, ctx.lineWidth * 3.4);
+  const px = -uy;
+  const py = ux;
   ctx.beginPath();
   ctx.moveTo(toX, toY);
-  ctx.lineTo(toX - head * 0.55, toY - head);
-  ctx.lineTo(toX + head * 0.55, toY - head);
+  ctx.lineTo(toX - ux * head + px * head * 0.45, toY - uy * head + py * head * 0.45);
+  ctx.lineTo(toX - ux * head - px * head * 0.45, toY - uy * head - py * head * 0.45);
   ctx.closePath();
   ctx.fill();
   ctx.restore();
 }
 
-function drawAnnotation(ctx, width, height, urlY) {
-  const annSize = Math.max(18, Math.round(height * 0.055));
-  const subSize = Math.max(14, Math.round(height * 0.038));
-  const ax = width * 0.5;
-  const ay = height * 0.18;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#1a1a1a';
-  ctx.font = `600 ${annSize}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  ctx.fillText('my thoughts are here', ax, ay);
-  ctx.fillStyle = '#6b6a66';
-  ctx.font = `500 ${subSize}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  ctx.fillText('@ ai native doc', ax, ay + annSize * 1.15);
+/** Hand-font annotation with white stroke + blue fill (Excalidraw vibe). */
+function drawHandLine(ctx, text, x, y, size, rotateRad) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotateRad);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.font = `700 ${size}px ${HAND_STACK}`;
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+  ctx.lineWidth = Math.max(4, size * 0.14);
+  ctx.strokeStyle = '#ffffff';
+  ctx.strokeText(text, 0, 0);
+  ctx.fillStyle = ACCENT;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
 
-  // Arrow starts under the annotation, lands just above the URL — no overlap.
-  const fromY = ay + annSize * 1.15 + subSize * 0.9;
-  const toY = urlY - Math.max(18, height * 0.06);
-  drawCurlyArrow(ctx, ax + width * 0.08, fromY, ax, toY);
+function drawAnnotation(ctx, width, height, handleX, urlY) {
+  // Hand-tuned HTML: anno at left 900 / top 48 on a 1500×500 canvas.
+  const ax = width * 0.6;
+  const ay = height * 0.096;
+  const annSize = Math.max(28, Math.round(height * 0.064));
+  const lineGap = annSize * 1.2;
+  const tilt = (-5 * Math.PI) / 180;
+
+  drawHandLine(ctx, 'my thoughts are here', ax, ay, annSize, tilt);
+  drawHandLine(ctx, '@ ai native doc', ax, ay + lineGap, annSize, tilt);
+
+  // Arrow from under "here" toward the blue @handle.
+  const fromX = ax + annSize * 2.8;
+  const fromY = ay + lineGap * 1.55;
+  const toX = handleX;
+  const toY = urlY - Math.max(14, height * 0.04);
+  drawCurlyArrow(ctx, fromX, fromY, toX, toY);
+}
+
+function drawHandleUrl(ctx, width, cy, size, handle) {
+  const prefix = 'tdoc.dev/';
+  const suffix = `@${handle || 'you'}`;
+  ctx.font = `700 ${size}px ${UI_STACK}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const prefixW = ctx.measureText(prefix).width;
+  const suffixW = ctx.measureText(suffix).width;
+  const total = prefixW + suffixW;
+  const startX = (width - total) / 2;
+  ctx.fillStyle = INK;
+  ctx.fillText(prefix, startX, cy);
+  ctx.fillStyle = ACCENT;
+  ctx.fillText(suffix, startX + prefixW, cy);
+  // Midpoint of the @handle — arrow lands here.
+  return startX + prefixW + suffixW * 0.45;
 }
 
 /** @returns {HTMLCanvasElement} */
@@ -109,20 +192,28 @@ export function renderHandlePoster(handle, kindId) {
 
   // Slightly above center so X avatar / bottom crop does not eat the URL.
   // X header sits a bit lower to leave room for the annotation + arrow above.
-  const cy = kind.id === 'x-header' ? height * 0.58 : height * 0.48;
-  ctx.fillStyle = '#1a1a1a';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = `700 ${size}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  ctx.fillText(line, width / 2, cy);
+  const cy = kind.id === 'x-header' ? height * 0.52 : height * 0.48;
 
   if (kind.id === 'x-header') {
-    drawAnnotation(ctx, width, height, cy - size * 0.35);
-  }
+    const handleX = drawHandleUrl(ctx, width, cy, size, h);
+    drawAnnotation(ctx, width, height, handleX, cy - size * 0.35);
 
-  ctx.fillStyle = '#6b6a66';
-  ctx.font = `500 ${Math.max(14, Math.round(height * 0.035))}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  ctx.fillText('tdoc', width / 2, height - Math.round(height * 0.08));
+    ctx.fillStyle = MUTED;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `500 ${Math.max(18, Math.round(height * 0.048))}px ${UI_STACK}`;
+    ctx.fillText('writing, in public', width / 2, cy + size * 0.72);
+  } else {
+    ctx.fillStyle = INK;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `700 ${size}px ${UI_STACK}`;
+    ctx.fillText(line, width / 2, cy);
+
+    ctx.fillStyle = MUTED;
+    ctx.font = `500 ${Math.max(14, Math.round(height * 0.035))}px ${UI_STACK}`;
+    ctx.fillText('tdoc', width / 2, height - Math.round(height * 0.08));
+  }
 
   return canvas;
 }
