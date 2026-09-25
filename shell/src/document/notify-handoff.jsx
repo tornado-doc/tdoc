@@ -81,6 +81,11 @@ function noAgentBoundReason(reason) {
     : null;
 }
 
+function defaultInstruction(commentIds) {
+  const n = Array.isArray(commentIds) ? commentIds.filter(Boolean).length : 0;
+  return n === 1 ? 'address this comment' : 'address my new comments';
+}
+
 export function NotifyHandoffPanel({
   slug,
   open,
@@ -90,7 +95,7 @@ export function NotifyHandoffPanel({
 }) {
   const targets = useNotifyTargets(slug, open);
   const [selected, setSelected] = useState(null);
-  const [instruction, setInstruction] = useState('');
+  const [instruction, setInstruction] = useState(() => defaultInstruction(commentIds));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [recent, setRecent] = useState([]);
@@ -98,9 +103,13 @@ export function NotifyHandoffPanel({
   useEffect(() => {
     if (!open) return;
     setSelected(targets.default);
-    setInstruction('');
-    setStatus('');
   }, [open, targets.default]);
+
+  useEffect(() => {
+    if (!open) return;
+    setInstruction(defaultInstruction(commentIds));
+    setStatus('');
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- only reset when the dialog opens
 
   useEffect(() => {
     if (!open || !targets.available) return undefined;
@@ -278,5 +287,9 @@ export function NotifyHandoffPanel({
 }
 
 export async function sendOneCommentToAgent(slug, commentId) {
-  return postNotifyHandoff({ slug, comment_ids: [commentId], instruction: '' });
+  return postNotifyHandoff({
+    slug,
+    comment_ids: [commentId],
+    instruction: 'address this comment',
+  });
 }
