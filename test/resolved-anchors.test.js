@@ -20,7 +20,7 @@ const chrome = read('server/chrome.css');
 console.log('a resolved thread still marks its sentence');
 
 t('the shell sends every thread, flagging the ones the margin hides', () => {
-  assert(shell.includes("return comments.comments.map((comment) => (shown.has(comment.id) ? comment : { ...comment, hidden: true }));"), 'no hidden flag');
+  assert(shell.includes('const base = shown.has(comment.id) ? comment : { ...comment, hidden: true };'), 'no hidden flag');
   assert(shell.includes("bridge.send({ type: 'tdoc:anchors', comments: anchorsForFrame });"), 'the frame is not sent the full set');
 });
 t('the probe paints a hidden thread lightly, with no pin and no seat', () => {
@@ -47,11 +47,15 @@ t('a comment whose words were rewritten marks the block that replaced them', () 
   assert(chrome.includes('::highlight(tdoc-anchor-moved)'), 'no style for the moved mark');
 });
 
-t('lost seats are stepped so a rewrite pile does not collapse to one Y', () => {
-  assert(probe.includes('seatY - seated * seatStep') && probe.includes('var seated = 0'),
-    'lost seats must step up the page instead of sharing one seatY');
+t('a fully lost pin prefers the last known place over the foot of the page', () => {
+  assert(probe.includes('c.pinHint') && probe.includes('hint.docY') && probe.includes('hint.docHeight'),
+    'seat must scale a remembered pinHint into the new document height');
+  assert(probe.includes('seated: true'),
+    'fallback seats must be marked so the shell does not learn from them');
   assert(probe.includes('function findSurvivingFragment'),
-    'partial rewrites should try a surviving fragment of the original text before seating');
+    'partial rewrites should try a surviving fragment before seating');
+  assert(shell.includes('tdoc-pin-hints:') && shell.includes('pinHint: hint'),
+    'the shell must remember and pass pin hints into the frame');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

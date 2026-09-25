@@ -824,27 +824,25 @@
     // the data and nowhere on screen — while the phone drawer, which renders the
     // list directly, shows it.
     //
-    // The seat goes near the END of the document, not the top. At the top a stack
-    // of comments from an older version is the first thing beside the title,
-    // which reads as "these matter most"; at the end it reads as what it is —
-    // what the last revision left behind. Everything downstream is unchanged:
-    // clustering, the rail, the dashed unanchored card, and the Re-anchor that
-    // puts one back where it belongs.
+    // Prefer the shell's remembered position from a version where this comment
+    // still resolved (pinHint): scale that Y into the new document height. That
+    // is an estimate, so the card still reads unanchored — but it stays near
+    // where the thread used to live instead of jumping to the foot of the page
+    // after an ordinary rewrite. Only with no hint does the seat fall back to
+    // the end of the document (what a full delete-and-replace left behind).
     // Not the very last pixel: the rail culls a pin that falls outside the
     // viewport, and a seat pinned to the document's final row is never on
     // screen even when you scroll all the way down. Sit just above the end.
-    //
-    // Several lost seats must NOT share one Y. After a big rewrite many anchors
-    // miss both their text and their neighbours, and a single seatY collapsed
-    // them into one pile that looked like the comments had vanished. Step each
-    // new seat up the page so the rail can show them as a stack.
-    var seatY = Math.max(0, document.documentElement.scrollHeight - 160);
-    var seatStep = 36;
-    var seated = 0;
+    var docH = document.documentElement.scrollHeight;
+    var seatY = Math.max(0, docH - 160);
     function seat(c, extra) {
-      var y = Math.max(0, seatY - seated * seatStep);
-      seated++;
-      var pin = { id: c.id, docY: y, lost: true, login: (c.author && c.author.login) || null,
+      var y = seatY;
+      var hint = c && c.pinHint;
+      if (hint && Number(hint.docHeight) > 0 && typeof hint.docY === 'number') {
+        y = Math.round((Number(hint.docY) / Number(hint.docHeight)) * docH);
+        y = Math.max(0, Math.min(y, seatY));
+      }
+      var pin = { id: c.id, docY: y, lost: true, seated: true, login: (c.author && c.author.login) || null,
         avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null,
         resolved: c.status === 'applied', deleted: !!c.deleted };
       if (extra) for (var k in extra) pin[k] = extra[k];
