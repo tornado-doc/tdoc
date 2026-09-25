@@ -51,6 +51,7 @@ import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { HandoffBanner } from './document/handoff-banner.jsx';
 import { DebugBar } from './debug-bar.jsx';
 
 function useNarrowViewport() {
@@ -1075,6 +1076,16 @@ export function DocumentShell({ boot, config }) {
           showToast('Diagram applied. Save the document to publish a new version.');
         }} />
       <OldVersionNotice value={boot.oldVersion} />
+
+      {notifyEnabled ? (
+        <HandoffBanner
+          slug={config.slug}
+          comments={comments.comments}
+          onOpenPanel={openDocNotify}
+          onRefresh={() => comments.refresh()}
+          onToast={(text, error) => showToast(text, error)}
+        />
+      ) : null}
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>

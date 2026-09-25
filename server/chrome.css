@@ -748,6 +748,45 @@
     margin: 0 0 6px;
   }
   .tdoc-handoff-chip.is-resolved { color: #2f6b3a; background: #e7f3ea; }
+  .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
+
+  .tdoc-handoff-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 16px;
+    font-size: 13px;
+    color: var(--td-ink, #1a1a1a);
+    background: var(--td-accent-tint, #e8eeff);
+    border-bottom: 1px solid var(--td-line, #e6e4dc);
+    box-sizing: border-box;
+  }
+  .tdoc-handoff-banner.is-failed {
+    background: #f7ebe7;
+  }
+  .tdoc-handoff-banner-text { font-weight: 600; }
+  .tdoc-handoff-banner-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .tdoc-handoff-banner .text-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--td-accent, #1652f0);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+    padding: 0;
+  }
+  .tdoc-handoff-banner .text-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .tdoc-handoff-banner.is-failed .text-btn { color: #8a3b2b; }
 
   /* Mobile primary entry for doc-level send — bar is hidden on desktop where
      the top-bar primary button carries it. */
