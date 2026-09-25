@@ -1,7 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
-import { POSTER_KINDS, downloadHandlePoster, profileUrl } from './profile-posters.js';
+import {
+  POSTER_KINDS,
+  consumeShareAfterNav,
+  downloadHandlePoster,
+  markShareAfterNav,
+  posterPreviewDataUrl,
+  profileUrl,
+} from './profile-posters.js';
 import './docs-hub.css';
 
 const CURATE_WARN_KEY = 'tdoc.curateWarned';
@@ -127,10 +134,19 @@ export function Profile({ boot }) {
 
   useEffect(() => {
     if (!mine) return;
+    let open = false;
     try {
       const q = new URLSearchParams(window.location.search);
-      if (q.get('share') === '1') setModal('share');
+      open = q.get('share') === '1';
+      if (open) {
+        // Drop the flag so refresh does not keep re-opening.
+        q.delete('share');
+        const next = `${window.location.pathname}${q.toString() ? `?${q}` : ''}${window.location.hash || ''}`;
+        window.history.replaceState({}, '', next);
+      }
     } catch { /* ignore */ }
+    if (!open) open = consumeShareAfterNav();
+    if (open) setModal('share');
   }, [mine]);
 
   const setView = (view) => {
@@ -238,8 +254,12 @@ export function Profile({ boot }) {
         );
         return;
       }
+      markShareAfterNav();
       if (body.url) location.assign(body.url.includes('?') ? `${body.url}&share=1` : `${body.url}?share=1`);
-      else location.reload();
+      else {
+        setModal('share');
+        location.reload();
+      }
     } catch {
       setHandleStatus('Could not save handle.');
     } finally {
@@ -435,21 +455,31 @@ export function Profile({ boot }) {
           </div>
           {shareStatus ? <p className="manage-hint">{shareStatus}</p> : null}
           <ul className="profile-poster-list">
-            {POSTER_KINDS.map((kind) => (
-              <li key={kind.id}>
-                <div>
-                  <b>{kind.label}</b>
-                  <span>{kind.hint}</span>
-                </div>
-                <button
-                  type="button"
-                  className="text-btn"
-                  onClick={() => downloadHandlePoster(login, kind.id)}
-                >
-                  Download PNG
-                </button>
-              </li>
-            ))}
+            {POSTER_KINDS.map((kind) => {
+              const preview = posterPreviewDataUrl(login, kind.id);
+              return (
+                <li key={kind.id}>
+                  {preview ? (
+                    <img
+                      className="profile-poster-preview"
+                      src={preview}
+                      alt={`${kind.label} preview`}
+                    />
+                  ) : null}
+                  <div className="profile-poster-meta">
+                    <b>{kind.label}</b>
+                    <span>{kind.hint}</span>
+                    <button
+                      type="button"
+                      className="text-btn"
+                      onClick={() => downloadHandlePoster(login, kind.id)}
+                    >
+                      Download PNG
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </ProfileDialog>
       ) : null}

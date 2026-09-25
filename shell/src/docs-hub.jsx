@@ -9,6 +9,7 @@ import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
+import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
 const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred']];
@@ -235,6 +236,7 @@ function ClaimHandleDialog({ suggested, current, onClose }) {
         setBusy(false);
         return;
       }
+      markShareAfterNav();
       if (body.url) location.assign(body.url.includes('?') ? `${body.url}&share=1` : `${body.url}?share=1`);
       else location.reload();
     } catch {

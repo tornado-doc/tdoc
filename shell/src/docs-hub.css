@@ -213,15 +213,30 @@
   }
   .profile-poster-list li {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    align-items: flex-start;
     gap: 12px;
     padding: 12px 0;
     border-top: 1px solid var(--td-line);
   }
   .profile-poster-list li:last-child { border-bottom: 1px solid var(--td-line); }
+  .profile-poster-preview {
+    width: 148px;
+    flex: 0 0 auto;
+    border: 1px solid var(--td-line);
+    border-radius: 6px;
+    background: #fff;
+    display: block;
+  }
+  .profile-poster-meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
   .profile-poster-list b { display: block; font-weight: 600; font-size: 14px; }
-  .profile-poster-list span { display: block; font-size: 12px; color: var(--td-muted); margin-top: 2px; }
+  .profile-poster-list span { display: block; font-size: 12px; color: var(--td-muted); }
   .tdoc-modal textarea {
     width: 100%;
     box-sizing: border-box;
