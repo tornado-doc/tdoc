@@ -91,7 +91,7 @@ function Reactions({ item, me, onReact }) {
   );
 }
 
-function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
+function ReplyForm({ commentId, onReply, replyingTo, mentionable, demo = false }) {
   const [text, setText] = useState('');
   // One submit at a time, same as the comment composer: ⌘+Enter and the
   // button share the lock, so a second press while the first reply is still
@@ -115,7 +115,7 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable }) {
         // clicking Reply put a composer on screen and left the caret wherever
         // it was, so the first thing you do is click the thing you just opened.
         autoFocus
-        placeholder="Reply… (@ to notify someone)"
+        placeholder={demo ? 'Reply… try @tibo' : 'Reply… (@ to notify someone)'}
         value={text}
         people={mentionable}
         onChange={setText}
@@ -302,6 +302,7 @@ function ReplyCard({
   currentUser,
   isOwner,
   mentionable,
+  demo = false,
   replyTarget,
   onReplyTarget,
   editTarget,
@@ -335,6 +336,7 @@ function ReplyCard({
       currentUser={currentUser}
       isOwner={isOwner}
       mentionable={mentionable}
+      demo={demo}
       replyTarget={replyTarget}
       onReplyTarget={onReplyTarget}
       editTarget={editTarget}
@@ -431,7 +433,7 @@ function ReplyCard({
       </div>
 
       {replyTarget === reply.id ? (
-        <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} mentionable={mentionable} />
+        <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} mentionable={mentionable} demo={demo} />
       ) : null}
 
       {kidCards}
@@ -444,6 +446,7 @@ export function CommentCard({
   currentUser,
   isOwner = false,
   mentionable = [],
+  demo = false,
   unanchored,
   floating = false,
   position,
@@ -545,6 +548,7 @@ export function CommentCard({
             currentUser={currentUser}
             isOwner={isOwner}
             mentionable={mentionable}
+            demo={demo}
             replyTarget={replyTarget}
             onReplyTarget={setReplyTarget}
             editTarget={editTarget}
@@ -592,6 +596,7 @@ export function CommentCard({
         onActivate(comment.id);
       }}
     >
+      {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
       {comment.status === 'applied' ? (
         <span className="tdoc-resolved-chip">
           {comment.resolved_by
@@ -744,7 +749,7 @@ export function CommentCard({
       {threadBlock}
 
       {replyTarget === comment.id ? (
-        <ReplyForm commentId={comment.id} onReply={submitReply} mentionable={mentionable} />
+        <ReplyForm commentId={comment.id} onReply={submitReply} mentionable={mentionable} demo={demo} />
       ) : null}
     </article>
   );

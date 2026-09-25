@@ -325,8 +325,9 @@ export function DocumentShell({ boot, config }) {
 
   const mentionable = useMentionable(
     config.slug,
-    Boolean(config.identity?.login),
+    Boolean(config.identity?.login) && !config.demoComments,
     comments.comments.length,
+    { demo: !!config.demoComments },
   );
 
   const selectFromFrame = useCallback((selection) => {
@@ -1067,6 +1068,7 @@ export function DocumentShell({ boot, config }) {
           currentUser={config.identity?.login || 'anon'}
           isOwner={Boolean(config.isOwner)}
           mentionable={mentionable}
+          demo={!!config.demoComments}
           openCommentId={openCommentId}
           expandReplies={deepReply}
           onOpenChange={setDrawerOpen}
@@ -1092,6 +1094,7 @@ export function DocumentShell({ boot, config }) {
           currentUser={config.identity?.login || 'anon'}
           isOwner={Boolean(config.isOwner)}
           mentionable={mentionable}
+          demo={!!config.demoComments}
           cardPosition={cardPosition}
           expandReplies={deepReply}
           onOpenComment={(id) => {
@@ -1114,6 +1117,7 @@ export function DocumentShell({ boot, config }) {
         <CommentComposer
           selection={composer}
           mentionable={mentionable}
+          demo={!!config.demoComments}
           onSubmit={postComment}
           onClose={closeComposer}
         />

@@ -55,7 +55,7 @@ export function composerPosition(rect, viewport) {
   return { top, left };
 }
 
-export function CommentComposer({ selection, onSubmit, onClose, mentionable = [] }) {
+export function CommentComposer({ selection, onSubmit, onClose, mentionable = [], demo = false }) {
   const [text, setText] = useState('');
   const [viewport, setViewport] = useState(readViewport);
 
@@ -96,19 +96,22 @@ export function CommentComposer({ selection, onSubmit, onClose, mentionable = []
       onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="head">
+        {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
         <span className="h">{preview}</span>
         <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
       </div>
       <MentionField
         autoFocus
-        placeholder="What should change? Type @ to notify someone"
+        placeholder={demo
+          ? 'What should change? Try tagging @tibo'
+          : 'What should change? Type @ to notify someone'}
         value={text}
         people={mentionable}
         onChange={setText}
         onSubmit={submit}
       />
       <div className="foot">
-        <span className="hint">⌘+Enter to submit</span>
+        <span className="hint">{demo ? 'Demo — refresh clears it' : '⌘+Enter to submit'}</span>
         <button className="submit" type="button" onClick={submit} disabled={busy}>{busy ? 'Posting…' : 'Comment'}</button>
       </div>
     </div>

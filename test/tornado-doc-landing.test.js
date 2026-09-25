@@ -348,6 +348,10 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage must not receive the document Share/Copy/Download actions');
   assert(/demo: !!config\.demoComments/.test(documentShell),
     'homepage shell must wire demoComments into useComments');
+  assert(/Try tagging @tibo/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
+    'demo composer placeholder should invite tagging @tibo');
+  assert(/tdoc-demo-chip/.test(fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8')),
+    'demo chip style must exist');
 });
 
 console.log('tdoc.dev / release payload');
