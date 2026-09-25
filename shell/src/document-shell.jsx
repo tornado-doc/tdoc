@@ -201,13 +201,6 @@ export function DocumentShell({ boot, config }) {
     if (new URLSearchParams(location.search).get('revised')) return true;
     try { return localStorage.getItem(RESOLVED_KEY) === '1'; } catch { return false; }
   });
-  const toggleResolved = useCallback(() => {
-    setShowResolved((on) => {
-      const next = !on;
-      try { localStorage.setItem(RESOLVED_KEY, next ? '1' : '0'); } catch {}
-      return next;
-    });
-  }, []);
 
   // `returnTo` lets a caller land the person somewhere specific after the
   // sign-in — the onboarding door they chose — instead of back where they were.
@@ -493,10 +486,28 @@ export function DocumentShell({ boot, config }) {
     [bridge.layout.docHeight, bridge.layout.pins],
   );
 
-  // Every thread goes to the frame. The ones the margin is not showing —
-  // resolved, with the switch off — go flagged `hidden`: no pin, a lighter
-  // mark on their sentence, and a click on it opens the thread (the open
-  // card is always shown, whatever the switch says).
+  const toggleResolved = useCallback(() => {
+    const next = !showResolved;
+    setShowResolved(next);
+    try { localStorage.setItem(RESOLVED_KEY, next ? '1' : '0'); } catch {}
+    if (!next) {
+      // An explicit deep link may reveal one resolved thread while the filter
+      // is off. Switching it off again dismisses that exception as well.
+      setDeepTarget(null);
+      if (commentsById.get(openCommentId)?.status === 'applied') {
+        setOpenCommentId(null);
+        bridge.send({ type: 'tdoc:focusAnchor', id: null });
+      }
+      const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
+      if (openCluster?.items.some(({ comment }) => commentsById.get(comment.id)?.status === 'applied')) {
+        setOpenClusterKey(null);
+      }
+      if (commentsById.get(reanchorId)?.status === 'applied') setReanchorId(null);
+    }
+  }, [bridge.send, clusters, commentsById, openClusterKey, openCommentId, reanchorId, showResolved]);
+
+  // Hidden threads remain in the payload for identity, but the frame must
+  // exclude them from pins, highlights and pointer hit-testing alike.
   const anchorsForFrame = useMemo(() => {
     const shown = new Set(shownComments.map((comment) => comment.id));
     return comments.comments.map((comment) => (shown.has(comment.id) ? comment : { ...comment, hidden: true }));

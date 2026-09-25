@@ -36,8 +36,9 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Run offline tests
         run: npm test
-      - name: Reader width and layout regressions
+      - name: Reader and resolved visibility regressions
         run: |
+          node test/resolved-visibility-ui.test.js
           node test/reader-width-ui.test.js
           node test/reader-layout.test.js
       # Manifest schema guard: plugin.json + marketplace.json must match the

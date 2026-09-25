@@ -1,9 +1,6 @@
 #!/usr/bin/env node
-// A resolved thread leaves the margin when the Resolved switch is off — and
-// used to take its highlight with it, so the sentence read as if nobody had
-// ever said anything about it. It keeps a lighter mark now, with no pin, and
-// a click on the sentence opens the thread. Source-shape guards; the
-// behaviour is in the browser suites.
+// Hidden threads must leave no frame affordance. Browser coverage lives in
+// resolved-visibility-ui.test.js; these guards retain the anchor fallback contracts.
 const fs = require('fs');
 const path = require('path');
 
@@ -17,25 +14,18 @@ const shell = read('shell/src/document-shell.jsx');
 const probe = read('server/frame-probe.js');
 const chrome = read('server/chrome.css');
 
-console.log('a resolved thread still marks its sentence');
+console.log('resolved visibility and anchor fallback contracts');
 
 t('the shell sends every thread, flagging the ones the margin hides', () => {
   assert(shell.includes("return comments.comments.map((comment) => (shown.has(comment.id) ? comment : { ...comment, hidden: true }));"), 'no hidden flag');
   assert(shell.includes("bridge.send({ type: 'tdoc:anchors', comments: anchorsForFrame });"), 'the frame is not sent the full set');
 });
-t('the probe paints a hidden thread lightly, with no pin and no seat', () => {
-  assert(probe.includes("if (c.hidden) { if (hlResolved && !c.deleted && !approximate) hlResolved.add(r); return; }"), 'hidden text anchors are not painted lightly');
-  assert(probe.includes("if (!c.anchor) return c.hidden ? undefined : seat(c);") && probe.includes("if (!r) return c.hidden ? undefined : seat(c);"), 'a hidden thread would take a seat');
-  assert(probe.includes("CSS.highlights.set('tdoc-anchor-resolved', hlResolved);"), 'the resolved highlight is never set');
-  assert(/::highlight\(tdoc-anchor-resolved\)\{background:' \+ resolved/.test(probe) && chrome.includes('::highlight(tdoc-anchor-resolved)'), 'the resolved highlight has no colour');
-});
-t('a hidden thread is still a click target', () => {
-  // The target is registered before the hidden early-return, so anchorIdAtPoint
-  // finds it and the shell opens the card — which is shown whatever the switch says.
-  const i = probe.indexOf('_anchorTargets[c.id] = { range: r };');
-  const j = probe.indexOf('if (c.hidden) { if (hlResolved', i);
-  assert(i > 0 && j > i && j - i < 400, 'the target is registered after the hidden return');
-  assert(shell.includes('|| comment.id === openCommentId'), 'the open card is not shown regardless of the switch');
+t('hidden threads are excluded before any targets or highlights are registered', () => {
+  const start = probe.indexOf('(comments || []).forEach(function (c)');
+  const skip = probe.indexOf('if (!c || c.hidden) return;', start);
+  const target = probe.indexOf('_anchorTargets[c.id]', start);
+  assert(skip > start && skip < target, 'hidden thread can register an anchor');
+  assert(!probe.includes('hlResolved'), 'hidden resolved highlights remain');
 });
 
 t('a comment whose words were rewritten marks the block that replaced them', () => {

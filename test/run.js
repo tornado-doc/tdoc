@@ -100,7 +100,7 @@ const OFFLINE = [
   'composer-position.test.js', // where the card goes when a keyboard is up
   'reader-patch-drift.test.js', // the phone table rule reaches both runtimes
   'dismiss-rule.test.js',     // the dismiss-first rule keeps its three exceptions
-  'resolved-anchors.test.js', // a resolved thread still marks its sentence
+  'resolved-anchors.test.js', // resolved visibility and anchor fallbacks
 ];
 
 // Require network (live Cloudflare) or a browser (playwright). Not run in the
@@ -108,6 +108,7 @@ const OFFLINE = [
 const GATED = [
   'onboarding.test.js',  // doctor flow
   'publish.test.js',     // dry-publish + (gated) real publish
+  'resolved-visibility-ui.test.js', // real resolved filter, highlights and pointer behavior
   'reader-width-ui.test.js', // actual shell toggle and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'responsive.test.js',  // playwright
