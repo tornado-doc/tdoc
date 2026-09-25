@@ -22,6 +22,7 @@ const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RUNTIME_JS_PATH__";
 const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`;
 const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";
 const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;
+const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
 
@@ -5406,6 +5407,11 @@ export default {
           'X-Content-Type-Options': 'nosniff',
         },
       });
+    }
+    if (SHELL_RUNTIME_EXTRA_ASSETS && typeof SHELL_RUNTIME_EXTRA_ASSETS === 'object' && Object.hasOwn(SHELL_RUNTIME_EXTRA_ASSETS, p) && (method === 'GET' || method === 'HEAD')) {
+      const asset = SHELL_RUNTIME_EXTRA_ASSETS[p];
+      const body = method === 'HEAD' ? null : asset.binary ? Uint8Array.from(atob(asset.body), (c) => c.charCodeAt(0)) : asset.body;
+      return new Response(body, { headers: { 'Content-Type': asset.type, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' } });
     }
     if (p === '/favicon.svg' && method === 'GET') {
       return new Response(TDOC_FAVICON_SVG, {

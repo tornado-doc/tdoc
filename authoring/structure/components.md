@@ -228,3 +228,35 @@ works. A toggle is `:checked` plus sibling selectors; motion is CSS
 `@keyframes` with a `prefers-reduced-motion` guard; SVG styling goes in a
 `<style>` *inside* the `<svg>`. Anything that genuinely needs to compute belongs
 in a sandboxed widget island.
+
+
+## Optional Excalidraw artifact
+
+The provider loads the official `@excalidraw/excalidraw` React editor on demand.
+Do not add React, script tags, an editor iframe, or a CDN import to author HTML.
+
+```html
+<figure id="value-flow" data-tdoc-artifact="Value flow"
+  aria-label="Value flow" data-tdoc-excalidraw="HTML-ATTRIBUTE-ESCAPED SCENE JSON">
+  <div class="diagram-box" data-tdoc-diagram-snapshot>
+    <!-- the SVG exported from the same scene -->
+  </div>
+  <figcaption>What the diagram shows.</figcaption>
+</figure>
+```
+
+Give every figure a unique stable ID. Store valid Excalidraw JSON (`type`,
+`version`, `elements`, `appState`, `files`) in the attribute, escaping `&`, `"`,
+`<` and `>` for HTML. Source limit: 2 MB and 5,000 elements. This first version
+supports shapes, text, lines, arrows and freehand drawings, not embedded web
+pages or image elements. Use native text/container and arrow bindings so labels
+and connectors follow their shapes. Include a responsive, accessible SVG
+snapshot even when no JavaScript is available. Keep scene and snapshot in sync.
+After manual edits, update the saved scene while preserving element IDs and
+positions rather than regenerating a layout that discards those edits.
+
+The source and snapshot live in the same HTML version: existing write, publish,
+pull, duplicate and download flows carry both. Owners choose Apply to document
+then Save, using the normal permission and base-version conflict checks. Readers
+may edit a temporary copy and download it; they cannot apply it to the source
+document. Comments attach to the figure, not individual Excalidraw elements.

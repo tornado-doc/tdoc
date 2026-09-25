@@ -11,8 +11,8 @@ a tradeoff in it, **draw it** — prose is the connective tissue between visuals
 not the main body. Aim for a visual roughly every screenful, wherever in the
 doc the material earns one.
 
-Everything here is buildable as inline SVG or CSS — the host runs no author
-JS, so no chart library. An SVG chart is also a commentable artifact, which is
+The host runs no author JavaScript. Use SVG/CSS for inline visuals; optional
+provider-owned editors can also supply a static SVG snapshot. An SVG chart is also a commentable artifact, which is
 the point of tdoc. Draw honestly: real numbers, labeled axes, no chartjunk.
 
 ## Match the visual to the data
@@ -37,6 +37,11 @@ Most non-trivial docs carry **several different types**, not one repeated. A
 competitor analysis wants stat tiles + a positioning map + a comparison matrix
 + maybe a bar chart. A technical design wants an architecture diagram + a
 sequence + a metrics row. Reach for the variety the content earns.
+
+## Excalidraw
+
+The official Excalidraw editor is available. Its scene and SVG snapshot format
+is documented in `structure/components.md`.
 
 ## The style owns the look, not the choice
 

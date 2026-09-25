@@ -36,6 +36,11 @@ const runtimeJsPath = '/' + runtimeEntry.file;
 const runtimeCssPath = '/' + runtimeEntry.css[0];
 const runtimeJs = fs.readFileSync(path.join(skill, 'server/runtime', runtimeEntry.file), 'utf8');
 const runtimeCss = fs.readFileSync(path.join(skill, 'server/runtime', runtimeEntry.css[0]), 'utf8');
+const runtimeAssets = require(path.join(skill, 'server/runtime-assets.js')).loadRuntimeAssets().all;
+const extraAssets = Object.fromEntries(runtimeAssets.filter((asset) => ![runtimeJsPath, runtimeCssPath].includes(asset.path)).map((asset) => {
+  const binary = asset.type === 'font/woff2';
+  return [asset.path, { type: asset.type, binary, body: fs.readFileSync(asset.file, binary ? 'base64' : 'utf8') }];
+}));
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -50,7 +55,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss].join('\0'));
+const bundleSha = sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets)].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -78,6 +83,8 @@ replaced = mustReplace(replaced, /const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RU
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`;/, 'const SHELL_RUNTIME_JS = ' + JSON.stringify(runtimeJs) + ';', 'SHELL_RUNTIME_JS');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";/, 'const SHELL_RUNTIME_CSS_PATH = ' + JSON.stringify(runtimeCssPath) + ';', 'SHELL_RUNTIME_CSS_PATH');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;/, 'const SHELL_RUNTIME_CSS = ' + JSON.stringify(runtimeCss) + ';', 'SHELL_RUNTIME_CSS');
+
+replaced = mustReplace(replaced, /const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";/, 'const SHELL_RUNTIME_EXTRA_ASSETS = ' + JSON.stringify(extraAssets) + ';', 'SHELL_RUNTIME_EXTRA_ASSETS');
 
 let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,

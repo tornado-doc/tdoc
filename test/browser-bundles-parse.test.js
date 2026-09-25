@@ -62,7 +62,11 @@ t('the built React shell runtime is valid JavaScript', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'server/runtime/manifest.json'), 'utf8'));
   const entry = Object.values(manifest).find((item) => item && item.isEntry);
   if (!entry || !entry.file) throw new Error('shell runtime manifest has no entry');
-  new vm.Script(fs.readFileSync(path.join(root, 'server/runtime', entry.file), 'utf8'), { filename: entry.file });
+  // Vite emits ES modules (including shared exports for lazy editors).
+  // Parse every emitted JS asset as a module without executing browser code.
+  for (const asset of require('../server/runtime-assets.js').loadRuntimeAssets().all.filter((a) => a.type.startsWith('text/javascript'))) {
+    require('child_process').execFileSync(process.execPath, ['--input-type=module', '--check'], { input: fs.readFileSync(asset.file), stdio: ['pipe', 'pipe', 'pipe'] });
+  }
 });
 
 console.log(`\n${pass} passed, ${fail} failed.`);
