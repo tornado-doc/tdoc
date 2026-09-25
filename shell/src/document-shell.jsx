@@ -820,6 +820,65 @@ export function DocumentShell({ boot, config }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [handoff.state, handoff.copiedAt, config.slug, config.version, commentsRefresh]);
 
+  // Connected-App handoffs: while any comment is still `sent`, refresh so the
+  // waiting tags and banner catch agent replies / resolve without a manual reload.
+  // No outstanding sent → no requests. Hidden tab → pause. Back off when quiet.
+  const outstandingHandoffs = useMemo(
+    () => comments.comments.some((c) => c && !c.deleted && c.handoff_status === 'sent'),
+    [comments.comments],
+  );
+  const commentsRef = useRef(comments.comments);
+  commentsRef.current = comments.comments;
+  useEffect(() => {
+    if (!outstandingHandoffs || !notifyEnabled) return undefined;
+    let cancelled = false;
+    let timer = null;
+    let delay = 8000;
+    let unchanged = 0;
+    let lastFingerprint = '';
+    const fingerprint = () => (commentsRef.current || [])
+      .filter((c) => c && c.handoff_status === 'sent')
+      .map((c) => `${c.id}:${c.handoff_at || ''}:${(c.replies || []).length}`)
+      .sort()
+      .join('|');
+    const tick = async () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        timer = window.setTimeout(tick, delay);
+        return;
+      }
+      try {
+        await commentsRefresh();
+      } catch { /* next tick */ }
+      if (cancelled) return;
+      const next = fingerprint();
+      if (next === lastFingerprint) {
+        unchanged += 1;
+        delay = Math.min(8000 * (2 ** Math.min(unchanged, 3)), 60000);
+      } else {
+        unchanged = 0;
+        delay = 8000;
+        lastFingerprint = next;
+      }
+      timer = window.setTimeout(tick, delay);
+    };
+    lastFingerprint = fingerprint();
+    timer = window.setTimeout(tick, delay);
+    const onVis = () => {
+      if (document.visibilityState !== 'visible' || cancelled) return;
+      unchanged = 0;
+      delay = 8000;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(tick, 500);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [outstandingHandoffs, notifyEnabled, commentsRefresh]);
+
   const answered = comments.comments.filter((c) => c.status === 'applied').length;
   // Copied in this session: the banner stays, as the confirmation, so the
   // frame does not jump and the pins and the open card stay where they are.
