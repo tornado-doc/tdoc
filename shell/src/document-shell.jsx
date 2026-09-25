@@ -1005,6 +1005,7 @@ export function DocumentShell({ boot, config }) {
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
               onShare={() => setDialog({ type: 'share' })}
+              onSendToAgent={notifyEnabled ? openDocNotify : null}
             />
           </>
         )}
@@ -1015,7 +1016,7 @@ export function DocumentShell({ boot, config }) {
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
             onShare={() => setDialog({ type: 'share' })}
-            onSendToAgent={notifyEnabled ? openDocNotify : null}
+            demotePrimary={notifyEnabled}
             onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
             onDuplicate={duplicate}
             onDownload={download}
@@ -1231,13 +1232,20 @@ export function DocumentShell({ boot, config }) {
 
 
       {notifyEnabled ? (
-        <NotifyHandoffPanel
-          slug={config.slug}
-          open={notifyOpen}
-          commentIds={notifyCommentIds || []}
-          onClose={() => setNotifyOpen(false)}
-          onSent={async () => { await comments.refresh(); }}
-        />
+        <>
+          <div className="tdoc-agent-bar">
+            <button type="button" className="primary" onClick={openDocNotify}>
+              Send to agent
+            </button>
+          </div>
+          <NotifyHandoffPanel
+            slug={config.slug}
+            open={notifyOpen}
+            commentIds={notifyCommentIds || []}
+            onClose={() => setNotifyOpen(false)}
+            onSent={async () => { await comments.refresh(); }}
+          />
+        </>
       ) : null}
 
       <PublishDialog

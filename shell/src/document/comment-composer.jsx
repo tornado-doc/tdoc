@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { AppSwitch } from '../ui/switch.jsx';
 import { MentionField } from './mention-field.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
 
@@ -125,15 +126,14 @@ export function CommentComposer({
       />
       <div className="foot">
         {canSendToAgent ? (
-          <button
-            type="button"
-            className={`tdoc-agent-toggle${sendToAgent ? ' is-on' : ''}`}
-            aria-pressed={sendToAgent}
-            title={sendToAgentDisabledReason || 'Hand this comment to the following agent on submit'}
-            onClick={() => setSendToAgent((v) => !v)}
-          >
-            @agent
-          </button>
+          <span title={sendToAgentDisabledReason || 'Hand this comment to the following agent on submit'}>
+            <AppSwitch
+              id="tdoc-composer-agent"
+              checked={sendToAgent}
+              onCheckedChange={setSendToAgent}
+              label="@agent"
+            />
+          </span>
         ) : null}
         <span className="hint">{demo ? 'Demo — refresh clears it' : '⌘+Enter to submit'}</span>
         <button className="submit" type="button" onClick={submit} disabled={busy}>
