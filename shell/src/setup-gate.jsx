@@ -77,8 +77,8 @@ export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;
 // than the doc, and "the one about me" pointed at something with a pronoun
 // nobody had introduced -- which one? -- so neither could be read at a glance.
 export const DOC_CHOICES = [
-  { id: 'own', label: 'Write about anything I want', sub: 'I name the topic. My agent writes it.' },
-  { id: 'portrait', label: 'Write about how I use AI', sub: 'I choose the traces. My agent writes it.' },
+  { id: 'own', label: 'My own topic', sub: 'Choose what to write about.' },
+  { id: 'portrait', label: 'How I use AI', sub: 'Choose which activity to share.' },
 ];
 // Kept as the export it always was: the placeholder line still answers "what
 // do I paste" for anyone who lands here with no choice made.
@@ -439,15 +439,15 @@ export function SetupGate({ boot, preview = null }) {
                 <ol className="sg-steps">
                   {step === 'doc' ? (
                     <>
-                      <li>Paste it into your agent.</li>
-                      <li>It writes the page and publishes it as you.</li>
-                      <li>The doc turns up here on its own. No need to refresh.</li>
+                      <li>Paste into your agent.</li>
+                      <li>Your agent writes and publishes to your account.</li>
+                      <li>Your doc appears here automatically.</li>
                     </>
                   ) : (
                     <>
-                      <li>Paste it into your agent.</li>
-                      <li>Approve the request when it opens in your browser.</li>
-                      <li>Your agent shows up here on its own. No need to refresh.</li>
+                      <li>Paste into your agent.</li>
+                      <li>Approve the request in your browser.</li>
+                      <li>Connection status updates automatically.</li>
                     </>
                   )}
                 </ol>
@@ -467,7 +467,7 @@ export function SetupGate({ boot, preview = null }) {
                   ) : null}
                   {state === 'stuck' ? (
                     <div className="sg-status stuck">
-                      <div className="head">Still nothing. Ask your agent to check itself:</div>
+                      <div className="head">Ask your agent to check the connection:</div>
                       <div className="sg-doctor">
                         <code>{DOCTOR_PROMPT}</code>
                         <button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy</button>
@@ -481,23 +481,23 @@ export function SetupGate({ boot, preview = null }) {
                         <path d="M8.2 12.3l2.6 2.6 5-5.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                       {step === 'doc'
-                        ? <div><b>Published.</b> <span className="found">Your first tdoc is live.</span></div>
-                        : <div><b>Connected.</b> <span className="found">Your agent can publish as you.</span></div>}
+                        ? <div><b>Published.</b></div>
+                        : <div><b>Connected.</b></div>}
                     </div>
                   ) : null}
                 </div>
 
                 <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
-                  {step === 'doc' ? 'Open it' : 'Continue'}
+                  {step === 'doc' ? 'Open doc' : 'Continue'}
                 </a>
-                <p className="sg-account"><a href="/me">I’ll do this later</a></p>
+                <p className="sg-account"><a href="/me">Later</a></p>
               </>
             ) : (
               <>
-                <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in to start</button>
+                <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
                 <p className="sg-account">
                   {boot?.oidcAuth
-                    ? 'Signing in creates your account. There is no separate sign-up.'
+                    ? 'New here? Signing in creates your account.'
                     : 'Sign-in is not configured on this host.'}
                 </p>
               </>

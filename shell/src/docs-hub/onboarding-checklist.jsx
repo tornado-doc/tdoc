@@ -57,8 +57,8 @@ export function onboardingSteps(record, firstDocHref) {
     // came for: the question already on the page, or the card carrying the
     // line for the agent. Landing on the bare URL left the last two rows
     // pointing at the same wall of text.
-    { id: 'comment', label: 'Leave a comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref && `${firstDocHref}?step=comment` },
-    { id: 'revise', label: 'Tell your agent to fix the comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
+    { id: 'comment', label: 'Comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref && `${firstDocHref}?step=comment` },
+    { id: 'revise', label: 'Ask your agent to fix comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
   ];
   // Locked until everything above it is done. The first unfinished row is the
   // only one anybody can act on.

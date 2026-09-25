@@ -59,7 +59,7 @@ export function SignInDialog({ open, onOpenChange, onSuccess, preview = null }) 
         if (cancelled) return;
         setDevice(result);
         interval = Math.max(5, Number(result.interval) || 5);
-        setStatus('Open GitHub to approve, then return to this tab.');
+        setStatus('Approve on GitHub, then return here.');
         copyText(result.user_code).then(setCopied);
         poll(result.device_code);
       } catch (startError) {

@@ -228,10 +228,10 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(!/#1a73e8/i.test(read('server/chrome.css')), 'no second accent blue in the reader chrome');
   // Closed is one row — the name and Copy; the line and the sentence are behind the chevron.
   assert(card.includes('Let your agent fix it') && card.includes("{handoff.open ? (\n              <div className=\"tdoc-handoff-line\">\n                <code>{handoff.line}</code>\n                {copyButton}") && card.includes('{!handoff.open ? copyButton : null}'), 'the line shows only when open');
-  assert(card.includes("{handoff.open || handoff.state !== 'idle' ? (") && card.includes('Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.'), 'the sentence shows when open; the wait shows either way');
+  assert(card.includes("{handoff.open || handoff.state !== 'idle' ? (") && card.includes('Paste into your agent to address each comment and publish an update.'), 'the sentence shows when open; the wait shows either way');
   assert(shell.includes("const onboardingDoc = Boolean(onboardingRecord?.first_doc && onboardingRecord.first_doc === config.slug && !onboardingRecord.shared);") && shell.includes('const handoffOpen = handoffTouched ? handoffPref : (onboardingDoc || handoffPref);'), 'open on the onboarding doc; elsewhere the last choice holds');
   assert(shell.includes("localStorage.setItem(HANDOFF_OPEN_KEY, next ? '1' : '0')"), 'the choice is remembered');
-  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && !card.includes("handoff.state === 'replied'") && card.includes('Still waiting — did you paste it into your agent?'), 'the four states — no doc-level "replied" on a thread');
+  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading…') && !card.includes("handoff.state === 'replied'") && card.includes('Check your agent’s window.'), 'the four states — no doc-level "replied" on a thread');
   // Three conditions, and it used to have one. Without the first it arrived on
   // the seeded card that is still asking them to say something, carrying the
   // line for handing their answer to an agent above a Reply button they had not
@@ -257,7 +257,7 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
 });
 
 t('the exit is a line on a revised doc, owed until the link is copied', () => {
-  assert(/`Your agent answered \$\{answered\} \$\{answered === 1 \? 'comment' : 'comments'\} in v\$\{version\}\. Send it to a real reader:`/.test(shell), 'the line says what happened and what to do');
+  assert(/`Answered \$\{answered\} \$\{answered === 1 \? 'comment' : 'comments'\} in v\$\{version\}\. Share it\.`/.test(shell), 'the line says what happened and what to do');
   assert(!shell.includes('Now get a real one'), 'no line a stranger has to decode');
   assert(/\.tdoc-onboard-banner \{\s*position: relative;/.test(read('shell/src/ui/ui.css')), 'in the flow, never floating over the card');
   assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started\s*&& onboardingRecord\.first_doc === config\.slug\s*&& \(!onboardingRecord\.shared \|\| sharedNow\)/.test(shell),
@@ -272,7 +272,7 @@ t('the exit is a line on a revised doc, owed until the link is copied', () => {
   assert(shell.includes('(showExitBanner ? exitBannerHeight : 0)'), 'the frame follows the banner when tutorial copy wraps');
   // Round-4: copying the link used to unmount the banner, shift the frame and
   // close the card — the doc looked comment-free the moment it was shared.
-  assert(shell.includes("(!onboardingRecord.shared || sharedNow)") && shell.includes("'Link copied — send it to someone.'"), 'the banner stays as the confirmation');
+  assert(shell.includes("(!onboardingRecord.shared || sharedNow)") && shell.includes("'Link copied.'"), 'the banner stays as the confirmation');
   assert(shell.includes('className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}'), 'the banner does not close the card');
   // A reply on the seeded card is the gesture too; the answered thread that
   // opens on v2 is the person's own.
@@ -294,7 +294,7 @@ t('the two arrivals open the right card and say what happened', () => {
   assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
   // A version published without a resolved thread still arrived; the count
   // going to zero must not turn the arrival into a report of failure.
-  assert(shell.includes('`v${version} is published. Send it to a real reader:`'), 'the exit line drops the count rather than printing zero');
+  assert(shell.includes('`v${version} published. Share it.`'), 'the exit line drops the count rather than printing zero');
   assert(shell.includes('`Your agent published v${config.version}.`'), 'and so does the arrival toast');
   // No "Your doc →" pill in the landing's top bar: the way back is the hub
   // (the owner asked for it gone).
