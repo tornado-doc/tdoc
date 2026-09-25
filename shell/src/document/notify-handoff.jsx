@@ -142,6 +142,10 @@ function defaultInstruction(commentIds) {
   return n === 1 ? 'address this comment' : 'address my new comments';
 }
 
+function isDefaultInstruction(text) {
+  return text === 'address this comment' || text === 'address my new comments';
+}
+
 export function NotifyHandoffPanel({
   slug,
   open,
@@ -326,6 +330,11 @@ export function NotifyHandoffPanel({
             placeholder="A line for the agent…"
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
+            onFocus={(e) => {
+              // Default is a starter, not locked copy — select it so the first
+              // key replaces instead of forcing a delete-then-type.
+              if (isDefaultInstruction(instruction)) e.target.select();
+            }}
           />
 
           <p className="status" role="status">{status || '\u00a0'}</p>
