@@ -33,12 +33,13 @@ jobs:
       - name: Install layout preflight browser
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium webkit
       - name: Run offline tests
         run: npm test
       - name: Reader and resolved visibility regressions
         run: |
           node test/resolved-visibility-ui.test.js
+          TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
           node test/reader-width-ui.test.js
           node test/reader-layout.test.js
       # Manifest schema guard: plugin.json + marketplace.json must match the

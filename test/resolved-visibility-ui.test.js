@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 const { resolveTarget } = require('./helpers/fixture-server');
-const { chromium } = require('playwright');
+const { chromium, webkit } = require('playwright');
 
 const resolvedText = 'Some prose so the article column has real height for layout tests.';
 const openText = 'A second section with its own heading';
@@ -8,7 +8,8 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
 
 (async () => {
   const target = await resolveTarget();
-  const browser = await chromium.launch({ headless: true });
+  const engine = process.env.TDOC_TEST_BROWSER === 'webkit' ? webkit : chromium;
+  const browser = await engine.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
     const errors = [];
@@ -118,6 +119,20 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     await toggle();
     await toggle();
     await page.locator('.tdoc-margin-comment').waitFor({ state: 'detached' });
+    // Inspect the rendered pixels as well as the registry: older Safari can
+    // retain a painted highlight after CSS.highlights.set replaces its ranges.
+    await page.setViewportSize({ width: 1600, height: 1600 });
+    await page.goto(target.url);
+    const paintFrame = await getFrame();
+    await paintFrame.waitForFunction(() => CSS.highlights.get('tdoc-anchor')?.size === 1);
+    const code = paintFrame.locator('pre');
+    const before = await code.screenshot();
+    await toggle();
+    await paintFrame.waitForFunction(() => CSS.highlights.get('tdoc-anchor-moved')?.size > 0);
+    assert(!before.equals(await code.screenshot()), 'resolved moved highlight must actually paint');
+    await toggle();
+    await paintFrame.waitForFunction(() => !CSS.highlights.get('tdoc-anchor-moved')?.size);
+    assert(before.equals(await code.screenshot()), 'resolved moved highlight must disappear from pixels, not only the registry');
     assert.deepEqual(errors, []);
     console.log('  ✓ Resolved hides paint, targets and selected cards; restores on demand; persists on mobile; deep links still work');
   } finally { await browser.close(); await target.stop(); }
