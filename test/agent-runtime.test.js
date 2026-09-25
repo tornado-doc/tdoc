@@ -149,6 +149,14 @@ t('worker TDOC_LOGO_SVG matches assets/tdoc_logo.svg', () => {
   assert(m[1] === asset, 'worker SVG drifted from assets/tdoc_logo.svg');
 });
 
+t('worker TDOC_LOGO_PNG_B64 matches assets/tdoc_logo.png', () => {
+  const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', 'tdoc_logo.png'));
+  const m = src.match(/const TDOC_LOGO_PNG_B64 = '([^']+)';/);
+  assert(m, 'TDOC_LOGO_PNG_B64 missing from worker.js');
+  assert(Buffer.from(m[1], 'base64').equals(asset), 'worker PNG drifted from assets/tdoc_logo.png');
+  assert(fs.existsSync(path.join(__dirname, '..', 'assets', 'tdoc_logo-v2.png')), 'assets/tdoc_logo-v2.png missing (OG cache-bust)');
+});
+
 t('worker GROK_LOGO_SVG matches assets/grok_logo.svg', () => {
   const assetPath = path.join(__dirname, '..', 'assets', 'grok_logo.svg');
   assert(fs.existsSync(assetPath), 'assets/grok_logo.svg missing');

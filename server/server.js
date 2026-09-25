@@ -966,7 +966,7 @@ function shellDocument(slug, version, nonce, reqUrl) {
       ? 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.'
       : (description || 'A local tdoc.'),
     url: pageUrl,
-    image: `${new URL(pageUrl).origin}/tdoc_logo.png`,
+    image: `${new URL(pageUrl).origin}/tdoc_logo-v2.png`,
     type: isLanding ? 'website' : 'article',
   } : null;
   return SHELL.shellHtml({
@@ -1347,8 +1347,9 @@ const server = http.createServer(async (req, res) => {
       'X-Content-Type-Options': 'nosniff',
     });
   }
-  if (p === '/tdoc_logo.png') {
-    const logoPath = path.join(__dirname, '..', 'assets', 'tdoc_logo.png');
+  if (p === '/tdoc_logo.png' || p === '/tdoc_logo-v2.png') {
+    const name = p === '/tdoc_logo-v2.png' ? 'tdoc_logo-v2.png' : 'tdoc_logo.png';
+    const logoPath = path.join(__dirname, '..', 'assets', name);
     if (!fs.existsSync(logoPath)) return send(res, 404, 'not found');
     return send(res, 200, fs.readFileSync(logoPath), {
       'Content-Type': 'image/png',

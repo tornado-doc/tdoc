@@ -267,6 +267,14 @@ function waitReady(port, ms = 5000) {
     if (r.body[0] !== 0x89 || r.body[1] !== 0x50) throw new Error('body is not PNG');
   });
 
+  await t('GET /tdoc_logo-v2.png is the cache-busted OG raster', async () => {
+    const r = await rawGet('/tdoc_logo-v2.png');
+    if (r.status !== 200) throw new Error(`status ${r.status}`);
+    const ct = String(r.headers['content-type'] || '');
+    if (!ct.includes('image/png')) throw new Error(`content-type ${ct}`);
+    if (r.body[0] !== 0x89 || r.body[1] !== 0x50) throw new Error('body is not PNG');
+  });
+
   // Cleanup: kill the spawned server + remove the temp dir.
   shutdown();
 
