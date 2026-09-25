@@ -617,8 +617,7 @@
   .tdoc-modal textarea.tdoc-notify-instruction { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 48px; background: #fff; cursor: text; }
   .tdoc-modal textarea.tdoc-notify-instruction:focus { outline: none; border-color: var(--td-accent); }
   .tdoc-modal .tdoc-notify-recipient { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; color: #222; }
-  .tdoc-modal .tdoc-notify-recipient-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #f2f4f7; color: #555; flex: none; overflow: hidden; }
-  .tdoc-modal .tdoc-notify-provider-icon { display: block; width: 16px; height: 16px; object-fit: contain; }
+  .tdoc-modal .tdoc-notify-recipient-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: #141111; color: #555; flex: none; overflow: hidden; }
   .tdoc-modal .tdoc-notify-provider-fallback { font-size: 12px; font-weight: 700; color: #555; }
   .tdoc-modal .tdoc-notify-recipient-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .tdoc-modal .tdoc-notify-recipient-copy strong { font-weight: 650; }
