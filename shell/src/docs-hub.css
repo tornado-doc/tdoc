@@ -227,6 +227,10 @@
     background: #fff;
     display: block;
   }
+  .profile-poster-preview--loading {
+    height: 49px;
+    background: var(--td-surface-2);
+  }
   .profile-poster-meta {
     flex: 1 1 auto;
     min-width: 0;

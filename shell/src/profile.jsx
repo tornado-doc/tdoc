@@ -5,6 +5,7 @@ import {
   POSTER_KINDS,
   consumeShareAfterNav,
   downloadHandlePoster,
+  ensurePosterFonts,
   markShareAfterNav,
   posterPreviewDataUrl,
   profileUrl,
@@ -130,6 +131,7 @@ export function Profile({ boot }) {
   const [busy, setBusy] = useState(false);
   const [pickView, setPickView] = useState(readPickView);
   const [shareStatus, setShareStatus] = useState('');
+  const [posterFontsReady, setPosterFontsReady] = useState(false);
   const identity = boot.identity || null;
 
   useEffect(() => {
@@ -148,6 +150,14 @@ export function Profile({ boot }) {
     if (!open) open = consumeShareAfterNav();
     if (open) setModal('share');
   }, [mine]);
+
+  useEffect(() => {
+    let cancelled = false;
+    ensurePosterFonts().then(() => {
+      if (!cancelled) setPosterFontsReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const setView = (view) => {
     setPickView(view);
@@ -456,7 +466,7 @@ export function Profile({ boot }) {
           {shareStatus ? <p className="manage-hint">{shareStatus}</p> : null}
           <ul className="profile-poster-list">
             {POSTER_KINDS.map((kind) => {
-              const preview = posterPreviewDataUrl(login, kind.id);
+              const preview = posterFontsReady ? posterPreviewDataUrl(login, kind.id) : '';
               return (
                 <li key={kind.id}>
                   {preview ? (
@@ -465,14 +475,19 @@ export function Profile({ boot }) {
                       src={preview}
                       alt={`${kind.label} preview`}
                     />
-                  ) : null}
+                  ) : (
+                    <div className="profile-poster-preview profile-poster-preview--loading" aria-hidden="true" />
+                  )}
                   <div className="profile-poster-meta">
                     <b>{kind.label}</b>
                     <span>{kind.hint}</span>
                     <button
                       type="button"
                       className="text-btn"
-                      onClick={() => downloadHandlePoster(login, kind.id)}
+                      onClick={async () => {
+                        await ensurePosterFonts();
+                        downloadHandlePoster(login, kind.id);
+                      }}
                     >
                       Download PNG
                     </button>
