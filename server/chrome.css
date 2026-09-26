@@ -220,6 +220,9 @@
   .tdoc-cc-icon:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 1px; }
   .tdoc-margin-comment .author { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .tdoc-margin-comment .author img { width: 24px; height: 24px; border-radius: 50%; }
+  .tdoc-author-profile { display: inline-flex; flex-shrink: 0; border-radius: 50%; }
+  .tdoc-author-profile:hover { box-shadow: 0 0 0 2px var(--td-accent); }
+  .tdoc-author-profile:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
   .tdoc-margin-comment .author .login { font-weight: 600; color: #111; font-size: 13px; }
   .tdoc-margin-comment .author .anon { color: #888; font-style: italic; }
   /* Agent identity — runtime logo when we know the host (Grok / Claude /

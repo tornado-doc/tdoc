@@ -111,12 +111,23 @@ function Author({ author, timestamp }) {
   }
 
   const avatar = avatarFor(author);
+  const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
+    && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
+    ? author.profile_url : null;
   const title = author.kind === 'agent' && author.principal?.terminal
     ? author.principal.terminal
     : undefined;
   return (
     <div className={`author${author.kind === 'agent' ? ' tdoc-agent-author' : ''}`} title={title}>
-      {avatar ? <img src={avatar} alt="" /> : null}
+      {avatar ? (profileUrl ? (
+        <a className="tdoc-author-profile" href={profileUrl}
+          aria-label={`View ${authorLine(author)}'s public profile`}
+          title={`View ${authorLine(author)}'s public profile`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}>
+          <img src={avatar} alt="" />
+        </a>
+      ) : <img src={avatar} alt="" />) : null}
       <span className="tdoc-cc-who">
         <span className="login">{authorLine(author)}</span>
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}

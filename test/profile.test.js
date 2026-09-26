@@ -500,6 +500,54 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(sess.account_id, 'session should gain account_id');
   });
 
+  await t('comment and reply avatars resolve current public handles without rewriting history', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const alice = await seedAccount(env, 'alice');
+    await seedAccount(env, 'bob');
+    const emailAccount = await seedEmailAccount(env, 'reader@example.com');
+    await seedDoc(env, 'profile-comments', { owner: 'alice', access: { visibility: 'public' } });
+    const author = (login, extra = {}) => ({ login, avatar_url: 'https://example.com/avatar.png', ...extra });
+    const legacy = [{
+      id: 'c_profile', version: 1, text: 'A comment', status: 'open',
+      anchor: { kind: 'text', text: 'Opening paragraph' },
+      created: '2026-01-01T00:00:00Z', author: author('alice'),
+      replies: [
+        { id: 'r_email', text: 'Email author', author: author('email:reader@example.com') },
+        { id: 'r_bob', text: 'GitHub fallback', author: author('bob') },
+        { id: 'r_none', text: 'No account', author: author('unregistered') },
+        { id: 'r_agent', text: 'Agent', author: author('alice', { kind: 'agent', profile_url: '/@bob' }) },
+        { id: 'r_system', text: 'System', author: author('bob', { kind: 'system' }) },
+      ].map(r => ({ ...r, parent_id: 'c_profile', created: '2026-01-01T01:00:00Z' })),
+    }];
+    await env.META.put('comments:profile-comments', JSON.stringify(legacy));
+    const claim = async (accountId, handle) => {
+      await seedPins(env, accountId, [], { handle });
+      await env.META.put(`hosted-handle:${handle}`, JSON.stringify({ account_id: accountId }));
+    };
+    await claim(alice, 'alice-public');
+    await claim(emailAccount, 'reader-public');
+    const get = async () => (await worker.fetch(req('/api/comments?slug=profile-comments&version=1'), env, {})).json();
+    const [comment] = await get();
+    assert(comment.author.profile_url === '/@alice-public', 'comment uses claimed handle');
+    assert(comment.replies[0].author.profile_url === '/@reader-public', 'email reply uses public handle');
+    assert(comment.replies[1].author.profile_url === '/@bob', 'GitHub fallback remains reachable');
+    for (const reply of comment.replies.slice(2)) assert(!reply.author.profile_url, 'no links for absent/system/agent profiles');
+    for (const person of [comment.author, ...comment.replies.map(r => r.author)]) {
+      if (person.profile_url) assert((await worker.fetch(req(person.profile_url), env, {})).status === 200, 'link resolves to a public page');
+    }
+    await env.META.delete('hosted-handle:alice-public');
+    await claim(alice, 'alice-renamed');
+    assert((await get())[0].author.profile_url === '/@alice-renamed', 'old comments follow current handle');
+    const history = await (await worker.fetch(req('/api/comments?slug=profile-comments&version=all'), env, {})).json();
+    assert(!history[0].author.profile_url, 'presentation metadata is not written to the event log');
+    assert(await env.META.get('comments:profile-comments') === JSON.stringify(legacy), 'legacy stored content remains untouched');
+    await env.META.put('hosted-handle:alice-renamed', JSON.stringify({ account_id: 'another-account' }));
+    assert(!(await get())[0].author.profile_url, 'never link an actor to another account');
+    const selfHosted = await worker.fetch(req('/api/comments?slug=profile-comments&version=1'),
+      { ...env, TDOC_HOSTED_REGISTRATION: '0' }, {});
+    assert(!(await selfHosted.json())[0].replies[1].author.profile_url, 'BYOK does not acquire broken hosted profile links');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
