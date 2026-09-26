@@ -54,6 +54,9 @@ import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { HandoffBanner } from './document/handoff-banner.jsx';
+import { HandoffDetailsPanel } from './document/handoff-details.jsx';
+import { summarizeHandoffSurfaces } from './document/handoff-state.js';
+import { markThreadSeen, readSeenMap } from './document/thread-seen.js';
 import { DebugBar } from './debug-bar.jsx';
 
 function useNarrowViewport() {
@@ -164,7 +167,9 @@ export function DocumentShell({ boot, config }) {
   // Connected-App notify panel (doc-level send). Separate from onboarding
   // copy-paste handoff below.
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
+  const [seenMap, setSeenMap] = useState(() => readSeenMap(config.slug));
   const [sendToAgentBusy, setSendToAgentBusy] = useState(false);
   const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
@@ -451,6 +456,18 @@ export function DocumentShell({ boot, config }) {
     bridge.send({ type: 'tdoc:focusAnchor', id, scroll });
   }, [bridge.send]);
 
+  useEffect(() => {
+    setSeenMap(readSeenMap(config.slug));
+  }, [config.slug]);
+
+  // Opening a thread clears its unread pin dot (mail/chat semantics).
+  useEffect(() => {
+    if (!openCommentId) return;
+    const comment = comments.comments.find((c) => c.id === openCommentId);
+    if (!comment) return;
+    if (markThreadSeen(config.slug, comment)) setSeenMap(readSeenMap(config.slug));
+  }, [openCommentId, comments.comments, config.slug]);
+
   // Everything, always: an id has to resolve to its comment even when that
   // comment is hidden, or a deep link would open nothing.
   const commentsById = useMemo(
@@ -706,14 +723,16 @@ export function DocumentShell({ boot, config }) {
     setNotifyCommentIds(ids);
     setNotifyOpen(true);
   };
-  // Badge + default selection = not yet handed off (handoff_status note).
-  // status≠applied alone is wrong: agent replies leave status open while
-  // handoff is already sent/resolved, so the count stayed inflated (#Send).
-  const pendingHandoff = (c) => c && !c.deleted && c.status !== 'applied' && c.handoff_status === 'note';
+  // Badge + send panel = comments ready to hand off (never sent, or human
+  // wrote again after the last handoff). Not "open" and not "sent".
+  const handoffBuckets = useMemo(
+    () => summarizeHandoffSurfaces(shownComments),
+    [shownComments],
+  );
   const openDocNotify = () => {
-    const openIds = shownComments.filter(pendingHandoff).map((c) => c.id);
-    openNotifyPanel(openIds);
+    openNotifyPanel(handoffBuckets.ready.map((c) => c.id));
   };
+  const openHandoffDetails = () => setHandoffDetailsOpen(true);
   const removeAnchor = async () => {
     if (!(await attempt(() => comments.moveAnchor(reanchorId, { kind: 'none' }))).ok) return;
     setReanchorId(null);
@@ -1075,7 +1094,7 @@ export function DocumentShell({ boot, config }) {
             />
             {notifyEnabled ? (
               <DocumentSendAgentAction
-                count={shownComments.filter(pendingHandoff).length}
+                count={handoffBuckets.ready.length}
                 onClick={openDocNotify}
               />
             ) : null}
@@ -1154,11 +1173,8 @@ export function DocumentShell({ boot, config }) {
 
       {notifyEnabled ? (
         <HandoffBanner
-          slug={config.slug}
           comments={comments.comments}
-          onOpenPanel={openDocNotify}
-          onRefresh={() => comments.refresh()}
-          onToast={(text, error) => showToast(text, error)}
+          onOpenDetails={openHandoffDetails}
         />
       ) : null}
 
@@ -1264,6 +1280,7 @@ export function DocumentShell({ boot, config }) {
         <DesktopCommentLayer
           clusters={clusters}
           commentsById={commentsById}
+          seenMap={seenMap}
           frameScrollY={bridge.layout.scrollY}
           frameTop={frameTop}
           pinLeft={pinLeft}
@@ -1324,6 +1341,18 @@ export function DocumentShell({ boot, config }) {
           commentIds={notifyCommentIds || []}
           onClose={() => setNotifyOpen(false)}
           onSent={async () => { await comments.refresh(); }}
+        />
+      ) : null}
+
+      {notifyEnabled ? (
+        <HandoffDetailsPanel
+          slug={config.slug}
+          open={handoffDetailsOpen}
+          comments={shownComments}
+          onClose={() => setHandoffDetailsOpen(false)}
+          onJump={(id) => setOpenCommentId(id)}
+          onRefresh={() => comments.refresh()}
+          onToast={(text, error) => showToast(text, error)}
         />
       ) : null}
 

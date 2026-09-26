@@ -6,6 +6,7 @@ import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { formatHandoffAgo } from './handoff-banner.jsx';
+import { handoffSurfaceState } from './handoff-state.js';
 
 /** Latest agent verdict on a reply, if any (applied / partial / question). */
 function latestAgentVerdict(comment) {
@@ -17,22 +18,12 @@ function latestAgentVerdict(comment) {
   return null;
 }
 
-function hasAgentReply(comment) {
-  return (comment?.replies || []).some(
-    (r) => r && (r.author?.kind === 'agent' || r.agent_status),
-  );
-}
-
 function HandoffStatusChips({ comment }) {
   // Tick so "3m ago" advances while the card stays open with a sent handoff.
   const [, setTick] = useState(0);
   const verdict = latestAgentVerdict(comment);
-  // Once the agent has posted on the thread, "Waiting" is stale even if
-  // handoff_status is still sent (resolve is a separate step).
-  const waiting = comment.handoff_status === 'sent'
-    && comment.handoff_delivery?.status !== 'failed'
-    && !hasAgentReply(comment)
-    && !verdict;
+  const surface = handoffSurfaceState(comment);
+  const waiting = surface === 'waiting';
   useEffect(() => {
     if (!waiting) return undefined;
     const id = window.setInterval(() => setTick((n) => n + 1), 30000);
@@ -41,7 +32,7 @@ function HandoffStatusChips({ comment }) {
   const ago = comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '';
   const chips = [];
 
-  if (comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed') {
+  if (surface === 'failed') {
     chips.push(
       <span
         key="failed"
@@ -55,6 +46,13 @@ function HandoffStatusChips({ comment }) {
     chips.push(
       <span key="waiting" className="tdoc-handoff-chip is-waiting">
         Waiting on agent{ago ? ` · ${ago}` : ''}
+      </span>,
+    );
+  } else if (surface === 'replied' && !verdict) {
+    // Positive cue when waiting clears — reply itself may be folded.
+    chips.push(
+      <span key="replied" className="tdoc-handoff-chip is-replied">
+        Agent replied
       </span>,
     );
   }
@@ -72,14 +70,8 @@ function HandoffStatusChips({ comment }) {
       </span>,
     );
   }
-
-  if (comment.handoff_status === 'resolved') {
-    chips.push(
-      <span key="resolved" className="tdoc-handoff-chip is-resolved">
-        Agent done
-      </span>,
-    );
-  }
+  // handoff_status resolved is folded into surface === 'replied' — no separate
+  // "Agent done" pill (redundant with the reply / this chip).
 
   if (!chips.length) return null;
   return <>{chips}</>;

@@ -321,6 +321,29 @@
   /* Resolved pins get a green ring + a small ✓ overlay badge. */
   .tdoc-pin.tdoc-pin-resolved { border-color: #1a7340; }
   .tdoc-pin.tdoc-pin-resolved::after { content: "✓"; position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; background: #1a7340; color: #fff; font-size: 9px; line-height: 14px; text-align: center; font-weight: 700; }
+  /* Handoff cues on the margin pin — readable without opening the card. */
+  .tdoc-pin.is-waiting-handoff {
+    border-color: color-mix(in srgb, var(--td-accent, #3b6cff) 70%, #cdd3dc);
+    animation: tdoc-pin-wait 1.8s ease-out infinite;
+  }
+  .tdoc-pin.is-failed-handoff { border-color: #c45c45; }
+  /* Unread = solid dot you clear by opening — not a permanent "replied" badge. */
+  .tdoc-pin.is-unread-handoff::after {
+    content: "";
+    position: absolute; right: -2px; top: -2px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #3b5bdb;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px color-mix(in srgb, #3b5bdb 35%, transparent);
+  }
+  @keyframes tdoc-pin-wait {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-accent, #3b6cff) 45%, transparent); }
+    70% { box-shadow: 0 0 0 8px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tdoc-pin.is-waiting-handoff { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-accent, #3b6cff) 35%, transparent); }
+  }
   /* A tombstone's pin (#354): the thread under it is still worth opening, so
      the pin stays, but it is faded and dashed and does not show whose face it
      was — otherwise a deleted comment reads, at a glance, exactly like one
@@ -805,6 +828,7 @@
   }
   /* Agent done stays neutral gray — green is reserved for comment-axis ✓ fixed. */
   .tdoc-handoff-chip.is-resolved { color: #5a5a56; background: #f0efea; }
+  .tdoc-handoff-chip.is-replied { color: #3b5bdb; background: #e8eeff; }
   .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
   .tdoc-handoff-chip.is-waiting {
     color: #1a3f8f;
@@ -858,6 +882,75 @@
     cursor: not-allowed;
   }
   .tdoc-handoff-banner.is-failed .text-btn { color: #8a3b2b; }
+
+  .tdoc-handoff-details-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: min(60vh, 420px);
+    overflow: auto;
+  }
+  .tdoc-handoff-details-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--td-line, #e6e4dc);
+    border-radius: 8px;
+    background: #fafaf8;
+  }
+  .tdoc-handoff-details-jump {
+    flex: 1 1 auto;
+    min-width: 0;
+    appearance: none;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+  }
+  .tdoc-handoff-details-jump:hover .tdoc-handoff-details-preview { color: var(--td-accent, #1652f0); }
+  .tdoc-handoff-details-state {
+    display: block;
+    font-size: 11px;
+    font-weight: 650;
+    color: #5a5a56;
+    margin-bottom: 2px;
+  }
+  .tdoc-handoff-details-state.is-failed { color: #8a3b2b; }
+  .tdoc-handoff-details-state.is-waiting { color: #3b5bdb; }
+  .tdoc-handoff-details-state.is-ready { color: #1a7340; }
+  .tdoc-handoff-details-preview {
+    display: block;
+    font-size: 13px;
+    line-height: 1.35;
+    color: #202124;
+    word-break: break-word;
+  }
+  .tdoc-handoff-details-actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 1px;
+  }
+  .tdoc-handoff-details-actions .text-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--td-accent, #1652f0);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+    padding: 0;
+  }
+  .tdoc-handoff-details-actions .text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
   /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
   .tdoc-bar .tdoc-send-agent-action {
