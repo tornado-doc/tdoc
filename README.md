@@ -1,264 +1,199 @@
-# tdoc — agent-native document review
+# tdoc
 
-**Turn a prompt into a commentable HTML document, share it as a live URL, and
-bring anchored comments back into your agent workflow.**
+**Create a document with your agent. Share it for review. Turn comments into the next version.**
 
-tdoc is a prompt-native document surface for agent-assisted writing and review.
-It creates versioned HTML snapshots, adds Google-Docs-style comments on text
-and artifacts, and lets an agent pull those comments to generate the next
-version with per-comment status replies.
+tdoc is an open-source document workspace for people and their agents. Your
+agent creates an HTML document with text, tables and diagrams; reviewers leave
+comments on the exact passage or visual they mean. The agent reads that feedback,
+revises the document and replies to each comment.
 
-**Source of truth (see [AGENTS.md](AGENTS.md)):** remote storage is source of
-truth; local HTML is disposable; the local skill is authoring/scaffold.
+Use it for a proposal, research report, technical design or visual explainer —
+anything that needs a readable document and a round of feedback.
 
-It runs in two modes:
+[Get started](#get-started) · [How it works](#how-it-works) · [Self-host](#hosting-targets) · [Contribute](CONTRIBUTING.md)
 
-- **Local Studio** — temporary authoring/preview on `localhost`. Not the
-  product source of truth; safe to discard.
-- **Published Reader** — remote snapshots on hosted tdoc.dev or on your
-  Cloudflare Worker / Vercel project. This is the durable document surface.
+## How it works
 
-tdoc is a first-class **Claude Code** skill and also runs under **Codex**. The
-skill auto-detects the host and falls back to plain-text prompts where
-Claude-specific tools are unavailable. See [Using tdoc with Codex](#using-tdoc-with-codex).
+1. **Create.** Describe the document to Claude Code or Codex. The tdoc skill
+   gives your agent the authoring rules and tools to build a local preview.
+2. **Share.** Publish to [tdoc.dev](https://tdoc.dev) and choose who can read,
+   comment and see previous versions.
+3. **Review.** Readers comment on text, images, diagrams and code blocks in
+   their browser. They do not need to install the skill.
+4. **Revise.** Ask your agent to pull the comments and make the next version.
+   It replies with applied, partial or needs-clarification status, keeping
+   feedback and changes together.
 
+In Claude Code:
+
+```text
+/tdoc new "A proposal for our customer onboarding, with a workflow diagram"
+/tdoc publish <slug>
+
+# After your reviewers leave comments:
+/tdoc edit <slug>
+/tdoc publish <slug>
 ```
-You:  /tdoc new "an explainer of compound interest with a diagram of principal vs interest over time"
-Claude: <generates doc, opens it locally>
-You:  /tdoc publish
-Claude: https://tdoc.dev/d/compound-interest/v/1
-```
 
-Anyone with the link reads it instantly and comments on any sentence, image, or
-chart. Your agent pulls those comments, regenerates the next version, and
-replies on each comment with ✅ applied / 🟡 partial / ❓ question so reviewers
-can see exactly what changed without leaving the doc.
+In Codex, ask for the same workflow in plain language using the installed
+[tdoc skill](SKILL.md).
 
-## The pain point
+## What you get
 
-**You no longer need to be the router between your colleagues' comments and your agent.**
+- **Visual documents.** HTML pages with charts, diagrams, tables and code.
+  Supported Excalidraw figures can also be
+  edited in the reader.
+- **Comments tied to content.** Text selections and visual artifacts have
+  their own threads, replies and reactions. If a revision removes a comment's
+  target, the thread remains available to re-anchor.
+- **A review loop your agent can use.** Feedback is available as structured
+  data. With a connected agent, the reader's **Send to agent** action can
+  hand off comments and show delivery status; otherwise, use the skill to
+  pull them into your session.
+- **Version history.** Each revision is a full snapshot. Earlier versions and
+  their comments remain available, subject to the document's history permissions.
+- **Control over sharing.** Public, unlisted and private documents, with
+  separate controls for commenting and version history.
+- **Hosted or self-hosted publishing.** Start on tdoc.dev, or use your own
+  Cloudflare or Vercel infrastructure.
 
-Feedback on docs from a chat was always a tradeoff:
-
-- A nice UI for people to comment (Google Doc, Slack thread, screenshots) → but you copy-paste it all back to the AI by hand, every round.
-- Or clean structured input the agent can act on (raw JSON, "edit line 47") → but nobody wants to write feedback that way.
-
-And docs made in chat have no version history — every regeneration overwrites the last.
-
-`tdoc` gives you both sides: humans comment Google-Docs-style on any sentence/image/chart, the agent reads the same comments as structured input, and every edit is a new version you can flip back to. All free, all yours.
-
-Think of it as **Google Docs, but for agent-authored HTML documents**:
-multiplayer comments, comment status that stays in sync, full version history,
-and a one-line CLI to drive it all.
-
-## Install
+## Get started
 
 Paste this into Claude Code or Codex:
 
-```
+```text
 Install tdoc by following https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md
 ```
 
-The agent clones the repo, runs the doctor, walks you through the ~2 browser clicks for Cloudflare, and ends with a published URL. **Zero to live in ~3 minutes.**
+The agent installs the skill and checks the setup. Hosted publishing uses
+**tdoc.dev by default**: approve the CLI connection in your browser when asked.
+You do not need a Cloudflare account or a cloud dashboard.
 
-Or via the plugin marketplace: `/plugin marketplace add tornado-doc/tdoc`
+**No npm dependency installation, Playwright or Chromium is required for normal
+onboarding, creation, editing or publishing.** The reader assets are prebuilt.
+Static HTML checks still run; user workflows do not launch a browser to audit
+layout.
+
+### Claude Code plugin
+
+Run both commands in Claude Code:
+
+```text
+/plugin marketplace add tornado-doc/tdoc
+/plugin install tdoc@tornado-tdoc
+```
+
+Then use `/tdoc onboard` for setup and `/tdoc new <prompt>` to create a document.
 
 ### Using tdoc with Codex
 
-tdoc is authored as a Claude Code skill but is host-aware, so it works under Codex too:
+You can also install the skill directly:
 
-- **Install location**: clone (or symlink) the repo into `~/.codex/skills/tdoc` (Codex reads `~/.codex/skills/`), the same way Claude Code uses `~/.claude/skills/tdoc`. The setup snippet resolves whichever location exists, and you can override with `TDOC_SKILL_DIR`.
-- **Prompts**: tdoc does not add an analytics-consent prompt on either host. Product choices use the interaction surface the active host provides.
-- **What's the same**: the worker, the CLI (`bin/tdoc-*`), comments, versions, publish — all host-independent.
+```bash
+git clone https://github.com/tornado-doc/tdoc ~/.codex/skills/tdoc
+```
 
-What is *not* yet first-class on Codex: native slash-command registration (`/tdoc …`) — you invoke tdoc by pointing Codex at `SKILL.md` and asking it to run the workflow. That's the one rough edge versus Claude Code.
+If it is already installed, update that checkout instead of cloning over it.
+Ask Codex to read `~/.codex/skills/tdoc/SKILL.md` and set up tdoc, then describe
+what you want to create or revise. Claude Code's slash-command syntax is not
+required; both hosts use the same document, comment and publishing tools.
+
+### Requirements
+
+The local tools use **Bash, Node.js 18+, Python 3 and curl**. Git is needed for
+the clone/update installation path. Python runs the HTML/template validation
+used during creation; hosted publishing uses Node and curl.
+
+Self-hosting additionally needs `jq` and the tools for your chosen provider:
+Wrangler for Cloudflare, or the Vercel CLI for Vercel. See
+[onboarding](ONBOARDING.md) for setup details.
 
 ## Commands
 
-| Command | What it does |
+These are skill commands in Claude Code; in Codex, request the equivalent action
+in plain language. The underlying tools live in [`bin/`](bin/).
+
+| Command | Purpose |
 |---|---|
-| `/tdoc new <prompt>` | Generate a new doc + open locally |
-| `/tdoc edit <slug>` | New version from open comments; replies on each with ✅/🟡/❓ status |
-| `/tdoc publish <slug>` | Publish a doc and get a public URL (hosted tdoc.dev by default; self-host with `--platform cloudflare` or `vercel`) |
-| `/tdoc pull <slug>` | Sync comments from the published doc back to local |
-| `/tdoc fork <slug>` | Copy a doc to a new slug |
-| `/tdoc unpublish <slug>` | Remove a published doc from your Worker |
-| `/tdoc list` | Show all docs |
-| `/tdoc onboard` | First-time guided setup |
-| `/tdoc update` | Pull the latest skill code |
-| `/tdoc doctor` | Health check (deps, Cloudflare config) |
+| `/tdoc new <prompt>` | Create a document and open a local preview |
+| `/tdoc edit <slug>` | Revise from open comments and reply to them |
+| `/tdoc publish <slug>` | Upload a version and return its link |
+| `/tdoc pull <slug>` | Fetch comments from the published document |
+| `/tdoc fork <slug>` | Copy a document to a new slug |
+| `/tdoc list` | List documents |
+| `/tdoc unpublish <slug>` | Delete the published document, including versions and comments |
+| `/tdoc onboard` | Set up the skill and publishing |
+| `/tdoc doctor` | Check dependencies and publishing configuration |
+| `/tdoc update` | Update the installed skill |
 
-## Cost
+## Sharing and storage
 
-**$0 for normal personal use.** Hosted publishing can use tdoc-managed
-infrastructure, so a first-time user does not need to configure Cloudflare,
-Vercel, R2, KV, Workers, or an OAuth app. Self-host targets still use your own
-Cloudflare or Vercel account (generous free tiers). You own a self-host
-account; nobody else (including the maintainer) sees that traffic or pays those
-bills.
+Public and unlisted documents can be read by link without signing in. Private
+documents restrict access to the owner and permitted readers. Commenting and
+history access follow the document's own permissions; hosted commenters can
+sign in with email, Google or GitHub.
+
+For a new document, the CLI's default access policy is **unlisted, with
+owner-only history**. A workflow can explicitly choose another policy, and
+publishing a new version preserves existing access settings unless you change
+them. Unlisted means readable by anyone with the link, not private.
+
+Published documents and comments live in remote storage. Local previews under
+`~/tdocs` are working copies: deleting one does not delete the published
+document. See [AGENTS.md](AGENTS.md) for the project's source-of-truth rule.
 
 ## Hosting targets
 
-Publishing has one hosted target and two self-host targets. First publish
-picks the default (hosted unless you pass `--platform`); that choice is saved
-in `~/.tdoc/published.json` and reused. Pass a different `--platform` later to
-switch — the CLI rewrites the config via full re-setup (previous file kept as
-`published.json.bak.switch`). A custom domain and `*.workers.dev` on the same
-Worker are two hostnames, not two platforms.
+| Target | Setup | Storage and operation |
+|---|---|---|
+| **tdoc.dev** — default | Sign in and approve the CLI connection | Managed by tdoc |
+| **Cloudflare** | `--platform cloudflare`; your account, Wrangler and R2 | Your Worker, R2 and KV; comment writes serialized by a Durable Object |
+| **Vercel** | `--platform vercel`; your account and Vercel CLI | Your Vercel Function, Blob and Upstash Redis |
 
-- **Hosted (default)** — `/tdoc publish <slug>` uploads to a tdoc-managed host
-  such as `tdoc.dev`. First use signs in once — email, Google, or GitHub,
-  all through one door — and the host
-  issues an account-scoped upload token bound to that login and stores it in
-  `~/.tdoc/published.json`. That token can only mutate docs it owns. `/me` on
-  the hosted worker lists that account's docs. If hosted signup is not
-  open, the CLI says so and points at `--platform cloudflare` or
-  `--platform vercel`.
-- **Cloudflare** — `/tdoc publish --platform cloudflare <slug>` deploys a
-  Worker + R2 + KV you own, with a Durable Object serializing concurrent
-  comment writes. The most battle-tested self-host target.
-- **Vercel** — `/tdoc publish --platform vercel <slug>` deploys a catch-all
-  Vercel Function backed by Vercel Blob (docs) and Upstash Redis (metadata +
-  comments, from the Vercel Marketplace). Same URLs, same commenting, same
-  GitHub sign-in. Two caveats vs. Cloudflare: concurrent comment writes are
-  not serialized (no Durable Object equivalent), and uploads are capped at
-  ~4.5 MB per doc by Vercel's request limit. Details in
-  [vercel/README.md](vercel/README.md).
+The chosen target is saved for later publishes. For self-hosting, pass the
+platform to the publish command, for example
+`/tdoc publish --platform cloudflare <slug>`.
 
-## Local vs published
+Vercel has different limits: uploads are capped at roughly 4.5 MB per document,
+and concurrent comment writes are not serialized as they are on Cloudflare.
+See [Vercel setup and limitations](vercel/README.md).
 
-Same document snapshots; different roles (see [AGENTS.md](AGENTS.md)):
+## Cost
 
-- **Local Studio** reads `~/tdocs` from disk for fast anonymous preview and
-  agent iteration. **Disposable.** Deleting local copies must never be treated
-  as deleting the product document.
-- **Published / remote storage** holds the durable snapshots, public URLs, and
-  hosted comments. **Source of truth.** Document delete/unpublish/management
-  targets remote storage via skill + API, not a particular local port UI.
+Hosted tdoc is free for normal personal use, with account document limits.
+Your agent or model usage is separate. Self-hosting uses your own provider
+accounts and their usage limits and charges.
 
-The reader shell (a React app under `shell/src`, prebuilt into
-`server/runtime/`) is bundled into the hosted runtime at publish time from the
-skill checkout; local shell edits only affect Local Studio until the next
-publish redeploy. Published pages also expose the bundled runtime provenance at
-`/api/runtime` and in `window.__TDOC__.runtime`.
+## Current boundaries
 
-## How comments work
+Document revisions are primarily agent-driven. tdoc does not yet provide
+Google-Docs-style simultaneous text editing, inline accept/reject suggestions
+or a track-changes view. Version snapshots and multiplayer commenting are
+available today; editable Excalidraw figures are a separate capability.
 
-It's the Google-Docs commenting model, built for generated HTML documents and
-wired to your agent:
+## Development
 
-- **Text**: highlight any sentence (across paragraphs, across bold/links — anchors survive regeneration) → comment popup, cursor ready to type
-- **Artifacts** (img / canvas / svg / video / `<pre>`): hover → comment icon → click
-- **Threads**: emoji reactions (👍 ❤️ 🔥 ✅ ❓ + `LGTM`) and replies; hover a reaction to see who reacted
-- **Move / remove anchor**: drag a comment to new text, or detach it entirely — it stays in the thread
-- **Multiplayer**: anyone with the link signs in once — email, Google, or GitHub — and comments. Every comment is attributed to its real author, and concurrent commenters never clobber each other (writes are serialized per-doc — see Reliability below).
-- **Status sync**: comments carry a resolved-style status that stays in sync between the web view and your agent — the acting agent stamps each with ✅ applied / 🟡 partial / ❓ needs clarification when it regenerates, so "what's been addressed" is visible to everyone, live, without re-pinging.
-
-## Version history
-
-Every doc is versioned, and **every version is a full snapshot** — not a diff. You can:
-
-- Flip back to any past version (`/d/<slug>/v/2`); a subtle banner on an older version links you to the latest.
-- Keep commenting on old versions — comments anchored to text that a later version removed are preserved, never silently dropped.
-- Pull the complete cross-version history of comments back to local with `/tdoc pull` (it merges, never overwrites).
-
-This is the "edit history" half of the Google-Docs feeling: nothing you write — doc or comment — gets lost to a regeneration.
-
-## Reliability (what makes the multiplayer part trustworthy)
-
-- **Concurrent comments never lost.** Per-doc comment writes are serialized through a Cloudflare Durable Object, so two people commenting at the same instant both land — no last-write-wins clobber.
-- **Comments survive every regenerate.** When a new version reshuffles the doc, comments re-anchor to their artifact by content identity; if a target genuinely disappears, the comment is shown unanchored ("click to re-anchor") rather than attached to the wrong place.
-- **Untrusted input is escaped.** Comment text, author names, and avatars are HTML-escaped on render — a comment can't inject script into the page.
-- **Auth**: local docs comment anonymously with zero setup. Published docs require a one-time sign-in (email, Google, or GitHub) before commenting. No GitHub account needed.
-
-## Requirements
-
-- Node 18+ and `curl`. That is the whole list for publishing to tdoc.dev, which
-  is the default — the first publish signs you in (any method) and needs no
-  other CLI, no account to create, and no cloud dashboard.
-- Self-hosting instead? Then also `jq`, plus ONE of:
-  - `wrangler` + a free Cloudflare account with R2 enabled
-    (`/tdoc publish --platform cloudflare <slug>`), or
-  - `vercel` CLI + a free Vercel account (`/tdoc publish --platform vercel <slug>`)
-
-`/tdoc onboard` checks and installs these for you.
-
-## Roadmap (not built yet)
-
-tdoc today is a **comment + version** surface — humans comment, the agent regenerates. These are wanted but **not yet shipped** (listed here so the feature list above stays honest):
-
-- **Suggestion mode** — propose an inline edit a reviewer can accept/reject, instead of leaving a comment.
-- **Edit mode** — edit the doc text in the browser, not only through the agent.
-- **Collaborative / multi-editor editing** — two people editing the same doc live (today, *commenting* is multiplayer; *editing* is agent-driven and single-writer per regenerate).
-- **Track-changes-style edit history** — version history exists today (full snapshots you can flip between); a per-change diff/track-changes view is the next step.
-
-Want one of these? Open an issue.
-
-## Testing
-
-The suite runs offline by default; browser and network suites are gated.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, browser regressions and the
+required build workflow, and [IMPLEMENTATION.md](IMPLEMENTATION.md) for the
+reader architecture.
 
 ```bash
-npm test                # offline logic and CLI tests; no npm install or browser needed
-npm ci                  # development dependencies only; not part of skill onboarding
-npx playwright install chromium
-npm run test:browser    # local browser regressions; missing browser is a failure
-npm run test:all        # also includes provider integration suites
+npm test  # offline logic and CLI tests; no npm install or browser needed
 ```
 
-Browser tests use committed local fixtures by default. `TDOC_TEST_URL=<url>`
-selects a live document for supported suites; `TDOC_INTEGRATION=1` enables
-live provider round trips. The development-only layout audit is available as
-`node test/helpers/check-layout.js <baked.html> --screenshots <directory>`.
-It does not run during user installation, onboarding, creation or publishing.
+Playwright and Chromium are used for **development tests only**. Their setup
+instructions are in the [contribution guide](CONTRIBUTING.md#tests).
 
+Authoring rules and styles live in [`authoring/`](authoring/README.md). Report
+bugs or propose improvements through [GitHub issues](https://github.com/tornado-doc/tdoc/issues).
+For vulnerability reports, follow [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
 ## Observability
 
-tdoc does not run client-side usage telemetry and never asks for analytics
-consent during skill onboarding. The former Supabase sender and its persistent
-installation/session identifiers were removed after that backend was retired.
-
-Hosted operations are observed where they actually happen: the tdoc.dev
-Cloudflare Worker. Workers Logs is enabled for production and PR previews,
-and the Worker emits a small structured onboarding funnel to both logs and a
-Workers Analytics Engine dataset:
-
-| Event | Meaning |
-|---|---|
-| `onboarding_started` | the CLI successfully created a pairing flow |
-| `onboarding_approved` | the signed-in user approved that CLI |
-| `token_minted` | the provider issued an account-scoped publish token |
-| `publish_succeeded` | a hosted upload committed successfully |
-
-These product events contain only the event name and bounded operational
-dimensions such as auth path, first-publish boolean, and validated client
-version. They deliberately exclude document content, prompts, slug, account,
-login, email, IP, cookies, tokens, session IDs, and installation IDs. Normal
-provider request logs remain subject to the hosting provider’s logging and
-retention controls.
-
-The production dataset is `tdoc_product_events` (previews use a separate
-`tdoc_preview_product_events` dataset). Its ordered columns are `blob1` event,
-`blob2` auth path, `blob3` client version, `double1` count, and `double2`
-first-publish count. For example, this Analytics Engine SQL query gives the
-last seven days of aggregate funnel counts:
-
-```sql
-SELECT blob1 AS event, SUM(_sample_interval * double1) AS events
-FROM tdoc_product_events
-WHERE timestamp > NOW() - INTERVAL '7' DAY
-GROUP BY event
-ORDER BY events DESC
-```
-
-This supports a Cloudflare/Grafana dashboard without manufacturing a GA4
-`client_id` or adding an analytics prompt to CLI onboarding. Public-site
-traffic and acquisition analytics are a separate concern and may use a web
-analytics tag without joining browser identity to these provider counters.
-
-BYOK deployments receive the same Worker logging configuration in their own
-Cloudflare account. Purely local skill operations are not tracked.
+The skill does not run client-side usage telemetry. Hosted infrastructure logs
+operational events, including onboarding and publishing, without adding
+analytics prompts to installation. See [observability details](docs/OBSERVABILITY.md)
+for event fields, exclusions and self-hosted behavior.
 
 ## Credit
 
