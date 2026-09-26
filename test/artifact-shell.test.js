@@ -554,7 +554,7 @@ const SLUG = 'hostile-body-css';
       if (!pinInfo.hasImg) throw new Error('agent pin did not render a logo mark');
       await page.click('.tdoc-pin[data-id="c_fixture_3"]');
       await page.waitForSelector('.tdoc-margin-comment.tdoc-resolved', { timeout: 2000 });
-      const chip = await page.$eval('.tdoc-margin-comment .tdoc-resolved-chip', el => el.textContent).catch(() => null);
+      const chip = await page.$eval('.tdoc-margin-comment [data-chip="resolved"]', el => el.textContent).catch(() => null);
       if (!chip || !/fixed/.test(chip)) throw new Error('card missing resolved chip: ' + chip);
       const agentAuthor = await page.evaluate(() => !!document.querySelector('.tdoc-margin-comment .author.tdoc-agent-author img'));
       await page.evaluate(() => localStorage.removeItem('tdoc-show-resolved'));

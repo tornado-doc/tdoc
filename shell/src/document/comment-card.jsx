@@ -4,6 +4,7 @@ import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
+import { Chip, ChipRow } from '../ui/chip.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { formatHandoffAgo } from './handoff-banner.jsx';
 
@@ -23,7 +24,11 @@ function hasAgentReply(comment) {
   );
 }
 
-function HandoffStatusChips({ comment }) {
+// Every status label on a card, in ONE row and from ONE component. #640 put
+// ✓ fixed and the handoff chips on the same line by unifying their CSS, but
+// the Demo chip was left outside that row and `.tdoc-demo-chip` stayed a
+// third copy of the same pill. Shape belongs to the kit, not to each caller.
+function CommentStatusChips({ comment, demo }) {
   // Tick so "3m ago" advances while the card stays open with a sent handoff.
   const [, setTick] = useState(0);
   const verdict = latestAgentVerdict(comment);
@@ -41,48 +46,59 @@ function HandoffStatusChips({ comment }) {
   const ago = comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '';
   const chips = [];
 
+  if (demo) chips.push(<Chip key="demo" name="demo" tone="warn">Demo</Chip>);
+
+  // The conclusion first: whether this comment is closed is what a reader
+  // looks for. Everything after it is how it got there.
+  if (comment.status === 'applied') {
+    chips.push(
+      <Chip key="applied" name="resolved" tone="success">
+        {comment.resolved_by
+          ? `✓ resolved by @${comment.resolved_by}`
+          : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
+      </Chip>,
+    );
+  }
+
   if (comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed') {
     chips.push(
-      <span
+      <Chip
         key="failed"
-        className="tdoc-handoff-chip is-failed"
+        name="handoff-failed"
+        tone="danger"
         title={comment.handoff_delivery?.error || undefined}
       >
         Not delivered
-      </span>,
+      </Chip>,
     );
   } else if (waiting) {
     chips.push(
-      <span key="waiting" className="tdoc-handoff-chip is-waiting">
+      <Chip key="waiting" name="handoff-waiting" tone="info" pulse>
         Waiting on agent{ago ? ` · ${ago}` : ''}
-      </span>,
+      </Chip>,
     );
   }
 
   if (verdict === 'partial') {
     chips.push(
-      <span key="partial" className="tdoc-handoff-chip is-partial">
-        Partial — needs you
-      </span>,
+      <Chip key="partial" name="verdict-partial" tone="warn">Partial — needs you</Chip>,
     );
   } else if (verdict === 'question') {
     chips.push(
-      <span key="question" className="tdoc-handoff-chip is-question">
-        Agent asked
-      </span>,
+      <Chip key="question" name="verdict-question" tone="accent">Agent asked</Chip>,
     );
   }
 
   if (comment.handoff_status === 'resolved') {
     chips.push(
-      <span key="resolved" className="tdoc-handoff-chip is-resolved">
-        Agent done
-      </span>,
+      <Chip key="handoff-resolved" name="handoff-resolved" tone="neutral">Agent done</Chip>,
     );
   }
 
+  // No chips, no row. #640 needed `:not(:has(...))` to hide an empty row
+  // because the row was markup; here it simply is not rendered.
   if (!chips.length) return null;
-  return <>{chips}</>;
+  return <ChipRow>{chips}</ChipRow>;
 }
 
 function authorLine(author) {
@@ -691,17 +707,7 @@ export function CommentCard({
         onActivate(comment.id);
       }}
     >
-      {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
-      <div className="tdoc-status-row">
-        {comment.status === 'applied' ? (
-          <span className="tdoc-resolved-chip">
-            {comment.resolved_by
-              ? `✓ resolved by @${comment.resolved_by}`
-              : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
-          </span>
-        ) : null}
-        <HandoffStatusChips comment={comment} />
-      </div>
+      <CommentStatusChips comment={comment} demo={demo} />
       <header className="tdoc-cc-head">
         <Author
           author={comment.author}

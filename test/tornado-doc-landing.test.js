@@ -356,8 +356,8 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'landing must turn off block/artifact hover chrome');
   assert(/var elementComment = true/.test(fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8')),
     'frame probe must gate element/block hover');
-  assert(/tdoc-demo-chip/.test(fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8')),
-    'demo chip style must exist');
+  assert(/ui-chip-warn/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'ui', 'ui.css'), 'utf8')),
+    'demo chip tone must exist in the shared chip kit');
 });
 
 console.log('tdoc.dev / release payload');

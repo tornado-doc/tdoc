@@ -902,3 +902,48 @@ button.tdoc-pin {
 @media (max-width: 380px) {
   .tdoc-modal .tds-codewrap { margin-left: 0; }
 }
+
+/* Chips — the one status-label shape. Tone carries the meaning; callers never
+   pick a radius. See ui/chip.jsx. */
+.ui-chip-row {
+  display: flex;
+  /* nowrap, not wrap: these are meant to read as one line (#640). */
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 6px;
+  min-width: 0;
+}
+
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* success = a conclusion (the comment is closed). neutral = a process note.
+   Green is reserved for the comment axis so "Agent done" cannot read as a
+   second "done" — see design doc v12 §10. */
+.ui-chip-success { background: #e8f5ed; color: #1a7340; }
+.ui-chip-neutral { background: #f0efea; color: #5a5a56; }
+.ui-chip-info    { background: #e8eeff; color: #1a3f8f; }
+.ui-chip-warn    { background: #f5efe0; color: #7a5c14; }
+.ui-chip-danger  { background: #f7ebe7; color: #8a3b2b; }
+.ui-chip-accent  { background: #f0eaf7; color: #5b3d8a; }
+
+/* Only "still waiting" pulses: it is the one state that changes on its own. */
+.ui-chip-pulse { animation: ui-chip-pulse 1.8s ease-in-out infinite; }
+@keyframes ui-chip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-chip-pulse { animation: none; }
+}
