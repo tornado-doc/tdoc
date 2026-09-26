@@ -6434,6 +6434,24 @@ export default {
       });
     }
 
+    // Shared account chrome needs the viewer's profile on every page, without
+    // loading their whole document catalog or confusing it with a viewed user.
+    if (p === '/api/me/profile' && method === 'GET') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const { handle, suggested } = await profileBootForSession(env, s);
+      return json({ ok: true, profile: { handle, suggested } }, {
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
+
     // Claim a public @handle (or change it). Hosted only. Email/OIDC users need
     // this for /@…; GitHub users can keep using their login via fallback or claim
     // a vanity name here. Changing frees the previous @handle.

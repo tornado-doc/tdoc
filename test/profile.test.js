@@ -207,6 +207,38 @@ async function seedPins(env, accountId, pins, extra = {}) {
   const worker = mod.default;
   console.log('public @handle profiles');
 
+  await t('account menu profile API reads only the signed-in viewer without minting accounts', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const alice = await seedAccount(env, 'alice');
+    const bob = await seedAccount(env, 'bob');
+    await seedPins(env, alice, ['alice-doc'], { handle: 'alice-public' });
+    await seedPins(env, bob, ['bob-doc'], { handle: 'bob-public' });
+    const cookie = await putSession(env, { login: 'alice' });
+    const response = await worker.fetch(req('/api/me/profile?login=bob', { cookie }), env);
+    assert(response.status === 200, 'viewer profile available');
+    assert(response.headers.get('Cache-Control') === 'private, no-store', 'private metadata is not cached');
+    const data = await response.json();
+    assert(JSON.stringify(data) === JSON.stringify({ ok: true, profile: { handle: 'alice-public', suggested: 'alice-public' } }),
+      'returns only viewer handle and suggestion, never subject profile, pins or catalog');
+
+    const emailId = await seedEmailAccount(env, 'person@example.com');
+    await seedPins(env, emailId, [], { handle: 'email-person' });
+    const emailCookie = await putSession(env, { email: 'person@example.com' });
+    const emailResponse = await worker.fetch(req('/api/me/profile', { cookie: emailCookie }), env);
+    assert((await emailResponse.json()).profile.handle === 'email-person', 'email identity resolves its own profile');
+
+    const freshCookie = await putSession(env, { login: 'new-person' });
+    const before = [...env.META.map.entries()];
+    const unclaimed = await worker.fetch(req('/api/me/profile', { cookie: freshCookie }), env);
+    const unclaimedBody = await unclaimed.json();
+    assert(unclaimed.status === 200 && unclaimedBody.profile.handle === null && unclaimedBody.profile.suggested === 'new-person',
+      'accountless viewer gets claim entry data');
+    assert(JSON.stringify([...env.META.map.entries()]) === JSON.stringify(before), 'reading the menu does not create an account');
+    assert((await worker.fetch(req('/api/me/profile'), env)).status === 401, 'anonymous is rejected');
+    const byok = makeEnv(mod.CommentsStore, { TDOC_HOSTED_REGISTRATION: '0' });
+    assert((await worker.fetch(req('/api/me/profile', { host: 'byok.example' }), byok)).status === 404, 'BYOK stays hosted-only');
+  });
+
   await t('profile header avatar is the subject, not the viewer', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'profile.jsx'), 'utf8');
     // Regression: logged-in viewers used to see their own session avatar on

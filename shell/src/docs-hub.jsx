@@ -288,7 +288,10 @@ export function DocsHub({ boot }) {
     onUnauthorized: () => { location.href = '/?notice=signin'; },
   });
   const [tab, setTab] = useState('mine');
-  const [modal, setModal] = useState(null);
+  // Capture the account-menu destination before useDocsHub normalizes the URL.
+  const [modal, setModal] = useState(() => (
+    boot.profile && location.hash === '#claim-profile' ? { type: 'claim-handle' } : null
+  ));
   const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
