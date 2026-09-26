@@ -232,7 +232,8 @@
   .tdoc-agent-status-applied { background: #e8f5ed; color: #1a7340; }
   .tdoc-agent-status-partial { background: #fff4dc; color: #8a5a00; }
   .tdoc-agent-status-question { background: #ffe7e7; color: #a52323; }
-  .tdoc-margin-comment .text { color: #202124; line-height: 1.5; word-wrap: break-word; font-size: 13.5px; }
+  /* pre-wrap: keep newlines from agent/human replies. Markdown still plain text. */
+  .tdoc-margin-comment .text { color: #202124; line-height: 1.5; word-wrap: break-word; font-size: 13.5px; white-space: pre-wrap; }
   /* A tombstone (#354): the words are gone, the name and the slot are not.
      Muted and italic so it reads as an absence, not as something said. */
   .tdoc-margin-comment .tdoc-deleted-text,
@@ -411,7 +412,7 @@
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
   .tdoc-reply .author .login { font-weight: 600; font-size: 12px; color: #111; }
   .tdoc-reply .author .anon { color: #888; font-style: italic; font-size: 12px; }
-  .tdoc-reply .text { color: #222; font-size: 13px; line-height: 1.4; word-wrap: break-word; }
+  .tdoc-reply .text { color: #222; font-size: 13px; line-height: 1.4; word-wrap: break-word; white-space: pre-wrap; }
   .tdoc-reply .meta { font-size: 11px; color: #888; margin-top: 4px; display: flex; justify-content: space-between; }
   .tdoc-reply .del { cursor: pointer; color: #c33; }
   .tdoc-reply .del:hover { text-decoration: underline; }
