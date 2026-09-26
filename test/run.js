@@ -3,17 +3,16 @@
 // single pass/fail. This is what `npm test` and CI invoke, so "run the tests"
 // is one command instead of N hand-run files (finding: no-test-runner-or-ci).
 //
-// Offline suite = no network or live Cloudflare. CLI gates use local Chromium; run
-// npm ci && npx playwright install chromium first. Additional UI suites are listed
-// under NETWORK/BROWSER and skipped here (run them with their own env).
+// Offline suite = no network, live provider or browser. Browser regressions run
+// separately with --browser; --all also includes provider integration suites.
 //
 // Usage:
 //   node test/run.js            # offline suite (default; CI uses this)
+//   node test/run.js --browser  # required local layout regressions
 //   node test/run.js --all      # also attempt network/browser suites
 
 const { spawnSync } = require('child_process');
 const path = require('path');
-require('./helpers/pin-browser-cache');
 
 const OFFLINE = [
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
@@ -69,8 +68,7 @@ const OFFLINE = [
   'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader
   'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it
   'web-oauth.test.js',        // web redirect flow: sanitizeReturn open-redirect guard + flow wiring + device fallback
-  'layout-preflight.test.js', // real Raft geometry and mandatory CLI gates
-  'table-layout.test.js',    // shared provider policy, independent geometry, all tables in full doc
+  'browser-free-cli.test.js', // clean skill install, write/edit/preview/publish without browser dependencies
   'cli.test.js',              // CLI resilience (drives bash hermetically)
   'no-drift.test.js',         // duplicated-helper drift guard
   'coverage.test.js',         // migration, bundle inlining, pull-merge, rich fold
@@ -105,13 +103,16 @@ const OFFLINE = [
   'resolved-anchors.test.js', // a resolved thread still marks its sentence
 ];
 
-// Require network (live Cloudflare) or a browser (playwright). Not run in the
-// default offline suite. Listed so it's explicit what coverage is gated.
-const GATED = [
-  'onboarding.test.js',  // doctor flow
-  'publish.test.js',     // dry-publish + (gated) real publish
+// These run against local fixtures and require the development browser.
+const BROWSER = [
+  'layout-preflight.test.js', // development-only Raft geometry audit
+  'table-layout.test.js', // provider table protection
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
+];
+
+// Existing opt-in UI suites; --all retains their broader coverage.
+const EXTENDED_BROWSER = [
   'responsive.test.js',  // playwright
   'ui.test.js',          // playwright
   'csp-xss.test.js',     // playwright: author <script>/onclick blocked, overlay still works
@@ -120,8 +121,18 @@ const GATED = [
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
 ];
 
+const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
 const runAll = process.argv.includes('--all');
-const files = runAll ? [...OFFLINE, ...GATED] : OFFLINE;
+const runBrowser = process.argv.includes('--browser');
+const files = runAll ? [...OFFLINE, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
+if (runAll || runBrowser) {
+  // A requested browser suite must never report success by skipping every test.
+  const probe = spawnSync(process.execPath, ['-e',
+    "require('playwright').chromium.launch({headless:true}).then(b=>b.close()).catch(e=>{console.error(e.message);process.exitCode=1})"
+  ], { stdio: 'inherit' });
+  if (probe.status !== 0) process.exit(1);
+  process.env.TDOC_REQUIRE_BROWSER_TESTS = '1';
+}
 
 let failed = [];
 for (const f of files) {
@@ -137,4 +148,4 @@ if (failed.length) {
   process.exit(1);
 }
 console.log(`PASS — all ${files.length} suite(s) green`);
-if (!runAll) console.log(`(gated suites not run: ${GATED.join(', ')} — use --all with a server/playwright)`);
+if (!runAll && !runBrowser) console.log('(browser suites: npm run test:browser; provider integration: npm run test:all)');

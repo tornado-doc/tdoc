@@ -9,14 +9,13 @@
 // committed fixture under test/fixtures/tdocs and target THAT — so they exercise
 // the working-tree overlay. The live URL stays available via TDOC_TEST_URL.
 //
-// Playwright is an optional dep. If it's not installed, callers SKIP LOUDLY
+// Playwright is a development dep. If it's not installed, callers SKIP LOUDLY
 // (clear message, exit 0) rather than crash or silently pass.
 //
 // This file also owns port allocation for every test that boots a server, so
 // that no suite has to guess a free port. See startStub() below for why.
 
 const fs = require('fs');
-require('./pin-browser-cache');
 const os = require('os');
 const path = require('path');
 const net = require('net');
@@ -201,6 +200,7 @@ async function resolveTarget({ port, e2eUser } = {}) {
 function requirePlaywrightOrSkip(suiteName) {
   const pw = tryRequirePlaywright();
   if (!pw) {
+    if (process.env.TDOC_REQUIRE_BROWSER_TESTS === '1') throw new Error(`${suiteName}: required development browser dependency is missing`);
     console.log(`SKIP (${suiteName}): playwright not installed — run \`npm i -D playwright && npx playwright install chromium\` to enable. This is a LOUD skip, not a silent pass.`);
     process.exit(0);
   }

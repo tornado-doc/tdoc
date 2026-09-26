@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Check the rendered, self-contained version before publishing it. No author
-// JavaScript is executed. Missing browser support is an error, not a pass.
+// Development-only layout audit. Never invoked by user creation or publishing.
+// No author JavaScript is executed. Missing browser support is an error, not a pass.
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { applyReaderWidth } = require('../server/reader-width');
-const { layoutTables } = require('../server/table-layout');
+const { applyReaderWidth } = require('../../server/reader-width');
+const { layoutTables } = require('../../server/table-layout');
 
 function measureGeometry() {
   const errors = [], warnings = [];
@@ -61,7 +61,7 @@ const measureLayout = new Function(`return function measureLayout() {
 async function checkLayout(file, { screenshotDir, widths = [375, 768, 1440], modes = ['narrow', 'wide'] } = {}) {
   let chromium;
   try { ({ chromium } = require('playwright')); }
-  catch { throw new Error('Playwright is required: run npm install in the tdoc checkout, then npx playwright install chromium. Layout has NOT been verified.'); }
+  catch { throw new Error('Playwright is required: run npm ci in the development checkout, then npx playwright install chromium. Layout has NOT been verified.'); }
   const browser = await chromium.launch({ headless: true });
   // A document that never settles must not leave creation/publishing hung.
   const deadline = setTimeout(() => { void browser.close(); }, 60000);
@@ -83,7 +83,7 @@ async function checkLayout(file, { screenshotDir, widths = [375, 768, 1440], mod
           const style = document.createElement('style');
           style.textContent = css;
           document.head.appendChild(style);
-        }, fs.readFileSync(path.join(__dirname, '../server/reader.css'), 'utf8'));
+        }, fs.readFileSync(path.join(__dirname, '../../server/reader.css'), 'utf8'));
       }
       await page.evaluate(applyReaderWidth, mode);
       await page.evaluate(() => document.fonts.ready);
@@ -122,7 +122,7 @@ async function main() {
     return 0;
   }
   if (!args.length || args.includes('--help')) {
-    console.log('Usage: node bin/tdoc-check-layout <baked.html> [--screenshots <directory>]\nChecks narrow and wide reader modes at 375px, 768px and 1440px; exits 1 for layout errors, 2 if unable to check. Inspect screenshots too: geometry cannot judge design quality.');
+    console.log('Usage: node test/helpers/check-layout.js <baked.html> [--screenshots <directory>]\nChecks narrow and wide reader modes at 375px, 768px and 1440px; exits 1 for layout errors, 2 if unable to check. Inspect screenshots too: geometry cannot judge design quality.');
     return args.length ? 0 : 2;
   }
   if (args.length !== 1 && !(args.length === 3 && args[1] === '--screenshots')) throw new Error('Expected <baked.html> [--screenshots <directory>]');
@@ -132,4 +132,4 @@ async function main() {
 }
 
 module.exports = { checkLayout, measureLayout };
-if (require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(`tdoc-check-layout: ${e.message}`); process.exitCode = 2; });
+if (require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(`check-layout: ${e.message}`); process.exitCode = 2; });
