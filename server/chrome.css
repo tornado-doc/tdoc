@@ -321,6 +321,28 @@
   /* Resolved pins get a green ring + a small ✓ overlay badge. */
   .tdoc-pin.tdoc-pin-resolved { border-color: #1a7340; }
   .tdoc-pin.tdoc-pin-resolved::after { content: "✓"; position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; background: #1a7340; color: #fff; font-size: 9px; line-height: 14px; text-align: center; font-weight: 700; }
+  /* Handoff cues on the margin pin — readable without opening the card. */
+  .tdoc-pin.is-waiting-handoff {
+    border-color: color-mix(in srgb, var(--td-accent, #3b6cff) 70%, #cdd3dc);
+    animation: tdoc-pin-wait 1.8s ease-out infinite;
+  }
+  .tdoc-pin.is-failed-handoff { border-color: #c45c45; }
+  .tdoc-pin.is-replied-handoff { border-color: #3b5bdb; }
+  .tdoc-pin.is-replied-handoff::after {
+    content: "↩";
+    position: absolute; right: -3px; bottom: -3px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #3b5bdb; color: #fff;
+    font-size: 9px; line-height: 14px; text-align: center; font-weight: 700;
+  }
+  @keyframes tdoc-pin-wait {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-accent, #3b6cff) 45%, transparent); }
+    70% { box-shadow: 0 0 0 8px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tdoc-pin.is-waiting-handoff { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-accent, #3b6cff) 35%, transparent); }
+  }
   /* A tombstone's pin (#354): the thread under it is still worth opening, so
      the pin stays, but it is faded and dashed and does not show whose face it
      was — otherwise a deleted comment reads, at a glance, exactly like one
@@ -805,6 +827,7 @@
   }
   /* Agent done stays neutral gray — green is reserved for comment-axis ✓ fixed. */
   .tdoc-handoff-chip.is-resolved { color: #5a5a56; background: #f0efea; }
+  .tdoc-handoff-chip.is-replied { color: #3b5bdb; background: #e8eeff; }
   .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
   .tdoc-handoff-chip.is-waiting {
     color: #1a3f8f;

@@ -4,11 +4,16 @@ import { CommentIcon } from '../ui/comment-icon.jsx';
 import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { avatarFor, TOP_BAR_HEIGHT } from './model.js';
+import { handoffSurfaceState } from './handoff-state.js';
 
-function Pin({ cluster, top, left, frameTop, onOpenComment, onOpenCluster }) {
+function Pin({ cluster, top, left, frameTop, commentsById, onOpenComment, onOpenCluster }) {
   const single = cluster.items.length === 1 ? cluster.items[0].comment : null;
   const resolved = single?.resolved
     || (!single && cluster.items.every((item) => item.comment.resolved));
+  const live = single && commentsById ? commentsById.get(single.id) : null;
+  // Pin cues for the handoff surface — visible without opening the card.
+  // resolved (msg axis) wins: a green check already answers "done".
+  const handoff = (!resolved && live) ? handoffSurfaceState(live) : null;
 
   return (
     <button
@@ -22,9 +27,18 @@ function Pin({ cluster, top, left, frameTop, onOpenComment, onOpenCluster }) {
         // on. Without this a deleted thread is invisible until you click it.
         single?.deleted ? 'tdoc-pin-deleted' : '',
         !single && resolved ? 'tdoc-cluster-allresolved' : '',
+        handoff === 'waiting' ? 'is-waiting-handoff' : '',
+        handoff === 'failed' ? 'is-failed-handoff' : '',
+        handoff === 'replied' ? 'is-replied-handoff' : '',
       ].filter(Boolean).join(' ')}
       data-id={single?.id}
       data-key={cluster.key}
+      title={
+        handoff === 'waiting' ? 'Waiting on agent'
+          : handoff === 'failed' ? 'Handoff not delivered'
+            : handoff === 'replied' ? 'Agent replied'
+              : undefined
+      }
       style={{ top: Math.max(frameTop + 4, top), left }}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={() => single ? onOpenComment(single.id) : onOpenCluster(cluster.key)}
@@ -103,6 +117,7 @@ export function DesktopCommentLayer({
             top={top}
             frameTop={frameTop}
             left={pinLeft}
+            commentsById={commentsById}
             onOpenComment={onOpenComment}
             onOpenCluster={onOpenCluster}
           />
