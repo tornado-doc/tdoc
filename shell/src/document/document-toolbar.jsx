@@ -143,8 +143,8 @@ export function DocumentPrimaryAction({
   );
 }
 
-// Always-visible Send to agent entry (desktop + mobile). Badge = open comments
-// waiting to be handed over. Prefer a paper-plane over a bottom strip.
+// Always-visible Send to agent entry (desktop + mobile). Badge = comments
+// still on handoff_status note (not yet sent). Prefer a paper-plane over a bottom strip.
 export function DocumentSendAgentAction({ count = 0, onClick }) {
   const label = count > 0 ? `Send to agent (${count} open)` : 'Send to agent';
   return (
