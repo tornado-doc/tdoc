@@ -206,13 +206,6 @@ export function DocumentShell({ boot, config }) {
     if (new URLSearchParams(location.search).get('revised')) return true;
     try { return localStorage.getItem(RESOLVED_KEY) === '1'; } catch { return false; }
   });
-  const toggleResolved = useCallback(() => {
-    setShowResolved((on) => {
-      const next = !on;
-      try { localStorage.setItem(RESOLVED_KEY, next ? '1' : '0'); } catch {}
-      return next;
-    });
-  }, []);
 
   // `returnTo` lets a caller land the person somewhere specific after the
   // sign-in — the onboarding door they chose — instead of back where they were.
@@ -405,7 +398,7 @@ export function DocumentShell({ boot, config }) {
       });
     },
     'tdoc:anchorClick': (message) => {
-      if (!message.id) return;
+      if (!visibleCommentsById.has(message.id)) return;
       setOpenCommentId(message.id);
       setOpenClusterKey(null);
       if (narrow) setDrawerOpen(true);
@@ -468,22 +461,17 @@ export function DocumentShell({ boot, config }) {
     () => comments.comments.filter((comment) => comment.status === 'applied').length,
     [comments.comments],
   );
-  // What the margin shows. A resolved thread (human ✓ or agent applied) is out
-  // of the way until asked for — except the one being looked at. A deep link
-  // opens its card before deepTarget is consumed, so without the openCommentId
-  // clause the card would sit there with no pin under it the moment the target
-  // cleared. (#629 tried to keep agent-applied visible by exempting
-  // !resolved_by; that made Resolved(N) lie and the switch look broken.)
+  // One visible set drives the margin and the frame. Selection must never
+  // override the filter; explicit links enable it before opening a thread.
   const shownComments = useMemo(() => (
     showResolved
       ? comments.comments
-      : comments.comments.filter((comment) => (
-        comment.status !== 'applied'
-        || comment.id === openCommentId
-        || comment.id === deepTarget
-        || comment.replies?.some((reply) => reply.id === deepTarget)
-      ))
-  ), [comments.comments, deepTarget, openCommentId, showResolved]);
+      : comments.comments.filter((comment) => comment.status !== 'applied')
+  ), [comments.comments, showResolved]);
+  const visibleCommentsById = useMemo(
+    () => new Map(shownComments.map((comment) => [comment.id, comment])),
+    [shownComments],
+  );
   // Lost pins are seats, not anchors: they give the card somewhere to be drawn
   // while it still reads — and styles — as unanchored, with the way back.
   const pinIds = useMemo(
@@ -495,18 +483,29 @@ export function DocumentShell({ boot, config }) {
     [bridge.layout.docHeight, bridge.layout.pins],
   );
 
-  // Every thread goes to the frame. The ones the margin is not showing —
-  // resolved, with the switch off — go flagged `hidden`: no pin, a lighter
-  // mark on their sentence, and a click on it opens the thread (the open
-  // card is always shown, whatever the switch says).
-  const anchorsForFrame = useMemo(() => {
-    const shown = new Set(shownComments.map((comment) => comment.id));
-    return comments.comments.map((comment) => (shown.has(comment.id) ? comment : { ...comment, hidden: true }));
-  }, [comments.comments, shownComments]);
+  const toggleResolved = useCallback(() => {
+    const next = !showResolved;
+    setShowResolved(next);
+    try { localStorage.setItem(RESOLVED_KEY, next ? '1' : '0'); } catch {}
+    if (!next) {
+      // Cancel any pending reveal as well as an already-open resolved card.
+      setDeepTarget(null);
+      if (commentsById.get(openCommentId)?.status === 'applied') {
+        setOpenCommentId(null);
+        bridge.send({ type: 'tdoc:focusAnchor', id: null });
+      }
+      const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
+      if (openCluster?.items.some(({ comment }) => commentsById.get(comment.id)?.status === 'applied')) {
+        setOpenClusterKey(null);
+      }
+      if (commentsById.get(reanchorId)?.status === 'applied') setReanchorId(null);
+    }
+  }, [bridge.send, clusters, commentsById, openClusterKey, openCommentId, reanchorId, showResolved]);
+
   useEffect(() => {
-    bridge.send({ type: 'tdoc:anchors', comments: anchorsForFrame });
+    bridge.send({ type: 'tdoc:anchors', comments: shownComments });
     if (!comments.loading) document.body.dataset.tdocReady = '1';
-  }, [bridge.send, anchorsForFrame, comments.loading]);
+  }, [bridge.send, shownComments, comments.loading]);
 
   useEffect(() => {
     bridgeRef.current = bridge.send;
@@ -531,6 +530,12 @@ export function DocumentShell({ boot, config }) {
     ));
     if (!root) {
       setDeepTarget(null);
+      return;
+    }
+    if (root.status === 'applied' && !showResolved) {
+      // A direct link is an explicit request to reveal this thread. Reflect
+      // that in the switch instead of bypassing its visibility contract.
+      setShowResolved(true);
       return;
     }
     if (narrow) {
@@ -564,7 +569,7 @@ export function DocumentShell({ boot, config }) {
     }
     setOpenCommentId(root.id);
     setDeepTarget(null);
-  }, [bridge.layout.scrollY, bridge.send, clusters, comments.comments, deepTarget, narrow]);
+  }, [bridge.layout.scrollY, bridge.send, clusters, comments.comments, deepTarget, narrow, showResolved]);
 
   // Save explains itself the first time, then gets out of the way for good if
   // the author asked it to.
@@ -1005,7 +1010,7 @@ export function DocumentShell({ boot, config }) {
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
     window.innerWidth - 34,
   );
-  const openComment = commentsById.get(openCommentId);
+  const openComment = visibleCommentsById.get(openCommentId);
   const openCluster = clusters.find((cluster) => (
     cluster.items.some(({ comment }) => comment.id === openCommentId)
   ));

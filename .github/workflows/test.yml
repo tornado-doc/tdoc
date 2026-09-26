@@ -79,8 +79,9 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:browser
+      - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
 
   shell-runtime:
     name: shell runtime

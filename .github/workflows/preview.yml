@@ -224,6 +224,18 @@ jobs:
           seed 1 test/fixtures/tdocs/sample-doc/v1/index.html
           seed 2 test/fixtures/tdocs/sample-doc/v2/index.html
 
+          # A separate slug keeps resolved-toggle review comments isolated from
+          # other PRs. Seed actual comments so reviewers need no local mocks.
+          RESOLVED_SLUG="resolved-pr-${{ github.event.pull_request.number }}"
+          reset_preview_slug "$RESOLVED_SLUG"
+          jq -n --arg slug "$RESOLVED_SLUG" --rawfile html test/fixtures/tdocs/sample-doc/v2/index.html \
+            --slurpfile comments test/fixtures/resolved-visibility-comments.json \
+            '{slug:$slug,version:2,html:$html,comments:$comments[0],meta:{title:"Resolved visibility preview",slug:$slug,versions:[{n:2}],access:{visibility:"public",commenting:"signed_in",history_visibility:"public",allowed_users:[]}}}' \
+            > /tmp/tdoc-preview-resolved.json
+          curl -sf --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \
+            -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
+            --data-binary @/tmp/tdoc-preview-resolved.json | jq -e '.ok == true'
+
           # Per-PR diagram fixture: shared preview storage must not mix scenes
           # from two concurrently reviewed branches.
           DIAGRAM_SLUG="excalidraw-pr-${{ github.event.pull_request.number }}"
@@ -273,6 +285,7 @@ jobs:
           **Open this:** https://${PREVIEW_HOST}/ — the homepage, this PR's code
           carrying the landing version in this PR's checkout.
           **Onboarding UI:** https://${PREVIEW_HOST}/__preview/onboarding
+          **Resolved toggle:** https://${PREVIEW_HOST}/d/resolved-pr-${PR}/v/2
           **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1
           **Or a document:** https://${PREVIEW_HOST}/d/conway-life/v/2
 

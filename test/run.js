@@ -100,13 +100,14 @@ const OFFLINE = [
   'composer-position.test.js', // where the card goes when a keyboard is up
   'reader-patch-drift.test.js', // the phone table rule reaches both runtimes
   'dismiss-rule.test.js',     // the dismiss-first rule keeps its three exceptions
-  'resolved-anchors.test.js', // a resolved thread still marks its sentence
+  'resolved-anchors.test.js', // resolved visibility and anchor fallbacks
 ];
 
 // These run against local fixtures and require the development browser.
 const BROWSER = [
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection
+  'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
 ];
