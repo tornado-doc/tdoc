@@ -8,6 +8,7 @@ import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
+import { QuotaBumpDialog } from './document/document-dialogs.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
@@ -379,6 +380,7 @@ export function DocsHub({ boot }) {
             create={hub.createDoc}
             canCreate={capabilities.create}
             onAgent={openAgentRecipe}
+            onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
             trigger={<button className="mk-btn" type="button">Create a doc</button>}
           />
         </div>
@@ -523,6 +525,15 @@ export function DocsHub({ boot }) {
         >
           <AgentRecipe />
         </HubDialog>
+      ) : null}
+      {modal?.type === 'quota-bump' ? (
+        <QuotaBumpDialog
+          open
+          used={modal.quota?.used}
+          limit={modal.quota?.limit}
+          onClose={closeModal}
+          onBumped={() => hub.notify('Limit raised — try creating again')}
+        />
       ) : null}
       {modal?.type === 'rename-doc' ? (
         <NameDialog

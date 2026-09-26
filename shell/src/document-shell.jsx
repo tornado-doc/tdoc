@@ -18,6 +18,7 @@ import {
   MentionReachDialog,
   MessageDialog,
   PublishDialog,
+  QuotaBumpDialog,
   ShareDialog,
 } from './document/document-dialogs.jsx';
 import {
@@ -748,6 +749,14 @@ export function DocumentShell({ boot, config }) {
         signIn();
         return;
       }
+      if (error.body?.error === 'quota_docs') {
+        setDialog({
+          type: 'quota-bump',
+          used: error.body.used,
+          limit: error.body.limit,
+        });
+        return;
+      }
       setDialog({
         type: 'message',
         title: 'Could not duplicate',
@@ -1340,6 +1349,13 @@ export function DocumentShell({ boot, config }) {
       <MessageDialog
         message={dialog?.type === 'message' ? dialog : null}
         onOpenChange={(open) => !open && setDialog(null)}
+      />
+      <QuotaBumpDialog
+        open={dialog?.type === 'quota-bump'}
+        used={dialog?.used}
+        limit={dialog?.limit}
+        onClose={() => setDialog(null)}
+        onBumped={() => showToast('Limit raised — try duplicate again')}
       />
       <SaveNoticeDialog
         open={saveNoticeOpen}
