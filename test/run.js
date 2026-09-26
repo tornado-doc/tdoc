@@ -86,6 +86,7 @@ const OFFLINE = [
   'agent-reply-once.test.js', // #349 the agent answers once per human turn
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
+  'rich-text.test.js',        // comment markdown subset (bold/code/list/link)
   'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)

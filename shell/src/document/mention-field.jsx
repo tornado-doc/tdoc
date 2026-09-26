@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import { useGithubUserSearch } from './github-user-search.js';
 import { insertMention, matchMentionable, mentionQueryAt, splitMentions } from './mentions.js';
+import { parseRichText } from './rich-text.js';
 
 // A textarea that offers people after `@`. Both composers use it, so mentioning
 // works the same whether you are starting a thread or answering one.
@@ -185,15 +186,58 @@ export function MentionField({
   );
 }
 
-// Posted comment text, with the mentions the server actually delivered shown
-// as chips. Everything else stays exactly as it was typed.
+function renderInline(nodes, keyPrefix) {
+  return (nodes || []).map((node, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (node.type === 'strong') return <strong key={key} className="tdoc-md-strong">{node.value}</strong>;
+    if (node.type === 'code') return <code key={key} className="tdoc-md-code">{node.value}</code>;
+    if (node.type === 'link') {
+      return (
+        <a key={key} className="tdoc-md-link" href={node.value} target="_blank" rel="noopener noreferrer">
+          {node.value}
+        </a>
+      );
+    }
+    return <React.Fragment key={key}>{node.value}</React.Fragment>;
+  });
+}
+
+function renderRichBlocks(blocks, keyPrefix) {
+  return (blocks || []).map((block, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (block.type === 'fence') {
+      return <pre key={key} className="tdoc-md-pre"><code>{block.value}</code></pre>;
+    }
+    if (block.type === 'list') {
+      return (
+        <ul key={key} className="tdoc-md-list">
+          {(block.items || []).map((item, i) => (
+            <li key={`${key}-li-${i}`}>{renderInline(item, `${key}-li-${i}`)}</li>
+          ))}
+        </ul>
+      );
+    }
+    if (block.type === 'break') return <React.Fragment key={key}>{'\n\n'}</React.Fragment>;
+    if (block.type === 'paragraph') {
+      return (
+        <span key={key} className="tdoc-md-p">
+          {renderInline(block.children, key)}
+        </span>
+      );
+    }
+    return null;
+  });
+}
+
+// Posted comment text: delivered mentions as chips, plus a small markdown
+// subset (bold / inline code / fences / lists / links) as React nodes only.
 export function MentionText({ text, mentions }) {
   const parts = splitMentions(text, mentions);
   return (
     <>
       {parts.map((part, index) => (part.type === 'mention'
         ? <span key={index} className="tdoc-mention-chip">{part.value}</span>
-        : <React.Fragment key={index}>{part.value}</React.Fragment>))}
+        : <React.Fragment key={index}>{renderRichBlocks(parseRichText(part.value), `t${index}`)}</React.Fragment>))}
     </>
   );
 }
