@@ -126,24 +126,19 @@ their own layout; the provider does not guess whether a matrix is a record list.
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`.
 
-A figure has to say how wide it is. An `<svg>` with `width="960"` on the tag
-renders at 960 physical pixels, so in a narrower column it runs past the right
-edge and the wrapper scrolls it out of sight — the last panel is simply gone
-unless the reader thinks to drag it. The document is what has to fix that, not
-the page it happens to be served by:
+Use wrapping HTML/CSS for text-heavy panels and HTML captions for explanations.
+Keep SVG labels short; split longer labels into lines that fit their nodes.
 
 ```css
 .diagram-box svg { display: block; width: 100%; height: auto; }
 ```
 
-`width: 100%` makes the drawing fluid: the viewBox does the scaling, so the
-figure fits whatever column it lands in and nothing is ever off-screen.
-
-Add a `min-width` when shrinking to fit would cost more than scrolling does. A
-dense figure squeezed into a phone puts its labels at a few pixels, which is
-worth trading for a swipe — that is the case the wrapper exists for, and
-without a `min-width` it never engages. Pick the width that keeps the smallest
-type around 9px.
+Estimate SVG label size as `font-size × displayed SVG width / viewBox width`,
+including cumulative scale from the text and its ancestors; target at least
+12px at the smallest intended width. If transforms make this uncertain, use an
+unscaled label layer or HTML. Split dense figures, or preserve their spatial
+layout with `min-width` and local scrolling. Recheck label/node fit after sizing;
+the estimate does not prove rendered fit.
 
 **Stat tile row** — a few numbers that carry an argument on their own. Three or
 four; a fifth is a table. It earns its place from the numbers in it, like any
@@ -216,8 +211,10 @@ Either use a semantic tag — `<section>`, `<aside>`, `<details>` — or mark it
 `data-tdoc-artifact`. That is what makes it something a reader can point at,
 which is the reason it is in a tdoc rather than a screenshot.
 
-**Survive a phone.** Fluid widths, a `viewBox` rather than pixel `width`/
-`height`, and a scroll wrapper if it genuinely cannot narrow.
+**Survive a phone.** Use fluid widths, an SVG `viewBox`, and local scrolling
+when a figure cannot narrow. Let text containers grow with their content;
+never fit required text with clipping, line clamping or a fixed/max height.
+An intentionally bounded viewport must scroll to expose all its content.
 
 **Compute nothing in the host.** The same rule as everything else: `:checked`
 for state, CSS `@keyframes` for motion, a sandboxed widget island if it truly

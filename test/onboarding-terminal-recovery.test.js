@@ -10,7 +10,6 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
-require('./helpers/pin-browser-cache');
 
 const PUBLISH = path.join(__dirname, '..', 'bin', 'tdoc-publish');
 let pass = 0, fail = 0;

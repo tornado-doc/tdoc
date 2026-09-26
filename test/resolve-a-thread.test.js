@@ -77,17 +77,17 @@ t('resolve sits with the thread actions, behind canMutate', () => {
   assert(card.slice(start - 200, start).includes('canMutate ? ('), 'resolve must be gated like delete');
 });
 
-t('a resolved thread leaves the margin, except the one being looked at', () => {
+t('resolved visibility governs selection without deleting stored comments', () => {
   const start = shell.indexOf('const shownComments = useMemo');
   const block = shell.slice(start, shell.indexOf('), [', start) + 120);
   assert(/comment\.status !== 'applied'/.test(block), 'resolved threads should not be sent as anchors');
-  assert(/comment\.id === openCommentId/.test(block),
-    'the open card would otherwise sit over a pin that is no longer there');
-  assert(/comment\.id === deepTarget/.test(block),
-    'a notification link must reach the thread it points at');
-  // The map the open card reads from must still hold everything.
+  assert(!/comment\.id === (openCommentId|deepTarget)/.test(block),
+    'selection or a notification link must not bypass the visibility switch');
+  assert(shell.includes('const openComment = visibleCommentsById.get(openCommentId);'),
+    'the card must obey the same visible set as the frame');
+  // Hidden records remain available for status changes and explicit reveals.
   assert(/const commentsById = useMemo\(\s*\n\s*\(\) => new Map\(comments\.comments/.test(shell),
-    'hiding is about the margin, not about forgetting the comment exists');
+    'hiding must not discard the stored comment');
 });
 
 t('the way back is a switch in the bar, off by default', () => {

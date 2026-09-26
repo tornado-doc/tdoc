@@ -7,20 +7,20 @@
     "build:shell": "vite build --config shell/vite.config.js",
     "dev:shell": "vite --config shell/vite.config.js",
     "test": "node test/run.js",
-    "test:all": "node test/run.js --all"
+    "test:all": "node test/run.js --all",
+    "test:browser": "node test/run.js --browser"
   },
-  "//devDependencies": "playwright and Chromium are required by document creation/publishing preflight. Install with: npm ci && npx playwright install chromium",
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@excalidraw/excalidraw": "0.18.1",
     "lucide-react": "^1.34.0",
-    "playwright": "^1.60.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "playwright": "^1.60.0"
   },
   "overrides": {
     "nanoid@3.3.3": "3.3.19",

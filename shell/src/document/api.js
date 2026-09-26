@@ -152,6 +152,16 @@ export function publishDocument(slug) {
   });
 }
 
+// Self-serve raise of the hosted-doc cap (50→100, then →200). Requires a
+// reason; agents use the same route with the upload token.
+export function requestQuotaBump(reason) {
+  return request('/api/quota/bump', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: String(reason || '').trim() }),
+  });
+}
+
 // Renaming is a metadata edit: it changes what the document is called and
 // touches neither its text nor its version history.
 export function renameDocument(slug, title) {

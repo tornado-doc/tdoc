@@ -84,7 +84,7 @@ t('POST /api/doc/duplicate is session-gated, snapshot-only, no comment copy', ()
   // it aid-stamps AND bakes the reading template AND records the content sha.
   assert(dupRoute.includes('prepareDocVersion'), 'copied HTML must go through prepareDocVersion (aids + bake + sha)');
   assert(dupRoute.includes('hostedAccountForGithub'), 'duplicate must reuse the hosted account registry');
-  assert(dupRoute.includes('quota_docs'), 'duplicate must share the hosted doc quota');
+  assert(dupRoute.includes('quotaDocsPayload'), 'duplicate must share the hosted doc quota');
   assert(dupRoute.includes('quota_upload_bytes'), 'duplicate must share the hosted upload-size cap');
 });
 

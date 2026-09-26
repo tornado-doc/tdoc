@@ -301,25 +301,12 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
 
    If it exits non-zero, fix the host and run it again; nothing has been
    written. Do not open, publish, or report the document as complete.
-5. **Inspect the rendered version before publishing.** `tdoc-write` now runs
-   the browser layout gate after baking and before writing; `tdoc-publish`
-   rechecks the newest bytes before uploading. Errors block both commands.
-   If Chromium is unavailable, follow the `layout_browser` step from
-   `tdoc-doctor` (`npm ci` then `npx playwright install chromium` in this
-   checkout). Do not bypass the gate. Generate screenshots for visual review:
-
-   ```bash
-   node "$SKILL_DIR/bin/tdoc-check-layout" ~/tdocs/<slug>/v1/index.html \
-     --screenshots /tmp/<slug>-layout
-   ```
-
-   Fix reported errors and inspect all six screenshots: constrained and expanded content layouts
-   at 375px, 768px and 1440px. Tiny SVG labels, squeezed table columns,
-   overlap and clipping are errors; intentional local scrolling is allowed. Check table column
-   balance, diagram labels inside their boxes, connector crossings, and local
-   scroll areas. A missing browser is an unverified result, never a pass.
-   The check disables author JS and remote assets; verify widgets and external
-   fonts separately in the served reader. See `authoring/visuals.md`.
+5. **Review the document before publishing.** Check the content, table structure,
+   SVG labels and responsive styles against `authoring/visuals.md`.
+   The write command validates the template and bakes the reading styles; it
+   does not perform rendered layout verification. Preview in an existing
+   browser when available, but do not install extra tools to create or publish.
+   Only claim visual verification when the rendered document was actually inspected.
 
 6. **Publish and hand over the link.**
 
@@ -482,8 +469,8 @@ silently is the #1 source of regression complaints.
      is based on a possibly-stale cache.
 
    Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
-   Run `bin/tdoc-check-layout` on the new baked version and inspect its desktop
-   and phone screenshots before publishing, just as on `/tdoc new`.
+   Review the new version using the same content and responsive-style checks
+   as `/tdoc new`; preview when available without installing extra tools.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice, and
@@ -1079,23 +1066,22 @@ Every doc must work on mobile out of the box. The baked template carries defensi
 - **Use fluid widths**, not hardcoded pixels. The default 720px column has a
   **672px** usable canvas; select `data-tdoc-width="wide"` on the root when
   the content needs more room. Keep root spacing in the template. On phones
-  both layouts shrink to the viewport. Grid text tracks should use
-  `minmax(0, 1fr)`; long inline identifiers must be able to wrap.
-- **SVG / images**: do NOT hardcode width=N height=M. Either:
-  - Use `width="100%"` + CSS aspect-ratio (`aspect-ratio: 16/9`), or
-  - Use a wrapper with `max-width: 100%` and let the artifact scale.
-  - For SVG, give the `<svg>` a `viewBox` and size it in CSS (`width: 100%; height: auto`). If the drawing needs more room than a phone gives it, put the `<svg>` in a wrapper with `overflow-x: auto` and a `min-width` on the SVG so it scrolls rather than squashing.
-  - (Canvas isn't an option — see "Interactivity: CSS only". Without JS there is nothing to draw into the buffer.)
+  both layouts shrink to the viewport. Use `minmax(0, 1fr)` for grid text tracks,
+  `min-width: 0` on their children and `overflow-wrap: anywhere` for long identifiers;
+  stack text-heavy columns on small screens.
+- **SVG / images**: use fluid sizing (`width: 100%; height: auto`) and an SVG
+  `viewBox`. Follow the figure rules in `$SKILL_DIR/authoring/structure/components.md`
+  for readable labels, HTML captions and intentional local scrolling.
 - **Tables**: wrap in `<div class="tdoc-table-scroll">`. Preserve semantic
   `<table>` / `<th>` / `<td>` relationships; mark atomic cells with
   `data-tdoc-cell="value"`. Do not use page clipping or shrinking text to fit.
   Native tables get the same content-width protection in the provider and CLI
   preview. An intentional card reflow remains the author's responsibility.
 - **Code blocks (`<pre>`)**: `max-width: 100%; overflow-x: auto;`.
-- **Test both content widths at 375px, 768px and 1440px** with `bin/tdoc-check-layout`,
-  then inspect the screenshots before publishing or claiming done. Check the
-  document frame as well as the shell: a fitting shell can hide an overflowing
-  iframe. Wide figures/tables may scroll locally; the whole page must not.
+- **Design for constrained and expanded content at phone, tablet and desktop widths.**
+  When previewing, inspect the document frame as well as the shell: a fitting
+  shell can hide an overflowing iframe. Wide figures/tables may scroll locally;
+  the whole page must not. Static validation does not prove rendered layout.
 
 The baked template carries `:where()` defensive defaults (media elements are
 capped at `max-width: 100%`). Provider-computed table geometry is transient and

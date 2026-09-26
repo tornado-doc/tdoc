@@ -6,8 +6,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 const { layoutTables } = require('../server/table-layout');
 const { applyReaderWidth } = require('../server/reader-width');
-const { measureLayout } = require('../bin/tdoc-check-layout');
-require('./helpers/pin-browser-cache');
+const { measureLayout } = require('./helpers/check-layout');
 const reader = fs.readFileSync(path.join(__dirname, '../server/reader.css'), 'utf8');
 
 const fixture = (size = 16) => `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">

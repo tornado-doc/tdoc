@@ -442,9 +442,6 @@
   /* Anchor highlights (Custom Highlight API + fallback span) */
   ::highlight(tdoc-pending) { background-color: #fff3a8; }
   ::highlight(tdoc-anchor) { background-color: #fff7d0; }
-  /* Resolved and out of the margin: a lighter mark, so the sentence still
-     shows it has history; a click opens the thread. */
-  ::highlight(tdoc-anchor-resolved) { background-color: #fffbe6; text-decoration: underline dotted #c9a94a; text-decoration-thickness: 1.5px; }
   /* The block that replaced a comment's words: same light mark, dashed. */
   ::highlight(tdoc-anchor-moved) { background-color: #fffbe6; text-decoration: underline dashed #c9a94a; text-decoration-thickness: 1.5px; }
   /* Active = clicked. Visibly different from resting: vivid yellow + thick

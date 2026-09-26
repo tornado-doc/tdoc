@@ -8,8 +8,8 @@
 
 - [ ] `npm test` passes locally (offline suite).
 - [ ] If I touched anything browser-facing (`server/overlay.js`, `server/server.js`)
-      or the worker (`worker/worker.js`), I ran `npm run test:all` with Playwright
-      installed (`npm i -D playwright && npx playwright install chromium`).
+      or the worker (`worker/worker.js`), I ran `npm run test:browser` with Playwright
+      installed (`npm ci && npx playwright install chromium`).
 - [ ] If I edited `SKILL.md`, I copied it to `skills/tdoc/SKILL.md` so the two
       stay in sync (`cp SKILL.md skills/tdoc/SKILL.md`). They must match — the
       plugin-mode install reads the copy.

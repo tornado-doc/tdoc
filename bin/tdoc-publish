@@ -968,39 +968,6 @@ EOF
   exit 1
 fi
 
-# Validate the newest version BEFORE sign-in/deployment or any remote write.
-# Recheck here: files can have changed since tdoc-write. Historical versions
-# remain historical; a bad old version must not prevent publishing a repair.
-LAYOUT_HTML="$(node -e '
-  const fs=require("fs"), path=require("path"), dir=process.argv[1];
-  const m=JSON.parse(fs.readFileSync(path.join(dir,"meta.json"),"utf8"));
-  const n=Math.max(...(m.versions||[]).map(v=>Number(v.n)).filter(Number.isFinite));
-  if (!Number.isInteger(n)||n<1) process.exit(1);
-  process.stdout.write(path.join(dir,`v${n}`,"index.html"));
-' "$DOC_DIR")" || { echo '[tdoc] Cannot determine the version to validate' >&2; exit 1; }
-LAYOUT_REPORT="$(mktemp -t tdoc-layout.XXXXXX)"
-# tdoc-check-layout: exit 1 = real layout errors (block); exit 2 = unable to
-# check (missing Playwright / browser). Soft-skip exit 2 by default; set
-# TDOC_LAYOUT_REQUIRE=1 to hard-fail when the checker cannot run.
-LAYOUT_RC=0
-node "$(cd "$(dirname "$0")" && pwd)/tdoc-check-layout" "$LAYOUT_HTML" >"$LAYOUT_REPORT" || LAYOUT_RC=$?
-if [ "$LAYOUT_RC" -eq 1 ]; then
-  cat "$LAYOUT_REPORT" >&2
-  rm -f "$LAYOUT_REPORT"
-  echo '[tdoc] Rendered layout validation failed; nothing uploaded. Fix the reported elements and retry.' >&2
-  exit 1
-elif [ "$LAYOUT_RC" -ne 0 ]; then
-  cat "$LAYOUT_REPORT" >&2 || true
-  rm -f "$LAYOUT_REPORT"
-  if [ "${TDOC_LAYOUT_REQUIRE:-0}" = "1" ]; then
-    echo "[tdoc] Layout check required but unavailable (exit $LAYOUT_RC). Install Playwright: npm ci && npx playwright install chromium." >&2
-    exit 1
-  fi
-  echo "[tdoc] Layout check skipped (exit $LAYOUT_RC — install Playwright to verify: npm ci && npx playwright install chromium)." >&2
-else
-  rm -f "$LAYOUT_REPORT"
-fi
-
 # --- bundle overlay.js into worker source ---
 # Writes _worker.bundled.js into $1 (defaults to the wrangler worker dir; the
 # vercel path passes its own app dir). Shared with the tdoc.dev CD workflow.
