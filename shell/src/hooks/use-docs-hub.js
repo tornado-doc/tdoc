@@ -119,15 +119,27 @@ export function useDocsHub({ boot, onUnauthorized }) {
   }, [docs, recent]);
 
   // Start from scratch. On success the browser leaves for the new document, so
-  // there is no success toast to raise — only a failure keeps us on /me, and
-  // `run` has already turned that into one.
+  // there is no success toast to raise — only a failure keeps us on /me.
+  // Quota hits return `{ quota }` so the page can open the bump dialog instead
+  // of a toast that leaves the person stuck.
   const createDoc = useCallback(async () => {
-    let created = null;
-    const ok = await run(async () => { created = await createDocument(); });
-    if (!ok || !created || !created.url) return false;
-    location.href = created.url;
-    return true;
-  }, [run]);
+    try {
+      const created = await createDocument();
+      if (!created || !created.url) return false;
+      location.href = created.url;
+      return true;
+    } catch (error) {
+      if (error.status === 401 && onUnauthorized) {
+        onUnauthorized();
+        return false;
+      }
+      if (error.body?.error === 'quota_docs') {
+        return { quota: error.body };
+      }
+      notify(error.message || 'Request failed', true);
+      return false;
+    }
+  }, [notify, onUnauthorized]);
 
   // Renaming from the list, the same metadata edit the document bar performs.
   // The row updates from the title the server echoes back rather than the one
@@ -242,6 +254,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     toggleSelected,
     selectAll,
     toast,
+    notify,
     createDoc,
     renameDoc,
     toggleStar,
