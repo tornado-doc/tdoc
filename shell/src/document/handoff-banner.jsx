@@ -17,13 +17,23 @@ export function formatHandoffAgo(iso) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+function agentAlreadyReplied(comment) {
+  return (comment?.replies || []).some(
+    (r) => r && (r.author?.kind === 'agent' || r.agent_status),
+  );
+}
+
 function summarize(comments) {
   const sent = (comments || []).filter((c) => c && !c.deleted && c.handoff_status === 'sent');
   if (!sent.length) return null;
   const failed = sent.filter((c) => c.handoff_delivery?.status === 'failed');
-  const waiting = sent.filter((c) => c.handoff_delivery?.status !== 'failed');
+  // Drop threads the agent already answered — waiting strip follows the chips.
+  const waiting = sent.filter(
+    (c) => c.handoff_delivery?.status !== 'failed' && !agentAlreadyReplied(c),
+  );
+  if (!failed.length && !waiting.length) return null;
   let latestAt = null;
-  for (const c of sent) {
+  for (const c of [...waiting, ...failed]) {
     if (!c.handoff_at) continue;
     if (!latestAt || Date.parse(c.handoff_at) > Date.parse(latestAt)) latestAt = c.handoff_at;
   }
