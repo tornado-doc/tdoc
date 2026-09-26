@@ -89,11 +89,14 @@ function CommentStatusChips({ comment, demo }) {
     );
   }
 
-  if (comment.handoff_status === 'resolved') {
-    chips.push(
-      <Chip key="handoff-resolved" name="handoff-resolved" tone="neutral">Agent done</Chip>,
-    );
-  }
+  // No "Agent done" chip on the card. It marked handoff_status === 'resolved',
+  // but across every resolved handoff in real use (11 of 11, three docs) the
+  // agent had also replied — the chip never carried anything the reply a few
+  // lines below it did not already carry. Design doc v12 §10 defines the two as
+  // ONE state ("agent replied OR handoff resolved"), so a separate chip
+  // contradicted the model it was supposed to express. The details panel still
+  // needs it: that list shows no reply bodies, so there "the agent answered" is
+  // real information.
 
   // No chips, no row. #640 needed `:not(:has(...))` to hide an empty row
   // because the row was markup; here it simply is not rendered.
