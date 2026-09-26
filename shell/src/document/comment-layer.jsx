@@ -5,15 +5,21 @@ import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { avatarFor, TOP_BAR_HEIGHT } from './model.js';
 import { handoffSurfaceState } from './handoff-state.js';
+import { isThreadUnread } from './thread-seen.js';
 
-function Pin({ cluster, top, left, frameTop, commentsById, onOpenComment, onOpenCluster }) {
+function Pin({
+  cluster, top, left, frameTop, commentsById, seenMap, onOpenComment, onOpenCluster,
+}) {
   const single = cluster.items.length === 1 ? cluster.items[0].comment : null;
   const resolved = single?.resolved
     || (!single && cluster.items.every((item) => item.comment.resolved));
   const live = single && commentsById ? commentsById.get(single.id) : null;
-  // Pin cues for the handoff surface — visible without opening the card.
-  // resolved (msg axis) wins: a green check already answers "done".
+  // Pin shows at most three things (plus failed, which is rare and urgent):
+  // waiting pulse / unread solid dot / resolved check. Fine states stay on the card.
   const handoff = (!resolved && live) ? handoffSurfaceState(live) : null;
+  const waiting = handoff === 'waiting';
+  const failed = handoff === 'failed';
+  const unread = !resolved && !waiting && live ? isThreadUnread(live, seenMap) : false;
 
   return (
     <button
@@ -27,16 +33,16 @@ function Pin({ cluster, top, left, frameTop, commentsById, onOpenComment, onOpen
         // on. Without this a deleted thread is invisible until you click it.
         single?.deleted ? 'tdoc-pin-deleted' : '',
         !single && resolved ? 'tdoc-cluster-allresolved' : '',
-        handoff === 'waiting' ? 'is-waiting-handoff' : '',
-        handoff === 'failed' ? 'is-failed-handoff' : '',
-        handoff === 'replied' ? 'is-replied-handoff' : '',
+        waiting ? 'is-waiting-handoff' : '',
+        failed ? 'is-failed-handoff' : '',
+        unread ? 'is-unread-handoff' : '',
       ].filter(Boolean).join(' ')}
       data-id={single?.id}
       data-key={cluster.key}
       title={
-        handoff === 'waiting' ? 'Waiting on agent'
-          : handoff === 'failed' ? 'Handoff not delivered'
-            : handoff === 'replied' ? 'Agent replied'
+        waiting ? 'Waiting on agent'
+          : failed ? 'Handoff not delivered'
+            : unread ? 'New agent reply'
               : undefined
       }
       style={{ top: Math.max(frameTop + 4, top), left }}
@@ -81,6 +87,7 @@ function ClusterPopover({ cluster, commentsById, top, left, onSelect }) {
 export function DesktopCommentLayer({
   clusters,
   commentsById,
+  seenMap = {},
   frameScrollY,
   frameTop = TOP_BAR_HEIGHT,
   pinLeft,
@@ -118,6 +125,7 @@ export function DesktopCommentLayer({
             frameTop={frameTop}
             left={pinLeft}
             commentsById={commentsById}
+            seenMap={seenMap}
             onOpenComment={onOpenComment}
             onOpenCluster={onOpenCluster}
           />

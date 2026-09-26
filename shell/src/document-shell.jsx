@@ -56,6 +56,7 @@ import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './d
 import { HandoffBanner } from './document/handoff-banner.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { summarizeHandoffSurfaces } from './document/handoff-state.js';
+import { markThreadSeen, readSeenMap } from './document/thread-seen.js';
 import { DebugBar } from './debug-bar.jsx';
 
 function useNarrowViewport() {
@@ -168,6 +169,7 @@ export function DocumentShell({ boot, config }) {
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
+  const [seenMap, setSeenMap] = useState(() => readSeenMap(config.slug));
   const [sendToAgentBusy, setSendToAgentBusy] = useState(false);
   const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
@@ -453,6 +455,18 @@ export function DocumentShell({ boot, config }) {
     if (closeDrawer) setDrawerOpen(false);
     bridge.send({ type: 'tdoc:focusAnchor', id, scroll });
   }, [bridge.send]);
+
+  useEffect(() => {
+    setSeenMap(readSeenMap(config.slug));
+  }, [config.slug]);
+
+  // Opening a thread clears its unread pin dot (mail/chat semantics).
+  useEffect(() => {
+    if (!openCommentId) return;
+    const comment = comments.comments.find((c) => c.id === openCommentId);
+    if (!comment) return;
+    if (markThreadSeen(config.slug, comment)) setSeenMap(readSeenMap(config.slug));
+  }, [openCommentId, comments.comments, config.slug]);
 
   // Everything, always: an id has to resolve to its comment even when that
   // comment is hidden, or a deep link would open nothing.
@@ -1266,6 +1280,7 @@ export function DocumentShell({ boot, config }) {
         <DesktopCommentLayer
           clusters={clusters}
           commentsById={commentsById}
+          seenMap={seenMap}
           frameScrollY={bridge.layout.scrollY}
           frameTop={frameTop}
           pinLeft={pinLeft}

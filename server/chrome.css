@@ -327,13 +327,14 @@
     animation: tdoc-pin-wait 1.8s ease-out infinite;
   }
   .tdoc-pin.is-failed-handoff { border-color: #c45c45; }
-  .tdoc-pin.is-replied-handoff { border-color: #3b5bdb; }
-  .tdoc-pin.is-replied-handoff::after {
-    content: "↩";
-    position: absolute; right: -3px; bottom: -3px;
-    width: 14px; height: 14px; border-radius: 50%;
-    background: #3b5bdb; color: #fff;
-    font-size: 9px; line-height: 14px; text-align: center; font-weight: 700;
+  /* Unread = solid dot you clear by opening — not a permanent "replied" badge. */
+  .tdoc-pin.is-unread-handoff::after {
+    content: "";
+    position: absolute; right: -2px; top: -2px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #3b5bdb;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px color-mix(in srgb, #3b5bdb 35%, transparent);
   }
   @keyframes tdoc-pin-wait {
     0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-accent, #3b6cff) 45%, transparent); }
