@@ -5618,7 +5618,13 @@ async function resolveNotifyTargets(env, slug) {
     default: fallback ? { ...fallback, source: 'account' } : null,
     candidates: fallbackList.slice(1).map(t => ({ ...t, source: 'account' })),
     fallback,
-    reason: fallback ? null : 'no_agent_bound',
+    // Empty account-notify + empty doc list means nobody has ever linked a
+    // Raft agent to this account (or followed this doc). Calling that
+    // "no_agent_bound" made the UI say "wait for an agent to touch the doc",
+    // which is a lie when the owner never connected Raft at all — the Send
+    // button looked broken. Prefer a reason the UI can turn into "connect
+    // Raft first". Keep `no_agent_bound` as a deprecated alias nowhere new.
+    reason: fallback ? null : 'no_raft_link',
   };
 }
 
