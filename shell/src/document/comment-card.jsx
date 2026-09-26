@@ -89,14 +89,25 @@ function CommentStatusChips({ comment, demo }) {
     );
   }
 
-  // No "Agent done" chip on the card. It marked handoff_status === 'resolved',
-  // but across every resolved handoff in real use (11 of 11, three docs) the
-  // agent had also replied — the chip never carried anything the reply a few
-  // lines below it did not already carry. Design doc v12 §10 defines the two as
-  // ONE state ("agent replied OR handoff resolved"), so a separate chip
-  // contradicted the model it was supposed to express. The details panel still
-  // needs it: that list shows no reply bodies, so there "the agent answered" is
-  // real information.
+  // Keyed on "the agent replied", NOT on handoff_status === 'resolved'.
+  //
+  // The old chip fired only on resolve. Two things make that the wrong
+  // trigger: agents frequently answer without ever calling resolve, and the
+  // reply itself is NOT visible evidence — replies sit behind a collapsed
+  // "N replies" toggle. So the moment an agent answered, "Waiting" vanished
+  // and nothing took its place, which is the exact gap Julie hit: the only
+  // way she could tell was that the banner disappeared.
+  //
+  // Checking real data, every resolved handoff (11 of 11, three docs) also had
+  // a reply — resolved is a strict subset of replied, so keying on replied
+  // covers the same cases and the ones resolve misses. Design doc v12 §10
+  // defines these as ONE state ("agent replied OR handoff resolved"); this is
+  // that state, with the trigger that actually fires.
+  if (hasAgentReply(comment) || comment.handoff_status === 'resolved') {
+    chips.push(
+      <Chip key="agent-replied" name="agent-replied" tone="neutral">Agent replied</Chip>,
+    );
+  }
 
   // No chips, no row. #640 needed `:not(:has(...))` to hide an empty row
   // because the row was markup; here it simply is not rendered.
