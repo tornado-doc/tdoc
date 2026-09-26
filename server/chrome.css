@@ -234,6 +234,27 @@
   .tdoc-agent-status-question { background: #ffe7e7; color: #a52323; }
   /* pre-wrap: keep newlines from agent/human replies. Markdown still plain text. */
   .tdoc-margin-comment .text { color: #202124; line-height: 1.5; word-wrap: break-word; font-size: 13.5px; white-space: pre-wrap; }
+  .tdoc-margin-comment .text .tdoc-md-p { display: inline; }
+  .tdoc-margin-comment .text .tdoc-md-list { margin: 6px 0; padding-left: 1.2em; white-space: normal; }
+  .tdoc-margin-comment .text .tdoc-md-list li { margin: 2px 0; }
+  .tdoc-margin-comment .text .tdoc-md-pre {
+    display: block; margin: 8px 0; padding: 8px 10px; border-radius: 8px;
+    background: #f1f3f4; overflow-x: auto; white-space: pre; font-size: 12.5px; line-height: 1.45;
+  }
+  .tdoc-margin-comment .text .tdoc-md-code,
+  .tdoc-reply .text .tdoc-md-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.92em; background: #f1f3f4; padding: 1px 5px; border-radius: 4px;
+  }
+  .tdoc-margin-comment .text .tdoc-md-strong,
+  .tdoc-reply .text .tdoc-md-strong { font-weight: 650; }
+  .tdoc-margin-comment .text .tdoc-md-link,
+  .tdoc-reply .text .tdoc-md-link { color: var(--td-accent); word-break: break-all; }
+  .tdoc-reply .text .tdoc-md-list { margin: 6px 0; padding-left: 1.2em; white-space: normal; }
+  .tdoc-reply .text .tdoc-md-pre {
+    display: block; margin: 8px 0; padding: 8px 10px; border-radius: 8px;
+    background: #f1f3f4; overflow-x: auto; white-space: pre; font-size: 12px; line-height: 1.45;
+  }
   /* A tombstone (#354): the words are gone, the name and the slot are not.
      Muted and italic so it reads as an absence, not as something said. */
   .tdoc-margin-comment .tdoc-deleted-text,
