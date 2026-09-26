@@ -1648,7 +1648,7 @@ EOF
 "This account is at its hosted-doc limit (${_qused:-?} of ${_qlimit:-?}). Raise it with one POST (self-serve steps: 50→100, then 100→200; each needs a non-empty reason), then republish:
 
   TOKEN=\$(python3 -c 'import json; print(json.load(open(\"$HOME/.tdoc/published.json\"))[\"upload_token\"])')
-  curl -sS -X POST '$UPLOAD_BASE/api/quota/bump' \\
+  curl -sS --connect-timeout 10 --max-time 30 -X POST '$UPLOAD_BASE/api/quota/bump' \\
     -H \"Authorization: Bearer \$TOKEN\" -H 'Content-Type: application/json' \\
     -d '{\"reason\":\"why you need more hosted docs\"}'
 
