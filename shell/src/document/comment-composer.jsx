@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { MentionField } from './mention-field.jsx';
+import { Chip } from '../ui/chip.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
 
 // The shell's chrome does not scroll — the frame does — so the composer's
@@ -108,7 +109,7 @@ export function CommentComposer({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="head">
-        {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
+        {demo ? <Chip kind="demo" tone="warn">Demo</Chip> : null}
         <span className="h">{preview}</span>
         <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
       </div>
