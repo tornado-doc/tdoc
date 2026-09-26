@@ -288,8 +288,7 @@ export function Profile({ boot }) {
         <div className="page-hd profile-hd">
           <ProfileAvatar
             githubLogin={githubLogin}
-            avatarUrl={identity && identity.avatar_url}
-            name={identity && identity.name}
+            name={login}
             handle={login}
           />
           <div className="profile-id">
