@@ -706,10 +706,12 @@ export function DocumentShell({ boot, config }) {
     setNotifyCommentIds(ids);
     setNotifyOpen(true);
   };
+  // Badge + default selection = not yet handed off (handoff_status note).
+  // status≠applied alone is wrong: agent replies leave status open while
+  // handoff is already sent/resolved, so the count stayed inflated (#Send).
+  const pendingHandoff = (c) => c && !c.deleted && c.status !== 'applied' && c.handoff_status === 'note';
   const openDocNotify = () => {
-    const openIds = shownComments
-      .filter((c) => c.status !== 'applied' && !c.deleted)
-      .map((c) => c.id);
+    const openIds = shownComments.filter(pendingHandoff).map((c) => c.id);
     openNotifyPanel(openIds);
   };
   const removeAnchor = async () => {
@@ -1073,7 +1075,7 @@ export function DocumentShell({ boot, config }) {
             />
             {notifyEnabled ? (
               <DocumentSendAgentAction
-                count={shownComments.filter((c) => c.status !== 'applied' && !c.deleted).length}
+                count={shownComments.filter(pendingHandoff).length}
                 onClick={openDocNotify}
               />
             ) : null}
