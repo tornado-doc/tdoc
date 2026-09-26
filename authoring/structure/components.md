@@ -133,11 +133,12 @@ Keep SVG labels short; split longer labels into lines that fit their nodes.
 .diagram-box svg { display: block; width: 100%; height: auto; }
 ```
 
-For uniformly scaled SVGs without nested transforms, estimate label size as
-`font-size × displayed SVG width / viewBox width`; aim for at least 12px at
-the smallest intended width. If too dense, split the figure; when its spatial
-layout must stay intact, set a `min-width` and use the local scroll wrapper.
-This estimate is a source-review aid, not proof of rendered text fit.
+Estimate SVG label size as `font-size × displayed SVG width / viewBox width`,
+including cumulative scale from the text and its ancestors; target at least
+12px at the smallest intended width. If transforms make this uncertain, use an
+unscaled label layer or HTML. Split dense figures, or preserve their spatial
+layout with `min-width` and local scrolling. Recheck label/node fit after sizing;
+the estimate does not prove rendered fit.
 
 **Stat tile row** — a few numbers that carry an argument on their own. Three or
 four; a fifth is a table. It earns its place from the numbers in it, like any
@@ -210,8 +211,10 @@ Either use a semantic tag — `<section>`, `<aside>`, `<details>` — or mark it
 `data-tdoc-artifact`. That is what makes it something a reader can point at,
 which is the reason it is in a tdoc rather than a screenshot.
 
-**Survive a phone.** Fluid widths, a `viewBox` rather than pixel `width`/
-`height`, and a scroll wrapper if it genuinely cannot narrow.
+**Survive a phone.** Use fluid widths, an SVG `viewBox`, and local scrolling
+when a figure cannot narrow. Let text containers grow with their content;
+never fit required text with clipping, line clamping or a fixed/max height.
+An intentionally bounded viewport must scroll to expose all its content.
 
 **Compute nothing in the host.** The same rule as everything else: `:checked`
 for state, CSS `@keyframes` for motion, a sandboxed widget island if it truly
