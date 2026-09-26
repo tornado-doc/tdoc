@@ -168,24 +168,8 @@
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
-  /* Parent-level resolved chip (distinct from the per-reply status chip). */
-  /* Same chip geometry for comment-axis (✓ fixed) and handoff-axis pills. */
-  .tdoc-resolved-chip,
-  .tdoc-handoff-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    flex: 0 0 auto;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 999px;
-    margin: 0;
-    white-space: nowrap;
-  }
-  .tdoc-resolved-chip { background: #e8f5ed; color: #1a7340; }
-  .tdoc-handoff-chip { color: #5a5a56; background: #f0efea; }
-  /* Homepage in-memory comment demo — same chip shape, quiet amber. */
+  /* Status pills live in shell/src/ui/chip.jsx (.ui-chip*). */
+  /* Homepage fixture may still reference the demo class name in tests. */
   .tdoc-demo-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #f5efe0; color: #7a5c14; }
   /* Re-anchor is a ⋯ menu item now. Its old inline-button dress — 10px, grey,
      uppercase, and display:none until the card was active — followed it into
@@ -786,37 +770,6 @@
   .tdoc-footer a:hover { color: var(--td-accent); text-decoration: underline; }
   .tdoc-footer .sep { color: #ccc; }
   @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
-
-/* Connected-App notify handoff chips on comment cards — one row with ✓ fixed. */
-  .tdoc-status-row {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 4px;
-    margin: 0 0 6px;
-    min-width: 0;
-  }
-  .tdoc-status-row:not(:has(.tdoc-resolved-chip, .tdoc-handoff-chip)) {
-    display: none;
-    margin: 0;
-  }
-  /* Agent done stays neutral gray — green is reserved for comment-axis ✓ fixed. */
-  .tdoc-handoff-chip.is-resolved { color: #5a5a56; background: #f0efea; }
-  .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
-  .tdoc-handoff-chip.is-waiting {
-    color: #1a3f8f;
-    background: #e8eeff;
-    animation: tdoc-handoff-pulse 1.8s ease-in-out infinite;
-  }
-  .tdoc-handoff-chip.is-partial { color: #7a5b12; background: #f7f0d8; }
-  .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
-  @keyframes tdoc-handoff-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .tdoc-handoff-chip.is-waiting { animation: none; }
-  }
 
   .tdoc-handoff-banner {
     display: flex;

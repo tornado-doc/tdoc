@@ -3,6 +3,7 @@ import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { Chip, ChipRow } from '../ui/chip.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { formatHandoffAgo } from './handoff-banner.jsx';
@@ -43,41 +44,41 @@ function HandoffStatusChips({ comment }) {
 
   if (comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed') {
     chips.push(
-      <span
+      <Chip
         key="failed"
-        className="tdoc-handoff-chip is-failed"
+        tone="danger"
         title={comment.handoff_delivery?.error || undefined}
       >
         Not delivered
-      </span>,
+      </Chip>,
     );
   } else if (waiting) {
     chips.push(
-      <span key="waiting" className="tdoc-handoff-chip is-waiting">
+      <Chip key="waiting" tone="info" className="is-waiting">
         Waiting on agent{ago ? ` · ${ago}` : ''}
-      </span>,
+      </Chip>,
     );
   }
 
   if (verdict === 'partial') {
     chips.push(
-      <span key="partial" className="tdoc-handoff-chip is-partial">
+      <Chip key="partial" tone="warn" className="is-partial">
         Partial — needs you
-      </span>,
+      </Chip>,
     );
   } else if (verdict === 'question') {
     chips.push(
-      <span key="question" className="tdoc-handoff-chip is-question">
+      <Chip key="question" tone="info" className="is-question">
         Agent asked
-      </span>,
+      </Chip>,
     );
   }
 
   if (comment.handoff_status === 'resolved') {
     chips.push(
-      <span key="resolved" className="tdoc-handoff-chip is-resolved">
+      <Chip key="resolved" tone="neutral">
         Agent done
-      </span>,
+      </Chip>,
     );
   }
 
@@ -691,17 +692,17 @@ export function CommentCard({
         onActivate(comment.id);
       }}
     >
-      {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
-      <div className="tdoc-status-row">
+      <ChipRow>
+        {demo ? <Chip tone="warn">Demo</Chip> : null}
         {comment.status === 'applied' ? (
-          <span className="tdoc-resolved-chip">
+          <Chip tone="success">
             {comment.resolved_by
               ? `✓ resolved by @${comment.resolved_by}`
               : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
-          </span>
+          </Chip>
         ) : null}
         <HandoffStatusChips comment={comment} />
-      </div>
+      </ChipRow>
       <header className="tdoc-cc-head">
         <Author
           author={comment.author}
