@@ -5,6 +5,76 @@ import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
+import { formatHandoffAgo } from './handoff-banner.jsx';
+
+/** Latest agent verdict on a reply, if any (applied / partial / question). */
+function latestAgentVerdict(comment) {
+  const replies = comment?.replies || [];
+  for (let i = replies.length - 1; i >= 0; i -= 1) {
+    const status = replies[i]?.agent_status;
+    if (status === 'partial' || status === 'question' || status === 'applied') return status;
+  }
+  return null;
+}
+
+function HandoffStatusChips({ comment }) {
+  // Tick so "3m ago" advances while the card stays open with a sent handoff.
+  const [, setTick] = useState(0);
+  const waiting = comment.handoff_status === 'sent'
+    && comment.handoff_delivery?.status !== 'failed';
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const id = window.setInterval(() => setTick((n) => n + 1), 30000);
+    return () => window.clearInterval(id);
+  }, [waiting]);
+
+  const verdict = latestAgentVerdict(comment);
+  const ago = comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '';
+  const chips = [];
+
+  if (comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed') {
+    chips.push(
+      <span
+        key="failed"
+        className="tdoc-handoff-chip is-failed"
+        title={comment.handoff_delivery?.error || undefined}
+      >
+        Not delivered
+      </span>,
+    );
+  } else if (waiting) {
+    chips.push(
+      <span key="waiting" className="tdoc-handoff-chip is-waiting">
+        Waiting on agent{ago ? ` · ${ago}` : ''}
+      </span>,
+    );
+  }
+
+  if (verdict === 'partial') {
+    chips.push(
+      <span key="partial" className="tdoc-handoff-chip is-partial">
+        Partial — needs you
+      </span>,
+    );
+  } else if (verdict === 'question') {
+    chips.push(
+      <span key="question" className="tdoc-handoff-chip is-question">
+        Agent asked
+      </span>,
+    );
+  }
+
+  if (comment.handoff_status === 'resolved') {
+    chips.push(
+      <span key="resolved" className="tdoc-handoff-chip is-resolved">
+        Agent done
+      </span>,
+    );
+  }
+
+  if (!chips.length) return null;
+  return <div className="tdoc-handoff-chips">{chips}</div>;
+}
 
 function authorLine(author) {
   if (!author) return 'anonymous';
@@ -620,12 +690,7 @@ export function CommentCard({
             : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
         </span>
       ) : null}
-      {comment.handoff_status === 'sent' ? (
-        <span className="tdoc-handoff-chip">Sent to agent</span>
-      ) : null}
-      {comment.handoff_status === 'resolved' ? (
-        <span className="tdoc-handoff-chip is-resolved">Agent resolved</span>
-      ) : null}
+      <HandoffStatusChips comment={comment} />
 
       <header className="tdoc-cc-head">
         <Author

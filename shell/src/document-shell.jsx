@@ -18,12 +18,14 @@ import {
   MentionReachDialog,
   MessageDialog,
   PublishDialog,
+  QuotaBumpDialog,
   ShareDialog,
 } from './document/document-dialogs.jsx';
 import {
   DocumentBreadcrumbs,
   DocumentOverflowActions,
   DocumentPrimaryAction,
+  DocumentSendAgentAction,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -51,6 +53,7 @@ import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { HandoffBanner } from './document/handoff-banner.jsx';
 import { DebugBar } from './debug-bar.jsx';
 
 function useNarrowViewport() {
@@ -465,10 +468,12 @@ export function DocumentShell({ boot, config }) {
     () => comments.comments.filter((comment) => comment.status === 'applied').length,
     [comments.comments],
   );
-  // What the margin shows. A resolved thread is out of the way until asked for
-  // — except the one being looked at. A deep link opens its card before
-  // deepTarget is consumed, so without the openCommentId clause the card would
-  // sit there with no pin under it the moment the target cleared.
+  // What the margin shows. A resolved thread (human ✓ or agent applied) is out
+  // of the way until asked for — except the one being looked at. A deep link
+  // opens its card before deepTarget is consumed, so without the openCommentId
+  // clause the card would sit there with no pin under it the moment the target
+  // cleared. (#629 tried to keep agent-applied visible by exempting
+  // !resolved_by; that made Resolved(N) lie and the switch look broken.)
   const shownComments = useMemo(() => (
     showResolved
       ? comments.comments
@@ -744,6 +749,14 @@ export function DocumentShell({ boot, config }) {
         signIn();
         return;
       }
+      if (error.body?.error === 'quota_docs') {
+        setDialog({
+          type: 'quota-bump',
+          used: error.body.used,
+          limit: error.body.limit,
+        });
+        return;
+      }
       setDialog({
         type: 'message',
         title: 'Could not duplicate',
@@ -817,6 +830,65 @@ export function DocumentShell({ boot, config }) {
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [handoff.state, handoff.copiedAt, config.slug, config.version, commentsRefresh]);
+
+  // Connected-App handoffs: while any comment is still `sent`, refresh so the
+  // waiting tags and banner catch agent replies / resolve without a manual reload.
+  // No outstanding sent → no requests. Hidden tab → pause. Back off when quiet.
+  const outstandingHandoffs = useMemo(
+    () => comments.comments.some((c) => c && !c.deleted && c.handoff_status === 'sent'),
+    [comments.comments],
+  );
+  const commentsRef = useRef(comments.comments);
+  commentsRef.current = comments.comments;
+  useEffect(() => {
+    if (!outstandingHandoffs || !notifyEnabled) return undefined;
+    let cancelled = false;
+    let timer = null;
+    let delay = 8000;
+    let unchanged = 0;
+    let lastFingerprint = '';
+    const fingerprint = () => (commentsRef.current || [])
+      .filter((c) => c && c.handoff_status === 'sent')
+      .map((c) => `${c.id}:${c.handoff_at || ''}:${(c.replies || []).length}`)
+      .sort()
+      .join('|');
+    const tick = async () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        timer = window.setTimeout(tick, delay);
+        return;
+      }
+      try {
+        await commentsRefresh();
+      } catch { /* next tick */ }
+      if (cancelled) return;
+      const next = fingerprint();
+      if (next === lastFingerprint) {
+        unchanged += 1;
+        delay = Math.min(8000 * (2 ** Math.min(unchanged, 3)), 60000);
+      } else {
+        unchanged = 0;
+        delay = 8000;
+        lastFingerprint = next;
+      }
+      timer = window.setTimeout(tick, delay);
+    };
+    lastFingerprint = fingerprint();
+    timer = window.setTimeout(tick, delay);
+    const onVis = () => {
+      if (document.visibilityState !== 'visible' || cancelled) return;
+      unchanged = 0;
+      delay = 8000;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(tick, 500);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [outstandingHandoffs, notifyEnabled, commentsRefresh]);
 
   const answered = comments.comments.filter((c) => c.status === 'applied').length;
   // Copied in this session: the banner stays, as the confirmation, so the
@@ -994,6 +1066,12 @@ export function DocumentShell({ boot, config }) {
               onSignIn={signIn}
               onChange={editor.changeMode}
             />
+            {notifyEnabled ? (
+              <DocumentSendAgentAction
+                count={shownComments.filter((c) => c.status !== 'applied' && !c.deleted).length}
+                onClick={openDocNotify}
+              />
+            ) : null}
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
@@ -1008,7 +1086,6 @@ export function DocumentShell({ boot, config }) {
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
             onShare={() => setDialog({ type: 'share' })}
-            onSendToAgent={notifyEnabled ? openDocNotify : null}
             onCopyMarkdown={() => bridge.send({ type: 'tdoc:copyDoc', requestId: Date.now() })}
             onDuplicate={duplicate}
             onDownload={download}
@@ -1067,6 +1144,16 @@ export function DocumentShell({ boot, config }) {
           showToast('Diagram applied. Save the document to publish a new version.');
         }} />
       <OldVersionNotice value={boot.oldVersion} />
+
+      {notifyEnabled ? (
+        <HandoffBanner
+          slug={config.slug}
+          comments={comments.comments}
+          onOpenPanel={openDocNotify}
+          onRefresh={() => comments.refresh()}
+          onToast={(text, error) => showToast(text, error)}
+        />
+      ) : null}
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
@@ -1262,6 +1349,13 @@ export function DocumentShell({ boot, config }) {
       <MessageDialog
         message={dialog?.type === 'message' ? dialog : null}
         onOpenChange={(open) => !open && setDialog(null)}
+      />
+      <QuotaBumpDialog
+        open={dialog?.type === 'quota-bump'}
+        used={dialog?.used}
+        limit={dialog?.limit}
+        onClose={() => setDialog(null)}
+        onBumped={() => showToast('Limit raised — try duplicate again')}
       />
       <SaveNoticeDialog
         open={saveNoticeOpen}

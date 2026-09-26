@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Bot,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -10,6 +9,7 @@ import {
   FileDown,
   History,
   Share2,
+  Send,
   Star,
   Trash2,
   Upload,
@@ -143,13 +143,33 @@ export function DocumentPrimaryAction({
   );
 }
 
+// Always-visible Send to agent entry (desktop + mobile). Badge = open comments
+// waiting to be handed over. Prefer a paper-plane over a bottom strip.
+export function DocumentSendAgentAction({ count = 0, onClick }) {
+  const label = count > 0 ? `Send to agent (${count} open)` : 'Send to agent';
+  return (
+    <button
+      id="tdoc-send-agent-btn"
+      type="button"
+      className="tdoc-send-agent-action"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <Send size={16} aria-hidden="true" />
+      {count > 0 ? (
+        <span className="tdoc-send-agent-badge">{count > 99 ? '99+' : count}</span>
+      ) : null}
+    </button>
+  );
+}
+
 export function DocumentOverflowActions({
   config,
   starred,
   onToggleStar,
   onPublish,
   onShare,
-  onSendToAgent,
   onCopyMarkdown,
   onDuplicate,
   onDownload,
@@ -170,11 +190,6 @@ export function DocumentOverflowActions({
           <Share2 size={15} /> Share
         </AppMenuItem>
       )}
-      {onSendToAgent ? (
-        <AppMenuItem className="tdoc-action-menu-item" data-action="send-to-agent" onClick={onSendToAgent}>
-          <Bot size={15} /> Send to agent
-        </AppMenuItem>
-      ) : null}
       {(config.versions || []).length > 1 ? (
         <AppSubmenu
           className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-version-submenu-trigger"

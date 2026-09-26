@@ -514,10 +514,14 @@
     .tdoc-edit-form textarea,
     .tdoc-margin-comment input[type="text"] { font-size: 16px; }
   }
-  .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
+  .tdoc-popup .tdoc-composer-foot-actions { display: flex; align-items: center; gap: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
   .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
   .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
+  /* Secondary action on the dark composer — same shape as Comment, quieter fill. */
+  .tdoc-popup .submit.agent { background: #2c2c2c; color: #f0f0f0; border: 1px solid #4a4a4a; }
+  .tdoc-popup .submit.agent:hover { background: #3a3a3a; }
   .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
 
   /* @mention picker + chips. The field wrapper is the positioning context for
@@ -603,6 +607,16 @@
      disclosure for the secondary axes, and a de-emphasised danger row. */
   .tdoc-modal .tdoc-select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 10px; font: inherit; color: inherit; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
   .tdoc-modal .tdoc-select:focus { outline: none; border-color: var(--td-accent); }
+  /* Notify instruction is a real textarea — do not reuse .tdoc-select (dropdown arrow). */
+  .tdoc-modal textarea.tdoc-notify-instruction { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 48px; background: #fff; cursor: text; }
+  .tdoc-modal textarea.tdoc-notify-instruction:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-modal .tdoc-notify-recipient { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; color: #222; }
+  .tdoc-modal .tdoc-notify-recipient-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: #141111; color: #555; flex: none; overflow: hidden; }
+  .tdoc-modal .tdoc-notify-provider-fallback { font-size: 12px; font-weight: 700; color: #555; }
+  .tdoc-modal .tdoc-notify-recipient-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .tdoc-modal .tdoc-notify-recipient-copy strong { font-weight: 650; }
+  .tdoc-modal .tdoc-notify-recipient-handle { font-size: 12px; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-modal .tdoc-notify-recipient-opt { display: inline-flex; align-items: center; gap: 6px; }
   .tdoc-modal .tdoc-adv { margin: 16px 0 0; border-top: 1px solid #eee; padding-top: 6px; }
   .tdoc-modal .tdoc-adv > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #555; padding: 6px 0; }
   .tdoc-modal .tdoc-adv > summary:hover { color: #222; }
@@ -615,6 +629,11 @@
        ≥ 900px: logo · v · title · author …… identity · share · ⋯
        < 900px: logo · v · title ……………… avatar   · share · ⋯  (author + name hide)
        < 700px: logo ·     title ………………            share · ⋯  (version+identity+resolved into ⋯) */
+  /* Width is the first optional action to fold. Reserve its 32px target,
+     4px gap and 8px breathing room before the next 900px collapse stage. */
+  @media (max-width: 944px) {
+    .tdoc-bar { --tdoc-inline-width-allowed: 0; }
+  }
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
@@ -734,7 +753,8 @@
   .tdoc-footer .sep { color: #ccc; }
   @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
 
-/* Connected-App notify handoff (Send to agent) */
+/* Connected-App notify handoff chips on comment cards. */
+  .tdoc-handoff-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
   .tdoc-handoff-chip {
     display: inline-block;
     font-size: 11px;
@@ -743,62 +763,94 @@
     background: #f0efea;
     border-radius: 4px;
     padding: 2px 6px;
-    margin: 0 0 6px;
+    margin: 0;
   }
   .tdoc-handoff-chip.is-resolved { color: #2f6b3a; background: #e7f3ea; }
-  .tdoc-notify-panel {
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    z-index: 80;
-    width: min(360px, calc(100vw - 32px));
-    background: var(--td-surface, #fff);
-    border: 1px solid var(--td-line, #e6e4dc);
-    border-radius: 10px;
-    box-shadow: 0 12px 40px rgba(0,0,0,.12);
-    padding: 14px 14px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+  .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
+  .tdoc-handoff-chip.is-waiting {
+    color: #1a3f8f;
+    background: #e8eeff;
+    animation: tdoc-handoff-pulse 1.8s ease-in-out infinite;
   }
-  .tdoc-notify-panel-head {
+  .tdoc-handoff-chip.is-partial { color: #7a5b12; background: #f7f0d8; }
+  .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
+  @keyframes tdoc-handoff-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tdoc-handoff-chip.is-waiting { animation: none; }
+  }
+
+  .tdoc-handoff-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-  }
-  .tdoc-notify-panel-head b { font-size: 14px; }
-  .tdoc-notify-last { margin: 0; font-size: 12px; color: var(--td-muted, #6b6a66); }
-  .tdoc-notify-targets {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 160px;
-    overflow: auto;
-  }
-  .tdoc-notify-targets label {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 16px;
     font-size: 13px;
-    cursor: pointer;
-  }
-  .tdoc-notify-targets .tdoc-muted { color: var(--td-muted, #6b6a66); font-weight: 400; }
-  .tdoc-notify-instruction {
-    width: 100%;
+    color: var(--td-ink, #1a1a1a);
+    background: var(--td-accent-tint, #e8eeff);
+    border-bottom: 1px solid var(--td-line, #e6e4dc);
     box-sizing: border-box;
-    font: inherit;
-    font-size: 13px;
-    padding: 8px 10px;
-    border: 1px solid var(--td-line, #e6e4dc);
-    border-radius: 6px;
-    resize: vertical;
   }
-  .tdoc-notify-actions {
-    display: flex;
+  .tdoc-handoff-banner.is-failed {
+    background: #f7ebe7;
+  }
+  .tdoc-handoff-banner-text { font-weight: 600; }
+  .tdoc-handoff-banner-actions {
+    display: inline-flex;
     align-items: center;
     gap: 10px;
+  }
+  .tdoc-handoff-banner .text-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--td-accent, #1652f0);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+    padding: 0;
+  }
+  .tdoc-handoff-banner .text-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .tdoc-handoff-banner.is-failed .text-btn { color: #8a3b2b; }
+
+  /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
+  .tdoc-bar .tdoc-send-agent-action {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--td-ink, #1a1a1a);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .tdoc-bar .tdoc-send-agent-action:hover {
+    background: var(--td-accent-tint, #e8eeff);
+    color: var(--td-accent, #1652f0);
+  }
+  .tdoc-bar .tdoc-send-agent-badge {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--td-accent, #1652f0);
+    color: #fff;
+    font: 650 10px/16px inherit;
+    text-align: center;
+    box-sizing: border-box;
   }

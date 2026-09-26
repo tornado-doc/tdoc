@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AppDialog } from '../ui/dialog.jsx';
-import { getPublishSignin, publishDocument } from './api.js';
+import { getPublishSignin, publishDocument, requestQuotaBump } from './api.js';
 import { copyText } from './model.js';
 
 export function ShareDialog({ open, url, onOpenChange, onCopied }) {
@@ -187,6 +187,78 @@ export function MessageDialog({ message, onOpenChange }) {
       actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
     >
       <p>{message?.message}</p>
+    </AppDialog>
+  );
+}
+
+// Shown when create/duplicate hits quota_docs. One reason → bump (50→100, then
+// 100→200). Agents get the same escape hatch from the error body's `bump` field.
+export function QuotaBumpDialog({ open, used, limit, onClose, onBumped }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setReason('');
+    setBusy(false);
+    setStatus('');
+  }, [open]);
+
+  const submit = async () => {
+    const trimmed = reason.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      const result = await requestQuotaBump(trimmed);
+      if (result.already) {
+        setStatus(`Already at the self-serve cap (${result.to}). A human has to raise it further.`);
+        return;
+      }
+      onBumped?.(result);
+      onClose?.();
+    } catch (error) {
+      setStatus(error.message || 'Could not raise the limit');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AppDialog
+      open={open}
+      onOpenChange={(next) => { if (!next) onClose?.(); }}
+      title="Doc limit reached"
+      description={typeof used === 'number' && typeof limit === 'number'
+        ? `This account has ${used} of ${limit} hosted docs. Write why you need more — we raise the limit (up to 200).`
+        : 'This account is at its hosted-doc limit. Write why you need more — we raise it (up to 200).'}
+      actions={(
+        <>
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || !reason.trim()}
+            onClick={submit}
+          >
+            {busy ? 'Requesting…' : 'Raise limit'}
+          </button>
+        </>
+      )}
+    >
+      <label className="manage-hint" style={{ display: 'block' }}>
+        Reason
+        <textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          rows={3}
+          maxLength={500}
+          placeholder="e.g. shipping a series of design drafts this week"
+          style={{ display: 'block', width: '100%', marginTop: 6, resize: 'vertical' }}
+        />
+      </label>
+      {status ? <div className="status" style={{ marginTop: 10 }}>{status}</div> : null}
     </AppDialog>
   );
 }
