@@ -859,6 +859,75 @@
   }
   .tdoc-handoff-banner.is-failed .text-btn { color: #8a3b2b; }
 
+  .tdoc-handoff-details-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: min(60vh, 420px);
+    overflow: auto;
+  }
+  .tdoc-handoff-details-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--td-line, #e6e4dc);
+    border-radius: 8px;
+    background: #fafaf8;
+  }
+  .tdoc-handoff-details-jump {
+    flex: 1 1 auto;
+    min-width: 0;
+    appearance: none;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+  }
+  .tdoc-handoff-details-jump:hover .tdoc-handoff-details-preview { color: var(--td-accent, #1652f0); }
+  .tdoc-handoff-details-state {
+    display: block;
+    font-size: 11px;
+    font-weight: 650;
+    color: #5a5a56;
+    margin-bottom: 2px;
+  }
+  .tdoc-handoff-details-state.is-failed { color: #8a3b2b; }
+  .tdoc-handoff-details-state.is-waiting { color: #3b5bdb; }
+  .tdoc-handoff-details-state.is-ready { color: #1a7340; }
+  .tdoc-handoff-details-preview {
+    display: block;
+    font-size: 13px;
+    line-height: 1.35;
+    color: #202124;
+    word-break: break-word;
+  }
+  .tdoc-handoff-details-actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 1px;
+  }
+  .tdoc-handoff-details-actions .text-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--td-accent, #1652f0);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+    padding: 0;
+  }
+  .tdoc-handoff-details-actions .text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
   /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
   .tdoc-bar .tdoc-send-agent-action {
     position: relative;
