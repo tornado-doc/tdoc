@@ -82,7 +82,7 @@ function HandoffStatusChips({ comment }) {
   }
 
   if (!chips.length) return null;
-  return <div className="tdoc-handoff-chips">{chips}</div>;
+  return <>{chips}</>;
 }
 
 function authorLine(author) {
@@ -703,15 +703,16 @@ export function CommentCard({
       }}
     >
       {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
-      {comment.status === 'applied' ? (
-        <span className="tdoc-resolved-chip">
-          {comment.resolved_by
-            ? `✓ resolved by @${comment.resolved_by}`
-            : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
-        </span>
-      ) : null}
-      <HandoffStatusChips comment={comment} />
-
+      <div className="tdoc-status-row">
+        {comment.status === 'applied' ? (
+          <span className="tdoc-resolved-chip">
+            {comment.resolved_by
+              ? `✓ resolved by @${comment.resolved_by}`
+              : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
+          </span>
+        ) : null}
+        <HandoffStatusChips comment={comment} />
+      </div>
       <header className="tdoc-cc-head">
         <Author
           author={comment.author}
