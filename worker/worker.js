@@ -6994,38 +6994,81 @@ export default {
       const session = await getSession(env, req);
       if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
       const ownerCreate = isOwnerSession(env, session);
-      let actor = { kind: 'owner_session' };
-      if (!ownerCreate) {
-        // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
-        // its owner unless it has opted into hosted accounts. tdoc.dev is open.
-        if (!hostedAccountCopiesEnabled(env, req)) {
-          return json({
-            error: 'account_create_unavailable',
-            message: 'This host only lets its owner create documents. Publish from the CLI instead.',
-          }, { status: 403 });
-        }
-        // Not a precondition — this mints the account on first use. A null here
-        // means the account store itself is unreachable.
-        const acct = sessionLogin(session)
+      // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
+      // its owner unless it has opted into hosted accounts. tdoc.dev is open.
+      // The operator session used to skip this and become `owner_session`,
+      // which bypassed the doc quota and left new docs unstamped — so the
+      // site owner never hit the bump dialog while their agent token did.
+      if (!ownerCreate && !hostedAccountCopiesEnabled(env, req)) {
+        return json({
+          error: 'account_create_unavailable',
+          message: 'This host only lets its owner create documents. Publish from the CLI instead.',
+        }, { status: 403 });
+      }
+      // Not a precondition — this mints the account on first use. A null here
+      // means the account store itself is unreachable.
+      const acct = sessionLogin(session)
         ? await hostedAccountForGithub(env, session.login, session && session.email,
             session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
         : await hostedAccountForEmail(env, session && session.email, session && session.idp);
-        if (!acct) return json({ error: 'hosted_account_unavailable' }, { status: 503 });
-        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login,
-          // Without this an email-born account's browser-created doc had no
-          // routable owner — the very path most email users take first.
-          email: normalizeEmail((acct && acct.email) || (session && session.email)) };
+      if (!acct) {
+        if (ownerCreate) {
+          // BYOK operator with no hosted registry: keep the old unlimited path.
+          const html = blankDocHtml();
+          let newSlug = null;
+          for (let attempt = 0; attempt < 8; attempt++) {
+            const candidate = blankDocSlug(crypto.getRandomValues(new Uint8Array(8)));
+            const existsMeta = await loadDocMeta(env, candidate);
+            if (existsMeta) continue;
+            const bytes = await docBytesExist(env, candidate);
+            if (!bytes.ok) return bytes.response;
+            if (bytes.exists) continue;
+            newSlug = candidate;
+            break;
+          }
+          if (!newSlug) return json({ error: 'slug_exhausted' }, { status: 409 });
+          const now = new Date().toISOString();
+          const incoming = {
+            title: 'Untitled',
+            created_from: 'blank',
+            slug: newSlug,
+            created: now,
+            versions: [{ n: 1, created: now, prompt: 'Created from scratch in the browser', blank: true }],
+            created_by: session.login,
+          };
+          const { html: stampedHtml, sha: blankSha } = await prepareDocVersion(html);
+          incoming.versions[0].sha = blankSha;
+          const r2Key = `docs/${newSlug}/v1/index.html`;
+          try {
+            await env.DOCS.put(r2Key, stampedHtml, {
+              httpMetadata: { contentType: 'text/html; charset=utf-8' },
+            });
+          } catch (e) {
+            return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+          }
+          const verify = await env.DOCS.head(r2Key);
+          if (!verify) return json({ error: 'r2_write_lost' }, { status: 500 });
+          await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
+          return json({ ok: true, slug: newSlug, version: 1, url: `/d/${newSlug}/v/1?edit=1` });
+        }
+        return json({ error: 'hosted_account_unavailable' }, { status: 503 });
       }
+      const actor = {
+        kind: 'hosted',
+        account_id: acct.account_id,
+        github_login: acct.github_login,
+        // Without this an email-born account's browser-created doc had no
+        // routable owner — the very path most email users take first.
+        email: normalizeEmail((acct && acct.email) || (session && session.email)),
+      };
 
       const html = blankDocHtml();
-      if (actor.kind === 'hosted') {
-        const maxBytes = hostedMaxUploadBytes(env);
-        const size = utf8ByteLength(html);
-        if (size > maxBytes) return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
-        const limit = await hostedMaxDocsFor(env, actor.account_id);
-        const used = await countHostedDocs(env, actor.account_id, limit);
-        if (used >= limit) return json(quotaDocsPayload(env, limit, used), { status: 403 });
-      }
+      const maxBytes = hostedMaxUploadBytes(env);
+      const size = utf8ByteLength(html);
+      if (size > maxBytes) return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
+      const limit = await hostedMaxDocsFor(env, actor.account_id);
+      const used = await countHostedDocs(env, actor.account_id);
+      if (used >= limit) return json(quotaDocsPayload(env, limit, used), { status: 403 });
 
       // Opaque ids don't collide in practice; the loop is here so that when one
       // does, the answer is another id rather than a failed create.
@@ -7037,18 +7080,16 @@ export default {
         const bytes = await docBytesExist(env, candidate);
         if (!bytes.ok) return bytes.response;
         if (bytes.exists) continue;
-        if (actor.kind === 'hosted') {
-          const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: actor.account_id });
-          if (!claimed.ok) {
-            if (
-              claimed.status === 503
-              || claimed.error === 'hosted_owner_store_unavailable'
-              || claimed.error === 'owner_store_conflict'
-            ) {
-              return json({ error: claimed.error || 'hosted_owner_store_unavailable' }, { status: claimed.status || 503 });
-            }
-            continue;
+        const claimed = await hostedOwnerOp(env, candidate, { kind: 'claim_owner', account_id: actor.account_id });
+        if (!claimed.ok) {
+          if (
+            claimed.status === 503
+            || claimed.error === 'hosted_owner_store_unavailable'
+            || claimed.error === 'owner_store_conflict'
+          ) {
+            return json({ error: claimed.error || 'hosted_owner_store_unavailable' }, { status: claimed.status || 503 });
           }
+          continue;
         }
         newSlug = candidate;
         break;
@@ -7118,16 +7159,22 @@ export default {
       const rawHtml = await obj.text();
 
       let actor = { kind: 'owner_session' };
-      if (!ownerCopy) {
-        const acct = sessionLogin(session)
+      // Operator session used to stay on owner_session forever, which skipped
+      // quota and left copies unstamped. Prefer the hosted account whenever
+      // one exists — same rules as everyone else.
+      const acct = sessionLogin(session)
         ? await hostedAccountForGithub(env, session.login, session && session.email,
             session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
         : await hostedAccountForEmail(env, session && session.email, session && session.idp);
-        if (!acct) return json({ error: 'account_copy_unavailable' }, { status: 403 });
-        actor = { kind: 'hosted', account_id: acct.account_id, github_login: acct.github_login,
-          // Without this an email-born account's browser-created doc had no
-          // routable owner — the very path most email users take first.
-          email: normalizeEmail((acct && acct.email) || (session && session.email)) };
+      if (acct) {
+        actor = {
+          kind: 'hosted',
+          account_id: acct.account_id,
+          github_login: acct.github_login,
+          email: normalizeEmail((acct && acct.email) || (session && session.email)),
+        };
+      } else if (!ownerCopy) {
+        return json({ error: 'account_copy_unavailable' }, { status: 403 });
       }
       if (actor.kind === 'hosted') {
         const maxBytes = hostedMaxUploadBytes(env);
@@ -7136,7 +7183,7 @@ export default {
           return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
         }
         const limit = await hostedMaxDocsFor(env, actor.account_id);
-        const used = await countHostedDocs(env, actor.account_id, limit);
+        const used = await countHostedDocs(env, actor.account_id);
         if (used >= limit) {
           return json(quotaDocsPayload(env, limit, used), { status: 403 });
         }
@@ -8655,7 +8702,7 @@ export default {
         }
         if (!writeGate.meta) {
           const limit = await hostedMaxDocsFor(env, auth.actor.account_id);
-          const used = await countHostedDocs(env, auth.actor.account_id, limit);
+          const used = await countHostedDocs(env, auth.actor.account_id);
           if (used >= limit) {
             return json(quotaDocsPayload(env, limit, used), { status: 403 });
           }

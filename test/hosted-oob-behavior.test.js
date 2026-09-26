@@ -449,6 +449,28 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(keys.length >= 3, `every ask should leave a log row, got ${keys.length}`);
   });
 
+  await t('operator browser Create still hits the hosted doc quota', async () => {
+    // Regression: TDOC_OWNER used to become owner_session, skip quota, and
+    // leave new docs unstamped — so the site owner never saw the bump dialog.
+    const env = makeEnv(mod.CommentsStore, {
+      TDOC_HOSTED_MAX_DOCS: '1',
+      TDOC_OWNER: 'julie',
+      TDOC_HOSTED_REGISTRATION: '1',
+    });
+    const julie = await issue(worker, env, 'julie');
+    const first = await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie: julie.cookie, body: {},
+    }), env, {});
+    assert(first.status === 200, `first create ${first.status}: ${await first.clone().text()}`);
+    const second = await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie: julie.cookie, body: {},
+    }), env, {});
+    assert(second.status === 403, `operator create should hit quota, got ${second.status}`);
+    const body = await second.json();
+    assert(body.error === 'quota_docs', `expected quota_docs, got ${JSON.stringify(body)}`);
+    assert(body.bump && body.bump.endpoint === '/api/quota/bump', 'operator must get the same bump teach-in');
+  });
+
   await t('hosted upload rejects oversize html', async () => {
     const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_UPLOAD_BYTES: '20' });
     const alice = await issue(worker, env, 'alice');
