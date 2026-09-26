@@ -3106,6 +3106,23 @@ function snapshotAt(c, V) {
         snap.resolved_by = e.human ? (e.by || '') : '';
         snap._agentVerdict = e.human ? null : (e.agent_status || 'applied');
         snap._agentActor = e.by || 'tdoc-agent';
+        // WHO closed this, for both kinds of actor. `resolved_by` stays
+        // human-only because callers already read it that way; this is the
+        // answer to "a human and an agent may both resolve, so record which".
+        // Everything here comes off the same event — no new write path, no
+        // migration.
+        // WHO closed this, for both kinds of actor — `resolved_by` stays
+        // human-only because callers already read it that way. Inlined rather
+        // than factored out: the fold is extracted and evaluated in isolation
+        // by several tests, so a helper defined elsewhere in the file is not
+        // in scope for them.
+        snap.resolution = {
+          state: 'resolved',
+          by: e.by || (e.human ? '' : 'tdoc-agent'),
+          kind: e.human ? 'human' : 'agent',
+          at: e.at || '',
+          at_version: e.at_version || null,
+        };
         break;
       case 'marked_open':
         snap.status = 'open';
@@ -3113,6 +3130,13 @@ function snapshotAt(c, V) {
         snap.resolved_by = '';
         snap._agentVerdict = e.human ? null : (e.agent_status || null);
         snap._agentActor = e.by || 'tdoc-agent';
+        snap.resolution = {
+          state: 'reopened',
+          by: e.by || (e.human ? '' : 'tdoc-agent'),
+          kind: e.human ? 'human' : 'agent',
+          at: e.at || '',
+          at_version: e.at_version || null,
+        };
         break;
       case 'deleted':
         snap.deleted = true;
@@ -3188,9 +3212,11 @@ function snapshotAt(c, V) {
     snap.reactions[emoji] = u;
   }
   delete snap._agentVerdict;
+  if (!snap.resolution) snap.resolution = { state: 'none', by: '', kind: null, at: '', at_version: null };
   snap.replies = keepThread(replyOrder, replyById).map(r => (hasNoWords(r) ? asTombstone(r) : r));
   return snap;
 }
+
 
 // A record with no words. Deleting takes the words away; a caller that posted
 // only whitespace never supplied any. Both leave the same thing behind — a slot
