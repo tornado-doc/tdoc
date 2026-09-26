@@ -4231,6 +4231,42 @@ async function accountClaimedHandle(env, accountId) {
   return normalizeGithubLogin(rec && rec.handle);
 }
 
+// Profile links are current presentation data, not part of the comment log.
+// Resolve the actor's account first: a claimed vanity handle is not a GitHub
+// identity, and an email actor must never become an email-shaped public URL.
+async function withCommentProfileLinks(env, comments) {
+  const urls = new Map();
+  async function profileUrl(login) {
+    const email = login.startsWith('email:') ? normalizeEmail(login.slice(6)) : null;
+    const github = email ? null : normalizeGithubLogin(login);
+    const accountId = email
+      ? await accountIdByEmail(env, email)
+      : github ? (await lookupHostedAccount(env, github))?.account_id : null;
+    if (!accountId) return null;
+    const handle = await accountClaimedHandle(env, accountId) || github;
+    if (!handle) return null;
+    // Only link if the public route still belongs to this account.
+    const target = await lookupProfileAccount(env, handle);
+    return target?.account_id === accountId ? `/@${handle}` : null;
+  }
+  async function enrich(author) {
+    if (!author) return author;
+    const { profile_url: ignored, ...base } = author;
+    const login = typeof base.login === 'string' ? base.login : '';
+    if (!login || base.kind === 'agent' || base.kind === 'system' || login.toLowerCase() === 'tdoc') return base;
+    if (!urls.has(login)) urls.set(login, profileUrl(login));
+    const url = await urls.get(login);
+    return url ? { ...base, profile_url: url } : base;
+  }
+  return Promise.all(comments.map(async (comment) => ({
+    ...comment,
+    author: await enrich(comment.author),
+    replies: await Promise.all((comment.replies || []).map(async (reply) => ({
+      ...reply, author: await enrich(reply.author),
+    }))),
+  })));
+}
+
 // Resolve /@x: claimed handle first, then the GitHub-login index (MVP #569
 // back-compat). Never mints.
 async function lookupProfileAccount(env, raw) {
@@ -6398,6 +6434,24 @@ export default {
       });
     }
 
+    // Shared account chrome needs the viewer's profile on every page, without
+    // loading their whole document catalog or confusing it with a viewed user.
+    if (p === '/api/me/profile' && method === 'GET') {
+      if (!hostedRegistrationEnabled(env, url.origin)) {
+        return json({ error: 'hosted_only' }, { status: 404 });
+      }
+      const s = await getSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin)) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, {
+          status: sessionPrincipal(s) ? 403 : 401,
+        });
+      }
+      const { handle, suggested } = await profileBootForSession(env, s);
+      return json({ ok: true, profile: { handle, suggested } }, {
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
+
     // Claim a public @handle (or change it). Hosted only. Email/OIDC users need
     // this for /@…; GitHub users can keep using their login via fallback or claim
     // a vanity name here. Changing frees the previous @handle.
@@ -8067,7 +8121,9 @@ export default {
       // Handoff state is derived from the handoff records, not stored on the
       // comment: the comment log stays a log of what people said, and "has
       // this been handed over" is a fact about the handoff, not the comment.
-      return json(withHandoffStatus(folded, await loadHandoffs(env, slug)));
+      const decorated = withHandoffStatus(folded, await loadHandoffs(env, slug));
+      return json(V !== 'all' && hostedRegistrationEnabled(env, url.origin)
+        ? await withCommentProfileLinks(env, decorated) : decorated);
     }
 
     // Who the composer offers after `@`. Same gate as posting a comment: if

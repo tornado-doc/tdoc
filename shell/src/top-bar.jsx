@@ -36,6 +36,21 @@ export function TopBar({
   const dark = activeTheme === 'dark';
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const notifications = useNotifications(Boolean(identity));
+  const [viewerProfile, setViewerProfile] = useState(null);
+  const viewerKey = identity?.login || '';
+  const activeProfile = profile || (viewerProfile?.viewerKey === viewerKey ? viewerProfile.profile : null);
+
+  useEffect(() => {
+    if (!viewerKey || profile) return undefined;
+    const controller = new AbortController();
+    fetch('/api/me/profile', { credentials: 'same-origin', signal: controller.signal })
+      .then(async response => response.ok ? response.json() : null)
+      .then(body => {
+        if (!controller.signal.aborted) setViewerProfile({ viewerKey, profile: body?.profile || null });
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [viewerKey, profile]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-tdoc-theme', dark ? 'dark' : 'light');
@@ -69,14 +84,15 @@ export function TopBar({
   };
 
   const openPublicProfile = () => {
-    if (profile?.handle) {
-      location.href = `/@${encodeURIComponent(profile.handle)}`;
+    if (activeProfile?.handle) {
+      location.href = `/@${encodeURIComponent(activeProfile.handle)}`;
       return;
     }
     if (onClaimProfile) onClaimProfile();
+    else if (activeProfile) location.href = '/me#claim-profile';
   };
-  const publicProfileLabel = profile?.handle
-    ? `Public profile (@${profile.handle})`
+  const publicProfileLabel = activeProfile?.handle
+    ? `Public profile (@${activeProfile.handle})`
     : 'Claim public profile';
 
   return (
@@ -130,7 +146,7 @@ export function TopBar({
                   </>
                 )}
               >
-                {profile || onClaimProfile ? (
+                {activeProfile || onClaimProfile ? (
                   <AppMenuItem className="tdoc-action-menu-item" onClick={openPublicProfile}>
                     <UserRound size={15} /> {publicProfileLabel}
                   </AppMenuItem>
@@ -166,7 +182,7 @@ export function TopBar({
               Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
             </AppMenuItem>
             <AppMenuItem onClick={() => { location.href = '/me'; }}>My docs</AppMenuItem>
-            {profile || onClaimProfile ? (
+            {activeProfile || onClaimProfile ? (
               <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
             ) : null}
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
