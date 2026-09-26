@@ -207,6 +207,16 @@ async function seedPins(env, accountId, pins, extra = {}) {
   const worker = mod.default;
   console.log('public @handle profiles');
 
+  await t('profile header avatar is the subject, not the viewer', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'profile.jsx'), 'utf8');
+    // Regression: logged-in viewers used to see their own session avatar on
+    // every /@handle because ProfileAvatar preferred identity.avatar_url.
+    assert(!/avatarUrl=\{identity && identity\.avatar_url\}/.test(src),
+      'do not feed the viewer session avatar into the profile subject header');
+    assert(/githubLogin=\{githubLogin\}/.test(src),
+      'subject avatar must come from the profile github_login');
+  });
+
   await t('/@alice lists only pinned readable docs', async () => {
     const env = makeEnv(mod.CommentsStore);
     const alice = await seedAccount(env, 'alice');
