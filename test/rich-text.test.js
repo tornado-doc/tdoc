@@ -35,9 +35,18 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(nodes[0].items.length === 2, JSON.stringify(nodes[0]));
   });
 
+  await t('bold can wrap a mention (parse order)', () => {
+    // Markdown first: **注意 @julie 这段** stays one strong node.
+    const nodes = parseRichText('**注意 @julie 这段是粗体** 尾巴');
+    assert(nodes.length === 1 && nodes[0].type === 'paragraph', JSON.stringify(nodes));
+    const kids = nodes[0].children;
+    assert(kids.some((n) => n.type === 'strong' && n.value.includes('@julie')), JSON.stringify(kids));
+  });
+
   await t('MentionText wires parseRichText (no dangerouslySetInnerHTML)', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'mention-field.jsx'), 'utf8');
     assert(src.includes('parseRichText'), 'MentionText must use parseRichText');
+    assert(src.includes('renderRichBlocks(parseRichText(text)'), 'markdown before mention split');
     assert(!src.includes('dangerouslySetInnerHTML'), 'no HTML injection');
     assert(!/from ['"]marked['"]|from ['"]markdown-it['"]|from ['"]remark/.test(src), 'no markdown library');
   });

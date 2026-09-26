@@ -186,10 +186,26 @@ export function MentionField({
   );
 }
 
-function renderInline(nodes, keyPrefix) {
+function renderMentionBits(text, mentions, keyPrefix) {
+  return splitMentions(text, mentions).map((part, index) => {
+    const key = `${keyPrefix}-m${index}`;
+    if (part.type === 'mention') {
+      return <span key={key} className="tdoc-mention-chip">{part.value}</span>;
+    }
+    return <React.Fragment key={key}>{part.value}</React.Fragment>;
+  });
+}
+
+function renderInline(nodes, mentions, keyPrefix) {
   return (nodes || []).map((node, index) => {
     const key = `${keyPrefix}-${index}`;
-    if (node.type === 'strong') return <strong key={key} className="tdoc-md-strong">{node.value}</strong>;
+    if (node.type === 'strong') {
+      return (
+        <strong key={key} className="tdoc-md-strong">
+          {renderMentionBits(node.value, mentions, key)}
+        </strong>
+      );
+    }
     if (node.type === 'code') return <code key={key} className="tdoc-md-code">{node.value}</code>;
     if (node.type === 'link') {
       return (
@@ -198,11 +214,11 @@ function renderInline(nodes, keyPrefix) {
         </a>
       );
     }
-    return <React.Fragment key={key}>{node.value}</React.Fragment>;
+    return <React.Fragment key={key}>{renderMentionBits(node.value, mentions, key)}</React.Fragment>;
   });
 }
 
-function renderRichBlocks(blocks, keyPrefix) {
+function renderRichBlocks(blocks, mentions, keyPrefix) {
   return (blocks || []).map((block, index) => {
     const key = `${keyPrefix}-${index}`;
     if (block.type === 'fence') {
@@ -212,7 +228,7 @@ function renderRichBlocks(blocks, keyPrefix) {
       return (
         <ul key={key} className="tdoc-md-list">
           {(block.items || []).map((item, i) => (
-            <li key={`${key}-li-${i}`}>{renderInline(item, `${key}-li-${i}`)}</li>
+            <li key={`${key}-li-${i}`}>{renderInline(item, mentions, `${key}-li-${i}`)}</li>
           ))}
         </ul>
       );
@@ -221,7 +237,7 @@ function renderRichBlocks(blocks, keyPrefix) {
     if (block.type === 'paragraph') {
       return (
         <span key={key} className="tdoc-md-p">
-          {renderInline(block.children, key)}
+          {renderInline(block.children, mentions, key)}
         </span>
       );
     }
@@ -229,15 +245,9 @@ function renderRichBlocks(blocks, keyPrefix) {
   });
 }
 
-// Posted comment text: delivered mentions as chips, plus a small markdown
-// subset (bold / inline code / fences / lists / links) as React nodes only.
+// Posted comment text: markdown subset first (so **…@x…** stays one bold run),
+// then delivered mentions become chips inside text/strong leaves. Code/fences
+// stay literal. React nodes only — no HTML strings, no markdown library.
 export function MentionText({ text, mentions }) {
-  const parts = splitMentions(text, mentions);
-  return (
-    <>
-      {parts.map((part, index) => (part.type === 'mention'
-        ? <span key={index} className="tdoc-mention-chip">{part.value}</span>
-        : <React.Fragment key={index}>{renderRichBlocks(parseRichText(part.value), `t${index}`)}</React.Fragment>))}
-    </>
-  );
+  return <>{renderRichBlocks(parseRichText(text), mentions, 't')}</>;
 }
