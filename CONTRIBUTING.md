@@ -40,22 +40,20 @@ When you add to the docs or write release notes, keep the credit prominent. `tdo
 A single runner drives everything. Offline suites run by default; browser/network suites are gated.
 
 ```bash
-npm test            # all offline suites — no network; CLI gates use Chromium. Covers:
-                    #   worker comment fold + cross-version history, anchor reconcile,
-                    #   event-log convergence, security (injection/authz/CSRF/path-traversal),
-                    #   P3 hardening (XSS escaping, corrupt-value resilience),
-                    #   CLI resilience, comment ops, aid-stamp parsing, local API (hermetic)
-npm run test:all    # also runs the gated suites:
-                    #   ui.test.js / responsive.test.js  — real browser via Playwright
-                    #       (default: local committed fixture; TDOC_TEST_URL=<url> for a live doc;
-                    #        skip LOUDLY if Playwright isn't installed)
-                    #   publish.test.js / onboarding.test.js — publish + doctor flows
-                    #   TDOC_INTEGRATION=1 → real Cloudflare round-trip
+npm test                # offline logic and CLI tests; no npm install or browser needed
+npm ci                  # development dependencies only; not part of skill onboarding
+npx playwright install chromium
+npm run test:browser    # local browser regressions; missing browser is a failure
+npm run test:all        # also includes provider integration suites
 ```
 
-Install dependencies and the layout browser with `npm ci && npx playwright install chromium`. CLI tests exercise the mandatory render gate even in the offline suite.
+Browser tests use committed local fixtures by default. `TDOC_TEST_URL=<url>`
+selects a live document for supported suites; `TDOC_INTEGRATION=1` enables
+live provider round trips. The development-only layout audit is available as
+`node test/helpers/check-layout.js <baked.html> --screenshots <directory>`.
+It does not run during user installation, onboarding, creation or publishing.
 
-`npm test` must be green before any commit to `main`.
+`npm test` and `npm run test:browser` must pass before merging runtime changes.
 
 ## The provider UI is a React app — build it, then commit the build
 

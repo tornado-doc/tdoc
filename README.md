@@ -199,17 +199,19 @@ Want one of these? Open an issue.
 The suite runs offline by default; browser and network suites are gated.
 
 ```bash
-npm test            # all offline suites (worker logic, comment fold, reconcile,
-                    # security, CLI, P3 hardening — no network, no browser)
-npm run test:all    # also runs the gated suites:
-                    #   ui.test.js / responsive.test.js  — real browser (needs playwright;
-                    #                                       skip loudly if absent)
-                    #   publish.test.js / onboarding.test.js — publish + doctor flows
+npm test                # offline logic and CLI tests; no npm install or browser needed
+npm ci                  # development dependencies only; not part of skill onboarding
+npx playwright install chromium
+npm run test:browser    # local browser regressions; missing browser is a failure
+npm run test:all        # also includes provider integration suites
 ```
 
-Browser suites default to a committed local fixture (so they test the working-tree
-overlay, offline). Point them at a live doc with `TDOC_TEST_URL=<url>`. Install the
-optional browser dep with `npm i -D playwright && npx playwright install chromium`.
+Browser tests use committed local fixtures by default. `TDOC_TEST_URL=<url>`
+selects a live document for supported suites; `TDOC_INTEGRATION=1` enables
+live provider round trips. The development-only layout audit is available as
+`node test/helpers/check-layout.js <baked.html> --screenshots <directory>`.
+It does not run during user installation, onboarding, creation or publishing.
+
 
 ## Observability
 

@@ -398,11 +398,77 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(second.status === 403, `quota should 403, got ${second.status}`);
     const body = await second.json();
     assert(body.error === 'quota_docs', `expected quota_docs, got ${JSON.stringify(body)}`);
+    assert(body.bump && body.bump.endpoint === '/api/quota/bump', `quota_docs should teach the bump route, got ${JSON.stringify(body.bump)}`);
+    const bump = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token,
+      body: { reason: 'need room for a second draft' },
+    }), env, {});
+    assert(bump.status === 200, `bump should 200, got ${bump.status}: ${await bump.clone().text()}`);
+    const bumped = await bump.json();
+    assert(bumped.from === 1 && bumped.to === 100, `expected 1→100, got ${JSON.stringify(bumped)}`);
+    const afterBump = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'two', version: 1, html: '<h1>2</h1>' },
+    }), env, {});
+    assert(afterBump.status === 200, `upload after bump should work, got ${afterBump.status}: ${await afterBump.text()}`);
     const retry = await worker.fetch(req('/api/upload', {
       method: 'POST', token: alice.token,
       body: { slug: 'one', version: 2, html: '<h1>1b</h1>' },
     }), env, {});
     assert(retry.status === 200, `same-slug retry should not count as a new doc, got ${retry.status}: ${await retry.text()}`);
+  });
+
+  await t('quota bump requires a reason and caps self-serve at 200', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_DOCS: '50' });
+    const alice = await issue(worker, env, 'alice');
+    const missing = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token, body: { reason: '   ' },
+    }), env, {});
+    assert(missing.status === 400, `empty reason should 400, got ${missing.status}`);
+    assert((await missing.json()).error === 'reason_required', 'empty reason must be rejected');
+
+    const first = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token, body: { reason: 'shipping a batch of drafts' },
+    }), env, {});
+    assert(first.status === 200, `first bump ${first.status}`);
+    const once = await first.json();
+    assert(once.from === 50 && once.to === 100 && once.already === false, `first bump ${JSON.stringify(once)}`);
+
+    const second = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token, body: { reason: 'still need more for the series' },
+    }), env, {});
+    const twice = await second.json();
+    assert(second.status === 200 && twice.from === 100 && twice.to === 200, `second bump ${JSON.stringify(twice)}`);
+
+    const third = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token, body: { reason: 'please go higher' },
+    }), env, {});
+    const capped = await third.json();
+    assert(third.status === 200 && capped.already === true && capped.to === 200, `cap ${JSON.stringify(capped)}`);
+    const keys = [...env.META.map.keys()].filter((k) => k.startsWith('account-quota-bump:'));
+    assert(keys.length >= 3, `every ask should leave a log row, got ${keys.length}`);
+  });
+
+  await t('operator browser Create still hits the hosted doc quota', async () => {
+    // Regression: TDOC_OWNER used to become owner_session, skip quota, and
+    // leave new docs unstamped — so the site owner never saw the bump dialog.
+    const env = makeEnv(mod.CommentsStore, {
+      TDOC_HOSTED_MAX_DOCS: '1',
+      TDOC_OWNER: 'julie',
+      TDOC_HOSTED_REGISTRATION: '1',
+    });
+    const julie = await issue(worker, env, 'julie');
+    const first = await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie: julie.cookie, body: {},
+    }), env, {});
+    assert(first.status === 200, `first create ${first.status}: ${await first.clone().text()}`);
+    const second = await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie: julie.cookie, body: {},
+    }), env, {});
+    assert(second.status === 403, `operator create should hit quota, got ${second.status}`);
+    const body = await second.json();
+    assert(body.error === 'quota_docs', `expected quota_docs, got ${JSON.stringify(body)}`);
+    assert(body.bump && body.bump.endpoint === '/api/quota/bump', 'operator must get the same bump teach-in');
   });
 
   await t('hosted upload rejects oversize html', async () => {

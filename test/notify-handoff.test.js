@@ -462,6 +462,54 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(c.handoff_status === 'sent', 'and still be sent');
   });
 
+  // ---- ack: "I have picked this up" ----
+  // Delivery proves an event reached an inbox, nothing more. Without ack,
+  // "the agent died" and "the agent is thinking" are the same picture.
+  const ack = (env, token, body) => worker.fetch(req('/api/notify/ack', { method: 'POST', token, body }), env, {});
+
+  await t('an agent acks a handoff and the comment reports when work started', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const before = Date.now();
+    const r = await ack(env, token, { slug, handoff_id: h.handoff_id });
+    const body = await r.json();
+    assert(r.status === 200 && body.ok && body.already === false, `ack: ${r.status} ${JSON.stringify(body)}`);
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_acked_at && Date.parse(c.handoff_acked_at) >= before - 1000, `acked_at: ${c.handoff_acked_at}`);
+    assert(c.handoff_status === 'sent', 'acking is not resolving — still sent');
+  });
+
+  await t('re-acking does not move the clock forward', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const first = await (await ack(env, token, { slug, handoff_id: h.handoff_id })).json();
+    const second = await (await ack(env, token, { slug, handoff_id: h.handoff_id })).json();
+    assert(second.already === true, 'a second ack reports itself as a no-op');
+    assert(second.acked_at === first.acked_at, `clock moved: ${first.acked_at} → ${second.acked_at}`);
+  });
+
+  await t('an un-acked handoff reports null, which means "not heard", not "not working"', async () => {
+    const { env, token, slug, commentId } = await seed();
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: target });
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_acked_at === null, `expected null, got ${c.handoff_acked_at}`);
+  });
+
+  await t('acking a handoff that does not exist is a 404', async () => {
+    const { env, token, slug } = await seed();
+    const r = await ack(env, token, { slug, handoff_id: 'h_nope' });
+    assert(r.status === 404, `expected 404, got ${r.status}`);
+  });
+
+  await t('ack needs the token, not just a session', async () => {
+    const { env, token, slug, commentId, reader } = await seed();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const r = await worker.fetch(req('/api/notify/ack', {
+      method: 'POST', cookie: reader, body: { slug, handoff_id: h.handoff_id },
+    }), env, {});
+    assert(r.status === 401, `a reader acked somebody else's handoff (${r.status})`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

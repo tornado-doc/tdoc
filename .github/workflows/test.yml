@@ -30,18 +30,8 @@ jobs:
       # jq is needed by the CLI tests that drive bin/tdoc-* hermetically.
       - name: Ensure jq
         run: jq --version || sudo apt-get update && sudo apt-get install -y jq
-      - name: Install layout preflight browser
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium webkit
       - name: Run offline tests
         run: npm test
-      - name: Reader and resolved visibility regressions
-        run: |
-          node test/resolved-visibility-ui.test.js
-          TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
-          node test/reader-width-ui.test.js
-          node test/reader-layout.test.js
       # Manifest schema guard: plugin.json + marketplace.json must match the
       # field types Claude Code validates at load/install time. This class of
       # bug shipped to users 4x (#36 owner, #42 repository) — keep it pinned.
@@ -78,6 +68,20 @@ jobs:
       # the dangerous classes (quoting/word-splitting/injection), not lint nits.
       - name: ShellCheck CLIs
         run: shellcheck --severity=warning --exclude=SC2034 bin/tdoc-publish bin/tdoc-doctor bin/tdoc-pull bin/tdoc-new bin/tdoc-unpublish bin/tdoc-update
+
+  browser:
+    name: browser regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:browser
+      - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
 
   shell-runtime:
     name: shell runtime

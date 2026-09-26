@@ -106,7 +106,7 @@ t('Combined owner-mutation gate is session OR admin token OR (hosted token + slu
 t('Hosted upload stamps remote meta ownership before writing', () => {
   assert(uploadRoute.includes('requireDocWriteAccess(env, auth.actor, slug, { create: true })'), 'upload must enforce create/claim write access');
   assert(uploadRoute.includes('stampHostedOwnership(incoming, auth.actor)'), 'upload must stamp hosted owner');
-  assert(uploadRoute.includes('quota_docs'), 'hosted create must enforce a per-account doc quota');
+  assert(uploadRoute.includes('quotaDocsPayload'), 'hosted create must enforce a per-account doc quota');
   assert(uploadRoute.includes('quota_upload_bytes'), 'hosted upload must cap payload bytes');
   assert(uploadRoute.includes('utf8ByteLength(doc)'), 'upload quota must count UTF-8 bytes');
   assert(!uploadRoute.includes('doc.length > maxBytes'), 'upload quota must not use JS string length');

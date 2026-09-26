@@ -85,7 +85,7 @@ export function HandoffBanner({
 
   const line = failed.length
     ? `${failed.length} handoff${failed.length === 1 ? '' : 's'} not delivered${ago ? ` · ${ago}` : ''}`
-    : `${sent.length} comment${sent.length === 1 ? '' : 's'} with agent${ago ? ` · ${ago}` : ''}`;
+    : `Waiting on agent · ${waiting.length} comment${waiting.length === 1 ? '' : 's'}${ago ? ` · ${ago}` : ''}`;
 
   return (
     <div className={`tdoc-handoff-banner${failed.length ? ' is-failed' : ''}`} role="status">

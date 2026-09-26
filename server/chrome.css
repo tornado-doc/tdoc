@@ -751,6 +751,7 @@
   @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
 
 /* Connected-App notify handoff chips on comment cards. */
+  .tdoc-handoff-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
   .tdoc-handoff-chip {
     display: inline-block;
     font-size: 11px;
@@ -759,10 +760,24 @@
     background: #f0efea;
     border-radius: 4px;
     padding: 2px 6px;
-    margin: 0 0 6px;
+    margin: 0;
   }
   .tdoc-handoff-chip.is-resolved { color: #2f6b3a; background: #e7f3ea; }
   .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
+  .tdoc-handoff-chip.is-waiting {
+    color: #1a3f8f;
+    background: #e8eeff;
+    animation: tdoc-handoff-pulse 1.8s ease-in-out infinite;
+  }
+  .tdoc-handoff-chip.is-partial { color: #7a5b12; background: #f7f0d8; }
+  .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
+  @keyframes tdoc-handoff-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tdoc-handoff-chip.is-waiting { animation: none; }
+  }
 
   .tdoc-handoff-banner {
     display: flex;

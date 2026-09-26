@@ -1,7 +1,6 @@
-// Client-side share posters for a claimed handle. White big-type cards
-// filled with tdoc.dev/@handle — no server render.
-// All sizes: Caveat annotation (white stroke + blue fill), blue @handle.
-// Optional curly arrow; annotation lines are caller-editable.
+// Client-side share posters for a claimed handle. One white big-type
+// composition — kind only changes canvas size (X banner / OG / square).
+// Caveat annotation (white stroke + blue fill), blue @handle; optional arrow.
 
 export const POSTER_KINDS = [
   {
@@ -140,9 +139,10 @@ function normalizeAnnotationLines(lines) {
 }
 
 function drawAnnotation(ctx, width, height, handleX, urlY, { lines, showArrow }) {
+  const short = Math.min(width, height);
   const ax = width * 0.6;
   const ay = height * 0.096;
-  const annSize = Math.max(22, Math.round(height * (height > 600 ? 0.04 : 0.064)));
+  const annSize = Math.max(22, Math.round(short * 0.064));
   const lineGap = annSize * 1.2;
   const tilt = (-5 * Math.PI) / 180;
   const textLines = normalizeAnnotationLines(lines);
@@ -155,7 +155,7 @@ function drawAnnotation(ctx, width, height, handleX, urlY, { lines, showArrow })
   const fromX = ax + annSize * 2.8;
   const fromY = ay + textLines.length * lineGap * 0.85;
   const toX = handleX;
-  const toY = urlY - Math.max(14, height * 0.04);
+  const toY = urlY - Math.max(14, short * 0.04);
   drawCurlyArrow(ctx, fromX, fromY, toX, toY);
 }
 
@@ -177,6 +177,9 @@ function drawHandleUrl(ctx, width, cy, size, handle) {
 }
 
 /**
+ * One composition, three crops. Kind only changes canvas size — pad, type
+ * scale, annotation, and subtitle all use the same ratios off width/height.
+ *
  * @param {string} handle
  * @param {string} kindId
  * @param {{ annotationLines?: string[], showArrow?: boolean }} [opts]
@@ -196,14 +199,17 @@ export function renderHandlePoster(handle, kindId, opts = {}) {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
 
-  const padX = kind.id === 'x-header' ? width * 0.12 : width * 0.1;
+  // Scale off the short side so a tall square and a wide banner keep the same
+  // relative type weight — only the crop frame changes.
+  const short = Math.min(width, height);
+  const padX = width * 0.12;
   const maxW = width - padX * 2;
-  const maxPx = kind.id === 'square' ? Math.round(height * 0.09) : Math.round(height * 0.16);
-  const minPx = Math.round(height * 0.06);
+  const maxPx = Math.round(short * 0.16);
+  const minPx = Math.round(short * 0.06);
   const size = fitText(ctx, line, maxW, maxPx, minPx);
 
   // Leave room above for annotation on every size.
-  const cy = kind.id === 'square' ? height * 0.52 : height * 0.52;
+  const cy = height * 0.52;
   const handleX = drawHandleUrl(ctx, width, cy, size, h);
   drawAnnotation(ctx, width, height, handleX, cy - size * 0.35, {
     lines: annotationLines,
@@ -213,13 +219,9 @@ export function renderHandlePoster(handle, kindId, opts = {}) {
   ctx.fillStyle = MUTED;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const subSize = Math.max(14, Math.round(height * (kind.id === 'x-header' ? 0.048 : 0.035)));
+  const subSize = Math.max(14, Math.round(short * 0.048));
   ctx.font = `500 ${subSize}px ${UI_STACK}`;
-  ctx.fillText(
-    kind.id === 'x-header' ? 'writing, in public' : 'tdoc',
-    width / 2,
-    kind.id === 'x-header' ? cy + size * 0.72 : height - Math.round(height * 0.08),
-  );
+  ctx.fillText('writing, in public', width / 2, cy + size * 0.72);
 
   return canvas;
 }
