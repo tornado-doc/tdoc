@@ -130,18 +130,18 @@ Use wrapping HTML/CSS for text-heavy panels and HTML captions for explanations.
 Keep SVG labels short; split longer labels into lines that fit their nodes.
 
 ```css
-.diagram-box svg { display: block; width: min(100%, 400px); height: auto; }
+.diagram-box svg { display: block; width: min(100%, var(--figure-width)); height: auto; }
 ```
 
-Choose the width cap per figure; 400px above is an example, not a template.
-Use a bounded `width`, not just `max-width` (the reader supplies its own
-responsive maximum). Do not enlarge a small figure just to fill the column.
+Set `--figure-width` per figure from its content and the selected style’s
+typography. Bound `width`, not just `max-width` (the reader supplies its own
+responsive maximum); do not enlarge a small figure just to fill the column.
 Estimate SVG label size as `font-size × displayed SVG width / viewBox width`,
-including ancestor transforms; aim for 12–18px for ordinary labels across the
-smallest and largest intended display widths. Deliberate titles/key numbers
-can be larger. If transforms make this uncertain, use unscaled labels or HTML.
-Split dense figures or preserve readable type with `min-width` and local
-scrolling. Recheck label/node fit after sizing; the estimate does not prove fit.
+including cumulative scale from the text and its ancestors; target at least
+12px at the smallest intended width. If transforms make this uncertain, use an
+unscaled label layer or HTML. Split dense figures, or preserve their spatial
+layout with `min-width` and local scrolling. Recheck label/node fit after sizing;
+the estimate does not prove rendered fit.
 
 Before finalizing a changed SVG chart, save a standalone copy with its actual
 styles and preview it at the intended display widths:
