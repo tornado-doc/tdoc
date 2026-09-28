@@ -4,7 +4,7 @@
   'use strict';
   if (new URLSearchParams(location.search).get('tdoc_compare') !== '1') return;
   var engine = window.TdocVersionDiff, model, elements = [], applied = false;
-  var maxBytes = 2000000, maxUnits = 2000, changes = [], navigation = [], controlled = [];
+  var maxBytes = 2000000, maxUnits = 2000, changes = [], controlled = [];
   var css = document.createElement('style');
   css.dataset.tdocProvider = '';
   css.textContent = '[data-tdoc-change="add"]{background:rgba(37,168,91,.16)!important;outline:1px solid rgba(37,168,91,.48);outline-offset:2px}'+
@@ -13,15 +13,21 @@
     '.tdoc-diff-ins{text-decoration:none;background:rgba(37,168,91,.16)!important;padding:1px 2px}.tdoc-diff-del{text-decoration:line-through;background:rgba(219,58,75,.13)!important;padding:1px 2px;margin-inline-end:.15em}'+
     'td>.tdoc-diff-del,td>.tdoc-diff-ins{display:block}'+
     '.tdoc-diff-label{display:block!important;font:12px/1.5 system-ui!important;margin:8px 0!important;color:inherit!important;opacity:.8}'+
+    '.tdoc-diff-label button{font:inherit;color:inherit;text-decoration:underline;border:0;background:none;padding:0;cursor:pointer}'+
     '[data-tdoc-diagram-open],.tdoc-comment-pill,.tdoc-hover-outline{display:none!important}'+
     'iframe{pointer-events:none!important}html{scroll-behavior:auto!important}';
   document.head.appendChild(css);
   function post(data) { parent.postMessage(Object.assign({ source: 'tdoc-compare' }, data), '*'); }
   function norm(s) { return s.replace(/\s+/g, ' ').trim(); }
   function key(el) { return el.id || el.getAttribute('data-aid') || ''; }
-  function label(el, message) {
+  function label(el, message, previousAnchor) {
     var note = document.createElement('span'); note.className = 'tdoc-diff-label';
     note.dataset.tdocProvider = ''; note.textContent = message;
+    if (previousAnchor !== undefined) {
+      var link = document.createElement('button'); link.type = 'button'; link.textContent = 'View previous';
+      link.addEventListener('click', function() { post({type:'previous',anchor:previousAnchor}); });
+      note.append(' · ',link);
+    }
     el.before(note);
   }
   function cleanClone(el) {
@@ -109,7 +115,7 @@
     if (source.nodeType === Node.TEXT_NODE) return document.createTextNode(source.textContent);
     if (source.nodeType !== Node.ELEMENT_NODE) return document.createTextNode('');
     if (/^(script|style|iframe|object|embed|svg|img|video|audio|canvas|input|button|form|link|meta)$/i.test(source.localName)) {
-      return document.createTextNode('[Previous ' + source.localName + ' — use Before to view]');
+      return document.createTextNode('[Previous ' + source.localName + ' — view previous version]');
     }
     var tag = /^(p|div|span|h[1-6]|strong|em|b|i|code|pre|blockquote|ul|ol|li|table|thead|tbody|tfoot|tr|td|th|br|figcaption|figure)$/.test(source.localName) ? source.localName : 'span';
     var copy = document.createElement(tag);
@@ -208,16 +214,14 @@
       var ownIndex = side === 'before' ? p.before : p.after, own = ownIndex === null ? null : elements[ownIndex];
       if (a && b && a.fingerprint === b.fingerprint) return;
       count++;
-      navigation.push(own);
       if (!a || !b) {
         if (own) mark(own, a ? 'delete' : 'add');
         else if (inline && a) {
           var copy = inertCopy(peerElement(a)); if (copy.nodeType !== Node.ELEMENT_NODE) { var wrap = document.createElement('p'); wrap.append(copy); copy = wrap; }
           mark(copy,'delete'); var next = pairs.slice(index+1).find(function (q) { return q.after !== null; });
-          navigation[navigation.length-1] = copy;
           if (next) elements[next.after].before(copy);
           else { if (trailingCopy) trailingCopy.after(copy); else if (elements.length) elements[elements.length-1].after(copy); else document.body.append(copy); trailingCopy = copy; }
-          label(copy,'− Removed in this version');
+          label(copy,'− Removed in this version', /^(svg|img|iframe|video|canvas)$/.test(a.kind) ? a.key : undefined);
         }
         return;
       }
@@ -229,10 +233,10 @@
           return;
         }
       }
-      if (a.kind === 'svg') { var svgMarks = changes.length; if (!svgDiff(own,(side === 'before' ? a : b).svg,(side === 'before' ? b : a).svg,side) || changes.length === svgMarks) mark(own,'modify'); label(own,'Graphic changed — compare Before / After'); return; }
-      if (/^(svg|img|iframe|video|canvas|table)$/.test(a.kind)) { mark(own,'modify'); label(own,'Artifact changed — compare Before / After'); return; }
+      if (a.kind === 'svg') { var svgMarks = changes.length; if (!svgDiff(own,(side === 'before' ? a : b).svg,(side === 'before' ? b : a).svg,side) || changes.length === svgMarks) mark(own,'modify'); label(own,'Graphic changed',side === 'after' ? a.key : undefined); return; }
+      if (/^(svg|img|iframe|video|canvas|table)$/.test(a.kind)) { mark(own,'modify'); label(own,'Artifact changed',side === 'after' ? a.key : undefined); return; }
       if (a.text !== b.text) textDiff(own,a.text,b.text,side,inline);
-      else { mark(own,'modify'); label(own,a.external || b.external ? 'Linked artifact or formatting changed — compare Before / After' : 'Formatting changed'); }
+      else { mark(own,'modify'); label(own,a.external || b.external ? 'Linked artifact or formatting changed' : 'Formatting changed'); }
     });
     post({ type:'result', count:count, styleChanged:peer.styles !== model.styles });
   }
@@ -249,11 +253,7 @@
         var animated = controlled.find(function(a) { return a.effect?.target; })?.effect.target;
         (animated?.closest('svg,figure') || animated)?.scrollIntoView({block:'center'});
       }
-      else if (d.type === 'navigate' && navigation.length) {
-        var index = Math.max(0,Math.min(navigation.length-1,Math.floor(d.index)||0));
-        var target = navigation[index] || navigation.slice(index).find(Boolean) || navigation.slice(0,index).reverse().find(Boolean);
-        target?.scrollIntoView({ block:'center' });
-      }
+
     } catch (error) { post({ type:'error', message:error.message || 'Could not compare this document.' }); }
   });
   // Never let reviewing a comparison submit a form or edit a linked artifact.

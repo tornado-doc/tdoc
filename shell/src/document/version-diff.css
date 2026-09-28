@@ -1,33 +1,28 @@
-.ui-dialog-popup.tdoc-version-diff-dialog { width: min(1280px, 96vw); max-width: 96vw; }
-.tdoc-diff-controls { display:flex; align-items:end; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
-.tdoc-diff-controls label { display:grid; gap:4px; font-size:12px; color:var(--td-muted,#666); }
-.tdoc-diff-controls select { font:inherit; font-size:14px; padding:7px 9px; border:1px solid var(--td-line,#ddd); border-radius:6px; background:var(--td-ground,#fff); color:var(--td-ink,#222); }
-.tdoc-diff-controls .tdoc-seg { margin-left:auto; flex-wrap:wrap; }
-.tdoc-diff-frames { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+.tdoc-reader-surface:not([hidden]) { display:contents; }
+.tdoc-version-diff { flex:1; min-width:0; display:flex; flex-direction:column; padding:0 20px 12px; }
+.tdoc-diff-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:54px; font-size:13px; }
+.tdoc-diff-heading button,.tdoc-diff-motion button { font:inherit; padding:8px 10px; border:1px solid var(--td-line,#ddd); border-radius:6px; background:var(--td-ground,#fff); color:var(--td-ink,#222); }
+.tdoc-diff-frames { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
 .tdoc-diff-pane { min-width:0; border:1px solid var(--td-line,#dedee3); border-radius:6px; overflow:hidden; }
 .tdoc-diff-pane-label { padding:8px 12px; font-size:12px; border-bottom:1px solid var(--td-line,#dedee3); }
-.tdoc-diff-pane iframe { display:block; width:100%; height:55dvh; min-height:260px; border:0; }
+.tdoc-diff-pane iframe { display:block; width:100%; height:calc(100dvh - 190px); min-height:360px; border:0; }
 .tdoc-diff-empty { padding:24px; }
-.tdoc-diff-frames.is-before,.tdoc-diff-frames.is-after { grid-template-columns:1fr; }
-.tdoc-diff-frames.is-before .is-after,.tdoc-diff-frames.is-after .is-before { display:none; }
-.tdoc-diff-summary { display:flex; gap:8px 20px; flex-wrap:wrap; font-size:12px; margin-bottom:10px; }
-.tdoc-diff-summary>span { margin-left:auto; }
-.tdoc-diff-navigation { display:flex; gap:10px; align-items:center; width:100%; }
-.tdoc-diff-navigation output { font-variant-numeric:tabular-nums; }
-.tdoc-diff-legend-add { color:#217848; }.tdoc-diff-legend-delete { color:#ac3548; }
+.tdoc-diff-frames.is-first,.tdoc-diff-frames.is-narrow { grid-template-columns:1fr; }
+.tdoc-diff-frames.is-first .is-before { display:none; }
+/* Keep the old frame laid out so its finite animation timeline can be sampled. */
+.tdoc-diff-frames.is-narrow:not(.is-motion):not(.is-first) .is-before { position:absolute; inset-inline-start:-10000px; visibility:hidden; width:calc(100% - 16px); }
 .tdoc-diff-motion { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:12px; }
 .tdoc-diff-motion label { flex:1; min-width:160px; font-size:12px; }
 .tdoc-diff-motion output { float:right; font-variant-numeric:tabular-nums; }
 .tdoc-diff-motion input { display:block; width:100%; margin-top:6px; }
 .tdoc-diff-note { font-size:12px; margin:12px 0 0; }
-.tdoc-diff-frames.is-narrow { grid-template-columns:1fr; }
-.tdoc-diff-frames.is-narrow.is-changes .is-before { display:none; }
-.tdoc-diff-frames.is-narrow.is-both iframe { height:25dvh; min-height:160px; }
 @media(max-width:700px) {
-  .ui-dialog-viewport:has(.tdoc-version-diff-dialog) { padding:6px; }
-  body.tdoc-narrow .ui-dialog-popup.tdoc-version-diff-dialog { width:calc(100vw - 12px); max-width:calc(100vw - 12px); padding:12px; }
-  .tdoc-diff-controls { gap:10px; }
-  .tdoc-diff-controls .tdoc-seg { margin:0; width:100%; }
-  .tdoc-diff-controls .tdoc-seg button { flex:1; min-height:44px; padding:6px; }
-  .tdoc-diff-controls select { min-height:44px; }
+  .tdoc-version-diff { padding:0 8px 12px; }
+  .tdoc-diff-heading { gap:8px; font-size:12px; }
+  .tdoc-diff-heading button,.tdoc-diff-motion button { min-height:44px; }
+  .tdoc-diff-frames { gap:0; }
 }
+
+.tdoc-diff-frames.is-narrow.is-motion:not(.is-first) .is-before { display:block; }
+.tdoc-diff-frames.is-narrow.is-motion iframe { height:28dvh; min-height:180px; }
+.tdoc-diff-frames.is-narrow.is-motion { gap:12px; }

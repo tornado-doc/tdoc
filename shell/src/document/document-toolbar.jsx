@@ -106,7 +106,7 @@ export function DocumentBreadcrumbs({ config, title, starred, onRename, onToggle
           </AppMenuItem>
         ))}
         <AppMenuSeparator />
-        <AppMenuItem onClick={onCompare}>Compare versions…</AppMenuItem>
+        <AppMenuItem onClick={onCompare}>View changes</AppMenuItem>
       </AppMenu>
       <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
       {/* Whose document this is. Absent for anything published before hosted
@@ -185,7 +185,7 @@ export function DocumentOverflowActions({
   return (
     <>
       <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
-        <History size={15} /> Compare versions…
+        <History size={15} /> View changes
       </AppMenuItem>
       {config.mode === 'local' ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
