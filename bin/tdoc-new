@@ -11,6 +11,23 @@
 # the content (a markdown report, an audit, a retro). They shouldn't
 # re-enter the prompt-flow; they should hand off the finished artifact.
 #
+# BEFORE YOU WRITE THE HTML — read the style contract, not just this usage.
+# A programmatic caller reads the command and stops, so the one rule that gets
+# broken most often is stated here rather than only in SKILL.md:
+#
+#   tdoc owns the page. Read $SKILL_DIR/authoring/style/<name>.md, pick the
+#   entry that fits the content, and pass --style. Do NOT invent a second
+#   page-wide aesthetic on top of it.
+#
+#   On this entry point house-style notes FAIL the run (it validates with
+#   --strict), because a programmatic caller never sees an advisory note
+#   scroll past. Restyling `body`, or any global selector, will stop you here.
+#
+#   If a whole-page custom design really is intended, say so with
+#   --custom-template. That flag is the declaration, and it is one flag;
+#   leaving it out and restyling anyway is the failure this notice exists
+#   to stop.
+#
 # Usage:
 #   tdoc-new --slug <slug> --title "<title>" --html-file <path> [options]
 #   tdoc-new --slug <slug> --title "<title>" --html-stdin             [options]
@@ -242,7 +259,17 @@ fi
 # named widgets, but broad page restyling requires an explicit opt-out.
 VALIDATOR="$(cd "$(dirname "$0")" && pwd)/tdoc-validate-template"
 VALIDATOR_ARGS=("$STAGE_HTML" --style "$STYLE")
-[ "$CUSTOM_TEMPLATE" = "1" ] && VALIDATOR_ARGS+=(--custom-template)
+if [ "$CUSTOM_TEMPLATE" = "1" ]; then
+  VALIDATOR_ARGS+=(--custom-template)
+else
+  # --strict is how a caller asks for house conformance to be enforced rather
+  # than suggested (see tdoc-validate-template). A human in /tdoc new is in a
+  # conversation and can be told; a programmatic caller reads the command,
+  # writes HTML, and never sees an advisory note scroll past — so on THIS
+  # entry point the notes are the contract. Declaring --custom-template is the
+  # way out, and it is one flag.
+  VALIDATOR_ARGS+=(--strict)
+fi
 if ! python3 "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
   die "default-template validation failed (existing doc, if any, left untouched)"
 fi

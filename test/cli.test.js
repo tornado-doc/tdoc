@@ -472,6 +472,40 @@ t('an explicitly transparent body background is an error, not a note', () => {
   }
 });
 
+t('tdoc-new holds programmatic callers to the house style', () => {
+  // The validator reports a house-style mismatch as a note and exits 0: a
+  // caller in a conversation can be told. A programmatic caller never sees
+  // that note scroll past, which is how three documents shipped with an
+  // invented palette. On THIS entry point the notes are the contract, and
+  // --custom-template is the one-flag way to say the design is deliberate.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-strict-'));
+  try {
+    const html = path.join(dir, 'offstyle.html');
+    fs.writeFileSync(html, `<!doctype html><html lang="en"><head>
+      <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>T</title><style>body { background:#f7f6f5 } .wrap { font-family:Georgia,serif; color:#000 }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`);
+
+    const bare = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html], { encoding: 'utf8' });
+    assert(bare.status === 0, 'the validator itself still treats this as a note');
+
+    const slug = `zz-strict-${Date.now()}`;
+    const strict = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', slug, '--title', 'T', '--html-file', html, '--no-server', '--quiet'],
+      { encoding: 'utf8' });
+    assert(strict.status !== 0, `tdoc-new should refuse an off-house-style document: ${strict.stderr}`);
+    assert(/--strict/.test(strict.stderr), `the refusal should name why: ${strict.stderr}`);
+
+    const declared = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', `${slug}-ok`, '--title', 'T', '--html-file', html, '--custom-template', '--no-server', '--quiet'],
+      { encoding: 'utf8' });
+    assert(declared.status === 0, `--custom-template is the declared way through: ${declared.stderr}`);
+    fs.rmSync(path.join(os.homedir(), 'tdocs', `${slug}-ok`), { recursive: true, force: true });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 t('tdoc host validator accepts the named editorial house-style background', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-style-'));
   try {

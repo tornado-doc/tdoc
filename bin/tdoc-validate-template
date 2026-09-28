@@ -886,7 +886,10 @@ def main() -> int:
         for note in notes:
             print(f"  · {note}", file=sys.stderr)
         print("These are taste, not contract. Follow them for a document that matches", file=sys.stderr)
-        print("the house style; ignore them for one that deliberately brings its own.", file=sys.stderr)
+        print("the house style; ignore them for one that deliberately brings its own —", file=sys.stderr)
+        print("and if it does, declare it with --custom-template rather than leaving it", file=sys.stderr)
+        print("implied. Programmatic callers are validated with --strict, so a note there", file=sys.stderr)
+        print("fails the run.", file=sys.stderr)
     if errors:
         print("tdoc-template: the document would not render correctly:", file=sys.stderr)
         for error in errors:
