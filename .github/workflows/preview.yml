@@ -224,6 +224,18 @@ jobs:
           seed 1 test/fixtures/tdocs/sample-doc/v1/index.html
           seed 2 test/fixtures/tdocs/sample-doc/v2/index.html
 
+          DIFF_SLUG="version-diff-pr-${{ github.event.pull_request.number }}"
+          reset_preview_slug "$DIFF_SLUG"
+          for v in 1 2; do
+            jq -n --arg slug "$DIFF_SLUG" --argjson version "$v" \
+              --rawfile html "test/fixtures/tdocs/version-diff/v$v/index.html" \
+              '{slug:$slug,version:$version,html:$html,meta:{title:"Version comparison",slug:$slug,versions:[{n:1},{n:2}],access:{visibility:"public",commenting:"signed_in",history_visibility:"public",allowed_users:[]}}}' \
+              > /tmp/tdoc-preview-diff.json
+            curl -sf --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \
+              -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
+              --data-binary @/tmp/tdoc-preview-diff.json | jq -e '.ok == true'
+          done
+
           # A separate slug keeps resolved-toggle review comments isolated from
           # other PRs. Seed actual comments so reviewers need no local mocks.
           RESOLVED_SLUG="resolved-pr-${{ github.event.pull_request.number }}"
@@ -286,6 +298,7 @@ jobs:
           carrying the landing version in this PR's checkout.
           **Onboarding UI:** https://${PREVIEW_HOST}/__preview/onboarding
           **Resolved toggle:** https://${PREVIEW_HOST}/d/resolved-pr-${PR}/v/2
+          **Version diff:** https://${PREVIEW_HOST}/d/version-diff-pr-${PR}/v/2?compare=1
           **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1
           **Or a document:** https://${PREVIEW_HOST}/d/conway-life/v/2
 

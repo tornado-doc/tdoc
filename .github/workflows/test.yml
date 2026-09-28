@@ -93,6 +93,7 @@ jobs:
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:browser
       - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
 
   shell-runtime:
     name: shell runtime

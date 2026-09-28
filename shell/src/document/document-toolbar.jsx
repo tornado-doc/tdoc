@@ -80,7 +80,7 @@ function DocumentTitle({ title, canRename, onRename }) {
   );
 }
 
-export function DocumentBreadcrumbs({ config, title, starred, onRename, onToggleStar }) {
+export function DocumentBreadcrumbs({ config, title, starred, onRename, onToggleStar, onCompare }) {
   if (config.isLanding) return null;
 
   return (
@@ -105,6 +105,8 @@ export function DocumentBreadcrumbs({ config, title, starred, onRename, onToggle
             v{version.n}{versionLabel(version.n, config)}
           </AppMenuItem>
         ))}
+        <AppMenuSeparator />
+        <AppMenuItem onClick={onCompare}>View changes</AppMenuItem>
       </AppMenu>
       <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
       {/* Whose document this is. Absent for anything published before hosted
@@ -178,9 +180,13 @@ export function DocumentOverflowActions({
   resolvedCount,
   showResolved,
   onToggleResolved,
+  onCompare,
 }) {
   return (
     <>
+      <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
+        <History size={15} /> View changes
+      </AppMenuItem>
       {config.mode === 'local' ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="publish" onClick={onPublish}>
           <Upload size={15} /> Publish

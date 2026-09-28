@@ -55,6 +55,7 @@ import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { HandoffBanner } from './document/handoff-banner.jsx';
 import { DebugBar } from './debug-bar.jsx';
+import { VersionDiffView } from './document/version-diff.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -145,6 +146,19 @@ const exitLine = (answered, version) => (
 );
 
 export function DocumentShell({ boot, config }) {
+  const [comparing, setComparing] = useState(() => new URLSearchParams(location.search).get('compare') === '1');
+  const changeComparison = (next) => {
+    if (next === comparing) return;
+    const url = new URL(location.href);
+    if (next) url.searchParams.set('compare', '1'); else url.searchParams.delete('compare');
+    history.pushState(null, '', url);
+    setComparing(next);
+  };
+  useEffect(() => {
+    const restore = () => setComparing(new URLSearchParams(location.search).get('compare') === '1');
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
@@ -1051,7 +1065,7 @@ export function DocumentShell({ boot, config }) {
         identity={config.identity}
         theme={theme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
-          <>
+          !comparing && <>
             {/* Resolved threads are out of the margin by default. The switch is
                 the way back, in the bar where it can be seen — it folds into
                 the ⋯ menu with everything else when the bar runs out of room.
@@ -1101,6 +1115,7 @@ export function DocumentShell({ boot, config }) {
             resolvedCount={resolvedCount}
             showResolved={showResolved}
             onToggleResolved={toggleResolved}
+            onCompare={() => changeComparison(true)}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -1114,6 +1129,7 @@ export function DocumentShell({ boot, config }) {
             location.href = target;
             return;
           }
+          setComparing(false);
           const commentId = item.comment_id || item.thread_id;
           history.replaceState(null, '', target);
           setDeepTarget(commentId);
@@ -1134,8 +1150,10 @@ export function DocumentShell({ boot, config }) {
           starred={starred}
           onRename={renameDoc}
           onToggleStar={toggleStar}
+          onCompare={() => changeComparison(true)}
         />
       </TopBar>
+      {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} onClose={() => changeComparison(false)} /> : null}
 
       <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
         onApply={async (json, svg) => {
@@ -1150,6 +1168,7 @@ export function DocumentShell({ boot, config }) {
           setDiagram(null);
           showToast('Diagram applied. Save the document to publish a new version.');
         }} />
+      <div className="tdoc-reader-surface" hidden={comparing}>
       <OldVersionNotice value={boot.oldVersion} />
 
       {notifyEnabled ? (
@@ -1237,7 +1256,7 @@ export function DocumentShell({ boot, config }) {
 
       {narrow ? (
         <MobileCommentDrawer
-          open={drawerOpen}
+          open={drawerOpen && !comparing}
           // shownComments, not the raw list: hiding resolved threads took the
           // pins out of the document but left every one of them in the drawer,
           // which on a phone IS the comment list. "Hide resolved" appeared to
@@ -1307,6 +1326,8 @@ export function DocumentShell({ boot, config }) {
           onClose={closeComposer}
         />
       ) : null}
+
+      </div>
 
       <MentionReachDialog
         open={Boolean(invited?.length)}

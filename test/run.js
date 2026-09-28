@@ -15,6 +15,7 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const OFFLINE = [
+  'version-diff.test.js', // bounded block matching and Unicode edits
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
@@ -107,6 +108,7 @@ const OFFLINE = [
 
 // These run against local fixtures and require the development browser.
 const BROWSER = [
+  'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments
   'layout-preflight.test.js', // development-only Raft geometry audit
