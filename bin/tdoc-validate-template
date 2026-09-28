@@ -686,7 +686,7 @@ def check_figure_width(html, styles):
         return []
     return ["a figure in a scroll wrapper carries a pixel width but no CSS "
             "width, so it is sized by the reader rather than by the document - "
-            "set width:100% (and a min-width only if it should scroll)"]
+            "set width:min(100%,<intended-width>px) (and min-width only for local scrolling)"]
 
 
 # `transparent`, `none` and a zero-alpha color all composite over whatever the
