@@ -40,6 +40,38 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert.equal(await after.locator('#intro a').getAttribute('href'), 'https://tdoc.dev', 'word diff preserves unchanged links');
     assert.equal(await view.locator('iframe').first().getAttribute('sandbox'), 'allow-scripts');
 
+    // Unequal content heights must align matching blocks, not raw pixels or
+    // whole-document percentages. This also models an asset expanding on load.
+    await before.locator('#flow-title').evaluate(el => {
+      const gap=document.createElement('div'); gap.id='scroll-test-gap'; gap.style.height='350px'; el.before(gap);
+    });
+    const alignAt = async (source, targetFrame, id) => {
+      await source.evaluate(id => scrollTo(0,document.getElementById(id).getBoundingClientRect().top+scrollY),id);
+      await targetFrame.waitForFunction(id => Math.abs(document.getElementById(id).getBoundingClientRect().top)<2,id);
+    };
+    await alignAt(before,after,'flow-title');
+    const positions = await Promise.all([before,after].map(f=>f.evaluate(()=>scrollY)));
+    assert(Math.abs(positions[0]-positions[1])>300,'matched sections align despite different pixel offsets');
+    await alignAt(after,before,'budget-title');
+    await before.evaluate(()=>scrollTo(0,document.documentElement.scrollHeight));
+    await after.waitForFunction(()=>Math.abs(scrollY-(document.documentElement.scrollHeight-innerHeight))<2);
+    const oldBottom=await before.evaluate(()=>scrollY);
+    await page.evaluate(()=>{window.__scrollMessages=0;addEventListener('message',e=>{if(e.data?.source==='tdoc-compare'&&e.data.type==='scroll')window.__scrollMessages++;});});
+    const afterBox=await view.locator('iframe[aria-label="New version"]').boundingBox();
+    await page.mouse.move(afterBox.x+100,afterBox.y+100);
+    await page.mouse.wheel(0,-180);
+    await before.waitForFunction(bottom=>scrollY<bottom-10,oldBottom);
+    await page.waitForTimeout(200);
+    const settled=await Promise.all([before,after].map(f=>f.evaluate(()=>scrollY)));
+    await page.waitForTimeout(200);
+    const later=await Promise.all([before,after].map(f=>f.evaluate(()=>scrollY)));
+    assert(later.every((y,i)=>Math.abs(y-settled[i])<1),'following scroll does not bounce back or drift');
+    assert(await page.evaluate(()=>window.__scrollMessages)<20,'programmatic following cannot form a message loop');
+    await alignAt(before,after,'flow-title');
+    await after.evaluate(()=>scrollTo(0,0));
+    await before.waitForFunction(()=>scrollY===0);
+    await before.locator('#scroll-test-gap').evaluate(el=>el.remove());
+
     await page.setViewportSize({ width: 390, height: 900 });
     await view.locator('.tdoc-diff-frames.is-narrow').waitFor();
     await summary.waitFor({state:'attached'});
@@ -115,6 +147,6 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await view.getByRole('alert').waitFor({timeout:25000});
     assert((await view.getByRole('alert').innerText()).includes('may not have access'));
     assert.equal(await summary.count(),0);
-    console.log('PASS version diff: direct page and history, fixed version pair, desktop/mobile, words, aligned rows/columns, SVG IDs, synchronized motion, first version, close/reopen and no writes');
+    console.log('PASS version diff: bidirectional aligned scrolling without feedback, direct page and history, fixed version pair, desktop/mobile, words, aligned rows/columns, SVG IDs, synchronized motion, first version, close/reopen and no writes');
   } finally { await browser.close(); await target.stop(); }
 })().catch(error => { console.error(error); process.exitCode=1; });

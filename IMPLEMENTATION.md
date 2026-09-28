@@ -87,7 +87,10 @@ Each side loads the existing `/d/:slug/v/:n/frame` route with its existing
 access checks and opaque `allow-scripts` sandbox. The shell exchanges bounded
 snapshots through a window-identity-checked comparison bridge; it never mounts
 author markup in the provider DOM. `frame-compare.js` is dormant outside these
-disposable frames. Leaving the view discards all comparison annotations.
+disposable frames. Leaving the view discards all comparison annotations. Both panes scroll together
+using matched block positions, with start/end anchors and interpolation through
+added or removed sections. A following frame suppresses its own resulting scroll
+event so either side can lead without feedback loops.
 
 `version-diff.js` matches stable block IDs, then equal content, then compatible
 gaps. Word edits preserve unchanged inline markup. Simple tables align unique

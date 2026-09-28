@@ -5,6 +5,7 @@
   if (new URLSearchParams(location.search).get('tdoc_compare') !== '1') return;
   var engine = window.TdocVersionDiff, model, elements = [], applied = false;
   var maxBytes = 2000000, maxUnits = 2000, changes = [], controlled = [];
+  var scrollAnchors = [], scrollTick = 0, followedScroll = null;
   var css = document.createElement('style');
   css.dataset.tdocProvider = '';
   css.textContent = '[data-tdoc-change="add"]{background:rgba(37,168,91,.16)!important;outline:1px solid rgba(37,168,91,.48);outline-offset:2px}'+
@@ -204,11 +205,51 @@
     });
     return true;
   }
+  // The shared block order provides a position independent of each version's
+  // pixel height. Insertions stretch the space between the surrounding anchors.
+  function scrollPoints() {
+    var max = Math.max(0, document.documentElement.scrollHeight - innerHeight), last = 0;
+    return [0].concat(scrollAnchors.map(function(el) {
+      last = Math.max(last, Math.min(max, el.getBoundingClientRect().top + scrollY));
+      return last;
+    }), [max]);
+  }
+  function scrollPosition(points) {
+    var y = Math.max(0, scrollY), end = points.length - 1;
+    if (y <= 0) return 0;
+    if (y >= points[end] - 1) return end;
+    var i = 0;
+    while (i < end - 1 && points[i + 1] <= y) i++;
+    return i + (y - points[i]) / Math.max(1, points[i + 1] - points[i]);
+  }
+  addEventListener('scroll', function() {
+    if (!applied) return;
+    if (followedScroll !== null) {
+      var following = Math.abs(scrollY - followedScroll) < 1;
+      followedScroll = null;
+      if (following) return;
+    }
+    if (!scrollTick) scrollTick = requestAnimationFrame(function() {
+      scrollTick = 0;
+      post({type:'scroll', position:scrollPosition(scrollPoints())});
+    });
+  }, {passive:true});
+  function followScroll(position) {
+    if (!applied) return;
+    cancelAnimationFrame(scrollTick); scrollTick = 0;
+    var points = scrollPoints(), end = points.length - 1;
+    var p = Math.max(0, Math.min(end, position)), i = Math.min(end - 1, Math.floor(p));
+    scrollTo(0, points[i] + (points[i + 1] - points[i]) * (p - i));
+    // Suppress only the resulting scroll event, not subsequent user input.
+    followedScroll = scrollY;
+  }
   function apply(peer, side, inline) {
     if (applied) return; applied = true;
     if (!peer || !Array.isArray(peer.units) || peer.units.length > maxUnits || JSON.stringify(peer).length > maxBytes * 3) throw new Error('Comparison data is unavailable.');
     var before = side === 'before' ? model.units : peer.units, after = side === 'after' ? model.units : peer.units;
     var pairs = engine.align(before, after), count = 0, trailingCopy = null;
+    scrollAnchors = pairs.filter(function(p) { return p.before !== null && p.after !== null; })
+      .map(function(p) { return elements[side === 'before' ? p.before : p.after]; });
     pairs.forEach(function (p, index) {
       var a = p.before === null ? null : before[p.before], b = p.after === null ? null : after[p.after];
       var ownIndex = side === 'before' ? p.before : p.after, own = ownIndex === null ? null : elements[ownIndex];
@@ -248,6 +289,7 @@
     try {
       if (d.type === 'snapshot') { if (!model) model = collect(); post({ type:'snapshot', model:model }); }
       else if (d.type === 'apply' && model) apply(d.peer,d.side,!!d.inline);
+      else if (d.type === 'scroll' && Number.isFinite(d.position)) followScroll(d.position);
       else if (d.type === 'time' && Number.isFinite(d.time)) controlled.forEach(function (a) { a.pause(); a.currentTime = Math.max(0,Math.min(120,d.time))*1000; });
       else if (d.type === 'motion') {
         var animated = controlled.find(function(a) { return a.effect?.target; })?.effect.target;

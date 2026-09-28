@@ -22,6 +22,10 @@ function ComparisonFrames({ slug, before, after, narrow, theme }) {
       const side = ['before', 'after'].find((key) => refs.current[key]?.contentWindow === event.source);
       const message = event.data;
       if (!side || !message || message.source !== 'tdoc-compare') return;
+      if (message.type === 'scroll' && applied.current && before && Number.isFinite(message.position)) {
+        send(refs.current[side === 'before' ? 'after' : 'before'], {type:'scroll', position:message.position});
+        return;
+      }
       if (message.type === 'previous' && before) {
         location.href = `/d/${encodeURIComponent(slug)}/v/${before}${message.anchor ? '#' + encodeURIComponent(message.anchor) : ''}`;
         return;
@@ -72,7 +76,7 @@ function ComparisonFrames({ slug, before, after, narrow, theme }) {
 
   useEffect(() => {
     if (!motionPreview) return;
-    const id = requestAnimationFrame(() => { for (const frame of Object.values(refs.current)) send(frame, {type:'motion'}); });
+    const id = requestAnimationFrame(() => send(refs.current.after, {type:'motion'}));
     return () => cancelAnimationFrame(id);
   }, [motionPreview]);
 
