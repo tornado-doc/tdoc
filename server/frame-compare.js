@@ -47,7 +47,7 @@
         if (!src || src[0] === '#' || src.startsWith('data:')) return '';
         try { return new URL(src,document.baseURI).href; } catch (_) { return src; }
       }).filter(Boolean);
-      return { kind: tag, key: key(el), text: clone.textContent || '', html: clone.outerHTML, fingerprint: clone.outerHTML + assets.join('\n'), external: assets.length > 0 };
+      return { kind: tag, key: key(el), text: clone.textContent || '', tree: treeOf(inertCopy(clone)), rowKeys: tag === 'table' ? Array.from(el.rows).map(key) : null, svg: tag === 'svg' ? svgModel(clone) : null, fingerprint: clone.outerHTML + assets.join('\n'), external: assets.length > 0 };
     });
     var keys = new Map();
     units.forEach(function(u) { if (u.key) keys.set(u.key,(keys.get(u.key)||0)+1); });
@@ -116,7 +116,30 @@
     if (/^(td|th)$/.test(tag)) ['colspan','rowspan'].forEach(function (a) { if (/^\d{1,3}$/.test(source.getAttribute(a) || '')) copy.setAttribute(a, source.getAttribute(a)); });
     source.childNodes.forEach(function (child) { copy.append(inertCopy(child)); }); return copy;
   }
-  function peerElement(unit) { return new DOMParser().parseFromString(unit.html, 'text/html').body.firstElementChild; }
+  // Exchange an inert node description, never HTML to be parsed at a sink.
+  function treeOf(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+    return { tag: node.localName, children: Array.from(node.childNodes).map(treeOf),
+      colspan: node.getAttribute('colspan'), rowspan: node.getAttribute('rowspan') };
+  }
+  function nodeOf(tree) {
+    if (typeof tree === 'string') return document.createTextNode(tree);
+    var tag = /^(p|div|span|h[1-6]|strong|em|b|i|code|pre|blockquote|ul|ol|li|table|thead|tbody|tfoot|tr|td|th|br|figcaption|figure)$/.test(tree?.tag) ? tree.tag : 'span';
+    var node = document.createElement(tag);
+    if (/^(td|th)$/.test(tag)) ['colspan','rowspan'].forEach(function(a) { if (/^\d{1,3}$/.test(tree[a] || '')) node.setAttribute(a,tree[a]); });
+    (Array.isArray(tree?.children) ? tree.children : []).forEach(function(child) { node.append(nodeOf(child)); });
+    return node;
+  }
+  function peerElement(unit) {
+    var node = nodeOf(unit.tree);
+    if (node.localName === 'table' && Array.isArray(unit.rowKeys)) Array.from(node.rows).forEach(function(row,i) { if (typeof unit.rowKeys[i] === 'string') row.setAttribute('data-aid',unit.rowKeys[i]); });
+    return node;
+  }
+  function svgModel(el) {
+    var drawing = 'path,rect,circle,ellipse,line,polyline,polygon,text,use,image';
+    return { complete: Array.from(el.querySelectorAll(drawing)).every(function(n) { return !!key(n); }),
+      nodes: Array.from(el.querySelectorAll('[id],[data-aid]')).map(function(n) { return { key:key(n), markup:n.outerHTML }; }) };
+  }
   function descriptor(el, type, k) { return { kind: type, key: k || '', fingerprint: norm(el.textContent) }; }
   function tableDiff(el, other, side, inline) {
     var oldTable = side === 'before' ? el : other, newTable = side === 'after' ? el : other;
@@ -162,18 +185,16 @@
     });
     return true;
   }
-  function svgDiff(el, other, side) {
-    var drawing = 'path,rect,circle,ellipse,line,polyline,polygon,text,use,image';
-    if ([el,other].some(function(s) { return Array.from(s.querySelectorAll(drawing)).some(function(n) { return !key(n); }); })) return false;
-    var a = Array.from((side === 'before' ? el : other).querySelectorAll('[id],[data-aid]'));
-    var b = Array.from((side === 'after' ? el : other).querySelectorAll('[id],[data-aid]'));
-    if (!a.length || !b.length) return false;
-    var aMap = new Map(a.map(function (e) { return [key(e),e]; })), bMap = new Map(b.map(function (e) { return [key(e),e]; }));
-    if (aMap.size !== a.length || bMap.size !== b.length) return false;
-    (side === 'before' ? a : b).forEach(function (node) {
-      var peer = (side === 'before' ? bMap : aMap).get(key(node));
-      if (!peer) mark(node,side === 'before' ? 'delete' : 'add');
-      else if (node.outerHTML !== peer.outerHTML) mark(node,'modify');
+  function svgDiff(el, ownModel, peerModel, side) {
+    if (!ownModel?.complete || !peerModel?.complete || !ownModel.nodes.length || !peerModel.nodes.length) return false;
+    var ownKeys = new Set(ownModel.nodes.map(function(n) { return n.key; }));
+    var peers = new Map(peerModel.nodes.map(function(n) { return [n.key,n.markup]; }));
+    if (ownKeys.size !== ownModel.nodes.length || peers.size !== peerModel.nodes.length) return false;
+    var originals = new Map(ownModel.nodes.map(function(n) { return [n.key,n.markup]; }));
+    el.querySelectorAll('[id],[data-aid]').forEach(function(node) {
+      var peer = peers.get(key(node));
+      if (peer === undefined) mark(node,side === 'before' ? 'delete' : 'add');
+      else if (originals.get(key(node)) !== peer) mark(node,'modify');
     });
     return true;
   }
@@ -208,7 +229,7 @@
           return;
         }
       }
-      if (a.kind === 'svg') { var svgMarks = changes.length; if (!svgDiff(own,other,side) || changes.length === svgMarks) mark(own,'modify'); label(own,'Graphic changed — compare Before / After'); return; }
+      if (a.kind === 'svg') { var svgMarks = changes.length; if (!svgDiff(own,(side === 'before' ? a : b).svg,(side === 'before' ? b : a).svg,side) || changes.length === svgMarks) mark(own,'modify'); label(own,'Graphic changed — compare Before / After'); return; }
       if (/^(svg|img|iframe|video|canvas|table)$/.test(a.kind)) { mark(own,'modify'); label(own,'Artifact changed — compare Before / After'); return; }
       if (a.text !== b.text) textDiff(own,a.text,b.text,side,inline);
       else { mark(own,'modify'); label(own,a.external || b.external ? 'Linked artifact or formatting changed — compare Before / After' : 'Formatting changed'); }
