@@ -7,6 +7,7 @@
     "build:shell": "vite build --config shell/vite.config.js",
     "dev:shell": "vite --config shell/vite.config.js",
     "test": "node test/run.js",
+    "test:svg": "node test/svg-preview.test.js",
     "test:all": "node test/run.js --all",
     "test:browser": "node test/run.js --browser"
   },

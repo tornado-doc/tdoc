@@ -69,6 +69,17 @@ jobs:
       - name: ShellCheck CLIs
         run: shellcheck --severity=warning --exclude=SC2034 bin/tdoc-publish bin/tdoc-doctor bin/tdoc-pull bin/tdoc-new bin/tdoc-unpublish bin/tdoc-update
 
+  svg-preview:
+    name: SVG preview and font coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+      - run: npm ci --prefix tools/svg-preview --ignore-scripts --no-audit --no-fund
+      - run: npm run test:svg
+
   browser:
     name: browser regressions
     runs-on: ubuntu-latest

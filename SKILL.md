@@ -304,9 +304,11 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
 5. **Review the document before publishing.** Check the content, table structure,
    SVG labels and responsive styles against `authoring/visuals.md`.
    The write command validates the template and bakes the reading styles; it
-   does not perform rendered layout verification. Preview in an existing
-   browser when available, but do not install extra tools to create or publish.
-   Only claim visual verification when the rendered document was actually inspected.
+   does not perform rendered layout verification. For changed SVG charts, use
+   the small standalone preview helper described in `$SKILL_DIR/authoring/structure/components.md`
+   and inspect its images. An existing browser can review the full document;
+   do not install a browser for authoring. Only claim visual verification for
+   what was actually rendered and inspected.
 
 6. **Publish and hand over the link.**
 
@@ -470,7 +472,7 @@ silently is the #1 source of regression complaints.
 
    Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
    Review the new version using the same content and responsive-style checks
-   as `/tdoc new`; preview when available without installing extra tools.
+   as `/tdoc new`, including image review for changed SVG charts.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice, and
