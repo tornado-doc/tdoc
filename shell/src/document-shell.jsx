@@ -55,6 +55,7 @@ import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { HandoffBanner } from './document/handoff-banner.jsx';
 import { DebugBar } from './debug-bar.jsx';
+import { VersionDiffDialog } from './document/version-diff.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -145,6 +146,7 @@ const exitLine = (answered, version) => (
 );
 
 export function DocumentShell({ boot, config }) {
+  const [comparing, setComparing] = useState(() => new URLSearchParams(location.search).get('compare') === '1');
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
@@ -1101,6 +1103,7 @@ export function DocumentShell({ boot, config }) {
             resolvedCount={resolvedCount}
             showResolved={showResolved}
             onToggleResolved={toggleResolved}
+            onCompare={() => setComparing(true)}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -1134,8 +1137,10 @@ export function DocumentShell({ boot, config }) {
           starred={starred}
           onRename={renameDoc}
           onToggleStar={toggleStar}
+          onCompare={() => setComparing(true)}
         />
       </TopBar>
+      {comparing ? <VersionDiffDialog config={config} theme={theme} narrow={narrow} onClose={() => setComparing(false)} /> : null}
 
       <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
         onApply={async (json, svg) => {

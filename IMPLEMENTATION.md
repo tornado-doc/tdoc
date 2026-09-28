@@ -72,3 +72,30 @@ separate destination-gated nested-frame route.
 TypeScript is intentionally deferred. The current API, model, hook, and
 component boundaries are the migration units; conversion should not change the
 runtime protocol or server boot shapes.
+
+## Rendered version comparison
+
+The version menu and document overflow menu open **Compare versions**. The
+selected published version defaults to its previous available version; the
+first version is compared with an empty document. `?compare=1` opens this view
+directly. It does not include an unsaved editor draft.
+
+Each side loads the existing `/d/:slug/v/:n/frame` route with its existing
+access checks and opaque `allow-scripts` sandbox. The shell exchanges bounded
+snapshots through a window-identity-checked comparison bridge; it never mounts
+author markup in the provider DOM. `frame-compare.js` is dormant outside these
+disposable frames. Closing the dialog discards all comparison annotations.
+
+`version-diff.js` matches stable block IDs, then equal content, then compatible
+gaps. Word edits preserve unchanged inline markup. Simple tables align unique
+headers and row labels; ambiguous or spanning tables fall back to whole-table
+comparison. Stable SVG element IDs allow local marks; unkeyed graphics fall
+back to an artifact outline and the original Before/After views. Changes on
+mobile inserts inert historical text/table copies into the newer view; copied
+markup cannot carry scripts, URLs, IDs or event handlers.
+
+Finite Web Animations timelines share a bounded clock. Embedded widgets,
+video, SMIL and unbounded timelines explicitly report that precise sync is
+unavailable. **Both** keeps original renderings side by side on desktop and
+stacked on mobile. Source styles retain their original per-version isolation;
+style changes are reported separately from content changes.
