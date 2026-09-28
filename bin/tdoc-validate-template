@@ -890,11 +890,13 @@ def main() -> int:
             print(f"  · {note}", file=sys.stderr)
         if args.strict:
             print("Match --style (default|technical|editorial|paper), or pass", file=sys.stderr)
-            print("--custom-template if this full-page custom design is intentional.", file=sys.stderr)
+            print("--custom-template with --custom-template-reason if this", file=sys.stderr)
+            print("full-page custom design is intentional.", file=sys.stderr)
         else:
             print("These are taste, not contract for a standalone check. Creation", file=sys.stderr)
             print("(tdoc-new / tdoc-write) runs with --strict and will fail them.", file=sys.stderr)
-            print("Pass --custom-template if this full-page custom design is intentional.", file=sys.stderr)
+            print("Pass --custom-template with --custom-template-reason if this", file=sys.stderr)
+            print("full-page custom design is intentional.", file=sys.stderr)
     if errors:
         print("tdoc-template: the document would not render correctly:", file=sys.stderr)
         for error in errors:

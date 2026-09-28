@@ -1474,6 +1474,35 @@ if [ ! -f "$META_FILE" ]; then
   exit 1
 fi
 
+# Re-check house style at publish when meta records a claim. Docs created
+# before style was stored skip this (no silent new failures on old trees).
+# Hand-edited ~/tdocs still bypass create-time checks; this closes the
+# publish door for the normal tdoc-new → tdoc-publish path. Server-side
+# upload validation is a separate product decision.
+PUBLISH_STYLE="$(node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  if (m.custom_template) process.stdout.write("custom");
+  else if (typeof m.style === "string" && m.style) process.stdout.write(m.style);
+' "$META_FILE")"
+if [ -n "$PUBLISH_STYLE" ]; then
+  VERSION_FOR_CHECK="$(node -e '
+    const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const vs = (m.versions || []).map((x) => Number(x.n)).filter(Number.isFinite);
+    process.stdout.write(vs.length ? String(Math.max(...vs)) : "");
+  ' "$META_FILE")"
+  HTML_FOR_CHECK="$DOC_DIR/v${VERSION_FOR_CHECK}/index.html"
+  if [ -f "$HTML_FOR_CHECK" ]; then
+    VALIDATOR="$(cd "$(dirname "$0")" && pwd)/tdoc-validate-template"
+    if [ "$PUBLISH_STYLE" = "custom" ]; then
+      python3 "$VALIDATOR" "$HTML_FOR_CHECK" --custom-template \
+        || { echo "[tdoc] publish blocked: host HTML failed custom-template validation" >&2; exit 1; }
+    else
+      python3 "$VALIDATOR" "$HTML_FOR_CHECK" --style "$PUBLISH_STYLE" --strict \
+        || { echo "[tdoc] publish blocked: host HTML failed house-style validation (meta.style=$PUBLISH_STYLE)" >&2; exit 1; }
+    fi
+  fi
+fi
+
 # JUL-31 access policy: merge flags into local meta.json so /api/upload
 # carries them. Defaults for a brand-new access block: unlisted + owner
 # history (pure publish). Existing access blocks keep unspecified fields.

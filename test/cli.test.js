@@ -518,11 +518,48 @@ t('tdoc-new hard-rejects house-style notes unless --custom-template', () => {
       { input: host, env, encoding: 'utf8', timeout: 20000 });
     assert(rejected.status !== 0, `tdoc-new should reject off-style HTML without --custom-template\nstderr: ${rejected.stderr}`);
     assert(!fs.existsSync(path.join(dir, 'tdocs', 'off-style')), 'failed create must not leave a doc dir');
-    const allowed = spawnSync(path.join(BIN, 'tdoc-new'),
+    const noReason = spawnSync(path.join(BIN, 'tdoc-new'),
       ['--slug', 'off-style', '--title', 'Off', '--html-stdin', '--quiet', '--no-server', '--custom-template'],
+      { input: host, env, encoding: 'utf8', timeout: 20000 });
+    assert(noReason.status !== 0, 'tdoc-new --custom-template without a reason must fail');
+    assert(/custom-template-reason/.test(noReason.stderr), `expected reason hint, got: ${noReason.stderr}`);
+    const allowed = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', 'off-style', '--title', 'Off', '--html-stdin', '--quiet', '--no-server',
+       '--custom-template', '--custom-template-reason', 'tweet visual, not a house-style doc'],
       { input: host, env, encoding: 'utf8', timeout: 20000 });
     assert(allowed.status === 0, `tdoc-new --custom-template should accept off-style HTML\nstderr: ${allowed.stderr}`);
     assert(fs.existsSync(path.join(dir, 'tdocs', 'off-style', 'v1', 'index.html')), 'custom-template create should write v1');
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, 'tdocs', 'off-style', 'meta.json'), 'utf8'));
+    assert(meta.custom_template === true, `meta should record custom_template: ${JSON.stringify(meta)}`);
+    assert(meta.custom_template_reason === 'tweet visual, not a house-style doc', `meta reason missing: ${JSON.stringify(meta)}`);
+    assert(!meta.style, `custom doc should not claim a house style: ${JSON.stringify(meta)}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-new records house style in meta.json', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-new-style-meta-'));
+  try {
+    const fakeBin = path.join(dir, 'fake-bin');
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(path.join(fakeBin, 'curl'), '#!/bin/sh\nprintf \'{"service":"tdoc"}\'\n');
+    fs.chmodSync(path.join(fakeBin, 'curl'), 0o755);
+    // Matches --style editorial ground so creation succeeds under --strict.
+    const host = `<!doctype html><html><head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>body { background:#f7f6f5 } .wrap { font-family:Georgia,serif; color:#000 }</style>
+      </head><body><div class="wrap"><h1>Title</h1></div></body></html>`;
+    const env = { ...process.env, HOME: dir, TDOC_DIR: path.join(dir, 'tdocs'),
+      PATH: `${fakeBin}:${process.env.PATH}` };
+    const r = spawnSync(path.join(BIN, 'tdoc-new'),
+      ['--slug', 'ed-style', '--title', 'Ed', '--html-stdin', '--quiet', '--no-server',
+       '--style', 'editorial'],
+      { input: host, env, encoding: 'utf8', timeout: 20000 });
+    assert(r.status === 0, `editorial create failed: ${r.stderr}`);
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, 'tdocs', 'ed-style', 'meta.json'), 'utf8'));
+    assert(meta.style === 'editorial', `meta.style should be editorial: ${JSON.stringify(meta)}`);
+    assert(meta.versions?.[0]?.style === 'editorial', `version style missing: ${JSON.stringify(meta)}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

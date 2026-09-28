@@ -11,6 +11,13 @@
 # the content (a markdown report, an audit, a retro). They shouldn't
 # re-enter the prompt-flow; they should hand off the finished artifact.
 #
+# House style (read this before writing any HTML):
+#   Pick --style default|technical|editorial|paper (omit → default). The
+#   visual contract is $SKILL_DIR/authoring/style/<name>.md — match it; do
+#   not invent a second page-wide aesthetic. Creation hard-rejects house-
+#   style deviations unless you pass BOTH --custom-template and a non-empty
+#   --custom-template-reason "<why>" (reason is stored in meta.json).
+#
 # Usage:
 #   tdoc-new --slug <slug> --title "<title>" --html-file <path> [options]
 #   tdoc-new --slug <slug> --title "<title>" --html-stdin             [options]
@@ -33,15 +40,13 @@
 #   --open                     open the local URL in the default browser.
 #   --quiet                    suppress informational output (still prints
 #                              the resulting URL on the last line).
-#   --style <name>             house style contract: default (the default),
-#                              technical, editorial, or paper. Before authoring,
-#                              read $SKILL_DIR/authoring/style/<name>.md (and
-#                              voice/visuals/structure) — that file is the
-#                              visual contract. Omit --style to use default.
-#   --custom-template          explicitly allow a whole-page custom design.
-#                              Without this flag, house-style deviations are
-#                              hard-rejected (creation runs the validator with
-#                              --strict). Normal docs must not pass it.
+#   --style <name>             house style: default|technical|editorial|paper
+#                              (default: default). See "House style" above.
+#   --custom-template          allow a whole-page custom design (requires
+#                              --custom-template-reason). Recorded in meta.
+#   --custom-template-reason   non-empty why this doc opts out of house style
+#                              (required with --custom-template; stored in
+#                              meta.json for audit).
 #   --force                    overwrite an existing slug directory. Without
 #                              this, an existing slug is a hard error.
 #   --first-doc                mark this as the doc FIRST-DOC.md produced
@@ -74,6 +79,7 @@ QUIET=0
 FORCE=0
 FIRST_DOC=0
 CUSTOM_TEMPLATE=0
+CUSTOM_TEMPLATE_REASON=""
 STYLE="default"
 # Which version this call writes. "1" creates the document; "next" (or an
 # explicit number) adds a version to an existing one — the path /tdoc edit
@@ -98,13 +104,14 @@ while [ $# -gt 0 ]; do
     --quiet)      QUIET=1; shift ;;
     --style)      STYLE="${2:-}"; shift 2 ;;
     --custom-template) CUSTOM_TEMPLATE=1; shift ;;
+    --custom-template-reason) CUSTOM_TEMPLATE_REASON="${2:-}"; shift 2 ;;
     --version)    VERSION_ARG="${2:-}"; [ -n "$VERSION_ARG" ] || usage; shift 2 ;;
     --version=*)  VERSION_ARG="${1#--version=}"; [ -n "$VERSION_ARG" ] || usage; shift ;;
     --force)      FORCE=1; shift ;;
     --first-doc)  FIRST_DOC=1; shift ;;
     --no-server)  NO_SERVER=1; shift ;;   # scaffold only — skip serving (CI / programmatic callers)
     -h|--help)
-      sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -145,6 +152,14 @@ case "$STYLE" in
 esac
 if [ "$CUSTOM_TEMPLATE" = "1" ] && [ "$STYLE" != "default" ]; then
   die "use --style OR --custom-template, not both"
+fi
+if [ "$CUSTOM_TEMPLATE" = "1" ]; then
+  # Opt-out must leave an audit trail (same idea as /api/quota/bump reason).
+  [ -n "$CUSTOM_TEMPLATE_REASON" ] \
+    || die "--custom-template requires --custom-template-reason \"<why>\""
+else
+  [ -z "$CUSTOM_TEMPLATE_REASON" ] \
+    || die "--custom-template-reason is only valid with --custom-template"
 fi
 
 # ─────────────────────────────── paths + env ──────────────────────────────
@@ -292,16 +307,23 @@ PROMPT_RECORDED="${PROMPT:-$DEFAULT_PROMPT}"
 # file from Python keeps the escaping correct for titles and prompts.
 META_JSON=$(python3 -c '
 import json, os, sys
-title, slug, created, prompt, n, path, first_doc = sys.argv[1:8]
+title, slug, created, prompt, n, path, first_doc, style, custom, reason = sys.argv[1:11]
 n = int(n)
+custom = custom == "1"
 meta = {}
 if n > 1 and os.path.exists(path):
     try:
         meta = json.load(open(path))
     except Exception:
         meta = {}
+ver = {"n": n, "created": created, "prompt": prompt}
+if custom:
+    ver["custom_template"] = True
+    ver["custom_template_reason"] = reason
+else:
+    ver["style"] = style
 versions = [v for v in meta.get("versions", []) if isinstance(v, dict) and v.get("n") != n]
-versions.append({"n": n, "created": created, "prompt": prompt})
+versions.append(ver)
 versions.sort(key=lambda v: v.get("n", 0))
 out = {
   "title": meta.get("title") or title,
@@ -309,11 +331,21 @@ out = {
   "created": meta.get("created") or created,
   "versions": versions,
 }
+# Document-level claim tracks the latest write (audit + publish callers).
+if custom:
+    out["custom_template"] = True
+    out["custom_template_reason"] = reason
+    out.pop("style", None)
+else:
+    out["style"] = style
+    out.pop("custom_template", None)
+    out.pop("custom_template_reason", None)
 # The mark belongs to the document: once a first doc, every version of it.
 if first_doc == "1" or meta.get("origin") == "first-doc":
     out["origin"] = "first-doc"
 print(json.dumps(out, indent=2))
-' "$TITLE" "$SLUG" "$CREATED" "$PROMPT_RECORDED" "$VERSION_N" "$DOC_DIR/meta.json" "${FIRST_DOC:-0}")
+' "$TITLE" "$SLUG" "$CREATED" "$PROMPT_RECORDED" "$VERSION_N" "$DOC_DIR/meta.json" "${FIRST_DOC:-0}" \
+  "$STYLE" "$CUSTOM_TEMPLATE" "$CUSTOM_TEMPLATE_REASON")
 
 printf '%s\n' "$META_JSON" > "$DOC_DIR/meta.json"
 # Never reset an existing thread — a new version keeps the comments it is
