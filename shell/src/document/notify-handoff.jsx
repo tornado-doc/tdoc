@@ -131,10 +131,12 @@ export function useNotifyTargets(slug, enabled) {
   return { ...state, refresh };
 }
 
-function noAgentBoundReason(reason) {
-  return reason === 'no_agent_bound'
-    ? 'No agent is following this doc yet, so there is nowhere to send.'
-    : null;
+function noRecipientHint(reason) {
+  if (reason === 'no_raft_link' || reason === 'no_agent_bound') {
+    // no_agent_bound is the pre-rename wire value; treat it the same.
+    return 'This needs a Raft agent linked to your account. Connect one (paste the /setup line into your agent), then come back.';
+  }
+  return null;
 }
 
 function defaultInstruction(commentIds) {
@@ -192,9 +194,12 @@ export function NotifyHandoffPanel({
   }
 
   const ids = Array.isArray(commentIds) ? commentIds.filter(Boolean) : [];
-  const boundHint = noAgentBoundReason(targets.reason);
+  const emptyHint = noRecipientHint(targets.reason);
   const canSubmit = !busy && ids.length > 0 && choices.length > 0 && (selected || targets.default);
   const selectedKey = targetKey(selected || targets.default);
+  const sendBlockedTitle = !choices.length
+    ? (emptyHint || 'No agent to send to')
+    : (!ids.length ? 'No open comments to send' : undefined);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -260,7 +265,7 @@ export function NotifyHandoffPanel({
               type="button"
               className="primary"
               disabled={!canSubmit}
-              title={!choices.length ? (boundHint || 'No agent to send to') : undefined}
+              title={sendBlockedTitle}
               onClick={submit}
             >
               {busy ? 'Sending…' : 'Send'}
@@ -315,9 +320,12 @@ export function NotifyHandoffPanel({
                 }}
               />
             </section>
+          ) : !targets.ready ? (
+            <p className="manage-hint">Looking up recipients…</p>
           ) : (
-            <p className="manage-hint" title={boundHint || undefined}>
-              {boundHint || 'No agent has touched this doc yet. Pick one after an agent publishes or replies.'}
+            <p className="manage-hint" role="status">
+              {emptyHint
+                || 'No agent has touched this doc yet. Pick one after an agent publishes or replies.'}
             </p>
           )}
 

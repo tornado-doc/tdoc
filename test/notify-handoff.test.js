@@ -290,7 +290,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const { env, token, slug } = await seed();
     const r = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
     assert(r.default === null, 'nobody is bound yet');
-    assert(r.reason === 'no_agent_bound', `reason: ${r.reason}`);
+    assert(r.reason === 'no_raft_link', `reason: ${r.reason}`);
   });
 
   await t('a bound recipient reports no reason at all', async () => {
@@ -426,7 +426,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     }), env, {});
     assert(up.status === 200, `publish must not depend on having a Raft identity: ${up.status}`);
     const t2 = await (await worker.fetch(req('/api/notify/targets?slug=plain-doc', { token: tok.token }), env, {})).json();
-    assert(t2.default === null && t2.reason === 'no_agent_bound', `expected nobody bound, got ${JSON.stringify(t2)}`);
+    assert(t2.default === null && t2.reason === 'no_raft_link', `expected nobody bound, got ${JSON.stringify(t2)}`);
   });
 
   // ---- a sent comment must say WHEN, and whether it landed ----

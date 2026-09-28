@@ -700,6 +700,7 @@ export function DocumentShell({ boot, config }) {
     && notifyTargets.ready
     && notifyTargets.available
     && notifyTargets.reason !== 'no_agent_bound'
+    && notifyTargets.reason !== 'no_raft_link'
     && (notifyTargets.default || (notifyTargets.candidates || []).length || notifyTargets.fallback),
   );
   const openNotifyPanel = (ids) => {
@@ -1299,8 +1300,8 @@ export function DocumentShell({ boot, config }) {
           demo={!!config.demoComments}
           canSendToAgent={canSendToAgent}
           sendToAgentDisabledReason={
-            notifyTargets.reason === 'no_agent_bound'
-              ? 'No agent is following this doc yet'
+            (notifyTargets.reason === 'no_raft_link' || notifyTargets.reason === 'no_agent_bound')
+              ? 'Connect a Raft agent to this account first'
               : null
           }
           onSubmit={postComment}
