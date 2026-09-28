@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""tdoc-eval — turn "is the skill producing on-template docs?" into a number.
+
+`test/authoring.test.js` already guards that the contract is wired in, and says
+in its own header what it cannot do:
+
+    What this CANNOT test: whether a model actually obeys voice.md at
+    generation time. The offline suite has no model. It tests that the
+    contract is wired in and intact — necessary, not sufficient.
+
+This is the sufficient half: it judges the artefact instead of the wiring.
+
+Two things make it cheap. The scorer already exists — `tdoc-validate-template`
+is the judgment, and this only tabulates it. And a compliant document still
+validates clean after baking, so the reader template injected at write time
+does not pollute the score and **already-written documents can be measured as
+they sit on disk**.
+
+Usage
+    tdoc-eval --all                     score every doc in $TDOC_DIR
+    tdoc-eval <file.html> [...]         score specific files
+    tdoc-eval --all --json              machine-readable
+    tdoc-eval --all --fail-under 90     exit 1 if the on-template rate is lower
+
+Why it tries every style: the chosen --style is not recorded anywhere (not in
+meta.json, which holds only created/slug/title/versions), so the only honest
+thing to do is score against all four house styles and report the closest fit.
+A document that scores clean under `paper` and badly under `default` is not
+broken — it is a paper document, and saying so is more useful than failing it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+HOUSE_STYLES = ("default", "technical", "editorial", "paper")
+BIN = Path(__file__).resolve().parent
+VALIDATOR = BIN / "tdoc-validate-template"
+
+NOTE_LINE = re.compile(r"^\s+·\s+(.*)$")
+ERROR_LINE = re.compile(r"^\s+-\s+(.*)$")
+
+
+def score_one(path: Path, style: str) -> tuple[list[str], list[str]]:
+    """Run the validator once and pull the two lists back out of its report."""
+    proc = subprocess.run(
+        [sys.executable, str(VALIDATOR), str(path), "--style", style],
+        capture_output=True,
+        text=True,
+    )
+    notes, errors = [], []
+    for line in proc.stderr.splitlines():
+        note = NOTE_LINE.match(line)
+        if note:
+            notes.append(note.group(1))
+            continue
+        err = ERROR_LINE.match(line)
+        if err:
+            errors.append(err.group(1))
+    return errors, notes
+
+
+def best_fit(path: Path, style: str | None) -> dict:
+    styles = (style,) if style else HOUSE_STYLES
+    attempts = []
+    for candidate in styles:
+        errors, notes = score_one(path, candidate)
+        attempts.append((len(errors), len(notes), candidate, errors, notes))
+    attempts.sort(key=lambda a: (a[0], a[1]))
+    n_err, n_note, candidate, errors, notes = attempts[0]
+    if n_err:
+        verdict = "broken"        # would not render correctly
+    elif n_note:
+        verdict = "off-template"  # renders, but is not the house style
+    else:
+        verdict = "clean"
+    return {
+        "path": str(path),
+        "style": candidate,
+        "verdict": verdict,
+        "errors": errors,
+        "notes": notes,
+    }
+
+
+def latest_version(doc: Path) -> Path | None:
+    versions = []
+    for child in doc.iterdir():
+        if child.is_dir() and re.fullmatch(r"v\d+", child.name):
+            index = child / "index.html"
+            if index.is_file():
+                versions.append((int(child.name[1:]), index))
+    if not versions:
+        return None
+    versions.sort()
+    return versions[-1][1]
+
+
+def collect_all(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+    out = []
+    for doc in sorted(root.iterdir()):
+        if not doc.is_dir():
+            continue
+        index = latest_version(doc)
+        if index:
+            out.append(index)
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Score tdoc documents against the house styles")
+    ap.add_argument("files", nargs="*", help="HTML files to score")
+    ap.add_argument("--all", action="store_true", help="score the latest version of every doc in $TDOC_DIR")
+    ap.add_argument("--style", choices=HOUSE_STYLES, help="score against one style instead of the best fit")
+    ap.add_argument("--json", action="store_true", help="emit JSON")
+    ap.add_argument("--fail-under", type=float, metavar="PCT",
+                    help="exit 1 when the on-template rate is below this percentage")
+    args = ap.parse_args()
+
+    targets = [Path(f) for f in args.files]
+    if args.all:
+        root = Path(os.environ.get("TDOC_DIR") or (Path.home() / "tdocs"))
+        targets.extend(collect_all(root))
+    if not targets:
+        print("tdoc-eval: nothing to score (pass files, or --all)", file=sys.stderr)
+        return 2
+
+    missing = [t for t in targets if not t.is_file()]
+    if missing:
+        for t in missing:
+            print(f"tdoc-eval: not a file: {t}", file=sys.stderr)
+        return 2
+
+    results = [best_fit(t, args.style) for t in targets]
+    clean = sum(1 for r in results if r["verdict"] == "clean")
+    off = sum(1 for r in results if r["verdict"] == "off-template")
+    broken = sum(1 for r in results if r["verdict"] == "broken")
+    rate = 100.0 * clean / len(results)
+
+    if args.json:
+        print(json.dumps({
+            "documents": results,
+            "summary": {"total": len(results), "clean": clean,
+                        "off_template": off, "broken": broken,
+                        "on_template_rate": round(rate, 1)},
+        }, indent=2))
+    else:
+        width = max(len(Path(r["path"]).parent.parent.name) for r in results)
+        for r in results:
+            name = Path(r["path"]).parent.parent.name
+            detail = ""
+            if r["verdict"] != "clean":
+                first = (r["errors"] or r["notes"])[0]
+                extra = len(r["errors"]) + len(r["notes"]) - 1
+                detail = f"  {first}" + (f" (+{extra} more)" if extra else "")
+            print(f"{name:<{width}}  {r['style']:<9} {r['verdict']:<12}{detail}")
+        print()
+        print(f"{len(results)} document(s): {clean} clean · {off} off-template · {broken} broken")
+        print(f"on-template rate: {rate:.1f}%")
+
+    if args.fail_under is not None and rate < args.fail_under:
+        print(f"tdoc-eval: on-template rate {rate:.1f}% is below --fail-under {args.fail_under}",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

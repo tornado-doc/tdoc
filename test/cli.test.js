@@ -472,6 +472,46 @@ t('an explicitly transparent body background is an error, not a note', () => {
   }
 });
 
+t('tdoc-eval scores documents and reports an on-template rate', () => {
+  // authoring.test.js guards that the contract is WIRED IN; its own header
+  // calls that "necessary, not sufficient" because the offline suite has no
+  // model. tdoc-eval is the sufficient half: it judges the artefact. The
+  // scorer is tdoc-validate-template -- this only tabulates it -- and a
+  // compliant document still validates clean after baking, which is what
+  // lets already-written docs be measured where they sit.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-eval-'));
+  try {
+    const clean = path.join(dir, 'clean.html');
+    fs.writeFileSync(clean, `<!doctype html><html lang="en"><head>
+      <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>T</title><style>body { background:#fff } .tile { border:1px solid #d4d4d4 }</style>
+      </head><body><div class="wrap"><h1>Title</h1><p>Copy.</p></div></body></html>`);
+    const off = path.join(dir, 'off.html');
+    fs.writeFileSync(off, `<!doctype html><html lang="en"><head>
+      <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>T</title><style>body { background:#fff } code { color:#c00 }</style>
+      </head><body><div class="wrap"><h1>Title</h1><p>Copy.</p></div></body></html>`);
+
+    const one = spawnSync(path.join(BIN, 'tdoc-eval'), [clean, '--json'], { encoding: 'utf8' });
+    assert(one.status === 0, `clean document should score: ${one.stderr}`);
+    const parsed = JSON.parse(one.stdout);
+    assert(parsed.summary.clean === 1, `expected a clean verdict: ${one.stdout}`);
+    assert(parsed.summary.on_template_rate === 100, 'a single clean doc is 100%');
+
+    const both = spawnSync(path.join(BIN, 'tdoc-eval'), [clean, off, '--json'], { encoding: 'utf8' });
+    const two = JSON.parse(both.stdout);
+    assert(two.summary.total === 2, 'both documents scored');
+    assert(two.summary.off_template === 1, `the global selector should read off-template: ${both.stdout}`);
+    assert(two.summary.on_template_rate === 50, `expected 50%, got ${two.summary.on_template_rate}`);
+
+    const gate = spawnSync(path.join(BIN, 'tdoc-eval'), [clean, off, '--fail-under', '90'], { encoding: 'utf8' });
+    assert(gate.status === 1, '--fail-under turns the rate into a build signal');
+    assert(/below --fail-under/.test(gate.stderr), `the failure should say why: ${gate.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 t('tdoc host validator accepts the named editorial house-style background', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-style-'));
   try {
