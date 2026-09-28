@@ -168,25 +168,7 @@
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
-  /* Parent-level resolved chip (distinct from the per-reply status chip). */
-  /* Same chip geometry for comment-axis (✓ fixed) and handoff-axis pills. */
-  .tdoc-resolved-chip,
-  .tdoc-handoff-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    flex: 0 0 auto;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 999px;
-    margin: 0;
-    white-space: nowrap;
-  }
-  .tdoc-resolved-chip { background: #e8f5ed; color: #1a7340; }
-  .tdoc-handoff-chip { color: #5a5a56; background: #f0efea; }
-  /* Homepage in-memory comment demo — same chip shape, quiet amber. */
-  .tdoc-demo-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #f5efe0; color: #7a5c14; }
+  /* Status pills live in shell/src/ui (Chip / ChipRow) — not duplicated here. */
   /* Re-anchor is a ⋯ menu item now. Its old inline-button dress — 10px, grey,
      uppercase, and display:none until the card was active — followed it into
      the menu and made one row shout while the others whispered. The menu item
@@ -537,7 +519,8 @@
   .tdoc-popup .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   .tdoc-popup .head .h { flex: 1; min-width: 0; color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
-  .tdoc-popup .tdoc-demo-chip { margin: 0; flex-shrink: 0; background: #3a3424; color: #e8d5a3; }
+  .tdoc-popup .tdoc-demo-chip,
+  .tdoc-popup .ui-chip-warn { margin: 0; flex-shrink: 0; background: #3a3424; color: #e8d5a3; }
   .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
   /* iOS Safari zooms the page whenever a focused field's text is smaller than
      16px, and every comment input was 13px — tapping one threw the reader out
@@ -789,37 +772,6 @@
   .tdoc-footer a:hover { color: var(--td-accent); text-decoration: underline; }
   .tdoc-footer .sep { color: #ccc; }
   @media (max-width: 700px) { .tdoc-footer .tdoc-footer-row { flex-direction: column; gap: 4px; } .tdoc-footer .sep { display: none; } }
-
-/* Connected-App notify handoff chips on comment cards — one row with ✓ fixed. */
-  .tdoc-status-row {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 4px;
-    margin: 0 0 6px;
-    min-width: 0;
-  }
-  .tdoc-status-row:not(:has(.tdoc-resolved-chip, .tdoc-handoff-chip)) {
-    display: none;
-    margin: 0;
-  }
-  /* Agent done stays neutral gray — green is reserved for comment-axis ✓ fixed. */
-  .tdoc-handoff-chip.is-resolved { color: #5a5a56; background: #f0efea; }
-  .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
-  .tdoc-handoff-chip.is-waiting {
-    color: #1a3f8f;
-    background: #e8eeff;
-    animation: tdoc-handoff-pulse 1.8s ease-in-out infinite;
-  }
-  .tdoc-handoff-chip.is-partial { color: #7a5b12; background: #f7f0d8; }
-  .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
-  @keyframes tdoc-handoff-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .tdoc-handoff-chip.is-waiting { animation: none; }
-  }
 
   .tdoc-handoff-banner {
     display: flex;

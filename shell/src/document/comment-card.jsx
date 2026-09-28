@@ -3,6 +3,7 @@ import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { Chip, ChipRow } from '../ui/chip.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { formatHandoffAgo } from './handoff-banner.jsx';
@@ -43,41 +44,48 @@ function HandoffStatusChips({ comment }) {
 
   if (comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed') {
     chips.push(
-      <span
+      <Chip
         key="failed"
-        className="tdoc-handoff-chip is-failed"
+        kind="failed"
+        tone="danger"
         title={comment.handoff_delivery?.error || undefined}
       >
         Not delivered
-      </span>,
+      </Chip>,
     );
   } else if (waiting) {
     chips.push(
-      <span key="waiting" className="tdoc-handoff-chip is-waiting">
+      <Chip key="waiting" kind="waiting" tone="info" pulse>
         Waiting on agent{ago ? ` · ${ago}` : ''}
-      </span>,
+      </Chip>,
     );
   }
 
   if (verdict === 'partial') {
     chips.push(
-      <span key="partial" className="tdoc-handoff-chip is-partial">
+      <Chip key="partial" kind="partial" tone="warn">
         Partial — needs you
-      </span>,
+      </Chip>,
     );
   } else if (verdict === 'question') {
     chips.push(
-      <span key="question" className="tdoc-handoff-chip is-question">
+      <Chip key="question" kind="question" tone="accent">
         Agent asked
-      </span>,
+      </Chip>,
     );
   }
 
-  if (comment.handoff_status === 'resolved') {
+  // Replied > resolve-only: agent forgets to resolve; the reply is the cue.
+  if (
+    comment.status !== 'applied'
+    && !waiting
+    && comment.handoff_delivery?.status !== 'failed'
+    && (hasAgentReply(comment) || comment.handoff_status === 'resolved')
+  ) {
     chips.push(
-      <span key="resolved" className="tdoc-handoff-chip is-resolved">
-        Agent done
-      </span>,
+      <Chip key="replied" kind="replied" tone="neutral">
+        Agent replied
+      </Chip>,
     );
   }
 
@@ -111,23 +119,12 @@ function Author({ author, timestamp }) {
   }
 
   const avatar = avatarFor(author);
-  const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
-    && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
-    ? author.profile_url : null;
   const title = author.kind === 'agent' && author.principal?.terminal
     ? author.principal.terminal
     : undefined;
   return (
     <div className={`author${author.kind === 'agent' ? ' tdoc-agent-author' : ''}`} title={title}>
-      {avatar ? (profileUrl ? (
-        <a className="tdoc-author-profile" href={profileUrl}
-          aria-label={`View ${authorLine(author)}'s public profile`}
-          title={`View ${authorLine(author)}'s public profile`}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}>
-          <img src={avatar} alt="" />
-        </a>
-      ) : <img src={avatar} alt="" />) : null}
+      {avatar ? <img src={avatar} alt="" /> : null}
       <span className="tdoc-cc-who">
         <span className="login">{authorLine(author)}</span>
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
@@ -702,17 +699,17 @@ export function CommentCard({
         onActivate(comment.id);
       }}
     >
-      {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
-      <div className="tdoc-status-row">
+      <ChipRow>
+        {demo ? <Chip kind="demo" tone="warn">Demo</Chip> : null}
         {comment.status === 'applied' ? (
-          <span className="tdoc-resolved-chip">
+          <Chip kind="resolved" tone="success">
             {comment.resolved_by
               ? `✓ resolved by @${comment.resolved_by}`
               : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
-          </span>
+          </Chip>
         ) : null}
         <HandoffStatusChips comment={comment} />
-      </div>
+      </ChipRow>
       <header className="tdoc-cc-head">
         <Author
           author={comment.author}
