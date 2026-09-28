@@ -34,11 +34,14 @@
 #   --quiet                    suppress informational output (still prints
 #                              the resulting URL on the last line).
 #   --style <name>             house style contract: default (the default),
-#                              technical, editorial, or paper.
+#                              technical, editorial, or paper. Before authoring,
+#                              read $SKILL_DIR/authoring/style/<name>.md (and
+#                              voice/visuals/structure) — that file is the
+#                              visual contract. Omit --style to use default.
 #   --custom-template          explicitly allow a whole-page custom design.
-#                              Without this flag, author HTML must use tdoc's
-#                              injected default template and may only add CSS
-#                              scoped to document-specific widgets.
+#                              Without this flag, house-style deviations are
+#                              hard-rejected (creation runs the validator with
+#                              --strict). Normal docs must not pass it.
 #   --force                    overwrite an existing slug directory. Without
 #                              this, an existing slug is a hard error.
 #   --first-doc                mark this as the doc FIRST-DOC.md produced
@@ -240,9 +243,15 @@ fi
 # Default-template is the normal contract. The overlay owns typography,
 # article width, headings, prose, tables, and code blocks. Authors may style
 # named widgets, but broad page restyling requires an explicit opt-out.
+# Without --custom-template, house-style notes fail the run (--strict): the
+# SKILL already said so in prose; creation is where that rule is enforced.
 VALIDATOR="$(cd "$(dirname "$0")" && pwd)/tdoc-validate-template"
 VALIDATOR_ARGS=("$STAGE_HTML" --style "$STYLE")
-[ "$CUSTOM_TEMPLATE" = "1" ] && VALIDATOR_ARGS+=(--custom-template)
+if [ "$CUSTOM_TEMPLATE" = "1" ]; then
+  VALIDATOR_ARGS+=(--custom-template)
+else
+  VALIDATOR_ARGS+=(--strict)
+fi
 if ! python3 "$VALIDATOR" "${VALIDATOR_ARGS[@]}"; then
   die "default-template validation failed (existing doc, if any, left untouched)"
 fi
