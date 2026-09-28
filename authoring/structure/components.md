@@ -140,6 +140,17 @@ unscaled label layer or HTML. Split dense figures, or preserve their spatial
 layout with `min-width` and local scrolling. Recheck label/node fit after sizing;
 the estimate does not prove rendered fit.
 
+Before finalizing a changed SVG chart, save a standalone copy with its actual
+styles and preview it at the intended display widths:
+`node "$SKILL_DIR/bin/tdoc-preview-svg" figure.svg --out /tmp/figure-preview --font /path/to/font.ttf --widths 343,672`.
+Repeat `--font` for other faces or CJK fallback; only supplied fonts are loaded.
+Use a new `--out` directory for each revision so stale previews cannot be reused.
+First use: `npm ci --prefix "$SKILL_DIR/tools/svg-preview" --ignore-scripts --no-audit --no-fund`.
+Inspect the PNGs and fix clipping, unintended overlap and small labels without
+removing content or changing data. Re-preview changes, not an unchanged publish.
+Missing glyphs/render warnings fail; exit 0 means ready for visual review, not
+layout approved. This previews the SVG only, not surrounding HTML/CSS.
+
 **Stat tile row** — a few numbers that carry an argument on their own. Three or
 four; a fifth is a table. It earns its place from the numbers in it, like any
 other component, so it goes where those numbers are the point rather than
