@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
+import { RaftMark } from '../agent-marks.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
@@ -23,22 +24,60 @@ function hasAgentReply(comment) {
   );
 }
 
+function isWaitingOnAgent(comment) {
+  if (comment?.handoff_status !== 'sent') return false;
+  if (comment.handoff_delivery?.status === 'failed') return false;
+  if (hasAgentReply(comment)) return false;
+  if (latestAgentVerdict(comment)) return false;
+  return true;
+}
+
+function recipientLabel(recipient) {
+  const name = String(recipient?.agent_name || '').trim();
+  if (!name) return '';
+  // "handle — bio…" → keep the handle side.
+  return name.split(/\s+[—–-]\s+/)[0].trim().slice(0, 48);
+}
+
+/** Recipient mark that pulses while a handoff is open — never the comment author. */
+function WaitingRecipientMark({ comment, waiting }) {
+  if (!waiting) return null;
+  const recipient = comment.handoff_recipient;
+  const acked = !!comment.handoff_acked_at;
+  const mode = acked ? 'acked' : 'pending';
+  const label = recipientLabel(recipient);
+  const since = acked && comment.handoff_acked_at
+    ? formatHandoffAgo(comment.handoff_acked_at)
+    : (comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '');
+  const title = acked
+    ? `${label || 'Agent'} picked up${since ? ` · ${since}` : ''}`
+    : `Delivered${label ? ` to ${label}` : ''} — waiting for pickup${since ? ` · ${since}` : ''}`;
+  const mark = recipient?.provider === 'raft'
+    ? <RaftMark size={14} />
+    : <span aria-hidden="true">{(label || '?').slice(0, 1).toUpperCase()}</span>;
+  return (
+    <span
+      className={`tdoc-handoff-recipient is-${mode}`}
+      title={title}
+      aria-label={title}
+    >
+      {mark}
+    </span>
+  );
+}
+
 function HandoffStatusChips({ comment }) {
   // Tick so "3m ago" advances while the card stays open with a sent handoff.
   const [, setTick] = useState(0);
-  const verdict = latestAgentVerdict(comment);
-  // Once the agent has posted on the thread, "Waiting" is stale even if
-  // handoff_status is still sent (resolve is a separate step).
-  const waiting = comment.handoff_status === 'sent'
-    && comment.handoff_delivery?.status !== 'failed'
-    && !hasAgentReply(comment)
-    && !verdict;
+  const waiting = isWaitingOnAgent(comment);
   useEffect(() => {
     if (!waiting) return undefined;
     const id = window.setInterval(() => setTick((n) => n + 1), 30000);
     return () => window.clearInterval(id);
   }, [waiting]);
+  const verdict = latestAgentVerdict(comment);
   const ago = comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '';
+  const acked = !!comment.handoff_acked_at;
   const chips = [];
 
   if (comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed') {
@@ -53,8 +92,9 @@ function HandoffStatusChips({ comment }) {
     );
   } else if (waiting) {
     chips.push(
-      <span key="waiting" className="tdoc-handoff-chip is-waiting">
-        Waiting on agent{ago ? ` · ${ago}` : ''}
+      <WaitingRecipientMark key="recipient" comment={comment} waiting={waiting} />,
+      <span key="waiting" className={`tdoc-handoff-chip is-waiting${acked ? ' is-acked' : ' is-pending'}`}>
+        {acked ? 'Agent working' : 'Waiting on agent'}{ago ? ` · ${ago}` : ''}
       </span>,
     );
   }

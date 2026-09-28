@@ -5685,8 +5685,27 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
 // a comment nobody handed over is a note for a human, not work queued for an
 // agent. Resolution is per comment id, so a partially-resolved handoff shows
 // exactly which of its comments are done.
+function publicHandoffRecipient(recipient) {
+  // Comments are public to anyone who can open the doc. The handoff record
+  // keeps server_id / agent_sub for delivery; the card only needs enough to
+  // draw "which agent" (provider mark + readable name) without leaking the
+  // addressing keys.
+  if (!recipient || typeof recipient !== 'object') return null;
+  const provider = typeof recipient.provider === 'string' ? recipient.provider.trim().toLowerCase() : '';
+  if (!provider) return null;
+  const agent_name = typeof recipient.agent_name === 'string' ? recipient.agent_name.slice(0, 80) : '';
+  return { provider, ...(agent_name ? { agent_name } : {}) };
+}
+
 function withHandoffStatus(list, handoffs) {
-  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_acked_at: null, handoff_delivery: null };
+  const bare = {
+    handoff_status: 'note',
+    handoff_id: null,
+    handoff_at: null,
+    handoff_acked_at: null,
+    handoff_delivery: null,
+    handoff_recipient: null,
+  };
   if (!Array.isArray(list) || !Array.isArray(handoffs) || !handoffs.length) {
     return Array.isArray(list) ? list.map(c => ({ ...c, ...bare })) : list;
   }
@@ -5710,6 +5729,7 @@ function withHandoffStatus(list, handoffs) {
         // that has not, so the UI must say "no response yet", never "not working".
         handoff_acked_at: h.acked_at || null,
         handoff_delivery: h.delivery ? { status: h.delivery.status, error: h.delivery.error || null } : null,
+        handoff_recipient: publicHandoffRecipient(h.recipient),
       });
     }
   }

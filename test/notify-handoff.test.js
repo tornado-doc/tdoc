@@ -449,7 +449,18 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   await t('an untouched comment carries nulls, not stale values', async () => {
     const { env, slug } = await seed();
     const [c] = await listComments(env, slug);
-    assert(c.handoff_at === null && c.handoff_delivery === null, `expected nulls, got ${JSON.stringify([c.handoff_at, c.handoff_delivery])}`);
+    assert(c.handoff_at === null && c.handoff_delivery === null && c.handoff_recipient === null,
+      `expected nulls, got ${JSON.stringify([c.handoff_at, c.handoff_delivery, c.handoff_recipient])}`);
+  });
+
+  await t('a sent comment exposes a public recipient (name + provider only)', async () => {
+    const { env, token, slug, commentId } = await seed();
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: target });
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_recipient && c.handoff_recipient.provider === 'raft', `provider: ${JSON.stringify(c.handoff_recipient)}`);
+    assert(c.handoff_recipient.agent_name === 'xiaocc', `name: ${c.handoff_recipient.agent_name}`);
+    assert(c.handoff_recipient.server_id == null && c.handoff_recipient.agent_sub == null,
+      `public recipient must not leak addressing keys: ${JSON.stringify(c.handoff_recipient)}`);
   });
 
   await t('handing the same comment over again supersedes the earlier record', async () => {
