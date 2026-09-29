@@ -6238,6 +6238,35 @@ async function touchDocAgent(env, slug, target) {
   return true;
 }
 
+// Which agent is acting on this doc. The follow-up seat is earned by doing the
+// work (publishing or replying); this decides whose work it was.
+//
+// A Raft agent session (the tdoc_agent_sid cookie) is verified and wins. The CLI
+// cannot carry that cookie -- it holds only an upload token -- so without one an
+// agent may SAY which Raft agent it is, as X-Tdoc-Raft-Agent: <server_id>/<agent_sub>
+// (the Raft runtime exposes these as SLOCK_CURRENT_SERVER_ID / SLOCK_CURRENT_AGENT_ID).
+// That claim is honoured ONLY when it names an agent already linked to this
+// account. Linking requires the upload token AND a Raft-verified identity, so the
+// allowlist is exactly the agents that have proven themselves once for this account.
+//
+// A self-report is acceptable here, unlike hosted.github_login, because the seat
+// is read in one place -- resolveNotifyTargets -- where it chooses WHO GETS
+// PINGED and never grants access. The worst a false claim can do is ping a
+// different one of the account's own agents. What gets recorded is the stored,
+// verified link, never the claimed object: the self-report only selects.
+async function actingAgent(env, req, actor) {
+  const session = await getAgentSession(env, req);
+  if (session) return session;
+  const accountId = actor && actor.kind === 'hosted' ? actor.account_id : null;
+  if (!accountId) return null;
+  const m = (req.headers.get('x-tdoc-raft-agent') || '').trim()
+    .match(/^([A-Za-z0-9-]{1,80})\/([A-Za-z0-9-]{1,80})$/);
+  if (!m) return null;
+  const [, serverId, agentSub] = m;
+  const linked = await accountNotifyTargets(env, accountId);
+  return linked.find(t => t.server_id === serverId && t.agent_sub === agentSub) || null;
+}
+
 async function accountNotifyTargets(env, accountId) {
   if (!accountId) return [];
   try {
@@ -9299,7 +9328,7 @@ export default {
       // one that went away becomes the default the first time it replies.
       // Silent by design — a Raft identity is optional and its absence must
       // not fail a reply that is otherwise fine.
-      const replyingAgent = await getAgentSession(env, req);
+      const replyingAgent = await actingAgent(env, req, auth.actor);
       if (replyingAgent) { try { await touchDocAgent(env, slug, replyingAgent); } catch {} }
       // One answer per human turn. A round that re-reads comments.json after
       // somebody deleted the agent's reply would otherwise post the same words
@@ -9597,7 +9626,7 @@ export default {
         // first time it publishes. After the commit point and swallowed on
         // failure — nobody's publish should fail over who gets notified.
         try {
-          const publishingAgent = await getAgentSession(env, req);
+          const publishingAgent = await actingAgent(env, req, auth.actor);
           if (publishingAgent) await touchDocAgent(env, slug, publishingAgent);
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
