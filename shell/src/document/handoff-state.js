@@ -23,20 +23,26 @@ export function lastHumanAt(comment) {
   return latest;
 }
 
+/** Latest agent reply / agent_status stamp on the thread. */
+export function lastAgentAt(comment) {
+  if (!comment) return 0;
+  let latest = 0;
+  for (const r of comment.replies || []) {
+    if (!r || !(isAgentAuthor(r.author) || r.agent_status)) continue;
+    const at = ts(r.created);
+    // Missing created: treat as "now enough" so we do not keep waiting forever.
+    latest = Math.max(latest, at || Number.MAX_SAFE_INTEGER);
+  }
+  return latest === Number.MAX_SAFE_INTEGER ? Date.now() : latest;
+}
+
 /** True if an agent posted (or stamped agent_status) after handoff_at. */
 export function agentRepliedAfterHandoff(comment) {
   const handoffMs = ts(comment?.handoff_at);
-  if (!handoffMs) {
-    return (comment?.replies || []).some(
-      (r) => r && (isAgentAuthor(r.author) || r.agent_status),
-    );
-  }
-  return (comment?.replies || []).some((r) => {
-    if (!r || !(isAgentAuthor(r.author) || r.agent_status)) return false;
-    const at = ts(r.created);
-    // Missing created: treat as after handoff so we do not keep "waiting".
-    return !at || at >= handoffMs;
-  });
+  const agentMs = lastAgentAt(comment);
+  if (!agentMs) return false;
+  if (!handoffMs) return true;
+  return agentMs >= handoffMs;
 }
 
 /**
@@ -57,11 +63,19 @@ export function handoffSurfaceState(comment) {
 
   const humanMs = lastHumanAt(comment);
   const handoffMs = ts(comment.handoff_at);
-  // Newer human input than the last handoff → ready to send again.
-  if (humanMs && handoffMs && humanMs > handoffMs) return 'ready';
+  const agentMs = lastAgentAt(comment);
 
-  const answered = agentRepliedAfterHandoff(comment) || status === 'resolved';
-  if (answered) return 'replied';
+  // One agent reply covers the whole thread (root + self-replies). Only go
+  // back to ready if a human wrote again AFTER that reply.
+  if (status === 'resolved' || (agentMs && agentMs >= handoffMs)) {
+    if (humanMs && agentMs && humanMs > agentMs) return 'ready';
+    if (status === 'resolved' || (agentMs && (!humanMs || agentMs >= humanMs))) {
+      return 'replied';
+    }
+  }
+
+  // Newer human input than the last handoff, and agent has not caught up.
+  if (humanMs && handoffMs && humanMs > handoffMs) return 'ready';
 
   // Ack means the agent inbox accepted it; still waiting for a reply.
   if (comment.handoff_acked_at) return 'received';
@@ -92,6 +106,7 @@ export function handoffActivityAt(comment) {
     ts(comment.handoff_at),
     ts(comment.handoff_acked_at),
     lastHumanAt(comment),
+    lastAgentAt(comment),
   );
 }
 

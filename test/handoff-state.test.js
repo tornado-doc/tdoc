@@ -89,7 +89,18 @@ function comment(partial) {
       { author: { kind: 'human', login: 'julie' }, created: '2026-01-01T03:00:00Z', text: 'more' },
     ],
   })), 'ready');
-  ok('human follow-up after handoff is ready again');
+  ok('human follow-up after agent reply is ready again');
+
+  assert.strictEqual(handoffSurfaceState(comment({
+    handoff_status: 'sent',
+    handoff_at: '2026-01-01T01:00:00Z',
+    handoff_delivery: { status: 'delivered' },
+    replies: [
+      { author: { kind: 'human', login: 'julie' }, created: '2026-01-01T01:30:00Z', text: 'also this' },
+      { author: { kind: 'agent', login: 'bot' }, created: '2026-01-01T02:00:00Z', text: 'saw both' },
+    ],
+  })), 'replied');
+  ok('one agent reply after self-reply counts as processed');
 
   assert.strictEqual(handoffSurfaceState(comment({ status: 'applied' })), null);
   ok('applied comments leave the surface');
