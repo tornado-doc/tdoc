@@ -6,6 +6,7 @@ import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { formatHandoffAgo } from './handoff-banner.jsx';
+import { handoffSurfaceState, isHandoffInFlight } from './handoff-state.js';
 
 /** Latest agent verdict on a reply, if any (applied / partial / question). */
 function latestAgentVerdict(comment) {
@@ -17,31 +18,24 @@ function latestAgentVerdict(comment) {
   return null;
 }
 
-function hasAgentReply(comment) {
-  return (comment?.replies || []).some(
-    (r) => r && (r.author?.kind === 'agent' || r.agent_status),
-  );
-}
-
 function HandoffStatusChips({ comment }) {
   // Tick so "3m ago" advances while the card stays open with a sent handoff.
   const [, setTick] = useState(0);
   const verdict = latestAgentVerdict(comment);
-  // Once the agent has posted on the thread, "Waiting" is stale even if
-  // handoff_status is still sent (resolve is a separate step).
-  const waiting = comment.handoff_status === 'sent'
-    && comment.handoff_delivery?.status !== 'failed'
-    && !hasAgentReply(comment)
-    && !verdict;
+  const surface = handoffSurfaceState(comment);
+  const waiting = isHandoffInFlight(surface);
   useEffect(() => {
     if (!waiting) return undefined;
     const id = window.setInterval(() => setTick((n) => n + 1), 30000);
     return () => window.clearInterval(id);
   }, [waiting]);
   const ago = comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '';
+  const receivedAgo = comment.handoff_acked_at
+    ? formatHandoffAgo(comment.handoff_acked_at)
+    : '';
   const chips = [];
 
-  if (comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed') {
+  if (surface === 'failed') {
     chips.push(
       <span
         key="failed"
@@ -51,10 +45,23 @@ function HandoffStatusChips({ comment }) {
         Not delivered
       </span>,
     );
-  } else if (waiting) {
+  } else if (surface === 'received') {
+    chips.push(
+      <span key="received" className="tdoc-handoff-chip is-received">
+        Agent received{receivedAgo ? ` · ${receivedAgo}` : ''}
+      </span>,
+    );
+  } else if (surface === 'waiting') {
     chips.push(
       <span key="waiting" className="tdoc-handoff-chip is-waiting">
         Waiting on agent{ago ? ` · ${ago}` : ''}
+      </span>,
+    );
+  } else if (surface === 'replied' && !verdict) {
+    // Positive cue when waiting clears — reply itself may be folded.
+    chips.push(
+      <span key="replied" className="tdoc-handoff-chip is-replied">
+        Agent replied
       </span>,
     );
   }
@@ -72,14 +79,8 @@ function HandoffStatusChips({ comment }) {
       </span>,
     );
   }
-
-  if (comment.handoff_status === 'resolved') {
-    chips.push(
-      <span key="resolved" className="tdoc-handoff-chip is-resolved">
-        Agent done
-      </span>,
-    );
-  }
+  // handoff_status resolved is folded into surface === 'replied' — no separate
+  // "Agent done" pill (redundant with the reply / this chip).
 
   if (!chips.length) return null;
   return <>{chips}</>;
@@ -197,19 +198,31 @@ function Reactions({ item, me, onReact }) {
   );
 }
 
-function ReplyForm({ commentId, onReply, replyingTo, mentionable, demo = false }) {
+function ReplyForm({
+  commentId,
+  handoffCommentId,
+  onReply,
+  replyingTo,
+  mentionable,
+  demo = false,
+  canSendToAgent = false,
+}) {
   const [text, setText] = useState('');
   // One submit at a time, same as the comment composer: ⌘+Enter and the
   // button share the lock, so a second press while the first reply is still
   // in flight does not post a twin.
   const [busy, setBusy] = useState(false);
 
-  const submit = async () => {
+  const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
       // onReply resolves false when the shell reported a failure; keep the draft.
-      if (await onReply(commentId, text) !== false) setText('');
+      const ok = await onReply(commentId, text, {
+        sendToAgent: canSendToAgent && sendToAgent,
+        handoffCommentId: handoffCommentId || commentId,
+      });
+      if (ok !== false) setText('');
     } finally { setBusy(false); }
   };
 
@@ -225,13 +238,28 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable, demo = false }
         value={text}
         people={mentionable}
         onChange={setText}
-        onSubmit={submit}
+        onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
       <div className="tdoc-reply-form-foot">
-        <span className="hint" />
-        <button className="tdoc-reply-submit" type="button" onClick={submit} disabled={busy}>
-          {busy ? 'Posting…' : 'Reply'}
-        </button>
+        <span className="hint">
+          {canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
+        </span>
+        <div className="tdoc-reply-form-actions">
+          {canSendToAgent ? (
+            <button
+              className="tdoc-reply-submit agent"
+              type="button"
+              onClick={() => submit(true)}
+              disabled={busy}
+              title="Reply and hand to the following agent"
+            >
+              {busy ? 'Posting…' : '@agent'}
+            </button>
+          ) : null}
+          <button className="tdoc-reply-submit" type="button" onClick={() => submit(false)} disabled={busy}>
+            {busy ? 'Posting…' : 'Reply'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -409,6 +437,7 @@ function ReplyCard({
   isOwner,
   mentionable,
   demo = false,
+  canSendToAgent = false,
   replyTarget,
   onReplyTarget,
   editTarget,
@@ -443,6 +472,7 @@ function ReplyCard({
       isOwner={isOwner}
       mentionable={mentionable}
       demo={demo}
+      canSendToAgent={canSendToAgent}
       replyTarget={replyTarget}
       onReplyTarget={onReplyTarget}
       editTarget={editTarget}
@@ -539,7 +569,15 @@ function ReplyCard({
       </div>
 
       {replyTarget === reply.id ? (
-        <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} mentionable={mentionable} demo={demo} />
+        <ReplyForm
+          commentId={reply.id}
+          handoffCommentId={rootId}
+          onReply={onReply}
+          replyingTo={author}
+          mentionable={mentionable}
+          demo={demo}
+          canSendToAgent={canSendToAgent}
+        />
       ) : null}
 
       {kidCards}
@@ -558,6 +596,7 @@ export function CommentCard({
   position,
   expandReplies = false,
   selected = false,
+  canSendToAgent = false,
   onActivate,
   onReply,
   onReact,
@@ -592,8 +631,8 @@ export function CommentCard({
   // fold: the reply was saved, nothing visibly changed, and only a page
   // refresh cleared the box. A failure (onReply === false) keeps the composer
   // and its draft so the text isn't lost.
-  const submitReply = async (parentId, text) => {
-    const result = await onReply(parentId, text);
+  const submitReply = async (parentId, text, opts = {}) => {
+    const result = await onReply(parentId, text, opts);
     if (result === false) return false;
     setReplyTarget(null);
     setRepliesOpen(true);
@@ -655,6 +694,7 @@ export function CommentCard({
             isOwner={isOwner}
             mentionable={mentionable}
             demo={demo}
+            canSendToAgent={canSendToAgent}
             replyTarget={replyTarget}
             onReplyTarget={setReplyTarget}
             editTarget={editTarget}
@@ -857,7 +897,14 @@ export function CommentCard({
       {threadBlock}
 
       {replyTarget === comment.id ? (
-        <ReplyForm commentId={comment.id} onReply={submitReply} mentionable={mentionable} demo={demo} />
+        <ReplyForm
+          commentId={comment.id}
+          handoffCommentId={comment.id}
+          onReply={submitReply}
+          mentionable={mentionable}
+          demo={demo}
+          canSendToAgent={canSendToAgent}
+        />
       ) : null}
     </article>
   );
