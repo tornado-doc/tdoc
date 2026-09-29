@@ -616,8 +616,8 @@ When the user reports a problem, check `$SKILL_DIR/authoring/troubleshooting.md`
 
 ## HTML generation rules
 
-Full markup contract: **`$SKILL_DIR/authoring/html-rules.md`** (CSP, CSS-only
-interactivity, widgets, responsive defaults, reader conflicts). Read it before
+Full markup contract (CSP, CSS-only interactivity, widgets, responsive defaults,
+reader conflicts): **`$SKILL_DIR/authoring/html-rules.md`**. Read it before
 writing host HTML.
 
 - **The prose in the doc is governed by `$SKILL_DIR/authoring/voice.md`.** These rules cover markup; that file covers the words inside it. Both apply to every doc.
@@ -625,6 +625,47 @@ writing host HTML.
 - **Hand versions to `bin/tdoc-write`** — do not write `~/tdocs` yourself. Validation + bake live there.
 - One content root (`.wrap` / `main` / `article`), explicit opaque `body` background, viewport meta.
 - Default-template docs must match the selected `$SKILL_DIR/authoring/style/<name>.md`; whole-page custom design needs `--custom-template`.
+
+These two invariants stay in SKILL.md on purpose — they are must-know before
+writing, not lookup detail. The test suite pins them here.
+
+### Author HTML compatibility contract (invariant)
+
+Agents generate arbitrary HTML. The baked template is **`:where()` zero-specificity** so **author CSS always wins** — property by property: what you name is yours, what you leave alone keeps the default. That also means a bad author rule silently breaks layout (e.g. `padding: 0 24px` on the content root wiped the top reading space — #96). Contract:
+
+- One primary content container: `.wrap` (preferred), `main`, `article`, `.content`, or `.container`.
+- Select default or `data-tdoc-width="wide"` on the primary root. **No arbitrary**
+  root width / `margin` / `padding` overrides — the template owns column spacing.
+- Treat `tdoc-*` classes/ids as reserved.
+- Scope document UI rules to the document (never global `button:hover`).
+- Prefer fluid/`max-width` layouts over fixed pixel shells.
+
+### Access policy (published docs — invariant)
+
+Remote storage holds optional `meta.access`:
+
+```json
+{
+  "visibility": "public | unlisted | private",
+  "commenting": "owner | invited | signed_in | off",
+  "history_visibility": "owner | invited | public",
+  "allowed_users": ["github-login"]
+}
+```
+
+- **public / unlisted**: link-readable without login. Unlisted is not catalog-discovery; `/me` still lists the signed-in publisher's docs.
+- **private**: the doc publisher (hosted `github_login`, or `TDOC_OWNER` on BYOK/legacy) + `allowed_users`. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
+- **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
+- Legacy meta without `access` stays world-readable + full history (back-compat).
+- **Access only ever tightens by omission.** A flag left out keeps what is
+  already stored — the CLI leaves an existing `meta.access` alone, and the
+  worker carries the stored block forward when an upload names none. A publish
+  that means to OPEN a doc must say so (`--visibility public`); this is why
+  FIRST-DOC.md names the policy instead of publishing flagless.
+- Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
+- After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
+- `/me` on hosted tdoc.dev lists the signed-in account's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
+
 
 ## Comment anchoring
 

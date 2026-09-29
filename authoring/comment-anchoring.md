@@ -1,6 +1,6 @@
 # Comment anchoring
 
-s are persisted with one of two anchor shapes:
+Comments are persisted with one of two anchor shapes:
 
 ```json
 // text anchor
