@@ -424,8 +424,12 @@ t('one record answers "have they commented", not two', () => {
   // they just wrote is inside it.
   assert(shell.includes('const markCommented = ()') && shell.includes('commented: new Date().toISOString()'),
     'a comment posted in this tab moves the record before the server is asked');
-  assert(shell.includes('markCommented();\n    closeComposer();') && shell.includes('{ markCommented(); reportMentions(value); }'),
-    'both ways of saying something -- a comment of their own, and the reply the seeded card asks for');
+  // Both the new-comment path and the reply path stamp the record. Shape may
+  // grow (e.g. @agent after a reply) but markCommented must still fire on each.
+  assert(shell.includes('markCommented();\n    closeComposer();'),
+    'a comment of their own stamps the record');
+  assert(/const replyTo = async[\s\S]*?markCommented\(\);[\s\S]*?reportMentions\(value\);/.test(shell),
+    'and so does the reply the seeded card asks for');
 });
 
 t('the hint is a wayfinder, never a second copy of the line', () => {
