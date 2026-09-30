@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MessageSquarePlus } from 'lucide-react';
+import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X } from 'lucide-react';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
@@ -37,22 +37,79 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-feedback-notice a,
     #tdoc-feedback-root .tdoc-feedback-notice button { color: #fff; }
     #tdoc-feedback-root .tdoc-feedback-dock {
-      position: fixed; right: 18px; bottom: 68px; z-index: 2147483642; pointer-events: auto;
-      display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 999px;
+      position: fixed; right: 18px; bottom: 18px; z-index: 2147483642; pointer-events: auto;
+      display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 999px;
       background: #fff; color: #1a1a1a; border: 1px solid #e5e5e7;
-      box-shadow: 0 4px 16px rgba(0,0,0,.10); font: 600 12px/1.2 system-ui, -apple-system, sans-serif;
+      box-shadow: 0 6px 24px rgba(0,0,0,.12); font: 600 12.5px/1.2 system-ui, -apple-system, sans-serif;
     }
-    #tdoc-feedback-root .tdoc-feedback-dock .counts { padding: 0 4px; color: #6b6a66; white-space: nowrap; }
-    #tdoc-feedback-root .tdoc-feedback-dock .counts strong { color: #1a1a1a; font-weight: 700; }
     #tdoc-feedback-root .tdoc-feedback-dock button,
     #tdoc-feedback-root .tdoc-feedback-dock a {
-      appearance: none; border: 0; background: #f0f0ee; color: #1a1a1a; cursor: pointer;
-      border-radius: 999px; padding: 5px 10px; font: inherit; text-decoration: none;
+      appearance: none; border: 0; background: transparent; color: #1a1a1a; cursor: pointer;
+      border-radius: 999px; padding: 7px 11px; font: inherit; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
     }
+    #tdoc-feedback-root .tdoc-feedback-dock svg { width: 15px; height: 15px; }
     #tdoc-feedback-root .tdoc-feedback-dock button:hover,
-    #tdoc-feedback-root .tdoc-feedback-dock a:hover { background: #e8eeff; color: #1652f0; }
+    #tdoc-feedback-root .tdoc-feedback-dock a:hover,
+    #tdoc-feedback-root .tdoc-feedback-dock .on { background: #f0f0ee; }
+    #tdoc-feedback-root .tdoc-feedback-dock .icon, #tdoc-feedback-root .tdoc-feedback-dock a { padding: 7px; color: #6b6a66; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary { background: #1652f0; color: #fff; }
-    #tdoc-feedback-root .tdoc-feedback-dock button.primary:hover { background: #1245d0; color: #fff; }
+    #tdoc-feedback-root .tdoc-feedback-dock button.primary:hover,
+    #tdoc-feedback-root .tdoc-feedback-dock button.primary.on { background: #1245d0; color: #fff; }
+    #tdoc-feedback-root .tdoc-fb-badge {
+      position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 4px;
+      border-radius: 999px; background: #1652f0; color: #fff; font: 700 10px/17px system-ui, sans-serif; text-align: center;
+    }
+    #tdoc-feedback-root .tdoc-fb-banner {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 2147483643; pointer-events: auto;
+      display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 16px; border-radius: 999px;
+      background: #1a1a1a; color: #fff; font: 600 13px/1.2 system-ui, -apple-system, sans-serif;
+      box-shadow: 0 8px 28px rgba(0,0,0,.22);
+    }
+    #tdoc-feedback-root .tdoc-fb-banner button {
+      appearance: none; border: 0; cursor: pointer; border-radius: 999px; padding: 5px 10px;
+      background: rgba(255,255,255,.14); color: #fff; font: inherit;
+    }
+    #tdoc-feedback-root .tdoc-fb-toast {
+      position: fixed; bottom: 70px; z-index: 2147483643; pointer-events: auto;
+      padding: 9px 14px; border-radius: 10px; background: #1a1a1a; color: #fff;
+      font: 500 13px/1.35 system-ui, -apple-system, sans-serif; box-shadow: 0 6px 20px rgba(0,0,0,.18);
+    }
+    #tdoc-feedback-root .tdoc-fb-toast.bad { background: #b42318; }
+    #tdoc-feedback-root .tdoc-pin.is-active { outline: 2px solid #1652f0; outline-offset: 2px; }
+    #tdoc-feedback-root .tdoc-fb-panel {
+      position: fixed; top: 0; right: 0; bottom: 0; width: 340px; z-index: 2147483641; pointer-events: auto;
+      display: flex; flex-direction: column; background: #fff; color: #1a1a1a;
+      border-left: 1px solid #e8e7e3; box-shadow: -8px 0 28px rgba(0,0,0,.08);
+      font: 13px/1.45 system-ui, -apple-system, sans-serif;
+    }
+    #tdoc-feedback-root .tdoc-fb-panel header {
+      display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px; border-bottom: 1px solid #efeeea;
+    }
+    #tdoc-feedback-root .tdoc-fb-panel header strong { font-size: 15px; }
+    #tdoc-feedback-root .tdoc-fb-filter { display: inline-flex; gap: 2px; margin-left: auto; background: #f3f3f1; border-radius: 8px; padding: 2px; }
+    #tdoc-feedback-root .tdoc-fb-filter button { appearance: none; border: 0; background: transparent; border-radius: 6px; padding: 4px 8px; font: 600 12px system-ui, sans-serif; color: #6b6a66; cursor: pointer; }
+    #tdoc-feedback-root .tdoc-fb-filter button.on { background: #fff; color: #1a1a1a; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    #tdoc-feedback-root .tdoc-fb-panel .x { appearance: none; border: 0; background: none; font-size: 20px; line-height: 1; color: #8a8985; cursor: pointer; padding: 0 2px; }
+    #tdoc-feedback-root .tdoc-fb-scroll { flex: 1; overflow-y: auto; padding: 6px 8px 16px; overscroll-behavior: contain; }
+    #tdoc-feedback-root .tdoc-fb-scroll h4 { margin: 14px 8px 6px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: #8a8985; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #tdoc-feedback-root .tdoc-fb-scroll ul { list-style: none; margin: 0; padding: 0; }
+    #tdoc-feedback-root .tdoc-fb-item {
+      appearance: none; border: 0; background: none; width: 100%; text-align: left; cursor: pointer;
+      display: grid; gap: 3px; padding: 9px 8px; border-radius: 8px; color: inherit; font: inherit;
+    }
+    #tdoc-feedback-root .tdoc-fb-item:hover { background: #f6f6f4; }
+    #tdoc-feedback-root .tdoc-fb-item .who { font-weight: 600; display: flex; gap: 6px; align-items: baseline; }
+    #tdoc-feedback-root .tdoc-fb-item .when { font-weight: 400; color: #8a8985; font-size: 12px; }
+    #tdoc-feedback-root .tdoc-fb-item .done { margin-left: auto; font: 600 11px system-ui, sans-serif; color: #0f7b3f; }
+    #tdoc-feedback-root .tdoc-fb-item .what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    #tdoc-feedback-root .tdoc-fb-item .where { color: #8a8985; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #tdoc-feedback-root .tdoc-fb-panel .empty { margin: 4px 8px; color: #8a8985; }
+    #tdoc-feedback-root .tdoc-fb-panel .link { appearance: none; border: 0; background: none; padding: 0; color: #1652f0; font: inherit; cursor: pointer; }
+    #tdoc-feedback-root .tdoc-fb-agent { border-top: 1px solid #efeeea; padding: 12px 14px 14px; background: #fafaf8; }
+    #tdoc-feedback-root .tdoc-fb-agent p { margin: 0 0 8px; }
+    #tdoc-feedback-root .tdoc-fb-agent code { display: block; margin: 0 0 8px; padding: 8px; border-radius: 6px; background: #fff; border: 1px solid #e8e7e3; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
+    #tdoc-feedback-root .tdoc-fb-agent button { appearance: none; border: 0; border-radius: 8px; padding: 6px 12px; background: #1652f0; color: #fff; font: 600 12px system-ui, sans-serif; cursor: pointer; }
     .ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu {
       z-index: 2147483647 !important;
     }
@@ -161,7 +218,9 @@ ${uiCss}
         writeSession(session);
         return session;
       } catch (error) {
-        if (error.status !== 401 && error.status !== 403 && error.status !== 404) throw error;
+        // 409: this person joined another space for the app (an invite) since
+        // the token was minted — reconnect so it names the one they joined.
+        if (![401, 403, 404, 409].includes(error.status)) throw error;
         writeSession(null);
       }
     }
@@ -220,13 +279,6 @@ ${uiCss}
     catch (_) { return null; }
   }
 
-  function cardPosition(element) {
-    const rect = element?.getBoundingClientRect();
-    if (!rect) return { top: 60, left: Math.max(8, innerWidth - 300) };
-    const left = rect.right + 294 < innerWidth ? rect.right + 10 : Math.max(8, rect.left - 290);
-    return { top: Math.max(12, rect.top), left };
-  }
-
   async function loadSurface(session, pageUrl) {
     const query = new URLSearchParams({ slug: session.slug, version: String(session.version) });
     const comments = await request(`/api/comments?${query}`);
@@ -243,12 +295,43 @@ ${uiCss}
     return {
       ok: true,
       config: session,
+      // Every page of the app, not just this one: the list shows them all,
+      // and only this page's get pins.
+      allComments: (Array.isArray(comments) ? comments : []).filter((comment) =>
+        comment && comment.anchor && comment.anchor.kind === 'product'),
       comments: (Array.isArray(comments) ? comments : []).filter((comment) =>
         comment && comment.anchor && comment.anchor.kind === 'product' && comment.anchor.url === pageUrl),
       mentionable, signedIn,
       currentUser: (mentions && mentions.identity && mentions.identity.login) || (session.identity && session.identity.login) || 'anon',
       isOwner: Boolean(mentions && mentions.is_owner),
     };
+  }
+
+  // @agent: the same handoff the doc page makes. Owner-only on the server;
+  // the result says whether it reached the agent, so the UI can say so.
+  async function sendToAgent(slug, commentId) {
+    try {
+      const body = await request('/api/notify/handoff', {
+        method: 'POST',
+        body: JSON.stringify({ slug, comment_ids: [commentId], instruction: 'address this comment' }),
+      });
+      const failed = body && body.delivery && body.delivery.status === 'failed';
+      return { ok: !failed, message: failed ? `Posted — not delivered to the agent${body.delivery.error ? `: ${body.delivery.error}` : ''}` : 'Sent to your agent' };
+    } catch (error) {
+      return { ok: false, message: `Posted — could not send to the agent (${error.message})` };
+    }
+  }
+
+  // Who @agent would reach, for the owner. `no_agent_bound` means nobody is
+  // linked yet — the case the UI turns into "connect your agent".
+  async function notifyTargets(slug) {
+    try {
+      const body = await request(`/api/notify/targets?slug=${encodeURIComponent(slug)}`);
+      const any = Boolean(body && (body.default || (body.candidates || []).length || body.fallback));
+      return { ready: true, canSend: any && body.reason !== 'no_agent_bound', reason: (body && body.reason) || null };
+    } catch (_) {
+      return { ready: true, canSend: false, reason: null };
+    }
   }
 
   // Every action: do the thing, then hand back the page's fresh surface. A
@@ -259,15 +342,21 @@ ${uiCss}
       const { slug, version } = session;
       const pageUrl = message.pageUrl || (message.anchor && message.anchor.url) || canonical();
       const body = (fields) => JSON.stringify({ slug, version, ...fields });
+      let handoff = null;
       switch (message.type) {
         case 'tdoc-feedback-load':
           break;
-        case 'tdoc-feedback-submit':
-          await request('/api/comments', { method: 'POST', body: body({ text: message.text, anchor: message.anchor }) });
+        case 'tdoc-feedback-submit': {
+          const made = await request('/api/comments', { method: 'POST', body: body({ text: message.text, anchor: message.anchor }) });
+          if (message.sendToAgent && made && made.id) handoff = await sendToAgent(slug, made.id);
           break;
-        case 'tdoc-feedback-reply':
-          await request('/api/comments', { method: 'POST', body: body({ text: message.text, parent_id: message.parentId }) });
+        }
+        case 'tdoc-feedback-reply': {
+          const made = await request('/api/comments', { method: 'POST', body: body({ text: message.text, parent_id: message.parentId }) });
+          const target = message.handoffCommentId || (made && made.id);
+          if (message.sendToAgent && target) handoff = await sendToAgent(slug, target);
           break;
+        }
         case 'tdoc-feedback-resolve':
           await request('/api/comments', { method: 'PATCH', body: body({ id: message.id, resolved: Boolean(message.resolved) }) });
           break;
@@ -292,7 +381,8 @@ ${uiCss}
         default:
           return { ok: false, error: 'Unknown feedback action' };
       }
-      return loadSurface(session, pageUrl);
+      const surface = await loadSurface(session, pageUrl);
+      return handoff ? { ...surface, handoff } : surface;
     } catch (error) {
       return { ok: false, status: error.status || 0, blocked: Boolean(error.blocked), error: String(error && error.message || error) };
     }
@@ -321,149 +411,291 @@ ${uiCss}
     }
   }
 
-  function FeedbackDock({ session, comments, onToggle }) {
+  // What an agent is asked to do to become reachable from tdoc. The owner
+  // pastes it into their own agent; the command runs the link ceremony.
+  const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I can hand you comments from tdoc: use the tdoc skill and run bin/tdoc-connect-agent.';
+
+  const PANEL_WIDTH = 340;
+  const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
+  const labelOf = (anchor) => {
+    const a = anchor || {};
+    const text = String(a.text || '').trim();
+    return a.accessible_name || (text ? `${a.tag || 'element'} · “${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”` : (a.selector || 'element'));
+  };
+  const ago = (iso) => {
+    const t = Date.parse(iso || '');
+    if (!t) return '';
+    const m = Math.round((Date.now() - t) / 60000);
+    if (m < 1) return 'now';
+    if (m < 60) return `${m}m`;
+    if (m < 1440) return `${Math.round(m / 60)}h`;
+    return `${Math.round(m / 1440)}d`;
+  };
+  const isOpen = (c) => c && !c.deleted && c.status !== 'applied';
+
+  function Dock({ session, openCount, panelOpen, picking, onList, onPick, onHide }) {
     const [copied, setCopied] = useState(false);
-    if (!session || !session.doc_url) return null;
-    const live = (Array.isArray(comments) ? comments : []).filter((c) => c && !c.deleted);
-    const open = live.filter((c) => c.status !== 'applied').length;
+    const invite = session && (session.invite_url || session.doc_url);
     const share = async () => {
-      const ok = await copyText(session.doc_url);
-      if (!ok) return;
+      if (!invite || !(await copyText(invite))) return;
       setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      setTimeout(() => setCopied(false), 1800);
     };
     return (
-      <div className="tdoc-feedback-dock" role="group" aria-label="tdoc feedback">
-        <span className="counts"><strong>{live.length}</strong>{live.length === 1 ? ' comment' : ' comments'} · <strong>{open}</strong> open</span>
-        <button type="button" className="primary" onClick={share}>{copied ? 'Copied' : 'Share'}</button>
-        <a href={session.doc_url} target="_blank" rel="noopener noreferrer">Open</a>
-        {onToggle ? <button type="button" onClick={onToggle}>Comment</button> : null}
+      <div className="tdoc-feedback-dock" role="toolbar" aria-label="tdoc feedback" style={panelOpen ? { right: PANEL_WIDTH + 18 } : null}>
+        <button type="button" className={panelOpen ? 'on' : ''} onClick={onList} title="All comments on this app">
+          <MessagesSquare aria-hidden="true" /> <strong>{openCount}</strong> open
+        </button>
+        <button type="button" className={`primary${picking ? ' on' : ''}`} onClick={onPick} title="Click anything on the page to comment on it">
+          <Plus aria-hidden="true" /> Comment
+        </button>
+        {invite ? (
+          <button type="button" onClick={share} title="Copy an invite link — teammates who open it comment in this same thread">
+            <Link2 aria-hidden="true" /> {copied ? 'Invite link copied' : 'Invite'}
+          </button>
+        ) : null}
+        {session && session.doc_url ? (
+          <a href={session.doc_url} target="_blank" rel="noopener noreferrer" title="Open this thread on tdoc"><ExternalLink aria-hidden="true" /></a>
+        ) : null}
+        <button type="button" className="icon" onClick={onHide} title="Hide tdoc (click the bookmark to bring it back)" aria-label="Hide tdoc"><X aria-hidden="true" /></button>
       </div>
     );
   }
 
+  function ListPanel({ all, pageUrl, filter, setFilter, agent, onPick, onOpen, onClose }) {
+    const [copied, setCopied] = useState(false);
+    const shown = all.filter((c) => !c.deleted && (filter === 'all' || (filter === 'open' ? c.status !== 'applied' : c.status === 'applied')));
+    const here = shown.filter((c) => c.anchor.url === pageUrl);
+    const elsewhere = new Map();
+    for (const c of shown) {
+      if (c.anchor.url === pageUrl) continue;
+      if (!elsewhere.has(c.anchor.url)) elsewhere.set(c.anchor.url, []);
+      elsewhere.get(c.anchor.url).push(c);
+    }
+    const item = (c, local) => {
+      const author = c.author || {};
+      const replies = Array.isArray(c.replies) ? c.replies.filter((r) => !r.deleted).length : 0;
+      return (
+        <li key={c.id}>
+          <button type="button" className="tdoc-fb-item" onClick={() => onOpen(c, local)}>
+            <span className="who">{author.name || author.login || 'anon'} <span className="when">{ago(c.created || c.ts)}</span>{c.status === 'applied' ? <span className="done">Resolved</span> : null}</span>
+            <span className="what">{c.text}</span>
+            <span className="where">{labelOf(c.anchor)}{replies ? ` · ${replies} ${replies === 1 ? 'reply' : 'replies'}` : ''}</span>
+          </button>
+        </li>
+      );
+    };
+    const copyPrompt = async () => { if (await copyText(CONNECT_AGENT_PROMPT)) { setCopied(true); setTimeout(() => setCopied(false), 1800); } };
+    return (
+      <aside className="tdoc-fb-panel" aria-label="Feedback on this app">
+        <header>
+          <strong>Feedback</strong>
+          <span className="tdoc-fb-filter" role="group" aria-label="Show">
+            {['open', 'resolved', 'all'].map((f) => (
+              <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>
+            ))}
+          </span>
+          <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
+        </header>
+        <div className="tdoc-fb-scroll">
+          <h4>This page</h4>
+          {here.length ? <ul>{here.map((c) => item(c, true))}</ul> : (
+            <p className="empty">Nothing {filter === 'resolved' ? 'resolved' : 'open'} here yet. <button type="button" className="link" onClick={onPick}>Add a comment</button></p>
+          )}
+          {[...elsewhere.entries()].map(([url, list]) => (
+            <section key={url}>
+              <h4 title={url}>{pathOf(url)}</h4>
+              <ul>{list.map((c) => item(c, false))}</ul>
+            </section>
+          ))}
+        </div>
+        {agent && agent.owner && agent.reason === 'no_agent_bound' ? (
+          <footer className="tdoc-fb-agent">
+            <p><strong>Hand feedback to your agent.</strong> No agent is connected to your tdoc account yet. Paste this into your agent once:</p>
+            <code>{CONNECT_AGENT_PROMPT}</code>
+            <button type="button" onClick={copyPrompt}>{copied ? 'Copied' : 'Copy prompt'}</button>
+          </footer>
+        ) : null}
+      </aside>
+    );
+  }
+
   function FeedbackApp() {
-    const [active, setActive] = useState(false);
+    const [shown, setShown] = useState(false);
+    const [picking, setPicking] = useState(false);
+    const [panelOpen, setPanelOpen] = useState(false);
+    const [filter, setFilter] = useState('open');
     const [surface, setSurface] = useState(null);
     const [session, setSession] = useState(() => readSession());
     const [hovered, setHovered] = useState(null);
     const [selected, setSelected] = useState(null);
     const [openId, setOpenId] = useState(null);
     const [notice, setNotice] = useState(null);
+    const [toast, setToast] = useState(null);
     const [reanchorId, setReanchorId] = useState(null);
+    const [agent, setAgent] = useState(null);
     const [, setViewportTick] = useState(0);
+
+    const say = useCallback((text, bad = false) => {
+      setToast({ text, bad });
+      setTimeout(() => setToast((t) => (t && t.text === text ? null : t)), 3200);
+    }, []);
 
     const apply = useCallback((result) => {
       if (result?.ok) {
         setSurface(result);
         if (result.config) setSession((prev) => ({ ...(prev || {}), ...result.config, token: (prev && prev.token) || result.config.token }));
         setNotice(result.signedIn === false ? { status: 401, error: 'Connect your tdoc account to comment here.' } : null);
+        if (result.handoff) say(result.handoff.message, !result.handoff.ok);
         return true;
       }
       setNotice(result || { error: 'Could not load tdoc comments' });
       return false;
-    }, []);
+    }, [say]);
 
     const load = useCallback(async () => apply(await call({
       type: 'tdoc-feedback-load', pageUrl: canonical(),
     })), [apply]);
 
-    const toggle = useCallback(async () => {
-      const next = !active;
-      setActive(next);
-      setSelected(null);
-      setOpenId(null);
-      setHovered(null);
-      if (next) await load();
-    }, [active, load]);
+    // Showing the overlay loads the thread. The first time on an app with no
+    // comments yet goes straight to picking — that is what someone who just
+    // clicked the bookmark came to do; otherwise the list opens so they can
+    // see what is already there.
+    const hiddenKey = `${storageKey}:hidden`;
+    const show = useCallback(async ({ intent } = {}) => {
+      try { localStorage.removeItem(hiddenKey); } catch (_) {}
+      setShown(true);
+      const result = await call({ type: 'tdoc-feedback-load', pageUrl: canonical() });
+      if (!apply(result)) return;
+      if (intent === 'bookmark') {
+        const any = (result.allComments || []).some((c) => !c.deleted);
+        if (any) setPanelOpen(true); else setPicking(true);
+      }
+    }, [apply, hiddenKey]);
 
-    // Warm the dock (counts + share URL) without forcing comment mode on.
+    // Hidden stays hidden across reloads of the app until the bookmark (or
+    // the pill) is clicked again — the one-line install would otherwise put
+    // the overlay back on every page load.
+    const hide = useCallback(() => {
+      try { localStorage.setItem(hiddenKey, '1'); } catch (_) {}
+      setShown(false); setPicking(false); setPanelOpen(false);
+      setSelected(null); setOpenId(null); setHovered(null); setReanchorId(null);
+    }, [hiddenKey]);
+
+    const toggle = useCallback(() => { if (shown) hide(); else show({ intent: 'bookmark' }); }, [shown, hide, show]);
+
+    // Warm the counts and the session quietly; connecting needs a click.
     useEffect(() => {
       let cancelled = false;
       (async () => {
+        if (!readSession()) return;
         try {
           const next = await ensureSession();
           if (cancelled || !next) return;
           setSession(next);
           const result = await call({ type: 'tdoc-feedback-load', pageUrl: canonical() });
-          if (!cancelled && result?.ok) apply(result);
-        } catch (_) {
-          // Stay quiet until the person opens the pill — connect needs a click.
-        }
+          let hidden = false;
+          try { hidden = localStorage.getItem(`${storageKey}:hidden`) === '1'; } catch (_) {}
+          if (!cancelled && result?.ok) { setSurface(result); if (!hidden) setShown(true); }
+        } catch (_) {}
       })();
       return () => { cancelled = true; };
-    }, [apply]);
+    }, []);
 
-    // The bookmarklet's second click, and anything else on the page that
-    // wants to drive us, goes through window.tdocFeedback.
+    // @agent is the owner's: ask once who it would reach.
+    const owner = Boolean(surface?.isOwner);
+    const slug = session && session.slug;
+    useEffect(() => {
+      if (!owner || !slug || !(session && session.notify)) { setAgent(null); return undefined; }
+      let cancelled = false;
+      notifyTargets(slug).then((t) => { if (!cancelled) setAgent({ ...t, owner: true }); });
+      return () => { cancelled = true; };
+    }, [owner, slug, session && session.notify]);
+    const canSendToAgent = Boolean(agent && agent.canSend);
+
     useEffect(() => {
       window.tdocFeedback = {
         toggle,
-        open: () => { if (!active) toggle(); },
-        close: () => { if (active) toggle(); },
-        disconnect: () => { writeSession(null); if (active) toggle(); },
+        open: () => { if (!shown) show({ intent: 'bookmark' }); },
+        close: hide,
+        comment: () => { setShown(true); setPicking(true); },
+        disconnect: () => { writeSession(null); hide(); },
         base,
       };
-    }, [active, toggle]);
+    }, [shown, toggle, show, hide]);
     useEffect(() => {
-      if (autoOpen) toggle();
-      // Once: the bookmarklet asked for the mode to be on when it loaded us.
+      if (autoOpen) show({ intent: 'bookmark' });
+      // Once: the bookmarklet asked for the overlay when it loaded us.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // Picking: the only mode that takes over the page's clicks. Browsing
+    // leaves the app fully usable with the pins on top.
     useEffect(() => {
-      if (!active) return undefined;
+      if (!picking && !reanchorId) return undefined;
       const priorCursor = document.documentElement.style.cursor;
       document.documentElement.style.cursor = 'crosshair';
-      let lastAlt = 0;
-
       const isTdocUi = (target) => target.closest?.('#tdoc-feedback-root, .ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu');
       const move = (event) => {
-        if (selected || openId || notice || isTdocUi(event.target)) return;
+        if (selected || isTdocUi(event.target)) return;
         setHovered(event.target instanceof Element ? event.target : null);
       };
       const click = async (event) => {
-        if (selected || openId || notice || isTdocUi(event.target)) return;
+        if (selected || isTdocUi(event.target)) return;
         const element = event.target instanceof Element ? event.target : null;
         if (!element || element === document.body || element === document.documentElement) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         if (reanchorId) {
-          const result = await call({
-            type: 'tdoc-feedback-reanchor', id: reanchorId,
-            anchor: contextFor(element), pageUrl: canonical(),
-          });
+          const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: contextFor(element), pageUrl: canonical() });
           if (apply(result)) setReanchorId(null);
           setHovered(null);
           return;
         }
+        setOpenId(null);
         setSelected(element);
         setHovered(null);
       };
-      const keydown = (event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          setSelected(null); setOpenId(null); setHovered(null); setReanchorId(null); setActive(false);
-          return;
-        }
-        if (event.key !== 'Alt' || event.repeat || event.ctrlKey || event.metaKey || event.shiftKey) return;
-        if (event.target.matches?.('input,textarea,select') || event.target.isContentEditable) return;
-        const now = Date.now();
-        if (now - lastAlt < 430) { event.preventDefault(); lastAlt = 0; toggle(); } else lastAlt = now;
-      };
       document.addEventListener('mousemove', move, true);
       document.addEventListener('click', click, true);
-      document.addEventListener('keydown', keydown, true);
       return () => {
         document.documentElement.style.cursor = priorCursor;
         document.removeEventListener('mousemove', move, true);
         document.removeEventListener('click', click, true);
-        document.removeEventListener('keydown', keydown, true);
       };
-    }, [active, selected, openId, notice, reanchorId, apply, toggle]);
+    }, [picking, reanchorId, selected, apply]);
+
+    // Esc steps back one level: composer → picking → card → list → hidden.
+    useEffect(() => {
+      if (!shown) return undefined;
+      const keydown = (event) => {
+        if (event.key !== 'Escape') return;
+        if (selected) setSelected(null);
+        else if (picking || reanchorId) { setPicking(false); setReanchorId(null); setHovered(null); }
+        else if (openId) setOpenId(null);
+        else if (panelOpen) setPanelOpen(false);
+        else return;
+        event.preventDefault();
+      };
+      document.addEventListener('keydown', keydown, true);
+      return () => document.removeEventListener('keydown', keydown, true);
+    }, [shown, selected, picking, reanchorId, openId, panelOpen]);
+
+    // Double-tap Option: start a comment from anywhere.
+    useEffect(() => {
+      let lastAlt = 0;
+      const keydown = (event) => {
+        if (event.key !== 'Alt' || event.repeat || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.target.matches?.('input,textarea,select') || event.target.isContentEditable) return;
+        const now = Date.now();
+        if (now - lastAlt < 430) { event.preventDefault(); lastAlt = 0; setShown(true); setPicking((p) => !p); if (!surface) load(); } else lastAlt = now;
+      };
+      document.addEventListener('keydown', keydown, true);
+      return () => document.removeEventListener('keydown', keydown, true);
+    }, [surface, load]);
 
     useEffect(() => {
-      if (!active) return undefined;
+      if (!shown) return undefined;
       const refresh = () => setViewportTick((tick) => tick + 1);
       window.addEventListener('scroll', refresh, { passive: true });
       window.addEventListener('resize', refresh);
@@ -471,22 +703,11 @@ ${uiCss}
         window.removeEventListener('scroll', refresh);
         window.removeEventListener('resize', refresh);
       };
-    }, [active]);
-
-    useEffect(() => {
-      let lastAlt = 0;
-      const keydown = (event) => {
-        if (active || event.key !== 'Alt' || event.repeat || event.ctrlKey || event.metaKey || event.shiftKey) return;
-        if (event.target.matches?.('input,textarea,select') || event.target.isContentEditable) return;
-        const now = Date.now();
-        if (now - lastAlt < 430) { event.preventDefault(); lastAlt = 0; toggle(); } else lastAlt = now;
-      };
-      document.addEventListener('keydown', keydown, true);
-      return () => document.removeEventListener('keydown', keydown, true);
-    }, [active, toggle]);
+    }, [shown]);
 
     const comments = surface?.comments || [];
-    const openComment = comments.find((comment) => comment.id === openId);
+    const allComments = surface?.allComments || comments;
+    const openComment = allComments.find((comment) => comment.id === openId);
     const mentionable = surface?.mentionable || [];
     const mutate = async (message, keepOpen = true) => {
       const result = await call(message);
@@ -494,34 +715,57 @@ ${uiCss}
       if (!keepOpen) setOpenId(null);
       return true;
     };
-    const pins = useMemo(() => comments.map((comment) => ({ comment, element: elementFor(comment) })), [comments]);
+    const pins = useMemo(() => comments.filter((c) => !c.deleted).map((comment) => ({ comment, element: elementFor(comment) })), [comments]);
+    const openCount = allComments.filter(isOpen).length;
 
-    if (!active) {
+    if (!shown) {
       return (
-        <>
-          <FeedbackDock session={session} comments={surface?.comments} onToggle={toggle} />
-          <button className="tdoc-comment-pill tdoc-feedback-mode tdoc-feedback-idle" type="button" title="Leave feedback · tdoc" onClick={toggle}>
-            <MessageSquarePlus aria-hidden="true" />
-          </button>
-        </>
+        <button className="tdoc-comment-pill tdoc-feedback-mode tdoc-feedback-idle" type="button" title="tdoc feedback" onClick={() => show({ intent: 'bookmark' })}>
+          <MessageSquarePlus aria-hidden="true" />
+          {openCount ? <span className="tdoc-fb-badge">{openCount}</span> : null}
+        </button>
       );
     }
-    const hoverRect = hovered?.getBoundingClientRect();
+
+    const hoverRect = (picking || reanchorId) ? hovered?.getBoundingClientRect() : null;
+    const rightInset = panelOpen ? PANEL_WIDTH : 0;
+    const placeCard = (element) => {
+      const rect = element?.getBoundingClientRect();
+      const width = innerWidth - rightInset;
+      if (!rect) return { top: 60, left: Math.max(8, width - 300) };
+      const left = rect.right + 294 < width ? rect.right + 10 : Math.max(8, Math.min(rect.left - 290, width - 300));
+      return { top: Math.max(12, rect.top), left };
+    };
+    const openFromList = (c, local) => {
+      if (!local) { location.href = c.anchor.url; return; }
+      const el = elementFor(c);
+      if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      setPicking(false);
+      setSelected(null);
+      setOpenId(c.id);
+    };
+
     return (
       <>
-        <FeedbackDock session={session || surface?.config} comments={comments} />
+        {(picking || reanchorId) && !selected ? (
+          <div className="tdoc-fb-banner" role="status">
+            {reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it'}
+            <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
+          </div>
+        ) : null}
         {hoverRect ? <div className="tdoc-hover-outline" style={{ left: hoverRect.left, top: hoverRect.top, width: hoverRect.width, height: hoverRect.height }} /> : null}
         {pins.map(({ comment, element }) => {
           if (!element) return null;
           const rect = element.getBoundingClientRect();
+          if (rect.bottom < 0 || rect.top > innerHeight) return null;
           const avatar = avatarFor(comment.author || comment);
           return (
             <button
               key={comment.id}
               type="button"
-              className={`tdoc-pin${comment.status === 'applied' ? ' tdoc-pin-resolved' : ''}${comment.deleted ? ' tdoc-pin-deleted' : ''}`}
-              style={{ left: Math.min(innerWidth - 32, Math.max(4, rect.right - 14)), top: Math.min(innerHeight - 32, Math.max(4, rect.top - 14)) }}
-              onClick={() => { setSelected(null); setOpenId(comment.id); }}
+              className={`tdoc-pin${comment.status === 'applied' ? ' tdoc-pin-resolved' : ''}${openId === comment.id ? ' is-active' : ''}`}
+              style={{ left: Math.min(innerWidth - rightInset - 32, Math.max(4, rect.right - 14)), top: Math.min(innerHeight - 32, Math.max(4, rect.top - 14)) }}
+              onClick={() => { setSelected(null); setPicking(false); setOpenId(comment.id); }}
               title={comment.text || 'tdoc comment'}
             >
               {avatar ? <img src={avatar} alt="" /> : <span className="tdoc-pin-anon" />}
@@ -531,13 +775,14 @@ ${uiCss}
 
         {selected ? (
           <CommentComposer
-            selection={{ kind: 'element', label: contextFor(selected).accessible_name || contextFor(selected).selector, rect: selected.getBoundingClientRect() }}
+            selection={{ kind: 'element', label: labelOf(contextFor(selected)), rect: selected.getBoundingClientRect() }}
             mentionable={mentionable}
+            canSendToAgent={canSendToAgent}
             onClose={() => setSelected(null)}
-            onSubmit={async (text) => {
+            onSubmit={async (text, opts = {}) => {
               const anchor = contextFor(selected);
-              const result = await call({ type: 'tdoc-feedback-submit', text, anchor });
-              if (apply(result)) setSelected(null);
+              const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent) });
+              if (apply(result)) { setSelected(null); setPicking(false); }
             }}
           />
         ) : null}
@@ -546,12 +791,13 @@ ${uiCss}
           <CommentCard
             comment={openComment}
             currentUser={surface.currentUser || 'anon'}
-            isOwner={Boolean(surface.isOwner)}
+            isOwner={owner}
             mentionable={mentionable}
+            canSendToAgent={canSendToAgent}
             unanchored={!elementFor(openComment)}
             floating
-            position={cardPosition(elementFor(openComment))}
-            onReply={(parentId, text) => mutate({ type: 'tdoc-feedback-reply', text, parentId, pageUrl: canonical() })}
+            position={placeCard(elementFor(openComment))}
+            onReply={(parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), handoffCommentId: opts.handoffCommentId, pageUrl: canonical() })}
             onReact={(id, emoji) => mutate({ type: 'tdoc-feedback-react', id, emoji, pageUrl: canonical() })}
             onDelete={(id) => mutate({ type: 'tdoc-feedback-delete', id, pageUrl: canonical() }, false)}
             onResolve={(id, resolved) => mutate({ type: 'tdoc-feedback-resolve', id, resolved, pageUrl: canonical() })}
@@ -560,17 +806,38 @@ ${uiCss}
           />
         ) : null}
 
+        {panelOpen ? (
+          <ListPanel
+            all={allComments}
+            pageUrl={canonical()}
+            filter={filter}
+            setFilter={setFilter}
+            agent={agent}
+            onPick={() => { setOpenId(null); setPicking(true); }}
+            onOpen={openFromList}
+            onClose={() => setPanelOpen(false)}
+          />
+        ) : null}
+
         {notice ? (
-          <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18, left: 'auto' }}>
+          <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
             <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" onClick={() => setNotice(null)}>×</button></div>
             <p>{notice.error}</p>
             <div className="foot"><span /><button className="submit" type="button" onClick={async () => { setNotice(null); apply(await call({ type: 'tdoc-feedback-signin', pageUrl: canonical() })); }}>Connect tdoc</button></div>
           </section>
         ) : null}
 
-        <button className="tdoc-comment-pill tdoc-feedback-mode" type="button" title={reanchorId ? 'Choose the new anchor · Esc to exit' : 'Exit tdoc feedback · Esc'} onClick={() => setActive(false)}>
-          <MessageSquarePlus aria-hidden="true" />
-        </button>
+        {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}`} role="status" style={{ right: 18 + rightInset }}>{toast.text}</div> : null}
+
+        <Dock
+          session={session || surface?.config}
+          openCount={openCount}
+          panelOpen={panelOpen}
+          picking={picking}
+          onList={() => setPanelOpen((v) => !v)}
+          onPick={() => { setOpenId(null); setSelected(null); setPicking((v) => !v); }}
+          onHide={hide}
+        />
       </>
     );
   }

@@ -603,6 +603,21 @@ bash "$SKILL_DIR/bin/tdoc-me" --shared <share_id>
 
 See **Agent catalog** under Access policy for the ACL rules.
 
+### `/tdoc connect-agent` — let tdoc hand comments to this agent
+
+When a person asks to connect you to their tdoc account (the tdoc page shows
+them a prompt that says "run bin/tdoc-connect-agent"), run:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-connect-agent"
+```
+
+It links this Raft agent to the tdoc account signed in on this machine, so
+`@agent` and "Send to agent" on tdoc reach you. Raft agents only for now, and
+the tdoc app must be installed on your Raft server. `--check` says whether it
+would work without changing anything. Never print or paste the credentials it
+reads.
+
 ### `/tdoc serve` — (re)start the server
 
 ```bash

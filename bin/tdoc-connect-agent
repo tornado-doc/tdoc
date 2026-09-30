@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# tdoc-connect-agent — connect THIS Raft agent to the tdoc account signed in
+# on this machine, so comments handed off from tdoc (@agent, "Send to agent")
+# reach it.
+#
+# Two credentials, both required, neither printed: the account's upload token
+# (~/.tdoc/published.json) says which tdoc account; a Login-with-Raft session
+# says which agent. Run it once per agent.
+#
+# Usage:
+#   tdoc-connect-agent            # link this agent to the signed-in account
+#   tdoc-connect-agent --check    # say what would happen; change nothing
+#   tdoc-connect-agent --help
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+
+CHECK=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check) CHECK=1; shift ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+say() { printf '[tdoc] %s\n' "$*" >&2; }
+
+CONFIG_FILE="$HOME/.tdoc/published.json"
+if [ ! -f "$CONFIG_FILE" ]; then
+  say "This machine is not signed in to tdoc yet. Run: bash \"$TDOC_BIN_DIR/tdoc-publish\" --signin-only"
+  exit 1
+fi
+PLATFORM="$(json_file_get "$CONFIG_FILE" platform)"
+TOKEN="$(json_file_get "$CONFIG_FILE" upload_token)"
+BASE="$(json_file_get "$CONFIG_FILE" base)"
+if [ "$PLATFORM" != "hosted" ] || [ -z "$TOKEN" ] || [ -z "$BASE" ]; then
+  say "Connecting an agent needs a hosted tdoc.dev account; this machine is set up for '${PLATFORM:-unknown}'."
+  exit 1
+fi
+
+if ! command -v raft >/dev/null 2>&1; then
+  say "Only Raft agents can be connected today, and the 'raft' command is not available here."
+  exit 1
+fi
+
+# The tdoc app has to be installed on this agent's Raft server; the login is
+# what proves which agent is asking.
+SERVICE="${TDOC_RAFT_SERVICE:-tdoc}"
+if ! LOGIN_JSON="$(raft integration login --service "$SERVICE" --json 2>/dev/null)"; then
+  say "Could not sign in to tdoc with Raft. Is the tdoc app installed on your Raft server? (service: $SERVICE)"
+  exit 1
+fi
+SESSION_PATH="$(printf '%s' "$LOGIN_JSON" | json_get data.session.path)"
+if [ -z "$SESSION_PATH" ] || [ ! -f "$SESSION_PATH" ]; then
+  say "Raft sign-in returned no session for tdoc."
+  exit 1
+fi
+
+# The cookie for this tdoc host, read straight into a variable — never echoed.
+HOST="$(node -e 'try { process.stdout.write(new URL(process.argv[1]).host) } catch {}' "$BASE")"
+COOKIE="$(node -e '
+  const fs = require("fs");
+  const [file, host] = process.argv.slice(1);
+  let d; try { d = JSON.parse(fs.readFileSync(file, "utf8")); } catch { process.exit(0); }
+  const c = (d.cookies || []).find((x) => String(x.pair || "").startsWith("tdoc_agent_sid=")
+    && (!x.host || x.host === host || host.endsWith("." + x.host.replace(/^\./, ""))));
+  if (c) process.stdout.write(c.pair);
+' "$SESSION_PATH" "$HOST")"
+if [ -z "$COOKIE" ]; then
+  say "Raft sign-in has no tdoc agent session for $HOST."
+  exit 1
+fi
+
+if [ "$CHECK" = 1 ]; then
+  say "Ready: signed in to $HOST, and Raft vouches for this agent. Run without --check to connect."
+  exit 0
+fi
+
+RESP="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
+  -X POST "$BASE/api/notify/link" \
+  -H "Authorization: Bearer $TOKEN" -H "Cookie: $COOKIE" \
+  -H "Content-Type: application/json" -d '{}')" || { say "Could not reach $BASE."; exit 1; }
+CODE="${RESP##*$'\n'}"
+BODY="${RESP%$'\n'*}"
+if [ "$CODE" != "200" ]; then
+  say "tdoc refused the link ($CODE): $(printf '%s' "$BODY" | json_get error)"
+  exit 1
+fi
+NAME="$(printf '%s' "$BODY" | json_get target.agent_name)"
+say "Connected${NAME:+ $NAME} to your tdoc account. Comments handed off on $HOST now reach this agent."
