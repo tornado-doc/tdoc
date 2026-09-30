@@ -52,7 +52,7 @@ import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
-import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { HandoffBanner } from './document/handoff-banner.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { summarizeHandoffSurfaces } from './document/handoff-state.js';
@@ -1362,6 +1362,7 @@ export function DocumentShell({ boot, config }) {
               ? 'No agent is following this doc yet'
               : null
           }
+          connectAgentPrompt={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
           onSubmit={postComment}
           onClose={closeComposer}
         />

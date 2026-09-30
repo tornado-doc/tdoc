@@ -89,6 +89,10 @@ function RecipientLine({ target }) {
   );
 }
 
+// What a person pastes into their own agent when none is linked to their
+// tdoc account yet: the agent runs the link ceremony (bin/tdoc-connect-agent).
+export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I can hand you comments from tdoc: use the tdoc skill and run bin/tdoc-connect-agent.';
+
 export function useNotifyTargets(slug, enabled) {
   const [state, setState] = useState({
     ready: false,
