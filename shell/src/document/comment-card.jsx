@@ -585,6 +585,22 @@ function ReplyCard({
   );
 }
 
+// A comment left on an app (feedback overlay) points at a page and an element
+// of that app, not at anything in this document. Without this line the card,
+// seen on the doc page, says what is wrong but not where.
+function ProductWhere({ anchor }) {
+  if (!anchor || anchor.kind !== 'product' || !anchor.url) return null;
+  let path = anchor.url;
+  try { const u = new URL(anchor.url); path = `${u.host}${u.pathname}${u.search}`; } catch (_) {}
+  const text = String(anchor.text || '').trim();
+  const what = anchor.accessible_name || (text ? `${anchor.tag || 'element'} “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”` : anchor.tag || '');
+  return (
+    <a className="tdoc-product-where" href={anchor.url} target="_blank" rel="noopener noreferrer" title={anchor.url}>
+      {path}{what ? ` · ${what}` : ''}
+    </a>
+  );
+}
+
 export function CommentCard({
   comment,
   currentUser,
@@ -809,6 +825,7 @@ export function CommentCard({
           ) : null}
         </div>
       </header>
+      <ProductWhere anchor={comment.anchor} />
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
       ) : (

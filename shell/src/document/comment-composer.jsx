@@ -63,8 +63,16 @@ export function CommentComposer({
   demo = false,
   canSendToAgent = false,
   sendToAgentDisabledReason = null,
+  // Set when @agent would work but nobody is linked yet: the button stays,
+  // and pressing it explains how to connect instead of vanishing silently.
+  connectAgentPrompt = null,
 }) {
   const [text, setText] = useState('');
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
+  const copyPrompt = async () => {
+    try { await navigator.clipboard.writeText(connectAgentPrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 1800); } catch (_) {}
+  };
   const [viewport, setViewport] = useState(readViewport);
 
   useEffect(() => {
@@ -122,6 +130,13 @@ export function CommentComposer({
         onChange={setText}
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
+      {connectOpen && connectAgentPrompt ? (
+        <div className="tdoc-connect-agent">
+          <p><strong>No agent is connected to your tdoc account yet.</strong> Paste this into your agent once, then @agent works here:</p>
+          <code>{connectAgentPrompt}</code>
+          <button type="button" onClick={copyPrompt}>{promptCopied ? 'Copied' : 'Copy prompt'}</button>
+        </div>
+      ) : null}
       <div className="foot">
         <span className="hint">
           {demo
@@ -129,6 +144,17 @@ export function CommentComposer({
             : (canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : '⌘+Enter to submit')}
         </span>
         <div className="tdoc-composer-foot-actions">
+          {!canSendToAgent && connectAgentPrompt ? (
+            <button
+              className="submit agent tdoc-agent-unlinked"
+              type="button"
+              aria-expanded={connectOpen}
+              onClick={() => setConnectOpen((v) => !v)}
+              title="Connect an agent to hand comments to it"
+            >
+              @agent
+            </button>
+          ) : null}
           {canSendToAgent ? (
             <button
               className="submit agent"

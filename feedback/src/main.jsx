@@ -4,6 +4,7 @@ import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X } from 
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
+import { CONNECT_AGENT_PROMPT } from '../../shell/src/document/notify-handoff.jsx';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
 // controls keep the browser's default button look on foreign pages.
@@ -411,9 +412,6 @@ ${uiCss}
     }
   }
 
-  // What an agent is asked to do to become reachable from tdoc. The owner
-  // pastes it into their own agent; the command runs the link ceremony.
-  const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I can hand you comments from tdoc: use the tdoc skill and run bin/tdoc-connect-agent.';
 
   const PANEL_WIDTH = 340;
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
@@ -778,6 +776,7 @@ ${uiCss}
             selection={{ kind: 'element', label: labelOf(contextFor(selected)), rect: selected.getBoundingClientRect() }}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
+            connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
             onClose={() => setSelected(null)}
             onSubmit={async (text, opts = {}) => {
               const anchor = contextFor(selected);
