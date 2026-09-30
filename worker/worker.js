@@ -85,7 +85,7 @@ const FEEDBACK_TOKEN_RE = /^Bearer\s+(fb_[a-f0-9]{48})$/;
 // The two notify routes let the space's owner hand a comment to their agent
 // from inside the app (@agent). Both are owner-gated by authorizeOwnerMutation,
 // which also refuses a token-bound session on any other doc.
-const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session', '/api/notify/targets', '/api/notify/handoff']);
+const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session', '/api/notify/targets', '/api/notify/handoff', '/api/notify/handoffs', '/api/notify/handoff/resend']);
 const FEEDBACK_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 function feedbackTokenFrom(req) {
@@ -9490,16 +9490,19 @@ export default {
       if (!gate.ok) return gate.response;
       const resolved = await resolveNotifyTargets(env, slug);
       // A feedback token lives in a page tdoc does not control, so a script
-      // there could hold it. From that door the handoff is fixed: the doc's
-      // own agent, the stock instruction — no free text into anyone's agent.
+      // there could hold it. From that door the recipient must be one of the
+      // account's own agents that the panel offered — never an address the
+      // page made up.
       const fromPage = Boolean(gate.session && gate.session.feedback);
-      const target = recipient && !fromPage ? normalizeNotifyTarget(recipient) : resolved.default;
+      const offered = [resolved.default, ...(resolved.candidates || []), resolved.fallback].filter(Boolean);
+      const asked = recipient ? normalizeNotifyTarget(recipient) : null;
+      const target = asked && (!fromPage || offered.some(t => sameNotifyTarget(t, asked))) ? asked : resolved.default;
       // No recipient is a 200 with a failed delivery, not a 4xx: the handoff
       // is a real record either way, and the panel renders "not delivered"
       // the same for "nobody bound" as for "Raft was down".
       const rec = await dispatchHandoff(env, {
         slug, meta: gate.meta, commentIds: ids,
-        instruction: fromPage ? 'address this comment' : (typeof instruction === 'string' ? instruction.slice(0, 2000) : ''),
+        instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
         recipient: target, publicHost: env.PUBLIC_HOST,
       });
       return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery });

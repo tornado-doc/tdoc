@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X } from 'lucide-react';
+import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send } from 'lucide-react';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
-import { CONNECT_AGENT_PROMPT } from '../../shell/src/document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel } from '../../shell/src/document/notify-handoff.jsx';
+import { summarizeHandoffSurfaces } from '../../shell/src/document/handoff-state.js';
+import { setApiTransport } from '../../shell/src/document/api.js';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
 // controls keep the browser's default button look on foreign pages.
@@ -106,9 +108,8 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-item .what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     #tdoc-feedback-root .tdoc-fb-item .state { font-size: 12px; color: #6b6a66; }
     #tdoc-feedback-root .tdoc-fb-item .state.hidden { color: #9a5b00; }
-    #tdoc-feedback-root .tdoc-fb-sendall { padding: 10px 14px; border-bottom: 1px solid #efeeea; }
-    #tdoc-feedback-root .tdoc-fb-sendall button { appearance: none; width: 100%; border: 1px solid #d9d8d4; background: #fff; border-radius: 8px; padding: 7px 10px; font: 600 12.5px system-ui, sans-serif; color: #1a1a1a; cursor: pointer; }
-    #tdoc-feedback-root .tdoc-fb-sendall button:hover { border-color: #1652f0; color: #1652f0; }
+    #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send { position: relative; padding: 7px; }
+    #tdoc-feedback-root .tdoc-fb-send-badge { position: absolute; top: 0; right: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px; background: #1652f0; color: #fff; font: 700 9.5px/15px system-ui, sans-serif; text-align: center; }
     #tdoc-feedback-root .tdoc-fb-item .where { color: #8a8985; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #tdoc-feedback-root .tdoc-fb-panel .empty { margin: 4px 8px; color: #8a8985; }
     #tdoc-feedback-root .tdoc-fb-panel .link { appearance: none; border: 0; background: none; padding: 0; color: #1652f0; font: inherit; cursor: pointer; }
@@ -116,6 +117,14 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-agent p { margin: 0 0 8px; }
     #tdoc-feedback-root .tdoc-fb-agent code { display: block; margin: 0 0 8px; padding: 8px; border-radius: 6px; background: #fff; border: 1px solid #e8e7e3; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
     #tdoc-feedback-root .tdoc-fb-agent button { appearance: none; border: 0; border-radius: 8px; padding: 6px 12px; background: #1652f0; color: #fff; font: 600 12px system-ui, sans-serif; cursor: pointer; }
+    .ui-dialog-backdrop, .ui-dialog-viewport { z-index: 2147483646 !important; }
+    /* Dialogs render outside our root, where the host app's own button and
+       text rules reach them. Pin the few that matter. */
+    .ui-dialog-popup.tdoc-modal { color: #1a1a1a; font: 14px/1.45 system-ui, -apple-system, sans-serif; text-align: left; }
+    .ui-dialog-popup.tdoc-modal button { font: 600 13px/1.2 system-ui, -apple-system, sans-serif; text-transform: none; letter-spacing: normal; box-shadow: none; }
+    .ui-dialog-popup.tdoc-modal .actions button:not(.primary):not(.danger) { background: #fff !important; color: #1a1a1a !important; border: 1px solid #d9d8d4 !important; }
+    .ui-dialog-popup.tdoc-modal .actions button.primary { background: #1652f0 !important; color: #fff !important; border: 1px solid #1652f0 !important; }
+    .ui-dialog-popup.tdoc-modal textarea { color: #1a1a1a; background: #fff; }
     .ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu {
       z-index: 2147483647 !important;
     }
@@ -150,6 +159,16 @@ ${uiCss}
       else localStorage.removeItem(storageKey);
     } catch (_) {}
   };
+
+  // The doc page's panels (Send to agent) call the shared API module; point
+  // it at the tdoc host with this app's feedback token.
+  setApiTransport({
+    base,
+    headers: () => {
+      const session = readSession();
+      return session && session.token ? { authorization: `Bearer ${session.token}` } : {};
+    },
+  });
 
   async function request(pathname, options = {}) {
     const session = readSession();
@@ -476,7 +495,7 @@ ${uiCss}
   };
   const isOpen = (c) => c && !c.deleted && c.status !== 'applied';
 
-  function Dock({ session, openCount, panelOpen, picking, onList, onPick, onHide }) {
+  function Dock({ session, openCount, panelOpen, picking, onList, onPick, onHide, sendCount, onSend }) {
     const [copied, setCopied] = useState(false);
     const invite = session && (session.invite_url || session.doc_url);
     const share = async () => {
@@ -492,6 +511,13 @@ ${uiCss}
         <button type="button" className={`primary${picking ? ' on' : ''}`} onClick={onPick} title="Click anything on the page to comment on it">
           <Plus aria-hidden="true" /> Comment
         </button>
+        {onSend ? (
+          // The doc page's Send to agent: same icon, same count (comments
+          // never sent, or with a human word since the last handoff).
+          <button type="button" className="tdoc-fb-send" onClick={onSend} title={sendCount ? `Send to agent (${sendCount} ready)` : 'Send to agent'} aria-label="Send to agent">
+            <Send aria-hidden="true" />{sendCount ? <span className="tdoc-fb-send-badge">{sendCount > 99 ? '99+' : sendCount}</span> : null}
+          </button>
+        ) : null}
         {invite ? (
           <button type="button" onClick={share} title="Copy an invite link — teammates who open it comment in this same thread">
             <Link2 aria-hidden="true" /> {copied ? 'Invite link copied' : 'Invite'}
@@ -505,10 +531,8 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ all, pageUrl, filter, setFilter, agent, onPick, onOpen, onClose, onSendAll }) {
+  function ListPanel({ all, pageUrl, filter, setFilter, agent, onPick, onOpen, onClose }) {
     const [copied, setCopied] = useState(false);
-    const [sending, setSending] = useState(false);
-    const openIds = all.filter(isOpen).map((c) => c.id);
     const shown = all.filter((c) => !c.deleted && (filter === 'all' || (filter === 'open' ? c.status !== 'applied' : c.status === 'applied')));
     const here = shown.filter((c) => c.anchor.url === pageUrl);
     const elsewhere = new Map();
@@ -545,13 +569,6 @@ ${uiCss}
           </span>
           <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
         </header>
-        {agent && agent.canSend && openIds.length ? (
-          <div className="tdoc-fb-sendall">
-            <button type="button" disabled={sending} onClick={async () => { setSending(true); try { await onSendAll(openIds); } finally { setSending(false); } }}>
-              {sending ? 'Sending…' : `Send ${openIds.length} open to agent`}
-            </button>
-          </div>
-        ) : null}
         <div className="tdoc-fb-scroll">
           <h4>This page</h4>
           {here.length ? <ul>{here.map((c) => item(c, true))}</ul> : (
@@ -589,6 +606,7 @@ ${uiCss}
     const [toast, setToast] = useState(null);
     const [reanchorId, setReanchorId] = useState(null);
     const [agent, setAgent] = useState(null);
+    const [notifyIds, setNotifyIds] = useState(null);
     const [, setViewportTick] = useState(0);
 
     const say = useCallback((text, bad = false) => {
@@ -690,7 +708,7 @@ ${uiCss}
       if (!picking && !reanchorId) return undefined;
       const priorCursor = document.documentElement.style.cursor;
       document.documentElement.style.cursor = 'crosshair';
-      const isTdocUi = (target) => target.closest?.('#tdoc-feedback-root, .ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu');
+      const isTdocUi = (target) => target.closest?.('#tdoc-feedback-root, .ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu, .ui-dialog-viewport, .ui-dialog-backdrop');
       const move = (event) => {
         if (selected || isTdocUi(event.target)) return;
         setHovered(event.target instanceof Element ? event.target : null);
@@ -789,6 +807,7 @@ ${uiCss}
     // us again when it does.
     const pins = comments.filter((c) => !c.deleted).map((comment) => ({ comment, element: elementFor(comment) }));
     const openCount = allComments.filter(isOpen).length;
+    const ready = summarizeHandoffSurfaces(allComments.filter((c) => !c.deleted)).ready;
 
     if (!shown) {
       return (
@@ -890,11 +909,6 @@ ${uiCss}
             onPick={() => { setOpenId(null); setPicking(true); }}
             onOpen={openFromList}
             onClose={() => setPanelOpen(false)}
-            onSendAll={async (ids) => {
-              const result = await sendToAgent(session.slug, ids);
-              say(result.ok ? `Sent ${ids.length} to your agent` : result.message, !result.ok);
-              load();
-            }}
           />
         ) : null}
 
@@ -916,7 +930,18 @@ ${uiCss}
           onList={() => setPanelOpen((v) => !v)}
           onPick={() => { setOpenId(null); setSelected(null); setPicking((v) => !v); }}
           onHide={hide}
+          sendCount={ready.length}
+          onSend={owner && session && session.notify ? () => { setPicking(false); setNotifyIds(ready.map((c) => c.id)); } : null}
         />
+        {notifyIds ? (
+          <NotifyHandoffPanel
+            slug={session.slug}
+            open
+            commentIds={notifyIds}
+            onClose={() => setNotifyIds(null)}
+            onSent={() => load()}
+          />
+        ) : null}
       </>
     );
   }
