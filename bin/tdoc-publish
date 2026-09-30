@@ -1590,7 +1590,7 @@ upload_version() {
   # produced this version?"
   TDOC_CLIENT_VERSION="$(git -C "$SKILL_DIR" rev-parse --short=12 HEAD 2>/dev/null || cat "$SKILL_DIR/VERSION" 2>/dev/null || echo unknown)"
   resp="$(curl -sS --connect-timeout 10 --max-time 120 -X POST "$UPLOAD_BASE/api/upload" \
-    -H "Authorization: Bearer $TOKEN" \
+    -H "Authorization: Bearer $TOKEN" ${RAFT_AGENT_HDR[@]+"${RAFT_AGENT_HDR[@]}"} \
     -H "X-Tdoc-Client: $TDOC_CLIENT_VERSION" \
     -H "Content-Type: application/json" \
     --data-binary @"$payload_file")" || { rm -f "$payload_file"; echo "[tdoc] v$v upload: network error/timeout" >&2; return 1; }
@@ -1660,6 +1660,14 @@ Then re-run: $RETRY_COMMAND
     return 1
   fi
 }
+
+# Which Raft agent this is. The Raft runtime exposes both ids; the server honours
+# the claim only for an agent already linked to this account (actingAgent in the
+# worker), and uses it solely to decide who is pinged about this doc next.
+RAFT_AGENT_HDR=()
+if [ -n "${SLOCK_CURRENT_SERVER_ID:-}" ] && [ -n "${SLOCK_CURRENT_AGENT_ID:-}" ]; then
+  RAFT_AGENT_HDR=(-H "X-Tdoc-Raft-Agent: ${SLOCK_CURRENT_SERVER_ID}/${SLOCK_CURRENT_AGENT_ID}")
+fi
 
 # Upload every local version that isn't yet on the worker. The version
 # picker in the doc UI needs older versions to be reachable too — we don't

@@ -140,7 +140,7 @@ function makeEnv(StoreClass, extra = {}) {
   return env;
 }
 
-function req(pathname, { method = 'GET', token = '', body = null, cookie = '', host = 'tdoc.dev', dest = '' } = {}) {
+function req(pathname, { method = 'GET', token = '', body = null, cookie = '', host = 'tdoc.dev', dest = '', headers = {} } = {}) {
   return new Request(`https://${host}${pathname}`, {
     method,
     headers: {
@@ -148,6 +148,7 @@ function req(pathname, { method = 'GET', token = '', body = null, cookie = '', h
       ...(cookie ? { Cookie: cookie.includes('=') ? cookie : `tdoc_sid=${cookie}` } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(dest ? { 'Sec-Fetch-Dest': dest } : {}),
+      ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
