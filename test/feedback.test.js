@@ -260,6 +260,27 @@ const APP = 'http://localhost:3000';
     assert(notOwner.status === 401 || notOwner.status === 403, `a joiner drives the owner's agent: ${notOwner.status}`);
   });
 
+  await t('an oversized anchor is refused on create and on re-anchor', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const julie = await putSession(env, 'julie');
+    const { body: space } = await connect(env, julie);
+    const big = { kind: 'product', url: `${APP}/`, selector: '#x', text: 'x'.repeat(9000) };
+    const r = await worker.fetch(req('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: 'hi', anchor: big } }), env, {});
+    assert(r.status === 413, `create: ${r.status}`);
+    const ok = await (await worker.fetch(req('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: 'hi', anchor: { kind: 'product', url: `${APP}/`, selector: '#x', state: { dialog: 'Invite' } } } }), env, {})).json();
+    const re = await worker.fetch(req('/api/comments', { method: 'PATCH', token: space.token, body: { slug: space.slug, version: 1, id: ok.id, anchor: big } }), env, {});
+    assert(re.status === 413, `re-anchor: ${re.status}`);
+  });
+
+  await t('/feedback carries the top bar: Sign in when signed out, My docs when signed in', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const anon = await (await worker.fetch(req('/feedback'), env, {})).text();
+    assert(anon.includes('class="fb-bar"') && anon.includes('Sign in'), 'signed-out bar missing');
+    const cookie = await putSession(env, 'julie');
+    const signed = await (await worker.fetch(req('/feedback', { cookie }), env, {})).text();
+    assert(signed.includes('href="/me"'), 'signed-in bar lacks My docs');
+  });
+
   await t('/feedback offers the bookmarklet and the one line; /feedback/connect is the popup', async () => {
     const env = makeEnv(mod.CommentsStore);
     const page = await worker.fetch(req('/feedback'), env, {});

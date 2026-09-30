@@ -103,6 +103,16 @@ async function feedbackTokenRecord(env, token) {
   } catch { return null; }
 }
 
+// An anchor rides inside every comment record, and every comment of a doc
+// is stored together. The feedback client adds page state to its anchors;
+// a cap keeps any client (or any script holding a token) from bloating the
+// record for everyone.
+const ANCHOR_MAX_BYTES = 8192;
+function anchorTooLarge(anchor) {
+  if (anchor == null) return false;
+  try { return JSON.stringify(anchor).length > ANCHOR_MAX_BYTES; } catch { return true; }
+}
+
 // A token-bound session may only touch the doc it was minted for.
 function feedbackScopeDenied(session, slug) {
   return Boolean(session && session.feedback && session.feedback.slug !== slug);
@@ -4207,6 +4217,15 @@ const FEEDBACK_PAGE_CSS = `
     --td-line: #e8e7e3;
     --hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
   }
+  .fb-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;
+    height: 48px; padding: 0 18px; background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--td-line); }
+  .fb-bar-home { display: inline-flex; align-items: center; gap: 8px; color: var(--td-ink); text-decoration: none; font: 700 15px/1 -apple-system, system-ui, sans-serif; }
+  .fb-bar nav { display: flex; align-items: center; gap: 12px; font: 600 13px/1 -apple-system, system-ui, sans-serif; }
+  .fb-bar-link { color: var(--td-ink); text-decoration: none; padding: 7px 10px; border-radius: 999px; }
+  .fb-bar-link:hover { background: #f0f0ee; }
+  .fb-bar-cta { background: var(--td-accent); color: #fff !important; }
+  .fb-bar-cta:hover { background: var(--td-accent-hover); }
+  .fb-bar-who { color: var(--td-muted); font-weight: 500; }
   [hidden] { display: none !important; }
   body { margin: 0; background: #fff; color: var(--td-ink);
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
@@ -4369,6 +4388,16 @@ const FEEDBACK_PAGE_CSS = `
 // The address of a bookmark is code, and our own origin goes into it. The
 // origin comes off the request, so it is reduced to the characters an origin
 // can be made of before it is spliced in — nothing else can reach the code.
+// The static feedback pages (install, invite, connect) are not React shell
+// pages, so they carry a plain version of the same top bar: the mark home,
+// and My docs or Sign in on the right.
+function feedbackTopBar(identity, returnTo) {
+  const right = identity
+    ? `<a class="fb-bar-link" href="/me">My docs</a><span class="fb-bar-who">${escapeHtml(identity.name || identity.login || '')}</span>`
+    : `<a class="fb-bar-link fb-bar-cta" href="/api/auth/oidc/login?return=${encodeURIComponent(returnTo || '/feedback')}">Sign in</a>`;
+  return `<header class="fb-bar"><a class="fb-bar-home" href="/" aria-label="tdoc home"><img src="/favicon.svg" alt="" width="20" height="20"><span>tdoc</span></a><nav>${right}</nav></header>`;
+}
+
 function feedbackScriptSrc(base) {
   const origin = String(base || '').replace(/[^A-Za-z0-9:.\-\[\]/]/g, '');
   if (!/^https?:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.\-]+)(?::\d{1,5})?$/.test(origin)) throw new Error('feedback: bad origin');
@@ -4379,7 +4408,7 @@ function feedbackBookmarklet(src) {
   return `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='${src}?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
 }
 
-function feedbackBookmarkletPage(base, nonce) {
+function feedbackBookmarkletPage(base, nonce, identity = null) {
   const src = feedbackScriptSrc(base);
   const bookmarklet = feedbackBookmarklet(src);
   const host = escapeHtml(new URL(base).host);
@@ -4396,6 +4425,7 @@ function feedbackBookmarkletPage(base, nonce) {
 <style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
 </head>
 <body>
+${feedbackTopBar(identity, '/feedback')}
 <main>
   <h1>Leave feedback on your own app</h1>
   <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent.</p>
@@ -4639,6 +4669,7 @@ function feedbackJoinPage({ base, nonce, slug, origin, identity, doors, error })
 <style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
 </head>
 <body>
+${feedbackTopBar(identity, returnTo)}
 <main>
   <h1>Feedback on ${escapeHtml(host || 'an app')}</h1>
   ${body}
@@ -7981,7 +8012,9 @@ export default {
     }
     if (p === '/feedback' && method === 'GET') {
       const nonce = rand(16);
-      return html(feedbackBookmarkletPage(url.origin, nonce), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+      const viewer = await getSession(env, req);
+      const identity = sessionPrincipal(viewer) && !viewer.feedback ? { login: actorKey(viewer), name: actorDisplayName(viewer) } : null;
+      return html(feedbackBookmarkletPage(url.origin, nonce, identity), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
     // An invite: /feedback/join/<space>. Signed in, one click files this
     // space as the person's feedback space for the app, so the next time
@@ -9066,6 +9099,7 @@ export default {
       if (!slug || !commentText) return json({ error: 'slug and text required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
+      if (anchorTooLarge(anchor)) return json({ error: 'anchor_too_large', limit: ANCHOR_MAX_BYTES }, { status: 413 });
       const meta = await loadDocMeta(env, slug);
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
@@ -9202,6 +9236,7 @@ export default {
       try { body = await req.json(); } catch {}
       const { slug, id, anchor, version } = body;
       if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
+      if (anchorTooLarge(anchor)) return json({ error: 'anchor_too_large', limit: ANCHOR_MAX_BYTES }, { status: 413 });
       if (typeof body.resolved === 'boolean') {
         // Marking a thread handled, and taking it back. Same gate as delete and
         // move-anchor: the doc's owner, or whoever wrote the comment — the

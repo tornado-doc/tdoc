@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X } from 'lucide-react';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
@@ -104,6 +104,11 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-item .when { font-weight: 400; color: #8a8985; font-size: 12px; }
     #tdoc-feedback-root .tdoc-fb-item .done { margin-left: auto; font: 600 11px system-ui, sans-serif; color: #0f7b3f; }
     #tdoc-feedback-root .tdoc-fb-item .what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    #tdoc-feedback-root .tdoc-fb-item .state { font-size: 12px; color: #6b6a66; }
+    #tdoc-feedback-root .tdoc-fb-item .state.hidden { color: #9a5b00; }
+    #tdoc-feedback-root .tdoc-fb-sendall { padding: 10px 14px; border-bottom: 1px solid #efeeea; }
+    #tdoc-feedback-root .tdoc-fb-sendall button { appearance: none; width: 100%; border: 1px solid #d9d8d4; background: #fff; border-radius: 8px; padding: 7px 10px; font: 600 12.5px system-ui, sans-serif; color: #1a1a1a; cursor: pointer; }
+    #tdoc-feedback-root .tdoc-fb-sendall button:hover { border-color: #1652f0; color: #1652f0; }
     #tdoc-feedback-root .tdoc-fb-item .where { color: #8a8985; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #tdoc-feedback-root .tdoc-fb-panel .empty { margin: 4px 8px; color: #8a8985; }
     #tdoc-feedback-root .tdoc-fb-panel .link { appearance: none; border: 0; background: none; padding: 0; color: #1652f0; font: inherit; cursor: pointer; }
@@ -258,9 +263,40 @@ ${uiCss}
     return parts.join(' > ');
   }
 
+  // Where in the app's state the element lived: an open dialog, the selected
+  // tabs. A comment on a modal cannot be found once the modal is closed; this
+  // is what tells the reader which state to open to see it in place.
+  function stateFor(element) {
+    const text = (node) => String(node && (node.innerText || node.textContent) || '').replace(/\s+/g, ' ').trim();
+    const state = {};
+    const dialog = element.closest('dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]');
+    if (dialog) {
+      const labelled = dialog.getAttribute('aria-labelledby');
+      const byId = labelled && document.getElementById(labelled.split(/\s+/)[0]);
+      const heading = dialog.querySelector('h1, h2, h3, [role="heading"]');
+      state.dialog = (dialog.getAttribute('aria-label') || text(byId) || text(heading) || 'dialog').slice(0, 80);
+    } else {
+      // Unlabelled overlays: a fixed-position ancestor above the page.
+      for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+        const cs = getComputedStyle(node);
+        if ((cs.position === 'fixed' || cs.position === 'sticky') && Number(cs.zIndex) > 0) {
+          const heading = node.querySelector('h1, h2, h3, [role="heading"]');
+          state.layer = (node.getAttribute('aria-label') || text(heading) || 'overlay').slice(0, 80);
+          break;
+        }
+      }
+    }
+    const tabs = [...document.querySelectorAll('[role="tab"][aria-selected="true"]')]
+      .map((tab) => text(tab).slice(0, 40)).filter(Boolean).slice(0, 3);
+    if (tabs.length) state.tabs = tabs;
+    if (document.title) state.title = document.title.slice(0, 120);
+    return state;
+  }
+
   function contextFor(element) {
     const rect = element.getBoundingClientRect();
     return {
+      state: stateFor(element),
       kind: 'product',
       url: canonical(),
       selector: selectorFor(element),
@@ -310,11 +346,11 @@ ${uiCss}
 
   // @agent: the same handoff the doc page makes. Owner-only on the server;
   // the result says whether it reached the agent, so the UI can say so.
-  async function sendToAgent(slug, commentId) {
+  async function sendToAgent(slug, commentIds) {
     try {
       const body = await request('/api/notify/handoff', {
         method: 'POST',
-        body: JSON.stringify({ slug, comment_ids: [commentId], instruction: 'address this comment' }),
+        body: JSON.stringify({ slug, comment_ids: [].concat(commentIds), instruction: 'address this comment' }),
       });
       const failed = body && body.delivery && body.delivery.status === 'failed';
       return { ok: !failed, message: failed ? `Posted — not delivered to the agent${body.delivery.error ? `: ${body.delivery.error}` : ''}` : 'Sent to your agent' };
@@ -420,6 +456,15 @@ ${uiCss}
     const text = String(a.text || '').trim();
     return a.accessible_name || (text ? `${a.tag || 'element'} · “${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”` : (a.selector || 'element'));
   };
+  // "in dialog “Invite teammates” · tab Billing" — the state to open.
+  const stateLabel = (anchor) => {
+    const st = (anchor && anchor.state) || {};
+    const parts = [];
+    if (st.dialog) parts.push(`in dialog “${st.dialog}”`);
+    else if (st.layer) parts.push(`in “${st.layer}”`);
+    if (st.tabs && st.tabs.length) parts.push(`tab ${st.tabs.join(' › ')}`);
+    return parts.join(' · ');
+  };
   const ago = (iso) => {
     const t = Date.parse(iso || '');
     if (!t) return '';
@@ -460,8 +505,10 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ all, pageUrl, filter, setFilter, agent, onPick, onOpen, onClose }) {
+  function ListPanel({ all, pageUrl, filter, setFilter, agent, onPick, onOpen, onClose, onSendAll }) {
     const [copied, setCopied] = useState(false);
+    const [sending, setSending] = useState(false);
+    const openIds = all.filter(isOpen).map((c) => c.id);
     const shown = all.filter((c) => !c.deleted && (filter === 'all' || (filter === 'open' ? c.status !== 'applied' : c.status === 'applied')));
     const here = shown.filter((c) => c.anchor.url === pageUrl);
     const elsewhere = new Map();
@@ -472,12 +519,15 @@ ${uiCss}
     }
     const item = (c, local) => {
       const author = c.author || {};
+      const where = stateLabel(c.anchor);
+      const hidden = local && !elementFor(c);
       const replies = Array.isArray(c.replies) ? c.replies.filter((r) => !r.deleted).length : 0;
       return (
         <li key={c.id}>
           <button type="button" className="tdoc-fb-item" onClick={() => onOpen(c, local)}>
             <span className="who">{author.name || author.login || 'anon'} <span className="when">{ago(c.created || c.ts)}</span>{c.status === 'applied' ? <span className="done">Resolved</span> : null}</span>
             <span className="what">{c.text}</span>
+            {where || hidden ? <span className={`state${hidden ? ' hidden' : ''}`}>{hidden ? 'Not on screen now' : ''}{hidden && where ? ' — ' : ''}{where}</span> : null}
             <span className="where">{labelOf(c.anchor)}{replies ? ` · ${replies} ${replies === 1 ? 'reply' : 'replies'}` : ''}</span>
           </button>
         </li>
@@ -495,6 +545,13 @@ ${uiCss}
           </span>
           <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
         </header>
+        {agent && agent.canSend && openIds.length ? (
+          <div className="tdoc-fb-sendall">
+            <button type="button" disabled={sending} onClick={async () => { setSending(true); try { await onSendAll(openIds); } finally { setSending(false); } }}>
+              {sending ? 'Sending…' : `Send ${openIds.length} open to agent`}
+            </button>
+          </div>
+        ) : null}
         <div className="tdoc-fb-scroll">
           <h4>This page</h4>
           {here.length ? <ul>{here.map((c) => item(c, true))}</ul> : (
@@ -692,6 +749,20 @@ ${uiCss}
       return () => document.removeEventListener('keydown', keydown, true);
     }, [surface, load]);
 
+    // Modals, tabs and client-side routing change the page without a scroll
+    // or resize. Watch the DOM (not our own overlay) and re-place the pins.
+    useEffect(() => {
+      if (!shown) return undefined;
+      let frame = 0;
+      const observer = new MutationObserver((records) => {
+        if (records.every((r) => host.contains(r.target))) return;
+        if (frame) return;
+        frame = requestAnimationFrame(() => { frame = 0; setViewportTick((tick) => tick + 1); });
+      });
+      observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-hidden', 'aria-selected'] });
+      return () => { observer.disconnect(); if (frame) cancelAnimationFrame(frame); };
+    }, [shown]);
+
     useEffect(() => {
       if (!shown) return undefined;
       const refresh = () => setViewportTick((tick) => tick + 1);
@@ -713,7 +784,10 @@ ${uiCss}
       if (!keepOpen) setOpenId(null);
       return true;
     };
-    const pins = useMemo(() => comments.filter((c) => !c.deleted).map((comment) => ({ comment, element: elementFor(comment) })), [comments]);
+    // Recomputed on every render, not memoised: a comment on a modal has no
+    // element until the modal opens, and the mutation observer below renders
+    // us again when it does.
+    const pins = comments.filter((c) => !c.deleted).map((comment) => ({ comment, element: elementFor(comment) }));
     const openCount = allComments.filter(isOpen).length;
 
     if (!shown) {
@@ -738,6 +812,7 @@ ${uiCss}
       if (!local) { location.href = c.anchor.url; return; }
       const el = elementFor(c);
       if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      else if (stateLabel(c.anchor)) say(`Left ${stateLabel(c.anchor)} — open it to see the comment in place.`);
       setPicking(false);
       setSelected(null);
       setOpenId(c.id);
@@ -793,7 +868,7 @@ ${uiCss}
             isOwner={owner}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
-            unanchored={!elementFor(openComment)}
+            unanchored={!elementFor(openComment) && !stateLabel(openComment.anchor)}
             floating
             position={placeCard(elementFor(openComment))}
             onReply={(parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), handoffCommentId: opts.handoffCommentId, pageUrl: canonical() })}
@@ -815,6 +890,11 @@ ${uiCss}
             onPick={() => { setOpenId(null); setPicking(true); }}
             onOpen={openFromList}
             onClose={() => setPanelOpen(false)}
+            onSendAll={async (ids) => {
+              const result = await sendToAgent(session.slug, ids);
+              say(result.ok ? `Sent ${ids.length} to your agent` : result.message, !result.ok);
+              load();
+            }}
           />
         ) : null}
 

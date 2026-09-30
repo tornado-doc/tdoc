@@ -42,7 +42,7 @@ const APP_HTML = `<!doctype html>
 </head><body><main>
 <nav><b>Dashboard</b> · Projects · Settings</nav>
 <section class="card"><h2>Weekly active users</h2><p>1,284 · +12%</p></section>
-<section class="card"><h2>Invite teammates</h2><button id="invite">Send invite</button></section>
+<section class="card"><h2>Invite teammates</h2><button id="invite">Send invite</button> <button id="open-modal">Settings</button></section>
 </main></body></html>`;
 
 (async () => {
@@ -186,6 +186,31 @@ const APP_HTML = `<!doctype html>
       assert((await items.first().innerText()).includes('This button does nothing'), 'list item lacks the comment');
       await items.first().click();
       await page.locator('#tdoc-feedback-root .tdoc-margin-comment').waitFor({ timeout: 3000 });
+    });
+
+    await test('a comment on a modal remembers the dialog and comes back when it reopens', async () => {
+      await page.evaluate(() => {
+        const d = document.createElement('div');
+        d.id = 'modal'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Team settings');
+        d.style.cssText = 'position:fixed;top:120px;left:200px;padding:24px;background:#fff;border:1px solid #ccc;z-index:10';
+        d.innerHTML = '<button id="save">Save</button>';
+        document.body.appendChild(d);
+      });
+      await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
+      await page.locator('#save').click();
+      const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]');
+      await c.first().fill('Save is disabled');
+      await page.locator('#tdoc-feedback-root .tdoc-popup button.submit').last().click();
+      await page.waitForFunction(() => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length >= 2);
+      const slug = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).slug, `tdoc-feedback:${tdocBase}`);
+      const comments = JSON.parse(fs.readFileSync(path.join(root, slug, 'comments.json'), 'utf8'));
+      const onModal = comments.find((x) => x.text === 'Save is disabled');
+      assert(onModal && onModal.anchor.state && onModal.anchor.state.dialog === 'Team settings', `state not recorded: ${JSON.stringify(onModal && onModal.anchor.state)}`);
+      const before = await page.locator('#tdoc-feedback-root .tdoc-pin').count();
+      const saved = await page.evaluate(() => { const m = document.getElementById('modal'); const html = m.outerHTML; m.remove(); return html; });
+      await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length === n - 1, before);
+      await page.evaluate((html) => document.body.insertAdjacentHTML('beforeend', html), saved);
+      await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length === n, before);
     });
 
     await test('no console errors on the app page', async () => {
