@@ -2117,6 +2117,68 @@ function clientIp(req) {
 // page cannot fake it. Absent Origin (curl, the CLI) is fine — those requests
 // carry no ambient session cookie worth stealing via CSRF anyway, and approve
 // (the only session-cookie-authenticated pair route) demands a match.
+// ---- Terminal credentials: list and revoke one --------------------------
+// Every pairing mints an account-wide token, and until now the only way to
+// take one back was the onboarding `unpair` sweep, which revokes all of them
+// -- so one credential left on a shared machine meant re-pairing every
+// terminal and agent the person has. These list what an account holds and
+// revoke exactly one. Browser session only: a token must not be able to
+// enumerate or revoke its siblings, and the person deciding is the human.
+async function accountTokenList(env, accountId) {
+  const out = [];
+  let cursor;
+  do {
+    const r = await env.META.list({ prefix: 'hosted-token:', cursor });
+    for (const k of r.keys) {
+      let owner = k.metadata && k.metadata.account_id;
+      let rec = null;
+      if (!owner || owner === accountId) {
+        try { rec = JSON.parse(await env.META.get(k.name)) || null; } catch {}
+        owner = owner || (rec && rec.account_id);
+      }
+      if (owner !== accountId || !rec) continue;
+      out.push({
+        id: k.name.slice('hosted-token:'.length),
+        created: typeof rec.created === 'string' ? rec.created : '',
+        label: typeof rec.label === 'string' ? rec.label : '',
+      });
+    }
+    cursor = r.cursor;
+    if (r.list_complete) break;
+  } while (cursor);
+  out.sort((a, b) => String(a.created).localeCompare(String(b.created)));
+  return out;
+}
+
+async function tokenPageSession(env, req) {
+  const session = await getSession(env, req);
+  if (!sessionPrincipal(session) || session.feedback) return null;
+  const accountId = await sessionAccountId(env, session);
+  return accountId ? { session, accountId } : null;
+}
+
+function tokenPageHtml(tokens, notice) {
+  const nonce = rand(16);
+  const rows = tokens.map((t) => `<tr><td>${escapeHtml(t.created ? t.created.replace('T', ' ').slice(0, 16) + ' UTC' : 'unknown')}</td>`
+    + `<td>${escapeHtml(t.label || '—')}</td><td><code>${escapeHtml(t.id.slice(0, 8))}</code></td>`
+    + `<td><form method="post" action="/me/tokens/revoke"><input type="hidden" name="id" value="${escapeHtml(t.id)}">`
+    + `<button type="submit">Revoke</button></form></td></tr>`).join('');
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Connected terminals · tdoc</title>
+<style nonce="${nonce}">body{font:15px/1.5 system-ui,sans-serif;margin:40px auto;max-width:760px;padding:0 20px;color:#111}
+table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb}
+p.muted{color:#555}p.notice{background:#f0f5ff;padding:8px 12px;border-radius:8px}button{cursor:pointer}</style>
+</head><body><h1>Connected terminals</h1>
+<p class="muted">Each row is a credential a CLI or agent received when you approved it. Each one can publish, edit and delete any of your documents. Revoke any you do not recognise; that terminal will need your approval again to reconnect.</p>
+${notice ? `<p class="notice">${escapeHtml(notice)}</p>` : ''}
+${tokens.length ? `<table><thead><tr><th>Approved</th><th>First published</th><th>ID</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<p>No connected terminals.</p>'}
+<p><a href="/me">Back to My docs</a></p></body></html>`;
+  return html(body, { headers: {
+    'Content-Security-Policy': `default-src 'none'; style-src 'nonce-${nonce}'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+    'Cache-Control': 'no-store',
+  } });
+}
+
 function sameOrigin(req, url) {
   const o = req.headers.get('origin');
   return !o || o === url.origin;
@@ -7242,6 +7304,28 @@ export default {
       return json({ ok: true, bio });
     }
 
+    if (p === '/me/tokens' && method === 'GET') {
+      const who = await tokenPageSession(env, req);
+      if (!who) return redirectTo(`/api/auth/oidc/login?return=${encodeURIComponent('/me/tokens')}`);
+      const tokens = await accountTokenList(env, who.accountId);
+      return tokenPageHtml(tokens, url.searchParams.get('revoked') === '1' ? 'Revoked. That terminal can no longer act on your account.' : '');
+    }
+    if (p === '/me/tokens/revoke' && method === 'POST') {
+      // A form post from this page: the browser always sends Origin on a
+      // POST, so a missing one is not "same origin" here.
+      if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+      const who = await tokenPageSession(env, req);
+      if (!who) return json({ error: 'sign_in_required' }, { status: 401 });
+      let id = '';
+      try { id = String((await req.formData()).get('id') || ''); } catch {}
+      if (!/^[a-f0-9]{64}$/.test(id)) return json({ error: 'invalid_id' }, { status: 400 });
+      const key = `hosted-token:${id}`;
+      let rec = null;
+      try { rec = JSON.parse(await env.META.get(key)); } catch {}
+      if (!rec || rec.account_id !== who.accountId) return json({ error: 'not_found' }, { status: 404 });
+      await env.META.delete(key);
+      return new Response(null, { status: 303, headers: { Location: '/me/tokens?revoked=1' } });
+    }
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
