@@ -82,7 +82,10 @@ function parseCookie(req) {
 // person, same permissions; the token only ever unlocks the routes in
 // FEEDBACK_TOKEN_PATHS and only for the doc it was minted for.
 const FEEDBACK_TOKEN_RE = /^Bearer\s+(fb_[a-f0-9]{48})$/;
-const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session']);
+// The two notify routes let the space's owner hand a comment to their agent
+// from inside the app (@agent). Both are owner-gated by authorizeOwnerMutation,
+// which also refuses a token-bound session on any other doc.
+const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session', '/api/notify/targets', '/api/notify/handoff']);
 const FEEDBACK_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 function feedbackTokenFrom(req) {
@@ -112,7 +115,7 @@ async function getSession(env, req) {
     const rec = await feedbackTokenRecord(env, feedbackTokenFrom(req));
     if (!rec) return null;
     sid = rec.sid;
-    feedback = { slug: rec.slug };
+    feedback = { slug: rec.slug, origin: typeof rec.origin === 'string' ? rec.origin : null };
   }
   const raw = await env.META.get(`session:${sid}`);
   if (!raw) return null;
@@ -4131,7 +4134,7 @@ function feedbackSpaceHtml(origin, base) {
 <main>
   <h1>Feedback · ${escapeHtml(host)}</h1>
   <p>Product feedback left on <a href="${escapeHtml(origin)}">${escapeHtml(origin)}</a>. Every comment here points at the page and the element it was left on.</p>
-  <p class="muted">To leave feedback, open the app and click the tdoc bookmark, or add <code>&lt;script src="${escapeHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app. Share from the comment button in the app — this space stays out of My docs.</p>
+  <p class="muted">To leave feedback on the app itself, open the app and click the tdoc bookmark (get it at <a href="${escapeHtml(base)}/feedback">${escapeHtml(new URL(base).host)}/feedback</a>), or add <code>&lt;script src="${escapeHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app. Teammates join this same thread through the Invite link in the app.</p>
 </main>
 </body>
 </html>
@@ -4181,6 +4184,12 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
     version,
     title: (meta && meta.title) || slug,
     doc_url: `${base}/d/${encodeURIComponent(slug)}/v/${version}`,
+    // What Share copies: opening it puts the person in THIS space for the
+    // app, instead of the one of their own a first connect would make.
+    invite_url: `${base}/feedback/join/${encodeURIComponent(slug)}`,
+    origin: (meta && meta.feedback && meta.feedback.origin) || null,
+    // This host can hand comments to an agent (the local twin cannot).
+    notify: true,
     identity: { login: actorKey(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
     is_owner: isDocOwnerSession(env, session, meta),
   };
@@ -4198,6 +4207,7 @@ const FEEDBACK_PAGE_CSS = `
     --td-line: #e8e7e3;
     --hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
   }
+  [hidden] { display: none !important; }
   body { margin: 0; background: #fff; color: var(--td-ink);
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
   main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
@@ -4257,6 +4267,8 @@ const FEEDBACK_PAGE_CSS = `
     position: absolute; left: 50%; top: 1.85rem; z-index: 2; white-space: nowrap;
     transform: translateX(-50%); transform-origin: 50% 80%; transition: background .12s; }
   .bookmarklet:hover { background: var(--td-accent-hover); }
+  /* Outside the install page's animated demo: an ordinary pill in the flow. */
+  .bookmarklet.inline { position: static; transform: none; left: auto; top: auto; }
   .bookmarklet:active { cursor: grabbing; }
   .bookmarklet.demo-fly {
     animation: demo-drag 3.4s cubic-bezier(.2,.7,.2,1) infinite;
@@ -4427,7 +4439,7 @@ function feedbackBookmarkletPage(base, nonce) {
   </div>
 
   <h2>Where it goes</h2>
-  <p>Comments land in a feedback space on ${host} — a doc named after your app, created for you on first connect. It stays out of My docs; share from the comment button in your app (copy link), or open the space on ${host} to manage access.</p>
+  <p>Comments land in one shared thread on ${host}, named after your app and created the first time you connect. To give feedback together, press <strong>Share</strong> in the app and send the invite link — teammates who open it join the same thread instead of starting their own.</p>
 </main>
 
 <div id="coach" class="coach" hidden>
@@ -4522,10 +4534,11 @@ function feedbackConnectPage({ base, origin, nonce, identity, doors, error }) {
   } else {
     body = `<p>Signed in as <strong>${escapeHtml(identity.name || identity.login)}</strong>.</p>
 <div class="card">
-  <p>Connect <strong>${escapeHtml(host)}</strong> to a feedback space in your account. One is created for this app the first time.</p>
+  <p>Comments you leave on <strong>${escapeHtml(host)}</strong> will be saved to your tdoc account, where you can share them and hand them to an agent.</p>
   <div class="row"><button type="button" id="connect">Connect</button><span id="status" class="muted"></span></div>
 </div>
-<details><summary class="muted">Use an existing doc instead</summary>
+<p class="muted">Joining a teammate's feedback? Open the invite link they sent you first, then click the bookmark again.</p>
+<details><summary class="muted">Save to an existing doc instead</summary>
   <p class="muted">Paste a doc link you can comment on and its comments will hold this app's feedback.</p>
   <div class="row"><input id="doc" placeholder="https://${escapeHtml(new URL(base).host)}/d/…/v/1" style="flex:1;min-width:14rem;padding:.5rem;border:1px solid #d4d4dc;border-radius:8px;font:inherit"><button type="button" class="secondary" id="connect-doc">Use this doc</button></div>
 </details>`;
@@ -4579,6 +4592,76 @@ function feedbackConnectPage({ base, origin, nonce, identity, doors, error }) {
     var m = /\\/d\\/([^/?#]+)/.exec(value);
     if (!m) { say('That is not a doc link', true); return; }
     connect({ slug: decodeURIComponent(m[1]) });
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
+// /feedback/join/<space> — where an invite lands. Three states: sign in,
+// join, then how to start (bookmark + open the app).
+function feedbackJoinPage({ base, nonce, slug, origin, identity, doors, error }) {
+  const host = origin ? new URL(origin).host : '';
+  const returnTo = slug ? `/feedback/join/${encodeURIComponent(slug)}` : '/feedback';
+  let body;
+  if (error) {
+    body = `<p class="err">${escapeHtml(error)}</p><p><a href="/feedback">What is tdoc Feedback?</a></p>`;
+  } else if (!identity) {
+    const links = [];
+    if (doors.oidc) links.push(`<a href="/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnTo)}"><button type="button">Sign in with ${escapeHtml(doors.oidcLabel || 'Email')}</button></a>`);
+    if (doors.web) links.push(`<a href="/api/auth/web/login?return=${encodeURIComponent(returnTo)}"><button type="button" class="${doors.oidc ? 'secondary' : ''}">Sign in with GitHub</button></a>`);
+    if (!links.length) links.push(`<a href="/?notice=signin"><button type="button">Sign in</button></a>`);
+    body = `<p>You're invited to leave feedback on <strong>${escapeHtml(host)}</strong> — comments you pin on the app land in one shared thread with everyone else's.</p>
+<p>Sign in first so your comments carry your name. First time here? Signing in creates your account.</p>
+<div class="row">${links.join(' ')}</div>`;
+  } else {
+    const bookmarklet = feedbackBookmarklet(feedbackScriptSrc(base));
+    body = `<p>You're invited to leave feedback on <strong>${escapeHtml(host)}</strong> — comments you pin on the app land in one shared thread with everyone else's.</p>
+<div class="card" id="step-join">
+  <p><strong>1 · Join</strong> as ${escapeHtml(identity.name || identity.login)}.</p>
+  <div class="row"><button type="button" id="join">Join</button><span id="status" class="muted"></span></div>
+</div>
+<div class="card" id="step-start" hidden>
+  <p><strong>2 · Get the bookmark</strong> — drag it to your bookmarks bar (skip if you already have it). No bar? <kbd>⌘⇧B</kbd>.</p>
+  <p><a class="bookmarklet inline" href="${escapeHtml(bookmarklet)}" draggable="true" title="Drag me to the bookmarks bar">🌪️ tdoc</a></p>
+  <p><strong>3 · Open the app and click the bookmark.</strong></p>
+  <p><a href="${escapeHtml(origin)}" target="_blank" rel="noopener"><button type="button">Open ${escapeHtml(host)}</button></a></p>
+</div>`;
+  }
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join feedback · ${escapeHtml(host || 'tdoc')}</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
+</head>
+<body>
+<main>
+  <h1>Feedback on ${escapeHtml(host || 'an app')}</h1>
+  ${body}
+</main>
+<script nonce="${nonce}">
+(function () {
+  var button = document.getElementById('join');
+  if (!button) return;
+  var status = document.getElementById('status');
+  button.addEventListener('click', function () {
+    button.disabled = true;
+    status.textContent = 'Joining…';
+    fetch('/api/feedback/join', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slug: ${JSON.stringify(slug || '')} }),
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (r) {
+        if (!r.ok) { button.disabled = false; status.textContent = (r.body && r.body.error) || 'Could not join'; status.className = 'err'; return; }
+        status.textContent = 'Joined.';
+        document.getElementById('step-start').hidden = false;
+      })
+      .catch(function (e) { button.disabled = false; status.textContent = String(e && e.message || e); status.className = 'err'; });
   });
 })();
 </script>
@@ -5550,6 +5633,9 @@ async function sendInviteEmails(env, { added, inviterName, inviterId, slug, titl
 // session, meta? } or { ok: false, response }.
 async function authorizeOwnerMutation(req, env, slug) {
   const session = await getSession(env, req);
+  // A feedback token speaks for one doc. Owning another doc does not make the
+  // token good for it.
+  if (feedbackScopeDenied(session, slug)) return { ok: false, response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
   const meta = slug ? await loadDocMeta(env, slug) : null;
   if (isDocOwnerSession(env, session, meta)) return { ok: true, session, actor: { kind: 'owner_session' }, meta };
   const auth = await requireUploadAuth(req, env);
@@ -7897,6 +7983,45 @@ export default {
       const nonce = rand(16);
       return html(feedbackBookmarkletPage(url.origin, nonce), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
+    // An invite: /feedback/join/<space>. Signed in, one click files this
+    // space as the person's feedback space for the app, so the next time
+    // they click the bookmark there they land in it.
+    const feedbackJoinMatch = p.match(/^\/feedback\/join\/([^/]+)\/?$/);
+    if (feedbackJoinMatch && method === 'GET') {
+      const nonce = rand(16);
+      const headers = { 'Content-Security-Policy': cspHeader(nonce) };
+      const slug = decodeURIComponent(feedbackJoinMatch[1]);
+      const meta = isValidSlug(slug) ? await loadDocMeta(env, slug) : null;
+      const origin = meta && meta.feedback && feedbackOrigin(meta.feedback.origin);
+      const s = await getSession(env, req);
+      if (!meta || !origin || !canReadDoc(accessFromMeta(meta), s, env, meta)) {
+        return html(feedbackJoinPage({ base: url.origin, nonce, error: 'This invite link is not valid, or the space is not shared with you.' }), { status: 404, headers });
+      }
+      const oidc = oidcConfig(env);
+      return html(feedbackJoinPage({
+        base: url.origin, nonce, slug, origin,
+        identity: sessionPrincipal(s) ? { login: actorKey(s), name: actorDisplayName(s) } : null,
+        doors: { oidc: !!oidc, oidcLabel: oidc && oidc.label, web: !!env.GITHUB_CLIENT_SECRET },
+      }), { headers });
+    }
+    if (p === '/api/feedback/join' && method === 'POST') {
+      if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = String((body && body.slug) || '');
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const meta = await loadDocMeta(env, slug);
+      const origin = meta && meta.feedback && feedbackOrigin(meta.feedback.origin);
+      if (!meta || !origin) return json({ error: 'not_found' }, { status: 404 });
+      const access = accessFromMeta(meta);
+      if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
+      if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
+      await env.META.put(feedbackSpaceIndexKey(s, origin), slug);
+      return json({ ok: true, slug, origin });
+    }
+
     if (p === '/feedback/connect' && method === 'GET') {
       const nonce = rand(16);
       const headers = { 'Content-Security-Policy': cspHeader(nonce) };
@@ -7945,6 +8070,13 @@ export default {
     if (p === '/api/feedback/session' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s || !s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      // Joined another space for this app since this token was minted (an
+      // invite): the token still names the old one. Say so, and the client
+      // reconnects rather than quietly commenting in the wrong place.
+      if (s.feedback.origin) {
+        const current = await env.META.get(feedbackSpaceIndexKey(s, s.feedback.origin));
+        if (current && current !== s.feedback.slug) return json({ error: 'space_moved', slug: current }, { status: 409 });
+      }
       const meta = await loadDocMeta(env, s.feedback.slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
       const access = accessFromMeta(meta);
@@ -9322,13 +9454,17 @@ export default {
       const gate = await authorizeOwnerMutation(req, env, slug);
       if (!gate.ok) return gate.response;
       const resolved = await resolveNotifyTargets(env, slug);
-      const target = recipient ? normalizeNotifyTarget(recipient) : resolved.default;
+      // A feedback token lives in a page tdoc does not control, so a script
+      // there could hold it. From that door the handoff is fixed: the doc's
+      // own agent, the stock instruction — no free text into anyone's agent.
+      const fromPage = Boolean(gate.session && gate.session.feedback);
+      const target = recipient && !fromPage ? normalizeNotifyTarget(recipient) : resolved.default;
       // No recipient is a 200 with a failed delivery, not a 4xx: the handoff
       // is a real record either way, and the panel renders "not delivered"
       // the same for "nobody bound" as for "Raft was down".
       const rec = await dispatchHandoff(env, {
         slug, meta: gate.meta, commentIds: ids,
-        instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
+        instruction: fromPage ? 'address this comment' : (typeof instruction === 'string' ? instruction.slice(0, 2000) : ''),
         recipient: target, publicHost: env.PUBLIC_HOST,
       });
       return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery });

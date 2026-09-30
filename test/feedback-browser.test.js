@@ -156,13 +156,36 @@ const APP_HTML = `<!doctype html>
       await doc.close();
     });
 
-    await test('a reload keeps the session: the idle pill is there, no popup needed', async () => {
+    await test('a reload keeps the session: pins and the dock come back, no popup needed', async () => {
       await page.reload();
       await page.addScriptTag({ url: `${tdocBase}/feedback.js` });
-      await page.locator('#tdoc-feedback-root .tdoc-feedback-idle').waitFor({ timeout: 5000 });
-      await page.locator('#tdoc-feedback-root .tdoc-feedback-idle').click();
+      await page.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor({ timeout: 5000 });
       await page.locator('#tdoc-feedback-root .tdoc-pin').first().waitFor({ timeout: 5000 });
       assert((await context.pages()).length === 1, 'a second popup opened');
+    });
+
+    await test('browsing leaves the app clickable; only + Comment takes over clicks', async () => {
+      await page.evaluate(() => { window.__clicked = 0; document.getElementById('invite').addEventListener('click', () => { window.__clicked += 1; }); });
+      await page.locator('#invite').click();
+      assert((await page.evaluate(() => window.__clicked)) === 1, 'a click on the app was swallowed while browsing');
+      assert((await page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]').count()) === 0, 'browsing opened a composer');
+      await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
+      await page.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor({ timeout: 3000 });
+      await page.locator('#invite').click();
+      assert((await page.evaluate(() => window.__clicked)) === 1, 'picking let the click through to the app');
+      await page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]').first().waitFor({ timeout: 3000 });
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Escape');
+    });
+
+    await test('the list shows every comment on the app and opens its card', async () => {
+      await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+      await page.locator('#tdoc-feedback-root .tdoc-fb-panel').waitFor({ timeout: 3000 });
+      const items = page.locator('#tdoc-feedback-root .tdoc-fb-item');
+      assert((await items.count()) >= 1, 'list is empty');
+      assert((await items.first().innerText()).includes('This button does nothing'), 'list item lacks the comment');
+      await items.first().click();
+      await page.locator('#tdoc-feedback-root .tdoc-margin-comment').waitFor({ timeout: 3000 });
     });
 
     await test('no console errors on the app page', async () => {
