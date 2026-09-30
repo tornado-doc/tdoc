@@ -283,7 +283,12 @@ export function Profile({ boot }) {
 
   return (
     <div className="tdoc-app docs-hub">
-      <TopBar identity={identity} />
+      {/* A visitor with no account sees someone's docs and nothing else to do;
+          send them to the front page, which is where getting started lives. */}
+      <TopBar
+        identity={identity}
+        actions={identity ? undefined : <a className="tdoc-chip signin" href="/">Make your own tdoc</a>}
+      />
       <main className="wrap">
         <div className="page-hd profile-hd">
           <ProfileAvatar
