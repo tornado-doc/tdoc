@@ -4339,8 +4339,8 @@ function feedbackBookmarkletPage(base, nonce) {
       <span class="demo-slot" aria-hidden="true"></span>
     </div>
     <div class="demo-page">
-      <span class="demo-ghost" aria-hidden="true">✎ tdoc Feedback</span>
-      <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">✎ tdoc Feedback</a>
+      <span class="demo-ghost" aria-hidden="true">🌪️ tdoc</span>
+      <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">🌪️ tdoc</a>
       <span class="step-1" aria-hidden="true">1 · Click Me!</span>
     </div>
   </div>

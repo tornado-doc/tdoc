@@ -1303,7 +1303,7 @@ const server = http.createServer(async (req, res) => {
 <main style="font:16px/1.6 system-ui;max-width:40rem;margin:3rem auto;padding:0 1.5rem">
 <h1>tdoc Feedback</h1>
 <p>Drag this to your bookmarks bar, then click it on any page of your app:</p>
-<p><a id="bookmarklet" href="${escHtml(bookmarklet)}" style="display:inline-block;background:#2f5bea;color:#fff;text-decoration:none;font-weight:600;padding:.6rem 1.1rem;border-radius:8px">✎ tdoc Feedback</a></p>
+<p><a id="bookmarklet" href="${escHtml(bookmarklet)}" style="display:inline-block;background:#2f5bea;color:#fff;text-decoration:none;font-weight:600;padding:.6rem 1.1rem;border-radius:8px">🌪️ tdoc</a></p>
 <p>Or add <code>&lt;script src="${escHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app.</p>
 </main>`, { 'Content-Type': 'text/html; charset=utf-8' });
   }
