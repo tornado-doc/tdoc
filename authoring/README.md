@@ -26,6 +26,20 @@ The last two are the axis that matters: a stat tile is the same stat tile in
 never what it is. A style that starts inventing components, or a component
 that hardcodes a colour, has broken that split.
 
+
+## Also in this directory (SKILL.md first-screen pointers)
+
+| File | Question it answers |
+|---|---|
+| `commands.md` | Full `/tdoc …` command reference beyond the generation-path stubs in SKILL.md |
+| `html-rules.md` | Host HTML / CSP / CSS-only interactivity / layout invariants |
+| `troubleshooting.md` | Common failure modes when the user reports a problem |
+| `comment-anchoring.md` | How comments attach across regenerations |
+
+SKILL.md keeps a **Where things live** table on the first screen so agents know
+these exist before they invent a second page-wide aesthetic or hand-write
+`~/tdocs`.
+
 ## voice.md is a floor, not an option
 
 Nobody picks "make it sound like AI." So voice is not a template a user
