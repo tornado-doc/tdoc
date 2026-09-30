@@ -704,7 +704,7 @@ function isLocalMutation(req) {
 // status. Also removes legacy `tdoc-agent` reactions first so old state
 // can't outlive the new outcome (e.g. an "applied" ✅ after a later
 // "question" outcome on the same comment).
-const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
+const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓', answered: '💬' };
 // The emoji set the agent uses as a verdict marker — used by the per-version
 // fold to strip a stale verdict off snapshots where the comment reads 'open'.
 const AGENT_VERDICT_EMOJI = new Set(Object.values(AGENT_STATUS_EMOJI));
@@ -2027,7 +2027,7 @@ const server = http.createServer(async (req, res) => {
       // the request version, then 1) so the fold can hide it on earlier ones.
       version: Number(applied_in != null ? applied_in : body.version) || 1,
       author: agent,
-      agent_status: ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null,
+      agent_status: Object.prototype.hasOwnProperty.call(AGENT_STATUS_EMOJI, agentStatus) ? agentStatus : null,
       created: new Date().toISOString(),
       reactions: {},
     };
@@ -2035,7 +2035,7 @@ const server = http.createServer(async (req, res) => {
     if (agentStatus === 'applied') {
       parent.status = 'applied';
       if (applied_in) parent.applied_in = applied_in;
-    } else if (agentStatus === 'question' || agentStatus === 'partial') {
+    } else if (agentStatus === 'question' || agentStatus === 'partial' || agentStatus === 'answered') {
       parent.status = 'open';
     }
     setAgentReaction(parent, agentStatus, agent.login);
