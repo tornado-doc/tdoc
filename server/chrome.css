@@ -150,6 +150,7 @@
   .tdoc-chip .name { font-size: 13px; font-weight: 500; }
   .tdoc-chip.signin { padding: 7px 14px; background: var(--td-accent); color: #fff; font-weight: 600; }
   .tdoc-chip.signin:hover { background: var(--td-accent-hover); }
+  a.tdoc-chip { text-decoration: none; }
   /* Only new inbox chrome: a red dot on the existing identity chip. */
   .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; border: 1.5px solid #fff; pointer-events: none; }
   /* Inbox rows reuse cluster-row: action + preview stacked, relative time on the right. */
