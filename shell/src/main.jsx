@@ -7,6 +7,7 @@ import './setup-gate.css';
 import { DocsHub } from './docs-hub.jsx';
 import { FolderShare } from './folder-share.jsx';
 import { TokensPage } from './tokens-page.jsx';
+import { FeedbackSpace } from './feedback-space.jsx';
 import { Profile } from './profile.jsx';
 import { DocumentShell } from './document-shell.jsx';
 import { NeutralLanding } from './neutral-landing.jsx';
@@ -24,6 +25,7 @@ if (appRoot && appBoot) {
   if (appBoot.page === 'onboarding-preview') page = <Suspense fallback={<p>Loading preview…</p>}><OnboardingPreview /></Suspense>;
   else if (appBoot.page === 'docs-hub') page = <DocsHub boot={appBoot} />;
   else if (appBoot.page === 'tokens') page = <TokensPage boot={appBoot} />;
+  else if (appBoot.page === 'feedback-space') page = <FeedbackSpace boot={appBoot} />;
   else if (appBoot.page === 'folder-share') page = <FolderShare boot={appBoot} />;
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;

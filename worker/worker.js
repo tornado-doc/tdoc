@@ -4199,7 +4199,7 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
     doc_url: `${base}/d/${encodeURIComponent(slug)}/v/${version}`,
     // What Share copies: opening it puts the person in THIS space for the
     // app, instead of the one of their own a first connect would make.
-    invite_url: `${base}/feedback/join/${encodeURIComponent(slug)}`,
+    invite_url: `${base}/d/${encodeURIComponent(slug)}`,
     origin: (meta && meta.feedback && meta.feedback.origin) || null,
     // This host can hand comments to an agent (the local twin cannot).
     notify: true,
@@ -7824,6 +7824,44 @@ export default {
     const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
     if (docMatch && (method === 'GET' || method === 'HEAD')) {
       const [, slug, vStr] = docMatch;
+      // A feedback space is a list of comments left on an app, not a document
+      // anyone reads; its page is that list, and the one link people share —
+      // it joins them too. ?doc=1 still opens the underlying doc.
+      if (method === 'GET' && !url.searchParams.has('doc') && SHELL && typeof SHELL.appHtml === 'function') {
+        const spaceMeta = isValidSlug(slug) ? await loadDocMeta(env, slug) : null;
+        const spaceOrigin = spaceMeta && spaceMeta.created_from === 'feedback' && spaceMeta.feedback && feedbackOrigin(spaceMeta.feedback.origin);
+        if (spaceOrigin) {
+          const gate = await enforceDocAccess(env, req, slug, Number(vStr));
+          if (!gate.ok) return gate.response;
+          const viewer = await getSession(env, req);
+          const signedIn = Boolean(sessionPrincipal(viewer)) && !(viewer && viewer.feedback);
+          const isOwner = signedIn && isDocOwnerSession(env, viewer, gate.meta);
+          const joined = isOwner || (signedIn && (await env.META.get(feedbackSpaceIndexKey(viewer, spaceOrigin))) === slug);
+          const access = accessFromMeta(gate.meta);
+          const nonce = rand(16);
+          return html(SHELL.appHtml({
+            title: `${gate.meta.title || 'Feedback'} · tdoc`,
+            nonceAttr: ` nonce="${nonce}"`,
+            runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+            runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+            bootJson: safeJsonForScript({
+              page: 'feedback-space',
+              slug,
+              version: latestVersionNumber(gate.meta) || Number(vStr),
+              title: gate.meta.title || 'Feedback',
+              origin: spaceOrigin,
+              inviteUrl: `${url.origin}/d/${encodeURIComponent(slug)}`,
+              docUrl: `/d/${encodeURIComponent(slug)}/v/${Number(vStr)}?doc=1`,
+              bookmarklet: feedbackBookmarklet(feedbackScriptSrc(url.origin)),
+              identity: signedIn ? { login: actorKey(viewer), avatar_url: viewer.avatar_url || '', name: actorDisplayName(viewer) } : null,
+              isOwner,
+              joined,
+              canComment: signedIn && canCommentOnDoc(access, viewer, env, gate.meta),
+              signinUrl: `/api/auth/oidc/login?return=${encodeURIComponent(`/d/${slug}`)}`,
+            }),
+          }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store' } });
+        }
+      }
       const res = await serveDocVersion(env, req, slug, Number(vStr));
       // Google-Docs-style recents: remember the visit — owned or not — for
       // the signed-in viewer's /me Recent tab. Only successful reads count
@@ -8033,6 +8071,9 @@ export default {
       if (!meta || !origin || !canReadDoc(accessFromMeta(meta), s, env, meta)) {
         return html(feedbackJoinPage({ base: url.origin, nonce, error: 'This invite link is not valid, or the space is not shared with you.' }), { status: 404, headers });
       }
+      // Invites now point at the space itself (/d/<space>), which joins too.
+      // Links sent before that still land in the right place.
+      if (!url.searchParams.has('legacy')) return redirectTo(`/d/${encodeURIComponent(slug)}`);
       const oidc = oidcConfig(env);
       return html(feedbackJoinPage({
         base: url.origin, nonce, slug, origin,
