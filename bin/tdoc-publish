@@ -336,6 +336,20 @@ clear_pending_signin() { rm -f "$PENDING_SIGNIN_FILE" "$PENDING_SIGNIN_FILE".tmp
 # Writes token/account_id/github_login into the caller's variables via
 # globals; returns 0 on success, 1 for "worker has no pairing" (fall back).
 # Every hard failure exits, same contract as hosted_github_signin.
+# How this terminal describes itself when it asks for a credential: hostname
+# and agent runtime, shown on the approval page and in /me/tokens so the
+# person can tell their terminals apart. A hint for a human, never trusted.
+tdoc_client_json() {
+  local device client
+  device="$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)"
+  if [ -n "${SLOCK_CURRENT_AGENT_ID:-}" ]; then client="Raft agent"
+  elif [ -n "${CLAUDECODE:-}${CLAUDE_CODE_ENTRYPOINT:-}" ]; then client="Claude Code"
+  elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${CODEX_HOME:-}" ]; then client="Codex"
+  else client="tdoc CLI"; fi
+  device="$(printf '%s' "$device" | tr -d '"\\' | cut -c1-60)"
+  printf '"device":"%s","client":"%s"' "$device" "$client"
+}
+
 hosted_pair_signin() {
   local base="$1"
   local resp http payload
@@ -413,7 +427,7 @@ hosted_pair_signin() {
   for pair_attempt in 1 2; do
     if resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' \
       -X POST "$base/api/cli/pair/start" -H "Content-Type: application/json" \
-      -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\"}")"; then
+      -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\",$(tdoc_client_json)}")"; then
       break
     fi
     resp=""
@@ -857,7 +871,7 @@ first_time_setup_hosted() {
   hosted_github_signin "$base" "$cookiejar"
   resp="$(curl -sS --connect-timeout 10 --max-time 30 -b "$cookiejar" -w $'\n%{http_code}' \
     -X POST "$base/api/hosted/token" -H "Content-Type: application/json" \
-    -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\"}" 2>&1)" || {
+    -d "{\"label\":\"$(printf '%s' "$SLUG" | sed 's/"/\\"/g')\",$(tdoc_client_json)}" 2>&1)" || {
       rm -f "$cookiejar"
       fail_with_agent_prompt "hosted service is unreachable" \
         "The hosted tdoc service at $base did not respond. Retry '/tdoc publish $SLUG' later, or set TDOC_HOSTED_BASE to the correct hosted URL. To self-host instead, run '/tdoc publish --platform cloudflare $SLUG' or '/tdoc publish --platform vercel $SLUG'."

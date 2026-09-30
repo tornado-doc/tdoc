@@ -11,16 +11,22 @@ async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 function revokeReq(id, { cookie = '', token = '', origin = 'https://tdoc.dev' } = {}) {
-  return new Request('https://tdoc.dev/me/tokens/revoke', {
+  return new Request('https://tdoc.dev/api/me/tokens/revoke', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
       ...(origin ? { Origin: origin } : {}),
       ...(cookie ? { Cookie: cookie } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: `id=${encodeURIComponent(id)}`,
+    body: JSON.stringify({ id }),
   });
+}
+
+async function listOf(worker, env, cookie) {
+  const r = await worker.fetch(req('/api/me/tokens', { cookie }), env, {});
+  assert(r.status === 200, `list ${r.status}`);
+  return (await r.json()).tokens;
 }
 
 async function tokenIds(env) {
@@ -53,19 +59,66 @@ async function works(worker, env, token) {
 
   await t('the owner sees only their own credentials, with label and approval time', async () => {
     const { env, mine } = await seed();
-    const r = await worker.fetch(req('/me/tokens', { cookie: mine.cookie }), env, {});
-    assert(r.status === 200, `status ${r.status}`);
-    const html = await r.text();
-    assert(html.includes('my-laptop-doc') && html.includes('hawaii-trip'), 'own labels missing');
-    assert(!html.includes('their-doc'), 'another account\'s credential leaked into the list');
-    assert(!/<script/i.test(html), 'page must not need JavaScript');
+    const list = await listOf(worker, env, mine.cookie);
+    const labels = list.map(x => x.label).sort();
+    assert(JSON.stringify(labels) === JSON.stringify(['hawaii-trip', 'my-laptop-doc']), `labels ${labels}`);
+    assert(list.every(x => x.created && /^[a-f0-9]{64}$/.test(x.id)), 'created/id missing');
+    const page = await worker.fetch(req('/me/tokens', { cookie: mine.cookie }), env, {});
+    assert(page.status === 200, `page ${page.status}`);
+    const html = await page.text();
+    assert(html.includes('"page":"tokens"') && html.includes('hawaii-trip'), 'page boot missing the list');
+    assert(!html.includes('their-doc'), 'another account\'s credential leaked into the page');
+  });
+
+  await t('a label resolves to its doc title only when the doc is yours', async () => {
+    const { env, mine, shared, other } = await seed();
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: shared.token, body: { slug: 'hawaii-trip', version: 1, html: '<h1>Hawaii 7 days</h1>', title: 'Hawaii 7 days' },
+    }), env, {});
+    assert(up.status === 200, `upload ${up.status}`);
+    const row = (await listOf(worker, env, mine.cookie)).find(x => x.label === 'hawaii-trip');
+    assert(row.doc && row.doc.slug === 'hawaii-trip' && row.doc.title, `doc not resolved: ${JSON.stringify(row)}`);
+    // A stranger whose credential label names Julie's slug must not learn its title.
+    await issue(worker, env, 'stranger', 'hawaii-trip');
+    const theirs = (await listOf(worker, env, other.cookie)).find(x => x.label === 'hawaii-trip');
+    assert(theirs && theirs.doc === null, `foreign title leaked: ${JSON.stringify(theirs)}`);
+  });
+
+  await t('a paired terminal is listed by the device and client it described', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const start = await worker.fetch(req('/api/cli/pair/start', {
+      method: 'POST', body: { label: 'x', device: 'shared-vm', client: 'Instinct' },
+    }), env, {});
+    const s0 = await start.json();
+    const { putSession } = require('./helpers/worker-harness');
+    const cookie = await putSession(env, 'owner');
+    const look = await worker.fetch(req('/api/cli/pair/lookup', {
+      method: 'POST', cookie, body: { user_code: s0.user_code }, headers: { Origin: 'https://tdoc.dev' },
+    }), env, {});
+    const l = await look.json();
+    assert(l.device === 'shared-vm' && l.client === 'Instinct', `approval page not told who is asking: ${JSON.stringify(l)}`);
+    const ap = await worker.fetch(req('/api/cli/pair/approve', {
+      method: 'POST', cookie, body: { user_code: s0.user_code }, headers: { Origin: 'https://tdoc.dev' },
+    }), env, {});
+    assert(ap.status === 200, `approve ${ap.status} ${await ap.text()}`);
+    const poll = await worker.fetch(req('/api/cli/pair/poll', {
+      method: 'POST', body: { user_code: s0.user_code, pair_secret: s0.pair_secret },
+    }), env, {});
+    const pd = await poll.json();
+    assert(pd.token, `poll ${JSON.stringify(pd)}`);
+    const row = (await listOf(worker, env, cookie))[0];
+    assert(row.device === 'shared-vm' && row.client === 'Instinct', `row ${JSON.stringify(row)}`);
+    assert(!row.last_used, 'unused token claims a last use');
+    await works(worker, env, pd.token);
+    const used = (await listOf(worker, env, cookie))[0];
+    assert(used.last_used, 'using the token did not stamp last_used');
   });
 
   await t('revoking one kills that credential and leaves the others working', async () => {
     const { env, mine, shared, other } = await seed();
     const id = await idOf(env, shared.token);
     const r = await worker.fetch(revokeReq(id, { cookie: mine.cookie }), env, {});
-    assert(r.status === 303, `status ${r.status}`);
+    assert(r.status === 200, `status ${r.status}`);
     assert(!(await works(worker, env, shared.token)), 'revoked token still publishes');
     assert(await works(worker, env, mine.token), 'sibling token was revoked too');
     assert(await works(worker, env, other.token), 'another account was affected');
@@ -73,8 +126,8 @@ async function works(worker, env, token) {
 
   await t('a credential cannot list or revoke its siblings', async () => {
     const { env, mine, shared } = await seed();
-    const list = await worker.fetch(req('/me/tokens', { token: shared.token }), env, {});
-    assert(list.status === 302 || list.status === 303, `bearer listing should bounce to sign-in, got ${list.status}`);
+    const list = await worker.fetch(req('/api/me/tokens', { token: shared.token }), env, {});
+    assert(list.status === 401, `bearer listing should be refused, got ${list.status}`);
     const id = await idOf(env, mine.token);
     const r = await worker.fetch(revokeReq(id, { token: shared.token }), env, {});
     assert(r.status === 401, `bearer revoke should be refused, got ${r.status}`);

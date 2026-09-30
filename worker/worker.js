@@ -2124,6 +2124,16 @@ function clientIp(req) {
 // terminal and agent the person has. These list what an account holds and
 // revoke exactly one. Browser session only: a token must not be able to
 // enumerate or revoke its siblings, and the person deciding is the human.
+// What a terminal says about itself when it pairs: its hostname and which
+// agent runtime is asking. Self-reported and therefore only a hint for the
+// person reading the list -- never an input to any access decision.
+function tokenClientInfo(body) {
+  const clean = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, n) : '');
+  const device = clean(body && body.device, 60);
+  const client = clean(body && body.client, 40);
+  return { ...(device ? { device } : {}), ...(client ? { client } : {}) };
+}
+
 async function accountTokenList(env, accountId) {
   const out = [];
   let cursor;
@@ -2137,10 +2147,27 @@ async function accountTokenList(env, accountId) {
         owner = owner || (rec && rec.account_id);
       }
       if (owner !== accountId || !rec) continue;
+      const label = typeof rec.label === 'string' ? rec.label : '';
+      // The label is the slug being published when the terminal paired.
+      // Show its title, but only for a doc this account owns -- a label is
+      // client-supplied, and must not become a way to read another
+      // account's titles.
+      let doc = null;
+      if (label && isValidSlug(label)) {
+        try {
+          const meta = await loadDocMeta(env, label);
+          if (meta && meta.hosted && meta.hosted.account_id === accountId) {
+            doc = { slug: label, title: meta.title || label };
+          }
+        } catch {}
+      }
       out.push({
         id: k.name.slice('hosted-token:'.length),
         created: typeof rec.created === 'string' ? rec.created : '',
-        label: typeof rec.label === 'string' ? rec.label : '',
+        last_used: typeof rec.last_used === 'string' ? rec.last_used : '',
+        label,
+        doc,
+        ...tokenClientInfo(rec),
       });
     }
     cursor = r.cursor;
@@ -2155,28 +2182,6 @@ async function tokenPageSession(env, req) {
   if (!sessionPrincipal(session) || session.feedback) return null;
   const accountId = await sessionAccountId(env, session);
   return accountId ? { session, accountId } : null;
-}
-
-function tokenPageHtml(tokens, notice) {
-  const nonce = rand(16);
-  const rows = tokens.map((t) => `<tr><td>${escapeHtml(t.created ? t.created.replace('T', ' ').slice(0, 16) + ' UTC' : 'unknown')}</td>`
-    + `<td>${escapeHtml(t.label || '—')}</td><td><code>${escapeHtml(t.id.slice(0, 8))}</code></td>`
-    + `<td><form method="post" action="/me/tokens/revoke"><input type="hidden" name="id" value="${escapeHtml(t.id)}">`
-    + `<button type="submit">Revoke</button></form></td></tr>`).join('');
-  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Connected terminals · tdoc</title>
-<style nonce="${nonce}">body{font:15px/1.5 system-ui,sans-serif;margin:40px auto;max-width:760px;padding:0 20px;color:#111}
-table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb}
-p.muted{color:#555}p.notice{background:#f0f5ff;padding:8px 12px;border-radius:8px}button{cursor:pointer}</style>
-</head><body><h1>Connected terminals</h1>
-<p class="muted">Each row is a credential a CLI or agent received when you approved it. Each one can publish, edit and delete any of your documents. Revoke any you do not recognise; that terminal will need your approval again to reconnect.</p>
-${notice ? `<p class="notice">${escapeHtml(notice)}</p>` : ''}
-${tokens.length ? `<table><thead><tr><th>Approved</th><th>First published</th><th>ID</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<p>No connected terminals.</p>'}
-<p><a href="/me">Back to My docs</a></p></body></html>`;
-  return html(body, { headers: {
-    'Content-Security-Policy': `default-src 'none'; style-src 'nonce-${nonce}'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
-    'Cache-Control': 'no-store',
-  } });
 }
 
 function sameOrigin(req, url) {
@@ -5241,6 +5246,7 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
   if (typeof body.label === 'string' && body.label.trim()) {
     record.label = body.label.trim().slice(0, 80);
   }
+  Object.assign(record, tokenClientInfo(body));
   // The account rides on the key's metadata as well as in the value. A list
   // returns metadata with the keys, so "which of these belong to this account"
   // can be answered from the listing alone -- without it, revoking an
@@ -5272,6 +5278,16 @@ async function hostedTokenActor(env, token) {
     if (raw) record = JSON.parse(raw);
   } catch {}
   if (!record || typeof record.account_id !== 'string' || !record.account_id) return null;
+  // "Last used", for the credentials list. At most one write an hour per
+  // token, so a busy CLI does not turn every request into a KV write.
+  const lastUsed = Date.parse(record.last_used || '') || 0;
+  if (Date.now() - lastUsed > 60 * 60 * 1000) {
+    try {
+      await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify({ ...record, last_used: new Date().toISOString() }), {
+        metadata: { account_id: record.account_id },
+      });
+    } catch {}
+  }
   const github_login = normalizeGithubLogin(record.github_login);
   return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash, github_login, email: normalizeEmail(record.email) };
 }
@@ -7307,24 +7323,41 @@ export default {
     if (p === '/me/tokens' && method === 'GET') {
       const who = await tokenPageSession(env, req);
       if (!who) return redirectTo(`/api/auth/oidc/login?return=${encodeURIComponent('/me/tokens')}`);
-      const tokens = await accountTokenList(env, who.accountId);
-      return tokenPageHtml(tokens, url.searchParams.get('revoked') === '1' ? 'Revoked. That terminal can no longer act on your account.' : '');
+      const nonce = rand(16);
+      const s = who.session;
+      return html(SHELL.appHtml({
+        title: 'Connected terminals · tdoc',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'tokens',
+          identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
+          tokens: await accountTokenList(env, who.accountId),
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store' } });
     }
-    if (p === '/me/tokens/revoke' && method === 'POST') {
-      // A form post from this page: the browser always sends Origin on a
-      // POST, so a missing one is not "same origin" here.
+    if (p === '/api/me/tokens' && method === 'GET') {
+      const who = await tokenPageSession(env, req);
+      if (!who) return json({ error: 'sign_in_required' }, { status: 401 });
+      return json({ ok: true, tokens: await accountTokenList(env, who.accountId) }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (p === '/api/me/tokens/revoke' && method === 'POST') {
+      // Browsers always send Origin on a POST, so a missing one is not
+      // "same origin" here.
       if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
       const who = await tokenPageSession(env, req);
       if (!who) return json({ error: 'sign_in_required' }, { status: 401 });
-      let id = '';
-      try { id = String((await req.formData()).get('id') || ''); } catch {}
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const id = String((body && body.id) || '');
       if (!/^[a-f0-9]{64}$/.test(id)) return json({ error: 'invalid_id' }, { status: 400 });
       const key = `hosted-token:${id}`;
       let rec = null;
       try { rec = JSON.parse(await env.META.get(key)); } catch {}
       if (!rec || rec.account_id !== who.accountId) return json({ error: 'not_found' }, { status: 404 });
       await env.META.delete(key);
-      return new Response(null, { status: 303, headers: { Location: '/me/tokens?revoked=1' } });
+      return json({ ok: true });
     }
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
@@ -8111,6 +8144,7 @@ export default {
         status: 'pending',
         strikes: 0,
         label,
+        ...tokenClientInfo(body),
         created: new Date().toISOString(),
       };
       await env.META.put(`pair:${user_code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS + 60 });
@@ -8153,7 +8187,7 @@ export default {
       // replayed poll (or a second reader of the code) collects nothing.
       await env.META.delete(`pair:${code}`);
       const approved = record.approved || {};
-      const issued = await issueHostedToken(env, { login: approved.login, label: record.label }, approved.email, approved.idp);
+      const issued = await issueHostedToken(env, { login: approved.login, label: record.label, device: record.device, client: record.client }, approved.email, approved.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       productEvent(env, 'token_minted', { auth_path: 'pair' });
       return json({
@@ -8184,7 +8218,7 @@ export default {
       if (!code || !record || record.status !== 'pending') {
         return json({ ok: false, error: 'unknown_code' }, { status: 404 });
       }
-      return json({ ok: true, label: record.label || '', created: record.created });
+      return json({ ok: true, label: record.label || '', created: record.created, ...tokenClientInfo(record) });
     }
 
     if (p === '/api/cli/pair/approve' && method === 'POST') {
