@@ -12,6 +12,7 @@ export const QUICK_REACTIONS = [
   '✅',
   '❌',
   '❓',
+  '💬',
   '❗',
   'LGTM',
 ];

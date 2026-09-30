@@ -3044,7 +3044,10 @@ async function profileData(env, account, { includePrivate = false } = {}) {
 
 // Agent verdict → emoji, rendered at fold time by snapshotAt (never stored as
 // a reaction event) so the ✅/🟡/❓ on a card is per-version like any status.
-const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
+// answered: the comment asked something and the reply answers it; nothing
+// in the doc needed to change. question is the reverse — the AGENT needs an
+// answer from a person before it can act.
+const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓', answered: '💬' };
 
 function isFiniteVersion(v) {
   return Number.isFinite(v) && v >= 0;
@@ -9587,7 +9590,7 @@ export default {
     // owner's machine has it, so this can't be spoofed by readers. Posts a
     // reply on the parent comment, attributed to the supplied agent identity
     // with `tdoc-agent` kept as the compatibility fallback.
-    // status values: 'applied', 'partial', 'question'. The status appears as
+    // status values: 'applied', 'partial', 'question', 'answered'. The status appears as
     // a visible badge on the reply and also flips the parent comment's
     // status to 'applied' / 'open' so the dashboard reflects it.
     if (p === '/api/agent/reply' && method === 'POST') {
@@ -9612,7 +9615,7 @@ export default {
       if (!thread) return json({ error: 'parent_not_found' }, { status: 404 });
       const parent = thread.root;
 
-      const verdict = ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null;
+      const verdict = Object.prototype.hasOwnProperty.call(AGENT_STATUS_EMOJI, agentStatus) ? agentStatus : null;
       const agent = agentIdentity(body, env);
       // Answering a comment is following the doc. This is the whole of the
       // "who gets the handoff" bookkeeping: nobody maintains a list, an agent
@@ -9643,7 +9646,7 @@ export default {
       }];
       if (verdict === 'applied') {
         events.push({ kind: 'marked_applied', at_version: V, at: now, applied_in: V, by: agent.login, agent_status: 'applied' });
-      } else if (verdict === 'partial' || verdict === 'question') {
+      } else if (verdict === 'partial' || verdict === 'question' || verdict === 'answered') {
         events.push({ kind: 'marked_open', at_version: V, at: now, by: agent.login, agent_status: verdict });
       }
       if (bind_anchor_aid && typeof bind_anchor_aid === 'string') {

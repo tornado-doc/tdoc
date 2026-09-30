@@ -88,8 +88,8 @@ t('the whole list still folds at the latest version (GET /api/comments path)', (
   assert(list[0].reactions['✅'], 'latest fold lost the verdict emoji');
 });
 
-t('partial and question verdicts fold too', () => {
-  for (const [status, emoji] of [['partial', '🟡'], ['question', '❓']]) {
+t('partial, question and answered verdicts fold too', () => {
+  for (const [status, emoji] of [['partial', '🟡'], ['question', '❓'], ['answered', '💬']]) {
     const c = appliedOnV2();
     c.events[1].agent_status = status;
     const snap = sandbox.snapshotAt(c, 2);

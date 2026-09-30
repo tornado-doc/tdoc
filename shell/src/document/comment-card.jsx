@@ -13,7 +13,7 @@ function latestAgentVerdict(comment) {
   const replies = comment?.replies || [];
   for (let i = replies.length - 1; i >= 0; i -= 1) {
     const status = replies[i]?.agent_status;
-    if (status === 'partial' || status === 'question' || status === 'applied') return status;
+    if (status === 'partial' || status === 'question' || status === 'applied' || status === 'answered') return status;
   }
   return null;
 }
@@ -57,7 +57,7 @@ function HandoffStatusChips({ comment }) {
         Waiting on agent{ago ? ` · ${ago}` : ''}
       </span>,
     );
-  } else if (surface === 'replied' && !verdict) {
+  } else if (surface === 'replied' && (!verdict || verdict === 'answered')) {
     // Positive cue when waiting clears — reply itself may be folded.
     chips.push(
       <span key="replied" className="tdoc-handoff-chip is-replied">
@@ -74,8 +74,14 @@ function HandoffStatusChips({ comment }) {
     );
   } else if (verdict === 'question') {
     chips.push(
-      <span key="question" className="tdoc-handoff-chip is-question">
-        Agent asked
+      <span key="question" className="tdoc-handoff-chip is-question" title="The agent needs your answer before it can continue">
+        Agent asked you
+      </span>,
+    );
+  } else if (verdict === 'answered' && surface !== 'replied') {
+    chips.push(
+      <span key="answered" className="tdoc-handoff-chip is-replied">
+        Agent answered
       </span>,
     );
   }

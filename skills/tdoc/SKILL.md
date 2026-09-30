@@ -478,14 +478,19 @@ silently is the #1 source of regression complaints.
    version stays as it is — do not re-edit untouched sections for voice, and
    keep whichever style the existing version already uses rather than
    restyling a doc the reader has been reading.
-3. For EACH open comment, decide one of three outcomes BEFORE writing:
+3. For EACH open comment, decide one of four outcomes BEFORE writing:
    - **applied** — the comment is clear and you can act on it.
    - **partial** — you applied part of it but couldn't fully address it
      (e.g. the user asked to "add a chart and explain compound interest";
      you added the chart but the explanation is shallow).
-   - **question** — you can't act without clarification (the comment is
-     ambiguous, contradicts another comment, or refers to content that
-     doesn't exist in the current doc).
+   - **question** — YOU need an answer from the person before you can act
+     (the comment is ambiguous, contradicts another comment, or refers to
+     content that doesn't exist in the current doc). Readers see "Agent asked
+     you", so use it only when your reply ends in a question to them.
+   - **answered** — the comment itself was a question ("what does this
+     mean?", "why is X so high?") and your reply answers it; nothing in the
+     doc needed to change. Not `question` — that label says you are waiting
+     on them.
 4. Regenerate the full HTML to a temp file, incorporating every `applied` and
    `partial` comment. A comment's anchor has:
    - `anchor.text` — the exact text the user highlighted (may span across
@@ -552,11 +557,13 @@ silently is the #1 source of regression complaints.
      basic — want me to flesh it out?"
    - question: "Two of your comments asked for different tones — formal in
      the intro and casual in section II. Which should I prioritize?"
+   - answered: "The three numbers are day 0 / 1 / 2 new users against their
+     7-day average, so −20% means a quieter day than usual."
 
 7. Update `comments.json`: set `status: "applied"` (or leave `"open"` for
-   partial/question) and `applied_in: n+1`. The agent-reply endpoint
+   partial/question/answered) and `applied_in: n+1`. The agent-reply endpoint
    already flips the status server-side AND drops a status emoji on the
-   parent comment (✅ applied, 🟡 partial, ❓ question), clearing any
+   parent comment (✅ applied, 🟡 partial, ❓ question, 💬 answered), clearing any
    previous agent emoji first. You don't need to send a separate reaction
    request — the reply endpoint does it. Users see the verdict at a
    glance from the comment cards without expanding replies.

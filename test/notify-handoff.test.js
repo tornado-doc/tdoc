@@ -591,6 +591,20 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       `replying did not claim the seat: ${JSON.stringify(r.default)}`);
   });
 
+  await t('an "answered" reply is stored as answered and leaves the comment open', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    await worker.fetch(req('/api/upload', { method: 'POST', token: tok.token, body: { slug: 'ans', version: 1, html: '<h1>d</h1><p>numbers here</p>' } }), env, {});
+    const reader = await putSession(env, 'reader');
+    const c = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: reader, body: { slug: 'ans', version: 1, text: 'what does -20% mean?', anchor: { kind: 'text', text: 'numbers' } } }), env, {})).json();
+    const r = await worker.fetch(req('/api/agent/reply', { method: 'POST', token: tok.token, body: { slug: 'ans', parent_id: c.id, text: 'It is vs the 7-day average.', status: 'answered' } }), env, {});
+    const b = await r.json();
+    assert(r.status === 200 && b.agent_status === 'answered', `reply: ${r.status} ${JSON.stringify(b)}`);
+    const list = await (await worker.fetch(req('/api/comments?slug=ans&version=1', { cookie: reader }), env, {})).json();
+    assert(list[0].status !== 'applied', 'answered must not resolve the comment');
+    assert(list[0].reactions && list[0].reactions['💬'], `no 💬 on the comment: ${JSON.stringify(list[0].reactions)}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

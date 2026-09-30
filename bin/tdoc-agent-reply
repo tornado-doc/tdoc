@@ -6,7 +6,7 @@
 #
 # Usage:
 #   tdoc-agent-reply --slug <slug> --parent <id> --text "..." \
-#     [--status applied|partial|question] [--applied-in N] \
+#     [--status applied|partial|question|answered] [--applied-in N] \
 #     [--login grok] [--name Grok] [--avatar-url https://...] [--force]
 #   tdoc-agent-reply --print-identity   # login/name JSON, no network
 #
