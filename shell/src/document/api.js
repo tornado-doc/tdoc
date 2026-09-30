@@ -1,8 +1,21 @@
+// Where requests go. On a tdoc page: this origin, with the cookie. The
+// feedback overlay runs inside someone else's app, so it points the same
+// calls at the tdoc host with its feedback token instead — that is what lets
+// it reuse panels written for the doc page (Send to agent) unchanged.
+let transport = null;
+export function setApiTransport(next) { transport = next || null; }
+
 async function request(path, options) {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...options,
-  });
+  const response = transport
+    ? await fetch(`${transport.base}${path}`, {
+      credentials: 'omit',
+      ...options,
+      headers: { ...((options && options.headers) || {}), ...transport.headers() },
+    })
+    : await fetch(path, {
+      credentials: 'same-origin',
+      ...options,
+    });
 
   const body = await response.json().catch(() => null);
   if (!response.ok) {
