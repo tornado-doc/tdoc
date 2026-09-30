@@ -510,6 +510,87 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 401, `a reader acked somebody else's handoff (${r.status})`);
   });
 
+  // ---- self-reported agent identity -------------------------------------
+  // The CLI cannot carry the tdoc_agent_sid cookie (it holds only an upload
+  // token), so no CLI publish or reply could ever claim a doc's follow-up seat:
+  // every handoff fell to the account default. An agent may now SAY which Raft
+  // agent it is. The claim is honoured only for an agent already LINKED to this
+  // account -- linking needs the token AND a Raft-verified identity -- and the
+  // seat it earns only chooses who is pinged; it never grants access.
+  const LINKED = { provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', server_slug: 'julie', agent_name: 'xiaocc' };
+  async function seedLinked(slug = 'self-report-doc') {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    await env.META.put(`account-notify:${tok.account_id}`, JSON.stringify([LINKED]));
+    return { env, tok, slug };
+  }
+  const publishAs = (env, tok, slug, claim, version = 1) => worker.fetch(req('/api/upload', {
+    method: 'POST', token: tok.token,
+    headers: claim === null ? {} : { 'X-Tdoc-Raft-Agent': claim },
+    body: { slug, version, html: '<h1>doc</h1><p>a sentence to comment on</p>' },
+  }), env, {});
+  const targetsOf = async (env, tok, slug) =>
+    (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token: tok.token }), env, {})).json();
+
+  await t('a linked agent that says who it is claims the doc it publishes', async () => {
+    const { env, tok, slug } = await seedLinked();
+    const up = await publishAs(env, tok, slug, 'S1/uuid-a');
+    assert(up.status === 200, `upload ${up.status}`);
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default && r.default.source === 'doc', `expected the doc seat, got ${JSON.stringify(r.default)}`);
+    assert(r.default.agent_name === 'xiaocc', `expected the linked agent, got ${r.default.agent_name}`);
+  });
+
+  await t('an agent that is not linked to the account is ignored, and the account default stands', async () => {
+    const { env, tok, slug } = await seedLinked();
+    await publishAs(env, tok, slug, 'S1/uuid-stranger');
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default && r.default.source === 'account',
+      `an unlinked claim took the seat: ${JSON.stringify(r.default)} -- a leaked token could route comments to a stranger`);
+  });
+
+  await t('the same agent on another Raft server does not match', async () => {
+    const { env, tok, slug } = await seedLinked();
+    await publishAs(env, tok, slug, 'S2/uuid-a');
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default.source === 'account', `matched on agent id alone: ${JSON.stringify(r.default)}`);
+  });
+
+  await t('a malformed claim is ignored rather than trusted', async () => {
+    const { env, tok, slug } = await seedLinked();
+    await publishAs(env, tok, slug, 'S1/uuid-a/extra; drop');
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default.source === 'account', `a malformed header was honoured: ${JSON.stringify(r.default)}`);
+  });
+
+  await t('no claim at all changes nothing -- the old behaviour holds', async () => {
+    const { env, tok, slug } = await seedLinked();
+    await publishAs(env, tok, slug, null);
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default.source === 'account', `expected the account default, got ${JSON.stringify(r.default)}`);
+  });
+
+  await t('answering a comment claims the seat the same way publishing does', async () => {
+    const { env, tok, slug } = await seedLinked('self-report-reply');
+    await publishAs(env, tok, slug, null);
+    const reader = await putSession(env, 'reader');
+    const posted = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: reader,
+      body: { slug, version: 1, text: 'why?', anchor: { kind: 'text', text: 'a sentence' } },
+    }), env, {});
+    const comment = await posted.json();
+    const r0 = await targetsOf(env, tok, slug);
+    assert(r0.default.source === 'account', 'precondition: nobody holds the seat yet');
+    const replied = await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token: tok.token, headers: { 'X-Tdoc-Raft-Agent': 'S1/uuid-a' },
+      body: { slug, parent_id: comment.id, text: 'because' },
+    }), env, {});
+    assert(replied.status === 200, `reply ${replied.status}`);
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default.source === 'doc' && r.default.agent_name === 'xiaocc',
+      `replying did not claim the seat: ${JSON.stringify(r.default)}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

@@ -99,6 +99,14 @@ PAYLOAD="$(node -e '
   process.stdout.write(JSON.stringify(o));
 ' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR" "$FORCE")"
 
+# Which Raft agent this is. The Raft runtime exposes both ids; the server honours
+# the claim only for an agent already linked to this account (actingAgent in the
+# worker), and uses it solely to decide who is pinged about this doc next.
+RAFT_AGENT_HDR=()
+if [ -n "${SLOCK_CURRENT_SERVER_ID:-}" ] && [ -n "${SLOCK_CURRENT_AGENT_ID:-}" ]; then
+  RAFT_AGENT_HDR=(-H "X-Tdoc-Raft-Agent: ${SLOCK_CURRENT_SERVER_ID}/${SLOCK_CURRENT_AGENT_ID}")
+fi
+
 # Post the reply and gate on the outcome.
 #
 # Two things have to be checked or a rejected reply is indistinguishable from a
@@ -110,7 +118,7 @@ post_reply() {
   local resp http body
   if [ -n "$tok" ]; then
     resp="$(curl -sS --max-time 20 -w $'\n%{http_code}' \
-      -X POST "$url" -H "Authorization: Bearer $tok" \
+      -X POST "$url" -H "Authorization: Bearer $tok" ${RAFT_AGENT_HDR[@]+"${RAFT_AGENT_HDR[@]}"} \
       -H "Content-Type: application/json" -d "$PAYLOAD" 2>&1)" || {
         echo "[tdoc] agent reply NOT posted: network error calling $url" >&2; return 1; }
   else
