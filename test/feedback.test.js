@@ -182,12 +182,21 @@ const APP = 'http://localhost:3000';
     const env = makeEnv(mod.CommentsStore);
     const julie = await putSession(env, 'julie');
     const { body: space } = await connect(env, julie);
-    assert(space.invite_url === `https://tdoc.dev/feedback/join/${space.slug}`, `invite_url ${space.invite_url}`);
+    assert(space.invite_url === `https://tdoc.dev/d/${space.slug}`, `invite_url ${space.invite_url}`);
     assert(space.origin === APP, `origin ${space.origin}`);
     const can = await putSession(env, 'can');
-    const page = await worker.fetch(req(`/feedback/join/${space.slug}`, { cookie: can }), env, {});
+    // One link: the space's own page lists the comments and offers Join.
+    const page = await worker.fetch(req(`/d/${space.slug}/v/1`, { cookie: can }), env, {});
     const html = await page.text();
-    assert(page.status === 200 && html.includes('id="join"') && html.includes('localhost:3000'), 'join page does not offer Join');
+    assert(page.status === 200 && html.includes('"page":"feedback-space"'), `space page: ${page.status}`);
+    assert(html.includes('"joined":false') && html.includes('"isOwner":false'), 'invitee should be offered Join');
+    const own = await (await worker.fetch(req(`/d/${space.slug}/v/1`, { cookie: julie }), env, {})).text();
+    assert(own.includes('"isOwner":true') && own.includes('"joined":true'), 'owner page flags');
+    const asDoc = await (await worker.fetch(req(`/d/${space.slug}/v/1?doc=1`, { cookie: julie }), env, {})).text();
+    assert(!asDoc.includes('"page":"feedback-space"'), '?doc=1 should open the underlying doc');
+    // Links sent before the change still arrive.
+    const legacy = await worker.fetch(req(`/feedback/join/${space.slug}`, { cookie: can }), env, {});
+    assert(legacy.status === 302 && (legacy.headers.get('Location') || '').endsWith(`/d/${space.slug}`), `legacy join: ${legacy.status} ${legacy.headers.get('Location')}`);
     const joined = await worker.fetch(joinReq(can, space.slug), env, {});
     assert(joined.status === 200, `join ${joined.status} ${await joined.text()}`);
     const { body: theirs } = await connect(env, can);
