@@ -9,6 +9,7 @@ import {
   Moon,
   MoreHorizontal,
   Sun,
+  TerminalSquare,
   UserRound,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from './ui/menu.jsx';
@@ -151,6 +152,9 @@ export function TopBar({
                     <UserRound size={15} /> {publicProfileLabel}
                   </AppMenuItem>
                 ) : null}
+                <AppMenuItem className="tdoc-action-menu-item" onClick={() => { location.href = '/me/tokens'; }}>
+                  <TerminalSquare size={15} /> Connected terminals
+                </AppMenuItem>
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
                 </AppMenuItem>
@@ -185,6 +189,7 @@ export function TopBar({
             {activeProfile || onClaimProfile ? (
               <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
             ) : null}
+            <AppMenuItem onClick={() => { location.href = '/me/tokens'; }}>Connected terminals</AppMenuItem>
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
             {onSwitchAccount ? <AppMenuItem onClick={onSwitchAccount}>Switch account</AppMenuItem> : null}
           </AppMenu>

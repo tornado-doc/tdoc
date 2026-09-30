@@ -58,7 +58,7 @@ export function ActivatePage({ boot, preview = null }) {
     const { status, data } = await post('/api/cli/pair/lookup', { user_code: code });
     setBusy(false);
     if (status === 200 && data && data.ok) {
-      setPending({ label: data.label });
+      setPending({ label: data.label, device: data.device || '', client: data.client || '' });
     } else if (status === 429) {
       setError('Too many tries. Wait a minute, then try again.');
     } else {
@@ -180,6 +180,14 @@ export function ActivatePage({ boot, preview = null }) {
             Signed in as <b>{identity.email || identity.name || identity.login}</b>.
           </p>
           <div className="tdoc-activate-codeshow">{code}</div>
+          {/* Who is asking, as the terminal describes itself. Approving hands
+              that machine full access to this account -- if the name is not
+              one you know, this is the moment to stop. */}
+          {pending.device || pending.client ? (
+            <p className="tdoc-activate-grant">
+              Requested by <b>{[pending.device, pending.client].filter(Boolean).join(' · ')}</b>.
+            </p>
+          ) : null}
           <button type="button" className="primary" disabled={busy} onClick={approve}>
             Approve Device Login
           </button>
