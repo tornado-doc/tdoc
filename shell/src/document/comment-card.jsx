@@ -594,9 +594,14 @@ function ProductWhere({ anchor }) {
   try { const u = new URL(anchor.url); path = `${u.host}${u.pathname}${u.search}`; } catch (_) {}
   const text = String(anchor.text || '').trim();
   const what = anchor.accessible_name || (text ? `${anchor.tag || 'element'} “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”` : anchor.tag || '');
+  const st = anchor.state || {};
+  const inState = [
+    st.dialog ? `in dialog “${st.dialog}”` : (st.layer ? `in “${st.layer}”` : ''),
+    st.tabs && st.tabs.length ? `tab ${st.tabs.join(' › ')}` : '',
+  ].filter(Boolean).join(' · ');
   return (
     <a className="tdoc-product-where" href={anchor.url} target="_blank" rel="noopener noreferrer" title={anchor.url}>
-      {path}{what ? ` · ${what}` : ''}
+      {path}{inState ? ` · ${inState}` : ''}{what ? ` · ${what}` : ''}
     </a>
   );
 }
