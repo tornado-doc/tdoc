@@ -253,9 +253,13 @@ ${uiCss}
     return connect();
   }
 
+  // A page's key. The hash is dropped — except a hash route (#/creators),
+  // which is how single-page apps name their pages: dropping it filed every
+  // tab of a dashboard under one page, and comments left on another tab
+  // read as lost. "#/" alone is the home route, same as no hash.
   const canonical = () => {
     const url = new URL(location.href);
-    url.hash = '';
+    if (!/^#!?\/./.test(url.hash)) url.hash = '';
     return url.href;
   };
   const cssEscape = (value) => window.CSS?.escape
@@ -331,9 +335,37 @@ ${uiCss}
     };
   }
 
+  // Finding a comment's element again. The selector is positional
+  // (nth-of-type), so a regenerated page — a dashboard rebuilt with one more
+  // card — can point it at a different element. In order of trust:
+  //   1. the selector's element, still showing the text it showed then;
+  //   2. any element of that tag showing that text (it moved);
+  //   3. the selector's element if it is still the same kind of element —
+  //      the text changed in place (a number updated), the spot did not.
+  const norm = (value) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+  const shownText = (el) => norm(el.innerText || el.textContent);
+  const found = new Map();
   function elementFor(comment) {
-    try { return document.querySelector(comment?.anchor?.selector || ''); }
-    catch (_) { return null; }
+    const anchor = comment && comment.anchor;
+    if (!anchor) return null;
+    const want = norm(anchor.text);
+    const cached = found.get(comment.id);
+    if (cached && cached.isConnected) return cached;
+    let bySelector = null;
+    try { bySelector = anchor.selector ? document.querySelector(anchor.selector) : null; } catch (_) { bySelector = null; }
+    let el = null;
+    if (bySelector && (!want || shownText(bySelector) === want)) el = bySelector;
+    if (!el && want) {
+      let candidates = [];
+      try { candidates = document.querySelectorAll(anchor.tag || '*'); } catch (_) { candidates = []; }
+      for (const node of candidates) {
+        if (node.closest('#tdoc-feedback-root')) continue;
+        if (shownText(node) === want) el = node; // keep the last (deepest) match
+      }
+    }
+    if (!el && bySelector && (!anchor.tag || bySelector.localName === anchor.tag)) el = bySelector;
+    if (el) found.set(comment.id, el); else found.delete(comment.id);
+    return el;
   }
 
   async function loadSurface(session, pageUrl) {
@@ -759,6 +791,16 @@ ${uiCss}
       return () => document.removeEventListener('keydown', keydown, true);
     }, [surface, load]);
 
+    // Hash-route navigation is a new page: reload which comments are here.
+    useEffect(() => {
+      if (!shown) return undefined;
+      let last = canonical();
+      const onNav = () => { const now = canonical(); if (now !== last) { last = now; load(); } };
+      window.addEventListener('hashchange', onNav);
+      window.addEventListener('popstate', onNav);
+      return () => { window.removeEventListener('hashchange', onNav); window.removeEventListener('popstate', onNav); };
+    }, [shown, load]);
+
     // Modals, tabs and client-side routing change the page without a scroll
     // or resize. Watch the DOM (not our own overlay) and re-place the pins.
     useEffect(() => {
@@ -820,7 +862,13 @@ ${uiCss}
       return { top: Math.max(12, rect.top), left };
     };
     const openFromList = (c, local) => {
-      if (!local) { location.href = c.anchor.url; return; }
+      if (!local) {
+        // Another route of this same app: switch to it and open the card
+        // once the comments for that page are loaded.
+        location.href = c.anchor.url;
+        setTimeout(() => setOpenId(c.id), 600);
+        return;
+      }
       const el = elementFor(c);
       if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       else if (stateLabel(c.anchor)) say(`Left ${stateLabel(c.anchor)} — open it to see the comment in place.`);
