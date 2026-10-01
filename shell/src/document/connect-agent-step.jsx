@@ -4,6 +4,8 @@ import './connect-agent-step.css';
 import { getOnboarding, postOnboardingEvent } from './api.js';
 import { copyText } from './model.js';
 import { CONNECT_AGENT_PROMPT } from './notify-handoff.jsx';
+import { TutorialStepRow } from './step-hint.jsx';
+import { selectContents } from '../onboarding-copy.js';
 
 // The tutorial ends on its revised document. This optional account connection
 // enables outbound comments; a publishing terminal alone does not prove it.
@@ -59,40 +61,34 @@ export function ConnectAgentStep({ record, onFinished, preview }) {
   const copy = async () => {
     const ok = await copyText(CONNECT_AGENT_PROMPT);
     setCopied(ok);
-    if (!ok) { promptRef.current?.focus(); promptRef.current?.select(); }
+    if (!ok) { promptRef.current?.focus(); selectContents(promptRef.current); }
   };
 
   if (hidden) return null;
   return (
-    <section className="sh-hint tdoc-tutorial-agent" aria-label="Connect your Raft agent (optional)">
-      <div className="sh-inner tdoc-tutorial-agent-inner">
-      <header>
-        <div>
-          <p className="tdoc-tutorial-agent-stage">Final step · Optional</p>
-          <h2>{connected ? 'Raft agent connected' : 'Connect your Raft agent'}</h2>
-          <p>{connected
-            ? 'Use Send to agent on your doc to send comments to Raft.'
-            : 'Send comments to Raft without copying them into a chat.'}</p>
-        </div>
-        {connected ? <Check size={18} aria-label="Connected" /> : null}
-      </header>
+    <section className="tdoc-tutorial-agent" aria-label="Step 5: Connect Raft (optional)">
+      <div className="sh-hint">
+        <TutorialStepRow number={5} optional label={connected ? 'Raft connected' : 'Connect Raft'}
+          marker={connected ? <span className="sh-tick" aria-label="Connected"><Check size={13} strokeWidth={3.5} /></span> : null}>
+          {connected
+            ? <button type="button" className="sh-go" aria-label="Finish tutorial" onClick={() => { setHidden(true); onFinished?.(); }}>Finish</button>
+            : <>
+              <button type="button" className="sh-go" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? 'Hide' : 'Show me'}</button>
+              <button type="button" className="sh-x sh-skip" aria-label="Skip for now" disabled={busy} onClick={skip}>{busy ? 'Saving…' : 'Skip'}</button>
+            </>}
+        </TutorialStepRow>
+      </div>
       {expanded && !connected ? (
-        <div className="tdoc-tutorial-agent-setup">
-          <label htmlFor="notify-agent-prompt">Paste this into your Raft agent</label>
-          <textarea id="notify-agent-prompt" ref={promptRef} readOnly value={CONNECT_AGENT_PROMPT} rows={3} />
-          <div className="tdoc-tutorial-agent-actions">
-            <button className="sh-go" type="button" onClick={copy}>{copied ? 'Copied' : 'Copy prompt'}</button>
-            <span className="loc-hint" role="status">Waiting for your agent to connect…</span>
+        <div className="tdoc-tutorial-agent-details">
+          <p>Paste this into your Raft agent to send comments directly from tdoc.</p>
+          <div className="tdoc-handoff-line">
+            <code ref={promptRef} tabIndex={0}>{CONNECT_AGENT_PROMPT}</code>
+            <button className="tdoc-handoff-copy" type="button" onClick={copy}>{copied ? 'Copied' : 'Copy prompt'}</button>
           </div>
+          <p role="status">Waiting for your agent to connect…</p>
         </div>
       ) : null}
-      {error ? <p role="alert">{error}</p> : null}
-      <div className="tdoc-tutorial-agent-actions">
-        {connected
-          ? <button type="button" className="sh-go" onClick={() => { setHidden(true); onFinished?.(); }}>Finish tutorial</button>
-          : <>{!expanded ? <button type="button" className="sh-go" onClick={() => setExpanded(true)}>Connect agent</button> : null}<button type="button" className="sh-go" disabled={busy} onClick={skip}>{busy ? 'Saving…' : 'Skip for now'}</button></>}
-      </div>
-      </div>
+      {error ? <p className="tdoc-tutorial-agent-details" role="alert">{error}</p> : null}
     </section>
   );
 }

@@ -190,7 +190,7 @@ export function OnboardingChecklist({ record, docs }) {
       <header>
         <div>
           <h2>Finish setting up</h2>
-          <p>{done} of {steps.length}</p>
+          <p>{done} of {steps.length} required steps</p>
         </div>
         <div className="onb-acts">
           <button

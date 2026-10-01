@@ -81,6 +81,15 @@ const TICK_MS = 2400;
 // step-hint.css moves every card on the page by the difference.
 export const STEP_HINT_HEIGHT = 68;
 
+// One visual row for every document tutorial step, including the optional fifth.
+export function TutorialStepRow({ number, marker, label, optional = false, children }) {
+  return <div className="sh-inner">
+    {marker || <span className="sh-step" aria-hidden="true">{number}</span>}
+    <span className="sh-text">{label}{optional ? <span className="sh-optional">Optional</span> : null}</span>
+    {children}
+  </div>;
+}
+
 export function DocStepHint({ step, agentState = 'idle', banner = false, justFinished = false, hidden: covered = false, onGo, onVisible }) {
   const [gone, setGone] = useState(hidden);
   // A row that is finished while somebody is looking at the page ticks where
@@ -136,15 +145,12 @@ export function DocStepHint({ step, agentState = 'idle', banner = false, justFin
       aria-live={still ? 'polite' : undefined}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="sh-inner">
-        {ticking ? (
-          <span className="sh-tick" aria-hidden="true"><Check size={13} strokeWidth={3.5} /></span>
-        ) : watching ? (
-          <span className="tdoc-wait-dot" aria-hidden="true" />
-        ) : (
-          <span className="sh-step" aria-hidden="true">{STEP_NO[shown]}</span>
-        )}
-        <span className="sh-text">{ticking ? DONE_LINES[finished] : LINES[key]}</span>
+      <TutorialStepRow
+        number={STEP_NO[shown]}
+        marker={ticking ? <span className="sh-tick" aria-hidden="true"><Check size={13} strokeWidth={3.5} /></span>
+          : watching ? <span className="tdoc-wait-dot" aria-hidden="true" /> : null}
+        label={ticking ? DONE_LINES[finished] : LINES[key]}
+      >
         {still ? null : (
           <>
             {/* Only when there is somewhere to go. This row opens the card that
@@ -162,7 +168,7 @@ export function DocStepHint({ step, agentState = 'idle', banner = false, justFin
             </button>
           </>
         )}
-      </div>
+      </TutorialStepRow>
     </div>
   );
 }

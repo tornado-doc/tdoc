@@ -1,10 +1,8 @@
-.tdoc-tutorial-agent .tdoc-tutorial-agent-inner { display: block; height: auto; padding: 14px; }
-.tdoc-tutorial-agent header { display: flex; justify-content: space-between; gap: 12px; }
-.tdoc-tutorial-agent h2 { margin: 0; font-size: 15px; line-height: 1.4; }
-.tdoc-tutorial-agent p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
-.tdoc-tutorial-agent .tdoc-tutorial-agent-stage { margin: 0 0 4px; color: var(--td-muted, #6b6a66); font-size: 12.5px; }
-.tdoc-tutorial-agent-setup { margin-top: 12px; }
-.tdoc-tutorial-agent-setup label { display: block; font-size: 13px; margin-bottom: 8px; }
-.tdoc-tutorial-agent-setup textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 10px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px; font: inherit; font-size: 13px; line-height: 1.5; color: inherit; background: var(--td-bg, #fff); }
-.tdoc-tutorial-agent-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
-.tdoc-tutorial-agent-actions .loc-hint { font-size: 13px; }
+.sh-optional { margin-left: 8px; font-size: 12.5px; font-weight: 400; color: var(--td-muted, #6b6a66); }
+.sh-x.sh-skip { width: auto; padding: 0 6px; font: 500 13px system-ui; }
+.tdoc-tutorial-agent-details { box-sizing: border-box; width: calc(100% - 40px); max-width: 720px; margin: 0 auto 12px; padding: 0 14px; }
+.tdoc-tutorial-agent-details p { margin: 8px 0; font: 13px/1.5 system-ui; color: var(--td-muted, #6b6a66); }
+.tdoc-tutorial-agent-details .tdoc-handoff-line { flex-wrap: wrap; }
+.tdoc-tutorial-agent-details .tdoc-handoff-line code { flex-basis: 220px; }
+@media (max-width: 720px) { .tdoc-tutorial-agent-details { width: calc(100% - 20px); padding: 0 12px; } }
+@media (max-width: 360px) { .tdoc-tutorial-agent .sh-optional { display: block; margin-left: 0; } }

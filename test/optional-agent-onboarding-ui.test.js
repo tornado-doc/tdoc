@@ -10,7 +10,7 @@ const engines = requirePlaywrightOrSkip('optional-agent-onboarding-ui.test.js');
     for (const name of ['chromium', 'webkit']) {
       const browser = await engines[name].launch();
       try {
-        for (const width of [1280, 390]) {
+        for (const width of [1280, 390, 320]) {
           const page = await browser.newPage({ viewport: { width, height: 900 } });
           let connected = false, skipped = false, failSkip = false;
           let revised = true, shared = false, firstDoc = 'sample-doc';
@@ -32,13 +32,17 @@ const engines = requirePlaywrightOrSkip('optional-agent-onboarding-ui.test.js');
             return route.fulfill({ json: { ok: true, record: { notify_setup_skipped: 'now' } } });
           });
           await page.goto(`${base}/me`);
-          assert.equal(await page.getByRole('region', { name: 'Connect your Raft agent (optional)' }).count(), 0, 'not on My docs');
+          assert.equal(await page.getByRole('region', { name: 'Step 5: Connect Raft (optional)' }).count(), 0, 'not on My docs');
           await page.goto(target.url);
-          const card = page.getByRole('region', { name: 'Connect your Raft agent (optional)' });
+          const card = page.getByRole('region', { name: 'Step 5: Connect Raft (optional)' });
           await card.waitFor();
-          await card.getByText('Final step · Optional').waitFor();
+          await card.getByText('Optional', { exact: true }).waitFor();
+          assert.equal(await card.locator('.sh-step').innerText(), '5', 'fifth step uses the same numbered tutorial row');
+          const optionalBox = await card.locator('.sh-optional').boundingBox();
+          const labelBox = await card.locator('.sh-text').boundingBox();
+          assert(optionalBox.x + optionalBox.width <= labelBox.x + labelBox.width + 1, 'Optional stays readable on narrow screens');
           assert.equal(await page.getByRole('dialog').count(), 0, 'final tutorial step is inline');
-          await card.getByRole('button', { name: 'Connect agent', exact: true }).click();
+          await card.getByRole('button', { name: 'Show me', exact: true }).click();
           await card.getByRole('button', { name: 'Copy prompt' }).click();
           assert.equal(await card.getByText('Raft agent connected', { exact: true }).count(), 0, 'copy is not connection');
           assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no mobile horizontal overflow');
@@ -46,7 +50,7 @@ const engines = requirePlaywrightOrSkip('optional-agent-onboarding-ui.test.js');
           const frameBox = await page.locator('iframe[aria-label="Document content"]').boundingBox();
           assert(frameBox.y >= stepBox.y + stepBox.height - 1, 'expanded final step stays above the document');
           connected = true;
-          await card.getByRole('heading', { name: 'Raft agent connected' }).waitFor();
+          await card.getByText('Raft connected', { exact: false }).waitFor();
           assert.deepEqual(mutations, [], 'connection does not send comments or forge completion');
           await card.getByRole('button', { name: 'Finish tutorial' }).click();
           await card.waitFor({ state: 'hidden' });
