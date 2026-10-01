@@ -5,18 +5,20 @@ import { SignInDialog } from './sign-in-dialog.jsx';
 import { StatusPage } from './status-page.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { DocStepHint } from './document/step-hint.jsx';
+import { ConnectAgentStep } from './document/connect-agent-step.jsx';
 import { CommentCard } from './document/comment-card.jsx';
 import './docs-hub.css';
 import './onboarding-preview.css';
 
 const identity = { name: 'Alex Morgan', email: 'alex.morgan@example.com' };
-const states = ['Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Optional agent connection', 'Optional agent connected', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
+const states = ['Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared', 'Tutorial Raft connected'];
 
 function TutorialPreview({ state }) {
   const [agentState, setAgentState] = useState(state.replace('Tutorial ', ''));
   const [open, setOpen] = useState(true);
   const [shared, setShared] = useState(state === 'Tutorial shared');
-  const done = ['Tutorial complete', 'Tutorial shared'].includes(state);
+  const done = ['Tutorial complete', 'Tutorial shared', 'Tutorial Raft connected'].includes(state);
+  const [finalDone, setFinalDone] = useState(false);
   const comment = { id: 'preview-comment', text: 'Make this introduction more concise.', author: { login: 'alex', name: 'Alex Morgan' }, replies: [], status: done ? 'applied' : 'open', applied_version: 2 };
   const noop = () => {};
   return <div className="op-tutorial">
@@ -24,6 +26,7 @@ function TutorialPreview({ state }) {
       <span>{shared ? 'Link copied.' : 'Answered 1 comment in v2. Share it.'}</span>
       {shared ? <a href="/me">My docs</a> : <button onClick={() => setShared(true)}>Copy link</button>}
     </div> : <DocStepHint step={state === 'Tutorial comment' ? 'comment' : 'handoff'} agentState={['waiting', 'reading', 'stuck'].includes(agentState) ? agentState : 'idle'} onGo={noop} />}
+    {done && !finalDone ? <ConnectAgentStep record={{ revised: true }} onFinished={() => setFinalDone(true)} preview={{ connected: state === 'Tutorial Raft connected' }} /> : null}
     <div className="op-tutorial-card"><CommentCard comment={comment} currentUser="alex" onReply={noop} onReact={noop} onDelete={noop} onResolve={noop} onEdit={noop}
       handoff={state === 'Tutorial comment' || done ? null : {threadId:comment.id, open, line:'Read https://tdoc.dev/d/my-first-tdoc and fix the comments.', state:['waiting','reading','stuck'].includes(agentState) ? agentState : 'idle', onCopy:()=>setAgentState('waiting'), onToggle:()=>setOpen(value=>!value)}} />
     </div>
@@ -34,15 +37,15 @@ function TutorialPreview({ state }) {
 // This gallery is served only by the PR preview Worker, never production.
 export default function OnboardingPreview() {
   const [state, setState] = useState(() => {
-    const screen = new URLSearchParams(location.search).get('screen');
+    let screen = new URLSearchParams(location.search).get('screen');
+    if (screen === 'Optional agent connection') screen = 'Tutorial complete';
+    if (screen === 'Optional agent connected') screen = 'Tutorial Raft connected';
     return states.includes(screen) ? screen : 'Approved';
   });
   const [dialogOpen, setDialogOpen] = useState(true);
   const [notice, setNotice] = useState('');
   let screen;
-  if (state.startsWith('Optional agent')) {
-    screen = <div className="docs-hub op-checklist"><OnboardingChecklist key={state} record={{ started: true, agent_connected: true, first_doc: 'my-first-tdoc', commented: true, revised: true }} docs={[{ slug: 'my-first-tdoc', title: 'My first tdoc' }]} preview={{ connected: state === 'Optional agent connected' }} /></div>;
-  } else if (state.startsWith('Tutorial ')) {
+  if (state.startsWith('Tutorial ')) {
     screen = <TutorialPreview key={state} state={state} />;
   } else if (state === 'Sign-in complete' || state === 'Sign-in error') {
     screen = <StatusPage boot={state === 'Sign-in complete' ? { title: 'Signed in', message: 'Your account is connected. You can return to your agent.', actions: [{ label: 'Go to my docs', href: '/me', primary: true }] } : { title: 'Sign-in expired', message: 'This sign-in request has expired. Start again from your agent.', error: true, actions: [{ label: 'Return to tdoc', href: '/', primary: true }] }} />;

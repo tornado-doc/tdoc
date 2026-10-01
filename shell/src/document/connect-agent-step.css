@@ -1,0 +1,10 @@
+.tdoc-tutorial-agent .tdoc-tutorial-agent-inner { display: block; height: auto; padding: 14px; }
+.tdoc-tutorial-agent header { display: flex; justify-content: space-between; gap: 12px; }
+.tdoc-tutorial-agent h2 { margin: 0; font-size: 15px; line-height: 1.4; }
+.tdoc-tutorial-agent p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; }
+.tdoc-tutorial-agent .tdoc-tutorial-agent-stage { margin: 0 0 4px; color: var(--td-muted, #6b6a66); font-size: 12.5px; }
+.tdoc-tutorial-agent-setup { margin-top: 12px; }
+.tdoc-tutorial-agent-setup label { display: block; font-size: 13px; margin-bottom: 8px; }
+.tdoc-tutorial-agent-setup textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 10px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px; font: inherit; font-size: 13px; line-height: 1.5; color: inherit; background: var(--td-bg, #fff); }
+.tdoc-tutorial-agent-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.tdoc-tutorial-agent-actions .loc-hint { font-size: 13px; }

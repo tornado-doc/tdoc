@@ -260,7 +260,7 @@ t('the exit is a line on a revised doc, owed until the link is copied', () => {
   assert(/`Answered \$\{answered\} \$\{answered === 1 \? 'comment' : 'comments'\} in v\$\{version\}\. Share it\.`/.test(shell), 'the line says what happened and what to do');
   assert(!shell.includes('Now get a real one'), 'no line a stranger has to decode');
   assert(/\.tdoc-onboard-banner \{\s*position: relative;/.test(read('shell/src/ui/ui.css')), 'in the flow, never floating over the card');
-  assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started\s*&& onboardingRecord\.first_doc === config\.slug\s*&& \(!onboardingRecord\.shared \|\| sharedNow\)/.test(shell),
+  assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started\s*&& onboardingRecord\.first_doc === config\.slug\s*&& \(!onboardingRecord\.shared \|\| sharedNow \|\| showOptionalAgentStep\)/.test(shell),
     'v2+, journey started, THIS doc, not yet shared (or shared just now)');
   assert(shell.includes("postOnboardingEvent('share_link_copied', config.slug)"), 'copying is the stamp');
   // On the journey's own doc, and nowhere else. Without the slug check the
@@ -272,8 +272,8 @@ t('the exit is a line on a revised doc, owed until the link is copied', () => {
   assert(shell.includes('(showExitBanner ? exitBannerHeight : 0)'), 'the frame follows the banner when tutorial copy wraps');
   // Round-4: copying the link used to unmount the banner, shift the frame and
   // close the card — the doc looked comment-free the moment it was shared.
-  assert(shell.includes("(!onboardingRecord.shared || sharedNow)") && shell.includes("'Link copied.'"), 'the banner stays as the confirmation');
-  assert(shell.includes('className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}'), 'the banner does not close the card');
+  assert(shell.includes("(!onboardingRecord.shared || sharedNow || showOptionalAgentStep)") && shell.includes("'Link copied.'"), 'the banner stays as the confirmation');
+  assert(shell.includes('ref={exitBannerRef} onPointerDown={(event) => event.stopPropagation()}'), 'the tutorial finish area does not close the comment card');
   // A reply on the seeded card is the gesture too; the answered thread that
   // opens on v2 is the person's own.
   assert(shell.includes("(c.replies || []).some((r) => r.author?.login === me)"), 'replying to the seed counts as commenting');

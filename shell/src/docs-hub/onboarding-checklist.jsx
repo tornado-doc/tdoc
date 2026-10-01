@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Check, ChevronDown, X } from 'lucide-react';
 import { AgentMarks } from '../agent-marks.jsx';
-import { ConnectAgentStep } from './connect-agent-step.jsx';
 
 // The onboarding, after setup. Four things, rendered from the record's own
 // timestamps rather than a second set of counters.
@@ -137,7 +136,7 @@ function Thumb({ id, title }) {
   );
 }
 
-export function OnboardingChecklist({ record, docs, preview }) {
+export function OnboardingChecklist({ record, docs }) {
   const [collapsed, setCollapsed] = useState(stored);
   const [open, setOpen] = useState(storedOpen);
   // Only link to the doc while it is still in their list: a seeded doc they
@@ -168,8 +167,7 @@ export function OnboardingChecklist({ record, docs, preview }) {
     record.started || record.published_first || record.first_doc
     || (record.agent_connected && !(docs || []).length)
   ));
-  if (!walking) return null;
-  if (done === steps.length) return <ConnectAgentStep record={record} docHref={href} preview={preview} />;
+  if (!walking || done === steps.length) return null;
 
   const toggle = (next) => { setCollapsed(next); remember(next); };
   const setOpenState = (next) => { setOpen(next); rememberOpen(next); };
