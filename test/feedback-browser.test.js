@@ -213,6 +213,26 @@ const APP_HTML = `<!doctype html>
       await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length === n, before);
     });
 
+    await test('a comment follows its element when the page is rebuilt with a card above it', async () => {
+      await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
+      const heading = page.locator('main > section.card h2', { hasText: 'Weekly active users' });
+      await heading.click();
+      const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]');
+      await c.first().fill('Rename this metric');
+      await page.locator('#tdoc-feedback-root .tdoc-popup button.submit').last().click();
+      await page.waitForTimeout(600);
+      // The app re-renders with a new card first: the positional selector
+      // now names a different heading.
+      await page.evaluate(() => {
+        const s = document.createElement('section'); s.className = 'card'; s.innerHTML = '<h2>Announcements</h2><p>new</p>';
+        document.querySelector('main section.card').before(s);
+      });
+      await page.waitForTimeout(500);
+      const target = await page.locator('main h2', { hasText: 'Weekly active users' }).boundingBox();
+      const pins = await page.locator('#tdoc-feedback-root .tdoc-pin').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
+      assert(pins.some((top) => Math.abs(top + 14 - target.y) < 6), `no pin next to the moved heading (heading y=${target.y}, pins ${pins})`);
+    });
+
     await test('no console errors on the app page', async () => {
       assert(consoleErrors.length === 0, consoleErrors.join('\n'));
     });
