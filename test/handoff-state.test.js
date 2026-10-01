@@ -130,6 +130,22 @@ function comment(partial) {
   assert.ok(shortCommentPreview('x'.repeat(100)).endsWith('…'));
   ok('preview truncates');
 
+  // Answered from a pull, never handed off: the agent has the last word, so
+  // it is not ready to send again (Julie, 2026-10-01).
+  assert.strictEqual(handoffSurfaceState(comment({
+    id: 'p', handoff_status: 'note',
+    replies: [{ id: 'r', author: { kind: 'agent', login: 'claude' }, created: '2026-01-01T02:00:00Z' }],
+  })), 'replied');
+  // A person replies after it: ready again.
+  assert.strictEqual(handoffSurfaceState(comment({
+    id: 'q', handoff_status: 'note',
+    replies: [
+      { id: 'r1', author: { kind: 'agent', login: 'claude' }, created: '2026-01-01T02:00:00Z' },
+      { id: 'r2', author: { login: 'julie' }, created: '2026-01-01T03:00:00Z' },
+    ],
+  })), 'ready');
+  ok('the last speaker decides: agent last is replied, never ready');
+
   console.log(`\n${pass} passed`);
 })().catch((e) => {
   console.error(e);

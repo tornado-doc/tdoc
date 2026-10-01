@@ -289,6 +289,15 @@ const APP = 'http://localhost:3000';
     assert(signed.includes('href="/me"'), 'signed-in bar lacks My docs');
   });
 
+  await t('feedback.js is never served as a year-cached hashed asset', async () => {
+    const assets = require(path.join(ROOT, 'server/runtime-assets.js')).loadRuntimeAssets().all;
+    assert(!assets.some((a) => a.path === '/feedback.js'), 'feedback.js is in the immutable asset list — script-tag installs would never update');
+    const env = makeEnv(mod.CommentsStore);
+    const r = await worker.fetch(req('/feedback.js'), env, {});
+    const cc = r.headers.get('Cache-Control') || '';
+    assert(!/immutable/.test(cc) && /max-age=\d{1,4}\b/.test(cc), `cache-control ${cc}`);
+  });
+
   await t('/feedback offers the bookmarklet and the one line; /feedback/connect is the popup', async () => {
     const env = makeEnv(mod.CommentsStore);
     const page = await worker.fetch(req('/feedback'), env, {});
