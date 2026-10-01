@@ -38,6 +38,7 @@ export function listComments(slug, version) {
 // action the page saw. Both live on the account, never in localStorage, so a
 // second device resumes where the first one stopped.
 export function getOnboarding(options) {
+  if (options?.notify) return request('/api/onboarding?notify=1');
   // `docs` asks the server to also name the newest doc this account owns. It
   // costs a catalog walk, so only the page that waits for a doc to appear
   // asks for it.

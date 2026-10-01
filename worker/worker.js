@@ -1747,6 +1747,7 @@ function onboardingActionStep(action) {
     case 'waitlist': return 'waitlist';
     case 'tour_seen': return 'tour_seen';
     case 'share_link_copied': return 'shared';
+    case 'notify_setup_skipped': return 'notify_setup_skipped';
     case 'example_opened':
     case 'copy_clicked':
     case 'fix_copy_clicked':
@@ -7149,7 +7150,8 @@ export default {
     }
 
     // Isolated design review; no session, credentials, or auth actions.
-    if (p === '/__preview/onboarding' && (method === 'GET' || method === 'HEAD')) {
+    if ((p === '/__preview/onboarding' || (p === '/me' && url.searchParams.get('preview') === 'tutorial'
+      && runtimeInfo().generated_by === 'tdoc-preview')) && (method === 'GET' || method === 'HEAD')) {
       if (runtimeInfo().generated_by !== 'tdoc-preview') return json({ error: 'not_found' }, { status: 404 });
       const nonce = rand(16);
       return html(SHELL.appHtml({
@@ -7519,7 +7521,11 @@ export default {
           onboarding: await (async () => {
             try {
               const id = await sessionAccountId(env, s);
-              return id ? await loadOnboarding(env, id) : null;
+              if (!id) return null;
+              const record = await loadOnboarding(env, id);
+              if (!record.revised || record.notify_setup_skipped) return record;
+              // This is an account binding, not a client-reported tutorial stamp.
+              return { ...record, notify_connected: (await accountNotifyTargets(env, id)).length > 0 };
             } catch { return null; }
           })(),
           // The checklist lives here, so every state reads differently on this
@@ -8919,6 +8925,12 @@ export default {
       let paired = false;
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
       const record = await loadOnboarding(env, accountId);
+      // Optional outbound-agent setup is distinct from connecting a publishing
+      // terminal. Read the real account binding, never a client completion flag.
+      if (url.searchParams.get('notify') === '1') {
+        const targets = await accountNotifyTargets(env, accountId);
+        return json({ record, paired, notify_connected: targets.length > 0 });
+      }
       // `?docs=1` costs a catalog walk, so only the page that waits for a doc
       // to appear asks for it. The connect gate's own poll stays two reads.
       if (url.searchParams.get('docs') === '1') {

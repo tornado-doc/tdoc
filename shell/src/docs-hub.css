@@ -682,3 +682,16 @@
 .tdoc-fbspace-list .tdoc-margin-comment { border: 1px solid var(--td-line) !important; box-shadow: none !important; }
 .tdoc-fbspace-list .tdoc-margin-comment.tdoc-current-comment { border-color: var(--td-accent) !important; }
 .tdoc-fbspace-agent { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -8px 0 18px; font-size: 13px; color: var(--td-muted); }
+
+/* Optional fifth tutorial row: same grid, thumbnail, and label as steps 1–4. */
+.onb-agent-row { width: 100%; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; }
+.onb-agent-row .onb-label { color: var(--td-accent, #1652f0); }
+.onb-agent-row:hover .onb-label { text-decoration: underline; }
+.onb-optional { display: block; font-size: 12px; font-weight: 400; color: var(--td-muted, #6b6a66); }
+.onb-agent-details { margin: 0 0 8px 30px; min-width: 0; }
+.onb-agent-details p { margin: 8px 0; font-size: 13px; line-height: 1.5; color: var(--td-muted, #6b6a66); }
+.onb-agent-details .tdoc-handoff-line { flex-wrap: wrap; }
+.onb-agent-details .tdoc-handoff-line code { flex-basis: 220px; }
+.onb-agent-skip { border: 0; padding: 4px 0; background: none; color: var(--td-muted, #6b6a66); font: inherit; font-size: 13px; cursor: pointer; }
+.onb-agent-skip:hover { text-decoration: underline; }
+@media (max-width: 480px) { .onb-agent-details { margin-left: 26px; } }

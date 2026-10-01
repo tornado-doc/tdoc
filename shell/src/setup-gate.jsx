@@ -368,7 +368,7 @@ export function SetupGate({ boot, preview = null }) {
                     tell the gate and the list are one journey and not two. */}
                 <p className="sg-eyebrow">
                   <span className="sg-step-n">{step === 'doc' ? 2 : 1}</span>
-                  Step {step === 'doc' ? 2 : 1} of 4
+                  Step {step === 'doc' ? 2 : 1} of 5
                 </p>
                 <h1 className="sg-h1">
                   {step !== 'doc' ? 'Connect your agent' : 'Make your first tdoc'}

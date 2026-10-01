@@ -110,6 +110,7 @@ const OFFLINE = [
 
 // These run against local fixtures and require the development browser.
 const BROWSER = [
+  'optional-agent-onboarding-ui.test.js', // real connection state, skip and mobile optional setup
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments

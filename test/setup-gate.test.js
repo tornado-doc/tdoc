@@ -201,17 +201,23 @@ t('a row cannot come before the row it depends on', () => {
   // eslint-disable-next-line no-new-func
   const steps = new Function(`${src.replace('export ', '')}; return onboardingSteps;`)();
   const ids = (r) => steps(r, '/d/x').filter((s) => s.locked).map((s) => s.id);
-  assert(JSON.stringify(ids({})) === JSON.stringify(['create', 'comment', 'revise']),
+  assert(JSON.stringify(ids({})) === JSON.stringify(['create', 'comment', 'revise', 'notify']),
     `nothing but the connect row is offered to an empty record: ${JSON.stringify(ids({}))}`);
-  assert(JSON.stringify(ids({ agent_connected: 'X' })) === JSON.stringify(['comment', 'revise']),
+  assert(JSON.stringify(ids({ agent_connected: 'X' })) === JSON.stringify(['comment', 'revise', 'notify']),
     'a connected agent unlocks making a doc, and nothing past it');
-  assert(JSON.stringify(ids({ agent_connected: 'X', first_doc: 'd' })) === JSON.stringify(['revise']),
+  assert(JSON.stringify(ids({ agent_connected: 'X', first_doc: 'd' })) === JSON.stringify(['revise', 'notify']),
     'a doc unlocks commenting on it');
-  assert(ids({ agent_connected: 'X', first_doc: 'd', commented: 'X' }).length === 0,
+  assert(JSON.stringify(ids({ agent_connected: 'X', first_doc: 'd', commented: 'X' })) === JSON.stringify(['notify']),
     'and a comment unlocks the handoff');
+  assert(ids({ agent_connected: 'X', first_doc: 'd', revised: 'X' }).length === 0,
+    'a revised doc unlocks optional Raft');
+  const finished = steps({ agent_connected: 'X', first_doc: 'd', revised: 'X', notify_setup_skipped: 'X' }, '/d/x');
+  assert(finished.length === 5 && finished.every(s => s.done), 'skipping completes only the optional step');
+  assert(!steps({ revised: 'X' }, '/d/x')[4].done, 'revision alone is not a Raft connection');
+  assert(steps({ notify_connected: true }, '/d/x')[4].done, 'existing server binding completes Raft even when the checklist is collapsed');
   // You cannot comment on a doc that does not exist, or ask an agent to fix
   // comments nobody has left. A locked row is shown and not offered.
-  assert(list.includes('{step.locked || !step.href'), 'a locked row is not a link');
+  assert(list.includes(': step.locked || !step.href'), 'a locked row is not a link');
   // A finished row still is one. Where it goes is still worth going: row 1 is
   // how you connect a second machine, row 2 is how you make another doc, and
   // that page was built for exactly the person who has done it once already.
@@ -231,7 +237,7 @@ t('an unfinished row is a way forward, never a dead line', () => {
   // Every row opens the page for its own step, finished or not: that page is
   // where the step's state is written, and a finished one should say so.
   assert(/id: 'create'[^}]*href: '\/setup\?step=doc'/.test(list), 'the create row leads to its own page, always');
-  const rows = list.match(/\{ id: '[a-z]+', label:[^\n]*\},/g) || [];
+  const rows = (list.match(/\{ id: '[a-z]+', label:[^\n]*\},/g) || []).filter(row => !row.includes("id: 'notify'"));
   assert(rows.length === 4 && rows.every((row) => row.includes('href:')),
     'every row carries an href — no row is a dead line while its neighbours are links');
   // That page exists to watch a FIRST doc arrive. Somebody who has one and
@@ -566,8 +572,9 @@ t('the first arrival sees the whole shape, without a modal', () => {
 });
 
 t('the checklist is for the middle of the journey', () => {
-  assert(/if \(!walking \|\| done === steps\.length\) return null;/.test(list),
-    'nothing before it starts, nothing after it ends');
+  assert(list.includes('if (!walking || done === steps.length) return null;'),
+    'nothing before starting or after all steps are completed or skipped');
+  assert(list.includes('ConnectAgentStep'), 'optional Raft is the fifth row inside the My docs tutorial');
   assert(list.includes("const STORE_KEY = 'tdoc.onboarding.collapsed'"), 'collapsing is a per-browser preference, not an account fact');
   assert(list.includes('onb-chip'), 'hidden, it parks rather than vanishing');
 });
