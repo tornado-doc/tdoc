@@ -93,6 +93,47 @@ function RecipientLine({ target }) {
 // tdoc account yet: the agent runs the link ceremony (bin/tdoc-connect-agent).
 export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I can hand you comments from tdoc: use the tdoc skill and run bin/tdoc-connect-agent.';
 
+// Ways an agent can be reached from tdoc. Raft is the only one today; the
+// next connector is one more entry here (name, what it is, how to connect),
+// and the Send to agent panel lists whatever is in it when nothing is
+// connected yet.
+export const AGENT_CONNECTORS = [
+  {
+    id: 'raft',
+    name: 'Raft agent',
+    blurb: 'An agent on a Raft server where the tdoc app is installed.',
+    prompt: CONNECT_AGENT_PROMPT,
+  },
+];
+
+function ConnectAgentView({ onClose }) {
+  const [copied, setCopied] = useState(null);
+  const copy = async (c) => {
+    try { await navigator.clipboard.writeText(c.prompt); setCopied(c.id); setTimeout(() => setCopied(null), 1800); } catch { /* ignore */ }
+  };
+  return (
+    <AppDialog
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title="Connect an agent"
+      description="Nothing is connected to your account yet, so there is nowhere to send these. Connect an agent once; after that Send to agent and @agent hand comments straight to it."
+      actions={<button type="button" onClick={onClose}>Close</button>}
+    >
+      <div className="tdoc-connectors">
+        {AGENT_CONNECTORS.map((c) => (
+          <section key={c.id} className="tdoc-connector">
+            <div className="tdoc-connector-head"><strong>{c.name}</strong><span className="muted">{c.blurb}</span></div>
+            <p className="manage-hint">Paste this into the agent:</p>
+            <code>{c.prompt}</code>
+            <button type="button" className="primary" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
+          </section>
+        ))}
+        <p className="manage-hint">More connectors are coming.</p>
+      </div>
+    </AppDialog>
+  );
+}
+
 export function useNotifyTargets(slug, enabled) {
   const [state, setState] = useState({
     ready: false,
@@ -245,6 +286,12 @@ export function NotifyHandoffPanel({
   const last = recent[0];
   const lastFailed = last?.delivery?.status === 'failed';
   const unavailable = targets.ready && !targets.available;
+
+  // Nobody connected: the panel's job becomes getting one connected, instead
+  // of a Send button that cannot go anywhere.
+  if (open && targets.ready && targets.available && (targets.reason === 'no_agent_bound' || !choices.length)) {
+    return <ConnectAgentView onClose={onClose} />;
+  }
 
   return (
     <AppDialog

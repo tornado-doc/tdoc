@@ -5,7 +5,7 @@ import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel } from '../../shell/src/document/notify-handoff.jsx';
-import { summarizeHandoffSurfaces } from '../../shell/src/document/handoff-state.js';
+import { summarizeHandoffSurfaces, threadPhase } from '../../shell/src/document/handoff-state.js';
 import { setApiTransport } from '../../shell/src/document/api.js';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
@@ -87,11 +87,11 @@ ${uiCss}
       font: 13px/1.45 system-ui, -apple-system, sans-serif;
     }
     #tdoc-feedback-root .tdoc-fb-panel header {
-      display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px; border-bottom: 1px solid #efeeea;
+      display: flex; align-items: center; gap: 8px; padding: 14px 10px 12px 14px; border-bottom: 1px solid #efeeea;
     }
     #tdoc-feedback-root .tdoc-fb-panel header strong { font-size: 15px; }
     #tdoc-feedback-root .tdoc-fb-filter { display: inline-flex; gap: 2px; margin-left: auto; background: #f3f3f1; border-radius: 8px; padding: 2px; }
-    #tdoc-feedback-root .tdoc-fb-filter button { appearance: none; border: 0; background: transparent; border-radius: 6px; padding: 4px 8px; font: 600 12px system-ui, sans-serif; color: #6b6a66; cursor: pointer; }
+    #tdoc-feedback-root .tdoc-fb-filter button { appearance: none; border: 0; background: transparent; border-radius: 6px; padding: 4px 6px; font: 600 11.5px system-ui, sans-serif; color: #6b6a66; cursor: pointer; }
     #tdoc-feedback-root .tdoc-fb-filter button.on { background: #fff; color: #1a1a1a; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
     #tdoc-feedback-root .tdoc-fb-panel .x { appearance: none; border: 0; background: none; font-size: 20px; line-height: 1; color: #8a8985; cursor: pointer; padding: 0 2px; }
     #tdoc-feedback-root .tdoc-fb-scroll { flex: 1; overflow-y: auto; padding: 6px 8px 16px; overscroll-behavior: contain; }
@@ -105,6 +105,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-item .who { font-weight: 600; display: flex; gap: 6px; align-items: baseline; }
     #tdoc-feedback-root .tdoc-fb-item .when { font-weight: 400; color: #8a8985; font-size: 12px; }
     #tdoc-feedback-root .tdoc-fb-item .done { margin-left: auto; font: 600 11px system-ui, sans-serif; color: #0f7b3f; }
+    #tdoc-feedback-root .tdoc-fb-item .done.replied { color: #3b5bdb; }
     #tdoc-feedback-root .tdoc-fb-item .what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     #tdoc-feedback-root .tdoc-fb-item .state { font-size: 12px; color: #6b6a66; }
     #tdoc-feedback-root .tdoc-fb-item .state.hidden { color: #9a5b00; }
@@ -493,7 +494,7 @@ ${uiCss}
     if (m < 1440) return `${Math.round(m / 60)}h`;
     return `${Math.round(m / 1440)}d`;
   };
-  const isOpen = (c) => c && !c.deleted && c.status !== 'applied';
+  const isOpen = (c) => threadPhase(c) === 'open';
 
   function Dock({ session, openCount, panelOpen, picking, onList, onPick, onHide, sendCount, onSend }) {
     const [copied, setCopied] = useState(false);
@@ -531,9 +532,8 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ all, pageUrl, filter, setFilter, agent, onPick, onOpen, onClose }) {
-    const [copied, setCopied] = useState(false);
-    const shown = all.filter((c) => !c.deleted && (filter === 'all' || (filter === 'open' ? c.status !== 'applied' : c.status === 'applied')));
+  function ListPanel({ all, pageUrl, filter, setFilter, onPick, onOpen, onClose }) {
+    const shown = all.filter((c) => !c.deleted && (filter === 'all' || threadPhase(c) === filter));
     const here = shown.filter((c) => c.anchor.url === pageUrl);
     const elsewhere = new Map();
     for (const c of shown) {
@@ -549,7 +549,7 @@ ${uiCss}
       return (
         <li key={c.id}>
           <button type="button" className="tdoc-fb-item" onClick={() => onOpen(c, local)}>
-            <span className="who">{author.name || author.login || 'anon'} <span className="when">{ago(c.created || c.ts)}</span>{c.status === 'applied' ? <span className="done">Resolved</span> : null}</span>
+            <span className="who">{author.name || author.login || 'anon'} <span className="when">{ago(c.created || c.ts)}</span>{threadPhase(c) === 'resolved' ? <span className="done">Resolved</span> : threadPhase(c) === 'replied' ? <span className="done replied">Replied</span> : null}</span>
             <span className="what">{c.text}</span>
             {where || hidden ? <span className={`state${hidden ? ' hidden' : ''}`}>{hidden ? 'Not on screen now' : ''}{hidden && where ? ' — ' : ''}{where}</span> : null}
             <span className="where">{labelOf(c.anchor)}{replies ? ` · ${replies} ${replies === 1 ? 'reply' : 'replies'}` : ''}</span>
@@ -557,13 +557,12 @@ ${uiCss}
         </li>
       );
     };
-    const copyPrompt = async () => { if (await copyText(CONNECT_AGENT_PROMPT)) { setCopied(true); setTimeout(() => setCopied(false), 1800); } };
     return (
       <aside className="tdoc-fb-panel" aria-label="Feedback on this app">
         <header>
           <strong>Feedback</strong>
           <span className="tdoc-fb-filter" role="group" aria-label="Show">
-            {['open', 'resolved', 'all'].map((f) => (
+            {['open', 'replied', 'resolved', 'all'].map((f) => (
               <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>
             ))}
           </span>
@@ -572,7 +571,7 @@ ${uiCss}
         <div className="tdoc-fb-scroll">
           <h4>This page</h4>
           {here.length ? <ul>{here.map((c) => item(c, true))}</ul> : (
-            <p className="empty">Nothing {filter === 'resolved' ? 'resolved' : 'open'} here yet. <button type="button" className="link" onClick={onPick}>Add a comment</button></p>
+            <p className="empty">Nothing {filter === 'all' ? '' : filter} here yet. <button type="button" className="link" onClick={onPick}>Add a comment</button></p>
           )}
           {[...elsewhere.entries()].map(([url, list]) => (
             <section key={url}>
@@ -581,13 +580,6 @@ ${uiCss}
             </section>
           ))}
         </div>
-        {agent && agent.owner && agent.reason === 'no_agent_bound' ? (
-          <footer className="tdoc-fb-agent">
-            <p><strong>Hand feedback to your agent.</strong> No agent is connected to your tdoc account yet. Paste this into your agent once:</p>
-            <code>{CONNECT_AGENT_PROMPT}</code>
-            <button type="button" onClick={copyPrompt}>{copied ? 'Copied' : 'Copy prompt'}</button>
-          </footer>
-        ) : null}
       </aside>
     );
   }

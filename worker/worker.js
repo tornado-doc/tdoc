@@ -3480,10 +3480,14 @@ function agentReplyGate(record, agentLogin) {
         break;
       case 'reply_added':
         if (!e.reply) break;
-        if (isAgentAuthor(e.reply.author) && e.reply.author.login === agentLogin) {
+        // ANY agent's reply is the agent side having spoken. Keyed on this
+        // agent's login it let a second agent (or the same one under another
+        // name) answer an answer, and the thread filled with agents talking
+        // to each other while the person had said nothing.
+        if (isAgentAuthor(e.reply.author)) {
           answered = true;
           theirTurn = false;
-        } else if (!isAgentAuthor(e.reply.author)) {
+        } else {
           theirTurn = true;
         }
         break;
@@ -9528,10 +9532,26 @@ export default {
       try { body = await req.json(); } catch {}
       const { slug, comment_ids, instruction, recipient } = body;
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const ids = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : [];
+      let ids = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : [];
       if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
       const gate = await authorizeOwnerMutation(req, env, slug);
       if (!gate.ok) return gate.response;
+      // Threads whose last word is already an agent's are the person's turn:
+      // handing them off again only made the agent answer itself. Drop them
+      // here, whatever the client sent.
+      let skipped = [];
+      try {
+        const list = await readComments(env, slug);
+        ensureMigrated(list);
+        skipped = ids.filter((id) => {
+          const thread = findCommentThread(list, id);
+          return thread && agentReplyGate(thread.root, '').reason === 'already_answered';
+        });
+      } catch {}
+      if (skipped.length) {
+        ids = ids.filter((id) => !skipped.includes(id));
+        if (!ids.length) return json({ ok: true, sent: 0, skipped, reason: 'agent_has_last_word' });
+      }
       const resolved = await resolveNotifyTargets(env, slug);
       // A feedback token lives in a page tdoc does not control, so a script
       // there could hold it. From that door the recipient must be one of the
@@ -9549,7 +9569,7 @@ export default {
         instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
         recipient: target, publicHost: env.PUBLIC_HOST,
       });
-      return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery });
+      return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(skipped.length ? { skipped } : {}) });
     }
 
     if (p === '/api/notify/handoff/resend' && method === 'POST') {
@@ -9670,8 +9690,11 @@ export default {
       // somebody deleted the agent's reply would otherwise post the same words
       // in the same place; the log remembers what the fold forgot. `force`
       // exists for the caller that means it — nothing in /tdoc edit sets it.
+      // No override: when the last word on a thread is an agent's, nothing an
+      // agent sends lands until a person speaks. `force` used to skip this,
+      // and agents used it to answer themselves; it is now ignored.
       const gate = agentReplyGate(parent, agent.login);
-      if (!gate.allowed && body.force !== true) {
+      if (!gate.allowed) {
         return json({
           ok: true, skipped: true, reason: gate.reason,
           parent_id, thread_id: parent.id,
