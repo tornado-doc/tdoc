@@ -10,7 +10,7 @@ import './docs-hub.css';
 import './onboarding-preview.css';
 
 const identity = { name: 'Alex Morgan', email: 'alex.morgan@example.com' };
-const states = ['Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
+const states = ['Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Optional agent connection', 'Optional agent connected', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
 
 function TutorialPreview({ state }) {
   const [agentState, setAgentState] = useState(state.replace('Tutorial ', ''));
@@ -33,11 +33,16 @@ function TutorialPreview({ state }) {
 // The original components and markup, with local sample state only.
 // This gallery is served only by the PR preview Worker, never production.
 export default function OnboardingPreview() {
-  const [state, setState] = useState('Approved');
+  const [state, setState] = useState(() => {
+    const screen = new URLSearchParams(location.search).get('screen');
+    return states.includes(screen) ? screen : 'Approved';
+  });
   const [dialogOpen, setDialogOpen] = useState(true);
   const [notice, setNotice] = useState('');
   let screen;
-  if (state.startsWith('Tutorial ')) {
+  if (state.startsWith('Optional agent')) {
+    screen = <div className="docs-hub op-checklist"><OnboardingChecklist key={state} record={{ started: true, agent_connected: true, first_doc: 'my-first-tdoc', commented: true, revised: true }} docs={[{ slug: 'my-first-tdoc', title: 'My first tdoc' }]} preview={{ connected: state === 'Optional agent connected' }} /></div>;
+  } else if (state.startsWith('Tutorial ')) {
     screen = <TutorialPreview key={state} state={state} />;
   } else if (state === 'Sign-in complete' || state === 'Sign-in error') {
     screen = <StatusPage boot={state === 'Sign-in complete' ? { title: 'Signed in', message: 'Your account is connected. You can return to your agent.', actions: [{ label: 'Go to my docs', href: '/me', primary: true }] } : { title: 'Sign-in expired', message: 'This sign-in request has expired. Start again from your agent.', error: true, actions: [{ label: 'Return to tdoc', href: '/', primary: true }] }} />;

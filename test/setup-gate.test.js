@@ -566,8 +566,9 @@ t('the first arrival sees the whole shape, without a modal', () => {
 });
 
 t('the checklist is for the middle of the journey', () => {
-  assert(/if \(!walking \|\| done === steps\.length\) return null;/.test(list),
-    'nothing before it starts, nothing after it ends');
+  assert(list.includes('if (!walking) return null;')
+    && list.includes('if (done === steps.length) return <ConnectAgentStep'),
+    'no checklist before starting; optional outbound setup after the four required steps');
   assert(list.includes("const STORE_KEY = 'tdoc.onboarding.collapsed'"), 'collapsing is a per-browser preference, not an account fact');
   assert(list.includes('onb-chip'), 'hidden, it parks rather than vanishing');
 });

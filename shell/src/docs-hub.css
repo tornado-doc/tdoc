@@ -471,6 +471,11 @@
 .onb-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .onb-card h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.015em; }
 .onb-card header p { margin: 4px 0 0; line-height: 1.5; font-size: 13px; color: var(--td-muted, #6b6a66); font-variant-numeric: tabular-nums; }
+.onb-agent h2 .loc-hint { font-size: 12px; font-weight: 400; margin-left: 6px; }
+.onb-agent-setup { margin-top: 16px; }
+.onb-agent-setup label { display: block; font-size: 13px; margin-bottom: 8px; }
+.onb-agent-setup textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 10px; border: 1px solid var(--td-line); border-radius: 8px; font: inherit; font-size: 13px; line-height: 1.5; color: inherit; background: var(--td-surface, #f4f4f2); }
+.onb-agent .toolbar { margin: 12px 0 0; }
 .onb-acts { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; align-self: flex-start; margin: -6px -8px 0 0; }
 .onb-acts button { border: 0; background: none; padding: 5px; border-radius: 8px; cursor: pointer; color: #b0b0ab; display: flex; }
 .onb-acts button:hover { background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); }
