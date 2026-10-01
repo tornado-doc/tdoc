@@ -620,6 +620,20 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       `replying did not claim the seat: ${JSON.stringify(r.default)}`);
   });
 
+  await t('a handoff drops threads where an agent already has the last word', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    await worker.fetch(req('/api/upload', { method: 'POST', token: tok.token, body: { slug: 'lw', version: 1, html: '<h1>d</h1><p>one two</p>' } }), env, {});
+    const reader = await putSession(env, 'reader');
+    const mk = async (t) => (await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: reader, body: { slug: 'lw', version: 1, text: t, anchor: { kind: 'text', text: 'one' } } }), env, {})).json()).id;
+    const a = await mk('answered already'); const b = await mk('still waiting');
+    await worker.fetch(req('/api/agent/reply', { method: 'POST', token: tok.token, body: { slug: 'lw', parent_id: a, text: 'done', status: 'answered' } }), env, {});
+    const r = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', token: tok.token, body: { slug: 'lw', comment_ids: [a, b] } }), env, {})).json();
+    assert(r.sent === 1 && Array.isArray(r.skipped) && r.skipped[0] === a, `handoff: ${JSON.stringify(r)}`);
+    const only = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', token: tok.token, body: { slug: 'lw', comment_ids: [a] } }), env, {})).json();
+    assert(only.sent === 0 && only.reason === 'agent_has_last_word', `all skipped: ${JSON.stringify(only)}`);
+  });
+
   await t('an "answered" reply is stored as answered and leaves the comment open', async () => {
     const env = makeEnv(mod.CommentsStore);
     const tok = await issue(worker, env, 'owner');

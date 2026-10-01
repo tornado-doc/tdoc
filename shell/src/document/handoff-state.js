@@ -57,6 +57,15 @@ export function handoffSurfaceState(comment) {
   const status = comment.handoff_status || 'note';
   const delivery = comment.handoff_delivery?.status;
 
+  // Whoever spoke last decides, before any handoff bookkeeping: an agent's
+  // word last means it is the person's turn — never "ready" to send again,
+  // even when it was never formally handed off (an agent that answered from
+  // a pull left handoff_status at note, and those threads were re-sent and
+  // answered twice).
+  const lastHuman = lastHumanAt(comment);
+  const lastAgent = lastAgentAt(comment);
+  if (lastAgent && lastAgent >= lastHuman) return 'replied';
+
   if (status === 'note' || !comment.handoff_at) return 'ready';
 
   if (delivery === 'failed') return 'failed';
@@ -81,6 +90,20 @@ export function handoffSurfaceState(comment) {
   if (comment.handoff_acked_at) return 'received';
 
   return 'waiting';
+}
+
+/**
+ * Where a thread stands for the person reading the list:
+ *   open     — waiting on the agent side (a person spoke last)
+ *   replied  — an agent spoke last; the person's turn
+ *   resolved — closed
+ * Who spoke last decides, not the agent's status label.
+ */
+export function threadPhase(comment) {
+  if (!comment || comment.deleted) return null;
+  if (comment.status === 'applied') return 'resolved';
+  const agent = lastAgentAt(comment);
+  return agent && agent >= lastHumanAt(comment) ? 'replied' : 'open';
 }
 
 /** In-flight = still expecting agent work (includes ack-without-reply). */

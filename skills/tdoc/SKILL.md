@@ -542,13 +542,12 @@ silently is the #1 source of regression complaints.
    you are answering.
 
    **A skip is a normal outcome, not an error.** The published Worker answers
-   a comment once per human turn: if your answer is already the last word on
-   that thread it prints `not posted: this comment already has your answer`
-   and exits 0. That is the server protecting the reader from hearing the same
-   thing twice — most often because they deleted your last answer, which
-   removes it from the comments.json you just read but not from the log the
-   server keeps. Do not retry it, and do not reach for `--force`: pass that
-   only when a person has asked you to say it again.
+   a comment once per human turn: if ANY agent's reply is already the last
+   word on that thread it prints `not posted: this comment already has your
+   answer` and exits 0. An agent never answers an agent — the next word on
+   that thread is the person's. Do not retry it; `--force` no longer
+   overrides this. If you need to correct your own reply, say so in your next
+   answer after the person writes again.
 
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading

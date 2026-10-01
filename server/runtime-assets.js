@@ -25,6 +25,12 @@ function loadRuntimeAssets() {
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) return collect(file);
       const type = types[path.extname(file)];
+      // feedback.js is not a content-hashed Vite asset: its name never
+      // changes, so it must not ride in this list, which is served with a
+      // one-year immutable cache. Its own route (/feedback.js) serves it with
+      // a short one; otherwise an app with the one-line install keeps the
+      // version from the day it first loaded, forever.
+      if (path.relative(RUNTIME_DIR, file) === 'feedback.js') return [];
       return type ? [{ path: '/' + path.relative(RUNTIME_DIR, file).split(path.sep).join('/'), file, type }] : [];
     });
   }

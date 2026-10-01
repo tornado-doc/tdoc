@@ -3,8 +3,8 @@ import { ExternalLink, Link2, Send } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
 import { CommentCard } from './document/comment-card.jsx';
-import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
-import { summarizeHandoffSurfaces } from './document/handoff-state.js';
+import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { summarizeHandoffSurfaces, threadPhase } from './document/handoff-state.js';
 import {
   createComment, listComments, listMentionableUsers, removeComment,
   setCommentResolved, toggleReaction, updateCommentText,
@@ -80,7 +80,7 @@ export function FeedbackSpace({ boot }) {
   };
 
   const live = (comments || []).filter((c) => !c.deleted);
-  const shown = live.filter((c) => (filter === 'all' ? true : filter === 'open' ? c.status !== 'applied' : c.status === 'applied'));
+  const shown = live.filter((c) => filter === 'all' || threadPhase(c) === filter);
   const groups = new Map();
   for (const c of shown) {
     const key = (c.anchor && c.anchor.url) || '';
@@ -88,7 +88,8 @@ export function FeedbackSpace({ boot }) {
     groups.get(key).push(c);
   }
   const ready = summarizeHandoffSurfaces(live).ready;
-  const openCount = live.filter((c) => c.status !== 'applied').length;
+  const openCount = live.filter((c) => threadPhase(c) === 'open').length;
+  const repliedCount = live.filter((c) => threadPhase(c) === 'replied').length;
 
   return (
     <div className="tdoc-app docs-hub tdoc-fbspace">
@@ -98,26 +99,20 @@ export function FeedbackSpace({ boot }) {
           <h1>{title}</h1>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
-          Comments left on <a href={origin} target="_blank" rel="noopener noreferrer">{host}</a> · {openCount} open
+          Comments left on <a href={origin} target="_blank" rel="noopener noreferrer">{host}</a> · {openCount} open · {repliedCount} replied
         </p>
         <div className="tdoc-fbspace-actions">
           <a className="tdoc-fbspace-btn" href={origin} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open the app</a>
           <button type="button" className="tdoc-fbspace-btn" onClick={async () => { if (await copy(inviteUrl)) { setCopied(true); setTimeout(() => setCopied(false), 1800); } }}>
             <Link2 size={14} /> {copied ? 'Link copied' : 'Copy invite link'}
           </button>
-          {isOwner && canSendToAgent ? (
+          {isOwner && notify.ready && notify.available ? (
             <button type="button" className="tdoc-fbspace-btn primary" onClick={() => setNotifyIds(ready.map((c) => c.id))}>
               <Send size={14} /> Send to agent{ready.length ? ` (${ready.length})` : ''}
             </button>
           ) : null}
         </div>
 
-        {isOwner && notify.ready && notify.reason === 'no_agent_bound' ? (
-          <p className="tdoc-fbspace-agent">
-            No agent is connected to your account yet, so these can't be handed off.
-            <button type="button" className="tdoc-fbspace-btn" onClick={async () => { if (await copy(CONNECT_AGENT_PROMPT)) setNotice('Copied — paste it into your agent.'); }}>Copy the connect prompt</button>
-          </p>
-        ) : null}
 
         {!identity ? (
           <section className="tdoc-fbspace-card">
@@ -146,14 +141,14 @@ export function FeedbackSpace({ boot }) {
             ariaLabel="Show"
             value={filter}
             onChange={setFilter}
-            options={[{ value: 'open', label: 'Open' }, { value: 'resolved', label: 'Resolved' }, { value: 'all', label: 'All' }]}
+            options={[{ value: 'open', label: 'Open' }, { value: 'replied', label: 'Replied' }, { value: 'resolved', label: 'Resolved' }, { value: 'all', label: 'All' }]}
           />
         </div>
 
         {notice ? <p className="muted" role="status">{notice}</p> : null}
         {comments === null ? <p className="muted">Loading…</p> : null}
         {comments !== null && !shown.length ? (
-          <p className="empty">{filter === 'resolved' ? 'Nothing resolved yet.' : 'No open comments.'}</p>
+          <p className="empty">{filter === 'all' ? 'No comments yet.' : `Nothing ${filter}.`}</p>
         ) : null}
 
         {[...groups.entries()].map(([url, list]) => (

@@ -148,7 +148,7 @@ post_reply() {
     local reason
     reason="$(printf '%s' "$body" | json_get reason)"
     case "$reason" in
-      already_answered) echo "[tdoc] not posted: this comment already has your answer, and nobody has replied to it since. Pass force to say it again." >&2 ;;
+      already_answered) echo "[tdoc] not posted: an agent already has the last word on this comment; it waits for a person to reply." >&2 ;;
       comment_deleted)  echo "[tdoc] not posted: that comment was deleted." >&2 ;;
       *)                echo "[tdoc] not posted: ${reason:-skipped}" >&2 ;;
     esac
