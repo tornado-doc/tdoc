@@ -1,8 +1,0 @@
-.sh-optional { margin-left: 8px; font-size: 12.5px; font-weight: 400; color: var(--td-muted, #6b6a66); }
-.sh-x.sh-skip { width: auto; padding: 0 6px; font: 500 13px system-ui; }
-.tdoc-tutorial-agent-details { box-sizing: border-box; width: calc(100% - 40px); max-width: 720px; margin: 0 auto 12px; padding: 0 14px; }
-.tdoc-tutorial-agent-details p { margin: 8px 0; font: 13px/1.5 system-ui; color: var(--td-muted, #6b6a66); }
-.tdoc-tutorial-agent-details .tdoc-handoff-line { flex-wrap: wrap; }
-.tdoc-tutorial-agent-details .tdoc-handoff-line code { flex-basis: 220px; }
-@media (max-width: 720px) { .tdoc-tutorial-agent-details { width: calc(100% - 20px); padding: 0 12px; } }
-@media (max-width: 360px) { .tdoc-tutorial-agent .sh-optional { display: block; margin-left: 0; } }

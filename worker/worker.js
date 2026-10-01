@@ -7150,7 +7150,8 @@ export default {
     }
 
     // Isolated design review; no session, credentials, or auth actions.
-    if (p === '/__preview/onboarding' && (method === 'GET' || method === 'HEAD')) {
+    if ((p === '/__preview/onboarding' || (p === '/me' && url.searchParams.get('preview') === 'tutorial'
+      && runtimeInfo().generated_by === 'tdoc-preview')) && (method === 'GET' || method === 'HEAD')) {
       if (runtimeInfo().generated_by !== 'tdoc-preview') return json({ error: 'not_found' }, { status: 404 });
       const nonce = rand(16);
       return html(SHELL.appHtml({
@@ -7520,7 +7521,11 @@ export default {
           onboarding: await (async () => {
             try {
               const id = await sessionAccountId(env, s);
-              return id ? await loadOnboarding(env, id) : null;
+              if (!id) return null;
+              const record = await loadOnboarding(env, id);
+              if (!record.revised || record.notify_setup_skipped) return record;
+              // This is an account binding, not a client-reported tutorial stamp.
+              return { ...record, notify_connected: (await accountNotifyTargets(env, id)).length > 0 };
             } catch { return null; }
           })(),
           // The checklist lives here, so every state reads differently on this

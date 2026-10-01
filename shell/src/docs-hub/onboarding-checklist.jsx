@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Check, ChevronDown, X } from 'lucide-react';
+import { ConnectAgentStep } from './connect-agent-step.jsx';
 import { AgentMarks } from '../agent-marks.jsx';
 
-// The onboarding, after setup. Four things, rendered from the record's own
-// timestamps rather than a second set of counters.
+// The onboarding, after setup: four required steps and an optional Raft
+// connection, rendered from account facts rather than browser counters.
 //
 // Setup and the seeded doc are already done by the time anyone reads this, so
-// it opens at two of four. The progress is real, not a welcome mat.
+// it opens at two of five. The progress is real, not a welcome mat.
 //
 // Collapsing is a view preference, not a step, so it lives in this browser and
 // not on the account: somebody who tidies it away on their laptop has not told
@@ -45,7 +46,7 @@ function rememberOpen(value) {
 // whose turn has not come is shown and not offered, so the shape of the whole
 // thing is visible from the first arrival without inviting a click that would
 // land nowhere.
-export function onboardingSteps(record, firstDocHref) {
+export function onboardingSteps(record, firstDocHref, notifyFinished = false) {
   const r = record || {};
   const steps = [
     { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
@@ -59,6 +60,7 @@ export function onboardingSteps(record, firstDocHref) {
     // pointing at the same wall of text.
     { id: 'comment', label: 'Comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref && `${firstDocHref}?step=comment` },
     { id: 'revise', label: 'Ask your agent to fix comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
+    { id: 'notify', label: 'Connect Raft', optional: true, done: Boolean(r.notify_connected || r.notify_setup_skipped || notifyFinished), action: true },
   ];
   // Locked until everything above it is done. The first unfinished row is the
   // only one anybody can act on.
@@ -68,7 +70,7 @@ export function onboardingSteps(record, firstDocHref) {
     // the doc it stands on is gone. Deleting the journey's doc used to leave
     // row 4 in full ink with no href: it read as the next thing to do and did
     // nothing when clicked.
-    const locked = !step.done && (!reached || !step.href);
+    const locked = !step.done && (!reached || (!step.href && !step.action));
     if (!step.done) reached = false;
     return { ...step, locked };
   });
@@ -80,6 +82,12 @@ export function onboardingSteps(record, firstDocHref) {
 // carry the things this product is actually recognised by — the two agents'
 // own marks, the anchor highlight's yellow, a comment card, a v2 chip.
 function Thumb({ id, title }) {
+  if (id === 'notify') {
+    return <span className="onb-thumb" aria-hidden="true">
+      <b className="t-title">Raft</b>
+      <i className="t-card"><em>tdoc</em><span>Send to agent →</span></i>
+    </span>;
+  }
   if (id === 'connect') {
     // Two real marks in two white discs, the way Notion shows Gmail and
     // Outlook. A logo somebody already recognises does more work than any
@@ -136,16 +144,18 @@ function Thumb({ id, title }) {
   );
 }
 
-export function OnboardingChecklist({ record, docs }) {
-  const [collapsed, setCollapsed] = useState(stored);
-  const [open, setOpen] = useState(storedOpen);
+export function OnboardingChecklist({ record, docs, preview }) {
+  const [collapsed, setCollapsed] = useState(() => preview ? false : stored());
+  const [open, setOpen] = useState(() => preview ? true : storedOpen());
+  const [notifyFinished, setNotifyFinished] = useState(false);
+  const finishNotifySetup = useCallback(() => setNotifyFinished(true), []);
   // Only link to the doc while it is still in their list: a seeded doc they
   // deleted would otherwise leave every row pointing at a 404.
   const first = record && record.first_doc;
   const firstDoc = first ? (docs || []).find((d) => d && d.slug === first) : null;
   const alive = Boolean(firstDoc);
   const href = alive ? `/d/${encodeURIComponent(first)}` : null;
-  const steps = onboardingSteps(record, href);
+  const steps = onboardingSteps(record, href, notifyFinished);
   const done = steps.filter((s) => s.done).length;
   // Nothing to say before the journey starts, and nothing left to say after it
   // ends: the card is for the middle.
@@ -169,8 +179,8 @@ export function OnboardingChecklist({ record, docs }) {
   ));
   if (!walking || done === steps.length) return null;
 
-  const toggle = (next) => { setCollapsed(next); remember(next); };
-  const setOpenState = (next) => { setOpen(next); rememberOpen(next); };
+  const toggle = (next) => { setCollapsed(next); if (!preview) remember(next); };
+  const setOpenState = (next) => { setOpen(next); if (!preview) rememberOpen(next); };
   // There is only ever one thing to do. Finished steps need no room and
   // unreached ones need none yet, so at rest the card carries the next step
   // alone. The heading and the bar stay: without them a count and a sentence
@@ -190,7 +200,7 @@ export function OnboardingChecklist({ record, docs }) {
       <header>
         <div>
           <h2>Finish setting up</h2>
-          <p>{done} of {steps.length} required steps</p>
+          <p>{done} of {steps.length} steps · Step 5 is optional</p>
         </div>
         <div className="onb-acts">
           <button
@@ -220,19 +230,21 @@ export function OnboardingChecklist({ record, docs }) {
           const body = (
             <>
               <span className="onb-tick">{step.done ? <Check size={12} strokeWidth={3} /> : null}</span>
-              <span className="onb-label">{step.label}</span>
+              <span className="onb-label">{step.label}{step.optional ? <small className="onb-optional">Optional</small> : null}</span>
               <Thumb id={step.id} title={firstDoc?.title} />
             </>
           );
           return (
-            <li key={step.id} className={step.done ? 'done' : step.locked ? 'locked' : ''}>
+            <li key={step.id} aria-label={step.optional ? 'Step 5: Connect Raft (optional)' : undefined} className={step.done ? 'done' : step.locked ? 'locked' : ''}>
               {/* A finished row still goes somewhere, and where it goes is still
                   worth going: row 1 is how you connect a second machine, row 2
                   is how you make another doc -- the page it opens was built
                   for exactly the person who has already done it once. Struck
                   through says it is finished; it does not have to mean the
                   door is gone. Only a locked row is inert. */}
-              {step.locked || !step.href
+              {step.action && !step.locked && !step.done
+                ? <ConnectAgentStep onFinished={finishNotifySetup} preview={preview}>{body}</ConnectAgentStep>
+                : step.locked || !step.href
                 ? <span className="onb-row">{body}</span>
                 : <a href={step.href}>{body}</a>}
             </li>

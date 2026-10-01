@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ConnectAgentStep } from './document/connect-agent-step.jsx';
 import { TopBar } from './top-bar.jsx';
 import { AppSwitch } from './ui/switch.jsx';
 import {
@@ -956,14 +955,6 @@ export function DocumentShell({ boot, config }) {
   // Copied in this session: the banner stays, as the confirmation, so the
   // frame does not jump and the pins and the open card stay where they are.
   const [sharedNow, setSharedNow] = useState(false);
-  const [notifySetupFinished, setNotifySetupFinished] = useState(false);
-  const finishNotifySetup = useCallback(() => setNotifySetupFinished(true), []);
-  const showOptionalAgentStep = Boolean(
-    handoffEnabled && Number(config.version) >= 2
-    && onboardingRecord?.started && onboardingRecord.revised
-    && onboardingRecord.first_doc === config.slug
-    && !onboardingRecord.notify_setup_skipped && !notifySetupFinished,
-  );
   // Set by the hint itself -- only it knows whether it drew.
   const [hintBar, setHintBar] = useState(false);
   // On the journey's own doc, and nowhere else. This never checked the slug,
@@ -976,7 +967,7 @@ export function DocumentShell({ boot, config }) {
     handoffEnabled && Number(config.version) >= 2
     && onboardingRecord && onboardingRecord.started
     && onboardingRecord.first_doc === config.slug
-    && (!onboardingRecord.shared || sharedNow || showOptionalAgentStep),
+    && (!onboardingRecord.shared || sharedNow),
   );
   const exitBannerRef = useRef(null);
   const [exitBannerHeight, setExitBannerHeight] = useState(36);
@@ -1228,14 +1219,11 @@ export function DocumentShell({ boot, config }) {
       ) : null}
 
       {showExitBanner ? (
-        <div ref={exitBannerRef} onPointerDown={(event) => event.stopPropagation()}>
-        <div className="tdoc-onboard-banner" role="status">
+        <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
           <span>{sharedNow ? 'Link copied.' : exitLine(answered, config.version)}</span>
           {sharedNow
             ? <a href="/me">My docs</a>
             : <button type="button" onClick={copyExitLink}>Copy link</button>}
-        </div>
-        {showOptionalAgentStep ? <ConnectAgentStep record={onboardingRecord} onFinished={finishNotifySetup} /> : null}
         </div>
       ) : null}
 
