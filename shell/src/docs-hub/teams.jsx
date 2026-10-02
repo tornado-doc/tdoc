@@ -89,7 +89,7 @@ export function TeamPane({ team, docs, viewer, menuFor }) {
         ))}
       </div>
       {!docs.length ? (
-        <p className="empty">No docs in {team.name} yet. Move one here from My docs with ⋯ → Move to team.</p>
+        <p className="empty">No docs in {team.name} yet. Create one, or move one here from My docs.</p>
       ) : null}
     </section>
   );

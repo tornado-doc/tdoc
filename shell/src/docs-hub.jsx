@@ -440,15 +440,15 @@ export function DocsHub({ boot }) {
             <button type="button" className="new-folder-btn tm-members-btn" onClick={() => setModal({ type: 'members' })}>
               <UsersRound size={15} /> {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
             </button>
-          ) : (
-            <CreateMenu
-              create={hub.createDoc}
-              canCreate={capabilities.create}
-              onAgent={openAgentRecipe}
-              onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
-              trigger={<button className="mk-btn" type="button">Create a doc</button>}
-            />
-          )}
+          ) : null}
+          <CreateMenu
+            create={hub.createDoc}
+            team={team ? team.id : ''}
+            canCreate={capabilities.create}
+            onAgent={openAgentRecipe}
+            onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
+            trigger={<button className="mk-btn" type="button">Create a doc</button>}
+          />
         </div>
         {team ? (
           <>

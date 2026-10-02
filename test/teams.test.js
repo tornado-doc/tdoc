@@ -105,6 +105,21 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(meta.hosted.account_id === 'acct-alice', 'author unchanged');
   });
 
+  await t('a member creates a doc straight into the team; outsiders cannot', async () => {
+    const outsider = await call('/api/doc/create', { method: 'POST', cookie: dave, body: { team: team.id } });
+    assert(outsider.status === 403, `outsider ${outsider.status}`);
+    const res = await call('/api/doc/create', { method: 'POST', cookie: bob, body: { team: team.id } });
+    assert(res.status === 200 && res.body.slug, `create ${res.status} ${JSON.stringify(res.body)}`);
+    const meta = JSON.parse(await env.META.get(`meta:${res.body.slug}`));
+    assert(meta.workspace_id === team.id && meta.access.team === true && meta.access.visibility === 'private', 'team-owned, team access');
+    assert(meta.hosted.github_login === 'bob', 'creator is the author');
+    const asAlice = await call(`/d/${res.body.slug}/v/1`, { cookie: alice });
+    assert(asAlice.status === 200, `teammate read ${asAlice.status}`);
+    const personal = await call('/api/doc/create', { method: 'POST', cookie: bob, body: {} });
+    const pmeta = JSON.parse(await env.META.get(`meta:${personal.body.slug}`));
+    assert(!pmeta.workspace_id && !pmeta.access?.team, 'no team means a personal doc');
+  });
+
   await t('team members read a private team doc; outsiders do not', async () => {
     const asBob = await call('/d/plan/v/1', { cookie: bob });
     assert(asBob.status === 200, `bob ${asBob.status}`);

@@ -4231,7 +4231,7 @@ function blankDocSlug(bytes) {
 // scratch", shared with the feedback space that /api/feedback/connect makes
 // on the person's behalf. Ownership, quota and slug rules are the ones the
 // create-from-scratch path always had; `meta` and `version` are what differs.
-async function createDocForSession(env, req, session, { html, meta, version }) {
+async function createDocForSession(env, req, session, { html, meta, version, team = null }) {
   const ownerCreate = isOwnerSession(env, session);
   // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
   // its owner unless it has opted into hosted accounts. tdoc.dev is open.
@@ -4310,6 +4310,10 @@ async function createDocForSession(env, req, session, { html, meta, version }) {
   if (incoming.access && typeof incoming.access === 'object') {
     const { team: _team, ...personal } = incoming.access;
     incoming.access = personal;
+  }
+  if (team) {
+    incoming.workspace_id = team;
+    incoming.access = normalizeAccess({ ...(incoming.access || {}), visibility: 'private', team: true }, { legacy: false });
   }
   incoming = stampHostedOwnership(incoming, actor);
 
@@ -8458,7 +8462,14 @@ export default {
     if (p === '/api/doc/create' && method === 'POST') {
       const session = await getSession(env, req);
       if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const team = body && body.team ? body.team : null;
+      if (team && !teamMember(await loadTeam(env, team), sessionInTeam(session, team) ? session.account_id : null)) {
+        return json({ error: 'not_team_member' }, { status: 403 });
+      }
       const made = await createDocForSession(env, req, session, {
+        team,
         html: blankDocHtml(),
         meta: {
           // Renamed by the first save that finds a heading in the document, and
