@@ -1179,10 +1179,6 @@ export function DocumentShell({ boot, config }) {
         // a new account lands on the first screen; one that has finished or
         // skipped is let straight through (the wizard closes itself).
         onSignIn={() => signIn(config.onboarding ? '/setup' : undefined)}
-        onSwitchAccount={config.oidcAuth ? () => {
-          const returnUrl = location.pathname + location.search + location.hash;
-          location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;
-        } : null}
       >
         <DocumentBreadcrumbs
           config={config}
