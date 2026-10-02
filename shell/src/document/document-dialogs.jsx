@@ -3,7 +3,7 @@ import { AppDialog } from '../ui/dialog.jsx';
 import { getPublishSignin, publishDocument, requestQuotaBump } from './api.js';
 import { copyText } from './model.js';
 
-export function ShareDialog({ open, url, onOpenChange, onCopied }) {
+export function ShareDialog({ open, url, team, onOpenChange, onCopied }) {
   const copy = async () => {
     await copyText(url);
     onCopied();
@@ -14,7 +14,11 @@ export function ShareDialog({ open, url, onOpenChange, onCopied }) {
       open={open}
       onOpenChange={onOpenChange}
       title="Share"
-      description="Anyone with this link can read. To comment, they sign in."
+      description={team
+        ? `${team.access?.visibility === 'private'
+          ? (team.access?.team ? `Everyone in ${team.team.name} can open and comment.` : 'Only people with access can open it.')
+          : 'Anyone with this link can read.'} Only the author and team admins can change access.`
+        : 'Anyone with this link can read. To comment, they sign in.'}
       actions={(
         <>
           <button type="button" onClick={() => onOpenChange(false)}>Close</button>

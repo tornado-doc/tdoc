@@ -1406,7 +1406,7 @@ export function DocumentShell({ boot, config }) {
         slug={config.slug}
         onOpenChange={(open) => !open && setDialog(null)}
       />
-      {config.ownerManage ? (
+      {config.ownerManage || config.teamManage?.canManage ? (
         <OwnerAccessDialog
           open={dialog?.type === 'share'}
           config={config}
@@ -1418,6 +1418,7 @@ export function DocumentShell({ boot, config }) {
         <ShareDialog
           open={dialog?.type === 'share'}
           url={shareUrl}
+          team={config.teamManage}
           onOpenChange={(open) => !open && setDialog(null)}
           onCopied={() => showToast('Link copied')}
         />

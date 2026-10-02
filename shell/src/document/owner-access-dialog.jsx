@@ -99,7 +99,8 @@ export function InviteField({ users, onChange }) {
 }
 
 export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied }) {
-  const manage = config.ownerManage;
+  const manage = config.ownerManage || (config.teamManage?.canManage ? config.teamManage : null);
+  const team = config.teamManage?.team || null;
   const [access, setAccess] = useState(manage?.access || {});
   const [status, setStatus] = useState('');
   // The boot config never learns about saves, so resetting from it on reopen
@@ -144,9 +145,12 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
     || normalized.commenting === 'invited'
     || normalized.history_visibility === 'invited';
   const invitedCount = normalized.allowed_users.length;
-  const accessDescription = normalized.visibility !== 'private'
+  const general = normalized.visibility !== 'private' ? 'unlisted' : (team && normalized.team ? 'team' : 'private');
+  const accessDescription = general === 'unlisted'
     ? 'Anyone with the link can read it.'
-    : invitedCount
+    : general === 'team'
+      ? `Everyone in ${team.name} can open and comment${invitedCount ? `, plus ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'}` : ''}.`
+      : invitedCount
       ? `Only you and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open it.`
       : 'Only you can open it. Add people below to invite them.';
 
@@ -169,19 +173,27 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
           Copy link
         </button>
       </div>
-      <p className="muted" style={{ margin: '8px 0 0' }}>
-        {config.slug} · {manage.versionCount} versions · {manage.commentCount} comments
-      </p>
+      {manage.versionCount != null ? (
+        <p className="muted" style={{ margin: '8px 0 0' }}>
+          {config.slug} · {manage.versionCount} versions · {manage.commentCount} comments
+        </p>
+      ) : null}
 
       <section className="manage-section">
         <label className="field" htmlFor="tdoc-access-select">Who has access</label>
         <select
           id="tdoc-access-select"
           className="tdoc-select"
-          value={normalized.visibility === 'private' ? 'private' : 'unlisted'}
-          onChange={(event) => save({ visibility: event.target.value })}
+          value={general}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (!team) save({ visibility: value });
+            else if (value === 'unlisted') save({ visibility: 'unlisted' });
+            else save({ visibility: 'private', team: value === 'team' });
+          }}
         >
-          <option value="private">Only people I invite</option>
+          <option value="private">{team ? 'Only people with access' : 'Only people I invite'}</option>
+          {team ? <option value="team">Everyone in {team.name}</option> : null}
           <option value="unlisted">Anyone with the link</option>
         </select>
         <p className="manage-hint">{accessDescription}</p>

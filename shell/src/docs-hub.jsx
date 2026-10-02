@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react';
+import { Check, ChevronRight, Folder, FolderPlus, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
@@ -9,6 +9,15 @@ import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
 import { QuotaBumpDialog } from './document/document-dialogs.jsx';
+import { deleteDocument, moveDocsToTeam, removeTeamMember } from './document/api.js';
+import {
+  LeaveTeamDialog,
+  MembersDialog,
+  MoveToTeamDialog,
+  NewTeamDialog,
+  SpaceSwitcher,
+  TeamPane,
+} from './docs-hub/teams.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
@@ -293,6 +302,20 @@ export function DocsHub({ boot }) {
     boot.profile && location.hash === '#claim-profile' ? { type: 'claim-handle' } : null
   ));
   const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
+  const [teams, setTeams] = useState(() => boot.teams || []);
+  const [teamDocs, setTeamDocs] = useState(() => boot.team_docs || []);
+  const [space, setSpace] = useState(() => {
+    const initial = new URLSearchParams(location.search).get('team') || '';
+    return (boot.teams || []).some((team) => team.id === initial) ? initial : '';
+  });
+  const team = teams.find((item) => item.id === space) || null;
+  const shownTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id) : [];
+
+  useEffect(() => {
+    if (space) history.replaceState(null, '', `?team=${encodeURIComponent(space)}`);
+    else if (new URLSearchParams(location.search).has('team')) history.replaceState(null, '', location.pathname);
+  }, [space]);
+
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
   const openAgentRecipe = () => setModal({ type: 'create-agent' });
@@ -342,6 +365,11 @@ export function DocsHub({ boot }) {
       className: 'row-profile-pin',
       onSelect: () => toggleProfilePin(doc),
     } : null,
+    teams.length && doc && doc.mine ? {
+      label: 'Move to team',
+      className: 'row-move-team',
+      onSelect: () => setModal({ type: 'move-team', slugs }),
+    } : null,
     capabilities.folders ? {
       label: 'Move to folder',
       className: 'row-move',
@@ -366,6 +394,28 @@ export function DocsHub({ boot }) {
     },
   ];
 
+  const teamFailed = (error) => {
+    if (error.status === 401) location.href = '/?notice=signin';
+    else hub.notify(error.message || 'Request failed', true);
+  };
+
+  const teamDocMenu = (doc) => [
+    { label: 'Open', onSelect: () => { location.href = `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest}`; } },
+    doc.mine ? {
+      label: 'Move to My docs',
+      className: 'row-move-personal',
+      onSelect: () => moveDocsToTeam([doc.slug], null)
+        .then(() => { location.href = '/me'; })
+        .catch(teamFailed),
+    } : null,
+    doc.can_manage ? {
+      label: 'Delete',
+      tone: 'danger',
+      className: 'row-delete',
+      onSelect: () => setModal({ type: 'delete-team-doc', doc }),
+    } : null,
+  ].filter(Boolean);
+
   const allSelected = hub.shownDocs.length > 0 && hub.shownDocs.every((doc) => hub.selected.has(doc.slug));
   const batchActions = capabilities.folders || capabilities.delete;
 
@@ -378,15 +428,35 @@ export function DocsHub({ boot }) {
       />
       <main className="wrap">
         <div className="page-hd">
-          <h1>My docs</h1>
-          <CreateMenu
-            create={hub.createDoc}
-            canCreate={capabilities.create}
-            onAgent={openAgentRecipe}
-            onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
-            trigger={<button className="mk-btn" type="button">Create a doc</button>}
-          />
+          <h1>
+            <SpaceSwitcher
+              teams={teams}
+              space={space}
+              onSpace={setSpace}
+              onNewTeam={() => setModal({ type: 'new-team' })}
+            />
+          </h1>
+          {team ? (
+            <button type="button" className="new-folder-btn tm-members-btn" onClick={() => setModal({ type: 'members' })}>
+              <UsersRound size={15} /> {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
+            </button>
+          ) : (
+            <CreateMenu
+              create={hub.createDoc}
+              canCreate={capabilities.create}
+              onAgent={openAgentRecipe}
+              onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
+              trigger={<button className="mk-btn" type="button">Create a doc</button>}
+            />
+          )}
         </div>
+        {team ? (
+          <>
+            <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
+            <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} />
+          </>
+        ) : (
+        <>
 
         <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
         {/* The checklist is on this page, so all six states show a difference
@@ -512,7 +582,64 @@ export function DocsHub({ boot }) {
             <FlatList docs={hub.starred} label="starred" viewer={viewer} empty="Star docs to find them again quickly." onToggleStar={hub.toggleStar} />
           </section>
         ) : null}
+        </>
+        )}
       </main>
+
+      {modal?.type === 'new-team' ? (
+        <NewTeamDialog
+          onClose={closeModal}
+          onCreated={(created) => { location.href = `/me?team=${encodeURIComponent(created.id)}`; }}
+        />
+      ) : null}
+      {modal?.type === 'members' && team ? (
+        <MembersDialog
+          teamId={team.id}
+          onClose={closeModal}
+          onChanged={(next) => setTeams((list) => list.map((item) => (
+            item.id === next.id ? { ...item, name: next.name, role: next.role, member_count: next.member_count } : item
+          )))}
+          onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
+        />
+      ) : null}
+      {modal?.type === 'leave-team' ? (
+        <LeaveTeamDialog
+          team={modal.team}
+          docCount={teamDocs.filter((doc) => doc.team === modal.team.id && doc.mine).length}
+          onClose={closeModal}
+          onLeave={async () => {
+            await removeTeamMember(modal.team.id, modal.me.account_id);
+            location.href = '/me';
+          }}
+        />
+      ) : null}
+      {modal?.type === 'move-team' ? (
+        <MoveToTeamDialog
+          teams={teams}
+          count={modal.slugs.length}
+          onClose={closeModal}
+          onMove={(target) => moveDocsToTeam(modal.slugs, target.id)
+            .then(() => { location.href = `/me?team=${encodeURIComponent(target.id)}`; })
+            .catch(teamFailed)}
+        />
+      ) : null}
+      {modal?.type === 'delete-team-doc' ? (
+        <HubDialog
+          title="Delete this doc?"
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => deleteDocument(modal.doc.slug)
+            .then(() => {
+              setTeamDocs((list) => list.filter((doc) => doc.slug !== modal.doc.slug));
+              closeModal();
+              hub.notify('Deleted');
+            })
+            .catch(teamFailed)}
+          onClose={closeModal}
+        >
+          <p>This permanently removes every version and comment of “{modal.doc.title}” for the whole team. This cannot be undone.</p>
+        </HubDialog>
+      ) : null}
 
       {modal?.type === 'claim-handle' ? (
         <ClaimHandleDialog
