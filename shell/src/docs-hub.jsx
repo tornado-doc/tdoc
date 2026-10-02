@@ -401,8 +401,8 @@ export function DocsHub({ boot }) {
 
   const teamDocMenu = (doc) => [
     { label: 'Open', onSelect: () => { location.href = `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest}`; } },
-    doc.mine ? {
-      label: 'Move to My docs',
+    doc.can_manage ? {
+      label: doc.mine ? 'Move to My docs' : "Move to author's My docs",
       className: 'row-move-personal',
       onSelect: () => moveDocsToTeam([doc.slug], null)
         .then(() => { location.href = '/me'; })

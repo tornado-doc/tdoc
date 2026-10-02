@@ -308,7 +308,7 @@ export function LeaveTeamDialog({ team, docCount, onLeave, onClose }) {
           ? `Your ${docCount === 1 ? 'doc' : `${docCount} docs`} in this team ${docCount === 1 ? 'stays' : 'stay'} with the team, and your name stays on ${docCount === 1 ? 'it' : 'them'} as the author.`
           : 'You will no longer see this team’s docs.'}
       </p>
-      <p className="manage-hint">You lose access unless someone shares it with you. To keep a doc, move it to My docs first.</p>
+      <p className="manage-hint">You lose access unless someone shares it with you. To keep a copy, open it and use Duplicate first.</p>
       {status ? <p className="status" role="status">{status}</p> : null}
     </AppDialog>
   );

@@ -151,6 +151,7 @@ async function getSession(env, req) {
     } catch {}
   }
   if (session.account_id) session.team_ids = await loadAccountTeamIds(env, session.account_id);
+  if (session.account_id) session.team_admin_ids = await loadAdminTeamIds(env, session.account_id, session.team_ids);
   if (feedback) session.feedback = feedback;
   return session;
 }
@@ -169,12 +170,14 @@ async function sessionFromHostedBearer(env, req) {
   }
   const actor = await hostedTokenActor(env, token);
   if (!actor) return null;
+  const teamIds = await loadAccountTeamIds(env, actor.account_id);
   return {
     id: null,
     login: actor.github_login || '',
     email: actor.email || '',
     account_id: actor.account_id,
-    team_ids: await loadAccountTeamIds(env, actor.account_id),
+    team_ids: teamIds,
+    team_admin_ids: await loadAdminTeamIds(env, actor.account_id, teamIds),
     bearer: true,
   };
 }
@@ -298,8 +301,15 @@ function sessionInTeam(session, teamId) {
   return !!(teamId && session && Array.isArray(session.team_ids) && session.team_ids.includes(teamId));
 }
 
+function sessionTeamAdmin(session, teamId) {
+  return !!(teamId && session && Array.isArray(session.team_admin_ids) && session.team_admin_ids.includes(teamId));
+}
+
+// The owner manages a doc: sharing, delete, rename, moving it. A personal doc
+// is owned by its author; a team doc by the team, i.e. its current admins.
+// The byline (meta.hosted) is display only and grants nothing on a team doc.
 function isDocOwnerSession(env, session, meta) {
-  if (meta && meta.workspace_id && !sessionInTeam(session, meta.workspace_id)) return false;
+  if (meta && meta.workspace_id) return sessionTeamAdmin(session, meta.workspace_id);
   // account_id is the canonical identity (phase 1), so compare it first —
   // this is what makes a doc published through an email-keyed account
   // manageable from the browser by the same person, whatever button they
@@ -1591,7 +1601,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     identity: identity || null,
     author,
     isOwner: !!isOwner,
-    canEdit: !!versionWritesEnabled && !!isOwner && !isLanding,
+    canEdit: !!versionWritesEnabled && (!!isOwner || !!(oidc && oidc.teamManage)) && !isLanding,
     // Landing keeps meta.commenting off (no KV writes) but still opens the
     // real sidebar so visitors can try highlight / reply. The shell stores
     // those in memory only — see demoComments.
@@ -2932,6 +2942,11 @@ async function saveTeam(env, team) {
   await env.META.put(`team:${team.id}`, JSON.stringify(team));
 }
 
+async function loadAdminTeamIds(env, accountId, teamIds) {
+  const teams = await Promise.all((teamIds || []).map((id) => loadTeam(env, id)));
+  return teams.filter((team) => teamRole(team, accountId) === 'admin').map((team) => team.id);
+}
+
 async function loadAccountTeamIds(env, accountId) {
   if (!accountId || !env || !env.META) return [];
   try {
@@ -2960,9 +2975,9 @@ function teamAdminCount(team) {
   return team.members.filter((m) => m.role === 'admin').length;
 }
 
-async function isTeamAdminSession(env, session, teamId) {
+async function isTeamMemberSession(env, session, teamId) {
   if (!sessionInTeam(session, teamId)) return false;
-  return teamRole(await loadTeam(env, teamId), session.account_id) === 'admin';
+  return !!teamMember(await loadTeam(env, teamId), session.account_id);
 }
 
 function teamSummary(team, accountId) {
@@ -3031,6 +3046,7 @@ async function teamSession(env, req, origin) {
       if (acct && acct.account_id) {
         session.account_id = acct.account_id;
         session.team_ids = await loadAccountTeamIds(env, acct.account_id);
+        session.team_admin_ids = await loadAdminTeamIds(env, acct.account_id, session.team_ids);
       }
     } catch {}
   }
@@ -3043,7 +3059,7 @@ async function teamManageFor(env, session, meta, access, isOwner) {
   const team = await loadTeam(env, meta.workspace_id);
   const role = teamRole(team, session.account_id);
   if (!role) return null;
-  const canManage = !!isOwner || role === 'admin';
+  const canManage = !!isOwner;
   return {
     team: { id: team.id, name: team.name },
     canManage,
@@ -3166,7 +3182,9 @@ async function indexData(env, session, origin) {
     // Computed here because only the server can compare canonical identities;
     // the client comparing display keys went quietly wrong for every session
     // shape that is not a bare handle.
-    mine: isDocOwnerSession(env, session, row.meta),
+    mine: row.meta && row.meta.workspace_id
+      ? !!(session && session.account_id && row.meta.hosted && row.meta.hosted.account_id === session.account_id)
+      : isDocOwnerSession(env, session, row.meta),
     starred: starred.has(row.slug),
   });
 
@@ -3186,7 +3204,7 @@ async function indexData(env, session, origin) {
       team: team.id,
       author: author ? author.name : ownerDisplay(row),
       former_member: !author,
-      can_manage: isDocOwnerSession(env, session, row.meta) || teamRole(team, viewerAccount) === 'admin',
+      can_manage: isDocOwnerSession(env, session, row.meta),
     };
   };
 
@@ -5263,6 +5281,7 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
   }
   if (!meta) return { error: 'not_found', status: 404 };
   // Author only — collaborators / folder guests cannot curate someone else's doc.
+  if (meta.workspace_id) return { error: 'team_doc', status: 409 };
   if (!isDocOwnerSession(env, session, meta)) return { error: 'forbidden', status: 403 };
 
   const access = accessFromMeta(meta);
@@ -5712,6 +5731,14 @@ async function requireUploadAuth(req, env) {
 // Slug-scoped write ACL for a hosted account token. Admin actors skip it.
 // opts.create: first publish / retry. Does NOT claim an empty slug — the
 // upload route claims after validation so a 400 cannot park the slug forever.
+// A team doc is written by any current member, the author included or not.
+// teamAdmin says whether this actor also owns it (see isDocOwnerSession).
+async function teamWriteAccess(env, actor, meta) {
+  const role = teamRole(await loadTeam(env, meta.workspace_id), actor.account_id);
+  if (!role) return { ok: false, response: json({ error: 'not_team_member' }, { status: 403 }) };
+  return { ok: true, meta, teamDoc: true, teamAdmin: role === 'admin' };
+}
+
 async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   const meta = await loadDocMeta(env, slug);
   if (!actor || actor.kind === 'admin') return { ok: true, meta };
@@ -5743,11 +5770,9 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
       return { ok: true, meta: null };
     }
     if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+    if (meta.workspace_id) return teamWriteAccess(env, actor, meta);
     if (accountId !== actor.account_id) {
       return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
-    }
-    if (meta.workspace_id && !(await loadAccountTeamIds(env, actor.account_id)).includes(meta.workspace_id)) {
-      return { ok: false, response: json({ error: 'not_team_member' }, { status: 403 }) };
     }
     const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
     if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
@@ -5755,10 +5780,8 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   }
   if (!meta) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
   if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+  if (meta.workspace_id) return teamWriteAccess(env, actor, meta);
   if (accountId !== actor.account_id) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
-  if (meta.workspace_id && !(await loadAccountTeamIds(env, actor.account_id)).includes(meta.workspace_id)) {
-    return { ok: false, response: json({ error: 'not_team_member' }, { status: 403 }) };
-  }
   const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
   if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
   return { ok: true, meta };
@@ -5924,16 +5947,28 @@ async function authorizeOwnerMutation(req, env, slug) {
   if (feedbackScopeDenied(session, slug)) return { ok: false, response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
   const meta = slug ? await loadDocMeta(env, slug) : null;
   if (isDocOwnerSession(env, session, meta)) return { ok: true, session, actor: { kind: 'owner_session' }, meta };
-  if (meta && meta.workspace_id && await isTeamAdminSession(env, session, meta.workspace_id)) {
-    return { ok: true, session, actor: { kind: 'team_admin' }, meta };
-  }
   const auth = await requireUploadAuth(req, env);
   if (!auth.ok) return { ok: false, response: auth.response };
   if (auth.actor.kind === 'admin') return { ok: true, session: null, actor: auth.actor, meta };
   if (!slug) return { ok: false, response: json({ error: 'slug required' }, { status: 400 }) };
   const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
   if (!writeGate.ok) return writeGate;
+  if (writeGate.teamDoc && !writeGate.teamAdmin) {
+    return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  }
   return { ok: true, session: null, actor: auth.actor, meta: writeGate.meta };
+}
+
+// Editing a doc and driving an agent on it. On a team doc every current
+// member may; sharing, delete and rename stay with authorizeOwnerMutation.
+async function authorizeDocEdit(req, env, slug) {
+  const session = await getSession(env, req);
+  const meta = slug ? await loadDocMeta(env, slug) : null;
+  if (meta && meta.workspace_id && !feedbackScopeDenied(session, slug)
+      && await isTeamMemberSession(env, session, meta.workspace_id)) {
+    return { ok: true, session, actor: { kind: 'team_member' }, meta };
+  }
+  return authorizeOwnerMutation(req, env, slug);
 }
 
 // ===========================================================================
@@ -6762,6 +6797,19 @@ async function resolveNotifyTargets(env, slug) {
   };
 }
 
+// A team doc has no one owner whose agent answers for it: whoever presses
+// the button sends to their own agents, never to a teammate's.
+async function notifyTargetsFor(env, slug, gate) {
+  if (!(gate.meta && gate.meta.workspace_id)) return resolveNotifyTargets(env, slug);
+  const own = await accountNotifyTargets(env, gate.session && gate.session.account_id);
+  return {
+    default: own[0] ? { ...own[0], source: 'account' } : null,
+    candidates: own.slice(1).map(t => ({ ...t, source: 'account' })),
+    fallback: own[0] || null,
+    reason: own.length ? null : 'no_agent_bound',
+  };
+}
+
 // ─────────────────────────── handoffs ───────────────────────────
 const HANDOFF_MAX = 50;
 
@@ -6802,7 +6850,7 @@ function handoffEvent({ slug, docTitle, handoffId, commentIds, instruction, publ
   };
 }
 
-async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recipient, publicHost }) {
+async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recipient, publicHost, by = null }) {
   const handoffId = `h_${Date.now()}_${rand(3)}`;
   const target = normalizeNotifyTarget(recipient);
   const event = handoffEvent({
@@ -6818,6 +6866,7 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
     comment_ids: commentIds,
     instruction: instruction || '',
     delivery: { ...delivery, at: new Date().toISOString() },
+    ...(by ? { by } : {}),
   });
 }
 
@@ -9829,6 +9878,7 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
       if (!writeGate.ok) return writeGate.response;
+      if (writeGate.teamDoc && !writeGate.teamAdmin) return json({ error: 'not_doc_owner' }, { status: 403 });
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
       return json(res.body, { status: res.status });
@@ -9982,21 +10032,22 @@ export default {
     }
 
     // ---- outbound notification: handoff to the doc's follow-up agent ----
-    // Gated by authorizeOwnerMutation, which is the whole permission model:
-    // driving an agent needs the doc owner's session or their upload token, so
-    // a reader who can comment still cannot make somebody's agent do work.
+    // Gated by authorizeDocEdit, which is the whole permission model: driving
+    // an agent needs the doc owner's session or upload token, or current
+    // membership of the doc's team, so a reader who can comment still cannot
+    // make somebody's agent do work.
     if (p === '/api/notify/targets' && method === 'GET') {
       const slug = url.searchParams.get('slug');
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const gate = await authorizeOwnerMutation(req, env, slug);
+      const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
-      return json(await resolveNotifyTargets(env, slug));
+      return json(await notifyTargetsFor(env, slug, gate));
     }
 
     if (p === '/api/notify/handoffs' && method === 'GET') {
       const slug = url.searchParams.get('slug');
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const gate = await authorizeOwnerMutation(req, env, slug);
+      const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
       return json({ handoffs: (await loadHandoffs(env, slug)).slice(0, limit) });
@@ -10009,7 +10060,7 @@ export default {
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       let ids = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : [];
       if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
-      const gate = await authorizeOwnerMutation(req, env, slug);
+      const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       // Threads whose last word is already an agent's are the person's turn:
       // handing them off again only made the agent answer itself. Drop them
@@ -10027,12 +10078,12 @@ export default {
         ids = ids.filter((id) => !skipped.includes(id));
         if (!ids.length) return json({ ok: true, sent: 0, skipped, reason: 'agent_has_last_word' });
       }
-      const resolved = await resolveNotifyTargets(env, slug);
+      const resolved = await notifyTargetsFor(env, slug, gate);
       // A feedback token lives in a page tdoc does not control, so a script
       // there could hold it. From that door the recipient must be one of the
       // account's own agents that the panel offered — never an address the
       // page made up.
-      const fromPage = Boolean(gate.session && gate.session.feedback);
+      const fromPage = Boolean(gate.session && gate.session.feedback) || Boolean(gate.meta && gate.meta.workspace_id);
       const offered = [resolved.default, ...(resolved.candidates || []), resolved.fallback].filter(Boolean);
       const asked = recipient ? normalizeNotifyTarget(recipient) : null;
       const target = asked && (!fromPage || offered.some(t => sameNotifyTarget(t, asked))) ? asked : resolved.default;
@@ -10043,6 +10094,7 @@ export default {
         slug, meta: gate.meta, commentIds: ids,
         instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
         recipient: target, publicHost: env.PUBLIC_HOST,
+        by: gate.meta && gate.meta.workspace_id && gate.session ? gate.session.account_id : null,
       });
       return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(skipped.length ? { skipped } : {}) });
     }
@@ -10052,10 +10104,13 @@ export default {
       try { body = await req.json(); } catch {}
       const { slug, handoff_id } = body;
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const gate = await authorizeOwnerMutation(req, env, slug);
+      const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      if (gate.meta && gate.meta.workspace_id && prev.by !== (gate.session && gate.session.account_id)) {
+        return json({ error: 'not_handoff_sender' }, { status: 403 });
+      }
       // A resend reuses the original externalEventId, so a provider that did
       // receive the first attempt drops the duplicate instead of waking the
       // agent twice for the same batch.
@@ -10228,7 +10283,7 @@ export default {
       if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(doc)) {
         return json({ error: 'provider_markup_forbidden' }, { status: 400 });
       }
-      const auth = await authorizeOwnerMutation(req, env, slug);
+      const auth = await authorizeDocEdit(req, env, slug);
       if (!auth.ok) return auth.response;
       const result = await createBrowserVersion(env, slug, {
         baseVersion,
@@ -10313,8 +10368,13 @@ export default {
           if (!prevTeam) delete incoming.access.team;
         }
         incoming = stampHostedOwnership(incoming, auth.actor);
+        // A teammate's publish adds a version; the author and sharing stay.
+        if (writeGate.teamDoc) {
+          incoming.hosted = prev.hosted;
+          incoming.access = prev.access;
+        }
       }
-      if (auth.actor && auth.actor.kind === 'hosted') {
+      if (auth.actor && auth.actor.kind === 'hosted' && !writeGate.teamDoc) {
         const claimed = await hostedOwnerOp(env, slug, { kind: 'claim_owner', account_id: auth.actor.account_id });
         if (!claimed.ok) return json({ error: claimed.error || 'owner_claim_failed' }, { status: claimed.status || 409 });
       }

@@ -127,6 +127,49 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(asDave.status === 403, `dave ${asDave.status}`);
   });
 
+  await t('every member edits a team doc and sends to their own agent; outsiders cannot', async () => {
+    const html = '<!doctype html><html><head><title>plan</title></head><body><h1>plan</h1><p>bob was here</p></body></html>';
+    const outsider = await call('/api/doc/versions', { method: 'POST', cookie: dave, body: { slug: 'plan', baseVersion: 1, html } });
+    assert(outsider.status === 403 || outsider.status === 401, `outsider save ${outsider.status}`);
+    const saved = await call('/api/doc/versions', { method: 'POST', cookie: bob, body: { slug: 'plan', baseVersion: 1, html } });
+    assert(saved.status === 200, `member save ${saved.status} ${JSON.stringify(saved.body)}`);
+    const meta = JSON.parse(await env.META.get('meta:plan'));
+    assert(meta.versions.length === 2 && meta.hosted.account_id === 'acct-alice', 'new version, same author');
+    const boot = await (await worker.fetch(req('/d/plan/v/2', { cookie: bob }), env, {})).text();
+    assert(/"canEdit":true/.test(boot), 'member gets the editor');
+
+    const agent = (name) => ({ provider: 'raft', server_id: 'srv', agent_sub: name, agent_name: name });
+    await env.META.put('account-notify:acct-alice', JSON.stringify([agent('alice-bot')]));
+    await env.META.put('account-notify:acct-bob', JSON.stringify([agent('bob-bot')]));
+    const targets = await call('/api/notify/targets?slug=plan', { cookie: bob });
+    assert(targets.status === 200 && targets.body.default && targets.body.default.agent_sub === 'bob-bot', `targets ${JSON.stringify(targets.body)}`);
+    assert(!targets.body.candidates.some((c) => c.agent_sub === 'alice-bot'), "never a teammate's agent");
+    const none = await call('/api/notify/targets?slug=plan', { cookie: carol });
+    assert(none.status === 200 && none.body.reason === 'no_agent_bound', 'no agent of your own, nobody to send to');
+    const outsiderTargets = await call('/api/notify/targets?slug=plan', { cookie: dave });
+    assert(outsiderTargets.status === 403 || outsiderTargets.status === 401, `outsider targets ${outsiderTargets.status}`);
+    const steer = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: ['c1'], recipient: agent('alice-bot') } });
+    const handoffs = JSON.parse(await env.META.get('handoffs:plan') || '[]');
+    assert(steer.status === 200 && handoffs[0] && handoffs[0].recipient.agent_sub === 'bob-bot' && handoffs[0].by === 'acct-bob', `handoff ${JSON.stringify(handoffs[0])}`);
+    const resend = await call('/api/notify/handoff/resend', { method: 'POST', cookie: alice, body: { slug: 'plan', handoff_id: handoffs[0].handoff_id } });
+    assert(resend.status === 403, `teammate resent bob's handoff ${resend.status}`);
+  });
+
+  await t("a member's agent token publishes a version but cannot change sharing", async () => {
+    const token = 'tok-bob-agent';
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    await env.META.put(`hosted-token:${hash}`, JSON.stringify({ account_id: 'acct-bob', github_login: 'bob' }));
+    const html = '<!doctype html><html><head><title>plan</title></head><body><h1>plan</h1><p>agent pass</p></body></html>';
+    const up = await call('/api/upload', { method: 'POST', token, body: { slug: 'plan', version: 3, html, meta: { access: { visibility: 'unlisted' } } } });
+    assert(up.status === 200, `upload ${up.status} ${JSON.stringify(up.body)}`);
+    const meta = JSON.parse(await env.META.get('meta:plan'));
+    assert(meta.hosted.account_id === 'acct-alice' && meta.access.visibility === 'private' && meta.access.team === true, `author and sharing kept ${JSON.stringify(meta.access)}`);
+    const patch = await call('/api/doc/access', { method: 'PATCH', token, body: { slug: 'plan', access: { visibility: 'unlisted' } } });
+    assert(patch.status === 403, `member token changed access ${patch.status}`);
+    const wipe = await call('/api/comments?slug=plan&all=1', { method: 'DELETE', token });
+    assert(wipe.status === 403, `member token wiped comments ${wipe.status}`);
+  });
+
   await t('/api/me lists team docs separately from personal docs', async () => {
     const me = await call('/api/me', { cookie: bob });
     assert(me.status === 200, `me ${me.status}`);
@@ -138,13 +181,19 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(!html.includes('allowed_users'), 'catalog leaks no access policy');
   });
 
-  await t('author and team admin change access; a plain member cannot', async () => {
+  await t('only team admins manage a team doc, even against its own author', async () => {
     const member = await call('/api/doc/access', { method: 'PATCH', cookie: bob, body: { slug: 'plan', access: { team: false } } });
     assert(member.status === 403 || member.status === 401, `member ${member.status}`);
+    const author = await call('/api/doc/access', { method: 'PATCH', cookie: bob, body: { slug: 'bob-notes', access: { visibility: 'unlisted' } } });
+    assert(author.status === 403 || author.status === 401, `member author ${author.status}`);
+    const out = await call('/api/team/move', { method: 'POST', cookie: bob, body: { slugs: ['bob-notes'], team: null } });
+    assert(out.status === 403, `member author moved it out ${out.status}`);
     const admin = await call('/api/doc/access', { method: 'PATCH', cookie: alice, body: { slug: 'bob-notes', access: { visibility: 'unlisted' } } });
     assert(admin.status === 200, `admin ${admin.status} ${JSON.stringify(admin.body)}`);
-    const author = await call('/api/doc/access', { method: 'PATCH', cookie: bob, body: { slug: 'bob-notes', access: { visibility: 'private' } } });
-    assert(author.status === 200, `author ${author.status}`);
+    const back = await call('/api/doc/access', { method: 'PATCH', cookie: alice, body: { slug: 'bob-notes', access: { visibility: 'private' } } });
+    assert(back.status === 200, `admin ${back.status}`);
+    const row = (await call('/api/me', { cookie: bob })).body.team_docs.find((d) => d.slug === 'bob-notes');
+    assert(row && row.mine === true && row.can_manage === false, `byline only ${JSON.stringify(row)}`);
     const personal = await call('/api/doc/access', { method: 'PATCH', cookie: alice, body: { slug: 'solo', access: { team: true } } });
     assert(personal.status === 400 && personal.body.error === 'not_team_doc', `personal ${personal.status}`);
   });
@@ -185,7 +234,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(row && row.author === 'alice' && row.former_member === true && row.can_manage === true, `row ${JSON.stringify(row)}`);
   });
 
-  await t('the author moves their doc back to personal; team access goes with it', async () => {
+  await t("an admin moves a team doc back to its author's My docs; team access goes with it", async () => {
     const back = await call('/api/team/move', { method: 'POST', cookie: bob, body: { slugs: ['bob-notes'], team: null } });
     assert(back.status === 200, `back ${back.status}`);
     const meta = JSON.parse(await env.META.get('meta:bob-notes'));

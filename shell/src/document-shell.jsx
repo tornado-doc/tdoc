@@ -745,7 +745,7 @@ export function DocumentShell({ boot, config }) {
     if (!comments.latest.current.some((c) => c.id === openCommentId)) setOpenCommentId(null);
   };
 
-  const notifyEnabled = Boolean(config.isOwner && !config.isLanding && config.mode !== 'local');
+  const notifyEnabled = Boolean((config.isOwner || config.teamManage) && !config.isLanding && config.mode !== 'local');
   const notifyTargets = useNotifyTargets(config.slug, notifyEnabled);
   const canSendToAgent = Boolean(
     notifyEnabled
