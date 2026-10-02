@@ -745,7 +745,7 @@ export function DocumentShell({ boot, config }) {
     if (!comments.latest.current.some((c) => c.id === openCommentId)) setOpenCommentId(null);
   };
 
-  const notifyEnabled = Boolean(config.isOwner && !config.isLanding && config.mode !== 'local');
+  const notifyEnabled = Boolean((config.isOwner || config.teamManage) && !config.isLanding && config.mode !== 'local');
   const notifyTargets = useNotifyTargets(config.slug, notifyEnabled);
   const canSendToAgent = Boolean(
     notifyEnabled
@@ -1406,7 +1406,7 @@ export function DocumentShell({ boot, config }) {
         slug={config.slug}
         onOpenChange={(open) => !open && setDialog(null)}
       />
-      {config.ownerManage ? (
+      {config.ownerManage || config.teamManage?.canManage ? (
         <OwnerAccessDialog
           open={dialog?.type === 'share'}
           config={config}
@@ -1418,6 +1418,7 @@ export function DocumentShell({ boot, config }) {
         <ShareDialog
           open={dialog?.type === 'share'}
           url={shareUrl}
+          team={config.teamManage}
           onOpenChange={(open) => !open && setDialog(null)}
           onCopied={() => showToast('Link copied')}
         />
