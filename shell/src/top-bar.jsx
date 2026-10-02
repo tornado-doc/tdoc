@@ -16,6 +16,16 @@ import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from './ui/menu.js
 import { useNotifications } from './hooks/use-notifications.js';
 import { NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 
+// Sign in always asks which account: after Sign out, the provider (and
+// GitHub behind it) still remember the last one, and going straight back in
+// as them was the only way the old flow worked. "Switch account" was that
+// same request under a second name, so it is gone; Sign out then Sign in is
+// how to change accounts.
+function defaultSignIn() {
+  const here = location.pathname + location.search + location.hash;
+  location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(here)}`;
+}
+
 export function TopBar({
   identity,
   children,
@@ -24,9 +34,10 @@ export function TopBar({
   theme,
   onThemeChange,
   onNotificationNavigate,
-  authConfigured = false,
-  onSignIn,
-  onSwitchAccount,
+  // Every page has a way in. A page that does not say otherwise signs in
+  // through the provider and comes back here; the doc page passes its own.
+  authConfigured = true,
+  onSignIn = defaultSignIn,
   profile = null,
   onClaimProfile = null,
 }) {
@@ -158,11 +169,6 @@ export function TopBar({
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
                 </AppMenuItem>
-                {onSwitchAccount ? (
-                  <AppMenuItem className="tdoc-action-menu-item" onClick={onSwitchAccount}>
-                    <LogIn size={15} /> Switch account
-                  </AppMenuItem>
-                ) : null}
               </AppSubmenu>
             </>
           ) : authConfigured ? (
@@ -191,7 +197,6 @@ export function TopBar({
             ) : null}
             <AppMenuItem onClick={() => { location.href = '/me/tokens'; }}>Connected terminals</AppMenuItem>
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
-            {onSwitchAccount ? <AppMenuItem onClick={onSwitchAccount}>Switch account</AppMenuItem> : null}
           </AppMenu>
         ) : authConfigured ? (
           <button type="button" className="tdoc-chip signin tdoc-account-trigger" onClick={onSignIn}>

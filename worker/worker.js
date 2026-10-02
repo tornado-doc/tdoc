@@ -558,9 +558,9 @@ function accessDeniedHtml({ status, title, body, slug, version, signin }) {
   // signed in as the wrong person, so force the account chooser — and a 403
   // can also ASK: request access drops a notification in the owner's inbox.
   const actions = signin === 'signin'
-    ? [{ label: 'Sign in', href: `/api/auth/oidc/login?return=${encodeURIComponent(next)}`, primary: true }]
+    ? [{ label: 'Sign in', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
     : signin === 'switch'
-      ? [{ label: 'Switch account', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
+      ? [{ label: 'Sign in with another account', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
       : null;
   return statusPageResponse({
     docTitle: `${title} · tdoc`,
@@ -4487,12 +4487,15 @@ const FEEDBACK_PAGE_CSS = `
   .fb-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;
     height: 48px; padding: 0 18px; background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--td-line); }
   .fb-bar-home { display: inline-flex; align-items: center; gap: 8px; color: var(--td-ink); text-decoration: none; font: 700 15px/1 -apple-system, system-ui, sans-serif; }
-  .fb-bar nav { display: flex; align-items: center; gap: 12px; font: 600 13px/1 -apple-system, system-ui, sans-serif; }
+  .fb-bar nav { display: flex; align-items: center; gap: 12px; font: 600 14px/1.2 -apple-system, system-ui, sans-serif; }
   .fb-bar-link { color: var(--td-ink); text-decoration: none; padding: 7px 10px; border-radius: 999px; }
   .fb-bar-link:hover { background: #f0f0ee; }
-  .fb-bar-cta { background: var(--td-accent); color: #fff !important; }
+  /* Same shapes as the app's top bar: a 6px Sign in button, an avatar chip. */
+  .fb-bar-cta { padding: 7px 14px; border-radius: 6px; background: var(--td-accent); color: #fff !important; text-decoration: none; }
   .fb-bar-cta:hover { background: var(--td-accent-hover); }
-  .fb-bar-who { color: var(--td-muted); font-weight: 500; }
+  .fb-bar-account { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; border-radius: 999px; background: transparent; color: #555; text-decoration: none; font-weight: 500; }
+  .fb-bar-account:hover { background: #f0f1f4; color: var(--td-ink); }
+  .fb-bar-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--td-accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font: 600 12px/1 -apple-system, system-ui, sans-serif; }
   [hidden] { display: none !important; }
   body { margin: 0; background: #fff; color: var(--td-ink);
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
@@ -4659,10 +4662,11 @@ const FEEDBACK_PAGE_CSS = `
 // pages, so they carry a plain version of the same top bar: the mark home,
 // and My docs or Sign in on the right.
 function feedbackTopBar(identity, returnTo) {
+  const who = (identity && (identity.name || identity.login)) || '';
   const right = identity
-    ? `<a class="fb-bar-link" href="/me">My docs</a><span class="fb-bar-who">${escapeHtml(identity.name || identity.login || '')}</span>`
-    : `<a class="fb-bar-link fb-bar-cta" href="/api/auth/oidc/login?return=${encodeURIComponent(returnTo || '/feedback')}">Sign in</a>`;
-  return `<header class="fb-bar"><a class="fb-bar-home" href="/" aria-label="tdoc home"><img src="/favicon.svg" alt="" width="20" height="20"><span>tdoc</span></a><nav>${right}</nav></header>`;
+    ? `<a class="fb-bar-account" href="/me" title="My docs"><span class="fb-bar-avatar">${escapeHtml(who.slice(0, 1).toUpperCase() || '?')}</span><span>${escapeHtml(who)}</span></a>`
+    : `<a class="fb-bar-cta" href="/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnTo || '/feedback')}">Sign in</a>`;
+  return `<header class="fb-bar"><a class="fb-bar-home" href="/me" aria-label="My docs"><img src="/favicon.svg" alt="" width="22" height="22"></a><nav>${right}</nav></header>`;
 }
 
 function feedbackScriptSrc(base) {
@@ -8845,7 +8849,12 @@ export default {
       // meant to pick a different method. prompt=login is the standard OIDC
       // lever that forces the chooser; whitelisted so the param can't smuggle
       // anything else.
-      if (url.searchParams.get('prompt') === 'login') auth.searchParams.set('prompt', 'login');
+      //
+      // Now unconditional: a sign-in that silently resumes the provider's
+      // session is the reason "sign out, sign in as someone else" did not
+      // work — every door that forgot to ask for the chooser (the status
+      // page, the feedback pages) went straight back in as the last account.
+      auth.searchParams.set('prompt', 'login');
       return redirectTo(auth.toString(), [
         `${cfg.stateCookie}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
