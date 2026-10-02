@@ -14,6 +14,7 @@ import { NeutralLanding } from './neutral-landing.jsx';
 import { StatusPage } from './status-page.jsx';
 import { ActivatePage } from './activate-page.jsx';
 import { SetupGate } from './setup-gate.jsx';
+import { TeamJoinPage } from './team-join.jsx';
 
 const OnboardingPreview = lazy(() => import('./onboarding-preview.jsx'));
 const WorkspacePreview = lazy(() => import('./workspace-preview.jsx'));
@@ -33,6 +34,7 @@ if (appRoot && appBoot) {
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;
   else if (appBoot.page === 'activate') page = <ActivatePage boot={appBoot} />;
   else if (appBoot.page === 'setup') page = <SetupGate boot={appBoot} />;
+  else if (appBoot.page === 'team-join') page = <TeamJoinPage boot={appBoot} />;
   else page = <NeutralLanding boot={appBoot} />;
   createRoot(appRoot).render(page);
 } else {
