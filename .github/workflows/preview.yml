@@ -297,6 +297,7 @@ jobs:
           **Open this:** https://${PREVIEW_HOST}/ — the homepage, this PR's code
           carrying the landing version in this PR's checkout.
           **Onboarding UI:** https://${PREVIEW_HOST}/__preview/onboarding
+          **Teams UI (JUL-71):** https://${PREVIEW_HOST}/__preview/workspace
           **Resolved toggle:** https://${PREVIEW_HOST}/d/resolved-pr-${PR}/v/2
           **Version diff:** https://${PREVIEW_HOST}/d/version-diff-pr-${PR}/v/2?compare=1
           **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1
