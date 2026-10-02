@@ -17,7 +17,7 @@ export function ShareDialog({ open, url, team, onOpenChange, onCopied }) {
       description={team
         ? `${team.access?.visibility === 'private'
           ? (team.access?.team ? `Everyone in ${team.team.name} can open and comment.` : 'Only people with access can open it.')
-          : 'Anyone with this link can read.'} Only the author and team admins can change access.`
+          : 'Anyone with this link can read.'} Only team admins can change access.`
         : 'Anyone with this link can read. To comment, they sign in.'}
       actions={(
         <>
