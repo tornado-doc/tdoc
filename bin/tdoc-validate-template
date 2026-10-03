@@ -882,11 +882,21 @@ def main() -> int:
         return 2
     errors, notes = validate(path, style=args.style, custom_template=args.custom_template)
     if notes:
-        print(f"tdoc-template: {len(notes)} house-style note(s) — the document is still valid:", file=sys.stderr)
+        if args.strict:
+            print(f"tdoc-template: {len(notes)} house-style note(s) — creation rejects these:", file=sys.stderr)
+        else:
+            print(f"tdoc-template: {len(notes)} house-style note(s) — the document is still valid:", file=sys.stderr)
         for note in notes:
             print(f"  · {note}", file=sys.stderr)
-        print("These are taste, not contract. Follow them for a document that matches", file=sys.stderr)
-        print("the house style; ignore them for one that deliberately brings its own.", file=sys.stderr)
+        if args.strict:
+            print("Match --style (default|technical|editorial|paper), or pass", file=sys.stderr)
+            print("--custom-template with --custom-template-reason if this", file=sys.stderr)
+            print("full-page custom design is intentional.", file=sys.stderr)
+        else:
+            print("These are taste, not contract for a standalone check. Creation", file=sys.stderr)
+            print("(tdoc-new / tdoc-write) runs with --strict and will fail them.", file=sys.stderr)
+            print("Pass --custom-template with --custom-template-reason if this", file=sys.stderr)
+            print("full-page custom design is intentional.", file=sys.stderr)
     if errors:
         print("tdoc-template: the document would not render correctly:", file=sys.stderr)
         for error in errors:
@@ -894,7 +904,6 @@ def main() -> int:
         print("Keep host HTML static/CSS-only. Put computation in a sandboxed widget island.", file=sys.stderr)
         return 1
     if notes and args.strict:
-        print("tdoc-template: --strict, so notes fail the run.", file=sys.stderr)
         return 1
     return 0
 
