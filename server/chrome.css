@@ -160,7 +160,10 @@
   .tdoc-popup .submit.agent.tdoc-agent-unlinked { opacity: .7; }
   .tdoc-connectors { display: grid; gap: 12px; }
   .tdoc-connector { border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 12px; display: grid; gap: 8px; }
-  .tdoc-connector-head { display: grid; gap: 2px; }
+  .tdoc-connector-head { display: flex; gap: 12px; align-items: flex-start; }
+  .tdoc-connector-logo { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 10px; background: var(--td-surface, #f5f5f3); display: inline-flex; align-items: center; justify-content: center; }
+  .tdoc-connector-title { display: grid; gap: 2px; }
+  .tdoc-connector-badge { justify-self: start; margin: 2px 0; padding: 1px 7px; border-radius: 999px; background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); font-size: 11px; font-weight: 600; }
   .tdoc-connector-head .muted { font-size: 12.5px; }
   .tdoc-connector code { display: block; padding: 8px; border-radius: 6px; background: var(--td-surface, #f7f7f5); font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
   .tdoc-connector .primary { justify-self: start; }

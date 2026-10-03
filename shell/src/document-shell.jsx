@@ -1306,6 +1306,7 @@ export function DocumentShell({ boot, config }) {
           openCommentId={openCommentId}
           expandReplies={deepReply}
           canSendToAgent={canSendToAgent}
+          agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me/agents?tab=send' : null}
           onOpenChange={setDrawerOpen}
           onReply={replyTo}
           onEdit={editComment}
@@ -1334,6 +1335,7 @@ export function DocumentShell({ boot, config }) {
           cardPosition={cardPosition}
           expandReplies={deepReply}
           canSendToAgent={canSendToAgent}
+          agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me/agents?tab=send' : null}
           onOpenComment={(id) => {
             focusComment(id);
           }}
@@ -1356,6 +1358,7 @@ export function DocumentShell({ boot, config }) {
           mentionable={mentionable}
           demo={!!config.demoComments}
           canSendToAgent={canSendToAgent}
+          agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me/agents?tab=send' : null}
           sendToAgentDisabledReason={
             notifyTargets.reason === 'no_agent_bound'
               ? 'No agent is following this doc yet'
