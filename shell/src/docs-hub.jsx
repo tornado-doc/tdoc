@@ -198,7 +198,17 @@ function ownerLabel(doc, viewer) {
 
 // Feedback spaces: one row per app, with where its comments stand. The row
 // opens the space's own page (the comment list), not a document.
-function FeedbackList({ spaces }) {
+function FeedbackList({ spaces: initial }) {
+  // Counts cost a comment read per space, so they load when the tab opens.
+  const [spaces, setSpaces] = useState(initial);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/me/feedback', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (!cancelled && b && Array.isArray(b.spaces)) setSpaces(b.spaces); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
   if (!spaces.length) {
     return (
       <p className="empty">
@@ -216,7 +226,7 @@ function FeedbackList({ spaces }) {
             <div className="doc-info">
               <span className="doc-title">{host}</span>
               <div className="doc-meta">
-                {[`${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
+                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
               </div>
             </div>
           </a>

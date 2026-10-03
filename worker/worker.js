@@ -3112,6 +3112,37 @@ function docReadableBy(env, session, meta) {
   return canReadDoc(accessFromMeta(meta || {}), session, env, meta);
 }
 
+// The feedback spaces a person owns or has joined. With counts, also where
+// each stands: open = a person spoke last, replied = an agent did.
+async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
+  if (!session) return [];
+  const out = await Promise.all(rows.map(async (row) => {
+    const origin = feedbackOrigin(row.meta && row.meta.feedback && row.meta.feedback.origin);
+    if (!origin) return null;
+    const owned = isDocOwnerSession(env, session, row.meta);
+    let joined = false;
+    if (!owned) {
+      try { joined = (await env.META.get(feedbackSpaceIndexKey(session, origin))) === row.slug; } catch {}
+    }
+    if (!owned && !joined) return null;
+    if (!docReadableBy(env, session, row.meta)) return null;
+    const item = { ...toPublic(row), origin, mine: owned };
+    if (withCounts) {
+      let open = 0, replied = 0;
+      try {
+        for (const c of snapshotList(await readComments(env, row.slug), Infinity)) {
+          if (!c || c.deleted || c.status === 'applied') continue;
+          const last = (c.replies || []).filter((r) => r && !r.deleted).slice(-1)[0];
+          if (last && last.author && last.author.kind === 'agent') replied++; else open++;
+        }
+      } catch {}
+      Object.assign(item, { open, replied });
+    }
+    return item;
+  }));
+  return out.filter(Boolean).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+}
+
 async function indexData(env, session, origin) {
   let keys = [];
   let cursor;
@@ -3209,28 +3240,9 @@ async function indexData(env, session, origin) {
   };
 
   // Feedback spaces stay out of My docs, but they need a home: the Feedback
-  // tab lists the ones this person owns or has joined, with where each
-  // stands (open = waiting on the agent side, replied = their turn).
-  const feedback = (await Promise.all(catalog.filter((row) => isFeedbackSpace(row.meta)).map(async (row) => {
-    const origin = feedbackOrigin(row.meta.feedback && row.meta.feedback.origin);
-    if (!origin || !session) return null;
-    const owned = isDocOwnerSession(env, session, row.meta);
-    let joined = false;
-    if (!owned) {
-      try { joined = (await env.META.get(feedbackSpaceIndexKey(session, origin))) === row.slug; } catch {}
-    }
-    if (!owned && !joined) return null;
-    if (!docReadableBy(env, session, row.meta)) return null;
-    let open = 0, replied = 0;
-    try {
-      for (const c of snapshotList(await readComments(env, row.slug), Infinity)) {
-        if (!c || c.deleted || c.status === 'applied') continue;
-        const last = (c.replies || []).filter((r) => r && !r.deleted).slice(-1)[0];
-        if (last && last.author && last.author.kind === 'agent') replied++; else open++;
-      }
-    } catch {}
-    return { ...publicRow(row), origin, mine: owned, open, replied };
-  }))).filter(Boolean).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  // tab. Listed here without counts — the catalog must not read comments per
+  // row — and counted by /api/me/feedback when the tab is opened.
+  const feedback = await feedbackSpacesFor(env, session, catalog.filter((row) => isFeedbackSpace(row.meta)), publicRow, false);
 
   return {
     docs: mine.map((row) => ({ ...publicRow(row), folder: folderState.docs[row.slug] || '' })),
@@ -7635,6 +7647,16 @@ export default {
     // Agents (hosted Bearer) use GET /api/me — same catalog as the HTML /me
     // hub, without needing a cookie. Cookie sessions also work so browser
     // tools can fetch JSON.
+    if (p === '/api/me/feedback' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const data = await indexData(env, s, url.origin);
+      const slugs = new Set((data.feedback || []).map((x) => x.slug));
+      const metas = await Promise.all([...slugs].map(async (slug) => ({ slug, meta: await loadDocMeta(env, slug) })));
+      const bySlug = new Map((data.feedback || []).map((x) => [x.slug, x]));
+      const spaces = await feedbackSpacesFor(env, s, metas.filter((m) => m.meta).map((m) => ({ ...m, updated: bySlug.get(m.slug).updated })), (row) => bySlug.get(row.slug), true);
+      return json({ ok: true, spaces }, { headers: { 'Cache-Control': 'no-store' } });
+    }
     if (p === '/api/me' && method === 'GET') {
       const s = await getViewerSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {

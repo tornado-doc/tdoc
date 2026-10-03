@@ -278,7 +278,10 @@ const APP = 'http://localhost:3000';
     }
     const me = await (await worker.fetch(req('/api/me', { cookie: julie }), env, {})).json();
     const row = (me.feedback || []).find((x) => x.slug === space.slug);
-    assert(row && row.mine === true && row.open === 2 && row.origin === APP, `owner row: ${JSON.stringify(me.feedback)}`);
+    assert(row && row.mine === true && row.origin === APP, `owner row: ${JSON.stringify(me.feedback)}`);
+    const counted = await (await worker.fetch(req('/api/me/feedback', { cookie: julie }), env, {})).json();
+    const crow = (counted.spaces || []).find((x) => x.slug === space.slug);
+    assert(crow && crow.open === 2 && crow.replied === 0, `counts: ${JSON.stringify(counted)}`);
     assert(!(me.docs || []).some((d) => d.slug === space.slug), 'space leaked into My docs');
     const can = await putSession(env, 'can');
     const before = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
