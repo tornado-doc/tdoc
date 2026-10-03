@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { deliveryErrorText } from './document/notify-handoff.jsx';
 import { TopBar } from './top-bar.jsx';
 import { AppSwitch } from './ui/switch.jsx';
 import {
@@ -677,7 +678,7 @@ export function DocumentShell({ boot, config }) {
         const body = await sendOneCommentToAgent(config.slug, value.id);
         const failed = body?.delivery?.status === 'failed';
         showToast(failed
-          ? `Sent — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
+          ? `Sent — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
           : 'Sent to agent');
         await comments.refresh();
       } catch (err) {
@@ -702,7 +703,7 @@ export function DocumentShell({ boot, config }) {
           const body = await sendOneCommentToAgent(config.slug, handoffId);
           const failed = body?.delivery?.status === 'failed';
           showToast(failed
-            ? `Sent — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
+            ? `Sent — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
             : 'Sent to agent', failed);
           await comments.refresh();
         } catch (err) {
