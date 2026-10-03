@@ -31,6 +31,37 @@ body,
   display: flex;
 }
 
+.tdoc-oldver-strip .tdoc-oldver-diff {
+  padding: 0;
+  margin-left: 8px;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: none;
+  color: #8a6d1f;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tdoc-oldver-strip .tdoc-oldver-diff:hover {
+  color: #6b5413;
+}
+
+.tdoc-oldver-strip > span,
+.tdoc-oldver-strip .tdoc-oldver-diff {
+  white-space: nowrap;
+}
+
+/* Narrow: one line still fits with the shorter lead. */
+.tdoc-oldver-lead-short,
+body.tdoc-narrow .tdoc-oldver-lead {
+  display: none;
+}
+
+body.tdoc-narrow .tdoc-oldver-lead-short {
+  display: inline;
+}
+
 .tdoc-doc-frame {
   flex: 1 1 auto;
   width: 100%;
