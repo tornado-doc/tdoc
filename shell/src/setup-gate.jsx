@@ -485,7 +485,17 @@ export function SetupGate({ boot, preview = null }) {
                         : <div><b>Connected.</b></div>}
                     </div>
                   ) : null}
+
                 </div>
+
+                {/* Optional, after the agent is connected: the agent can
+                    already use tdoc; this is for the other direction — tdoc
+                    pinging the agent when comments come in. */}
+                {state === 'done' && step !== 'doc' ? (
+                  <p className="sg-optional">
+                    <span>Optional</span> Want to send comments to your agent from tdoc (Send to agent, @agent)? <a href="/me/agents?tab=send">Set that up</a>.
+                  </p>
+                ) : null}
 
                 <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
                   {step === 'doc' ? 'Open doc' : 'Continue'}

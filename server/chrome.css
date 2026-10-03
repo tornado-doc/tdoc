@@ -164,6 +164,11 @@
   .tdoc-connector-head .muted { font-size: 12.5px; }
   .tdoc-connector code { display: block; padding: 8px; border-radius: 6px; background: var(--td-surface, #f7f7f5); font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
   .tdoc-connector .primary { justify-self: start; }
+  .tdoc-connector .tdoc-connector-action { display: inline-block; padding: 7px 14px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 13px/1.2 system-ui, sans-serif; text-decoration: none; }
+  .tdoc-connector details summary { cursor: pointer; }
+  .tdoc-connector details[open] { display: grid; gap: 8px; }
+  .tdoc-connect-agent .tdoc-connect-agent-cta { display: inline-block; margin: 0 0 8px; padding: 5px 10px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 12px system-ui, sans-serif; text-decoration: none; }
+  .tdoc-connect-agent details summary { cursor: pointer; color: #bbb; margin-bottom: 6px; }
   /* Lives inside the dark composer popup. */
   .tdoc-connect-agent { margin: 8px 0 4px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.08); color: #ddd; font-size: 12.5px; line-height: 1.45; }
   .tdoc-connect-agent p { margin: 0 0 6px; color: #ccc; }
