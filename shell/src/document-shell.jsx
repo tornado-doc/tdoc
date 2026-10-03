@@ -108,15 +108,18 @@ function ReanchorBanner({ commentId, onRemove, onCancel }) {
   );
 }
 
-function OldVersionNotice({ value }) {
+function OldVersionNotice({ value, onSeeChanges }) {
   if (!value) return null;
   return (
     <div className="tdoc-oldver-slot">
       <div className="tdoc-oldver-strip tdoc-oldver-visible">
         <span>
-          You're viewing v{value.current} - the latest is{' '}
+          <span className="tdoc-oldver-lead">You're viewing</span><span className="tdoc-oldver-lead-short">Viewing</span> v{value.current} - the latest is{' '}
           <a href={value.latestUrl}>v{value.latest}</a>
         </span>
+        {onSeeChanges ? (
+          <button type="button" className="tdoc-oldver-diff" onClick={onSeeChanges}>See changes</button>
+        ) : null}
       </div>
     </div>
   );
@@ -149,20 +152,42 @@ const exitLine = (answered, version) => (
 );
 
 export function DocumentShell({ boot, config }) {
-  const [comparing, setComparing] = useState(() => new URLSearchParams(location.search).get('compare') === '1');
-  const changeComparison = (next) => {
-    if (next === comparing) return;
-    const url = new URL(location.href);
-    if (next) url.searchParams.set('compare', '1'); else url.searchParams.delete('compare');
-    history.pushState(null, '', url);
-    setComparing(next);
+  // null, or the pair in the URL: ?compare=1[&from=<n>&to=<n>]. Missing or
+  // stale numbers resolve to the viewed version and the one before it.
+  const readComparison = () => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('compare') !== '1') return null;
+    return { from: params.has('from') ? Number(params.get('from')) : null, to: Number(params.get('to')) || null };
   };
+  const [comparing, setComparing] = useState(readComparison);
+  // Opening and closing are history steps; changing the pair replaces the
+  // step, so Back always leaves the comparison in one press.
+  const changeComparison = useCallback((next) => {
+    const url = new URL(location.href);
+    url.searchParams.delete('from');
+    url.searchParams.delete('to');
+    if (next) {
+      url.searchParams.set('compare', '1');
+      if (next.from != null) url.searchParams.set('from', String(next.from));
+      if (next.to != null) url.searchParams.set('to', String(next.to));
+    } else url.searchParams.delete('compare');
+    if (url.href === location.href) return;
+    const open = new URLSearchParams(location.search).get('compare') === '1';
+    if (open && next) history.replaceState(null, '', url); else history.pushState(null, '', url);
+    setComparing(next ? { from: next.from ?? null, to: next.to ?? null } : null);
+  }, []);
+  const closeComparison = useCallback(() => changeComparison(null), [changeComparison]);
   useEffect(() => {
-    const restore = () => setComparing(new URLSearchParams(location.search).get('compare') === '1');
+    const restore = () => setComparing(readComparison());
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);
   }, []);
   const narrow = useNarrowViewport();
+  // Readers who may not see history get only the viewed version in the list,
+  // so nothing offers to compare for them.
+  const canCompare = !config.isLanding && (config.versions || []).length > 1;
+  const canSeeLatest = canCompare && Boolean(boot.oldVersion)
+    && (config.versions || []).some((v) => Number(v.n) === Number(boot.oldVersion.latest));
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
   const editorRef = useRef(null);
@@ -1155,7 +1180,7 @@ export function DocumentShell({ boot, config }) {
             resolvedCount={resolvedCount}
             showResolved={showResolved}
             onToggleResolved={toggleResolved}
-            onCompare={() => changeComparison(true)}
+            onCompare={canCompare ? () => changeComparison({}) : null}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -1169,7 +1194,7 @@ export function DocumentShell({ boot, config }) {
             location.href = target;
             return;
           }
-          setComparing(false);
+          setComparing(null);
           const commentId = item.comment_id || item.thread_id;
           history.replaceState(null, '', target);
           setDeepTarget(commentId);
@@ -1186,10 +1211,10 @@ export function DocumentShell({ boot, config }) {
           starred={starred}
           onRename={renameDoc}
           onToggleStar={toggleStar}
-          onCompare={() => changeComparison(true)}
+          onCompare={canCompare ? () => changeComparison({}) : null}
         />
       </TopBar>
-      {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} onClose={() => changeComparison(false)} /> : null}
+      {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} pair={comparing} onPick={changeComparison} onClose={closeComparison} /> : null}
 
       <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
         onApply={async (json, svg) => {
@@ -1204,8 +1229,11 @@ export function DocumentShell({ boot, config }) {
           setDiagram(null);
           showToast('Diagram applied. Save the document to publish a new version.');
         }} />
-      <div className="tdoc-reader-surface" hidden={comparing}>
-      <OldVersionNotice value={boot.oldVersion} />
+      <div className="tdoc-reader-surface" hidden={Boolean(comparing)}>
+      <OldVersionNotice
+        value={boot.oldVersion}
+        onSeeChanges={canSeeLatest ? () => changeComparison({ from: boot.oldVersion.current, to: boot.oldVersion.latest }) : null}
+      />
 
       {notifyEnabled ? (
         <HandoffBanner

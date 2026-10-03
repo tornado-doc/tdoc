@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { ArrowRight, ChevronDown, X } from 'lucide-react';
+import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import './version-diff.css';
 
 const empty = { units: [], styles: '', duration: 0, animationCount: 0, unsupported: false };
@@ -114,13 +116,58 @@ function ComparisonFrames({ slug, before, after, narrow, theme }) {
   </>;
 }
 
-export function VersionDiffView({ config, theme, narrow, onClose }) {
-  const after = Number(config.version);
-  const before = Math.max(0, after - 1);
+// The pair a comparison shows. Unknown or out-of-order numbers fall back to
+// the viewed version and the one before it, so a stale link still opens.
+export function comparisonPair(config, requested = {}) {
+  const current = Number(config.version);
+  const known = (config.versions || []).map((v) => Number(v.n)).filter((n) => n > 0);
+  const versions = [...new Set([...known, current])].sort((a, b) => a - b);
+  const to = versions.includes(Number(requested.to)) ? Number(requested.to) : current;
+  const older = versions.filter((n) => n < to);
+  const from = older.includes(Number(requested.from)) ? Number(requested.from)
+    : older.length ? older[older.length - 1]
+      : versions.length > 1 ? 0 : Math.max(0, to - 1);
+  return { from, to, versions };
+}
+
+function VersionPicker({ label, value, options, onPick }) {
+  const name = (n) => (n ? `v${n}` : 'Empty');
+  if (options.length < 2) return <span className="tdoc-diff-version is-fixed">{name(value)}</span>;
+  return <AppMenu align="start" trigger={(
+    <button type="button" className="tdoc-diff-version" aria-label={`${label}: ${name(value)}`}>
+      {name(value)}<ChevronDown size={12} aria-hidden="true" />
+    </button>
+  )}>
+    {options.map((n) => <AppMenuItem key={n} className={`tdoc-version-item${n === value ? ' current' : ''}`} onClick={() => onPick(n)}>
+      {name(n)}
+    </AppMenuItem>)}
+  </AppMenu>;
+}
+
+export function VersionDiffView({ config, theme, narrow, pair, onPick, onClose }) {
+  const { from: before, to: after, versions } = comparisonPair(config, pair);
+  const hasEmpty = versions.length > 1;
+  const olderOptions = versions.filter((n) => n < after);
+  const fromOptions = olderOptions.length ? olderOptions : (hasEmpty ? [0] : [before]);
+  useEffect(() => {
+    // An open picker owns Escape; otherwise it is the way out.
+    const onKey = (event) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && !document.querySelector('.ui-menu-popup')) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
   return <main className="tdoc-version-diff" aria-label="Version changes">
     <div className="tdoc-diff-heading">
-      <strong>{before ? `v${after} · Changes from v${before}` : `v${after} · First version`}</strong>
-      <button type="button" onClick={onClose}>Back to document</button>
+      <div className="tdoc-diff-pair" role="group" aria-label="Versions to compare">
+        <span className="tdoc-diff-pair-label">Compare</span>
+        <VersionPicker label="Older version" value={before} options={fromOptions} onPick={(n) => onPick(comparisonPair(config, { from: n, to: after }))} />
+        <ArrowRight size={14} aria-hidden="true" />
+        <VersionPicker label="Newer version" value={after} options={versions} onPick={(n) => onPick(comparisonPair(config, { from: before && before < n ? before : null, to: n }))} />
+      </div>
+      <button type="button" className="tdoc-diff-close" aria-label="Back to document" title="Back to document (Esc)" onClick={onClose}>
+        <X size={16} aria-hidden="true" /><span>Back to document</span>
+      </button>
     </div>
     <ComparisonFrames key={`${before}:${after}:${narrow}`} slug={config.slug} before={before} after={after} narrow={narrow} theme={theme} />
   </main>;

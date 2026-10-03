@@ -1,6 +1,11 @@
 .tdoc-reader-surface:not([hidden]) { display:contents; }
 .tdoc-version-diff { flex:1; min-width:0; display:flex; flex-direction:column; padding:0 20px 12px; }
 .tdoc-diff-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:54px; font-size:13px; }
+.tdoc-diff-pair { display:flex; align-items:center; gap:8px; min-width:0; color:var(--td-muted,#6b6a66); }
+.tdoc-diff-pair-label { color:var(--td-ink,#222); font-weight:600; }
+.tdoc-diff-heading .tdoc-diff-version { display:inline-flex; align-items:center; gap:4px; padding:6px 8px; font-weight:600; font-variant-numeric:tabular-nums; cursor:pointer; }
+.tdoc-diff-version.is-fixed { padding:6px 0; color:var(--td-ink,#222); font-weight:600; }
+.tdoc-diff-heading .tdoc-diff-close { display:inline-flex; align-items:center; gap:6px; flex:none; cursor:pointer; }
 .tdoc-diff-heading button,.tdoc-diff-motion button { font:inherit; padding:8px 10px; border:1px solid var(--td-line,#ddd); border-radius:6px; background:var(--td-ground,#fff); color:var(--td-ink,#222); }
 .tdoc-diff-frames { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
 .tdoc-diff-pane { min-width:0; border:1px solid var(--td-line,#dedee3); border-radius:6px; overflow:hidden; }
@@ -19,7 +24,14 @@
 @media(max-width:700px) {
   .tdoc-version-diff { padding:0 8px 12px; }
   .tdoc-diff-heading { gap:8px; font-size:12px; }
-  .tdoc-diff-heading button,.tdoc-diff-motion button { min-height:44px; }
+  .tdoc-diff-pair-label,.tdoc-diff-close span { display:none; }
+  .tdoc-diff-heading .tdoc-diff-close { min-width:44px; justify-content:center; }
+  .tdoc-diff-pair { display:flex; align-items:center; gap:8px; min-width:0; color:var(--td-muted,#6b6a66); }
+.tdoc-diff-pair-label { color:var(--td-ink,#222); font-weight:600; }
+.tdoc-diff-heading .tdoc-diff-version { display:inline-flex; align-items:center; gap:4px; padding:6px 8px; font-weight:600; font-variant-numeric:tabular-nums; cursor:pointer; }
+.tdoc-diff-version.is-fixed { padding:6px 0; color:var(--td-ink,#222); font-weight:600; }
+.tdoc-diff-heading .tdoc-diff-close { display:inline-flex; align-items:center; gap:6px; flex:none; cursor:pointer; }
+.tdoc-diff-heading button,.tdoc-diff-motion button { min-height:44px; }
   .tdoc-diff-frames { gap:0; }
 }
 

@@ -18,9 +18,9 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await summary.waitFor({state:'attached'});
     assert(!(await summary.innerText()).startsWith('No content'));
     assert.equal(await page.getByRole('dialog').count(),0,'diff is a page, not a popup');
-    assert.equal(await view.getByRole('combobox').count(),0,'version pair is automatic');
     assert.equal(await view.getByRole('radiogroup').count(),0,'no view setup is required');
-    assert.equal(await view.locator('.tdoc-diff-heading strong').innerText(),'v2 · Changes from v1');
+    const pairText = () => view.getByRole('group', { name: 'Versions to compare' }).innerText();
+    assert.equal((await pairText()).replace(/\s+/g,' ').trim(),'Compare v1 v2','opens on the previous version and the viewed one');
     assert.equal(await page.locator('iframe[aria-label="Document content"]').isVisible(),false);
     await page.frameLocator('iframe[aria-label="Document content"]').locator('body').evaluate(() => { window.__readerInstance = 'retained'; });
     await page.evaluate(() => window.postMessage({source:'tdoc-compare',type:'error',message:'spoof'},'*'));
@@ -108,7 +108,7 @@ const { resolveTarget } = require('./helpers/fixture-server');
     assert.equal(await page.frameLocator('iframe[aria-label="Document content"]').locator('body').evaluate(() => window.__readerInstance),'retained','reader instance survives the comparison');
     assert.equal(await page.frameLocator('iframe[aria-label="Document content"]').locator('[data-tdoc-change],.tdoc-diff-del').count(),0,'comparison annotations never touch the reader');
     await page.getByRole('button', {name:'More actions',exact:true}).click();
-    await page.getByRole('menuitem', {name:'View changes',exact:true}).click();
+    await page.getByRole('menuitem', {name:'Compare versions',exact:true}).click();
     await summary.waitFor({state:'attached'});
     assert(new URL(page.url()).searchParams.has('compare'));
     await page.goBack();
@@ -125,8 +125,46 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await summary.waitFor({state:'attached'});
     after = await frame('New version');
     await after.locator('#title[data-tdoc-change="add"]').waitFor();
-    assert.equal(await view.locator('.tdoc-diff-heading strong').innerText(),'v1 · First version');
+    assert.equal(await view.getByRole('button',{name:'Older version: Empty'}).count(),0,'nothing older than v1 to pick');
+    assert.equal(await view.locator('.tdoc-diff-version.is-fixed').innerText(),'Empty');
     assert.equal(await view.locator('iframe[aria-label="Previous version"]').count(),0);
+
+    // Either side can be picked. Picking replaces the history step, so one
+    // Back still leaves the comparison.
+    await view.getByRole('button',{name:'Newer version: v1'}).click();
+    await page.getByRole('menuitem',{name:'v2',exact:true}).click();
+    await view.locator('iframe[aria-label="Previous version"]').waitFor({state:'attached'});
+    assert.equal((await pairText()).replace(/\s+/g,' ').trim(),'Compare v1 v2');
+    let params = new URL(page.url()).searchParams;
+    assert.deepEqual([params.get('compare'),params.get('from'),params.get('to')],['1','1','2']);
+    after = await frame('New version');
+    await after.locator('#added[data-tdoc-change="add"]').waitFor();
+    await view.getByRole('button',{name:'Newer version: v2'}).click();
+    await page.getByRole('menuitem',{name:'v1',exact:true}).click();
+    await view.locator('iframe[aria-label="Previous version"]').waitFor({state:'detached'});
+    assert.equal(new URL(page.url()).searchParams.get('to'),'1');
+    await page.keyboard.press('Escape');
+    await view.waitFor({state:'detached'});
+    assert(!new URL(page.url()).searchParams.has('compare'),'Esc leaves in one press');
+
+    // An older version's "latest is" strip opens viewed → latest in place.
+    await page.getByRole('button',{name:'See changes',exact:true}).click();
+    await summary.waitFor({state:'attached'});
+    params = new URL(page.url()).searchParams;
+    assert.deepEqual([params.get('from'),params.get('to')],['1','2']);
+    assert(new URL(page.url()).pathname.endsWith('/v/1'));
+    await view.getByRole('button',{name:'Back to document',exact:true}).click();
+    await view.waitFor({state:'detached'});
+    assert(await page.locator('.tdoc-oldver-strip').isVisible());
+    await page.goBack();
+    await summary.waitFor({state:'attached'});
+    await page.goBack();
+    await view.waitFor({state:'detached'});
+
+    // A stale pair falls back instead of failing.
+    await page.goto(`${url}?compare=1&from=9&to=7`);
+    await summary.waitFor({state:'attached'});
+    assert.equal((await pairText()).replace(/\s+/g,' ').trim(),'Compare v1 v2');
     assert.deepEqual(writes, [], 'review never writes document or comment state');
     assert.deepEqual(errors, []);
     const baselineRoute = '**/v/1/frame?tdoc_compare=1';
@@ -147,6 +185,6 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await view.getByRole('alert').waitFor({timeout:25000});
     assert((await view.getByRole('alert').innerText()).includes('may not have access'));
     assert.equal(await summary.count(),0);
-    console.log('PASS version diff: bidirectional aligned scrolling without feedback, direct page and history, fixed version pair, desktop/mobile, words, aligned rows/columns, SVG IDs, synchronized motion, first version, close/reopen and no writes');
+    console.log('PASS version diff: bidirectional aligned scrolling without feedback, direct page and history, both-side version picking, See changes strip, Esc exit, stale pairs, desktop/mobile, words, aligned rows/columns, SVG IDs, synchronized motion, first version, close/reopen and no writes');
   } finally { await browser.close(); await target.stop(); }
 })().catch(error => { console.error(error); process.exitCode=1; });

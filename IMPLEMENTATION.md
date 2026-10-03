@@ -75,11 +75,16 @@ runtime protocol or server boot shapes.
 
 ## Rendered version comparison
 
-The version menu and document overflow menu open **View changes** directly in
-the document area, with no dialog or setup controls. The current published
-version is always compared with its previous version; the first version is
-compared with an empty document. `?compare=1` opens this view
-directly, and browser Back/Forward restore the reading/comparison mode. The
+The version menu and document overflow menu open **Compare versions** directly
+in the document area, with no dialog. It opens on the viewed version and its
+previous version; the header (`Compare [v2 ▾] → [v3 ▾]`) picks either side. The
+first version is compared with an empty document. On an older version, the
+"latest is vN" strip offers **See changes** (viewed version → latest). Entries
+are hidden when the reader's version list has a single version (one version, or
+history hidden). `?compare=1[&from=<n>&to=<n>]` opens this view directly;
+unknown or out-of-order numbers fall back to the viewed version and the one
+before it. Opening and closing are history steps and changing the pair replaces
+the step, so Back, Esc or **Back to document** leave in one action. The
 original reader stays mounted but hidden, preserving unsaved editor state.
 Comparison includes published versions only.
 
