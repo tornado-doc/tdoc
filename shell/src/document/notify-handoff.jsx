@@ -125,7 +125,7 @@ function ConnectAgentView({ onClose }) {
       actions={(
         <>
           <button type="button" onClick={onClose}>Close</button>
-          <button type="button" className="primary" onClick={() => { location.href = '/me/connectors'; }}>Open Connectors</button>
+          <button type="button" className="primary" onClick={() => { location.href = '/me/agents?tab=send'; }}>Set up an agent</button>
         </>
       )}
     >
@@ -138,7 +138,7 @@ function ConnectAgentView({ onClose }) {
             <button type="button" className="primary" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
           </section>
         ))}
-        <p className="manage-hint">No Raft? Add a webhook, or manage everything, on the <a href="/me/connectors">Connectors</a> page.</p>
+        <p className="manage-hint">No Raft? Add a webhook, or manage everything, on the <a href="/me/agents?tab=send">Agents</a> page.</p>
       </div>
     </AppDialog>
   );

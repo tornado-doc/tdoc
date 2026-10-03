@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { CONNECT_AGENT_PROMPT, ProviderMark, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
@@ -28,7 +27,7 @@ function detailOf(t) {
 
 async function copy(text) { try { await navigator.clipboard.writeText(text); return true; } catch (_) { return false; } }
 
-export function ConnectorsPage({ boot }) {
+export function ConnectorsBody() {
   const [targets, setTargets] = useState(null);
   const [connectors, setConnectors] = useState([]);
   const [available, setAvailable] = useState([]);
@@ -86,10 +85,7 @@ export function ConnectorsPage({ boot }) {
   const doCopy = async (what, text) => { if (await copy(text)) { setCopied(what); setTimeout(() => setCopied(''), 1800); } };
 
   return (
-    <div className="tdoc-app docs-hub tdoc-connectors-page">
-      <TopBar identity={boot.identity || null} />
-      <main className="wrap">
-        <div className="page-hd"><h1>Connectors</h1></div>
+    <>
         <p className="muted" style={{ marginTop: 0 }}>
           Where tdoc sends comments when you press Send to agent or @agent. The agent that wrote a doc gets its comments first; the top one here is the default for everything else.
         </p>
@@ -144,7 +140,6 @@ export function ConnectorsPage({ boot }) {
             <p className="muted tdoc-conn-note">tdoc POSTs JSON (<span className="tdoc-inline-code">type: "tdoc.handoff"</span>, the doc, comment ids, instruction) with <span className="tdoc-inline-code">X-Tdoc-Signature: sha256=…</span>, an HMAC-SHA256 of the body with your signing secret.</p>
           </section>
         </div>
-      </main>
 
       {confirm ? (
         <AppDialog
@@ -175,6 +170,6 @@ export function ConnectorsPage({ boot }) {
           </div>
         </AppDialog>
       ) : null}
-    </div>
+    </>
   );
 }

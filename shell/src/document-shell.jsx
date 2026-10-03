@@ -745,7 +745,9 @@ export function DocumentShell({ boot, config }) {
     if (!comments.latest.current.some((c) => c.id === openCommentId)) setOpenCommentId(null);
   };
 
-  const notifyEnabled = Boolean((config.isOwner || config.teamManage) && !config.isLanding && config.mode !== 'local');
+  // Team docs: Send to agent and @agent are off until whose agent answers a
+  // team doc is decided (the server refuses too).
+  const notifyEnabled = Boolean(config.isOwner && !config.teamManage && !config.isLanding && config.mode !== 'local');
   const notifyTargets = useNotifyTargets(config.slug, notifyEnabled);
   const canSendToAgent = Boolean(
     notifyEnabled
