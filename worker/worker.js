@@ -3208,8 +3208,33 @@ async function indexData(env, session, origin) {
     };
   };
 
+  // Feedback spaces stay out of My docs, but they need a home: the Feedback
+  // tab lists the ones this person owns or has joined, with where each
+  // stands (open = waiting on the agent side, replied = their turn).
+  const feedback = (await Promise.all(catalog.filter((row) => isFeedbackSpace(row.meta)).map(async (row) => {
+    const origin = feedbackOrigin(row.meta.feedback && row.meta.feedback.origin);
+    if (!origin || !session) return null;
+    const owned = isDocOwnerSession(env, session, row.meta);
+    let joined = false;
+    if (!owned) {
+      try { joined = (await env.META.get(feedbackSpaceIndexKey(session, origin))) === row.slug; } catch {}
+    }
+    if (!owned && !joined) return null;
+    if (!docReadableBy(env, session, row.meta)) return null;
+    let open = 0, replied = 0;
+    try {
+      for (const c of snapshotList(await readComments(env, row.slug), Infinity)) {
+        if (!c || c.deleted || c.status === 'applied') continue;
+        const last = (c.replies || []).filter((r) => r && !r.deleted).slice(-1)[0];
+        if (last && last.author && last.author.kind === 'agent') replied++; else open++;
+      }
+    } catch {}
+    return { ...publicRow(row), origin, mine: owned, open, replied };
+  }))).filter(Boolean).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+
   return {
     docs: mine.map((row) => ({ ...publicRow(row), folder: folderState.docs[row.slug] || '' })),
+    feedback,
     recent: savedRows(recentItems).map(publicRow),
     starred: savedRows(starItems).map(publicRow),
     folders: folderState.folders.map((folder) => publicFolder(folder)),
@@ -7629,6 +7654,7 @@ export default {
         folders: data.folders,
         recent: data.recent,
         starred: data.starred,
+        feedback: data.feedback,
         teams: data.teams,
         team_docs: data.team_docs,
         ...(profile ? { profile } : {}),
