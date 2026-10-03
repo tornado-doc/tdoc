@@ -177,6 +177,12 @@ async function approve(worker, env, cookie, user_code) {
     assert(!(await response.text()).includes('"page":"onboarding-preview"'), 'preview boot escaped its build guard');
   });
 
+  await t('the teams design gallery is unavailable on a production build', async () => {
+    const response = await worker.fetch(req('/__preview/workspace'), makeEnv(mod.CommentsStore), {});
+    assert(response.status === 404, 'sample team screens must not be served on production');
+    assert(!(await response.text()).includes('"page":"workspace-preview"'), 'preview boot escaped its build guard');
+  });
+
   await t('the doc shell advertises the seat too — no surface left on the old door', async () => {
     const env = makeEnv(mod.CommentsStore, {
       OIDC_ISSUER: 'https://issuer.example', OIDC_CLIENT_ID: 'cid',

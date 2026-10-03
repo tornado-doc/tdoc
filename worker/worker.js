@@ -7656,6 +7656,16 @@ export default {
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
 
+    if (p === '/__preview/workspace' && (method === 'GET' || method === 'HEAD')) {
+      if (runtimeInfo().generated_by !== 'tdoc-preview') return json({ error: 'not_found' }, { status: 404 });
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        title: 'tdoc teams preview', nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH, runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({ page: 'workspace-preview' }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+    }
+
     // `/setup` — the gate. Setup is not the tutorial: it is the one thing that
     // must be true before tdoc does anything, so it gets a route of its own
     // rather than a step inside the landing pop-up. The page reads the

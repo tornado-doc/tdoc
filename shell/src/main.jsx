@@ -17,6 +17,7 @@ import { SetupGate } from './setup-gate.jsx';
 import { TeamJoinPage } from './team-join.jsx';
 
 const OnboardingPreview = lazy(() => import('./onboarding-preview.jsx'));
+const WorkspacePreview = lazy(() => import('./workspace-preview.jsx'));
 
 const appRoot = document.getElementById('tdoc-app-root');
 const appBoot = window.__TDOC_APP_BOOT__;
@@ -24,6 +25,7 @@ const appBoot = window.__TDOC_APP_BOOT__;
 if (appRoot && appBoot) {
   let page;
   if (appBoot.page === 'onboarding-preview') page = <Suspense fallback={<p>Loading preview…</p>}><OnboardingPreview /></Suspense>;
+  else if (appBoot.page === 'workspace-preview') page = <Suspense fallback={<p>Loading preview…</p>}><WorkspacePreview /></Suspense>;
   else if (appBoot.page === 'docs-hub') page = <DocsHub boot={appBoot} />;
   else if (appBoot.page === 'feedback-space') page = <FeedbackSpace boot={appBoot} />;
   else if (appBoot.page === 'agents') page = <AgentsPage boot={appBoot} />;
