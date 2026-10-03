@@ -78,19 +78,38 @@ export function ProviderMark({ target, size = 18 }) {
   return <span className="tdoc-notify-provider-fallback" aria-hidden="true">{meta.label.slice(0, 1)}</span>;
 }
 
+// Why this agent: doc follower vs account default. Silent account fallback is
+// what made "every send goes to the same agent" look like a routing bug.
+function recipientSourceHint(target) {
+  if (!target) return '';
+  if (target.source === 'account') {
+    return 'Account default — no agent is following this doc yet.';
+  }
+  if (target.source === 'doc') {
+    return 'Following this doc.';
+  }
+  return '';
+}
+
 function RecipientLine({ target }) {
   const handle = readableHandle(target);
   const primary = recipientPrimary(target);
+  const sourceHint = recipientSourceHint(target);
   return (
-    <p className="tdoc-notify-recipient" aria-label="Recipient">
-      <span className="tdoc-notify-recipient-avatar" aria-hidden="true">
-        <ProviderMark target={target} size={18} />
-      </span>
-      <span className="tdoc-notify-recipient-copy">
-        <strong>{primary}</strong>
-        {handle ? <span className="tdoc-notify-recipient-handle">{handle}</span> : null}
-      </span>
-    </p>
+    <div className="tdoc-notify-recipient-block">
+      <p className="tdoc-notify-recipient" aria-label="Recipient">
+        <span className="tdoc-notify-recipient-avatar" aria-hidden="true">
+          <ProviderMark target={target} size={18} />
+        </span>
+        <span className="tdoc-notify-recipient-copy">
+          <strong>{primary}</strong>
+          {handle ? <span className="tdoc-notify-recipient-handle">{handle}</span> : null}
+        </span>
+      </p>
+      {sourceHint ? (
+        <p className="manage-hint tdoc-notify-recipient-source">{sourceHint}</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -298,13 +317,18 @@ export function NotifyHandoffPanel({
     if (!choices.some((x) => sameTarget(x, c))) choices.push(c);
   }
   if (targets.fallback && !choices.some((x) => sameTarget(x, targets.fallback))) {
-    choices.push(targets.fallback);
+    // API fallback object may omit source; tag it so the panel can label it.
+    choices.push({ ...targets.fallback, source: targets.fallback.source || 'account' });
   }
 
   const ids = Array.isArray(commentIds) ? commentIds.filter(Boolean) : [];
   const boundHint = noAgentBoundReason(targets.reason);
   const canSubmit = !busy && ids.length > 0 && choices.length > 0 && (selected || targets.default);
-  const selectedKey = targetKey(selected || targets.default);
+  const selectedTarget = selected || targets.default;
+  const selectedKey = targetKey(selectedTarget);
+  const accountFallback =
+    selectedTarget?.source === 'account'
+    || (targets.default?.source === 'account' && sameTarget(selectedTarget, targets.default));
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -365,9 +389,13 @@ export function NotifyHandoffPanel({
       title="Send to agent"
       description={unavailable
         ? 'Notify is not available on this host yet.'
-        : (ids.length === 1
-          ? 'Sending 1 comment. One recipient per handoff.'
-          : `Sending ${ids.length || 0} open comments. One recipient per handoff.`)}
+        : accountFallback
+          ? (ids.length === 1
+            ? 'Sending 1 comment to your account default agent (nobody is following this doc).'
+            : `Sending ${ids.length || 0} open comments to your account default agent (nobody is following this doc).`)
+          : (ids.length === 1
+            ? 'Sending 1 comment. One recipient per handoff.'
+            : `Sending ${ids.length || 0} open comments. One recipient per handoff.`)}
       actions={(
         <>
           <button type="button" onClick={onClose}>Close</button>
@@ -415,12 +443,16 @@ export function NotifyHandoffPanel({
                 options={choices.map((t) => {
                   const handle = readableHandle(t);
                   const meta = providerMeta(t);
+                  const tagged = t.source === 'account' ? ' (account default)' : '';
                   return {
                     value: targetKey(t),
                     label: (
-                      <span className="tdoc-notify-recipient-opt" title={handle || undefined}>
+                      <span
+                        className="tdoc-notify-recipient-opt"
+                        title={recipientSourceHint(t) || handle || undefined}
+                      >
                         <ProviderMark target={t} size={16} />
-                        {handle || meta.label}
+                        {(handle || meta.label) + tagged}
                       </span>
                     ),
                   };
@@ -433,7 +465,7 @@ export function NotifyHandoffPanel({
             </section>
           ) : (
             <p className="manage-hint" title={boundHint || undefined}>
-              {boundHint || 'No agent has touched this doc yet. Pick one after an agent publishes or replies.'}
+              {boundHint || 'No agent is following this doc, and no account default is bound. Bind an agent or have one publish/reply with a Raft session.'}
             </p>
           )}
 
