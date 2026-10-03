@@ -30,6 +30,7 @@ const OFFLINE = [
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
+  'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated

@@ -6850,6 +6850,66 @@ const NOTIFY_PROVIDERS = {
   },
 };
 
+// Webhook: any service that can take an HTTPS POST (a bot, an agent runner,
+// Zapier). The connector is a URL plus a signing secret tdoc generates; the
+// body is the same handoff payload Raft gets, and X-Tdoc-Signature is
+// HMAC-SHA256(secret, body) so the receiver can tell tdoc sent it.
+// The secret lives under its own key: targets are shown to the account in
+// the UI, and the secret must never ride along.
+const WEBHOOK_ID_RE = /^wh_[a-f0-9]{16,40}$/;
+function webhookUrl(raw) {
+  try {
+    const u = new URL(String(raw || '').trim());
+    if (u.protocol !== 'https:' || u.username || u.password) return null;
+    const href = u.toString();
+    return href.length <= 500 ? href : null;
+  } catch { return null; }
+}
+async function hmacSha256Hex(secret, body) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+NOTIFY_PROVIDERS.webhook = {
+  validateTarget(t) {
+    const agent_sub = typeof t.agent_sub === 'string' ? t.agent_sub.trim() : '';
+    const url = webhookUrl(t.url);
+    if (!WEBHOOK_ID_RE.test(agent_sub) || !url) return null;
+    return { server_id: 'webhook', agent_sub, url };
+  },
+  async send(env, target, event) {
+    const secret = await env.META.get(`notify-webhook-secret:${target.agent_sub}`);
+    if (!secret) return { status: 'failed', error: 'webhook_secret_missing' };
+    const body = JSON.stringify({
+      type: 'tdoc.handoff',
+      id: event.externalEventId,
+      summary: event.summary,
+      sent_at: new Date().toISOString(),
+      ...event.payload,
+    });
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(target.url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'tdoc-webhook',
+          'X-Tdoc-Event': 'handoff',
+          'X-Tdoc-Delivery': event.externalEventId,
+          'X-Tdoc-Signature': `sha256=${await hmacSha256Hex(secret, body)}`,
+        },
+        body,
+      });
+      clearTimeout(timer);
+      return r.ok ? { status: 'delivered', error: null } : { status: 'failed', error: `webhook_${r.status}` };
+    } catch (e) {
+      return { status: 'failed', error: String((e && e.name === 'AbortError') ? 'webhook_timeout' : (e && e.message) || e).slice(0, 200) };
+    }
+  },
+};
+
 function raftAuthHeaders(env) {
   const basic = btoa(`${env.RAFT_CLIENT_ID}:${env.RAFT_CLIENT_SECRET}`);
   return { 'Content-Type': 'application/json', Authorization: `Basic ${basic}` };
@@ -6897,12 +6957,49 @@ async function actingAgent(env, req, actor) {
   if (session) return session;
   const accountId = actor && actor.kind === 'hosted' ? actor.account_id : null;
   if (!accountId) return null;
-  const m = (req.headers.get('x-tdoc-raft-agent') || '').trim()
-    .match(/^([A-Za-z0-9-]{1,80})\/([A-Za-z0-9-]{1,80})$/);
-  if (!m) return null;
-  const [, serverId, agentSub] = m;
+  // Two spellings of the same claim. X-Tdoc-Agent: <provider>/<server>/<agent>
+  // is the general one (a webhook connector says webhook/webhook/wh_…);
+  // X-Tdoc-Raft-Agent: <server>/<agent> is what the Raft CLI already sends.
+  // Either way the provider is read off the linked record, never the header,
+  // so the logo and the channel are the connector's, not the claimant's.
+  let provider = null, serverId = null, agentSub = null;
+  const general = (req.headers.get('x-tdoc-agent') || '').trim()
+    .match(/^([a-z]{1,20})\/([A-Za-z0-9_-]{1,80})\/([A-Za-z0-9_-]{1,80})$/);
+  if (general) [, provider, serverId, agentSub] = general;
+  else {
+    const raft = (req.headers.get('x-tdoc-raft-agent') || '').trim()
+      .match(/^([A-Za-z0-9-]{1,80})\/([A-Za-z0-9-]{1,80})$/);
+    if (!raft) return null;
+    provider = 'raft'; [, serverId, agentSub] = raft;
+  }
   const linked = await accountNotifyTargets(env, accountId);
-  return linked.find(t => t.server_id === serverId && t.agent_sub === agentSub) || null;
+  const exact = linked.find(t => t.provider === provider && t.server_id === serverId && t.agent_sub === agentSub);
+  if (exact) return exact;
+  // Not linked one by one, but on a Raft server this account connected: the
+  // server is the boundary, so the agent is taken at its word for WHICH agent
+  // it is — the worst a false claim does is route to another agent on the
+  // person's own connected server. Its handle is what Raft delivers by.
+  if (provider !== 'raft') return null;
+  const server = (await accountRaftServers(env, accountId)).find((sv) => sv.server_id === serverId);
+  if (!server) return null;
+  const removed = await accountRemovedTargets(env, accountId);
+  if (removed.has(`raft:${serverId}:${agentSub}`)) return null;
+  let name = '';
+  try { name = decodeURIComponent((req.headers.get('x-tdoc-raft-agent-name') || '').trim()).replace(/^@/, ''); } catch {}
+  // A handle in any script (小c), but one line and short; without one there
+  // is no way to deliver to it.
+  if (!name || name.length > 80 || /[\u0000-\u001f\u007f\s]/.test(name)) return null;
+  return normalizeNotifyTarget({ provider: 'raft', server_id: serverId, server_slug: server.server_slug, agent_sub: agentSub, agent_name: name });
+}
+
+// Agents the person disconnected. A doc keeps the agents that worked on it
+// (notify_agents), so removing one from the account alone would leave it
+// receiving handoffs for those docs; this list makes Disconnect mean it.
+// Linking the agent again takes it off the list.
+const notifyKey = (t) => `${t.provider}:${t.server_id}:${t.agent_sub}`;
+async function accountRemovedTargets(env, accountId) {
+  if (!accountId) return new Set();
+  try { return new Set(JSON.parse((await env.META.get(`account-notify-removed:${accountId}`)) || '[]')); } catch { return new Set(); }
 }
 
 async function accountNotifyTargets(env, accountId) {
@@ -6914,14 +7011,39 @@ async function accountNotifyTargets(env, accountId) {
   } catch { return []; }
 }
 
+// Raft servers this account has connected. The trust boundary for Raft is the
+// server, not the agent: once a server is connected, any agent on it that
+// says who it is (and the CLI says so on every publish and reply) can take a
+// doc's follow-up seat, and tdoc routes inside the server by agent name.
+// Today a server counts as connected when one of its agents was linked; the
+// explicit list is where a person's own "Connect with Raft" will write.
+async function accountRaftServers(env, accountId) {
+  if (!accountId) return [];
+  const byId = new Map();
+  try {
+    for (const sv of JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]')) {
+      if (sv && sv.server_id) byId.set(sv.server_id, { server_id: sv.server_id, server_slug: sv.server_slug || '' });
+    }
+  } catch {}
+  for (const t of await accountNotifyTargets(env, accountId)) {
+    if (t.provider === 'raft' && !byId.has(t.server_id)) byId.set(t.server_id, { server_id: t.server_id, server_slug: t.server_slug || '' });
+  }
+  const removed = await accountRemovedTargets(env, accountId);
+  return [...byId.values()].filter((sv) => !removed.has(`raft-server:${sv.server_id}`));
+}
+
 // doc first, account second. Returns what the handoff panel renders: one
 // preselected recipient, the other recent ones as switchable candidates.
 async function resolveNotifyTargets(env, slug) {
   const meta = await loadDocMeta(env, slug);
   const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
+  const ownerAccount = meta && meta.hosted && meta.hosted.account_id;
+  const removed = await accountRemovedTargets(env, ownerAccount);
   const docTargets = (Array.isArray(meta && meta.notify_agents) ? meta.notify_agents : [])
-    .map(normalizeNotifyTarget).filter(Boolean).sort(byRecency);
-  const fallbackList = await accountNotifyTargets(env, meta && meta.hosted && meta.hosted.account_id);
+    .map(normalizeNotifyTarget)
+    .filter((t) => t && !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)))
+    .sort(byRecency);
+  const fallbackList = await accountNotifyTargets(env, ownerAccount);
   const fallback = fallbackList[0] || null;
   if (docTargets.length) {
     return {
@@ -7908,6 +8030,22 @@ export default {
       return json({ ok: true, bio });
     }
 
+    if (p === '/me/connectors' && method === 'GET') {
+      const who = await tokenPageSession(env, req);
+      if (!who) return redirectTo(`/api/auth/oidc/login?prompt=login&return=${encodeURIComponent('/me/connectors')}`);
+      const nonce = rand(16);
+      const s = who.session;
+      return html(SHELL.appHtml({
+        title: 'Connectors · tdoc',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'connectors',
+          identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store' } });
+    }
     if (p === '/me/tokens' && method === 'GET') {
       const who = await tokenPageSession(env, req);
       if (!who) return redirectTo(`/api/auth/oidc/login?return=${encodeURIComponent('/me/tokens')}`);
@@ -10209,6 +10347,99 @@ export default {
     // link code proves which agent signed in (the issuer said so), the upload
     // token proves whose account is being written to. Either alone is inert —
     // which is the whole reason an agent may sign in without a browser.
+    // ---- Connectors: what can receive handoffs for this account ----
+    // Browser session only (a token cannot add or remove where its own
+    // account's comments go), and POSTs must come from this origin.
+    if (p.startsWith('/api/me/connectors')) {
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (method === 'POST' && req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+      const accountId = await sessionAccountId(env, s);
+      if (!accountId) return json({ error: 'account_required' }, { status: 403 });
+      const listKey = `account-notify:${accountId}`;
+      const current = await accountNotifyTargets(env, accountId);
+      let body = {};
+      if (method === 'POST') { try { body = await req.json(); } catch {} }
+      const find = () => current.find((t) => t.provider === body.provider && t.server_id === body.server_id && t.agent_sub === body.agent_sub);
+
+      if (p === '/api/me/connectors' && method === 'GET') {
+        // One row per connector: a Raft server (with the agents tdoc knows on
+        // it) or a webhook. The first agent overall is the account default.
+        const servers = await accountRaftServers(env, accountId);
+        const connectors = [
+          ...servers.map((sv) => ({
+            kind: 'raft', id: `raft:${sv.server_id}`, server_id: sv.server_id, server_slug: sv.server_slug,
+            agents: current.filter((t) => t.provider === 'raft' && t.server_id === sv.server_id),
+          })),
+          ...current.filter((t) => t.provider === 'webhook').map((t) => ({ kind: 'webhook', id: `webhook:${t.agent_sub}`, target: t })),
+        ];
+        return json({
+          ok: true,
+          connectors,
+          default: current[0] || null,
+          targets: current,
+          available: [
+            { id: 'raft', name: 'Raft agent', ready: !!(env.RAFT_CLIENT_ID && env.RAFT_CLIENT_SECRET) },
+            { id: 'webhook', name: 'Webhook', ready: true },
+          ],
+        }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (p === '/api/me/connectors/webhook' && method === 'POST') {
+        const hookUrl = webhookUrl(body.url);
+        if (!hookUrl) return json({ error: 'invalid_url', message: 'Use a full https:// URL.' }, { status: 400 });
+        const label = typeof body.label === 'string' ? body.label.trim().slice(0, 60) : '';
+        const id = `wh_${rand(10)}`;
+        const secret = `whsec_${rand(24)}`;
+        await env.META.put(`notify-webhook-secret:${id}`, secret);
+        const target = normalizeNotifyTarget({ provider: 'webhook', server_id: 'webhook', agent_sub: id, url: hookUrl, agent_name: label || new URL(hookUrl).host });
+        // Added at the end: a new webhook should not quietly become where
+        // everything goes. It is the default only when it is the first.
+        const next = [...current, { ...target, last_touched: new Date().toISOString() }].slice(-NOTIFY_AGENTS_MAX);
+        await env.META.put(listKey, JSON.stringify(next));
+        // The only time the secret leaves tdoc.
+        return json({ ok: true, target, secret });
+      }
+      if (p === '/api/me/connectors/test' && method === 'POST') {
+        const target = find();
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        const event = {
+          kind: 'notification',
+          summary: 'tdoc: test from your Connectors page — nothing to do',
+          externalEventId: `tdoc:test:${rand(6)}`,
+          ttlSeconds: 3600,
+          payload: { source: 'tdoc', test: true, comment_ids: [], instruction: 'This is a test. No action needed.', url: `${url.origin}/me/connectors` },
+        };
+        const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
+        return json({ ok: true, delivery });
+      }
+      if (p === '/api/me/connectors/remove' && method === 'POST' && body.provider === 'raft' && body.server_id && !body.agent_sub) {
+        // Disconnect a whole Raft server: none of its agents get handoffs,
+        // linked or self-identified, until it is connected again.
+        const gone = current.filter((t) => t.provider === 'raft' && t.server_id === body.server_id);
+        await env.META.put(listKey, JSON.stringify(current.filter((t) => !gone.includes(t))));
+        const removed = await accountRemovedTargets(env, accountId);
+        removed.add(`raft-server:${body.server_id}`);
+        for (const t of gone) removed.add(notifyKey(t));
+        await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
+        try {
+          const explicit = JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]').filter((sv) => sv && sv.server_id !== body.server_id);
+          await env.META.put(`account-raft-servers:${accountId}`, JSON.stringify(explicit));
+        } catch {}
+        return json({ ok: true, removed: gone.length });
+      }
+      if (p === '/api/me/connectors/remove' && method === 'POST') {
+        const target = find();
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        await env.META.put(listKey, JSON.stringify(current.filter((t) => t !== target)));
+        const removed = await accountRemovedTargets(env, accountId);
+        removed.add(notifyKey(target));
+        await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
+        if (target.provider === 'webhook') { try { await env.META.delete(`notify-webhook-secret:${target.agent_sub}`); } catch {} }
+        return json({ ok: true });
+      }
+      return json({ error: 'not_found' }, { status: 404 });
+    }
+
     if (p === '/api/notify/link' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
@@ -10241,6 +10472,11 @@ export default {
         ...existing.filter(t => !sameNotifyTarget(t, target)),
       ].slice(0, NOTIFY_AGENTS_MAX);
       await env.META.put(`account-notify:${auth.actor.account_id}`, JSON.stringify(next));
+      const removed = await accountRemovedTargets(env, auth.actor.account_id);
+      const clearedServer = removed.delete(`raft-server:${target.server_id}`);
+      if (removed.delete(notifyKey(target)) || clearedServer) {
+        await env.META.put(`account-notify-removed:${auth.actor.account_id}`, JSON.stringify([...removed]));
+      }
       return json({ ok: true, target, targets: next.length });
     }
 

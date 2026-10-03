@@ -211,10 +211,23 @@ function FeedbackList({ spaces: initial }) {
     return () => { cancelled = true; };
   }, []);
   if (!spaces.length) {
+    // The first visit to this tab is usually someone who has not tried it:
+    // say what it is and how to start, rather than "nothing here".
     return (
-      <p className="empty">
-        No feedback yet. Leave comments on your own app with the <a href="/feedback">tdoc bookmark</a>; they collect here.
-      </p>
+      <div className="tdoc-fb-empty">
+        <div className="tdoc-fb-empty-art" aria-hidden="true">
+          <span className="win"><i /><i /><i /></span>
+          <span className="pin">💬</span>
+        </div>
+        <h3>Collect feedback on your own app</h3>
+        <p className="muted">Click anything in the app you are building, say what is wrong, and hand it to your agent. Every app you comment on gets a list here.</p>
+        <ol>
+          <li><b>Get the bookmark</b> — drag it to your bookmarks bar.</li>
+          <li><b>Open your app</b> and click it, then <b>+ Comment</b>.</li>
+          <li><b>Invite teammates</b> to the same list, or <b>Send to agent</b>.</li>
+        </ol>
+        <a className="tdoc-fbspace-btn primary" href="/feedback">Get the bookmark</a>
+      </div>
     );
   }
   return (
