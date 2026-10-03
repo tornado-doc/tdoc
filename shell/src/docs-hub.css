@@ -682,3 +682,7 @@
 .tdoc-fbspace-list .tdoc-margin-comment { border: 1px solid var(--td-line) !important; box-shadow: none !important; }
 .tdoc-fbspace-list .tdoc-margin-comment.tdoc-current-comment { border-color: var(--td-accent) !important; }
 .tdoc-fbspace-agent { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -8px 0 18px; font-size: 13px; color: var(--td-muted); }
+
+/* Feedback tab rows are whole-row links; read like the other tabs' rows. */
+#pane-feedback a.doc-row { color: inherit; text-decoration: none; }
+#pane-feedback a.doc-row:hover .doc-title { color: var(--td-accent); }

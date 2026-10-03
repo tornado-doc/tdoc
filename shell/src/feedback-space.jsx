@@ -188,7 +188,7 @@ export function FeedbackSpace({ boot }) {
           </section>
         ))}
 
-        <p className="muted tdoc-fbspace-foot"><a href={docUrl}>Open as a document</a></p>
+        <p className="muted tdoc-fbspace-foot"><a href="/me?tab=feedback">All your feedback</a> · <a href={docUrl}>Open as a document</a></p>
       </main>
       {notifyIds ? (
         <NotifyHandoffPanel slug={slug} open commentIds={notifyIds} onClose={() => setNotifyIds(null)} onSent={() => refresh()} />
