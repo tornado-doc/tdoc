@@ -22,6 +22,7 @@ const ERRORS = {
   invalid_name: 'Give the team a name (up to 60 characters).',
   team_full: 'This team is full.',
   not_invited: 'This invite is no longer open. Ask a team admin to invite you again.',
+  email_required: 'Your sign-in did not share a verified email, so it cannot be matched to an email invite.',
 };
 const message = (error) => ERRORS[error?.body?.error] || error?.message || 'Request failed';
 

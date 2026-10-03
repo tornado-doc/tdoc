@@ -3022,13 +3022,30 @@ function normalizeTeamInvites(list) {
   return out.length > TEAM_INVITES_MAX ? null : out;
 }
 
-function sessionInviteKeys(session) {
-  return [sessionLogin(session), normalizeEmail(session && session.email)].filter(Boolean);
+// Who a session is to an invite list, whichever door it came through. Every
+// Clerk sign-in, email or GitHub inside the modal, arrives with the verified
+// address (completeEmailSignIn refuses one without), so the address is the
+// match. First-party GitHub sign-in carries one only when GitHub reported a
+// verified address; without it, the address the account itself verified when
+// the identity was linked stands in. A GitHub handle invite still matches the
+// handle the session carries. No address and no matching handle is no match.
+async function sessionInviteIdentity(env, session) {
+  const login = sessionLogin(session);
+  let email = normalizeEmail(session && session.email);
+  if (!email && login && session.account_id) {
+    const rec = await lookupHostedAccount(env, login);
+    if (rec && rec.account_id === session.account_id) email = normalizeEmail(rec.email);
+  }
+  return { email, keys: [email, login].filter(Boolean) };
 }
 
-function sessionInvited(team, session) {
+function sessionInvited(team, who) {
   const invites = team && Array.isArray(team.invites) ? team.invites : [];
-  return sessionInviteKeys(session).some((key) => invites.includes(key));
+  return who.keys.some((key) => invites.includes(key));
+}
+
+function notInvitedError(who) {
+  return who.email ? 'not_invited' : 'email_required';
 }
 
 // Reverse index so an invitee can find their pending invites without a scan.
@@ -3081,7 +3098,7 @@ async function notifyTeamInvitees(env, team, added, inviter) {
 // keyed by a GitHub handle that carries the same address picks it up here.
 async function adoptEmailTeamInvites(env, session) {
   const own = inboxKey(actorKey(session));
-  const email = normalizeEmail(session && session.email);
+  const { email } = await sessionInviteIdentity(env, session);
   const other = email ? inboxKey(`email:${email}`) : null;
   if (!own || !other || own === other) return;
   const { inbox: theirs } = await loadInbox(env, `email:${email}`);
@@ -3098,12 +3115,13 @@ async function adoptEmailTeamInvites(env, session) {
 
 async function pendingTeamInvites(env, session) {
   if (!session || !session.account_id) return [];
-  const ids = [...new Set((await Promise.all(sessionInviteKeys(session).map((k) => loadInvitedTeamIds(env, k)))).flat())];
+  const who = await sessionInviteIdentity(env, session);
+  const ids = [...new Set((await Promise.all(who.keys.map((k) => loadInvitedTeamIds(env, k)))).flat())];
   const teams = await Promise.all(ids.map((id) => loadTeam(env, id)));
   return teams
-    .filter((team) => team && sessionInvited(team, session) && !teamMember(team, session.account_id))
+    .filter((team) => team && sessionInvited(team, who) && !teamMember(team, session.account_id))
     .map((team) => {
-      const key = sessionInviteKeys(session).find((k) => team.invites.includes(k));
+      const key = who.keys.find((k) => team.invites.includes(k));
       const by = team.invited_by && team.invited_by[key];
       return { id: team.id, name: team.name, member_count: team.members.length, ...(by ? { invited_by: by } : {}) };
     });
@@ -7903,11 +7921,14 @@ export default {
         });
       }
       if (teamMember(team, s.account_id)) return redirectTo(`/me?team=${team.id}`);
-      if (!team.anyone_with_link && !sessionInvited(team, s)) {
+      const who = await sessionInviteIdentity(env, s);
+      if (!team.anyone_with_link && !sessionInvited(team, who)) {
         return statusPageResponse({
           docTitle: `Join ${team.name} · tdoc`,
           title: `You haven't been invited to ${team.name}`,
-          message: `Ask a team admin to invite ${actorDisplayName(s)}${normalizeEmail(s.email) ? ` (${normalizeEmail(s.email)})` : ''}, then open this link again.`,
+          message: who.email
+            ? `Ask a team admin to invite ${who.email}, then open this link again.`
+            : 'Your sign-in did not share a verified email, so it cannot be matched to an email invite. Sign in with the email you were invited at, or ask a team admin to invite your GitHub handle.',
           error: true,
           status: 403,
         });
@@ -9444,8 +9465,10 @@ export default {
       if (!team) return json({ error: 'invite_invalid' }, { status: 404 });
       if (!teamMember(team, s.account_id)) {
         const viaLink = body.id == null && team.anyone_with_link;
-        if (!viaLink && !sessionInvited(team, s)) {
-          return json({ error: 'not_invited' }, { status: body.id != null ? 404 : 403 });
+        const who = await sessionInviteIdentity(env, s);
+        if (!viaLink && !sessionInvited(team, who)) {
+          if (body.id != null) return json({ error: 'not_invited' }, { status: 404 });
+          return json({ error: notInvitedError(who) }, { status: 403 });
         }
         if (team.members.length >= TEAM_MEMBERS_MAX) {
           return json({ error: 'team_full', limit: TEAM_MEMBERS_MAX }, { status: 400 });
@@ -9454,7 +9477,7 @@ export default {
           return json({ error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX }, { status: 400 });
         }
         team.members.push(teamMemberFromSession(s, 'member'));
-        const mine = sessionInviteKeys(s);
+        const mine = who.keys;
         const before = Array.isArray(team.invites) ? team.invites : [];
         team.invites = before.filter((x) => !mine.includes(x));
         await syncTeamInvites(env, team, before, null);
@@ -9471,8 +9494,9 @@ export default {
       let body = {};
       try { body = await req.json(); } catch {}
       const team = await loadTeam(env, body.id);
-      if (!team || !sessionInvited(team, s)) return json({ error: 'not_found' }, { status: 404 });
-      const mine = sessionInviteKeys(s);
+      const who = await sessionInviteIdentity(env, s);
+      if (!team || !sessionInvited(team, who)) return json({ error: 'not_found' }, { status: 404 });
+      const mine = who.keys;
       const before = team.invites;
       team.invites = before.filter((x) => !mine.includes(x));
       await syncTeamInvites(env, team, before, null);
