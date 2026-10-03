@@ -3,6 +3,7 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { Webhook } from 'lucide-react';
 import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
@@ -29,7 +30,7 @@ function shortAgentName(name) {
 
 // Readable agent handle when we have one. Empty is fine — the UI falls back
 // to the provider line so we never render "Hand to " with a blank.
-function readableHandle(t) {
+export function readableHandle(t) {
   if (!t) return '';
   const name = (t.agent_name || '').trim();
   const sub = (t.agent_sub || '').trim();
@@ -38,10 +39,13 @@ function readableHandle(t) {
   return '';
 }
 
-function providerMeta(t) {
+export function providerMeta(t) {
   const p = String(t?.provider || 'raft').trim().toLowerCase();
   if (p === 'raft') {
     return { key: 'raft', label: 'Raft', mark: 'raft' };
+  }
+  if (p === 'webhook') {
+    return { key: 'webhook', label: 'Webhook', mark: 'webhook' };
   }
   return { key: p || 'agent', label: p ? p[0].toUpperCase() + p.slice(1) : 'agent', mark: '' };
 }
@@ -67,9 +71,10 @@ function sameTarget(a, b) {
     && a.agent_sub === b.agent_sub;
 }
 
-function ProviderMark({ target, size = 18 }) {
+export function ProviderMark({ target, size = 18 }) {
   const meta = providerMeta(target);
   if (meta.mark === 'raft') return <RaftMark size={size} />;
+  if (meta.mark === 'webhook') return <Webhook size={size} aria-hidden="true" />;
   return <span className="tdoc-notify-provider-fallback" aria-hidden="true">{meta.label.slice(0, 1)}</span>;
 }
 
@@ -117,7 +122,12 @@ function ConnectAgentView({ onClose }) {
       onOpenChange={(next) => { if (!next) onClose(); }}
       title="Connect an agent"
       description="Nothing is connected to your account yet, so there is nowhere to send these. Connect an agent once; after that Send to agent and @agent hand comments straight to it."
-      actions={<button type="button" onClick={onClose}>Close</button>}
+      actions={(
+        <>
+          <button type="button" onClick={onClose}>Close</button>
+          <button type="button" className="primary" onClick={() => { location.href = '/me/connectors'; }}>Open Connectors</button>
+        </>
+      )}
     >
       <div className="tdoc-connectors">
         {AGENT_CONNECTORS.map((c) => (
@@ -128,7 +138,7 @@ function ConnectAgentView({ onClose }) {
             <button type="button" className="primary" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
           </section>
         ))}
-        <p className="manage-hint">More connectors are coming.</p>
+        <p className="manage-hint">No Raft? Add a webhook, or manage everything, on the <a href="/me/connectors">Connectors</a> page.</p>
       </div>
     </AppDialog>
   );
