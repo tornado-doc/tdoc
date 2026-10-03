@@ -22,7 +22,7 @@ import { useDocsHub } from './hooks/use-docs-hub.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
-const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred']];
+const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['feedback', 'Feedback']];
 const CURATE_WARN_KEY = 'tdoc.curateWarned';
 
 function needsCurateWarn() {
@@ -196,6 +196,59 @@ function ownerLabel(doc, viewer) {
   return viewer && doc.owner === viewer ? 'me' : doc.owner;
 }
 
+// Feedback spaces: one row per app, with where its comments stand. The row
+// opens the space's own page (the comment list), not a document.
+function FeedbackList({ spaces: initial }) {
+  // Counts cost a comment read per space, so they load when the tab opens.
+  const [spaces, setSpaces] = useState(initial);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/me/feedback', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (!cancelled && b && Array.isArray(b.spaces)) setSpaces(b.spaces); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  if (!spaces.length) {
+    // The first visit to this tab is usually someone who has not tried it:
+    // say what it is and how to start, rather than "nothing here".
+    return (
+      <div className="tdoc-fb-empty">
+        <div className="tdoc-fb-empty-art" aria-hidden="true">
+          <span className="win"><i /><i /><i /></span>
+          <span className="pin">💬</span>
+        </div>
+        <h3>Collect feedback on your own app</h3>
+        <p className="muted">Click anything in the app you are building, say what is wrong, and hand it to your agent. Every app you comment on gets a list here.</p>
+        <ol>
+          <li><b>Get the bookmark</b> — drag it to your bookmarks bar.</li>
+          <li><b>Open your app</b> and click it, then <b>+ Comment</b>.</li>
+          <li><b>Invite teammates</b> to the same list, or <b>Send to agent</b>.</li>
+        </ol>
+        <a className="tdoc-fbspace-btn primary" href="/feedback">Get the bookmark</a>
+      </div>
+    );
+  }
+  return (
+    <div className="doc-list">
+      {spaces.map((space) => {
+        let host = space.origin;
+        try { host = new URL(space.origin).host; } catch (_) {}
+        return (
+          <a key={space.slug} className="doc-row flat-row" href={`/d/${encodeURIComponent(space.slug)}`}>
+            <div className="doc-info">
+              <span className="doc-title">{host}</span>
+              <div className="doc-meta">
+                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function FlatList({ docs, label, viewer, empty, onToggleStar }) {
   if (!docs.length) return <p className="empty">{empty}</p>;
   return (
@@ -296,7 +349,11 @@ export function DocsHub({ boot }) {
     // expired, and the route's own redirect is the sign-in path.
     onUnauthorized: () => { location.href = '/?notice=signin'; },
   });
-  const [tab, setTab] = useState('mine');
+  // ?tab=feedback opens straight onto a tab (links from the feedback pages).
+  const [tab, setTab] = useState(() => {
+    const asked = new URLSearchParams(location.search).get('tab');
+    return TABS.some(([id]) => id === asked) ? asked : 'mine';
+  });
   // Capture the account-menu destination before useDocsHub normalizes the URL.
   const [modal, setModal] = useState(() => (
     boot.profile && location.hash === '#claim-profile' ? { type: 'claim-handle' } : null
@@ -575,6 +632,11 @@ export function DocsHub({ boot }) {
         {tab === 'recent' ? (
           <section className="pane" id="pane-recent">
             <FlatList docs={hub.recent} label="visited" viewer={viewer} empty="Docs you open show up here." onToggleStar={hub.toggleStar} />
+          </section>
+        ) : null}
+        {tab === 'feedback' ? (
+          <section className="pane" id="pane-feedback">
+            <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} />
           </section>
         ) : null}
         {tab === 'starred' ? (
