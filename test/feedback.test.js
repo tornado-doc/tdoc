@@ -268,6 +268,30 @@ const APP = 'http://localhost:3000';
     assert(notOwner.status === 401 || notOwner.status === 403, `a joiner drives the owner's agent: ${notOwner.status}`);
   });
 
+  await t('My docs lists feedback spaces you own or joined, with open/replied counts', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const julie = await putSession(env, 'julie');
+    const { body: space } = await connect(env, julie);
+    const anchor = { kind: 'product', url: `${APP}/`, selector: '#x', text: 'x' };
+    for (const text of ['one', 'two']) {
+      await worker.fetch(req('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text, anchor } }), env, {});
+    }
+    const me = await (await worker.fetch(req('/api/me', { cookie: julie }), env, {})).json();
+    const row = (me.feedback || []).find((x) => x.slug === space.slug);
+    assert(row && row.mine === true && row.origin === APP, `owner row: ${JSON.stringify(me.feedback)}`);
+    const counted = await (await worker.fetch(req('/api/me/feedback', { cookie: julie }), env, {})).json();
+    const crow = (counted.spaces || []).find((x) => x.slug === space.slug);
+    assert(crow && crow.open === 2 && crow.replied === 0, `counts: ${JSON.stringify(counted)}`);
+    assert(!(me.docs || []).some((d) => d.slug === space.slug), 'space leaked into My docs');
+    const can = await putSession(env, 'can');
+    const before = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
+    assert(!(before.feedback || []).length, 'a stranger sees the space');
+    await worker.fetch(joinReq(can, space.slug), env, {});
+    const after = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
+    const theirs = (after.feedback || []).find((x) => x.slug === space.slug);
+    assert(theirs && theirs.mine === false, `joiner row: ${JSON.stringify(after.feedback)}`);
+  });
+
   await t('an oversized anchor is refused on create and on re-anchor', async () => {
     const env = makeEnv(mod.CommentsStore);
     const julie = await putSession(env, 'julie');
