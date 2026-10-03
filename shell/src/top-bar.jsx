@@ -195,6 +195,7 @@ export function TopBar({
             {activeProfile || onClaimProfile ? (
               <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
             ) : null}
+            <AppMenuItem onClick={() => { location.href = '/me/connectors'; }}>Connectors</AppMenuItem>
             <AppMenuItem onClick={() => { location.href = '/me/tokens'; }}>Connected terminals</AppMenuItem>
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
