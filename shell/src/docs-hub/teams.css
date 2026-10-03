@@ -14,3 +14,8 @@
 .tm-text-btn { border: 0 !important; background: none !important; color: var(--td-muted); font-size: 13px; padding: 4px !important; }
 .tm-link-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }
 .tdoc-modal .actions .tm-push-left { margin: 0 auto 0 0; }
+.tm-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; cursor: pointer; }
+.tm-invites { display: grid; gap: 8px; margin: 0 0 16px; }
+.tm-invite { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--td-line); border-radius: 10px; font-size: 14px; }
+.tm-invite svg { flex: none; color: var(--td-muted); }
+.tm-invite-text { flex: 1; min-width: 0; }

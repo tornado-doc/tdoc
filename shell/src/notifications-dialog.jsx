@@ -23,6 +23,9 @@ function notificationLabel(item) {
   if (item.kind === 'reply') {
     return `${actor} replied${count > 1 ? ` and ${count - 1} more replied` : ''}`;
   }
+  if (item.kind === 'team_invite') {
+    return `${actor} invited you to join`;
+  }
   if (item.kind === 'access_request') {
     return `${actor} requested access${count > 1 ? ` and ${count - 1} more asked` : ''} — open Share to invite`;
   }
@@ -30,6 +33,7 @@ function notificationLabel(item) {
 }
 
 export function notificationTarget(item) {
+  if (item?.kind === 'team_invite') return '/me';
   if (!item?.slug) return '';
   const version = Math.max(1, Number(item.version) || 1);
   const target = item.comment_id || item.thread_id;

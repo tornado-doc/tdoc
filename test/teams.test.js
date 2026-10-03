@@ -10,10 +10,10 @@ async function t(n, fn) {
 }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-async function sessionFor(env, login) {
+async function sessionFor(env, login, email) {
   const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
   await env.META.put(`session:${id}`, JSON.stringify({
-    login, name: login, avatar_url: '', account_id: `acct-${login}`, created: new Date().toISOString(),
+    login, name: login, avatar_url: '', account_id: `acct-${login}`, created: new Date().toISOString(), ...(email ? { email } : {}),
   }));
   return `tdoc_sid=${id}`;
 }
@@ -42,7 +42,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
 
   const alice = await sessionFor(env, 'alice');
   const bob = await sessionFor(env, 'bob');
-  const carol = await sessionFor(env, 'carol');
+  const carol = await sessionFor(env, 'carol', 'carol@example.com');
   const dave = await sessionFor(env, 'dave');
   await seedDoc(env, 'plan', 'alice');
   await seedDoc(env, 'bob-notes', 'bob');
@@ -79,10 +79,41 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(dead.status === 404, `dead ${dead.status}`);
   });
 
-  await t('joining by link adds a member and clears their pending invite', async () => {
+  await t('the invite link only admits invited people by default', async () => {
+    const res = await call('/api/team/join', { method: 'POST', cookie: dave, body: { token } });
+    assert(res.status === 403 && res.body.error === 'not_invited', `uninvited join ${res.status}`);
+    const page = await call(`/team/join/${token}`, { cookie: dave });
+    assert(page.status === 403 && (await page.r.text()).includes('invited'), `uninvited page ${page.status}`);
+    const byId = await call('/api/team/join', { method: 'POST', cookie: dave, body: { id: team.id } });
+    assert(byId.status === 404, `uninvited accept ${byId.status}`);
+    const okPage = await call(`/team/join/${token}`, { cookie: bob });
+    assert(okPage.status === 200, `invited page ${okPage.status}`);
+  });
+
+  await t('invitees see pending invites and a notification; only their own', async () => {
+    const asBob = await call('/api/me', { cookie: bob });
+    assert(asBob.body.team_invites.length === 1 && asBob.body.team_invites[0].id === team.id, `bob invites ${JSON.stringify(asBob.body.team_invites)}`);
+    assert(asBob.body.team_invites[0].invited_by === 'alice', 'inviter shown');
+    const asCarol = await call('/api/me', { cookie: carol });
+    assert(asCarol.body.team_invites.length === 1, 'email invitee sees invite');
+    const asDave = await call('/api/me', { cookie: dave });
+    assert(asDave.body.team_invites.length === 0, 'outsider sees none');
+    const inbox = await call('/api/notifications', { cookie: bob });
+    const note = inbox.body.items.find((i) => i.kind === 'team_invite');
+    assert(note && note.team === team.id && note.title === 'Acme', `bob inbox ${JSON.stringify(inbox.body.items)}`);
+    const emailInbox = JSON.parse(await env.META.get('inbox:email:carol@example.com') || '{"items":[]}');
+    assert(emailInbox.items.some((i) => i.kind === 'team_invite'), 'email invitee notified');
+  });
+
+  await t('joining by link or accepting adds a member and clears their pending invite', async () => {
     const res = await call('/api/team/join', { method: 'POST', cookie: bob, body: { token } });
     assert(res.status === 200 && res.body.team.role === 'member', `join ${res.status}`);
-    await call('/api/team/join', { method: 'POST', cookie: carol, body: { token } });
+    const again = await call('/api/team/join', { method: 'POST', cookie: bob, body: { token } });
+    assert(again.status === 200, `rejoin is idempotent ${again.status}`);
+    const accept = await call('/api/team/join', { method: 'POST', cookie: carol, body: { id: team.id } });
+    assert(accept.status === 200, `email invitee accepts ${accept.status}`);
+    const pending = await call('/api/me', { cookie: carol });
+    assert(pending.body.team_invites.length === 0, 'accepted invite is gone');
     const detail = await call(`/api/team?id=${team.id}`, { cookie: bob });
     assert(detail.status === 200 && detail.body.team.members.length === 3, 'three members');
     assert(!detail.body.team.invites.includes('bob'), 'bob invite cleared');
@@ -241,6 +272,27 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(!meta.workspace_id && !meta.access.team, 'personal again');
     const me = await call('/api/me', { cookie: bob });
     assert(me.body.docs.some((d) => d.slug === 'bob-notes'), 'back in My docs');
+  });
+
+  await t('declining drops the invite; an open link admits anyone signed in', async () => {
+    const erin = await sessionFor(env, 'erin');
+    const frank = await sessionFor(env, 'frank');
+    const res = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'Open', invites: ['erin'] } });
+    const open = res.body.team;
+    const link = open.invite_url.split('/').pop();
+    assert(open.anyone_with_link === false, 'restricted by default');
+    const decline = await call('/api/team/decline', { method: 'POST', cookie: erin, body: { id: open.id } });
+    assert(decline.status === 200, `decline ${decline.status}`);
+    const after = await call(`/api/team?id=${open.id}`, { cookie: alice });
+    assert(after.body.team.invites.length === 0 && after.body.team.members.length === 1, 'declined, not joined');
+    const gone = await call('/api/team/join', { method: 'POST', cookie: erin, body: { id: open.id } });
+    assert(gone.status === 404, `declined invite accepted ${gone.status}`);
+    const byMember = await call('/api/team', { method: 'PATCH', cookie: frank, body: { id: open.id, anyone_with_link: true } });
+    assert(byMember.status !== 200, 'non-admin cannot open the link');
+    const flip = await call('/api/team', { method: 'PATCH', cookie: alice, body: { id: open.id, anyone_with_link: true } });
+    assert(flip.status === 200 && flip.body.team.anyone_with_link === true, `open link ${flip.status}`);
+    const joined = await call('/api/team/join', { method: 'POST', cookie: frank, body: { token: link } });
+    assert(joined.status === 200 && joined.body.team.role === 'member', `open join ${joined.status}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

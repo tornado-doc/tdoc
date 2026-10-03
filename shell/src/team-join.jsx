@@ -20,7 +20,7 @@ export function TeamJoinPage({ boot }) {
       <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
       <h1>Join {boot.team.name}</h1>
       <p>
-        {count} {count === 1 ? 'member' : 'members'}. Members can open and comment on every doc in {boot.team.name}.
+        {count} {count === 1 ? 'member' : 'members'}. Every member can read, comment on and edit the docs in {boot.team.name}.
         {boot.identity?.name ? ` You’ll join as ${boot.identity.name}.` : ''}
       </p>
       <div className="tdoc-status-actions">
