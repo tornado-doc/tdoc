@@ -724,3 +724,5 @@
 .tdoc-conn-alt summary { cursor: pointer; }
 .tdoc-conn-alt[open] { display: grid; gap: 8px; }
 .tdoc-connector > a.tdoc-fbspace-btn { justify-self: start; }
+
+.tdoc-connector.is-featured { border-color: var(--td-accent, #1652f0); box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff); }
