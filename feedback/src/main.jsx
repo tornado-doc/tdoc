@@ -911,6 +911,7 @@ ${uiCss}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
             connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
+            agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
             onClose={() => setSelected(null)}
             onSubmit={async (text, opts = {}) => {
               const anchor = contextFor(selected);
@@ -927,6 +928,7 @@ ${uiCss}
             isOwner={owner}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
+            agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
             unanchored={!elementFor(openComment) && !stateLabel(openComment.anchor)}
             floating
             position={placeCard(elementFor(openComment))}

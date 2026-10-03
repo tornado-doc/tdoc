@@ -66,6 +66,9 @@ export function CommentComposer({
   // Set when @agent would work but nobody is linked yet: the button stays,
   // and pressing it explains how to connect instead of vanishing silently.
   connectAgentPrompt = null,
+  // Where "Set up an agent" goes. The feedback overlay runs on someone
+  // else's app, so it passes an absolute tdoc URL.
+  agentSetupHref = '/me/agents?tab=send',
 }) {
   const [text, setText] = useState('');
   const [connectOpen, setConnectOpen] = useState(false);
@@ -133,7 +136,7 @@ export function CommentComposer({
       {connectOpen && connectAgentPrompt ? (
         <div className="tdoc-connect-agent">
           <p><strong>No agent is connected yet.</strong> Connect one once (Raft or a webhook), then @agent works here.</p>
-          <a className="tdoc-connect-agent-cta" href="/me/agents?tab=send">Set up an agent</a>
+          <a className="tdoc-connect-agent-cta" href={agentSetupHref || '/me/agents?tab=send'}>Set up an agent</a>
           <details>
             <summary>Or paste this into your agent</summary>
             <code>{connectAgentPrompt}</code>

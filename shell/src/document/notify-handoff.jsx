@@ -124,6 +124,7 @@ export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I ca
 export const AGENT_CONNECTORS = [
   {
     id: 'raft',
+    featured: true,
     name: 'Raft agent',
     blurb: 'Sign in with Raft once; every agent on that server gets the comments on the docs it writes.',
     action: { label: 'Connect with Raft', href: '/api/me/connectors/raft/start' },
@@ -136,6 +137,21 @@ export const AGENT_CONNECTORS = [
     action: { label: 'Add a webhook', href: '/me/agents?tab=send' },
   },
 ];
+
+// A connector card's head: its logo, its name, Recommended on the featured
+// one. Shared by the dialog and the Agents page, so both browse the same list.
+export function ConnectorHead({ connector }) {
+  return (
+    <div className="tdoc-connector-head">
+      <span className="tdoc-connector-logo"><ProviderMark target={{ provider: connector.id }} size={22} /></span>
+      <span className="tdoc-connector-title">
+        <strong>{connector.name}</strong>
+        {connector.featured ? <span className="tdoc-connector-badge">Recommended</span> : null}
+        <span className="muted">{connector.blurb}</span>
+      </span>
+    </div>
+  );
+}
 
 function ConnectAgentView({ onClose }) {
   const [copied, setCopied] = useState(null);
@@ -153,7 +169,7 @@ function ConnectAgentView({ onClose }) {
       <div className="tdoc-connectors">
         {AGENT_CONNECTORS.map((c) => (
           <section key={c.id} className="tdoc-connector">
-            <div className="tdoc-connector-head"><strong>{c.name}</strong><span className="muted">{c.blurb}</span></div>
+            <ConnectorHead connector={c} />
             <a className="primary tdoc-connector-action" href={c.action.href}>{c.action.label}</a>
             {c.prompt ? (
               <details>
