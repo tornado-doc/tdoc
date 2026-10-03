@@ -132,9 +132,13 @@ export function CommentComposer({
       />
       {connectOpen && connectAgentPrompt ? (
         <div className="tdoc-connect-agent">
-          <p><strong>No agent is connected to your tdoc account yet.</strong> Paste this into your agent once, then @agent works here:</p>
-          <code>{connectAgentPrompt}</code>
-          <button type="button" onClick={copyPrompt}>{promptCopied ? 'Copied' : 'Copy prompt'}</button>
+          <p><strong>No agent is connected yet.</strong> Connect one once (Raft or a webhook), then @agent works here.</p>
+          <a className="tdoc-connect-agent-cta" href="/me/agents?tab=send">Set up an agent</a>
+          <details>
+            <summary>Or paste this into your agent</summary>
+            <code>{connectAgentPrompt}</code>
+            <button type="button" onClick={copyPrompt}>{promptCopied ? 'Copied' : 'Copy prompt'}</button>
+          </details>
         </div>
       ) : null}
       <div className="foot">

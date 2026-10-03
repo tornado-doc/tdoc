@@ -64,11 +64,11 @@ async function works(worker, env, token) {
     assert(JSON.stringify(labels) === JSON.stringify(['hawaii-trip', 'my-laptop-doc']), `labels ${labels}`);
     assert(list.every(x => x.created && /^[a-f0-9]{64}$/.test(x.id)), 'created/id missing');
     const legacy = await worker.fetch(req('/me/tokens', { cookie: mine.cookie }), env, {});
-    assert(legacy.status === 302 && legacy.headers.get('Location') === '/me/devices', 'old /me/tokens link should land on /me/devices');
-    const page = await worker.fetch(req('/me/devices', { cookie: mine.cookie }), env, {});
+    assert(legacy.status === 302 && legacy.headers.get('Location') === '/me/agents?tab=access', 'old /me/tokens link should land on the Access tab');
+    const page = await worker.fetch(req('/me/agents?tab=access', { cookie: mine.cookie }), env, {});
     assert(page.status === 200, `page ${page.status}`);
     const html = await page.text();
-    assert(html.includes('"page":"tokens"') && html.includes('hawaii-trip'), 'page boot missing the list');
+    assert(html.includes('"page":"agents"') && html.includes('hawaii-trip'), 'page boot missing the list');
     assert(!html.includes('their-doc'), 'another account\'s credential leaked into the page');
   });
 

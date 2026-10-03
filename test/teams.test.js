@@ -127,7 +127,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(asDave.status === 403, `dave ${asDave.status}`);
   });
 
-  await t('every member edits a team doc and sends to their own agent; outsiders cannot', async () => {
+  await t('every member edits a team doc; nobody sends it to an agent yet; outsiders cannot', async () => {
     const html = '<!doctype html><html><head><title>plan</title></head><body><h1>plan</h1><p>bob was here</p></body></html>';
     const outsider = await call('/api/doc/versions', { method: 'POST', cookie: dave, body: { slug: 'plan', baseVersion: 1, html } });
     assert(outsider.status === 403 || outsider.status === 401, `outsider save ${outsider.status}`);
@@ -141,18 +141,18 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const agent = (name) => ({ provider: 'raft', server_id: 'srv', agent_sub: name, agent_name: name });
     await env.META.put('account-notify:acct-alice', JSON.stringify([agent('alice-bot')]));
     await env.META.put('account-notify:acct-bob', JSON.stringify([agent('bob-bot')]));
-    const targets = await call('/api/notify/targets?slug=plan', { cookie: bob });
-    assert(targets.status === 200 && targets.body.default && targets.body.default.agent_sub === 'bob-bot', `targets ${JSON.stringify(targets.body)}`);
-    assert(!targets.body.candidates.some((c) => c.agent_sub === 'alice-bot'), "never a teammate's agent");
-    const none = await call('/api/notify/targets?slug=plan', { cookie: carol });
-    assert(none.status === 200 && none.body.reason === 'no_agent_bound', 'no agent of your own, nobody to send to');
+    // Send to agent is off on team docs for now (Julie, 2026-10-03): no
+    // member, author included, hands a team doc's comments to an agent.
+    for (const who of [bob, alice, carol]) {
+      const targets = await call('/api/notify/targets?slug=plan', { cookie: who });
+      assert(targets.status === 200 && !targets.body.default && targets.body.reason === 'team_doc', `targets ${JSON.stringify(targets.body)}`);
+    }
     const outsiderTargets = await call('/api/notify/targets?slug=plan', { cookie: dave });
     assert(outsiderTargets.status === 403 || outsiderTargets.status === 401, `outsider targets ${outsiderTargets.status}`);
     const steer = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: ['c1'], recipient: agent('alice-bot') } });
+    assert(steer.status === 403 && steer.body.error === 'team_docs_agent_disabled', `team handoff ${steer.status} ${JSON.stringify(steer.body)}`);
     const handoffs = JSON.parse(await env.META.get('handoffs:plan') || '[]');
-    assert(steer.status === 200 && handoffs[0] && handoffs[0].recipient.agent_sub === 'bob-bot' && handoffs[0].by === 'acct-bob', `handoff ${JSON.stringify(handoffs[0])}`);
-    const resend = await call('/api/notify/handoff/resend', { method: 'POST', cookie: alice, body: { slug: 'plan', handoff_id: handoffs[0].handoff_id } });
-    assert(resend.status === 403, `teammate resent bob's handoff ${resend.status}`);
+    assert(!handoffs.length, 'a team handoff was recorded');
   });
 
   await t("a member's agent token publishes a version but cannot change sharing", async () => {

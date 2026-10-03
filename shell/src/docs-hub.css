@@ -714,3 +714,13 @@
 .tdoc-dev-row { gap: 10px; }
 .tdoc-dev-client { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--td-surface, #f3f3f1); color: var(--td-muted); font-size: 11.5px; font-weight: 600; }
 .tdoc-dev-remove:hover { border-color: var(--td-danger, #c33) !important; color: var(--td-danger, #c33) !important; }
+
+.onb-optional { margin: 4px 0 0; padding: 10px 2px 0; border-top: 1px dashed var(--td-line); font-size: 13px; color: var(--td-muted); }
+.onb-optional span { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; background: var(--td-surface, #f3f3f1); font-size: 11px; font-weight: 600; }
+
+.tdoc-conn-default-form { display: flex; gap: 6px; margin-top: 6px; max-width: 420px; }
+.tdoc-conn-default-form input { flex: 1; font: inherit; font-size: 13px; padding: 5px 9px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-bg, #fff); color: var(--td-ink); }
+.tdoc-conn-alt { font-size: 13px; color: var(--td-muted); }
+.tdoc-conn-alt summary { cursor: pointer; }
+.tdoc-conn-alt[open] { display: grid; gap: 8px; }
+.tdoc-connector > a.tdoc-fbspace-btn { justify-self: start; }

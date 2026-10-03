@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { deliveryErrorText } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
@@ -40,7 +41,7 @@ function HandoffStatusChips({ comment }) {
       <span
         key="failed"
         className="tdoc-handoff-chip is-failed"
-        title={comment.handoff_delivery?.error || undefined}
+        title={deliveryErrorText(comment.handoff_delivery?.error) || undefined}
       >
         Not delivered
       </span>,

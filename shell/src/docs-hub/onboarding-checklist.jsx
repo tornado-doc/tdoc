@@ -239,6 +239,14 @@ export function OnboardingChecklist({ record, docs }) {
           );
         })}
       </ol>
+      {/* Not a step: tdoc already works without it. Shown with the full list
+          so the person learns the other direction exists — tdoc pinging their
+          agent — without it counting against "done". */}
+      {open ? (
+        <p className="onb-optional">
+          <span>Optional</span> Send comments straight to your agent from tdoc. <a href="/me/agents?tab=send">Set up an agent</a>
+        </p>
+      ) : null}
     </section>
   );
 }
