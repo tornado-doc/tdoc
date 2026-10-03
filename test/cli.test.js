@@ -472,6 +472,51 @@ t('an explicitly transparent body background is an error, not a note', () => {
   }
 });
 
+t('tdoc validator does not mistake spelling for design', () => {
+  // #fff and #ffffff are the same colour. Comparing the literal text reported a
+  // spelling difference as a house-style violation.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-hex-'));
+  try {
+    const html = path.join(dir, 'longhand.html');
+    fs.writeFileSync(html, `<!doctype html><html lang="en"><head>
+      <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>T</title><style>body { background:#ffffff }</style>
+      </head><body><div class="wrap"><h1>Title</h1><p>Copy.</p></div></body></html>`);
+    const r = spawnSync(path.join(BIN, 'tdoc-validate-template'), [html, '--strict'], { encoding: 'utf8' });
+    assert(r.status === 0, `longhand white is still white: ${r.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('tdoc validator lets a table follow the cell rule it demands', () => {
+  // check_table_cells REQUIRES background and border-radius named on th/td, or
+  // the reader's chip survives. Flagging that same rule as a global override
+  // left no way to write a passing table: omit it and one check fired, add it
+  // and the other did.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cells-'));
+  try {
+    const page = (extra) => `<!doctype html><html lang="en"><head>
+      <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>T</title><style>body { background:#fff } ${extra}</style>
+      </head><body><div class="wrap"><h1>Title</h1>
+      <table><tr><th>a</th><td>b</td></tr></table></div></body></html>`;
+
+    const reset = path.join(dir, 'reset.html');
+    fs.writeFileSync(reset, page('th, td { background:none; border-radius:0 }'));
+    const ok = spawnSync(path.join(BIN, 'tdoc-validate-template'), [reset, '--strict'], { encoding: 'utf8' });
+    assert(ok.status === 0, `the required cell reset must not read as an override: ${ok.stderr}`);
+
+    // Narrow on purpose: the moment such a rule restyles prose, the note is right.
+    const more = path.join(dir, 'more.html');
+    fs.writeFileSync(more, page('th, td { background:none; border-radius:0; font-size:20px }'));
+    const flagged = spawnSync(path.join(BIN, 'tdoc-validate-template'), [more, '--strict'], { encoding: 'utf8' });
+    assert(flagged.status !== 0, 'a th/td rule that restyles prose is still an override');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 t('tdoc host validator accepts the named editorial house-style background', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-style-'));
   try {
