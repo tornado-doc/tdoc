@@ -94,6 +94,25 @@ function RecipientLine({ target }) {
   );
 }
 
+// Delivery errors in words a person can act on. The codes come from the
+// providers (worker NOTIFY_PROVIDERS); "request_404" told nobody anything.
+export function deliveryErrorText(code) {
+  const c = String(code || '');
+  if (!c) return '';
+  if (c === 'no_recipient') return 'no agent is connected';
+  if (c === 'provider_not_configured') return 'Raft is not set up on this host';
+  if (c === 'target_missing_server_slug') return "this agent's Raft server is unknown; connect it again";
+  if (/^request_40[13]$/.test(c)) return 'Raft refused; the tdoc app may not be installed on that server';
+  if (c === 'request_404') return "Raft couldn't find that agent on its server";
+  if (/^token_/.test(c)) return "Raft didn't grant access to that agent";
+  if (/^event_/.test(c)) return "Raft didn't accept the message";
+  if (c === 'webhook_timeout') return "the webhook didn't answer within 8 seconds";
+  if (c === 'webhook_secret_missing') return 'this webhook needs to be added again';
+  const m = c.match(/^webhook_(\d{3})$/);
+  if (m) return `the webhook answered ${m[1]}`;
+  return c;
+}
+
 // What a person pastes into their own agent when none is linked to their
 // tdoc account yet: the agent runs the link ceremony (bin/tdoc-connect-agent).
 export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I can hand you comments from tdoc: use the tdoc skill and run bin/tdoc-connect-agent.';
@@ -106,8 +125,15 @@ export const AGENT_CONNECTORS = [
   {
     id: 'raft',
     name: 'Raft agent',
-    blurb: 'An agent on a Raft server where the tdoc app is installed.',
+    blurb: 'Sign in with Raft once; every agent on that server gets the comments on the docs it writes.',
+    action: { label: 'Connect with Raft', href: '/api/me/connectors/raft/start' },
     prompt: CONNECT_AGENT_PROMPT,
+  },
+  {
+    id: 'webhook',
+    name: 'Webhook',
+    blurb: 'Any bot or service that can receive an HTTPS POST. No Raft needed.',
+    action: { label: 'Add a webhook', href: '/me/agents?tab=send' },
   },
 ];
 
@@ -121,24 +147,24 @@ function ConnectAgentView({ onClose }) {
       open
       onOpenChange={(next) => { if (!next) onClose(); }}
       title="Connect an agent"
-      description="Nothing is connected to your account yet, so there is nowhere to send these. Connect an agent once; after that Send to agent and @agent hand comments straight to it."
-      actions={(
-        <>
-          <button type="button" onClick={onClose}>Close</button>
-          <button type="button" className="primary" onClick={() => { location.href = '/me/connectors'; }}>Open Connectors</button>
-        </>
-      )}
+      description="Nothing is connected yet, so there is nowhere to send these. Connect once; after that Send to agent and @agent hand comments straight to it."
+      actions={<button type="button" onClick={onClose}>Close</button>}
     >
       <div className="tdoc-connectors">
         {AGENT_CONNECTORS.map((c) => (
           <section key={c.id} className="tdoc-connector">
             <div className="tdoc-connector-head"><strong>{c.name}</strong><span className="muted">{c.blurb}</span></div>
-            <p className="manage-hint">Paste this into the agent:</p>
-            <code>{c.prompt}</code>
-            <button type="button" className="primary" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
+            <a className="primary tdoc-connector-action" href={c.action.href}>{c.action.label}</a>
+            {c.prompt ? (
+              <details>
+                <summary className="manage-hint">Or paste this into your agent</summary>
+                <code>{c.prompt}</code>
+                <button type="button" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
+              </details>
+            ) : null}
           </section>
         ))}
-        <p className="manage-hint">No Raft? Add a webhook, or manage everything, on the <a href="/me/connectors">Connectors</a> page.</p>
+        <p className="manage-hint">Manage connections any time on the <a href="/me/agents?tab=send">Agents</a> page.</p>
       </div>
     </AppDialog>
   );
@@ -264,7 +290,7 @@ export function NotifyHandoffPanel({
       });
       const failed = body?.delivery?.status === 'failed';
       setStatus(failed
-        ? `Sent ${body.sent || ids.length} — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
+        ? `Sent ${body.sent || ids.length} — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
         : `Sent ${body.sent || ids.length} to agent`);
       if (onSent) onSent(body);
       try {
