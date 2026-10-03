@@ -101,8 +101,12 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const inbox = await call('/api/notifications', { cookie: bob });
     const note = inbox.body.items.find((i) => i.kind === 'team_invite');
     assert(note && note.team === team.id && note.title === 'Acme', `bob inbox ${JSON.stringify(inbox.body.items)}`);
-    const emailInbox = JSON.parse(await env.META.get('inbox:email:carol@example.com') || '{"items":[]}');
-    assert(emailInbox.items.some((i) => i.kind === 'team_invite'), 'email invitee notified');
+    const unread = await call('/api/notifications/unread', { cookie: carol });
+    assert(unread.body.unread >= 1, `carol unread ${JSON.stringify(unread.body)}`);
+    const carolInbox = await call('/api/notifications', { cookie: carol });
+    assert(carolInbox.body.items.some((i) => i.kind === 'team_invite' && i.team === team.id), 'github session with the invited email gets the notification');
+    const leftover = JSON.parse(await env.META.get('inbox:email:carol@example.com') || '{"items":[]}');
+    assert(!leftover.items.some((i) => i.kind === 'team_invite'), 'moved, not copied');
   });
 
   await t('joining by link or accepting adds a member and clears their pending invite', async () => {

@@ -3077,6 +3077,25 @@ async function notifyTeamInvitees(env, team, added, inviter) {
   }
 }
 
+// An invite addressed to an email lands in that address's inbox. A session
+// keyed by a GitHub handle that carries the same address picks it up here.
+async function adoptEmailTeamInvites(env, session) {
+  const own = inboxKey(actorKey(session));
+  const email = normalizeEmail(session && session.email);
+  const other = email ? inboxKey(`email:${email}`) : null;
+  if (!own || !other || own === other) return;
+  const { inbox: theirs } = await loadInbox(env, `email:${email}`);
+  const moving = theirs.items.filter((i) => i && i.kind === 'team_invite');
+  if (!moving.length) return;
+  const { inbox: mine } = await loadInbox(env, actorKey(session));
+  const ids = new Set(mine.items.filter(Boolean).map((i) => i.id));
+  const items = [...moving.filter((i) => !ids.has(i.id)), ...mine.items]
+    .sort((a, b) => String((b && b.at) || '').localeCompare(String((a && a.at) || '')))
+    .slice(0, INBOX_MAX);
+  await env.META.put(own, JSON.stringify({ ...mine, items }));
+  await env.META.put(other, JSON.stringify({ ...theirs, items: theirs.items.filter((i) => !moving.includes(i)) }));
+}
+
 async function pendingTeamInvites(env, session) {
   if (!session || !session.account_id) return [];
   const ids = [...new Set((await Promise.all(sessionInviteKeys(session).map((k) => loadInvitedTeamIds(env, k)))).flat())];
@@ -9078,6 +9097,7 @@ export default {
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       const key = inboxKey(actorKey(s));
       if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
+      try { await adoptEmailTeamInvites(env, s); } catch {}
       let inbox = emptyInbox();
       try {
         const raw = await env.META.get(key);
@@ -9091,6 +9111,7 @@ export default {
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       const key = inboxKey(actorKey(s));
       if (!key) return json({ unread: 0 });
+      try { await adoptEmailTeamInvites(env, s); } catch {}
       let inbox = emptyInbox();
       try {
         const raw = await env.META.get(key);
