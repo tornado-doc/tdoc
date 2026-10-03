@@ -120,6 +120,7 @@ const BROWSER = [
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
+  'team-join-buttons-ui.test.js', // team invite answers render at one size
 ];
 
 // Existing opt-in UI suites; --all retains their broader coverage.

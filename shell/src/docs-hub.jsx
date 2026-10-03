@@ -15,6 +15,7 @@ import {
   MembersDialog,
   MoveToTeamDialog,
   NewTeamDialog,
+  PendingInvites,
   SpaceSwitcher,
   TeamPane,
 } from './docs-hub/teams.jsx';
@@ -361,6 +362,7 @@ export function DocsHub({ boot }) {
   const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
   const [teams, setTeams] = useState(() => boot.teams || []);
   const [teamDocs, setTeamDocs] = useState(() => boot.team_docs || []);
+  const [invites, setInvites] = useState(() => boot.team_invites || []);
   const [space, setSpace] = useState(() => {
     const initial = new URLSearchParams(location.search).get('team') || '';
     return (boot.teams || []).some((team) => team.id === initial) ? initial : '';
@@ -509,12 +511,13 @@ export function DocsHub({ boot }) {
         </div>
         {team ? (
           <>
-            <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
+            <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can read, comment and edit.</p>
             <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} />
           </>
         ) : (
         <>
 
+        <PendingInvites invites={invites} onDone={setInvites} />
         <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
         {/* The checklist is on this page, so all six states show a difference
             here -- this is the one surface that has a face for every one. */}

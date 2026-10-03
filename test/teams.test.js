@@ -10,11 +10,17 @@ async function t(n, fn) {
 }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-async function sessionFor(env, login) {
+async function sessionFor(env, login, email) {
   const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
   await env.META.put(`session:${id}`, JSON.stringify({
-    login, name: login, avatar_url: '', account_id: `acct-${login}`, created: new Date().toISOString(),
+    login, name: login, avatar_url: '', account_id: `acct-${login}`, created: new Date().toISOString(), ...(email ? { email } : {}),
   }));
+  return `tdoc_sid=${id}`;
+}
+
+async function rawSession(env, fields) {
+  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  await env.META.put(`session:${id}`, JSON.stringify({ avatar_url: '', created: new Date().toISOString(), ...fields }));
   return `tdoc_sid=${id}`;
 }
 
@@ -42,7 +48,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
 
   const alice = await sessionFor(env, 'alice');
   const bob = await sessionFor(env, 'bob');
-  const carol = await sessionFor(env, 'carol');
+  const carol = await sessionFor(env, 'carol', 'carol@example.com');
   const dave = await sessionFor(env, 'dave');
   await seedDoc(env, 'plan', 'alice');
   await seedDoc(env, 'bob-notes', 'bob');
@@ -79,10 +85,46 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(dead.status === 404, `dead ${dead.status}`);
   });
 
-  await t('joining by link adds a member and clears their pending invite', async () => {
+  await t('the invite link only admits invited people by default', async () => {
+    const res = await call('/api/team/join', { method: 'POST', cookie: dave, body: { token } });
+    // dave's sign-in carries no verified email, so the refusal says why.
+    assert(res.status === 403 && res.body.error === 'email_required', `uninvited join ${res.status} ${JSON.stringify(res.body)}`);
+    const page = await call(`/team/join/${token}`, { cookie: dave });
+    assert(page.status === 403 && (await page.r.text()).includes('invited'), `uninvited page ${page.status}`);
+    const byId = await call('/api/team/join', { method: 'POST', cookie: dave, body: { id: team.id } });
+    assert(byId.status === 404, `uninvited accept ${byId.status}`);
+    const okPage = await call(`/team/join/${token}`, { cookie: bob });
+    assert(okPage.status === 200, `invited page ${okPage.status}`);
+  });
+
+  await t('invitees see pending invites and a notification; only their own', async () => {
+    const asBob = await call('/api/me', { cookie: bob });
+    assert(asBob.body.team_invites.length === 1 && asBob.body.team_invites[0].id === team.id, `bob invites ${JSON.stringify(asBob.body.team_invites)}`);
+    assert(asBob.body.team_invites[0].invited_by === 'alice', 'inviter shown');
+    const asCarol = await call('/api/me', { cookie: carol });
+    assert(asCarol.body.team_invites.length === 1, 'email invitee sees invite');
+    const asDave = await call('/api/me', { cookie: dave });
+    assert(asDave.body.team_invites.length === 0, 'outsider sees none');
+    const inbox = await call('/api/notifications', { cookie: bob });
+    const note = inbox.body.items.find((i) => i.kind === 'team_invite');
+    assert(note && note.team === team.id && note.title === 'Acme', `bob inbox ${JSON.stringify(inbox.body.items)}`);
+    const unread = await call('/api/notifications/unread', { cookie: carol });
+    assert(unread.body.unread >= 1, `carol unread ${JSON.stringify(unread.body)}`);
+    const carolInbox = await call('/api/notifications', { cookie: carol });
+    assert(carolInbox.body.items.some((i) => i.kind === 'team_invite' && i.team === team.id), 'github session with the invited email gets the notification');
+    const leftover = JSON.parse(await env.META.get('inbox:email:carol@example.com') || '{"items":[]}');
+    assert(!leftover.items.some((i) => i.kind === 'team_invite'), 'moved, not copied');
+  });
+
+  await t('joining by link or accepting adds a member and clears their pending invite', async () => {
     const res = await call('/api/team/join', { method: 'POST', cookie: bob, body: { token } });
     assert(res.status === 200 && res.body.team.role === 'member', `join ${res.status}`);
-    await call('/api/team/join', { method: 'POST', cookie: carol, body: { token } });
+    const again = await call('/api/team/join', { method: 'POST', cookie: bob, body: { token } });
+    assert(again.status === 200, `rejoin is idempotent ${again.status}`);
+    const accept = await call('/api/team/join', { method: 'POST', cookie: carol, body: { id: team.id } });
+    assert(accept.status === 200, `email invitee accepts ${accept.status}`);
+    const pending = await call('/api/me', { cookie: carol });
+    assert(pending.body.team_invites.length === 0, 'accepted invite is gone');
     const detail = await call(`/api/team?id=${team.id}`, { cookie: bob });
     assert(detail.status === 200 && detail.body.team.members.length === 3, 'three members');
     assert(!detail.body.team.invites.includes('bob'), 'bob invite cleared');
@@ -241,6 +283,82 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(!meta.workspace_id && !meta.access.team, 'personal again');
     const me = await call('/api/me', { cookie: bob });
     assert(me.body.docs.some((d) => d.slug === 'bob-notes'), 'back in My docs');
+  });
+
+  await t('declining drops the invite; an open link admits anyone signed in', async () => {
+    const erin = await sessionFor(env, 'erin');
+    const frank = await sessionFor(env, 'frank');
+    const res = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'Open', invites: ['erin'] } });
+    const open = res.body.team;
+    const link = open.invite_url.split('/').pop();
+    assert(open.anyone_with_link === false, 'restricted by default');
+    const decline = await call('/api/team/decline', { method: 'POST', cookie: erin, body: { id: open.id } });
+    assert(decline.status === 200, `decline ${decline.status}`);
+    const after = await call(`/api/team?id=${open.id}`, { cookie: alice });
+    assert(after.body.team.invites.length === 0 && after.body.team.members.length === 1, 'declined, not joined');
+    const gone = await call('/api/team/join', { method: 'POST', cookie: erin, body: { id: open.id } });
+    assert(gone.status === 404, `declined invite accepted ${gone.status}`);
+    const byMember = await call('/api/team', { method: 'PATCH', cookie: frank, body: { id: open.id, anyone_with_link: true } });
+    assert(byMember.status !== 200, 'non-admin cannot open the link');
+    const flip = await call('/api/team', { method: 'PATCH', cookie: alice, body: { id: open.id, anyone_with_link: true } });
+    assert(flip.status === 200 && flip.body.team.anyone_with_link === true, `open link ${flip.status}`);
+    const joined = await call('/api/team/join', { method: 'POST', cookie: frank, body: { token: link } });
+    assert(joined.status === 200 && joined.body.team.role === 'member', `open join ${joined.status}`);
+  });
+
+  await t('an email invite is recognised by email and GitHub sign-in alike, never by having an email', async () => {
+    const res = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'Same email', invites: ['gina@example.com'] } });
+    const tm = res.body.team;
+    const link = tm.invite_url.split('/').pop();
+    // One Clerk account, two doors: email code, and GitHub inside the modal.
+    const viaEmail = await rawSession(env, { oidc: true, name: 'Gina', email: 'gina@example.com', account_id: 'acct-gina', idp: { provider: 'oidc', sub: 'user_gina' } });
+    const viaGithub = await rawSession(env, { oidc: true, name: 'Gina', email: 'Gina@Example.com', login: 'gina-gh', account_id: 'acct-gina', idp: { provider: 'oidc', sub: 'user_gina' } });
+    for (const [door, cookie] of [['email', viaEmail], ['github', viaGithub]]) {
+      const page = await call(`/team/join/${link}`, { cookie });
+      assert(page.status === 200, `${door} join page ${page.status}`);
+      const me = await call('/api/me', { cookie });
+      assert(me.body.team_invites.some((i) => i.id === tm.id), `${door} pending ${JSON.stringify(me.body.team_invites)}`);
+    }
+    const inbox = await call('/api/notifications', { cookie: viaGithub });
+    assert(inbox.body.items.some((i) => i.kind === 'team_invite' && i.team === tm.id), 'github-keyed inbox gets the email invite');
+    const joined = await call('/api/team/join', { method: 'POST', cookie: viaGithub, body: { token: link } });
+    assert(joined.status === 200 && joined.body.team.role === 'member', `github join ${joined.status}`);
+    const already = await call(`/team/join/${link}`, { cookie: viaEmail });
+    assert(already.status === 302, `same account through the email door is already a member ${already.status}`);
+    const detail = await call(`/api/team?id=${tm.id}`, { cookie: viaEmail });
+    assert(detail.status === 200 && detail.body.team.role === 'member' && detail.body.team.invites.length === 0, 'member, invite consumed');
+
+    const stranger = await rawSession(env, { oidc: true, name: 'Hank', email: 'hank@example.com', account_id: 'acct-hank' });
+    const hankPage = await call(`/team/join/${link}`, { cookie: stranger });
+    assert(hankPage.status === 403 && (await hankPage.r.text()).includes('hank@example.com'), `uninvited email page ${hankPage.status}`);
+    const hankJoin = await call('/api/team/join', { method: 'POST', cookie: stranger, body: { token: link } });
+    assert(hankJoin.status === 403 && hankJoin.body.error === 'not_invited', `uninvited email join ${hankJoin.status}`);
+    const hankMe = await call('/api/me', { cookie: stranger });
+    assert(hankMe.body.team_invites.length === 0, 'an email alone is not an invite');
+  });
+
+  await t('a sign-in without a verified email cannot match an email invite, and is told why', async () => {
+    const res = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'No email', invites: ['ivy@example.com', 'jack'] } });
+    const tm = res.body.team;
+    const link = tm.invite_url.split('/').pop();
+    const ivy = await rawSession(env, { login: 'ivy', name: 'ivy', account_id: 'acct-ivy' });
+    const page = await call(`/team/join/${link}`, { cookie: ivy });
+    assert(page.status === 403 && (await page.r.text()).includes('verified email'), `no-email page ${page.status}`);
+    const join = await call('/api/team/join', { method: 'POST', cookie: ivy, body: { token: link } });
+    assert(join.status === 403 && join.body.error === 'email_required', `no-email join ${join.status} ${JSON.stringify(join.body)}`);
+    const byId = await call('/api/team/join', { method: 'POST', cookie: ivy, body: { id: tm.id } });
+    assert(byId.status === 404, `no-email accept ${byId.status}`);
+    const decline = await call('/api/team/decline', { method: 'POST', cookie: ivy, body: { id: tm.id } });
+    assert(decline.status === 404, `no-email decline ${decline.status}`);
+    // A GitHub session whose address GitHub withheld still has the one its
+    // account verified when the identity was linked.
+    await env.META.put('hosted-account:ivy', JSON.stringify({ account_id: 'acct-ivy', email: 'ivy@example.com' }));
+    const linked = await call('/api/team/join', { method: 'POST', cookie: ivy, body: { token: link } });
+    assert(linked.status === 200 && linked.body.team.role === 'member', `account email join ${linked.status}`);
+    // A handle invite still matches the handle without any email.
+    const jack = await rawSession(env, { login: 'jack', name: 'jack', account_id: 'acct-jack' });
+    const handle = await call('/api/team/join', { method: 'POST', cookie: jack, body: { id: tm.id } });
+    assert(handle.status === 200, `handle invite ${handle.status}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

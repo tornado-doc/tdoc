@@ -5,7 +5,9 @@ import { AppMenu, AppMenuItem, AppMenuSeparator } from '../ui/menu.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
 import { copyText } from '../document/model.js';
 import {
+  acceptTeamInvite,
   createTeam,
+  declineTeamInvite,
   getTeam,
   removeTeamMember,
   setTeamRole,
@@ -18,6 +20,9 @@ const ERRORS = {
   last_admin: 'Make someone else an admin first. A team always keeps at least one admin.',
   team_limit: 'You are in the maximum number of teams.',
   invalid_name: 'Give the team a name (up to 60 characters).',
+  team_full: 'This team is full.',
+  not_invited: 'This invite is no longer open. Ask a team admin to invite you again.',
+  email_required: 'Your sign-in did not share a verified email, so it cannot be matched to an email invite.',
 };
 const message = (error) => ERRORS[error?.body?.error] || error?.message || 'Request failed';
 
@@ -136,7 +141,7 @@ export function NewTeamDialog({ onClose, onCreated }) {
       <section className="manage-section">
         <label className="field">Invite people</label>
         <InviteField users={people} onChange={setPeople} />
-        <p className="manage-hint">You are the admin. Invitees join with the team’s invite link, which you can copy from Members.</p>
+        <p className="manage-hint">You are the admin. Invitees see the invite in their notifications and on My docs once they sign in with that GitHub account or email.</p>
       </section>
       {status ? <p className="status" role="status">{status}</p> : null}
     </AppDialog>
@@ -193,6 +198,14 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
                 users={[]}
                 onChange={(added) => apply(() => updateTeam(team.id, { invites: [...team.invites, ...added.filter((x) => !team.invites.includes(x))] }))}
               />
+              <label className="tm-check">
+                <input
+                  type="checkbox"
+                  checked={team.anyone_with_link}
+                  onChange={(event) => apply(() => updateTeam(team.id, { anyone_with_link: event.target.checked }))}
+                />
+                Anyone with the link can join
+              </label>
               {team.invite_url ? (
                 <button
                   type="button"
@@ -202,6 +215,11 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
                   <Link2 size={14} /> {copied ? 'Invite link copied' : 'Copy invite link'}
                 </button>
               ) : null}
+              <p className="manage-hint">
+                {team.anyone_with_link
+                  ? 'Anyone signed in who has the link can join as a member.'
+                  : 'Only people you invited can join, from the link or from their notifications.'}
+              </p>
             </section>
           ) : null}
           <section className="manage-section">
@@ -258,6 +276,48 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
         </>
       )}
     </AppDialog>
+  );
+}
+
+export function PendingInvites({ invites, onDone }) {
+  const [status, setStatus] = useState('');
+  if (!invites.length) return null;
+  const drop = (id) => onDone(invites.filter((invite) => invite.id !== id));
+  const accept = async (invite) => {
+    setStatus(`Joining ${invite.name}…`);
+    try {
+      await acceptTeamInvite(invite.id);
+      location.href = `/me?team=${encodeURIComponent(invite.id)}`;
+    } catch (error) {
+      setStatus(message(error));
+      if (error?.body?.error === 'not_invited') drop(invite.id);
+    }
+  };
+  const decline = async (invite) => {
+    setStatus('');
+    try {
+      await declineTeamInvite(invite.id);
+      drop(invite.id);
+    } catch (error) {
+      setStatus(message(error));
+    }
+  };
+  return (
+    <section className="tm-invites" aria-label="Team invites">
+      {invites.map((invite) => (
+        <div className="tm-invite" key={invite.id}>
+          <UsersRound size={16} />
+          <span className="tm-invite-text">
+            {invite.invited_by ? `${invite.invited_by} invited you to join ` : 'You are invited to join '}
+            <strong>{invite.name}</strong>
+            <span className="muted"> · {invite.member_count} {invite.member_count === 1 ? 'member' : 'members'}</span>
+          </span>
+          <button type="button" onClick={() => decline(invite)}>Decline</button>
+          <button type="button" className="primary" onClick={() => accept(invite)}>Accept</button>
+        </div>
+      ))}
+      {status ? <p className="status" role="status">{status}</p> : null}
+    </section>
   );
 }
 

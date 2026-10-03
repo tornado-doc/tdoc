@@ -333,6 +333,14 @@ export function joinTeam(token) {
   return teamRequest('/api/team/join', 'POST', { token });
 }
 
+export function acceptTeamInvite(id) {
+  return teamRequest('/api/team/join', 'POST', { id });
+}
+
+export function declineTeamInvite(id) {
+  return teamRequest('/api/team/decline', 'POST', { id });
+}
+
 export function moveDocsToTeam(slugs, team) {
   return teamRequest('/api/team/move', 'POST', { slugs, team: team || null });
 }

@@ -656,6 +656,7 @@ button.tdoc-pin {
 .tdoc-status-actions a,
 .tdoc-status-actions button {
   display: inline-flex;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
   min-height: 40px;
@@ -678,6 +679,11 @@ button.tdoc-pin {
   border: 1px solid var(--tdoc-rule, #d9d9d9);
 }
 .tdoc-status-actions button[disabled] { opacity: 0.6; cursor: default; }
+/* A choice between two answers: both buttons take the wider one's width. */
+.tdoc-status-actions.pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .tdoc-status-note { color: var(--td-muted); font-size: 13px; }
 .tdoc-status-note a { color: var(--td-accent); margin-top: 0; }
 

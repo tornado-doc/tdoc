@@ -3024,6 +3024,7 @@ function teamDetail(team, accountId, origin) {
       me: m.account_id === accountId,
     })),
     invites: Array.isArray(team.invites) ? team.invites : [],
+    anyone_with_link: !!team.anyone_with_link,
     ...(admin && team.invite_token ? { invite_url: `${origin}/team/join/${team.invite_token}` } : {}),
   };
 }
@@ -3047,6 +3048,111 @@ function normalizeTeamInvites(list) {
     if (!out.includes(invitee)) out.push(invitee);
   }
   return out.length > TEAM_INVITES_MAX ? null : out;
+}
+
+// Who a session is to an invite list, whichever door it came through. Every
+// Clerk sign-in, email or GitHub inside the modal, arrives with the verified
+// address (completeEmailSignIn refuses one without), so the address is the
+// match. First-party GitHub sign-in carries one only when GitHub reported a
+// verified address; without it, the address the account itself verified when
+// the identity was linked stands in. A GitHub handle invite still matches the
+// handle the session carries. No address and no matching handle is no match.
+async function sessionInviteIdentity(env, session) {
+  const login = sessionLogin(session);
+  let email = normalizeEmail(session && session.email);
+  if (!email && login && session.account_id) {
+    const rec = await lookupHostedAccount(env, login);
+    if (rec && rec.account_id === session.account_id) email = normalizeEmail(rec.email);
+  }
+  return { email, keys: [email, login].filter(Boolean) };
+}
+
+function sessionInvited(team, who) {
+  const invites = team && Array.isArray(team.invites) ? team.invites : [];
+  return who.keys.some((key) => invites.includes(key));
+}
+
+function notInvitedError(who) {
+  return who.email ? 'not_invited' : 'email_required';
+}
+
+// Reverse index so an invitee can find their pending invites without a scan.
+async function loadInvitedTeamIds(env, invitee) {
+  try {
+    const ids = JSON.parse(await env.META.get(`team-invited:${invitee}`));
+    return Array.isArray(ids) ? ids.filter(validTeamId) : [];
+  } catch { return []; }
+}
+
+async function setInvitedTeam(env, invitee, teamId, on) {
+  const ids = await loadInvitedTeamIds(env, invitee);
+  const next = on ? [...new Set([...ids, teamId])] : ids.filter((id) => id !== teamId);
+  if (next.length) await env.META.put(`team-invited:${invitee}`, JSON.stringify(next));
+  else await env.META.delete(`team-invited:${invitee}`);
+}
+
+async function syncTeamInvites(env, team, before, inviter) {
+  const after = Array.isArray(team.invites) ? team.invites : [];
+  const added = after.filter((x) => !before.includes(x));
+  const dropped = before.filter((x) => !after.includes(x));
+  const by = team.invited_by && typeof team.invited_by === 'object' ? team.invited_by : {};
+  for (const x of dropped) delete by[x];
+  for (const x of added) by[x] = inviter ? actorDisplayName(inviter) : '';
+  team.invited_by = by;
+  await Promise.all([
+    ...added.map((x) => setInvitedTeam(env, x, team.id, true)),
+    ...dropped.map((x) => setInvitedTeam(env, x, team.id, false)),
+  ]);
+  return added;
+}
+
+async function notifyTeamInvitees(env, team, added, inviter) {
+  for (const invitee of added) {
+    const { key, inbox } = await loadInbox(env, invitee.includes('@') ? `email:${invitee}` : invitee);
+    if (!key) continue;
+    const next = applyInboxEvent(inbox, {
+      id: `n_${Date.now()}_${rand(4)}`,
+      kind: 'team_invite',
+      target_id: team.id,
+      title: team.name,
+      at: new Date().toISOString(),
+      actor: { login: actorKey(inviter), name: actorDisplayName(inviter) },
+    });
+    await env.META.put(key, JSON.stringify(next));
+  }
+}
+
+// An invite addressed to an email lands in that address's inbox. A session
+// keyed by a GitHub handle that carries the same address picks it up here.
+async function adoptEmailTeamInvites(env, session) {
+  const own = inboxKey(actorKey(session));
+  const { email } = await sessionInviteIdentity(env, session);
+  const other = email ? inboxKey(`email:${email}`) : null;
+  if (!own || !other || own === other) return;
+  const { inbox: theirs } = await loadInbox(env, `email:${email}`);
+  const moving = theirs.items.filter((i) => i && i.kind === 'team_invite');
+  if (!moving.length) return;
+  const { inbox: mine } = await loadInbox(env, actorKey(session));
+  const ids = new Set(mine.items.filter(Boolean).map((i) => i.id));
+  const items = [...moving.filter((i) => !ids.has(i.id)), ...mine.items]
+    .sort((a, b) => String((b && b.at) || '').localeCompare(String((a && a.at) || '')))
+    .slice(0, INBOX_MAX);
+  await env.META.put(own, JSON.stringify({ ...mine, items }));
+  await env.META.put(other, JSON.stringify({ ...theirs, items: theirs.items.filter((i) => !moving.includes(i)) }));
+}
+
+async function pendingTeamInvites(env, session) {
+  if (!session || !session.account_id) return [];
+  const who = await sessionInviteIdentity(env, session);
+  const ids = [...new Set((await Promise.all(who.keys.map((k) => loadInvitedTeamIds(env, k)))).flat())];
+  const teams = await Promise.all(ids.map((id) => loadTeam(env, id)));
+  return teams
+    .filter((team) => team && sessionInvited(team, who) && !teamMember(team, session.account_id))
+    .map((team) => {
+      const key = who.keys.find((k) => team.invites.includes(k));
+      const by = team.invited_by && team.invited_by[key];
+      return { id: team.id, name: team.name, member_count: team.members.length, ...(by ? { invited_by: by } : {}) };
+    });
 }
 
 async function rotateTeamInvite(env, team) {
@@ -3280,6 +3386,7 @@ async function indexData(env, session, origin) {
     folders: folderState.folders.map((folder) => publicFolder(folder)),
     teams: teamRecords.map((team) => teamSummary(team, viewerAccount)),
     team_docs: teamDocs.map(teamDocRow),
+    team_invites: await pendingTeamInvites(env, session),
   };
 }
 
@@ -6169,6 +6276,7 @@ function inboxGroupKey(kind, slug, targetId) {
   if (kind === 'reply') return `reply:${targetId}`;
   if (kind === 'reaction') return `reaction:${targetId}`;
   if (kind === 'access_request') return `access_request:${slug}`;
+  if (kind === 'team_invite') return `team_invite:${targetId}`;
   return `other:${slug || 'x'}`;
 }
 
@@ -6210,6 +6318,7 @@ function applyInboxEvent(inbox, ev) {
     read: false,
     count: 1,
     emoji: ev.emoji || null,
+    ...(ev.kind === 'team_invite' ? { team: ev.target_id } : {}),
   };
   return { items: [row, ...items].slice(0, INBOX_MAX) };
 }
@@ -7835,6 +7944,7 @@ export default {
         feedback: data.feedback,
         teams: data.teams,
         team_docs: data.team_docs,
+        team_invites: data.team_invites,
         ...(profile ? { profile } : {}),
       });
     }
@@ -8019,6 +8129,18 @@ export default {
         });
       }
       if (teamMember(team, s.account_id)) return redirectTo(`/me?team=${team.id}`);
+      const who = await sessionInviteIdentity(env, s);
+      if (!team.anyone_with_link && !sessionInvited(team, who)) {
+        return statusPageResponse({
+          docTitle: `Join ${team.name} · tdoc`,
+          title: `You haven't been invited to ${team.name}`,
+          message: who.email
+            ? `Ask a team admin to invite ${who.email}, then open this link again.`
+            : 'Your sign-in did not share a verified email, so it cannot be matched to an email invite. Sign in with the email you were invited at, or ask a team admin to invite your GitHub handle.',
+          error: true,
+          status: 403,
+        });
+      }
       if (method === 'HEAD') return new Response(null, { status: 200 });
       const nonce = rand(16);
       return html(SHELL.appHtml({
@@ -9214,6 +9336,7 @@ export default {
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       const key = inboxKey(actorKey(s));
       if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
+      try { await adoptEmailTeamInvites(env, s); } catch {}
       let inbox = emptyInbox();
       try {
         const raw = await env.META.get(key);
@@ -9227,6 +9350,7 @@ export default {
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
       const key = inboxKey(actorKey(s));
       if (!key) return json({ unread: 0 });
+      try { await adoptEmailTeamInvites(env, s); } catch {}
       let inbox = emptyInbox();
       try {
         const raw = await env.META.get(key);
@@ -9461,9 +9585,12 @@ export default {
         created_by: s.account_id,
         members: [teamMemberFromSession(s, 'admin')],
         invites,
+        anyone_with_link: false,
       };
       await rotateTeamInvite(env, team);
+      await syncTeamInvites(env, team, [], s);
       await saveTeam(env, team);
+      try { await notifyTeamInvitees(env, team, invites, s); } catch {}
       await setAccountTeam(env, s.account_id, team.id, true);
       let emailed = [];
       try {
@@ -9495,11 +9622,13 @@ export default {
         const invites = normalizeTeamInvites(body.invites);
         if (!invites) return json({ error: 'invalid_invites' }, { status: 400 });
         const before = Array.isArray(team.invites) ? team.invites : [];
-        added = invites.filter((x) => !before.includes(x));
         team.invites = invites;
+        added = await syncTeamInvites(env, team, before, s);
       }
+      if ('anyone_with_link' in body) team.anyone_with_link = body.anyone_with_link === true;
       if (body.reset_link === true) await rotateTeamInvite(env, team);
       await saveTeam(env, team);
+      try { await notifyTeamInvitees(env, team, added, s); } catch {}
       let emailed = [];
       try {
         emailed = await sendTeamInviteEmails(env, {
@@ -9548,9 +9677,17 @@ export default {
       const s = gate.session;
       let body = {};
       try { body = await req.json(); } catch {}
-      const team = await teamForInviteToken(env, body.token);
+      const team = body.id != null
+        ? await loadTeam(env, body.id)
+        : await teamForInviteToken(env, body.token);
       if (!team) return json({ error: 'invite_invalid' }, { status: 404 });
       if (!teamMember(team, s.account_id)) {
+        const viaLink = body.id == null && team.anyone_with_link;
+        const who = await sessionInviteIdentity(env, s);
+        if (!viaLink && !sessionInvited(team, who)) {
+          if (body.id != null) return json({ error: 'not_invited' }, { status: 404 });
+          return json({ error: notInvitedError(who) }, { status: 403 });
+        }
         if (team.members.length >= TEAM_MEMBERS_MAX) {
           return json({ error: 'team_full', limit: TEAM_MEMBERS_MAX }, { status: 400 });
         }
@@ -9558,12 +9695,31 @@ export default {
           return json({ error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX }, { status: 400 });
         }
         team.members.push(teamMemberFromSession(s, 'member'));
-        const mine = [sessionLogin(s), normalizeEmail(s.email)].filter(Boolean);
-        team.invites = (Array.isArray(team.invites) ? team.invites : []).filter((x) => !mine.includes(x));
+        const mine = who.keys;
+        const before = Array.isArray(team.invites) ? team.invites : [];
+        team.invites = before.filter((x) => !mine.includes(x));
+        await syncTeamInvites(env, team, before, null);
         await saveTeam(env, team);
         await setAccountTeam(env, s.account_id, team.id, true);
       }
       return json({ ok: true, team: teamSummary(team, s.account_id) });
+    }
+
+    if (p === '/api/team/decline' && method === 'POST') {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const team = await loadTeam(env, body.id);
+      const who = await sessionInviteIdentity(env, s);
+      if (!team || !sessionInvited(team, who)) return json({ error: 'not_found' }, { status: 404 });
+      const mine = who.keys;
+      const before = team.invites;
+      team.invites = before.filter((x) => !mine.includes(x));
+      await syncTeamInvites(env, team, before, null);
+      await saveTeam(env, team);
+      return json({ ok: true });
     }
 
     // Moving is the author's call alone: into a team they belong to, or back
