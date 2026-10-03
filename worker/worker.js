@@ -7946,13 +7946,15 @@ export default {
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store' } });
     }
-    if (p === '/me/tokens' && method === 'GET') {
+    // "Devices & agents" — /me/tokens was its first name; links to it still work.
+    if (p === '/me/tokens' && method === 'GET') return redirectTo('/me/devices');
+    if (p === '/me/devices' && method === 'GET') {
       const who = await tokenPageSession(env, req);
-      if (!who) return redirectTo(`/api/auth/oidc/login?return=${encodeURIComponent('/me/tokens')}`);
+      if (!who) return redirectTo(`/api/auth/oidc/login?prompt=login&return=${encodeURIComponent('/me/devices')}`);
       const nonce = rand(16);
       const s = who.session;
       return html(SHELL.appHtml({
-        title: 'Connected terminals · tdoc',
+        title: 'Devices & agents · tdoc',
         nonceAttr: ` nonce="${nonce}"`,
         runtimeJsPath: SHELL_RUNTIME_JS_PATH,
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
