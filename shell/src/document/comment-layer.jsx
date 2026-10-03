@@ -101,6 +101,7 @@ export function DesktopCommentLayer({
   cardPosition,
   expandReplies,
   canSendToAgent = false,
+  agentSetupHref = null,
   onOpenComment,
   onOpenCluster,
   onReply,
@@ -158,6 +159,7 @@ export function DesktopCommentLayer({
           position={cardPosition}
           expandReplies={expandReplies}
           canSendToAgent={canSendToAgent}
+                  agentSetupHref={agentSetupHref}
           onReply={onReply}
           onReact={onReact}
           onDelete={onDelete}
@@ -182,6 +184,7 @@ export function MobileCommentDrawer({
   openCommentId,
   expandReplies,
   canSendToAgent = false,
+  agentSetupHref = null,
   onOpenChange,
   onReply,
   onReact,
@@ -228,6 +231,7 @@ export function MobileCommentDrawer({
                   expandReplies={openCommentId === comment.id && expandReplies}
                   selected={openCommentId === comment.id}
                   canSendToAgent={canSendToAgent}
+                  agentSetupHref={agentSetupHref}
                   onActivate={onNavigate}
                   onReply={onReply}
                   onReact={onReact}

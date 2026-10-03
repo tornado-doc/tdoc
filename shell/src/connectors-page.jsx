@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
-import { CONNECT_AGENT_PROMPT, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
+import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
 
 // Where this account's comments go when someone presses Send to agent or
@@ -145,30 +145,34 @@ export function ConnectorsBody() {
 
         <h2 className="tdoc-conn-h">Add a connector</h2>
         <div className="tdoc-connectors">
-          <section className="tdoc-connector">
-            <div className="tdoc-connector-head"><strong>Raft agent</strong><span className="muted">An agent on a Raft server where the tdoc app is installed.</span></div>
-            {raftReady ? (
-              <>
-                <p className="muted tdoc-conn-note">Sign in with your Raft account once. Every agent on that server then gets the comments on the docs it writes.</p>
-                <a className="tdoc-fbspace-btn primary" href="/api/me/connectors/raft/start">Connect with Raft</a>
-                <details className="tdoc-conn-alt">
-                  <summary>Or let an agent connect itself</summary>
-                  <code>{CONNECT_AGENT_PROMPT}</code>
-                  <button type="button" className="tdoc-fbspace-btn" onClick={() => doCopy('raft', CONNECT_AGENT_PROMPT)}>{copied === 'raft' ? 'Copied' : 'Copy prompt'}</button>
-                </details>
-              </>
-            ) : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>}
-          </section>
-
-          <section className="tdoc-connector">
-            <div className="tdoc-connector-head"><strong>Webhook</strong><span className="muted">Any bot or service that can receive an HTTPS POST. No Raft needed.</span></div>
-            <form className="tdoc-conn-form" onSubmit={addHook}>
-              <input type="url" required placeholder="https://your-bot.example.com/tdoc" value={hookUrl} onChange={(e) => setHookUrl(e.target.value)} />
-              <input type="text" placeholder="Name (optional)" value={hookName} onChange={(e) => setHookName(e.target.value)} maxLength={60} />
-              <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || !hookUrl}>Add webhook</button>
-            </form>
-            <p className="muted tdoc-conn-note">tdoc POSTs JSON (<span className="tdoc-inline-code">type: "tdoc.handoff"</span>, the doc, comment ids, instruction) with <span className="tdoc-inline-code">X-Tdoc-Signature: sha256=…</span>, an HMAC-SHA256 of the body with your signing secret.</p>
-          </section>
+          {/* Browse: one card per kind of connector, the featured one first.
+              Raft is the only agent platform today; webhooks cover the rest. */}
+          {AGENT_CONNECTORS.map((conn) => (
+            <section key={conn.id} className={`tdoc-connector${conn.featured ? ' is-featured' : ''}`}>
+              <ConnectorHead connector={conn} />
+              {conn.id === 'raft' ? (raftReady ? (
+                <>
+                  <a className="tdoc-fbspace-btn primary" href="/api/me/connectors/raft/start">Connect with Raft</a>
+                  <details className="tdoc-conn-alt">
+                    <summary>Or let an agent connect itself</summary>
+                    <code>{CONNECT_AGENT_PROMPT}</code>
+                    <button type="button" className="tdoc-fbspace-btn" onClick={() => doCopy('raft', CONNECT_AGENT_PROMPT)}>{copied === 'raft' ? 'Copied' : 'Copy prompt'}</button>
+                  </details>
+                </>
+              ) : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>) : null}
+              {conn.id === 'webhook' ? (
+                <>
+                  <form className="tdoc-conn-form" onSubmit={addHook}>
+                    <input type="url" required placeholder="https://your-bot.example.com/tdoc" value={hookUrl} onChange={(e) => setHookUrl(e.target.value)} />
+                    <input type="text" placeholder="Name (optional)" value={hookName} onChange={(e) => setHookName(e.target.value)} maxLength={60} />
+                    <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || !hookUrl}>Add webhook</button>
+                  </form>
+                  <p className="muted tdoc-conn-note">tdoc POSTs JSON (<span className="tdoc-inline-code">type: "tdoc.handoff"</span>, the doc, comment ids, instruction) with <span className="tdoc-inline-code">X-Tdoc-Signature: sha256=…</span>, an HMAC-SHA256 of the body with your signing secret.</p>
+                </>
+              ) : null}
+            </section>
+          ))}
+          <p className="muted tdoc-conn-note">More connectors are coming.</p>
         </div>
 
       {confirm ? (
