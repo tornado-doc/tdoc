@@ -206,6 +206,14 @@ artifact — which is the whole point of putting it in a tdoc.
 | **Gauge** | A magnitude on a scale | The scale's ends are visible, or the reading means nothing |
 | **Small multiples** | The same chart repeated | Shared axes across every panel, or they cannot be compared |
 
+## Drawing one
+
+`diagrams.md` in this directory carries paste-ready SVG for the figure shapes —
+flow chain, cycle with a return edge, layered stack, orthogonal band, evidence
+status, 16:9 share card — already at the column's 672px width, plus the four
+rules that decide whether a hand-built figure renders or quietly breaks. Read it
+before drawing by hand.
+
 ## Writing a component that is not on this list
 
 The nine parts and twelve chart types above cover what has come up so far. They

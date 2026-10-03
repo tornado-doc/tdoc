@@ -81,6 +81,13 @@ left-hand ink is flush before shipping it.
 
 ## Keep them commentable and responsive
 
+**The shapes themselves are written down.** `structure/diagrams.md` has
+paste-ready SVG for a flow chain, a cycle with a return edge, a layered stack,
+an orthogonal band, an evidence-status figure and a 16:9 share card — each
+already at the column's 672px width. Start from one rather than from an empty
+`<svg>`; the four rules at the top of that file are the ones that decide whether
+a figure renders or quietly overlaps its own labels.
+
 Wrap wide charts in `<div class="diagram-box">` (or `tdoc-table-scroll` for
 tables) so they scroll on a phone instead of overflowing. Tag an author-built
 figure `data-tdoc-artifact` if it is a composed block rather than a single
