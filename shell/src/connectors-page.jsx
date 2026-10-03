@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
-import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
+import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, RaftConnectButton, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
 
 // Where this account's comments go when someone presses Send to agent or
@@ -152,7 +152,7 @@ export function ConnectorsBody() {
               <ConnectorHead connector={conn} />
               {conn.id === 'raft' ? (raftReady ? (
                 <>
-                  <a className="tdoc-fbspace-btn primary" href="/api/me/connectors/raft/start">Connect with Raft</a>
+                  <RaftConnectButton />
                   <details className="tdoc-conn-alt">
                     <summary>Or let an agent connect itself</summary>
                     <code>{CONNECT_AGENT_PROMPT}</code>
@@ -163,11 +163,30 @@ export function ConnectorsBody() {
               {conn.id === 'webhook' ? (
                 <>
                   <form className="tdoc-conn-form" onSubmit={addHook}>
-                    <input type="url" required placeholder="https://your-bot.example.com/tdoc" value={hookUrl} onChange={(e) => setHookUrl(e.target.value)} />
-                    <input type="text" placeholder="Name (optional)" value={hookName} onChange={(e) => setHookName(e.target.value)} maxLength={60} />
+                    <label>
+                      <span>Endpoint URL</span>
+                      <input type="url" required placeholder="https://your-bot.example.com/tdoc" value={hookUrl} onChange={(e) => setHookUrl(e.target.value)} />
+                    </label>
+                    <label>
+                      <span>Name <em>optional</em></span>
+                      <input type="text" placeholder="My bot" value={hookName} onChange={(e) => setHookName(e.target.value)} maxLength={60} />
+                    </label>
                     <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || !hookUrl}>Add webhook</button>
                   </form>
-                  <p className="muted tdoc-conn-note">tdoc POSTs JSON (<span className="tdoc-inline-code">type: "tdoc.handoff"</span>, the doc, comment ids, instruction) with <span className="tdoc-inline-code">X-Tdoc-Signature: sha256=…</span>, an HMAC-SHA256 of the body with your signing secret.</p>
+                  <details className="tdoc-conn-alt">
+                    <summary>What tdoc sends</summary>
+                    <p className="muted tdoc-conn-note">A JSON POST, signed with the secret you get when you add it.</p>
+                    <pre className="tdoc-conn-pre">{`POST <your URL>
+X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
+
+{
+  "type": "tdoc.handoff",
+  "slug": "q3-plan",
+  "comment_ids": ["c_…"],
+  "instruction": "address my new comments",
+  "url": "https://tdoc.dev/d/q3-plan"
+}`}</pre>
+                  </details>
                 </>
               ) : null}
             </section>

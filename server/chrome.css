@@ -167,7 +167,11 @@
   .tdoc-connector-head .muted { font-size: 12.5px; }
   .tdoc-connector code { display: block; padding: 8px; border-radius: 6px; background: var(--td-surface, #f7f7f5); font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
   .tdoc-connector .primary { justify-self: start; }
-  .tdoc-connector .tdoc-connector-action { display: inline-block; padding: 7px 14px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 13px/1.2 system-ui, sans-serif; text-decoration: none; }
+  /* Agents surfaces share one look: 12px cards, 6px buttons. */
+  .tdoc-connector { border-radius: 12px !important; padding: 16px !important; gap: 12px !important; }
+  .tdoc-raft-btn { justify-self: start; display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 10px; border-radius: 6px; background: #141111; color: #fff !important; font: 600 13px/1 -apple-system, system-ui, sans-serif; text-decoration: none; }
+  .tdoc-raft-btn:hover { background: #2a2626; }
+  .tdoc-connector .tdoc-connector-action { justify-self: start; display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 13px/1.2 system-ui, sans-serif; text-decoration: none; }
   .tdoc-connector details summary { cursor: pointer; }
   .tdoc-connector details[open] { display: grid; gap: 8px; }
   .tdoc-connect-agent .tdoc-connect-agent-cta { display: inline-block; margin: 0 0 8px; padding: 5px 10px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 12px system-ui, sans-serif; text-decoration: none; }

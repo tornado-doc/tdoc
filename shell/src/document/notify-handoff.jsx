@@ -140,6 +140,17 @@ export const AGENT_CONNECTORS = [
 
 // A connector card's head: its logo, its name, Recommended on the featured
 // one. Shared by the dialog and the Agents page, so both browse the same list.
+// The one way to start a Raft connection, wherever it is offered: Raft's
+// mark on Raft's black, so it reads as "sign in with Raft" at a glance.
+export function RaftConnectButton({ label = 'Connect with Raft' }) {
+  return (
+    <a className="tdoc-raft-btn" href="/api/me/connectors/raft/start">
+      <RaftMark size={18} />
+      <span>{label}</span>
+    </a>
+  );
+}
+
 export function ConnectorHead({ connector }) {
   return (
     <div className="tdoc-connector-head">
@@ -170,7 +181,9 @@ function ConnectAgentView({ onClose }) {
         {AGENT_CONNECTORS.map((c) => (
           <section key={c.id} className="tdoc-connector">
             <ConnectorHead connector={c} />
-            <a className="primary tdoc-connector-action" href={c.action.href}>{c.action.label}</a>
+            {c.id === 'raft'
+              ? <RaftConnectButton />
+              : <a className="tdoc-connector-action" href={c.action.href}>{c.action.label}</a>}
             {c.prompt ? (
               <details>
                 <summary className="manage-hint">Or paste this into your agent</summary>
