@@ -52,7 +52,7 @@ export function ActivatePage({ boot, preview = null }) {
   }, []);
 
   const lookup = async () => {
-    if (preview) { setPending({ label: 'Preview terminal' }); setError(''); return; }
+    if (preview) { setPending({ label: 'Preview device' }); setError(''); return; }
     setBusy(true);
     setError('');
     const { status, data } = await post('/api/cli/pair/lookup', { user_code: code });
@@ -106,7 +106,7 @@ export function ActivatePage({ boot, preview = null }) {
 
             So: say what the terminal is doing, and offer the one place worth
             going instead. */}
-        <p>Your terminal is finishing sign-in.</p>
+        <p>Your device is finishing sign-in.</p>
         <div className="tdoc-status-actions">
           <a className="primary" href="/me">My docs</a>
         </div>
@@ -124,8 +124,8 @@ export function ActivatePage({ boot, preview = null }) {
       {!identity ? (
         <>
           <p>{code
-            ? 'Sign in, then approve this terminal to publish to your account.'
-            : 'Sign in to connect your terminal.'}</p>
+            ? 'Sign in, then approve this device or agent to publish to your account.'
+            : 'Sign in to connect your device or agent.'}</p>
           <p className="tdoc-activate-hint">
             New here? Signing in creates your account.
           </p>

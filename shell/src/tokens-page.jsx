@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Laptop } from 'lucide-react';
-import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from './agent-marks.jsx';
 import './docs-hub.css';
@@ -30,8 +29,8 @@ function ClientMark({ client }) {
   return <Laptop size={18} aria-hidden="true" />;
 }
 
-export function TokensPage({ boot }) {
-  const initial = (Array.isArray(boot.tokens) ? boot.tokens : [])
+export function DevicesBody({ tokens: given }) {
+  const initial = (Array.isArray(given) ? given : [])
     .slice()
     .sort((a, b) => String(b.last_used || b.created || '').localeCompare(String(a.last_used || a.created || '')));
   const [tokens, setTokens] = useState(initial);
@@ -61,10 +60,7 @@ export function TokensPage({ boot }) {
   };
 
   return (
-    <div className="tdoc-app docs-hub tdoc-devices-page">
-      <TopBar identity={boot.identity || null} />
-      <main className="wrap">
-        <div className="page-hd"><h1>Devices &amp; agents</h1></div>
+    <>
         <p className="muted" style={{ marginTop: 0 }}>
           Every computer or agent you approved can publish, edit and delete your docs. Remove any you don’t recognise; it will need your approval to come back.
         </p>
@@ -91,8 +87,7 @@ export function TokensPage({ boot }) {
             ))}
           </section>
         )}
-        <p className="muted tdoc-fbspace-foot">Where comments go when you press Send to agent is set on <a href="/me/connectors">Connectors</a>.</p>
-      </main>
+
       {confirm ? (
         <AppDialog
           open
@@ -112,6 +107,6 @@ export function TokensPage({ boot }) {
           </p>
         </AppDialog>
       ) : null}
-    </div>
+    </>
   );
 }

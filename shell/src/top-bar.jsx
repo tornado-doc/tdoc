@@ -163,11 +163,8 @@ export function TopBar({
                     <UserRound size={15} /> {publicProfileLabel}
                   </AppMenuItem>
                 ) : null}
-                <AppMenuItem className="tdoc-action-menu-item" onClick={() => { location.href = '/me/connectors'; }}>
-                  <TerminalSquare size={15} /> Connectors
-                </AppMenuItem>
-                <AppMenuItem className="tdoc-action-menu-item" onClick={() => { location.href = '/me/devices'; }}>
-                  <TerminalSquare size={15} /> Devices &amp; agents
+                <AppMenuItem className="tdoc-action-menu-item" onClick={() => { location.href = '/me/agents'; }}>
+                  <TerminalSquare size={15} /> Agents
                 </AppMenuItem>
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
@@ -198,8 +195,7 @@ export function TopBar({
             {activeProfile || onClaimProfile ? (
               <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
             ) : null}
-            <AppMenuItem onClick={() => { location.href = '/me/connectors'; }}>Connectors</AppMenuItem>
-            <AppMenuItem onClick={() => { location.href = '/me/devices'; }}>Devices &amp; agents</AppMenuItem>
+            <AppMenuItem onClick={() => { location.href = '/me/agents'; }}>Agents</AppMenuItem>
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
         ) : authConfigured ? (

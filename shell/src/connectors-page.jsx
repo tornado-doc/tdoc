@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
-import { CONNECT_AGENT_PROMPT, ProviderMark, providerMeta, readableHandle } from './document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
 
 // Where this account's comments go when someone presses Send to agent or
@@ -28,7 +27,7 @@ function detailOf(t) {
 
 async function copy(text) { try { await navigator.clipboard.writeText(text); return true; } catch (_) { return false; } }
 
-export function ConnectorsPage({ boot }) {
+export function ConnectorsBody() {
   const [targets, setTargets] = useState(null);
   const [connectors, setConnectors] = useState([]);
   const [available, setAvailable] = useState([]);
@@ -40,6 +39,18 @@ export function ConnectorsPage({ boot }) {
   const [made, setMade] = useState(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState('');
+  const [defaults, setDefaults] = useState({});
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (q.get('connected') === 'raft') setNotice('Raft server connected. Agents on it now get comments on the docs they write.');
+    else if (q.get('error')) setNotice(`Could not connect: ${q.get('error').replace(/_/g, ' ')}.`);
+  }, []);
+  const saveDefault = async (c) => {
+    const name = (defaults[c.id] || '').trim();
+    if (!name) return;
+    try { await call('/api/me/connectors/raft/default', { server_id: c.server_id, agent_name: name }); setDefaults((d) => ({ ...d, [c.id]: '' })); await load(); }
+    catch (err) { setNotice(err.message); }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -56,7 +67,7 @@ export function ConnectorsPage({ boot }) {
     try {
       const b = await call('/api/me/connectors/test', keyOf(t));
       const d = b.delivery || {};
-      setResults((r) => ({ ...r, [idOf(t)]: d.status === 'delivered' ? 'Delivered ✓' : `Not delivered: ${d.error || 'unknown'}` }));
+      setResults((r) => ({ ...r, [idOf(t)]: d.status === 'delivered' ? 'Delivered ✓' : `Not delivered: ${deliveryErrorText(d.error) || 'unknown'}` }));
     } catch (err) { setResults((r) => ({ ...r, [idOf(t)]: err.message })); }
   };
 
@@ -86,10 +97,7 @@ export function ConnectorsPage({ boot }) {
   const doCopy = async (what, text) => { if (await copy(text)) { setCopied(what); setTimeout(() => setCopied(''), 1800); } };
 
   return (
-    <div className="tdoc-app docs-hub tdoc-connectors-page">
-      <TopBar identity={boot.identity || null} />
-      <main className="wrap">
-        <div className="page-hd"><h1>Connectors</h1></div>
+    <>
         <p className="muted" style={{ marginTop: 0 }}>
           Where tdoc sends comments when you press Send to agent or @agent. The agent that wrote a doc gets its comments first; the top one here is the default for everything else.
         </p>
@@ -115,6 +123,17 @@ export function ConnectorsPage({ boot }) {
                   <div className="doc-info">
                     <span className="doc-title">{title}{isDefault ? <span className="tdoc-conn-default">default</span> : null}</span>
                     <div className="doc-meta">{detail}{sample && results[idOf(sample)] ? ` · ${results[idOf(sample)]}` : ''}</div>
+                    {isRaft ? (
+                      <form className="tdoc-conn-default-form" onSubmit={(e) => { e.preventDefault(); saveDefault(c); }}>
+                        <input
+                          type="text"
+                          placeholder={names.length ? 'Change default agent (@handle)' : 'Default agent for docs no agent wrote (@handle)'}
+                          value={defaults[c.id] || ''}
+                          onChange={(e) => setDefaults((d) => ({ ...d, [c.id]: e.target.value }))}
+                        />
+                        <button type="submit" className="tdoc-fbspace-btn" disabled={!(defaults[c.id] || '').trim()}>Save</button>
+                      </form>
+                    ) : null}
                   </div>
                   {sample ? <button type="button" className="tdoc-fbspace-btn" onClick={() => test(sample)}>Send test</button> : null}
                   <button type="button" className="tdoc-fbspace-btn" onClick={() => setConfirm({ ...c, title })}>Disconnect</button>
@@ -128,10 +147,17 @@ export function ConnectorsPage({ boot }) {
         <div className="tdoc-connectors">
           <section className="tdoc-connector">
             <div className="tdoc-connector-head"><strong>Raft agent</strong><span className="muted">An agent on a Raft server where the tdoc app is installed.</span></div>
-            {raftReady ? null : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>}
-            <p className="muted tdoc-conn-note">Paste this into the agent; it connects itself:</p>
-            <code>{CONNECT_AGENT_PROMPT}</code>
-            <button type="button" className="tdoc-fbspace-btn primary" onClick={() => doCopy('raft', CONNECT_AGENT_PROMPT)}>{copied === 'raft' ? 'Copied' : 'Copy prompt'}</button>
+            {raftReady ? (
+              <>
+                <p className="muted tdoc-conn-note">Sign in with your Raft account once. Every agent on that server then gets the comments on the docs it writes.</p>
+                <a className="tdoc-fbspace-btn primary" href="/api/me/connectors/raft/start">Connect with Raft</a>
+                <details className="tdoc-conn-alt">
+                  <summary>Or let an agent connect itself</summary>
+                  <code>{CONNECT_AGENT_PROMPT}</code>
+                  <button type="button" className="tdoc-fbspace-btn" onClick={() => doCopy('raft', CONNECT_AGENT_PROMPT)}>{copied === 'raft' ? 'Copied' : 'Copy prompt'}</button>
+                </details>
+              </>
+            ) : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>}
           </section>
 
           <section className="tdoc-connector">
@@ -144,7 +170,6 @@ export function ConnectorsPage({ boot }) {
             <p className="muted tdoc-conn-note">tdoc POSTs JSON (<span className="tdoc-inline-code">type: "tdoc.handoff"</span>, the doc, comment ids, instruction) with <span className="tdoc-inline-code">X-Tdoc-Signature: sha256=…</span>, an HMAC-SHA256 of the body with your signing secret.</p>
           </section>
         </div>
-      </main>
 
       {confirm ? (
         <AppDialog
@@ -175,6 +200,6 @@ export function ConnectorsPage({ boot }) {
           </div>
         </AppDialog>
       ) : null}
-    </div>
+    </>
   );
 }

@@ -377,3 +377,7 @@
 .sg-steps { gap: 12px; }
 .sg-steps li { line-height: 1.5; }
 .sg-account { margin-top: 0; line-height: 1.5; }
+
+/* The optional "let tdoc ping your agent" line under Connected. */
+.sg-optional { margin: 10px 0 0; font-size: 13px; line-height: 1.5; color: var(--td-muted, #6b6a66); }
+.sg-optional span { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; background: var(--td-surface, #f3f3f1); font-size: 11px; font-weight: 600; }

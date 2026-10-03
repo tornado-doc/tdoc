@@ -4,7 +4,7 @@ import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send }
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
-import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel } from '../../shell/src/document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText } from '../../shell/src/document/notify-handoff.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from '../../shell/src/document/handoff-state.js';
 import { setApiTransport } from '../../shell/src/document/api.js';
 import chromeCss from '../../server/chrome.css?inline';
@@ -405,7 +405,7 @@ ${uiCss}
         body: JSON.stringify({ slug, comment_ids: [].concat(commentIds), instruction: 'address this comment' }),
       });
       const failed = body && body.delivery && body.delivery.status === 'failed';
-      return { ok: !failed, message: failed ? `Posted — not delivered to the agent${body.delivery.error ? `: ${body.delivery.error}` : ''}` : 'Sent to your agent' };
+      return { ok: !failed, message: failed ? `Posted — not delivered to the agent${body.delivery.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}` : 'Sent to your agent' };
     } catch (error) {
       return { ok: false, message: `Posted — could not send to the agent (${error.message})` };
     }

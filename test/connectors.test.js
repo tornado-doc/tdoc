@@ -15,6 +15,16 @@ const posts = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init = {}) => {
   const u = String(input && input.url || input);
+  if (u.startsWith('https://raft.test/')) {
+    const path = new URL(u).pathname;
+    const body = path.endsWith('openid-configuration')
+      ? { issuer: 'https://raft.test', authorization_endpoint: 'https://raft.test/oauth/authorize', token_endpoint: 'https://raft.test/api/oauth/token', userinfo_endpoint: 'https://raft.test/api/oauth/userinfo' }
+      : path.endsWith('/token') ? { access_token: 'at-human', token_type: 'Bearer' }
+      : path.endsWith('/userinfo') ? { sub: 'human-1', type: 'human', preferred_username: 'julie' }
+      : path.endsWith('/serverinfo') ? { id: 'S9', slug: 'julies-server', name: 'Julie' }
+      : {};
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
   if (u.startsWith('https://hooks.example/')) {
     posts.push({ url: u, headers: init.headers || {}, body: init.body });
     return new Response('ok', { status: u.endsWith('/fail') ? 500 : 200 });
@@ -166,6 +176,50 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-c', 'X-Tdoc-Raft-Agent-Name': 'gamma' });
     const again = await targetsOf(ctx);
     assert(!again.default || again.default.provider === 'webhook', `new agent on the disconnected server claimed: ${JSON.stringify(again.default)}`);
+  });
+
+  const RAFT = { RAFT_CLIENT_ID: 'tdoc-x', RAFT_CLIENT_SECRET: 's', RAFT_OIDC_ISSUER: 'https://raft.test', RAFT_API_BASE: 'https://raft.test' };
+  async function connectRaft(env, cookie, otherCookie) {
+    const start = await worker.fetch(req('/api/me/connectors/raft/start', { cookie }), env, {});
+    const loc = new URL(start.headers.get('Location'));
+    const state = loc.searchParams.get('state');
+    const stateCookie = (start.headers.get('Set-Cookie') || '').split(';')[0];
+    const back = await worker.fetch(req(`/auth/raft/callback?code=c1&state=${state}`, { cookie: `${otherCookie || cookie}; ${stateCookie}` }), env, {});
+    return { start, back };
+  }
+
+  await t('Connect with Raft: one sign-in connects the person\'s server', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT);
+    const owner = await issue(worker, env, 'owner');
+    const { start, back } = await connectRaft(env, owner.cookie);
+    assert(start.status === 302 && start.headers.get('Location').startsWith('https://raft.test/oauth/authorize'), `start ${start.status}`);
+    assert(back.status === 302 && back.headers.get('Location').includes('connected=raft'), `callback ${back.status} ${back.headers.get('Location')}`);
+    const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+    const raft = list.connectors.find((c) => c.kind === 'raft');
+    assert(raft && raft.server_id === 'S9' && raft.server_slug === 'julies-server', JSON.stringify(list.connectors));
+  });
+
+  await t('a connect started by one tdoc session cannot finish on another', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT);
+    const owner = await issue(worker, env, 'owner');
+    const other = await issue(worker, env, 'stranger');
+    const { back } = await connectRaft(env, owner.cookie, other.cookie);
+    assert(back.status === 403, `cross-session connect: ${back.status}`);
+    const theirs = await (await worker.fetch(req('/api/me/connectors', { cookie: other.cookie }), env, {})).json();
+    assert(!theirs.connectors.length, 'the other account got the server');
+  });
+
+  await t('after connecting, a default agent is set by handle and receives handoffs', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT);
+    const owner = await issue(worker, env, 'owner');
+    await connectRaft(env, owner.cookie);
+    const bad = await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'NOPE', agent_name: 'x' }), env, {});
+    assert(bad.status === 404, `unconnected server: ${bad.status}`);
+    const set = await (await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_name: '@小c' }), env, {})).json();
+    assert(set.ok && set.target.agent_name === '小c' && set.target.server_slug === 'julies-server', JSON.stringify(set));
+    await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'rdoc', version: 1, html: '<p>x</p>' } }), env, {});
+    const r = await (await worker.fetch(req('/api/notify/targets?slug=rdoc', { cookie: owner.cookie }), env, {})).json();
+    assert(r.default && r.default.agent_name === '小c', JSON.stringify(r.default));
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
