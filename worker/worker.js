@@ -10587,16 +10587,27 @@ export default {
       // Silent by design — a Raft identity is optional and its absence must
       // not fail a reply that is otherwise fine.
       const replyingAgent = await actingAgent(env, req, auth.actor);
-      if (replyingAgent) {
+      // A handoff already records which connector carried this thread. Keep
+      // that provider attribution even when an older CLI cannot send its Raft
+      // identity header; the provider mark describes the route, while the
+      // runtime name remains available as terminal detail.
+      let replyTarget = replyingAgent;
+      if (!replyTarget) {
+        const handoff = (await loadHandoffs(env, slug)).find((h) => h && Array.isArray(h.comment_ids) && h.comment_ids.includes(parent.id));
+        replyTarget = normalizeNotifyTarget(handoff && handoff.recipient);
+      }
+      if (replyTarget) {
         const accountHandle = auth.actor.account_id
           ? (await accountClaimedHandle(env, auth.actor.account_id)) || auth.actor.github_login || ''
           : '';
         agent = {
           ...agent,
-          provider: replyingAgent.provider,
-          handle: replyingAgent.agent_name ? `@${replyingAgent.agent_name.replace(/^@/, '')}` : '',
+          provider: replyTarget.provider,
+          handle: replyTarget.agent_name ? `@${replyTarget.agent_name.replace(/^@/, '')}` : '',
           ...(accountHandle ? { principal: { display: `@${accountHandle}`, terminal: agent.name } } : {}),
         };
+      }
+      if (replyingAgent) {
         try {
           await touchDocAgent(env, slug, replyingAgent);
           await touchAccountAgent(env, auth.actor.account_id, replyingAgent);

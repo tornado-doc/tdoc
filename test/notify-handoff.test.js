@@ -79,6 +79,17 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(c.handoff_id === body.handoff_id, 'comment carries its handoff id');
   });
 
+  await t('a reply keeps the handoff provider mark when an older CLI sends no agent header', async () => {
+    const { env, slug, token, commentId } = await seed('provider-reply');
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: target });
+    const response = await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token,
+      body: { slug, parent_id: commentId, text: 'handled', status: 'answered', agent_login: 'claude' },
+    }), env, {});
+    const body = await response.json();
+    assert(body.author.provider === 'raft' && body.author.handle === '@xiaocc', JSON.stringify(body.author));
+  });
+
   await t('an unconfigured provider fails the delivery but still records the handoff', async () => {
     const { env, slug, token, commentId } = await seed();
     const body = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
