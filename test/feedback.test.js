@@ -352,6 +352,7 @@ const APP = 'http://localhost:3000';
     const source = fs.readFileSync(path.join(ROOT, 'feedback/src/main.jsx'), 'utf8');
     assert(source.includes("from '../../shell/src/document/comment-card.jsx'") && source.includes("from '../../server/chrome.css?inline'"), 'client stopped sharing the shell UI');
     assert(!source.includes('chrome.runtime'), 'client still depends on a browser extension');
+    assert(source.includes('POLL_MS = 15_000') && source.includes("visibilitychange") && source.includes('aria-label="Refresh feedback"'), 'live/manual feedback refresh is missing');
     const bundle = fs.readFileSync(path.join(ROOT, 'bin/tdoc-bundle'), 'utf8');
     assert(bundle.includes('__TDOC_FEEDBACK_JS__'), 'tdoc-bundle does not inline the client');
   });
