@@ -33,13 +33,13 @@
     var palette = { background: false, color: false };
     function foundation(style) {
       if (!style) return false;
-      // Token-based adjustments still use the reader design. Layout rules,
-      // responsive breakpoints and individual accent colors do not opt out.
+      // Token-based adjustments still use the reader design. Typography,
+      // layout and individual accents do not opt out: require an author
+      // background AND text color before removing the house stylesheet.
       function own(prop) {
         var value = style.getPropertyValue(prop).trim();
         return value && !/var\(\s*--td-/.test(value) && !/^(inherit|initial|unset|revert|transparent)$/.test(value);
       }
-      if (own('font-family') || own('font')) return true;
       if (own('background-color') || own('background')) palette.background = true;
       if (own('color')) palette.color = true;
       return palette.background && palette.color;

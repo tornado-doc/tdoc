@@ -46,7 +46,8 @@ const { resolveTarget } = require('./helpers/fixture-server');
       ['layout-only CSS', '', '@media(max-width:520px){.wrap{padding:12px}} body{background:white}', false],
       ['reader tokens', '', 'body{color:var(--td-ink);background:var(--td-ground);font-family:var(--td-font-display)}', false],
       ['custom light palette', '', 'body{color:#123;background:#fff}', true],
-      ['custom type', '', 'body{font-family:Georgia}', true],
+      ['font-family only', '', 'body{font-family:Georgia}', false],
+      ['font shorthand only', '', 'body{font:16px/1.7 Georgia}', false],
       ['custom content root', '', 'main{color:#eee;background:#111}', true],
       ['conditional palette', '', '@media(min-width:2000px){body{color:#eee;background:#111}}', true],
       ['explicit custom design', 'data-tdoc-design="custom"', '', true],
@@ -58,6 +59,14 @@ const { resolveTarget } = require('./helpers/fixture-server');
       await page.waitForFunction(() => window.testReady);
       assert.equal(await page.evaluate(() => window.testReady.supportsTheme), !custom, name);
       assert.equal(await page.locator('#tdoc-reader').evaluate(el => el.sheet.disabled), custom, name);
+      if (name.startsWith('font')) {
+        assert.equal(await page.locator('main').evaluate(el => getComputedStyle(el).maxWidth), '720px', 'font changes retain the reader column');
+        await page.evaluate(() => window.postMessage({source:'tdoc-shell',type:'tdoc:theme',theme:'dark'}, '*'));
+        await page.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-theme') === 'dark');
+        assert.equal(await page.locator('html').evaluate(el => getComputedStyle(el).filter), 'invert(1) hue-rotate(180deg)', 'font changes retain dark mode');
+        await page.evaluate(() => window.postMessage({source:'tdoc-shell',type:'tdoc:theme',theme:'light'}, '*'));
+        await page.waitForFunction(() => !document.documentElement.hasAttribute('data-tdoc-theme'));
+      }
       console.log(`✓ ${name}`);
     }
   } finally { await browser.close(); await target.stop(); }
