@@ -344,7 +344,7 @@
   .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
   /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
      switches over the already-rendered page — no fetch on tab change. */
-  .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--td-line); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--td-line); }
   .tab { border: none; background: none; font: inherit; font-weight: 600; color: var(--td-muted); padding: 8px 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tab:hover { color: var(--td-ink); }
   .tab.is-active { color: var(--td-accent); border-bottom-color: var(--td-accent); }
@@ -501,8 +501,10 @@
 .onb-card ol { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
 .onb-card ol:has(li:only-child) { margin-top: -2px; }
 
+.onb-card li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 12px; align-items: start; }
+.onb-step-content { min-width: 0; }
 .onb-card li a, .onb-card li .onb-row {
-  display: grid; grid-template-columns: 18px 1fr 100px; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: minmax(0, 1fr) 100px; gap: 12px; align-items: center;
   /* 4, not 8. One line of text beside a picture four times its height reads as
      a list with holes in it: the air between the labels is the thumbnail's,
      not the row's, so the row should not add more of its own. */
@@ -512,7 +514,7 @@
 .onb-label { font-size: 14px; line-height: 1.5; }
 @media (max-width: 480px) {
   .onb-card { padding: 16px; }
-  .onb-card li a, .onb-card li .onb-row { gap: 8px; }
+  .onb-card li, .onb-card li a, .onb-card li .onb-row { gap: 8px; }
 }
 .onb-card li a .onb-label { color: var(--td-accent, #1652f0); }
 .onb-card li.done .onb-label { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
@@ -521,11 +523,11 @@
    itself. Both lines, together. */
 .onb-card li.done a:hover .onb-label { text-decoration: line-through underline; }
 .onb-tick {
-  width: 18px; height: 18px; border-radius: 50%;
-  border: 1px solid var(--td-line, #e8e7e3); background: #fff;
-  display: flex; align-items: center; justify-content: center; color: #fff;
+  width: 18px; height: 18px; margin: 26px 0 0;
+  accent-color: var(--td-accent, #1652f0); cursor: pointer;
 }
-.onb-card li.done .onb-tick { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); }
+.onb-tick:disabled { cursor: wait; }
+.onb-tick:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 3px; }
 /* A row whose turn has not come is shown and not offered. Nothing is hidden —
    the whole shape should be legible on the first arrival — but nothing about
    it invites a click that would land nowhere. */
@@ -683,6 +685,17 @@
 .tdoc-fbspace-list .tdoc-margin-comment.tdoc-current-comment { border-color: var(--td-accent) !important; }
 .tdoc-fbspace-agent { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -8px 0 18px; font-size: 13px; color: var(--td-muted); }
 
+/* Optional fifth tutorial row: same grid, thumbnail, and label as steps 1–4. */
+.onb-agent-row { width: 100%; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; }
+.onb-agent-row .onb-label { color: var(--td-accent, #1652f0); }
+.onb-agent-row:hover .onb-label { text-decoration: underline; }
+.onb-optional { display: block; font-size: 12px; font-weight: 400; color: var(--td-muted, #6b6a66); }
+.onb-agent-details { margin: 0 0 8px; min-width: 0; }
+.onb-agent-details p { margin: 8px 0; font-size: 13px; line-height: 1.5; color: var(--td-muted, #6b6a66); }
+.onb-agent-details .tdoc-handoff-line { flex-wrap: wrap; }
+.onb-agent-details .tdoc-handoff-line code { flex-basis: 220px; }
+.onb-agent-skip { border: 0; padding: 4px 0; background: none; color: var(--td-muted, #6b6a66); font: inherit; font-size: 13px; cursor: pointer; }
+.onb-agent-skip:hover { text-decoration: underline; }
 /* Feedback tab rows are whole-row links; read like the other tabs' rows. */
 #pane-feedback a.doc-row { color: inherit; text-decoration: none; }
 #pane-feedback a.doc-row:hover .doc-title { color: var(--td-accent); }
@@ -719,8 +732,6 @@
 .tdoc-dev-client { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--td-surface, #f3f3f1); color: var(--td-muted); font-size: 11.5px; font-weight: 600; }
 .tdoc-dev-remove:hover { border-color: var(--td-danger, #c33) !important; color: var(--td-danger, #c33) !important; }
 
-.onb-optional { margin: 4px 0 0; padding: 10px 2px 0; border-top: 1px dashed var(--td-line); font-size: 13px; color: var(--td-muted); }
-.onb-optional span { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; background: var(--td-surface, #f3f3f1); font-size: 11px; font-weight: 600; }
 
 .tdoc-conn-default-form { display: flex; gap: 6px; margin-top: 6px; max-width: 420px; }
 .tdoc-conn-default-form input { flex: 1; font: inherit; font-size: 13px; padding: 5px 9px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-bg, #fff); color: var(--td-ink); }

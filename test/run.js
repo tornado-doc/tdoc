@@ -66,6 +66,7 @@ const OFFLINE = [
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'resolve-a-thread.test.js',
   'onboarding-journey.test.js',
+  'onboarding-manual-steps.test.js',
   'setup-gate.test.js', // the journey: two doors, three server-driven bridges, no daemon // #357 a person can resolve; resolved threads leave the margin
   'tornado-doc-landing.test.js',
   'landing-republish.test.js', // #458 the homepage is one v1, re-shipped in place with `replace`
@@ -112,6 +113,7 @@ const OFFLINE = [
 
 // These run against local fixtures and require the development browser.
 const BROWSER = [
+  'optional-agent-onboarding-ui.test.js', // real connection state, skip and mobile optional setup
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments

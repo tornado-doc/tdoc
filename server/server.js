@@ -55,6 +55,7 @@ function onboardingActionStep(action) {
     case 'waitlist': return 'waitlist';
     case 'tour_seen': return 'tour_seen';
     case 'share_link_copied': return 'shared';
+    case 'notify_setup_skipped': return 'notify_setup_skipped';
     case 'example_opened':
     case 'copy_clicked':
     case 'fix_copy_clicked':
@@ -1861,12 +1862,28 @@ const server = http.createServer(async (req, res) => {
     // an env flag stands in for "this account has connected a terminal".
     const record = discoverFirstDocLocal(all.record || {});
     const paired = Boolean(process.env.TDOC_E2E_PAIRED);
+    if (url.searchParams.get('notify') === '1') {
+      // Local documents have no hosted outbound-agent account binding.
+      return json(res, 200, { record, paired, notify_connected: false });
+    }
     // Twin of the worker's `?docs=1`: only the page waiting for a doc to
     // appear pays for the walk.
     if (url.searchParams.get('docs') === '1') {
       return json(res, 200, { record, paired, newest_doc: newestDocLocal() });
     }
     return json(res, 200, { record, paired });
+  }
+  if (p === '/api/onboarding/step' && req.method === 'PUT') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    if (!['connect', 'create', 'comment', 'revise', 'notify'].includes(body?.step) || typeof body?.done !== 'boolean') {
+      return json(res, 400, { error: 'invalid_step' });
+    }
+    const all = loadOnboardingLocal();
+    all.record = all.record || {};
+    all.record.manual_steps = { ...all.record.manual_steps, [body.step]: body.done };
+    writeJson(ONBOARDING_FILE, all);
+    return json(res, 200, { ok: true });
   }
   if (p === '/api/onboarding/event' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });

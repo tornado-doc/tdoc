@@ -38,10 +38,19 @@ export function listComments(slug, version) {
 // action the page saw. Both live on the account, never in localStorage, so a
 // second device resumes where the first one stopped.
 export function getOnboarding(options) {
+  if (options?.notify) return request('/api/onboarding?notify=1');
   // `docs` asks the server to also name the newest doc this account owns. It
   // costs a catalog walk, so only the page that waits for a doc to appear
   // asks for it.
   return request(options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
+}
+
+export function setOnboardingStep(step, done) {
+  return request('/api/onboarding/step', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ step, done }),
+  });
 }
 
 export function postOnboardingEvent(action, doc) {

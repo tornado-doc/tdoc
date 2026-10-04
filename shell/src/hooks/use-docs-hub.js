@@ -18,7 +18,7 @@ const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
 // Every mutation goes through `run`, so a failure always reaches the user as
 // a toast and an expired session always reaches `onUnauthorized` — the page
 // component never has to remember to catch.
-export function useDocsHub({ boot, onUnauthorized }) {
+export function useDocsHub({ boot, onUnauthorized, preview }) {
   const [docs, setDocs] = useState(boot.docs || []);
   const [recent, setRecent] = useState(boot.recent || []);
   const [starred, setStarred] = useState(boot.starred || []);
@@ -40,9 +40,9 @@ export function useDocsHub({ boot, onUnauthorized }) {
 
   useEffect(() => {
     const next = folder ? `?folder=${encodeURIComponent(folder)}` : location.pathname;
-    history.replaceState(null, '', next);
+    if (!preview) history.replaceState(null, '', next);
     setSelected(new Set());
-  }, [folder]);
+  }, [folder, preview]);
 
   const notify = useCallback((message, error = false) => setToast({ message, error }), []);
 

@@ -175,6 +175,9 @@ async function approve(worker, env, cookie, user_code) {
     const response = await worker.fetch(req('/__preview/onboarding'), makeEnv(mod.CommentsStore), {});
     assert(response.status === 404, 'sample approval screens must not be served on production');
     assert(!(await response.text()).includes('"page":"onboarding-preview"'), 'preview boot escaped its build guard');
+    const me = await worker.fetch(req('/me?preview=tutorial'), makeEnv(mod.CommentsStore), {});
+    assert(me.status === 302, 'production My docs still requires sign-in');
+    assert(!(await me.text()).includes('"page":"onboarding-preview"'), 'My docs sample escaped its build guard');
   });
 
   await t('the doc shell advertises the seat too — no surface left on the old door', async () => {

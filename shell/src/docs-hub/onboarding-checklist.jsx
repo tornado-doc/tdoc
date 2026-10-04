@@ -1,18 +1,11 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Check, ChevronDown, X } from 'lucide-react';
+import { ConnectAgentStep } from './connect-agent-step.jsx';
+import { setOnboardingStep } from '../document/api.js';
 import { AgentMarks } from '../agent-marks.jsx';
 
-// The onboarding, after setup. Four things, rendered from the record's own
-// timestamps rather than a second set of counters.
-//
-// Setup and the seeded doc are already done by the time anyone reads this, so
-// it opens at two of four. The progress is real, not a welcome mat.
-//
-// Collapsing is a view preference, not a step, so it lives in this browser and
-// not on the account: somebody who tidies it away on their laptop has not told
-// us anything about their phone.
-// Two preferences, both this browser's: whether the list is expanded, and
-// whether it is here at all.
+// Account facts provide defaults; manual checks are saved separately on the
+// account. Collapsing and expanding remain browser view preferences.
 const STORE_KEY = 'tdoc.onboarding.collapsed';
 const OPEN_KEY = 'tdoc.onboarding.open';
 
@@ -45,7 +38,7 @@ function rememberOpen(value) {
 // whose turn has not come is shown and not offered, so the shape of the whole
 // thing is visible from the first arrival without inviting a click that would
 // land nowhere.
-export function onboardingSteps(record, firstDocHref) {
+export function onboardingSteps(record, firstDocHref, notifyFinished = false, manualSteps = {}) {
   const r = record || {};
   const steps = [
     { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
@@ -59,6 +52,7 @@ export function onboardingSteps(record, firstDocHref) {
     // pointing at the same wall of text.
     { id: 'comment', label: 'Comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref && `${firstDocHref}?step=comment` },
     { id: 'revise', label: 'Ask your agent to fix comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
+    { id: 'notify', label: 'Connect Raft', optional: true, done: Boolean(r.notify_connected || r.notify_setup_skipped || notifyFinished), action: true },
   ];
   // Locked until everything above it is done. The first unfinished row is the
   // only one anybody can act on.
@@ -68,9 +62,10 @@ export function onboardingSteps(record, firstDocHref) {
     // the doc it stands on is gone. Deleting the journey's doc used to leave
     // row 4 in full ink with no href: it read as the next thing to do and did
     // nothing when clicked.
-    const locked = !step.done && (!reached || !step.href);
-    if (!step.done) reached = false;
-    return { ...step, locked };
+    const done = typeof manualSteps[step.id] === 'boolean' ? manualSteps[step.id] : step.done;
+    const locked = !done && (!reached || (!step.href && !step.action));
+    if (!done) reached = false;
+    return { ...step, done, locked };
   });
 }
 
@@ -80,6 +75,12 @@ export function onboardingSteps(record, firstDocHref) {
 // carry the things this product is actually recognised by — the two agents'
 // own marks, the anchor highlight's yellow, a comment card, a v2 chip.
 function Thumb({ id, title }) {
+  if (id === 'notify') {
+    return <span className="onb-thumb" aria-hidden="true">
+      <b className="t-title">Raft</b>
+      <i className="t-card"><em>tdoc</em><span>Send to agent →</span></i>
+    </span>;
+  }
   if (id === 'connect') {
     // Two real marks in two white discs, the way Notion shows Gmail and
     // Outlook. A logo somebody already recognises does more work than any
@@ -136,19 +137,23 @@ function Thumb({ id, title }) {
   );
 }
 
-export function OnboardingChecklist({ record, docs }) {
-  const [collapsed, setCollapsed] = useState(stored);
-  const [open, setOpen] = useState(storedOpen);
+export function OnboardingChecklist({ record, docs, preview }) {
+  const [collapsed, setCollapsed] = useState(() => preview ? false : stored());
+  const [open, setOpen] = useState(() => preview ? true : storedOpen());
+  const [manualSteps, setManualSteps] = useState(() => record?.manual_steps || {});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [notifyFinished, setNotifyFinished] = useState(false);
+  const finishNotifySetup = useCallback(() => setNotifyFinished(true), []);
   // Only link to the doc while it is still in their list: a seeded doc they
   // deleted would otherwise leave every row pointing at a 404.
   const first = record && record.first_doc;
   const firstDoc = first ? (docs || []).find((d) => d && d.slug === first) : null;
   const alive = Boolean(firstDoc);
   const href = alive ? `/d/${encodeURIComponent(first)}` : null;
-  const steps = onboardingSteps(record, href);
+  const steps = onboardingSteps(record, href, notifyFinished, manualSteps);
   const done = steps.filter((s) => s.done).length;
-  // Nothing to say before the journey starts, and nothing left to say after it
-  // ends: the card is for the middle.
+  // Keep manually edited checklists available for undo, even at five of five.
   //
   // `started` alone is not the middle. It is stamped by a signed-in visit to
   // /setup, and the journey this product is actually built around never goes
@@ -167,10 +172,22 @@ export function OnboardingChecklist({ record, docs }) {
     record.started || record.published_first || record.first_doc
     || (record.agent_connected && !(docs || []).length)
   ));
-  if (!walking || done === steps.length) return null;
+  if (!walking || (done === steps.length && !Object.keys(manualSteps).length)) return null;
 
-  const toggle = (next) => { setCollapsed(next); remember(next); };
-  const setOpenState = (next) => { setOpen(next); rememberOpen(next); };
+  const markStep = async (id, checked) => {
+    setSaving(true);
+    setSaveError('');
+    const previous = manualSteps;
+    setManualSteps(current => ({ ...current, [id]: checked }));
+    try {
+      if (!preview) await setOnboardingStep(id, checked);
+    } catch {
+      setManualSteps(previous);
+      setSaveError('Could not save your progress. Try again.');
+    } finally { setSaving(false); }
+  };
+  const toggle = (next) => { setCollapsed(next); if (!preview) remember(next); };
+  const setOpenState = (next) => { setOpen(next); if (!preview) rememberOpen(next); };
   // There is only ever one thing to do. Finished steps need no room and
   // unreached ones need none yet, so at rest the card carries the next step
   // alone. The heading and the bar stay: without them a count and a sentence
@@ -190,7 +207,7 @@ export function OnboardingChecklist({ record, docs }) {
       <header>
         <div>
           <h2>Finish setting up</h2>
-          <p>{done} of {steps.length}</p>
+          <p>{done} of {steps.length} steps · Step 5 is optional</p>
         </div>
         <div className="onb-acts">
           <button
@@ -219,34 +236,33 @@ export function OnboardingChecklist({ record, docs }) {
         {(open ? steps : [next]).map((step) => {
           const body = (
             <>
-              <span className="onb-tick">{step.done ? <Check size={12} strokeWidth={3} /> : null}</span>
-              <span className="onb-label">{step.label}</span>
+              <span className="onb-label">{step.label}{step.optional ? <small className="onb-optional">Optional</small> : null}</span>
               <Thumb id={step.id} title={firstDoc?.title} />
             </>
           );
           return (
-            <li key={step.id} className={step.done ? 'done' : step.locked ? 'locked' : ''}>
-              {/* A finished row still goes somewhere, and where it goes is still
-                  worth going: row 1 is how you connect a second machine, row 2
-                  is how you make another doc -- the page it opens was built
-                  for exactly the person who has already done it once. Struck
-                  through says it is finished; it does not have to mean the
-                  door is gone. Only a locked row is inert. */}
-              {step.locked || !step.href
-                ? <span className="onb-row">{body}</span>
-                : <a href={step.href}>{body}</a>}
+            <li key={step.id} aria-label={step.optional ? 'Step 5: Connect Raft (optional)' : undefined} className={step.done ? 'done' : step.locked ? 'locked' : ''}>
+              <input type="checkbox" className="onb-tick" checked={step.done}
+                aria-label={`Mark ${step.label} complete`} disabled={saving}
+                onChange={event => markStep(step.id, event.target.checked)} />
+              <div className="onb-step-content">
+                {/* A finished row still goes somewhere, and where it goes is still
+                    worth going: row 1 is how you connect a second machine, row 2
+                    is how you make another doc -- the page it opens was built
+                    for exactly the person who has already done it once. Struck
+                    through says it is finished; it does not have to mean the
+                    door is gone. Only a locked row is inert. */}
+                {step.action && !step.locked && !step.done && !notifyFinished && !record?.notify_connected && !record?.notify_setup_skipped
+                  ? <ConnectAgentStep onFinished={finishNotifySetup} preview={preview}>{body}</ConnectAgentStep>
+                  : step.locked || !step.href
+                  ? <span className="onb-row">{body}</span>
+                  : <a href={step.href}>{body}</a>}
+              </div>
             </li>
           );
         })}
       </ol>
-      {/* Not a step: tdoc already works without it. Shown with the full list
-          so the person learns the other direction exists — tdoc pinging their
-          agent — without it counting against "done". */}
-      {open ? (
-        <p className="onb-optional">
-          <span>Optional</span> Send comments straight to your agent from tdoc. <a href="/me/agents?tab=send">Set up an agent</a>
-        </p>
-      ) : null}
+      {saveError ? <p role="alert">{saveError}</p> : null}
     </section>
   );
 }

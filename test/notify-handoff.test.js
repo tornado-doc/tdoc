@@ -164,6 +164,35 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   }
   const link = (env, token, body) => worker.fetch(req('/api/notify/link', { method: 'POST', token, body }), env, {});
 
+  await t('optional onboarding reads a real account connection and isolates it from other accounts', async () => {
+    const { env, token } = await seed();
+    const owner = await putSession(env, 'owner');
+    await issue(worker, env, 'someone-else');
+    const other = await putSession(env, 'someone-else');
+    const state = async cookie => (await worker.fetch(req('/api/onboarding?notify=1', { cookie }), env, {})).json();
+    assert((await state(owner)).notify_connected === false, 'publishing alone is not an outbound connection');
+    await link(env, token, { link_code: await pendingLink(env) });
+    assert((await state(owner)).notify_connected === true, 'real linked agent completes the optional step');
+    assert((await state(other)).notify_connected === false, 'another account cannot inherit that connection');
+    assert((await state()).anonymous === true, 'anonymous clients see no connection state');
+  });
+
+  await t('skipping optional setup persists without pretending an agent connected', async () => {
+    const { env } = await seed();
+    const cookie = await putSession(env, 'owner');
+    const response = await worker.fetch(req('/api/onboarding/event', {
+      method: 'POST', cookie, body: { action: 'notify_setup_skipped' },
+    }), env, {});
+    assert(response.status === 200, 'skip succeeds');
+    const state = await (await worker.fetch(req('/api/onboarding?notify=1', { cookie }), env, {})).json();
+    assert(state.record.notify_setup_skipped, 'skip survives a reload / second browser');
+    assert(state.notify_connected === false, 'skip is not a connection');
+    const forged = await worker.fetch(req('/api/onboarding/event', {
+      method: 'POST', cookie, body: { action: 'notify_connected' },
+    }), env, {});
+    assert(forged.status === 400, 'browser cannot forge completion');
+  });
+
   await t('a link code plus an account token binds the agent as a fallback recipient', async () => {
     const { env, token, slug } = await seed();
     const code = await pendingLink(env);

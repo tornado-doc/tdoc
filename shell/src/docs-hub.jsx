@@ -340,11 +340,12 @@ function ClaimHandleDialog({ suggested, current, onClose }) {
 // Page-level orchestrator for /me. State and mutations live in useDocsHub;
 // rows and menus are the shared docs-hub/rows.jsx components; every modal is
 // the AppDialog facade. This component only decides what is on screen.
-export function DocsHub({ boot }) {
+export function DocsHub({ boot, preview }) {
   const capabilities = { folders: true, delete: true, star: true, create: true, ...(boot.capabilities || {}) };
   const viewer = boot.identity?.login || '';
   const hub = useDocsHub({
     boot,
+    preview,
     // /me is session-gated by the server; a 401 mid-visit means the session
     // expired, and the route's own redirect is the sign-in path.
     onUnauthorized: () => { location.href = '/?notice=signin'; },
@@ -515,7 +516,7 @@ export function DocsHub({ boot }) {
         ) : (
         <>
 
-        <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
+        <OnboardingChecklist record={boot.onboarding} docs={hub.docs} preview={preview} />
         {/* The checklist is on this page, so all six states show a difference
             here -- this is the one surface that has a face for every one. */}
         {boot.debug ? (
