@@ -22,6 +22,57 @@
   function post(msg) {
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
+  // A baked reader block is present on every upload, including fully authored
+  // designs. Its presence alone is not consent to restyle or invert the page.
+  function usesReaderDesign() {
+    var explicit = document.documentElement.getAttribute('data-tdoc-design');
+    if (explicit === 'custom') return false;
+    if (explicit === 'tdoc') return true;
+    var roots = [document.documentElement, document.body];
+    Array.prototype.forEach.call(document.querySelectorAll('body > main, body > article, body > section, body > div'), function (content) { roots.push(content); });
+    var palette = { background: false, color: false };
+    function foundation(style) {
+      if (!style) return false;
+      // Token-based adjustments still use the reader design. Layout rules,
+      // responsive breakpoints and individual accent colors do not opt out.
+      function own(prop) {
+        var value = style.getPropertyValue(prop).trim();
+        return value && !/var\(\s*--td-/.test(value) && !/^(inherit|initial|unset|revert|transparent)$/.test(value);
+      }
+      if (own('font-family') || own('font')) return true;
+      if (own('background-color') || own('background')) palette.background = true;
+      if (own('color')) palette.color = true;
+      return palette.background && palette.color;
+    }
+    function rulesHaveDesign(rules) {
+      for (var i = 0; i < rules.length; i++) {
+        var rule = rules[i];
+        if (rule.selectorText && roots.some(function (root) {
+          try { return root && root.matches(rule.selectorText); } catch (_) { return false; }
+        }) && foundation(rule.style)) return true;
+        // Include conditional styles: the design must not switch ownership
+        // when a viewport breakpoint or OS color preference changes.
+        if (rule.cssRules && rulesHaveDesign(rule.cssRules)) return true;
+      }
+      return false;
+    }
+    for (var i = 0; i < roots.length; i++) if (roots[i] && foundation(roots[i].style)) return false;
+    for (var j = 0; j < document.styleSheets.length; j++) {
+      var sheet = document.styleSheets[j], owner = sheet.ownerNode;
+      if (sheet.disabled || (owner && (owner.id === 'tdoc-reader' || owner.id === 'tdoc-reader-patch' || owner.hasAttribute('data-tdoc-provider')))) continue;
+      try { if (rulesHaveDesign(sheet.cssRules)) return false; }
+      catch (_) { return false; } // An opaque author stylesheet owns its design.
+    }
+    return true;
+  }
+  var supportsTheme = usesReaderDesign();
+  if (!supportsTheme) {
+    // Disable only the house design, not the provider's table/overflow patch,
+    // comments or author styles. CSSOM state is not serialized into storage.
+    Array.prototype.forEach.call(document.querySelectorAll('style#tdoc-reader'), function (style) {
+      if (style.sheet) style.sheet.disabled = true;
+    });
+  }
   var interactionMode = 'read';
   // Block/artifact hover outline. Off on the homepage — landing sections are
   // huge commentable boxes and the dashed chrome gets in the way. Text
@@ -1056,12 +1107,12 @@
     return walk(root, { inPre: false }).replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  // Dark mode = filter-invert applied INSIDE the frame (verbatim from overlay.js
-  // 821-842). Works on any author doc without knowing its colors; photos/video/
-  // canvas are inverted back. An author can opt an element out with
-  // data-tdoc-dark="invert", or ship their own theme (then avoid our toggle).
+  // Only the tdoc reader design participates in the shell theme. Custom
+  // designs keep their original palette, even if an old shell sends a theme.
+  // Photos/video/canvas are inverted back for the default reader.
   var themeStyle = null;
   function applyTheme(theme) {
+    if (!supportsTheme) return;
     var html = document.documentElement;
     if (theme === 'dark') html.setAttribute('data-tdoc-theme', 'dark'); else html.removeAttribute('data-tdoc-theme');
     if (st) st.textContent = highlightCss(theme === 'dark');
@@ -1405,6 +1456,6 @@
   }, { passive: true });
 
   prepareDiagrams();
-  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
+  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();

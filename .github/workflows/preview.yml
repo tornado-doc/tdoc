@@ -248,6 +248,17 @@ jobs:
             -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
             --data-binary @/tmp/tdoc-preview-resolved.json | jq -e '.ok == true'
 
+          # Public synthetic colors reproduce the custom-design regression
+          # without copying a user's report into shared preview storage.
+          THEME_SLUG="custom-design-pr-${{ github.event.pull_request.number }}"
+          reset_preview_slug "$THEME_SLUG"
+          jq -n --arg slug "$THEME_SLUG" --rawfile html test/fixtures/tdocs/custom-design/v1/index.html \
+            '{slug:$slug,version:1,html:$html,meta:{title:"Custom document design",slug:$slug,versions:[{n:1}],access:{visibility:"public",commenting:"signed_in",history_visibility:"public",allowed_users:[]}}}' \
+            > /tmp/tdoc-preview-theme.json
+          curl -sf --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \
+            -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
+            --data-binary @/tmp/tdoc-preview-theme.json | jq -e '.ok == true'
+
           # Per-PR diagram fixture: shared preview storage must not mix scenes
           # from two concurrently reviewed branches.
           DIAGRAM_SLUG="excalidraw-pr-${{ github.event.pull_request.number }}"
@@ -299,6 +310,7 @@ jobs:
           **Onboarding UI:** https://${PREVIEW_HOST}/__preview/onboarding
           **Resolved toggle:** https://${PREVIEW_HOST}/d/resolved-pr-${PR}/v/2
           **Version diff:** https://${PREVIEW_HOST}/d/version-diff-pr-${PR}/v/2?compare=1
+          **Custom design (no theme switch):** https://${PREVIEW_HOST}/d/custom-design-pr-${PR}/v/1
           **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1
           **Or a document:** https://${PREVIEW_HOST}/d/conway-life/v/2
 

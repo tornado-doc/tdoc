@@ -94,6 +94,7 @@ jobs:
       - run: npm run test:browser
       - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
       - run: TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/custom-design-theme.test.js
 
   shell-runtime:
     name: shell runtime
@@ -112,6 +113,8 @@ jobs:
       # A diff here means someone edited shell/src without `npm run build:shell`.
       - run: npm ci
       - run: npm run build:shell
+      # build:shell clears the output directory; restore the independently built bookmarklet.
+      - run: npm run build:feedback
       - name: Committed runtime matches shell/src
         run: |
           git add -N server/runtime

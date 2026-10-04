@@ -118,6 +118,7 @@ const BROWSER = [
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
+  'custom-design-theme.test.js', // custom palettes opt out of house styles and theme inversion
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
 ];
