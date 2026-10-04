@@ -10579,7 +10579,7 @@ export default {
       const parent = thread.root;
 
       const verdict = Object.prototype.hasOwnProperty.call(AGENT_STATUS_EMOJI, agentStatus) ? agentStatus : null;
-      const agent = agentIdentity(body, env);
+      let agent = agentIdentity(body, env);
       // Answering a comment is following the doc. This is the whole of the
       // "who gets the handoff" bookkeeping: nobody maintains a list, an agent
       // earns the seat by doing the work, and an agent that takes over from
@@ -10588,6 +10588,15 @@ export default {
       // not fail a reply that is otherwise fine.
       const replyingAgent = await actingAgent(env, req, auth.actor);
       if (replyingAgent) {
+        const accountHandle = auth.actor.account_id
+          ? (await accountClaimedHandle(env, auth.actor.account_id)) || auth.actor.github_login || ''
+          : '';
+        agent = {
+          ...agent,
+          provider: replyingAgent.provider,
+          handle: replyingAgent.agent_name ? `@${replyingAgent.agent_name.replace(/^@/, '')}` : '',
+          ...(accountHandle ? { principal: { display: `@${accountHandle}`, terminal: agent.name } } : {}),
+        };
         try {
           await touchDocAgent(env, slug, replyingAgent);
           await touchAccountAgent(env, auth.actor.account_id, replyingAgent);

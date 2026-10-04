@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { deliveryErrorText } from './notify-handoff.jsx';
+import { deliveryErrorText, ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
@@ -119,6 +119,7 @@ function Author({ author, timestamp }) {
   }
 
   const avatar = avatarFor(author);
+  const providerAvatar = author.kind === 'agent' && author.provider;
   const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
     && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
     ? author.profile_url : null;
@@ -127,7 +128,11 @@ function Author({ author, timestamp }) {
     : undefined;
   return (
     <div className={`author${author.kind === 'agent' ? ' tdoc-agent-author' : ''}`} title={title}>
-      {avatar ? (profileUrl ? (
+      {providerAvatar ? (
+        <span className="tdoc-agent-provider-mark" aria-hidden="true">
+          <ProviderMark target={author} size={18} />
+        </span>
+      ) : avatar ? (profileUrl ? (
         <a className="tdoc-author-profile" href={profileUrl}
           aria-label={`View ${authorLine(author)}'s public profile`}
           title={`View ${authorLine(author)}'s public profile`}
