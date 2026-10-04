@@ -344,7 +344,7 @@
   .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
   /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
      switches over the already-rendered page — no fetch on tab change. */
-  .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--td-line); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--td-line); }
   .tab { border: none; background: none; font: inherit; font-weight: 600; color: var(--td-muted); padding: 8px 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
   .tab:hover { color: var(--td-ink); }
   .tab.is-active { color: var(--td-accent); border-bottom-color: var(--td-accent); }

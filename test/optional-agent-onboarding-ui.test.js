@@ -77,7 +77,10 @@ const engines = requirePlaywrightOrSkip('optional-agent-onboarding-ui.test.js');
           await toggle.click();
           await row.getByRole('button', { name: 'Copy prompt' }).click();
           assert.equal(await row.getByText('Raft connected.', { exact: false }).count(), 0, 'copy is not connection');
-          assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no mobile horizontal overflow');
+          const overflow = await page.evaluate(() => [...document.querySelectorAll('body *')]
+            .filter(el => el.getBoundingClientRect().right > innerWidth + 1)
+            .map(el => ({ tag: el.tagName, class: el.className, right: el.getBoundingClientRect().right })).slice(0, 12));
+          assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `no mobile overflow: ${JSON.stringify(overflow)}`);
           connected = true;
           await row.getByText('Raft connected.', { exact: false }).waitFor();
           assert.deepEqual(mutations, [], 'connection does not send comments or forge completion');
