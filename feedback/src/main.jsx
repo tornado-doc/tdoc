@@ -791,6 +791,19 @@ ${uiCss}
       return () => document.removeEventListener('keydown', keydown, true);
     }, [surface, load]);
 
+    // The list docks instead of floating over the app: the page gives up the
+    // panel's width while it is open, so the app's own top bar and right
+    // edge (an account menu, buttons) stay visible and clickable beside it.
+    useEffect(() => {
+      if (!shown || !panelOpen) return undefined;
+      const root = document.documentElement;
+      const prior = root.style.marginRight;
+      const priorTransition = root.style.transition;
+      root.style.transition = 'margin-right .15s ease';
+      root.style.marginRight = `${PANEL_WIDTH}px`;
+      return () => { root.style.marginRight = prior; root.style.transition = priorTransition; };
+    }, [shown, panelOpen]);
+
     // Hash-route navigation is a new page: reload which comments are here.
     useEffect(() => {
       if (!shown) return undefined;
