@@ -274,6 +274,54 @@ async function claimAccount(worker, env, cookie) {
       `bridged session lost the handle: ${JSON.stringify(second)}`);
   });
 
+  await t('a Clerk user who linked two existing accounts owns both sets of docs', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+
+    // Claire first used email, which already minted its own account and OIDC
+    // link before she chose GitHub inside the same Clerk user.
+    stubProviders({ oidcSub: 'user_claire', oidcEmail: 'claire@example.com' });
+    const emailSession = await oidcSignIn(worker, env);
+    const emailClaim = await claimAccount(worker, env, `tdoc_sid=${emailSession.sid}`);
+
+    // Separately, her private-email GitHub identity published the old doc.
+    // No email hint can join these records; only the two stable provider ids
+    // now presented by Clerk prove that both are hers.
+    stubProviders({ ghLogin: 'unknowncici', ghId: 203355018, ghEmail: null });
+    const githubSession = await githubSignIn(worker, env);
+    const githubClaim = await claimAccount(worker, env, `tdoc_sid=${githubSession.sid}`);
+    assert(githubClaim.account_id !== emailClaim.account_id, 'test did not create the split account');
+    const upload = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: githubClaim.token,
+      body: { slug: 'claire-old-doc', version: 1, html: '<h1>old doc</h1>' },
+    }), env, {});
+    assert(upload.status === 200, `upload: ${upload.status} ${await upload.clone().text()}`);
+
+    const calls = {};
+    stubProviders({
+      oidcSub: 'user_claire', oidcEmail: 'claire@example.com',
+      clerkExternal: { id: 203355018, username: 'unknowncici' }, calls,
+    });
+    const linked = await oidcSignIn(worker, env);
+    assert(linked.account_id === emailClaim.account_id, 'primary email account changed');
+    assert((linked.linked_account_ids || []).includes(githubClaim.account_id),
+      `GitHub account was not attached: ${JSON.stringify(linked)}`);
+    assert(linked.login === 'unknowncici', `GitHub handle was not restored: ${JSON.stringify(linked)}`);
+
+    const page = await worker.fetch(req('/d/claire-old-doc/v/1', {
+      cookie: `tdoc_sid=${linked.sid}`,
+    }), env, {});
+    const html = await page.text();
+    assert(page.status === 200 && /"isOwner":true/.test(html),
+      `linked session still was not doc owner: ${page.status}`);
+
+    // The durable OIDC link carries the verified alias, so future sign-ins
+    // neither call Clerk again nor lose ownership.
+    const again = await oidcSignIn(worker, env);
+    assert((again.linked_account_ids || []).includes(githubClaim.account_id),
+      `linked account did not survive: ${JSON.stringify(again)}`);
+    assert(calls.clerkApi === 1, `provider was queried again: ${calls.clerkApi}`);
+  });
+
   await t('a token mint on a handle-less session does not erase the bridged handle', async () => {
     const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
     // Backfilled shape — the bridge resolves her through the numeric id.

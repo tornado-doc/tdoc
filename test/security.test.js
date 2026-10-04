@@ -46,6 +46,8 @@ vm.runInContext([
   // email-only identity can own its own words.
   sliceFn(workerSrc, 'normalizeEmail'),
   sliceFn(workerSrc, 'sessionPrincipal'),
+  sliceFn(workerSrc, 'sessionAccountIds'),
+  sliceFn(workerSrc, 'sessionOwnsAccount'),
   sliceFn(workerSrc, 'actorKey'),
   sliceFn(workerSrc, 'hostedGithubLogin'),
   sliceFn(workerSrc, 'isOwnerSession'),
