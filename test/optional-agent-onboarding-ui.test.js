@@ -13,8 +13,8 @@ const engines = requirePlaywrightOrSkip('optional-agent-onboarding-ui.test.js');
         for (const width of [1280, 390, 320]) {
           const page = await browser.newPage({ viewport: { width, height: 900 } });
           let connected = false, skipped = false, failSkip = false;
-          let revised = true;
-          const record = () => ({ started: true, agent_connected: true, first_doc: 'sample-doc', commented: true, revised, notify_connected: connected, notify_setup_skipped: skipped });
+          let revised = true, manualSteps = {}, failCheck = false;
+          const record = () => ({ started: true, agent_connected: true, first_doc: 'sample-doc', commented: true, revised, notify_connected: connected, notify_setup_skipped: skipped, manual_steps: manualSteps });
           const mutations = [], errors = [];
           page.on('pageerror', e => errors.push(e.message));
           await page.route(`${base}/me`, route => route.fulfill({ contentType: 'text/html', body:
@@ -24,6 +24,12 @@ const engines = requirePlaywrightOrSkip('optional-agent-onboarding-ui.test.js');
           }));
           await page.route('**/api/onboarding', route => route.fulfill({ json: { record: record() } }));
           await page.route('**/api/onboarding?notify=1', route => route.fulfill({ json: { record: {}, notify_connected: connected } }));
+          await page.route('**/api/onboarding/step', async route => {
+            if (failCheck) return route.fulfill({ status: 500, json: { error: 'failed' } });
+            const body = route.request().postDataJSON();
+            manualSteps[body.step] = body.done;
+            return route.fulfill({ json: { ok: true } });
+          });
           await page.route('**/api/onboarding/event', async route => {
             const body = route.request().postDataJSON(); mutations.push(body.action);
             if (failSkip) return route.fulfill({ status: 500, json: { error: 'Could not save' } });
@@ -42,6 +48,32 @@ const engines = requirePlaywrightOrSkip('optional-agent-onboarding-ui.test.js');
           assert.equal(await page.getByRole('dialog').count(), 0, 'no modal');
           const style = el => { const s = getComputedStyle(el); return [s.gridTemplateColumns, s.gap, s.padding]; };
           assert.deepEqual(await toggle.evaluate(style), await checklist.locator('li a').first().evaluate(style), 'same row grid and spacing');
+          const checks = checklist.getByRole('checkbox');
+          assert.equal(await checks.count(), 5);
+          // Native keyboard operation, independent of the row link.
+          await checks.first().focus();
+          await checks.first().press('Space');
+          await page.waitForFunction(() => !document.querySelector('.onb-tick').checked);
+          assert.equal(page.url(), `${base}/me`, 'checkbox does not navigate');
+          await page.reload();
+          assert.equal(await checks.first().isChecked(), false, 'manual undo survives reload over automatic completion');
+          for (let i = 0; i < 5; i++) {
+            await checks.nth(i).setChecked(true);
+            await page.waitForFunction(() => !document.querySelector('.onb-tick').disabled);
+          }
+          assert.equal(await checklist.locator('li.done').count(), 5, 'all five checks strike through');
+          await page.reload();
+          assert.equal(await checklist.locator('li.done').count(), 5, 'completed list remains available to undo');
+          failCheck = true;
+          await checks.last().click();
+          await checklist.getByRole('alert').waitFor();
+          assert.equal(await checks.last().isChecked(), true, 'failed save keeps prior value');
+          failCheck = false;
+          await checks.last().uncheck();
+          await page.waitForFunction(() => !document.querySelectorAll('.onb-tick')[4].checked);
+          assert(!connected && !skipped && !mutations.length, 'manual checks do not forge connection or skip');
+          manualSteps = {};
+          await page.reload();
           await toggle.click();
           await row.getByRole('button', { name: 'Copy prompt' }).click();
           assert.equal(await row.getByText('Raft connected.', { exact: false }).count(), 0, 'copy is not connection');

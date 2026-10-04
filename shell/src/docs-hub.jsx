@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Folder, FolderPlus, Search, X } from 'lucide-react';
+import { Check, ChevronRight, Folder, FolderPlus, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
@@ -9,11 +9,20 @@ import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
 import { QuotaBumpDialog } from './document/document-dialogs.jsx';
+import { deleteDocument, moveDocsToTeam, removeTeamMember } from './document/api.js';
+import {
+  LeaveTeamDialog,
+  MembersDialog,
+  MoveToTeamDialog,
+  NewTeamDialog,
+  SpaceSwitcher,
+  TeamPane,
+} from './docs-hub/teams.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
-const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred']];
+const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['feedback', 'Feedback']];
 const CURATE_WARN_KEY = 'tdoc.curateWarned';
 
 function needsCurateWarn() {
@@ -187,6 +196,59 @@ function ownerLabel(doc, viewer) {
   return viewer && doc.owner === viewer ? 'me' : doc.owner;
 }
 
+// Feedback spaces: one row per app, with where its comments stand. The row
+// opens the space's own page (the comment list), not a document.
+function FeedbackList({ spaces: initial }) {
+  // Counts cost a comment read per space, so they load when the tab opens.
+  const [spaces, setSpaces] = useState(initial);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/me/feedback', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => { if (!cancelled && b && Array.isArray(b.spaces)) setSpaces(b.spaces); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  if (!spaces.length) {
+    // The first visit to this tab is usually someone who has not tried it:
+    // say what it is and how to start, rather than "nothing here".
+    return (
+      <div className="tdoc-fb-empty">
+        <div className="tdoc-fb-empty-art" aria-hidden="true">
+          <span className="win"><i /><i /><i /></span>
+          <span className="pin">💬</span>
+        </div>
+        <h3>Collect feedback on your own app</h3>
+        <p className="muted">Click anything in the app you are building, say what is wrong, and hand it to your agent. Every app you comment on gets a list here.</p>
+        <ol>
+          <li><b>Get the bookmark</b> — drag it to your bookmarks bar.</li>
+          <li><b>Open your app</b> and click it, then <b>+ Comment</b>.</li>
+          <li><b>Invite teammates</b> to the same list, or <b>Send to agent</b>.</li>
+        </ol>
+        <a className="tdoc-fbspace-btn primary" href="/feedback">Get the bookmark</a>
+      </div>
+    );
+  }
+  return (
+    <div className="doc-list">
+      {spaces.map((space) => {
+        let host = space.origin;
+        try { host = new URL(space.origin).host; } catch (_) {}
+        return (
+          <a key={space.slug} className="doc-row flat-row" href={`/d/${encodeURIComponent(space.slug)}`}>
+            <div className="doc-info">
+              <span className="doc-title">{host}</span>
+              <div className="doc-meta">
+                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function FlatList({ docs, label, viewer, empty, onToggleStar }) {
   if (!docs.length) return <p className="empty">{empty}</p>;
   return (
@@ -288,12 +350,30 @@ export function DocsHub({ boot, preview }) {
     // expired, and the route's own redirect is the sign-in path.
     onUnauthorized: () => { location.href = '/?notice=signin'; },
   });
-  const [tab, setTab] = useState('mine');
+  // ?tab=feedback opens straight onto a tab (links from the feedback pages).
+  const [tab, setTab] = useState(() => {
+    const asked = new URLSearchParams(location.search).get('tab');
+    return TABS.some(([id]) => id === asked) ? asked : 'mine';
+  });
   // Capture the account-menu destination before useDocsHub normalizes the URL.
   const [modal, setModal] = useState(() => (
     boot.profile && location.hash === '#claim-profile' ? { type: 'claim-handle' } : null
   ));
   const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
+  const [teams, setTeams] = useState(() => boot.teams || []);
+  const [teamDocs, setTeamDocs] = useState(() => boot.team_docs || []);
+  const [space, setSpace] = useState(() => {
+    const initial = new URLSearchParams(location.search).get('team') || '';
+    return (boot.teams || []).some((team) => team.id === initial) ? initial : '';
+  });
+  const team = teams.find((item) => item.id === space) || null;
+  const shownTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id) : [];
+
+  useEffect(() => {
+    if (space) history.replaceState(null, '', `?team=${encodeURIComponent(space)}`);
+    else if (new URLSearchParams(location.search).has('team')) history.replaceState(null, '', location.pathname);
+  }, [space]);
+
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
   const openAgentRecipe = () => setModal({ type: 'create-agent' });
@@ -343,6 +423,11 @@ export function DocsHub({ boot, preview }) {
       className: 'row-profile-pin',
       onSelect: () => toggleProfilePin(doc),
     } : null,
+    teams.length && doc && doc.mine ? {
+      label: 'Move to team',
+      className: 'row-move-team',
+      onSelect: () => setModal({ type: 'move-team', slugs }),
+    } : null,
     capabilities.folders ? {
       label: 'Move to folder',
       className: 'row-move',
@@ -367,6 +452,28 @@ export function DocsHub({ boot, preview }) {
     },
   ];
 
+  const teamFailed = (error) => {
+    if (error.status === 401) location.href = '/?notice=signin';
+    else hub.notify(error.message || 'Request failed', true);
+  };
+
+  const teamDocMenu = (doc) => [
+    { label: 'Open', onSelect: () => { location.href = `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest}`; } },
+    doc.can_manage ? {
+      label: doc.mine ? 'Move to My docs' : "Move to author's My docs",
+      className: 'row-move-personal',
+      onSelect: () => moveDocsToTeam([doc.slug], null)
+        .then(() => { location.href = '/me'; })
+        .catch(teamFailed),
+    } : null,
+    doc.can_manage ? {
+      label: 'Delete',
+      tone: 'danger',
+      className: 'row-delete',
+      onSelect: () => setModal({ type: 'delete-team-doc', doc }),
+    } : null,
+  ].filter(Boolean);
+
   const allSelected = hub.shownDocs.length > 0 && hub.shownDocs.every((doc) => hub.selected.has(doc.slug));
   const batchActions = capabilities.folders || capabilities.delete;
 
@@ -379,15 +486,35 @@ export function DocsHub({ boot, preview }) {
       />
       <main className="wrap">
         <div className="page-hd">
-          <h1>My docs</h1>
+          <h1>
+            <SpaceSwitcher
+              teams={teams}
+              space={space}
+              onSpace={setSpace}
+              onNewTeam={() => setModal({ type: 'new-team' })}
+            />
+          </h1>
+          {team ? (
+            <button type="button" className="new-folder-btn tm-members-btn" onClick={() => setModal({ type: 'members' })}>
+              <UsersRound size={15} /> {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
+            </button>
+          ) : null}
           <CreateMenu
             create={hub.createDoc}
+            team={team ? team.id : ''}
             canCreate={capabilities.create}
             onAgent={openAgentRecipe}
             onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
             trigger={<button className="mk-btn" type="button">Create a doc</button>}
           />
         </div>
+        {team ? (
+          <>
+            <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
+            <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} />
+          </>
+        ) : (
+        <>
 
         <OnboardingChecklist record={boot.onboarding} docs={hub.docs} preview={preview} />
         {/* The checklist is on this page, so all six states show a difference
@@ -508,12 +635,74 @@ export function DocsHub({ boot, preview }) {
             <FlatList docs={hub.recent} label="visited" viewer={viewer} empty="Docs you open show up here." onToggleStar={hub.toggleStar} />
           </section>
         ) : null}
+        {tab === 'feedback' ? (
+          <section className="pane" id="pane-feedback">
+            <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} />
+          </section>
+        ) : null}
         {tab === 'starred' ? (
           <section className="pane" id="pane-starred">
             <FlatList docs={hub.starred} label="starred" viewer={viewer} empty="Star docs to find them again quickly." onToggleStar={hub.toggleStar} />
           </section>
         ) : null}
+        </>
+        )}
       </main>
+
+      {modal?.type === 'new-team' ? (
+        <NewTeamDialog
+          onClose={closeModal}
+          onCreated={(created) => { location.href = `/me?team=${encodeURIComponent(created.id)}`; }}
+        />
+      ) : null}
+      {modal?.type === 'members' && team ? (
+        <MembersDialog
+          teamId={team.id}
+          onClose={closeModal}
+          onChanged={(next) => setTeams((list) => list.map((item) => (
+            item.id === next.id ? { ...item, name: next.name, role: next.role, member_count: next.member_count } : item
+          )))}
+          onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
+        />
+      ) : null}
+      {modal?.type === 'leave-team' ? (
+        <LeaveTeamDialog
+          team={modal.team}
+          docCount={teamDocs.filter((doc) => doc.team === modal.team.id && doc.mine).length}
+          onClose={closeModal}
+          onLeave={async () => {
+            await removeTeamMember(modal.team.id, modal.me.account_id);
+            location.href = '/me';
+          }}
+        />
+      ) : null}
+      {modal?.type === 'move-team' ? (
+        <MoveToTeamDialog
+          teams={teams}
+          count={modal.slugs.length}
+          onClose={closeModal}
+          onMove={(target) => moveDocsToTeam(modal.slugs, target.id)
+            .then(() => { location.href = `/me?team=${encodeURIComponent(target.id)}`; })
+            .catch(teamFailed)}
+        />
+      ) : null}
+      {modal?.type === 'delete-team-doc' ? (
+        <HubDialog
+          title="Delete this doc?"
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => deleteDocument(modal.doc.slug)
+            .then(() => {
+              setTeamDocs((list) => list.filter((doc) => doc.slug !== modal.doc.slug));
+              closeModal();
+              hub.notify('Deleted');
+            })
+            .catch(teamFailed)}
+          onClose={closeModal}
+        >
+          <p>This permanently removes every version and comment of “{modal.doc.title}” for the whole team. This cannot be undone.</p>
+        </HubDialog>
+      ) : null}
 
       {modal?.type === 'claim-handle' ? (
         <ClaimHandleDialog

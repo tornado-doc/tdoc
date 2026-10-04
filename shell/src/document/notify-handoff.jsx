@@ -3,6 +3,7 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { Webhook } from 'lucide-react';
 import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
@@ -29,7 +30,7 @@ function shortAgentName(name) {
 
 // Readable agent handle when we have one. Empty is fine — the UI falls back
 // to the provider line so we never render "Hand to " with a blank.
-function readableHandle(t) {
+export function readableHandle(t) {
   if (!t) return '';
   const name = (t.agent_name || '').trim();
   const sub = (t.agent_sub || '').trim();
@@ -38,10 +39,13 @@ function readableHandle(t) {
   return '';
 }
 
-function providerMeta(t) {
+export function providerMeta(t) {
   const p = String(t?.provider || 'raft').trim().toLowerCase();
   if (p === 'raft') {
     return { key: 'raft', label: 'Raft', mark: 'raft' };
+  }
+  if (p === 'webhook') {
+    return { key: 'webhook', label: 'Webhook', mark: 'webhook' };
   }
   return { key: p || 'agent', label: p ? p[0].toUpperCase() + p.slice(1) : 'agent', mark: '' };
 }
@@ -67,9 +71,10 @@ function sameTarget(a, b) {
     && a.agent_sub === b.agent_sub;
 }
 
-function ProviderMark({ target, size = 18 }) {
+export function ProviderMark({ target, size = 18 }) {
   const meta = providerMeta(target);
   if (meta.mark === 'raft') return <RaftMark size={size} />;
+  if (meta.mark === 'webhook') return <Webhook size={size} aria-hidden="true" />;
   return <span className="tdoc-notify-provider-fallback" aria-hidden="true">{meta.label.slice(0, 1)}</span>;
 }
 
@@ -89,6 +94,25 @@ function RecipientLine({ target }) {
   );
 }
 
+// Delivery errors in words a person can act on. The codes come from the
+// providers (worker NOTIFY_PROVIDERS); "request_404" told nobody anything.
+export function deliveryErrorText(code) {
+  const c = String(code || '');
+  if (!c) return '';
+  if (c === 'no_recipient') return 'no agent is connected';
+  if (c === 'provider_not_configured') return 'Raft is not set up on this host';
+  if (c === 'target_missing_server_slug') return "this agent's Raft server is unknown; connect it again";
+  if (/^request_40[13]$/.test(c)) return 'Raft refused; the tdoc app may not be installed on that server';
+  if (c === 'request_404') return "Raft couldn't find that agent on its server";
+  if (/^token_/.test(c)) return "Raft didn't grant access to that agent";
+  if (/^event_/.test(c)) return "Raft didn't accept the message";
+  if (c === 'webhook_timeout') return "the webhook didn't answer within 8 seconds";
+  if (c === 'webhook_secret_missing') return 'this webhook needs to be added again';
+  const m = c.match(/^webhook_(\d{3})$/);
+  if (m) return `the webhook answered ${m[1]}`;
+  return c;
+}
+
 // What a person pastes into their own agent when none is linked to their
 // tdoc account yet: the agent runs the link ceremony (bin/tdoc-connect-agent).
 export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I can hand you comments from tdoc: use the tdoc skill and run bin/tdoc-connect-agent.';
@@ -100,11 +124,45 @@ export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I ca
 export const AGENT_CONNECTORS = [
   {
     id: 'raft',
+    featured: true,
     name: 'Raft agent',
-    blurb: 'An agent on a Raft server where the tdoc app is installed.',
+    blurb: 'Sign in with Raft once; every agent on that server gets the comments on the docs it writes.',
+    action: { label: 'Connect with Raft', href: '/api/me/connectors/raft/start' },
     prompt: CONNECT_AGENT_PROMPT,
   },
+  {
+    id: 'webhook',
+    name: 'Webhook',
+    blurb: 'Any bot or service that can receive an HTTPS POST. No Raft needed.',
+    action: { label: 'Add a webhook', href: '/me/agents?tab=send' },
+  },
 ];
+
+// A connector card's head: its logo, its name, Recommended on the featured
+// one. Shared by the dialog and the Agents page, so both browse the same list.
+// The one way to start a Raft connection, wherever it is offered: Raft's
+// mark on Raft's black, so it reads as "sign in with Raft" at a glance.
+export function RaftConnectButton({ label = 'Connect with Raft' }) {
+  return (
+    <a className="tdoc-raft-btn" href="/api/me/connectors/raft/start">
+      <RaftMark size={18} />
+      <span>{label}</span>
+    </a>
+  );
+}
+
+export function ConnectorHead({ connector }) {
+  return (
+    <div className="tdoc-connector-head">
+      <span className="tdoc-connector-logo"><ProviderMark target={{ provider: connector.id }} size={22} /></span>
+      <span className="tdoc-connector-title">
+        <strong>{connector.name}</strong>
+        {connector.featured ? <span className="tdoc-connector-badge">Recommended</span> : null}
+        <span className="muted">{connector.blurb}</span>
+      </span>
+    </div>
+  );
+}
 
 function ConnectAgentView({ onClose }) {
   const [copied, setCopied] = useState(null);
@@ -116,19 +174,26 @@ function ConnectAgentView({ onClose }) {
       open
       onOpenChange={(next) => { if (!next) onClose(); }}
       title="Connect an agent"
-      description="Nothing is connected to your account yet, so there is nowhere to send these. Connect an agent once; after that Send to agent and @agent hand comments straight to it."
+      description="Nothing is connected yet, so there is nowhere to send these. Connect once; after that Send to agent and @agent hand comments straight to it."
       actions={<button type="button" onClick={onClose}>Close</button>}
     >
       <div className="tdoc-connectors">
         {AGENT_CONNECTORS.map((c) => (
           <section key={c.id} className="tdoc-connector">
-            <div className="tdoc-connector-head"><strong>{c.name}</strong><span className="muted">{c.blurb}</span></div>
-            <p className="manage-hint">Paste this into the agent:</p>
-            <code>{c.prompt}</code>
-            <button type="button" className="primary" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
+            <ConnectorHead connector={c} />
+            {c.id === 'raft'
+              ? <RaftConnectButton />
+              : <a className="tdoc-connector-action" href={c.action.href}>{c.action.label}</a>}
+            {c.prompt ? (
+              <details>
+                <summary className="manage-hint">Or paste this into your agent</summary>
+                <code>{c.prompt}</code>
+                <button type="button" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
+              </details>
+            ) : null}
           </section>
         ))}
-        <p className="manage-hint">More connectors are coming.</p>
+        <p className="manage-hint">Manage connections any time on the <a href="/me/agents?tab=send">Agents</a> page.</p>
       </div>
     </AppDialog>
   );
@@ -254,7 +319,7 @@ export function NotifyHandoffPanel({
       });
       const failed = body?.delivery?.status === 'failed';
       setStatus(failed
-        ? `Sent ${body.sent || ids.length} — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
+        ? `Sent ${body.sent || ids.length} — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
         : `Sent ${body.sent || ids.length} to agent`);
       if (onSent) onSent(body);
       try {

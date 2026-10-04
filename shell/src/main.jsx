@@ -6,14 +6,15 @@ import './shell.css';
 import './setup-gate.css';
 import { DocsHub } from './docs-hub.jsx';
 import { FolderShare } from './folder-share.jsx';
-import { TokensPage } from './tokens-page.jsx';
 import { FeedbackSpace } from './feedback-space.jsx';
+import { AgentsPage } from './agents-page.jsx';
 import { Profile } from './profile.jsx';
 import { DocumentShell } from './document-shell.jsx';
 import { NeutralLanding } from './neutral-landing.jsx';
 import { StatusPage } from './status-page.jsx';
 import { ActivatePage } from './activate-page.jsx';
 import { SetupGate } from './setup-gate.jsx';
+import { TeamJoinPage } from './team-join.jsx';
 
 const OnboardingPreview = lazy(() => import('./onboarding-preview.jsx'));
 
@@ -24,13 +25,14 @@ if (appRoot && appBoot) {
   let page;
   if (appBoot.page === 'onboarding-preview') page = <Suspense fallback={<p>Loading preview…</p>}><OnboardingPreview /></Suspense>;
   else if (appBoot.page === 'docs-hub') page = <DocsHub boot={appBoot} />;
-  else if (appBoot.page === 'tokens') page = <TokensPage boot={appBoot} />;
   else if (appBoot.page === 'feedback-space') page = <FeedbackSpace boot={appBoot} />;
+  else if (appBoot.page === 'agents') page = <AgentsPage boot={appBoot} />;
   else if (appBoot.page === 'folder-share') page = <FolderShare boot={appBoot} />;
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;
   else if (appBoot.page === 'activate') page = <ActivatePage boot={appBoot} />;
   else if (appBoot.page === 'setup') page = <SetupGate boot={appBoot} />;
+  else if (appBoot.page === 'team-join') page = <TeamJoinPage boot={appBoot} />;
   else page = <NeutralLanding boot={appBoot} />;
   createRoot(appRoot).render(page);
 } else {

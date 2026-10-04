@@ -1873,6 +1873,18 @@ const server = http.createServer(async (req, res) => {
     }
     return json(res, 200, { record, paired });
   }
+  if (p === '/api/onboarding/step' && req.method === 'PUT') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    if (!['connect', 'create', 'comment', 'revise', 'notify'].includes(body?.step) || typeof body?.done !== 'boolean') {
+      return json(res, 400, { error: 'invalid_step' });
+    }
+    const all = loadOnboardingLocal();
+    all.record = all.record || {};
+    all.record.manual_steps = { ...all.record.manual_steps, [body.step]: body.done };
+    writeJson(ONBOARDING_FILE, all);
+    return json(res, 200, { ok: true });
+  }
   if (p === '/api/onboarding/event' && req.method === 'POST') {
     if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
     const body = await readBody(req);

@@ -150,6 +150,8 @@ async function getSession(env, req) {
       if (id) session.account_id = id;
     } catch {}
   }
+  if (session.account_id) session.team_ids = await loadAccountTeamIds(env, session.account_id);
+  if (session.account_id) session.team_admin_ids = await loadAdminTeamIds(env, session.account_id, session.team_ids);
   if (feedback) session.feedback = feedback;
   return session;
 }
@@ -168,11 +170,14 @@ async function sessionFromHostedBearer(env, req) {
   }
   const actor = await hostedTokenActor(env, token);
   if (!actor) return null;
+  const teamIds = await loadAccountTeamIds(env, actor.account_id);
   return {
     id: null,
     login: actor.github_login || '',
     email: actor.email || '',
     account_id: actor.account_id,
+    team_ids: teamIds,
+    team_admin_ids: await loadAdminTeamIds(env, actor.account_id, teamIds),
     bearer: true,
   };
 }
@@ -225,7 +230,7 @@ function canMutate(record, session, env, meta) {
 const ACCESS_VISIBILITIES = new Set(['public', 'unlisted', 'private']);
 const ACCESS_COMMENTING = new Set(['owner', 'invited', 'signed_in', 'off']);
 const ACCESS_HISTORY = new Set(['owner', 'invited', 'public']);
-const ACCESS_PATCH_FIELDS = new Set(['visibility', 'commenting', 'history_visibility', 'allowed_users']);
+const ACCESS_PATCH_FIELDS = new Set(['visibility', 'commenting', 'history_visibility', 'allowed_users', 'team']);
 
 function sessionLogin(session) {
   return session && typeof session.login === 'string' && session.login
@@ -289,7 +294,22 @@ function actorDisplayName(session) {
   return email ? email.split('@')[0] : '';
 }
 
+// A team doc's author keeps their byline after leaving, but not their
+// authority over it: authorship only manages a team doc while the author is
+// still on the team.
+function sessionInTeam(session, teamId) {
+  return !!(teamId && session && Array.isArray(session.team_ids) && session.team_ids.includes(teamId));
+}
+
+function sessionTeamAdmin(session, teamId) {
+  return !!(teamId && session && Array.isArray(session.team_admin_ids) && session.team_admin_ids.includes(teamId));
+}
+
+// The owner manages a doc: sharing, delete, rename, moving it. A personal doc
+// is owned by its author; a team doc by the team, i.e. its current admins.
+// The byline (meta.hosted) is display only and grants nothing on a team doc.
 function isDocOwnerSession(env, session, meta) {
+  if (meta && meta.workspace_id) return sessionTeamAdmin(session, meta.workspace_id);
   // account_id is the canonical identity (phase 1), so compare it first —
   // this is what makes a doc published through an email-keyed account
   // manageable from the browser by the same person, whatever button they
@@ -327,7 +347,9 @@ function normalizeAccess(raw, { legacy = true } = {}) {
     seen.add(login);
     allowed.push(login);
   }
-  return { visibility, commenting, history_visibility, allowed_users: allowed };
+  const out = { visibility, commenting, history_visibility, allowed_users: allowed };
+  if (a.team === true) out.team = true;
+  return out;
 }
 
 function accessFromMeta(meta) {
@@ -377,6 +399,10 @@ function validateAccessWrite(access) {
     }
     out.allowed_users = allowed;
   }
+  if ('team' in access) {
+    if (typeof access.team !== 'boolean') return { error: 'invalid_access_value', field: 'team' };
+    out.team = access.team;
+  }
   return { access: out };
 }
 
@@ -404,6 +430,7 @@ function applyAccessPatch(meta, patch) {
 
 function isAllowlisted(access, session, env, meta) {
   if (isDocOwnerSession(env, session, meta)) return true;
+  if (access.team && meta && sessionInTeam(session, meta.workspace_id)) return true;
   const allowed = access.allowed_users || [];
   // Two shapes match, because two shapes get invited: legacy entries are
   // GitHub handles, new ones are email addresses (D2). A session offers
@@ -531,9 +558,9 @@ function accessDeniedHtml({ status, title, body, slug, version, signin }) {
   // signed in as the wrong person, so force the account chooser — and a 403
   // can also ASK: request access drops a notification in the owner's inbox.
   const actions = signin === 'signin'
-    ? [{ label: 'Sign in', href: `/api/auth/oidc/login?return=${encodeURIComponent(next)}`, primary: true }]
+    ? [{ label: 'Sign in', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
     : signin === 'switch'
-      ? [{ label: 'Switch account', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
+      ? [{ label: 'Sign in with another account', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
       : null;
   return statusPageResponse({
     docTitle: `${title} · tdoc`,
@@ -1574,7 +1601,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     identity: identity || null,
     author,
     isOwner: !!isOwner,
-    canEdit: !!versionWritesEnabled && !!isOwner && !isLanding,
+    canEdit: !!versionWritesEnabled && (!!isOwner || !!(oidc && oidc.teamManage)) && !isLanding,
     // Landing keeps meta.commenting off (no KV writes) but still opens the
     // real sidebar so visitors can try highlight / reply. The shell stores
     // those in memory only — see demoComments.
@@ -1584,6 +1611,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     isLanding: !!isLanding,
     isCatalog: !!isCatalog,
     ownerManage: isOwner ? (ownerManage || null) : null,
+    teamManage: (oidc && oidc.teamManage) || null,
     authConfigured: true,
     webAuth: !!webAuth,
     // The provider seat, so the doc shell's sign-in goes through the same
@@ -1983,6 +2011,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     } catch {}
     ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
   }
+  const teamManage = await teamManageFor(env, session, gate.meta, gate.access, isOwner);
   const nonce = rand(16);
   // Every doc — the landing docs included — renders as the cross-origin shell
   // (full migration; the overlay monolith is being deleted). Homepage SEO is
@@ -2008,7 +2037,7 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', debug: await isDebugAccount(env, session) }, pageUrl), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, debug: await isDebugAccount(env, session) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -2471,6 +2500,34 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
 const RAFT_LINK_TTL = 600;
 const AGENT_SESSION_TTL = 60 * 60 * 24 * 30;
 
+// The end of Connect with Raft. The account comes from the nonce minted for
+// the signed-in tdoc session that started it, and must still be that
+// session's account — a connect someone else started cannot land on yours.
+// The server comes from the issuer, as for agent sign-in.
+async function completeRaftConnect(env, req, { pending, tok, ret, clearState }) {
+  let started = null;
+  try { started = JSON.parse(pending); } catch {}
+  const session = await getSession(env, req);
+  const accountId = session && !session.feedback ? await sessionAccountId(env, session) : null;
+  if (!started || !accountId || started.account_id !== accountId) {
+    return authStatusResponse('This Raft connection was started from a different tdoc session. Start it again from Agents.', { error: true, status: 403 });
+  }
+  const server = await raftServerInfo(env, tok && tok.access_token);
+  if (!server || !server.id) {
+    return authStatusResponse('Raft did not say which server you are on, so nothing was connected.', { error: true, status: 502 });
+  }
+  let list = [];
+  try { list = JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]'); } catch {}
+  list = [{ server_id: String(server.id), server_slug: String(server.slug || ''), name: String(server.name || ''), connected_at: new Date().toISOString() },
+    ...list.filter((sv) => sv && sv.server_id !== String(server.id))].slice(0, 20);
+  await env.META.put(`account-raft-servers:${accountId}`, JSON.stringify(list));
+  const removed = await accountRemovedTargets(env, accountId);
+  if (removed.delete(`raft-server:${server.id}`)) {
+    await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed]));
+  }
+  return redirectTo(`${ret && ret.startsWith('/me/agents') ? ret : '/me/agents?tab=send'}&connected=raft`, [clearState]);
+}
+
 async function completeRaftSignIn(env, { user, tok, stateless }) {
   const sub = user && user.sub ? String(user.sub) : '';
   if (!sub) {
@@ -2880,11 +2937,239 @@ function validFolderName(name) {
   return n;
 }
 
+// ---- teams (JUL-71) ----
+// A team is a private record (`team:<id>`) seen only by its members; each
+// member's account carries an index of its teams (`account-teams:<account>`)
+// so a session learns its memberships with one read. A team doc is an
+// ordinary doc with `meta.workspace_id`: the team owns it, `meta.hosted`
+// stays the human author (byline, quota, version attribution).
+const TEAM_NAME_MAX = 60;
+const TEAM_MEMBERS_MAX = 100;
+const TEAM_INVITES_MAX = 100;
+const TEAMS_PER_ACCOUNT_MAX = 20;
+const TEAM_ROLES = new Set(['admin', 'member']);
+
+function validTeamId(id) {
+  return typeof id === 'string' && /^t_[a-f0-9]{16}$/.test(id);
+}
+
+function validTeamName(name) {
+  const n = String(name == null ? '' : name).replace(/[\x00-\x1f\x7f]/g, '').trim();
+  if (!n || n.length > TEAM_NAME_MAX) return null;
+  return n;
+}
+
+async function loadTeam(env, id) {
+  if (!validTeamId(id)) return null;
+  try {
+    const team = JSON.parse(await env.META.get(`team:${id}`));
+    return team && team.id === id && Array.isArray(team.members) ? team : null;
+  } catch { return null; }
+}
+
+async function saveTeam(env, team) {
+  await env.META.put(`team:${team.id}`, JSON.stringify(team));
+}
+
+async function loadAdminTeamIds(env, accountId, teamIds) {
+  const teams = await Promise.all((teamIds || []).map((id) => loadTeam(env, id)));
+  return teams.filter((team) => teamRole(team, accountId) === 'admin').map((team) => team.id);
+}
+
+async function loadAccountTeamIds(env, accountId) {
+  if (!accountId || !env || !env.META) return [];
+  try {
+    const ids = JSON.parse(await env.META.get(`account-teams:${accountId}`));
+    return Array.isArray(ids) ? ids.filter(validTeamId) : [];
+  } catch { return []; }
+}
+
+async function setAccountTeam(env, accountId, teamId, on) {
+  const ids = await loadAccountTeamIds(env, accountId);
+  const next = on ? [...new Set([...ids, teamId])] : ids.filter((id) => id !== teamId);
+  await env.META.put(`account-teams:${accountId}`, JSON.stringify(next));
+}
+
+function teamMember(team, accountId) {
+  if (!team || !accountId) return null;
+  return team.members.find((m) => m.account_id === accountId) || null;
+}
+
+function teamRole(team, accountId) {
+  const member = teamMember(team, accountId);
+  return member ? member.role : null;
+}
+
+function teamAdminCount(team) {
+  return team.members.filter((m) => m.role === 'admin').length;
+}
+
+async function isTeamMemberSession(env, session, teamId) {
+  if (!sessionInTeam(session, teamId)) return false;
+  return !!teamMember(await loadTeam(env, teamId), session.account_id);
+}
+
+function teamSummary(team, accountId) {
+  return { id: team.id, name: team.name, role: teamRole(team, accountId), member_count: team.members.length };
+}
+
+function teamDetail(team, accountId, origin) {
+  const admin = teamRole(team, accountId) === 'admin';
+  return {
+    ...teamSummary(team, accountId),
+    members: team.members.map((m) => ({
+      account_id: m.account_id,
+      name: m.name,
+      key: m.key,
+      role: m.role,
+      me: m.account_id === accountId,
+    })),
+    invites: Array.isArray(team.invites) ? team.invites : [],
+    ...(admin && team.invite_token ? { invite_url: `${origin}/team/join/${team.invite_token}` } : {}),
+  };
+}
+
+function teamMemberFromSession(session, role) {
+  return {
+    account_id: session.account_id,
+    key: actorKey(session),
+    name: actorDisplayName(session),
+    role,
+    joined: new Date().toISOString(),
+  };
+}
+
+function normalizeTeamInvites(list) {
+  if (!Array.isArray(list)) return null;
+  const out = [];
+  for (const item of list) {
+    const invitee = normalizeInvitee(item);
+    if (!invitee) return null;
+    if (!out.includes(invitee)) out.push(invitee);
+  }
+  return out.length > TEAM_INVITES_MAX ? null : out;
+}
+
+async function rotateTeamInvite(env, team) {
+  if (team.invite_token) await env.META.delete(`team-invite:${team.invite_token}`);
+  team.invite_token = rand(16);
+  await env.META.put(`team-invite:${team.invite_token}`, team.id);
+}
+
+async function teamForInviteToken(env, token) {
+  if (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token)) return null;
+  const team = await loadTeam(env, await env.META.get(`team-invite:${token}`));
+  return team && team.invite_token === token ? team : null;
+}
+
+// Team routes need an account, not just a sign-in: membership is keyed on
+// account_id. Like claiming a handle, joining or forming a team is something
+// worth minting one for on a hosted deployment.
+async function teamSession(env, req, origin) {
+  const session = await getSession(env, req);
+  if (!sessionPrincipal(session)) return { ok: false, response: json({ error: 'sign_in_required' }, { status: 401 }) };
+  if (session.feedback) return { ok: false, response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
+  if (!session.account_id && hostedRegistrationEnabled(env, origin)) {
+    try {
+      const acct = await ensureSessionHostedAccount(env, session);
+      if (acct && acct.account_id) {
+        session.account_id = acct.account_id;
+        session.team_ids = await loadAccountTeamIds(env, acct.account_id);
+        session.team_admin_ids = await loadAdminTeamIds(env, acct.account_id, session.team_ids);
+      }
+    } catch {}
+  }
+  if (!session.account_id) return { ok: false, response: json({ error: 'account_required' }, { status: 403 }) };
+  return { ok: true, session };
+}
+
+async function teamManageFor(env, session, meta, access, isOwner) {
+  if (!meta || !sessionInTeam(session, meta.workspace_id)) return null;
+  const team = await loadTeam(env, meta.workspace_id);
+  const role = teamRole(team, session.account_id);
+  if (!role) return null;
+  const canManage = !!isOwner;
+  return {
+    team: { id: team.id, name: team.name },
+    canManage,
+    access: canManage ? access : { visibility: access.visibility, team: !!access.team },
+  };
+}
+
+async function sendTeamInviteEmails(env, { added, inviterName, inviterId, team, origin }) {
+  const emailed = [];
+  if (!emailSenderAvailable(env) || !Array.isArray(added) || !added.length || !team.invite_token) return emailed;
+  let host = 'tdoc.dev';
+  try { host = new URL(origin).hostname; } catch {}
+  const from = { email: String(env.TDOC_EMAIL_FROM || '').trim() || `invites@${host}`, name: 'tdoc' };
+  const day = new Date().toISOString().slice(0, 10);
+  const capKey = `invite-cap:${inviterId || 'unknown'}:${day}`;
+  let sentToday = Number(await env.META.get(capKey)) || 0;
+  const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const joinUrl = `${origin}/team/join/${team.invite_token}`;
+  for (const invitee of added) {
+    if (sentToday >= INVITE_EMAIL_DAILY_CAP) return emailed;
+    let addr = null;
+    try { addr = await resolveInviteeAddress(env, invitee); } catch {}
+    if (!addr || await env.META.get(`email-optout:${addr}`)) continue;
+    const coolKey = `team-invite-sent:${team.id}:${addr}`;
+    if (await env.META.get(coolKey)) continue;
+    const tok = rand(16);
+    const optoutUrl = `${origin}/email/optout?t=${tok}`;
+    try {
+      await env.META.put(`email-optout-token:${tok}`, addr, { expirationTtl: 60 * 60 * 24 * 30 });
+      await deliverEmail(env, {
+        to: addr,
+        from,
+        subject: `${inviterName} invited you to join ${team.name} on tdoc`,
+        text: `${inviterName} invited you to join the team "${team.name}" on tdoc.\n\nJoin here: ${joinUrl}\n\n—\nNo more emails like this: ${optoutUrl}`,
+        html: `<p><strong>${esc(inviterName)}</strong> invited you to join the team &ldquo;${esc(team.name)}&rdquo; on tdoc.</p><p><a href="${esc(joinUrl)}">Join ${esc(team.name)}</a></p><p style="color:#999;font-size:0.85em"><a href="${esc(optoutUrl)}" style="color:#999">No more emails like this</a></p>`,
+      });
+      sentToday += 1;
+      emailed.push(addr);
+      await env.META.put(capKey, String(sentToday), { expirationTtl: 60 * 60 * 24 * 2 });
+      await env.META.put(coolKey, '1', { expirationTtl: INVITE_EMAIL_COOLDOWN_S });
+    } catch {}
+  }
+  return emailed;
+}
+
 // /me needs to know whether a recent/starred doc — possibly someone else's —
 // is still readable by this viewer. Policy evaluation stays out here so the
 // catalog renderer never touches access data; it only sees the verdict.
 function docReadableBy(env, session, meta) {
   return canReadDoc(accessFromMeta(meta || {}), session, env, meta);
+}
+
+// The feedback spaces a person owns or has joined. With counts, also where
+// each stands: open = a person spoke last, replied = an agent did.
+async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
+  if (!session) return [];
+  const out = await Promise.all(rows.map(async (row) => {
+    const origin = feedbackOrigin(row.meta && row.meta.feedback && row.meta.feedback.origin);
+    if (!origin) return null;
+    const owned = isDocOwnerSession(env, session, row.meta);
+    let joined = false;
+    if (!owned) {
+      try { joined = (await env.META.get(feedbackSpaceIndexKey(session, origin))) === row.slug; } catch {}
+    }
+    if (!owned && !joined) return null;
+    if (!docReadableBy(env, session, row.meta)) return null;
+    const item = { ...toPublic(row), origin, mine: owned };
+    if (withCounts) {
+      let open = 0, replied = 0;
+      try {
+        for (const c of snapshotList(await readComments(env, row.slug), Infinity)) {
+          if (!c || c.deleted || c.status === 'applied') continue;
+          const last = (c.replies || []).filter((r) => r && !r.deleted).slice(-1)[0];
+          if (last && last.author && last.author.kind === 'agent') replied++; else open++;
+        }
+      } catch {}
+      Object.assign(item, { open, replied });
+    }
+    return item;
+  }));
+  return out.filter(Boolean).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 }
 
 async function indexData(env, session, origin) {
@@ -2925,6 +3210,7 @@ async function indexData(env, session, origin) {
   const isFeedbackSpace = (meta) => meta && meta.created_from === 'feedback';
   const mine = catalog.filter((row) => {
     if (isFeedbackSpace(row.meta)) return false;
+    if (row.meta && row.meta.workspace_id) return false;
     if (hosted) return isDocOwnerSession(env, session, row.meta);
     return !row.owner || row.owner === viewer;
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
@@ -2956,15 +3242,45 @@ async function indexData(env, session, origin) {
     // Computed here because only the server can compare canonical identities;
     // the client comparing display keys went quietly wrong for every session
     // shape that is not a bare handle.
-    mine: isDocOwnerSession(env, session, row.meta),
+    mine: row.meta && row.meta.workspace_id
+      ? !!(session && session.account_id && row.meta.hosted && row.meta.hosted.account_id === session.account_id)
+      : isDocOwnerSession(env, session, row.meta),
     starred: starred.has(row.slug),
   });
 
+  const viewerAccount = session && session.account_id;
+  const teamRecords = (await Promise.all((session && session.team_ids || []).map((id) => loadTeam(env, id))))
+    .filter((team) => team && teamMember(team, viewerAccount));
+  const teamById = new Map(teamRecords.map((team) => [team.id, team]));
+  const teamDocs = catalog.filter((row) => {
+    if (isFeedbackSpace(row.meta) || !row.meta || !teamById.has(row.meta.workspace_id)) return false;
+    return docReadableBy(env, session, row.meta);
+  }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  const teamDocRow = (row) => {
+    const team = teamById.get(row.meta.workspace_id);
+    const author = teamMember(team, row.meta.hosted && row.meta.hosted.account_id);
+    return {
+      ...publicRow(row),
+      team: team.id,
+      author: author ? author.name : ownerDisplay(row),
+      former_member: !author,
+      can_manage: isDocOwnerSession(env, session, row.meta),
+    };
+  };
+
+  // Feedback spaces stay out of My docs, but they need a home: the Feedback
+  // tab. Listed here without counts — the catalog must not read comments per
+  // row — and counted by /api/me/feedback when the tab is opened.
+  const feedback = await feedbackSpacesFor(env, session, catalog.filter((row) => isFeedbackSpace(row.meta)), publicRow, false);
+
   return {
     docs: mine.map((row) => ({ ...publicRow(row), folder: folderState.docs[row.slug] || '' })),
+    feedback,
     recent: savedRows(recentItems).map(publicRow),
     starred: savedRows(starItems).map(publicRow),
     folders: folderState.folders.map((folder) => publicFolder(folder)),
+    teams: teamRecords.map((team) => teamSummary(team, viewerAccount)),
+    team_docs: teamDocs.map(teamDocRow),
   };
 }
 
@@ -3999,7 +4315,7 @@ function blankDocSlug(bytes) {
 // scratch", shared with the feedback space that /api/feedback/connect makes
 // on the person's behalf. Ownership, quota and slug rules are the ones the
 // create-from-scratch path always had; `meta` and `version` are what differs.
-async function createDocForSession(env, req, session, { html, meta, version }) {
+async function createDocForSession(env, req, session, { html, meta, version, team = null }) {
   const ownerCreate = isOwnerSession(env, session);
   // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
   // its owner unless it has opted into hosted accounts. tdoc.dev is open.
@@ -4074,6 +4390,15 @@ async function createDocForSession(env, req, session, { html, meta, version }) {
     versions: [{ n: 1, created: now, ...version }],
     created_by: session.login,
   };
+  delete incoming.workspace_id;
+  if (incoming.access && typeof incoming.access === 'object') {
+    const { team: _team, ...personal } = incoming.access;
+    incoming.access = personal;
+  }
+  if (team) {
+    incoming.workspace_id = team;
+    incoming.access = normalizeAccess({ ...(incoming.access || {}), visibility: 'private', team: true }, { legacy: false });
+  }
   incoming = stampHostedOwnership(incoming, actor);
 
   const { html: stampedHtml, sha } = await prepareDocVersion(html);
@@ -4228,12 +4553,15 @@ const FEEDBACK_PAGE_CSS = `
   .fb-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;
     height: 48px; padding: 0 18px; background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--td-line); }
   .fb-bar-home { display: inline-flex; align-items: center; gap: 8px; color: var(--td-ink); text-decoration: none; font: 700 15px/1 -apple-system, system-ui, sans-serif; }
-  .fb-bar nav { display: flex; align-items: center; gap: 12px; font: 600 13px/1 -apple-system, system-ui, sans-serif; }
+  .fb-bar nav { display: flex; align-items: center; gap: 12px; font: 600 14px/1.2 -apple-system, system-ui, sans-serif; }
   .fb-bar-link { color: var(--td-ink); text-decoration: none; padding: 7px 10px; border-radius: 999px; }
   .fb-bar-link:hover { background: #f0f0ee; }
-  .fb-bar-cta { background: var(--td-accent); color: #fff !important; }
+  /* Same shapes as the app's top bar: a 6px Sign in button, an avatar chip. */
+  .fb-bar-cta { padding: 7px 14px; border-radius: 6px; background: var(--td-accent); color: #fff !important; text-decoration: none; }
   .fb-bar-cta:hover { background: var(--td-accent-hover); }
-  .fb-bar-who { color: var(--td-muted); font-weight: 500; }
+  .fb-bar-account { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; border-radius: 999px; background: transparent; color: #555; text-decoration: none; font-weight: 500; }
+  .fb-bar-account:hover { background: #f0f1f4; color: var(--td-ink); }
+  .fb-bar-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--td-accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font: 600 12px/1 -apple-system, system-ui, sans-serif; }
   [hidden] { display: none !important; }
   body { margin: 0; background: #fff; color: var(--td-ink);
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
@@ -4400,10 +4728,11 @@ const FEEDBACK_PAGE_CSS = `
 // pages, so they carry a plain version of the same top bar: the mark home,
 // and My docs or Sign in on the right.
 function feedbackTopBar(identity, returnTo) {
+  const who = (identity && (identity.name || identity.login)) || '';
   const right = identity
-    ? `<a class="fb-bar-link" href="/me">My docs</a><span class="fb-bar-who">${escapeHtml(identity.name || identity.login || '')}</span>`
-    : `<a class="fb-bar-link fb-bar-cta" href="/api/auth/oidc/login?return=${encodeURIComponent(returnTo || '/feedback')}">Sign in</a>`;
-  return `<header class="fb-bar"><a class="fb-bar-home" href="/" aria-label="tdoc home"><img src="/favicon.svg" alt="" width="20" height="20"><span>tdoc</span></a><nav>${right}</nav></header>`;
+    ? `<a class="fb-bar-account" href="/me" title="My docs"><span class="fb-bar-avatar">${escapeHtml(who.slice(0, 1).toUpperCase() || '?')}</span><span>${escapeHtml(who)}</span></a>`
+    : `<a class="fb-bar-cta" href="/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnTo || '/feedback')}">Sign in</a>`;
+  return `<header class="fb-bar"><a class="fb-bar-home" href="/me" aria-label="My docs"><img src="/favicon.svg" alt="" width="22" height="22"></a><nav>${right}</nav></header>`;
 }
 
 function feedbackScriptSrc(base) {
@@ -5022,6 +5351,7 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
   }
   if (!meta) return { error: 'not_found', status: 404 };
   // Author only — collaborators / folder guests cannot curate someone else's doc.
+  if (meta.workspace_id) return { error: 'team_doc', status: 409 };
   if (!isDocOwnerSession(env, session, meta)) return { error: 'forbidden', status: 403 };
 
   const access = accessFromMeta(meta);
@@ -5471,6 +5801,14 @@ async function requireUploadAuth(req, env) {
 // Slug-scoped write ACL for a hosted account token. Admin actors skip it.
 // opts.create: first publish / retry. Does NOT claim an empty slug — the
 // upload route claims after validation so a 400 cannot park the slug forever.
+// A team doc is written by any current member, the author included or not.
+// teamAdmin says whether this actor also owns it (see isDocOwnerSession).
+async function teamWriteAccess(env, actor, meta) {
+  const role = teamRole(await loadTeam(env, meta.workspace_id), actor.account_id);
+  if (!role) return { ok: false, response: json({ error: 'not_team_member' }, { status: 403 }) };
+  return { ok: true, meta, teamDoc: true, teamAdmin: role === 'admin' };
+}
+
 async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   const meta = await loadDocMeta(env, slug);
   if (!actor || actor.kind === 'admin') return { ok: true, meta };
@@ -5502,6 +5840,7 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
       return { ok: true, meta: null };
     }
     if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+    if (meta.workspace_id) return teamWriteAccess(env, actor, meta);
     if (accountId !== actor.account_id) {
       return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
     }
@@ -5511,6 +5850,7 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   }
   if (!meta) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
   if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+  if (meta.workspace_id) return teamWriteAccess(env, actor, meta);
   if (accountId !== actor.account_id) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
   const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
   if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
@@ -5683,7 +6023,22 @@ async function authorizeOwnerMutation(req, env, slug) {
   if (!slug) return { ok: false, response: json({ error: 'slug required' }, { status: 400 }) };
   const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
   if (!writeGate.ok) return writeGate;
+  if (writeGate.teamDoc && !writeGate.teamAdmin) {
+    return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  }
   return { ok: true, session: null, actor: auth.actor, meta: writeGate.meta };
+}
+
+// Editing a doc and driving an agent on it. On a team doc every current
+// member may; sharing, delete and rename stay with authorizeOwnerMutation.
+async function authorizeDocEdit(req, env, slug) {
+  const session = await getSession(env, req);
+  const meta = slug ? await loadDocMeta(env, slug) : null;
+  if (meta && meta.workspace_id && !feedbackScopeDenied(session, slug)
+      && await isTeamMemberSession(env, session, meta.workspace_id)) {
+    return { ok: true, session, actor: { kind: 'team_member' }, meta };
+  }
+  return authorizeOwnerMutation(req, env, slug);
 }
 
 // ===========================================================================
@@ -6415,6 +6770,66 @@ const NOTIFY_PROVIDERS = {
   },
 };
 
+// Webhook: any service that can take an HTTPS POST (a bot, an agent runner,
+// Zapier). The connector is a URL plus a signing secret tdoc generates; the
+// body is the same handoff payload Raft gets, and X-Tdoc-Signature is
+// HMAC-SHA256(secret, body) so the receiver can tell tdoc sent it.
+// The secret lives under its own key: targets are shown to the account in
+// the UI, and the secret must never ride along.
+const WEBHOOK_ID_RE = /^wh_[a-f0-9]{16,40}$/;
+function webhookUrl(raw) {
+  try {
+    const u = new URL(String(raw || '').trim());
+    if (u.protocol !== 'https:' || u.username || u.password) return null;
+    const href = u.toString();
+    return href.length <= 500 ? href : null;
+  } catch { return null; }
+}
+async function hmacSha256Hex(secret, body) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+NOTIFY_PROVIDERS.webhook = {
+  validateTarget(t) {
+    const agent_sub = typeof t.agent_sub === 'string' ? t.agent_sub.trim() : '';
+    const url = webhookUrl(t.url);
+    if (!WEBHOOK_ID_RE.test(agent_sub) || !url) return null;
+    return { server_id: 'webhook', agent_sub, url };
+  },
+  async send(env, target, event) {
+    const secret = await env.META.get(`notify-webhook-secret:${target.agent_sub}`);
+    if (!secret) return { status: 'failed', error: 'webhook_secret_missing' };
+    const body = JSON.stringify({
+      type: 'tdoc.handoff',
+      id: event.externalEventId,
+      summary: event.summary,
+      sent_at: new Date().toISOString(),
+      ...event.payload,
+    });
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(target.url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'tdoc-webhook',
+          'X-Tdoc-Event': 'handoff',
+          'X-Tdoc-Delivery': event.externalEventId,
+          'X-Tdoc-Signature': `sha256=${await hmacSha256Hex(secret, body)}`,
+        },
+        body,
+      });
+      clearTimeout(timer);
+      return r.ok ? { status: 'delivered', error: null } : { status: 'failed', error: `webhook_${r.status}` };
+    } catch (e) {
+      return { status: 'failed', error: String((e && e.name === 'AbortError') ? 'webhook_timeout' : (e && e.message) || e).slice(0, 200) };
+    }
+  },
+};
+
 function raftAuthHeaders(env) {
   const basic = btoa(`${env.RAFT_CLIENT_ID}:${env.RAFT_CLIENT_SECRET}`);
   return { 'Content-Type': 'application/json', Authorization: `Basic ${basic}` };
@@ -6441,6 +6856,22 @@ async function touchDocAgent(env, slug, target) {
   return true;
 }
 
+// The account fallback is automatic too: whichever connected agent most
+// recently did real work becomes the first choice for a doc that has never
+// had an agent. This is routing state, not a setting a person should have to
+// type and maintain on the Connectors page.
+async function touchAccountAgent(env, accountId, target) {
+  const t = normalizeNotifyTarget(target);
+  if (!accountId || !t) return false;
+  const prev = await accountNotifyTargets(env, accountId);
+  const rest = prev.filter((x) => !sameNotifyTarget(x, t));
+  await env.META.put(`account-notify:${accountId}`, JSON.stringify([
+    { ...t, last_touched: new Date().toISOString() },
+    ...rest,
+  ].slice(0, NOTIFY_AGENTS_MAX)));
+  return true;
+}
+
 // Which agent is acting on this doc. The follow-up seat is earned by doing the
 // work (publishing or replying); this decides whose work it was.
 //
@@ -6462,12 +6893,49 @@ async function actingAgent(env, req, actor) {
   if (session) return session;
   const accountId = actor && actor.kind === 'hosted' ? actor.account_id : null;
   if (!accountId) return null;
-  const m = (req.headers.get('x-tdoc-raft-agent') || '').trim()
-    .match(/^([A-Za-z0-9-]{1,80})\/([A-Za-z0-9-]{1,80})$/);
-  if (!m) return null;
-  const [, serverId, agentSub] = m;
+  // Two spellings of the same claim. X-Tdoc-Agent: <provider>/<server>/<agent>
+  // is the general one (a webhook connector says webhook/webhook/wh_…);
+  // X-Tdoc-Raft-Agent: <server>/<agent> is what the Raft CLI already sends.
+  // Either way the provider is read off the linked record, never the header,
+  // so the logo and the channel are the connector's, not the claimant's.
+  let provider = null, serverId = null, agentSub = null;
+  const general = (req.headers.get('x-tdoc-agent') || '').trim()
+    .match(/^([a-z]{1,20})\/([A-Za-z0-9_-]{1,80})\/([A-Za-z0-9_-]{1,80})$/);
+  if (general) [, provider, serverId, agentSub] = general;
+  else {
+    const raft = (req.headers.get('x-tdoc-raft-agent') || '').trim()
+      .match(/^([A-Za-z0-9-]{1,80})\/([A-Za-z0-9-]{1,80})$/);
+    if (!raft) return null;
+    provider = 'raft'; [, serverId, agentSub] = raft;
+  }
   const linked = await accountNotifyTargets(env, accountId);
-  return linked.find(t => t.server_id === serverId && t.agent_sub === agentSub) || null;
+  const exact = linked.find(t => t.provider === provider && t.server_id === serverId && t.agent_sub === agentSub);
+  if (exact) return exact;
+  // Not linked one by one, but on a Raft server this account connected: the
+  // server is the boundary, so the agent is taken at its word for WHICH agent
+  // it is — the worst a false claim does is route to another agent on the
+  // person's own connected server. Its handle is what Raft delivers by.
+  if (provider !== 'raft') return null;
+  const server = (await accountRaftServers(env, accountId)).find((sv) => sv.server_id === serverId);
+  if (!server) return null;
+  const removed = await accountRemovedTargets(env, accountId);
+  if (removed.has(`raft:${serverId}:${agentSub}`)) return null;
+  let name = '';
+  try { name = decodeURIComponent((req.headers.get('x-tdoc-raft-agent-name') || '').trim()).replace(/^@/, ''); } catch {}
+  // A handle in any script (小c), but one line and short; without one there
+  // is no way to deliver to it.
+  if (!name || name.length > 80 || /[\u0000-\u001f\u007f\s]/.test(name)) return null;
+  return normalizeNotifyTarget({ provider: 'raft', server_id: serverId, server_slug: server.server_slug, agent_sub: agentSub, agent_name: name });
+}
+
+// Agents the person disconnected. A doc keeps the agents that worked on it
+// (notify_agents), so removing one from the account alone would leave it
+// receiving handoffs for those docs; this list makes Disconnect mean it.
+// Linking the agent again takes it off the list.
+const notifyKey = (t) => `${t.provider}:${t.server_id}:${t.agent_sub}`;
+async function accountRemovedTargets(env, accountId) {
+  if (!accountId) return new Set();
+  try { return new Set(JSON.parse((await env.META.get(`account-notify-removed:${accountId}`)) || '[]')); } catch { return new Set(); }
 }
 
 async function accountNotifyTargets(env, accountId) {
@@ -6479,14 +6947,39 @@ async function accountNotifyTargets(env, accountId) {
   } catch { return []; }
 }
 
+// Raft servers this account has connected. The trust boundary for Raft is the
+// server, not the agent: once a server is connected, any agent on it that
+// says who it is (and the CLI says so on every publish and reply) can take a
+// doc's follow-up seat, and tdoc routes inside the server by agent name.
+// Today a server counts as connected when one of its agents was linked; the
+// explicit list is where a person's own "Connect with Raft" will write.
+async function accountRaftServers(env, accountId) {
+  if (!accountId) return [];
+  const byId = new Map();
+  try {
+    for (const sv of JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]')) {
+      if (sv && sv.server_id) byId.set(sv.server_id, { server_id: sv.server_id, server_slug: sv.server_slug || '' });
+    }
+  } catch {}
+  for (const t of await accountNotifyTargets(env, accountId)) {
+    if (t.provider === 'raft' && !byId.has(t.server_id)) byId.set(t.server_id, { server_id: t.server_id, server_slug: t.server_slug || '' });
+  }
+  const removed = await accountRemovedTargets(env, accountId);
+  return [...byId.values()].filter((sv) => !removed.has(`raft-server:${sv.server_id}`));
+}
+
 // doc first, account second. Returns what the handoff panel renders: one
 // preselected recipient, the other recent ones as switchable candidates.
 async function resolveNotifyTargets(env, slug) {
   const meta = await loadDocMeta(env, slug);
   const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
+  const ownerAccount = meta && meta.hosted && meta.hosted.account_id;
+  const removed = await accountRemovedTargets(env, ownerAccount);
   const docTargets = (Array.isArray(meta && meta.notify_agents) ? meta.notify_agents : [])
-    .map(normalizeNotifyTarget).filter(Boolean).sort(byRecency);
-  const fallbackList = await accountNotifyTargets(env, meta && meta.hosted && meta.hosted.account_id);
+    .map(normalizeNotifyTarget)
+    .filter((t) => t && !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)))
+    .sort(byRecency);
+  const fallbackList = await accountNotifyTargets(env, ownerAccount);
   const fallback = fallbackList[0] || null;
   if (docTargets.length) {
     return {
@@ -6509,6 +7002,25 @@ async function resolveNotifyTargets(env, slug) {
     candidates: fallbackList.slice(1).map(t => ({ ...t, source: 'account' })),
     fallback,
     reason: fallback ? null : 'no_agent_bound',
+  };
+}
+
+// A team doc has no one owner whose agent answers for it: whoever presses
+// the button sends to their own agents, never to a teammate's.
+// Team docs: off for now. On Raft the trust boundary is the server; on a
+// personal doc it is the author. A team doc has neither yet — it cannot be
+// co-edited, so whose agent should answer it is undecided — and until that
+// is settled nobody hands its comments to an agent (Julie, 2026-10-03).
+const TEAM_DOC_AGENT_OFF = { error: 'team_docs_agent_disabled', message: 'Send to agent is not available on team docs yet.' };
+
+async function notifyTargetsFor(env, slug, gate) {
+  if (!(gate.meta && gate.meta.workspace_id)) return resolveNotifyTargets(env, slug);
+  const own = await accountNotifyTargets(env, gate.session && gate.session.account_id);
+  return {
+    default: own[0] ? { ...own[0], source: 'account' } : null,
+    candidates: own.slice(1).map(t => ({ ...t, source: 'account' })),
+    fallback: own[0] || null,
+    reason: own.length ? null : 'no_agent_bound',
   };
 }
 
@@ -6552,7 +7064,7 @@ function handoffEvent({ slug, docTitle, handoffId, commentIds, instruction, publ
   };
 }
 
-async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recipient, publicHost }) {
+async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recipient, publicHost, by = null }) {
   const handoffId = `h_${Date.now()}_${rand(3)}`;
   const target = normalizeNotifyTarget(recipient);
   const event = handoffEvent({
@@ -6568,6 +7080,7 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
     comment_ids: commentIds,
     instruction: instruction || '',
     delivery: { ...delivery, at: new Date().toISOString() },
+    ...(by ? { by } : {}),
   });
 }
 
@@ -7308,6 +7821,16 @@ export default {
     // Agents (hosted Bearer) use GET /api/me — same catalog as the HTML /me
     // hub, without needing a cookie. Cookie sessions also work so browser
     // tools can fetch JSON.
+    if (p === '/api/me/feedback' && method === 'GET') {
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const data = await indexData(env, s, url.origin);
+      const slugs = new Set((data.feedback || []).map((x) => x.slug));
+      const metas = await Promise.all([...slugs].map(async (slug) => ({ slug, meta: await loadDocMeta(env, slug) })));
+      const bySlug = new Map((data.feedback || []).map((x) => [x.slug, x]));
+      const spaces = await feedbackSpacesFor(env, s, metas.filter((m) => m.meta).map((m) => ({ ...m, updated: bySlug.get(m.slug).updated })), (row) => bySlug.get(row.slug), true);
+      return json({ ok: true, spaces }, { headers: { 'Cache-Control': 'no-store' } });
+    }
     if (p === '/api/me' && method === 'GET') {
       const s = await getViewerSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
@@ -7327,6 +7850,9 @@ export default {
         folders: data.folders,
         recent: data.recent,
         starred: data.starred,
+        feedback: data.feedback,
+        teams: data.teams,
+        team_docs: data.team_docs,
         ...(profile ? { profile } : {}),
       });
     }
@@ -7446,18 +7972,22 @@ export default {
       return json({ ok: true, bio });
     }
 
-    if (p === '/me/tokens' && method === 'GET') {
+    // One page, two tabs: where comments go (send) and what can act as you
+    // (access). Its earlier addresses still land on the right tab.
+    if ((p === '/me/tokens' || p === '/me/devices') && method === 'GET') return redirectTo('/me/agents?tab=access');
+    if (p === '/me/connectors' && method === 'GET') return redirectTo('/me/agents?tab=send');
+    if (p === '/me/agents' && method === 'GET') {
       const who = await tokenPageSession(env, req);
-      if (!who) return redirectTo(`/api/auth/oidc/login?return=${encodeURIComponent('/me/tokens')}`);
+      if (!who) return redirectTo(`/api/auth/oidc/login?prompt=login&return=${encodeURIComponent('/me/agents' + url.search)}`);
       const nonce = rand(16);
       const s = who.session;
       return html(SHELL.appHtml({
-        title: 'Connected terminals · tdoc',
+        title: 'Agents · tdoc',
         nonceAttr: ` nonce="${nonce}"`,
         runtimeJsPath: SHELL_RUNTIME_JS_PATH,
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
         bootJson: safeJsonForScript({
-          page: 'tokens',
+          page: 'agents',
           identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
           tokens: await accountTokenList(env, who.accountId),
         }),
@@ -7485,6 +8015,44 @@ export default {
       await env.META.delete(key);
       return json({ ok: true });
     }
+    const teamJoinMatch = p.match(/^\/team\/join\/([a-f0-9]{32})$/);
+    if (teamJoinMatch && (method === 'GET' || method === 'HEAD')) {
+      const team = await teamForInviteToken(env, teamJoinMatch[1]);
+      if (!team) {
+        return statusPageResponse({
+          docTitle: 'Invite link expired · tdoc',
+          title: 'This invite link no longer works',
+          message: 'Ask a team admin for a new link.',
+          error: true,
+          status: 404,
+        });
+      }
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s)) {
+        return statusPageResponse({
+          docTitle: `Join ${team.name} · tdoc`,
+          title: `Join ${team.name} on tdoc`,
+          message: 'Sign in to join. First time here? Signing in creates your account automatically.',
+          actions: [{ label: 'Sign in', href: `${oidcConfig(env) ? '/api/auth/oidc/login' : '/api/auth/web/login'}?return=${encodeURIComponent(p)}`, primary: true }],
+        });
+      }
+      if (teamMember(team, s.account_id)) return redirectTo(`/me?team=${team.id}`);
+      if (method === 'HEAD') return new Response(null, { status: 200 });
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        title: `Join ${team.name} · tdoc`,
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'team-join',
+          token: teamJoinMatch[1],
+          team: { id: team.id, name: team.name, member_count: team.members.length },
+          identity: { login: actorKey(s), name: actorDisplayName(s) },
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+    }
+
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
       if (!canSeeMyDocs(env, s, url.origin)) {
@@ -8177,7 +8745,14 @@ export default {
     if (p === '/api/doc/create' && method === 'POST') {
       const session = await getSession(env, req);
       if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const team = body && body.team ? body.team : null;
+      if (team && !teamMember(await loadTeam(env, team), sessionInTeam(session, team) ? session.account_id : null)) {
+        return json({ error: 'not_team_member' }, { status: 403 });
+      }
       const made = await createDocForSession(env, req, session, {
+        team,
         html: blankDocHtml(),
         meta: {
           // Renamed by the first save that finds a heading in the document, and
@@ -8494,7 +9069,12 @@ export default {
       // meant to pick a different method. prompt=login is the standard OIDC
       // lever that forces the chooser; whitelisted so the param can't smuggle
       // anything else.
-      if (url.searchParams.get('prompt') === 'login') auth.searchParams.set('prompt', 'login');
+      //
+      // Now unconditional: a sign-in that silently resumes the provider's
+      // session is the reason "sign out, sign in as someone else" did not
+      // work — every door that forgot to ask for the chooser (the status
+      // page, the feedback pages) went straight back in as the last account.
+      auth.searchParams.set('prompt', 'login');
       return redirectTo(auth.toString(), [
         `${cfg.stateCookie}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
@@ -8546,6 +9126,16 @@ export default {
         const user = await ur.json().catch(() => null);
         if (stateless && !(user && user.type === 'agent')) {
           return authStatusResponse('Only an agent may sign in without a browser session. Please start sign-in again.', { error: true, status: 403 });
+        }
+        // "Connect with Raft" from the Agents page: not a sign-in. The person
+        // is already signed in to tdoc; Raft says which server they are on,
+        // and that server becomes a connector on their account.
+        if (cfg.id === 'raft' && !stateless) {
+          const pending = await env.META.get(`raft-connect:${state}`);
+          if (pending) {
+            await env.META.delete(`raft-connect:${state}`);
+            return await completeRaftConnect(env, req, { pending, tok, ret, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
+          }
         }
         return await cfg.complete(env, { user, tok, disc, ret, stateless, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
       } catch (e) {
@@ -8861,6 +9451,183 @@ export default {
       return json({ ok: true, moved: slugs.length, folder: folderId });
     }
 
+    // ---- teams (JUL-71) ----
+    // Membership is server truth: every route re-reads the team record and
+    // answers a non-member exactly like a missing team (no public team page).
+    if (p === '/api/teams' && method === 'GET') {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      const teams = (await Promise.all((s.team_ids || []).map((id) => loadTeam(env, id))))
+        .filter((team) => team && teamMember(team, s.account_id));
+      return json({ ok: true, teams: teams.map((team) => teamSummary(team, s.account_id)) });
+    }
+
+    if (p === '/api/teams' && method === 'POST') {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const name = validTeamName(body.name);
+      if (!name) return json({ error: 'invalid_name', limit: TEAM_NAME_MAX }, { status: 400 });
+      const invites = normalizeTeamInvites(body.invites == null ? [] : body.invites);
+      if (!invites) return json({ error: 'invalid_invites' }, { status: 400 });
+      if ((s.team_ids || []).length >= TEAMS_PER_ACCOUNT_MAX) {
+        return json({ error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX }, { status: 400 });
+      }
+      const team = {
+        id: `t_${rand(8)}`,
+        name,
+        created: new Date().toISOString(),
+        created_by: s.account_id,
+        members: [teamMemberFromSession(s, 'admin')],
+        invites,
+      };
+      await rotateTeamInvite(env, team);
+      await saveTeam(env, team);
+      await setAccountTeam(env, s.account_id, team.id, true);
+      let emailed = [];
+      try {
+        emailed = await sendTeamInviteEmails(env, {
+          added: invites, inviterName: actorDisplayName(s), inviterId: actorKey(s), team, origin: url.origin,
+        });
+      } catch {}
+      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
+    }
+
+    if (p === '/api/team' && (method === 'GET' || method === 'PATCH')) {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      let body = {};
+      if (method === 'PATCH') { try { body = await req.json(); } catch {} }
+      const id = method === 'GET' ? url.searchParams.get('id') : body.id;
+      const team = await loadTeam(env, id);
+      if (!teamMember(team, s.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      if (method === 'GET') return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
+      if (teamRole(team, s.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      let added = [];
+      if ('name' in body) {
+        const name = validTeamName(body.name);
+        if (!name) return json({ error: 'invalid_name', limit: TEAM_NAME_MAX }, { status: 400 });
+        team.name = name;
+      }
+      if ('invites' in body) {
+        const invites = normalizeTeamInvites(body.invites);
+        if (!invites) return json({ error: 'invalid_invites' }, { status: 400 });
+        const before = Array.isArray(team.invites) ? team.invites : [];
+        added = invites.filter((x) => !before.includes(x));
+        team.invites = invites;
+      }
+      if (body.reset_link === true) await rotateTeamInvite(env, team);
+      await saveTeam(env, team);
+      let emailed = [];
+      try {
+        emailed = await sendTeamInviteEmails(env, {
+          added, inviterName: actorDisplayName(s), inviterId: actorKey(s), team, origin: url.origin,
+        });
+      } catch {}
+      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
+    }
+
+    // Role changes and removals share one invariant: a team always keeps at
+    // least one admin. Leaving is removing yourself, so it obeys it too.
+    if ((p === '/api/team/role' || p === '/api/team/remove') && method === 'POST') {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const team = await loadTeam(env, body.id);
+      const myRole = teamRole(team, s.account_id);
+      if (!myRole) return json({ error: 'not_found' }, { status: 404 });
+      const target = teamMember(team, body.account_id);
+      if (!target) return json({ error: 'member_not_found' }, { status: 404 });
+      const self = target.account_id === s.account_id;
+      if (myRole !== 'admin' && !(p === '/api/team/remove' && self)) {
+        return json({ error: 'admin_required' }, { status: 403 });
+      }
+      const lastAdmin = target.role === 'admin' && teamAdminCount(team) === 1;
+      if (p === '/api/team/role') {
+        if (!TEAM_ROLES.has(body.role)) return json({ error: 'invalid_role' }, { status: 400 });
+        if (lastAdmin && body.role !== 'admin') return json({ error: 'last_admin' }, { status: 409 });
+        target.role = body.role;
+        await saveTeam(env, team);
+      } else {
+        if (lastAdmin) return json({ error: 'last_admin' }, { status: 409 });
+        team.members = team.members.filter((m) => m.account_id !== target.account_id);
+        await saveTeam(env, team);
+        await setAccountTeam(env, target.account_id, team.id, false);
+        if (self) return json({ ok: true, left: true });
+      }
+      return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
+    }
+
+    if (p === '/api/team/join' && method === 'POST') {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const team = await teamForInviteToken(env, body.token);
+      if (!team) return json({ error: 'invite_invalid' }, { status: 404 });
+      if (!teamMember(team, s.account_id)) {
+        if (team.members.length >= TEAM_MEMBERS_MAX) {
+          return json({ error: 'team_full', limit: TEAM_MEMBERS_MAX }, { status: 400 });
+        }
+        if ((s.team_ids || []).length >= TEAMS_PER_ACCOUNT_MAX) {
+          return json({ error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX }, { status: 400 });
+        }
+        team.members.push(teamMemberFromSession(s, 'member'));
+        const mine = [sessionLogin(s), normalizeEmail(s.email)].filter(Boolean);
+        team.invites = (Array.isArray(team.invites) ? team.invites : []).filter((x) => !mine.includes(x));
+        await saveTeam(env, team);
+        await setAccountTeam(env, s.account_id, team.id, true);
+      }
+      return json({ ok: true, team: teamSummary(team, s.account_id) });
+    }
+
+    // Moving is the author's call alone: into a team they belong to, or back
+    // to their own docs. The doc keeps its author; only the owner changes.
+    if (p === '/api/team/move' && method === 'POST') {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const teamId = body.team == null ? null : String(body.team);
+      const slugs = Array.isArray(body.slugs) ? body.slugs : [];
+      if (!slugs.length || slugs.length > 100 || !slugs.every((x) => typeof x === 'string' && isValidSlug(x))) {
+        return json({ error: 'invalid_slugs' }, { status: 400 });
+      }
+      let team = null;
+      if (teamId) {
+        team = await loadTeam(env, teamId);
+        if (!teamMember(team, s.account_id)) return json({ error: 'team_not_found' }, { status: 404 });
+      }
+      const metas = [];
+      for (const slug of slugs) {
+        const meta = await loadDocMeta(env, slug);
+        if (!meta || !isDocOwnerSession(env, s, meta)) return json({ error: 'not_owner', slug }, { status: 403 });
+        metas.push([slug, meta]);
+      }
+      for (const [slug, meta] of metas) {
+        const next = { ...meta };
+        const policy = { ...accessFromMeta(meta) };
+        if (team) {
+          next.workspace_id = team.id;
+          policy.team = true;
+        } else {
+          delete next.workspace_id;
+          delete policy.team;
+        }
+        next.access = policy;
+        await env.META.put(`meta:${slug}`, JSON.stringify(next));
+      }
+      return json({ ok: true, moved: slugs.length, team: team ? team.id : null });
+    }
+
     // ---- hosted publish token bootstrap ----
     // Hosted/OOB users should not create Cloudflare resources or receive the
     // provider-wide TDOC_UPLOAD_TOKEN. The central Worker mints an account-
@@ -9045,6 +9812,21 @@ export default {
         }
       }
       return json({ ok: true, state, record: next, cleared });
+    }
+    if (p === '/api/onboarding/step' && method === 'PUT') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId || session?.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      if (!['connect', 'create', 'comment', 'revise', 'notify'].includes(body?.step) || typeof body?.done !== 'boolean') {
+        return json({ error: 'invalid_step' }, { status: 400 });
+      }
+      const record = await loadOnboarding(env, accountId);
+      record.manual_steps = { ...record.manual_steps, [body.step]: body.done };
+      await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(record));
+      return json({ ok: true });
     }
     if (p === '/api/onboarding/event' && method === 'POST') {
       let body = {};
@@ -9366,6 +10148,7 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
       if (!writeGate.ok) return writeGate.response;
+      if (writeGate.teamDoc && !writeGate.teamAdmin) return json({ error: 'not_doc_owner' }, { status: 403 });
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
       return json(res.body, { status: res.status });
@@ -9483,6 +10266,127 @@ export default {
     // link code proves which agent signed in (the issuer said so), the upload
     // token proves whose account is being written to. Either alone is inert —
     // which is the whole reason an agent may sign in without a browser.
+    // ---- Connectors: what can receive handoffs for this account ----
+    // Browser session only (a token cannot add or remove where its own
+    // account's comments go), and POSTs must come from this origin.
+    if (p.startsWith('/api/me/connectors')) {
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (method === 'POST' && req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+      const accountId = await sessionAccountId(env, s);
+      if (!accountId) return json({ error: 'account_required' }, { status: 403 });
+      const listKey = `account-notify:${accountId}`;
+      const current = await accountNotifyTargets(env, accountId);
+      let body = {};
+      if (method === 'POST') { try { body = await req.json(); } catch {} }
+      const find = () => current.find((t) => t.provider === body.provider && t.server_id === body.server_id && t.agent_sub === body.agent_sub);
+
+      if (p === '/api/me/connectors/raft/start' && method === 'GET') {
+        const cfg = oidcProvider(env, 'raft');
+        if (!cfg) return redirectTo('/me/agents?tab=send&error=raft_not_configured');
+        const nonce = rand(16);
+        await env.META.put(`oauthstate:${cfg.id}:${nonce}`, '/me/agents?tab=send', { expirationTtl: 600 });
+        await env.META.put(`raft-connect:${nonce}`, JSON.stringify({ account_id: accountId }), { expirationTtl: 600 });
+        let auth;
+        try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
+        catch (e) { return redirectTo('/me/agents?tab=send&error=raft_unreachable'); }
+        auth.searchParams.set('client_id', cfg.clientId);
+        auth.searchParams.set('redirect_uri', `${url.origin}${cfg.callbackPath}`);
+        auth.searchParams.set('response_type', 'code');
+        auth.searchParams.set('scope', cfg.scope);
+        auth.searchParams.set('state', nonce);
+        return redirectTo(auth.toString(), [`${cfg.stateCookie}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`]);
+      }
+      if (p === '/api/me/connectors/raft/default' && method === 'POST') {
+        // Which agent on a connected server gets comments on docs no agent
+        // has claimed. Delivery is by handle, so the handle is the identity.
+        const server = (await accountRaftServers(env, accountId)).find((sv) => sv.server_id === body.server_id);
+        if (!server) return json({ error: 'not_found' }, { status: 404 });
+        const name = String(body.agent_name || '').trim().replace(/^@/, '');
+        if (!name || name.length > 80 || /[\u0000-\u001f\u007f\s]/.test(name)) return json({ error: 'invalid_agent_name' }, { status: 400 });
+        const target = normalizeNotifyTarget({ provider: 'raft', server_id: server.server_id, server_slug: server.server_slug, agent_sub: `@${name}`, agent_name: name });
+        const rest = current.filter((t) => !(t.provider === 'raft' && t.server_id === server.server_id && t.agent_name === name));
+        await env.META.put(listKey, JSON.stringify([{ ...target, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX)));
+        return json({ ok: true, target });
+      }
+      if (p === '/api/me/connectors' && method === 'GET') {
+        // One row per connector: a Raft server (with the agents tdoc knows on
+        // it) or a webhook. The first agent overall is the account default.
+        const servers = await accountRaftServers(env, accountId);
+        const connectors = [
+          ...servers.map((sv) => ({
+            kind: 'raft', id: `raft:${sv.server_id}`, server_id: sv.server_id, server_slug: sv.server_slug,
+            agents: current.filter((t) => t.provider === 'raft' && t.server_id === sv.server_id),
+          })),
+          ...current.filter((t) => t.provider === 'webhook').map((t) => ({ kind: 'webhook', id: `webhook:${t.agent_sub}`, target: t })),
+        ];
+        return json({
+          ok: true,
+          connectors,
+          default: current[0] || null,
+          targets: current,
+          available: [
+            { id: 'raft', name: 'Raft agent', ready: !!(env.RAFT_CLIENT_ID && env.RAFT_CLIENT_SECRET) },
+            { id: 'webhook', name: 'Webhook', ready: true },
+          ],
+        }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (p === '/api/me/connectors/webhook' && method === 'POST') {
+        const hookUrl = webhookUrl(body.url);
+        if (!hookUrl) return json({ error: 'invalid_url', message: 'Use a full https:// URL.' }, { status: 400 });
+        const label = typeof body.label === 'string' ? body.label.trim().slice(0, 60) : '';
+        const id = `wh_${rand(10)}`;
+        const secret = `whsec_${rand(24)}`;
+        await env.META.put(`notify-webhook-secret:${id}`, secret);
+        const target = normalizeNotifyTarget({ provider: 'webhook', server_id: 'webhook', agent_sub: id, url: hookUrl, agent_name: label || new URL(hookUrl).host });
+        // Added at the end: a new webhook should not quietly become where
+        // everything goes. It is the default only when it is the first.
+        const next = [...current, { ...target, last_touched: new Date().toISOString() }].slice(-NOTIFY_AGENTS_MAX);
+        await env.META.put(listKey, JSON.stringify(next));
+        // The only time the secret leaves tdoc.
+        return json({ ok: true, target, secret });
+      }
+      if (p === '/api/me/connectors/test' && method === 'POST') {
+        const target = find();
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        const event = {
+          kind: 'notification',
+          summary: 'tdoc: test from your Connectors page — nothing to do',
+          externalEventId: `tdoc:test:${rand(6)}`,
+          ttlSeconds: 3600,
+          payload: { source: 'tdoc', test: true, comment_ids: [], instruction: 'This is a test. No action needed.', url: `${url.origin}/me/agents?tab=send` },
+        };
+        const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
+        return json({ ok: true, delivery });
+      }
+      if (p === '/api/me/connectors/remove' && method === 'POST' && body.provider === 'raft' && body.server_id && !body.agent_sub) {
+        // Disconnect a whole Raft server: none of its agents get handoffs,
+        // linked or self-identified, until it is connected again.
+        const gone = current.filter((t) => t.provider === 'raft' && t.server_id === body.server_id);
+        await env.META.put(listKey, JSON.stringify(current.filter((t) => !gone.includes(t))));
+        const removed = await accountRemovedTargets(env, accountId);
+        removed.add(`raft-server:${body.server_id}`);
+        for (const t of gone) removed.add(notifyKey(t));
+        await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
+        try {
+          const explicit = JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]').filter((sv) => sv && sv.server_id !== body.server_id);
+          await env.META.put(`account-raft-servers:${accountId}`, JSON.stringify(explicit));
+        } catch {}
+        return json({ ok: true, removed: gone.length });
+      }
+      if (p === '/api/me/connectors/remove' && method === 'POST') {
+        const target = find();
+        if (!target) return json({ error: 'not_found' }, { status: 404 });
+        await env.META.put(listKey, JSON.stringify(current.filter((t) => t !== target)));
+        const removed = await accountRemovedTargets(env, accountId);
+        removed.add(notifyKey(target));
+        await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
+        if (target.provider === 'webhook') { try { await env.META.delete(`notify-webhook-secret:${target.agent_sub}`); } catch {} }
+        return json({ ok: true });
+      }
+      return json({ error: 'not_found' }, { status: 404 });
+    }
+
     if (p === '/api/notify/link' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
@@ -9515,25 +10419,32 @@ export default {
         ...existing.filter(t => !sameNotifyTarget(t, target)),
       ].slice(0, NOTIFY_AGENTS_MAX);
       await env.META.put(`account-notify:${auth.actor.account_id}`, JSON.stringify(next));
+      const removed = await accountRemovedTargets(env, auth.actor.account_id);
+      const clearedServer = removed.delete(`raft-server:${target.server_id}`);
+      if (removed.delete(notifyKey(target)) || clearedServer) {
+        await env.META.put(`account-notify-removed:${auth.actor.account_id}`, JSON.stringify([...removed]));
+      }
       return json({ ok: true, target, targets: next.length });
     }
 
     // ---- outbound notification: handoff to the doc's follow-up agent ----
-    // Gated by authorizeOwnerMutation, which is the whole permission model:
-    // driving an agent needs the doc owner's session or their upload token, so
-    // a reader who can comment still cannot make somebody's agent do work.
+    // Gated by authorizeDocEdit, which is the whole permission model: driving
+    // an agent needs the doc owner's session or upload token, or current
+    // membership of the doc's team, so a reader who can comment still cannot
+    // make somebody's agent do work.
     if (p === '/api/notify/targets' && method === 'GET') {
       const slug = url.searchParams.get('slug');
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const gate = await authorizeOwnerMutation(req, env, slug);
+      const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
-      return json(await resolveNotifyTargets(env, slug));
+      if (gate.meta && gate.meta.workspace_id) return json({ default: null, candidates: [], fallback: null, reason: 'team_doc' });
+      return json(await notifyTargetsFor(env, slug, gate));
     }
 
     if (p === '/api/notify/handoffs' && method === 'GET') {
       const slug = url.searchParams.get('slug');
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const gate = await authorizeOwnerMutation(req, env, slug);
+      const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
       return json({ handoffs: (await loadHandoffs(env, slug)).slice(0, limit) });
@@ -9546,8 +10457,9 @@ export default {
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       let ids = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : [];
       if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
-      const gate = await authorizeOwnerMutation(req, env, slug);
+      const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
+      if (gate.meta && gate.meta.workspace_id) return json(TEAM_DOC_AGENT_OFF, { status: 403 });
       // Threads whose last word is already an agent's are the person's turn:
       // handing them off again only made the agent answer itself. Drop them
       // here, whatever the client sent.
@@ -9564,12 +10476,12 @@ export default {
         ids = ids.filter((id) => !skipped.includes(id));
         if (!ids.length) return json({ ok: true, sent: 0, skipped, reason: 'agent_has_last_word' });
       }
-      const resolved = await resolveNotifyTargets(env, slug);
+      const resolved = await notifyTargetsFor(env, slug, gate);
       // A feedback token lives in a page tdoc does not control, so a script
       // there could hold it. From that door the recipient must be one of the
       // account's own agents that the panel offered — never an address the
       // page made up.
-      const fromPage = Boolean(gate.session && gate.session.feedback);
+      const fromPage = Boolean(gate.session && gate.session.feedback) || Boolean(gate.meta && gate.meta.workspace_id);
       const offered = [resolved.default, ...(resolved.candidates || []), resolved.fallback].filter(Boolean);
       const asked = recipient ? normalizeNotifyTarget(recipient) : null;
       const target = asked && (!fromPage || offered.some(t => sameNotifyTarget(t, asked))) ? asked : resolved.default;
@@ -9580,6 +10492,7 @@ export default {
         slug, meta: gate.meta, commentIds: ids,
         instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
         recipient: target, publicHost: env.PUBLIC_HOST,
+        by: gate.meta && gate.meta.workspace_id && gate.session ? gate.session.account_id : null,
       });
       return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(skipped.length ? { skipped } : {}) });
     }
@@ -9589,10 +10502,14 @@ export default {
       try { body = await req.json(); } catch {}
       const { slug, handoff_id } = body;
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const gate = await authorizeOwnerMutation(req, env, slug);
+      const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
+      if (gate.meta && gate.meta.workspace_id) return json(TEAM_DOC_AGENT_OFF, { status: 403 });
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      if (gate.meta && gate.meta.workspace_id && prev.by !== (gate.session && gate.session.account_id)) {
+        return json({ error: 'not_handoff_sender' }, { status: 403 });
+      }
       // A resend reuses the original externalEventId, so a provider that did
       // receive the first attempt drops the duplicate instead of waking the
       // agent twice for the same batch.
@@ -9697,7 +10614,12 @@ export default {
       // Silent by design — a Raft identity is optional and its absence must
       // not fail a reply that is otherwise fine.
       const replyingAgent = await actingAgent(env, req, auth.actor);
-      if (replyingAgent) { try { await touchDocAgent(env, slug, replyingAgent); } catch {} }
+      if (replyingAgent) {
+        try {
+          await touchDocAgent(env, slug, replyingAgent);
+          await touchAccountAgent(env, auth.actor.account_id, replyingAgent);
+        } catch {}
+      }
       // One answer per human turn. A round that re-reads comments.json after
       // somebody deleted the agent's reply would otherwise post the same words
       // in the same place; the log remembers what the fold forgot. `force`
@@ -9765,7 +10687,7 @@ export default {
       if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(doc)) {
         return json({ error: 'provider_markup_forbidden' }, { status: 400 });
       }
-      const auth = await authorizeOwnerMutation(req, env, slug);
+      const auth = await authorizeDocEdit(req, env, slug);
       if (!auth.ok) return auth.response;
       const result = await createBrowserVersion(env, slug, {
         baseVersion,
@@ -9838,9 +10760,25 @@ export default {
           }
           incoming.access = normalizeAccess(validatedAccess.access, { legacy: false });
         }
+        // Team placement is moved only through /api/team/move; a publish
+        // neither sets it nor drops it, and keeps the team share flag unless
+        // the client says otherwise.
+        const prevTeam = prev && prev.workspace_id;
+        if (prevTeam) incoming.workspace_id = prevTeam;
+        else delete incoming.workspace_id;
+        if (incoming.access) {
+          const clientSaysTeam = meta && meta.access && typeof meta.access === 'object' && 'team' in meta.access;
+          if (prevTeam && !clientSaysTeam && prev.access && prev.access.team === true) incoming.access.team = true;
+          if (!prevTeam) delete incoming.access.team;
+        }
         incoming = stampHostedOwnership(incoming, auth.actor);
+        // A teammate's publish adds a version; the author and sharing stay.
+        if (writeGate.teamDoc) {
+          incoming.hosted = prev.hosted;
+          incoming.access = prev.access;
+        }
       }
-      if (auth.actor && auth.actor.kind === 'hosted') {
+      if (auth.actor && auth.actor.kind === 'hosted' && !writeGate.teamDoc) {
         const claimed = await hostedOwnerOp(env, slug, { kind: 'claim_owner', account_id: auth.actor.account_id });
         if (!claimed.ok) return json({ error: claimed.error || 'owner_claim_failed' }, { status: claimed.status || 409 });
       }
@@ -9998,7 +10936,10 @@ export default {
         // failure — nobody's publish should fail over who gets notified.
         try {
           const publishingAgent = await actingAgent(env, req, auth.actor);
-          if (publishingAgent) await touchDocAgent(env, slug, publishingAgent);
+          if (publishingAgent) {
+            await touchDocAgent(env, slug, publishingAgent);
+            await touchAccountAgent(env, auth.actor.account_id, publishingAgent);
+          }
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
         }
@@ -10209,6 +11150,9 @@ export default {
       if (!auth.ok) return auth.response;
       const meta = auth.meta || await loadDocMeta(env, slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      if (access && access.team === true && !meta.workspace_id) {
+        return json({ error: 'not_team_doc' }, { status: 400 });
+      }
       const prevAllowed = accessFromMeta(meta).allowed_users;
       const next = applyAccessPatch(meta, access);
       if (next.error) {

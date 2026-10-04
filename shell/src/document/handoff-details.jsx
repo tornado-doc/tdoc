@@ -2,6 +2,7 @@
 // Replaces the old "Manage" entry that was an alias for Send to agent.
 
 import React, { useMemo, useState } from 'react';
+import { deliveryErrorText } from './notify-handoff.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { postNotifyHandoff, resendNotifyHandoff } from './api.js';
 import { formatHandoffAgo } from './handoff-ago.js';
@@ -62,7 +63,7 @@ export function HandoffDetailsPanel({
       });
       const failed = body?.delivery?.status === 'failed';
       onToast?.(failed
-        ? `Sent — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
+        ? `Sent — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
         : 'Sent to agent', failed);
       await onRefresh?.();
     } catch (err) {

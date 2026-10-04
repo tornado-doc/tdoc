@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { deliveryErrorText } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
@@ -40,7 +41,7 @@ function HandoffStatusChips({ comment }) {
       <span
         key="failed"
         className="tdoc-handoff-chip is-failed"
-        title={comment.handoff_delivery?.error || undefined}
+        title={deliveryErrorText(comment.handoff_delivery?.error) || undefined}
       >
         Not delivered
       </span>,
@@ -212,6 +213,8 @@ function ReplyForm({
   mentionable,
   demo = false,
   canSendToAgent = false,
+  // Owner with no agent connected: @agent stays visible and leads to setup.
+  agentSetupHref = null,
 }) {
   const [text, setText] = useState('');
   // One submit at a time, same as the comment composer: ⌘+Enter and the
@@ -251,6 +254,9 @@ function ReplyForm({
           {canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
         </span>
         <div className="tdoc-reply-form-actions">
+          {!canSendToAgent && agentSetupHref ? (
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
+          ) : null}
           {canSendToAgent ? (
             <button
               className="tdoc-reply-submit agent"
@@ -444,6 +450,8 @@ function ReplyCard({
   mentionable,
   demo = false,
   canSendToAgent = false,
+  // Owner with no agent connected: @agent stays visible and leads to setup.
+  agentSetupHref = null,
   replyTarget,
   onReplyTarget,
   editTarget,
@@ -479,6 +487,7 @@ function ReplyCard({
       mentionable={mentionable}
       demo={demo}
       canSendToAgent={canSendToAgent}
+            agentSetupHref={agentSetupHref}
       replyTarget={replyTarget}
       onReplyTarget={onReplyTarget}
       editTarget={editTarget}
@@ -583,6 +592,7 @@ function ReplyCard({
           mentionable={mentionable}
           demo={demo}
           canSendToAgent={canSendToAgent}
+            agentSetupHref={agentSetupHref}
         />
       ) : null}
 
@@ -624,6 +634,8 @@ export function CommentCard({
   expandReplies = false,
   selected = false,
   canSendToAgent = false,
+  // Owner with no agent connected: @agent stays visible and leads to setup.
+  agentSetupHref = null,
   onActivate,
   onReply,
   onReact,
@@ -722,6 +734,7 @@ export function CommentCard({
             mentionable={mentionable}
             demo={demo}
             canSendToAgent={canSendToAgent}
+            agentSetupHref={agentSetupHref}
             replyTarget={replyTarget}
             onReplyTarget={setReplyTarget}
             editTarget={editTarget}
@@ -932,6 +945,7 @@ export function CommentCard({
           mentionable={mentionable}
           demo={demo}
           canSendToAgent={canSendToAgent}
+            agentSetupHref={agentSetupHref}
         />
       ) : null}
     </article>

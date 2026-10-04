@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send } from 'lucide-react';
+import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send, RefreshCw } from 'lucide-react';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
-import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel } from '../../shell/src/document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText } from '../../shell/src/document/notify-handoff.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from '../../shell/src/document/handoff-state.js';
 import { setApiTransport } from '../../shell/src/document/api.js';
 import chromeCss from '../../server/chrome.css?inline';
@@ -64,13 +64,13 @@ ${uiCss}
       border-radius: 999px; background: #1652f0; color: #fff; font: 700 10px/17px system-ui, sans-serif; text-align: center;
     }
     #tdoc-feedback-root .tdoc-fb-banner {
-      position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 2147483643; pointer-events: auto;
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 2147483643; pointer-events: none;
       display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 16px; border-radius: 999px;
       background: #1a1a1a; color: #fff; font: 600 13px/1.2 system-ui, -apple-system, sans-serif;
       box-shadow: 0 8px 28px rgba(0,0,0,.22);
     }
     #tdoc-feedback-root .tdoc-fb-banner button {
-      appearance: none; border: 0; cursor: pointer; border-radius: 999px; padding: 5px 10px;
+      appearance: none; border: 0; cursor: pointer; pointer-events: auto; border-radius: 999px; padding: 5px 10px;
       background: rgba(255,255,255,.14); color: #fff; font: inherit;
     }
     #tdoc-feedback-root .tdoc-fb-toast {
@@ -94,6 +94,11 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-filter button { appearance: none; border: 0; background: transparent; border-radius: 6px; padding: 4px 6px; font: 600 11.5px system-ui, sans-serif; color: #6b6a66; cursor: pointer; }
     #tdoc-feedback-root .tdoc-fb-filter button.on { background: #fff; color: #1a1a1a; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
     #tdoc-feedback-root .tdoc-fb-panel .x { appearance: none; border: 0; background: none; font-size: 20px; line-height: 1; color: #8a8985; cursor: pointer; padding: 0 2px; }
+    #tdoc-feedback-root .tdoc-fb-refresh { appearance: none; border: 0; background: none; color: #6b6a66; cursor: pointer; border-radius: 6px; padding: 5px; display: inline-flex; }
+    #tdoc-feedback-root .tdoc-fb-refresh:hover { background: #f0f0ee; color: #1a1a1a; }
+    #tdoc-feedback-root .tdoc-fb-refresh svg { width: 15px; height: 15px; }
+    #tdoc-feedback-root .tdoc-fb-refresh[aria-busy="true"] svg { animation: tdoc-fb-spin .7s linear infinite; }
+    @keyframes tdoc-fb-spin { to { transform: rotate(360deg); } }
     #tdoc-feedback-root .tdoc-fb-scroll { flex: 1; overflow-y: auto; padding: 6px 8px 16px; overscroll-behavior: contain; }
     #tdoc-feedback-root .tdoc-fb-scroll h4 { margin: 14px 8px 6px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: #8a8985; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #tdoc-feedback-root .tdoc-fb-scroll ul { list-style: none; margin: 0; padding: 0; }
@@ -196,20 +201,13 @@ ${uiCss}
   let connecting = null;
   function connect() {
     if (connecting) return connecting;
-    connecting = new Promise((resolve, reject) => {
+    const attempt = new Promise((resolve, reject) => {
       const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}`;
-      const popup = window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
-      if (!popup) {
-        const error = new Error('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.');
-        error.status = 0;
-        error.blocked = true;
-        reject(error);
-        return;
-      }
+      let popup = null;
+      let watch = null;
       const done = (fn) => (value) => {
         window.removeEventListener('message', onMessage);
         clearInterval(watch);
-        connecting = null;
         fn(value);
       };
       const finish = done(resolve);
@@ -222,8 +220,19 @@ ${uiCss}
         writeSession(session);
         finish(session);
       };
+      // Listen before opening. A signed-in popup can answer immediately, and
+      // registering afterwards leaves the app waiting for a message it missed.
       window.addEventListener('message', onMessage);
-      const watch = setInterval(() => {
+      popup = window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+      if (!popup) {
+        window.removeEventListener('message', onMessage);
+        const error = new Error('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.');
+        error.status = 0;
+        error.blocked = true;
+        reject(error);
+        return;
+      }
+      watch = setInterval(() => {
         if (popup.closed) {
           const error = new Error('The tdoc window was closed before connecting.');
           error.status = 0;
@@ -231,6 +240,13 @@ ${uiCss}
         }
       }, 500);
     });
+    // Every attempt, including a browser-blocked popup, must release the
+    // single-flight slot. Otherwise the first rejected Promise is cached and
+    // every later click fails without even trying to open a window.
+    connecting = attempt.then(
+      (session) => { connecting = null; return session; },
+      (error) => { connecting = null; throw error; },
+    );
     return connecting;
   }
 
@@ -405,7 +421,7 @@ ${uiCss}
         body: JSON.stringify({ slug, comment_ids: [].concat(commentIds), instruction: 'address this comment' }),
       });
       const failed = body && body.delivery && body.delivery.status === 'failed';
-      return { ok: !failed, message: failed ? `Posted — not delivered to the agent${body.delivery.error ? `: ${body.delivery.error}` : ''}` : 'Sent to your agent' };
+      return { ok: !failed, message: failed ? `Posted — not delivered to the agent${body.delivery.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}` : 'Sent to your agent' };
     } catch (error) {
       return { ok: false, message: `Posted — could not send to the agent (${error.message})` };
     }
@@ -502,6 +518,21 @@ ${uiCss}
 
 
   const PANEL_WIDTH = 340;
+  const POLL_MS = 15_000;
+  // Keep our panel, picking banner and floating cards below the host app's
+  // own top navigation/tabs. This stays zero on pages with no top chrome.
+  const hostTopInset = () => {
+    let bottom = 0;
+    for (const el of document.querySelectorAll('header, nav, [role="tablist"]')) {
+      if (host.contains(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < innerWidth * .35 || r.top < -2 || r.top > 180 || r.bottom > 240) continue;
+      const s = getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden') continue;
+      bottom = Math.max(bottom, r.bottom);
+    }
+    return bottom ? Math.ceil(bottom + 8) : 0;
+  };
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
     const a = anchor || {};
@@ -564,7 +595,7 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ all, pageUrl, filter, setFilter, onPick, onOpen, onClose }) {
+  function ListPanel({ all, pageUrl, filter, setFilter, onPick, onOpen, onClose, onRefresh, refreshing, topInset }) {
     const shown = all.filter((c) => !c.deleted && (filter === 'all' || threadPhase(c) === filter));
     const here = shown.filter((c) => c.anchor.url === pageUrl);
     const elsewhere = new Map();
@@ -590,7 +621,7 @@ ${uiCss}
       );
     };
     return (
-      <aside className="tdoc-fb-panel" aria-label="Feedback on this app">
+      <aside className="tdoc-fb-panel" aria-label="Feedback on this app" style={topInset ? { top: topInset } : null}>
         <header>
           <strong>Feedback</strong>
           <span className="tdoc-fb-filter" role="group" aria-label="Show">
@@ -598,6 +629,7 @@ ${uiCss}
               <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>
             ))}
           </span>
+          <button type="button" className="tdoc-fb-refresh" aria-label="Refresh feedback" title="Refresh feedback" aria-busy={refreshing ? 'true' : 'false'} onClick={onRefresh}><RefreshCw aria-hidden="true" /></button>
           <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
         </header>
         <div className="tdoc-fb-scroll">
@@ -628,6 +660,8 @@ ${uiCss}
     const [openId, setOpenId] = useState(null);
     const [notice, setNotice] = useState(null);
     const [toast, setToast] = useState(null);
+    const [refreshing, setRefreshing] = useState(false);
+    const refreshingRef = useRef(false);
     const [reanchorId, setReanchorId] = useState(null);
     const [agent, setAgent] = useState(null);
     const [notifyIds, setNotifyIds] = useState(null);
@@ -653,6 +687,13 @@ ${uiCss}
     const load = useCallback(async () => apply(await call({
       type: 'tdoc-feedback-load', pageUrl: canonical(),
     })), [apply]);
+    const refresh = useCallback(async () => {
+      if (refreshingRef.current) return false;
+      refreshingRef.current = true;
+      setRefreshing(true);
+      try { return await load(); }
+      finally { refreshingRef.current = false; setRefreshing(false); }
+    }, [load]);
 
     // Showing the overlay loads the thread. The first time on an app with no
     // comments yet goes straight to picking — that is what someone who just
@@ -791,6 +832,19 @@ ${uiCss}
       return () => document.removeEventListener('keydown', keydown, true);
     }, [surface, load]);
 
+    // The list docks instead of floating over the app: the page gives up the
+    // panel's width while it is open, so the app's own top bar and right
+    // edge (an account menu, buttons) stay visible and clickable beside it.
+    useEffect(() => {
+      if (!shown || !panelOpen) return undefined;
+      const root = document.documentElement;
+      const prior = root.style.marginRight;
+      const priorTransition = root.style.transition;
+      root.style.transition = 'margin-right .15s ease';
+      root.style.marginRight = `${PANEL_WIDTH}px`;
+      return () => { root.style.marginRight = prior; root.style.transition = priorTransition; };
+    }, [shown, panelOpen]);
+
     // Hash-route navigation is a new page: reload which comments are here.
     useEffect(() => {
       if (!shown) return undefined;
@@ -800,6 +854,18 @@ ${uiCss}
       window.addEventListener('popstate', onNav);
       return () => { window.removeEventListener('hashchange', onNav); window.removeEventListener('popstate', onNav); };
     }, [shown, load]);
+
+    // Refresh lightly while the overlay is visible. Hidden tabs make no
+    // requests, and a composer/thread stays still while somebody is typing.
+    // Returning to the tab refreshes immediately; the list also has a manual
+    // refresh button for the moments when a person wants certainty now.
+    useEffect(() => {
+      if (!shown || !surface || !(session && session.token) || selected || openId) return undefined;
+      const tick = () => { if (document.visibilityState === 'visible') refresh(); };
+      const timer = setInterval(tick, POLL_MS);
+      document.addEventListener('visibilitychange', tick);
+      return () => { clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
+    }, [shown, surface, session && session.token, selected, openId, refresh]);
 
     // Modals, tabs and client-side routing change the page without a scroll
     // or resize. Watch the DOM (not our own overlay) and re-place the pins.
@@ -842,6 +908,7 @@ ${uiCss}
     const pins = comments.filter((c) => !c.deleted).map((comment) => ({ comment, element: elementFor(comment) }));
     const openCount = allComments.filter(isOpen).length;
     const ready = summarizeHandoffSurfaces(allComments.filter((c) => !c.deleted)).ready;
+    const topInset = hostTopInset();
 
     if (!shown) {
       return (
@@ -857,9 +924,9 @@ ${uiCss}
     const placeCard = (element) => {
       const rect = element?.getBoundingClientRect();
       const width = innerWidth - rightInset;
-      if (!rect) return { top: 60, left: Math.max(8, width - 300) };
+      if (!rect) return { top: Math.max(60, topInset + 12), left: Math.max(8, width - 300) };
       const left = rect.right + 294 < width ? rect.right + 10 : Math.max(8, Math.min(rect.left - 290, width - 300));
-      return { top: Math.max(12, rect.top), left };
+      return { top: Math.max(topInset + 12, rect.top), left };
     };
     const openFromList = (c, local) => {
       if (!local) {
@@ -880,7 +947,7 @@ ${uiCss}
     return (
       <>
         {(picking || reanchorId) && !selected ? (
-          <div className="tdoc-fb-banner" role="status">
+          <div className="tdoc-fb-banner" role="status" style={topInset ? { top: topInset + 14 } : null}>
             {reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it'}
             <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
           </div>
@@ -911,6 +978,7 @@ ${uiCss}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
             connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
+            agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
             onClose={() => setSelected(null)}
             onSubmit={async (text, opts = {}) => {
               const anchor = contextFor(selected);
@@ -927,6 +995,7 @@ ${uiCss}
             isOwner={owner}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
+            agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
             unanchored={!elementFor(openComment) && !stateLabel(openComment.anchor)}
             floating
             position={placeCard(elementFor(openComment))}
@@ -949,14 +1018,24 @@ ${uiCss}
             onPick={() => { setOpenId(null); setPicking(true); }}
             onOpen={openFromList}
             onClose={() => setPanelOpen(false)}
+            onRefresh={refresh}
+            refreshing={refreshing}
+            topInset={topInset}
           />
         ) : null}
 
         {notice ? (
-          <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
+          <section className="tdoc-popup tdoc-feedback-notice" style={{ top: Math.max(64, topInset + 12), right: 18 + rightInset, left: 'auto' }}>
             <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" onClick={() => setNotice(null)}>×</button></div>
             <p>{notice.error}</p>
-            <div className="foot"><span /><button className="submit" type="button" onClick={async () => { setNotice(null); apply(await call({ type: 'tdoc-feedback-signin', pageUrl: canonical() })); }}>Connect tdoc</button></div>
+            <div className="foot"><span /><button className="submit" type="button" onClick={async () => {
+              setNotice(null);
+              const result = await call({ type: 'tdoc-feedback-signin', pageUrl: canonical() });
+              // This button is the continuation of "leave a comment", not a
+              // standalone account setting. After a successful first connect,
+              // put the person back where they were headed: picking an element.
+              if (apply(result)) setPicking(true);
+            }}>Connect tdoc</button></div>
           </section>
         ) : null}
 

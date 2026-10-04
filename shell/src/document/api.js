@@ -45,6 +45,14 @@ export function getOnboarding(options) {
   return request(options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
 }
 
+export function setOnboardingStep(step, done) {
+  return request('/api/onboarding/step', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ step, done }),
+  });
+}
+
 export function postOnboardingEvent(action, doc) {
   return request('/api/onboarding/event', {
     method: 'POST',
@@ -126,11 +134,11 @@ export function setDocumentStar(slug, starred) {
 // Start from scratch. There is no title yet — the author types one into the
 // page — so the server mints an opaque slug and returns the new doc's URL,
 // already carrying ?edit=1.
-export function createDocument() {
+export function createDocument(team) {
   return request('/api/doc/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify(team ? { team } : {}),
   });
 }
 
@@ -300,4 +308,40 @@ export function updateFolderAccess(id, { visibility, allowed_users } = {}) {
 export function deleteFolder(id) {
   const query = new URLSearchParams({ id });
   return request(`/api/folders?${query}`, { method: 'DELETE' });
+}
+
+function teamRequest(path, method, body) {
+  return request(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function createTeam(name, invites) {
+  return teamRequest('/api/teams', 'POST', { name, invites });
+}
+
+export function getTeam(id) {
+  return request(`/api/team?${new URLSearchParams({ id })}`);
+}
+
+export function updateTeam(id, patch) {
+  return teamRequest('/api/team', 'PATCH', { id, ...patch });
+}
+
+export function setTeamRole(id, accountId, role) {
+  return teamRequest('/api/team/role', 'POST', { id, account_id: accountId, role });
+}
+
+export function removeTeamMember(id, accountId) {
+  return teamRequest('/api/team/remove', 'POST', { id, account_id: accountId });
+}
+
+export function joinTeam(token) {
+  return teamRequest('/api/team/join', 'POST', { token });
+}
+
+export function moveDocsToTeam(slugs, team) {
+  return teamRequest('/api/team/move', 'POST', { slugs, team: team || null });
 }

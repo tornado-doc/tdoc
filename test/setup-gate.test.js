@@ -171,7 +171,7 @@ t('every thumbnail shows the thing its own step produces', () => {
   // Two of them run off the right edge rather than sitting in a box inside a
   // box, which is how Notion lets its calendar and its templates crop.
   assert(listCss.includes('right: -12px') && listCss.includes('right: -14px'), 'and two of them are cropped by the edge');
-  assert(listCss.includes('width: 100px; height: 62px;') && listCss.includes('grid-template-columns: 18px 1fr 100px;'),
+  assert(listCss.includes('width: 100px; height: 62px;') && listCss.includes('grid-template-columns: minmax(0, 1fr) 100px;'),
     'the row reserves exactly what the thumbnail takes');
   // The picture sets the row's height, so the row adds almost nothing of its
   // own: one line of text beside four lines' worth of picture reads as a list
@@ -572,8 +572,8 @@ t('the first arrival sees the whole shape, without a modal', () => {
 });
 
 t('the checklist is for the middle of the journey', () => {
-  assert(list.includes('if (!walking || done === steps.length) return null;'),
-    'nothing before starting or after all steps are completed or skipped');
+  assert(list.includes('if (!walking || (done === steps.length && !Object.keys(manualSteps).length)) return null;'),
+    'nothing before starting; manual completion stays reversible');
   assert(list.includes('ConnectAgentStep'), 'optional Raft is the fifth row inside the My docs tutorial');
   assert(list.includes("const STORE_KEY = 'tdoc.onboarding.collapsed'"), 'collapsing is a per-browser preference, not an account fact');
   assert(list.includes('onb-chip'), 'hidden, it parks rather than vanishing');
@@ -658,7 +658,7 @@ t('a brand-new account is the one state it must not refuse', () => {
   // It also refused exactly the state onboarding most needs simulating from.
   // The point of the internal bar is to stand at the beginning of the journey,
   // and the beginning is an account that has done nothing.
-  const route = worker.slice(worker.indexOf("p === '/api/onboarding/state'"));
+  const route = worker.slice(worker.indexOf("p === '/api/onboarding/state'"), worker.indexOf("p === '/api/onboarding/step'"));
   assert(/let accountId = await sessionAccountId\(env, session\);/.test(route), 'it looks the account up');
   assert(route.indexOf('hostedAccountForEmail(env, session && session.email') < route.indexOf('let body = {}'),
     'and mints one on first use, the way creating a doc does');

@@ -122,9 +122,9 @@ export function useDocsHub({ boot, onUnauthorized, preview }) {
   // there is no success toast to raise — only a failure keeps us on /me.
   // Quota hits return `{ quota }` so the page can open the bump dialog instead
   // of a toast that leaves the person stuck.
-  const createDoc = useCallback(async () => {
+  const createDoc = useCallback(async (team) => {
     try {
-      const created = await createDocument();
+      const created = await createDocument(team);
       if (!created || !created.url) return false;
       location.href = created.url;
       return true;

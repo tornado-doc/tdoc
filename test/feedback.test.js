@@ -268,6 +268,30 @@ const APP = 'http://localhost:3000';
     assert(notOwner.status === 401 || notOwner.status === 403, `a joiner drives the owner's agent: ${notOwner.status}`);
   });
 
+  await t('My docs lists feedback spaces you own or joined, with open/replied counts', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const julie = await putSession(env, 'julie');
+    const { body: space } = await connect(env, julie);
+    const anchor = { kind: 'product', url: `${APP}/`, selector: '#x', text: 'x' };
+    for (const text of ['one', 'two']) {
+      await worker.fetch(req('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text, anchor } }), env, {});
+    }
+    const me = await (await worker.fetch(req('/api/me', { cookie: julie }), env, {})).json();
+    const row = (me.feedback || []).find((x) => x.slug === space.slug);
+    assert(row && row.mine === true && row.origin === APP, `owner row: ${JSON.stringify(me.feedback)}`);
+    const counted = await (await worker.fetch(req('/api/me/feedback', { cookie: julie }), env, {})).json();
+    const crow = (counted.spaces || []).find((x) => x.slug === space.slug);
+    assert(crow && crow.open === 2 && crow.replied === 0, `counts: ${JSON.stringify(counted)}`);
+    assert(!(me.docs || []).some((d) => d.slug === space.slug), 'space leaked into My docs');
+    const can = await putSession(env, 'can');
+    const before = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
+    assert(!(before.feedback || []).length, 'a stranger sees the space');
+    await worker.fetch(joinReq(can, space.slug), env, {});
+    const after = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
+    const theirs = (after.feedback || []).find((x) => x.slug === space.slug);
+    assert(theirs && theirs.mine === false, `joiner row: ${JSON.stringify(after.feedback)}`);
+  });
+
   await t('an oversized anchor is refused on create and on re-anchor', async () => {
     const env = makeEnv(mod.CommentsStore);
     const julie = await putSession(env, 'julie');
@@ -328,6 +352,7 @@ const APP = 'http://localhost:3000';
     const source = fs.readFileSync(path.join(ROOT, 'feedback/src/main.jsx'), 'utf8');
     assert(source.includes("from '../../shell/src/document/comment-card.jsx'") && source.includes("from '../../server/chrome.css?inline'"), 'client stopped sharing the shell UI');
     assert(!source.includes('chrome.runtime'), 'client still depends on a browser extension');
+    assert(source.includes('POLL_MS = 15_000') && source.includes("visibilitychange") && source.includes('aria-label="Refresh feedback"'), 'live/manual feedback refresh is missing');
     const bundle = fs.readFileSync(path.join(ROOT, 'bin/tdoc-bundle'), 'utf8');
     assert(bundle.includes('__TDOC_FEEDBACK_JS__'), 'tdoc-bundle does not inline the client');
   });
