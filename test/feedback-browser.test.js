@@ -166,7 +166,13 @@ const APP_HTML = `<!doctype html>
       assert((await page.evaluate(() => window.__clicked)) === 1, 'a click on the app was swallowed while browsing');
       assert((await page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]').count()) === 0, 'browsing opened a composer');
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
-      await page.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor({ timeout: 3000 });
+      const banner = page.locator('#tdoc-feedback-root .tdoc-fb-banner');
+      await banner.waitFor({ timeout: 3000 });
+      const positions = await page.evaluate(() => ({
+        navBottom: document.querySelector('nav').getBoundingClientRect().bottom,
+        bannerTop: document.querySelector('#tdoc-feedback-root .tdoc-fb-banner').getBoundingClientRect().top,
+      }));
+      assert(positions.bannerTop >= positions.navBottom, `picking banner covers host navigation: ${JSON.stringify(positions)}`);
       await page.locator('#invite').click();
       assert((await page.evaluate(() => window.__clicked)) === 1, 'picking let the click through to the app');
       await page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]').first().waitFor({ timeout: 3000 });
@@ -184,6 +190,24 @@ const APP_HTML = `<!doctype html>
       await page.locator('#tdoc-feedback-root .tdoc-margin-comment').waitFor({ timeout: 3000 });
     });
 
+    await test('Refresh fetches a new comment without reloading the app', async () => {
+      const session = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), `tdoc-feedback:${tdocBase}`);
+      const response = await context.request.post(`${tdocBase}/api/comments`, {
+        headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/json' },
+        data: {
+          slug: session.slug,
+          version: session.version,
+          text: 'Appeared without a page reload',
+          anchor: { kind: 'product', url: `${appBase}/dashboard`, selector: '#invite', text: 'Send invite' },
+        },
+      });
+      assert(response.ok(), `external comment failed: ${response.status()}`);
+      const panel = page.locator('#tdoc-feedback-root .tdoc-fb-panel');
+      if (!(await panel.isVisible())) await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+      await page.getByRole('button', { name: 'Refresh feedback' }).click();
+      await page.getByText('Appeared without a page reload').waitFor({ timeout: 3000 });
+    });
+
     await test('a comment on a modal remembers the dialog and comes back when it reopens', async () => {
       await page.evaluate(() => {
         const d = document.createElement('div');
@@ -196,8 +220,9 @@ const APP_HTML = `<!doctype html>
       await page.locator('#save').click();
       const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]');
       await c.first().fill('Save is disabled');
+      const countBeforeSave = await page.locator('#tdoc-feedback-root .tdoc-pin').count();
       await page.locator('#tdoc-feedback-root .tdoc-popup button.submit').last().click();
-      await page.waitForFunction(() => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length >= 2);
+      await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length > n, countBeforeSave);
       const slug = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).slug, `tdoc-feedback:${tdocBase}`);
       const comments = JSON.parse(fs.readFileSync(path.join(root, slug, 'comments.json'), 'utf8'));
       const onModal = comments.find((x) => x.text === 'Save is disabled');
