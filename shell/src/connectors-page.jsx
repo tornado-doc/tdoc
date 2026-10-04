@@ -40,6 +40,7 @@ export function ConnectorsBody() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState('');
   const [defaults, setDefaults] = useState({});
+  const [editingDefault, setEditingDefault] = useState({});
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (q.get('connected') === 'raft') setNotice('Raft server connected. Agents on it now get comments on the docs they write.');
@@ -107,40 +108,59 @@ export function ConnectorsBody() {
         {targets === null ? <p className="muted">Loading…</p> : !connectors.length ? (
           <p className="empty">Nothing connected yet. Add one below.</p>
         ) : (
-          <section className="pane">
+          <div className="tdoc-connectors">
             {connectors.map((c) => {
               const isRaft = c.kind === 'raft';
               const sample = isRaft ? (c.agents || [])[0] : c.target;
               const title = isRaft ? `Raft · ${c.server_slug || 'server'}` : (readableHandle(c.target) || 'Webhook');
               const names = isRaft ? (c.agents || []).map((a) => readableHandle(a) || a.agent_sub) : [];
               const isDefault = targets[0] && sample && idOf(targets[0]) === idOf(sample);
-              const detail = isRaft
-                ? `${names.length ? `Linked: ${names.join(', ')}` : 'No agent linked yet'} · any agent on this server gets comments on the docs it writes`
-                : detailOf(c.target);
+              const editing = Boolean(editingDefault[c.id]);
               return (
-                <div key={c.id} className="doc-row tdoc-conn-row">
-                  <span className="tdoc-conn-mark"><ProviderMark target={isRaft ? { provider: 'raft' } : c.target} size={20} /></span>
-                  <div className="doc-info">
-                    <span className="doc-title">{title}{isDefault ? <span className="tdoc-conn-default">default</span> : null}</span>
-                    <div className="doc-meta">{detail}{sample && results[idOf(sample)] ? ` · ${results[idOf(sample)]}` : ''}</div>
-                    {isRaft ? (
-                      <form className="tdoc-conn-default-form" onSubmit={(e) => { e.preventDefault(); saveDefault(c); }}>
-                        <input
-                          type="text"
-                          placeholder={names.length ? 'Change default agent (@handle)' : 'Default agent for docs no agent wrote (@handle)'}
-                          value={defaults[c.id] || ''}
-                          onChange={(e) => setDefaults((d) => ({ ...d, [c.id]: e.target.value }))}
-                        />
-                        <button type="submit" className="tdoc-fbspace-btn" disabled={!(defaults[c.id] || '').trim()}>Save</button>
-                      </form>
-                    ) : null}
+                <section key={c.id} className="tdoc-connector tdoc-conn-card">
+                  <div className="tdoc-conn-card-head">
+                    <span className="tdoc-connector-logo"><ProviderMark target={isRaft ? { provider: 'raft' } : c.target} size={22} /></span>
+                    <div className="tdoc-conn-card-title">
+                      <strong>{title}</strong>
+                      {isDefault ? <span className="tdoc-connector-badge">Default</span> : null}
+                    </div>
+                    <div className="tdoc-conn-card-actions">
+                      {sample ? <button type="button" className="tdoc-fbspace-btn" onClick={() => test(sample)}>Send test</button> : null}
+                      <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirm({ ...c, title })}>Disconnect</button>
+                    </div>
                   </div>
-                  {sample ? <button type="button" className="tdoc-fbspace-btn" onClick={() => test(sample)}>Send test</button> : null}
-                  <button type="button" className="tdoc-fbspace-btn" onClick={() => setConfirm({ ...c, title })}>Disconnect</button>
-                </div>
+                  <dl className="tdoc-conn-facts">
+                    {isRaft ? (
+                      <>
+                        <div><dt>Default agent</dt><dd>{names.length ? names.join(', ') : 'none yet'}</dd></div>
+                        <div><dt>Routing</dt><dd>Any agent on this server gets the comments on docs it wrote.</dd></div>
+                      </>
+                    ) : (
+                      <div><dt>Endpoint</dt><dd>{detailOf(c.target)}</dd></div>
+                    )}
+                    {sample && results[idOf(sample)] ? <div><dt>Last test</dt><dd>{results[idOf(sample)]}</dd></div> : null}
+                  </dl>
+                  {isRaft ? (editing ? (
+                    <form className="tdoc-conn-inline-form" onSubmit={(e) => { e.preventDefault(); saveDefault(c); setEditingDefault((m) => ({ ...m, [c.id]: false })); }}>
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder="@agent-handle"
+                        value={defaults[c.id] || ''}
+                        onChange={(e) => setDefaults((d) => ({ ...d, [c.id]: e.target.value }))}
+                      />
+                      <button type="submit" className="tdoc-fbspace-btn primary" disabled={!(defaults[c.id] || '').trim()}>Save</button>
+                      <button type="button" className="tdoc-fbspace-btn" onClick={() => setEditingDefault((m) => ({ ...m, [c.id]: false }))}>Cancel</button>
+                    </form>
+                  ) : (
+                    <button type="button" className="tdoc-link-btn" onClick={() => setEditingDefault((m) => ({ ...m, [c.id]: true }))}>
+                      {names.length ? 'Change default agent' : 'Set a default agent'}
+                    </button>
+                  )) : null}
+                </section>
               );
             })}
-          </section>
+          </div>
         )}
 
         <h2 className="tdoc-conn-h">Add a connector</h2>
@@ -152,7 +172,12 @@ export function ConnectorsBody() {
               <ConnectorHead connector={conn} />
               {conn.id === 'raft' ? (raftReady ? (
                 <>
-                  <RaftConnectButton />
+                  {connectors.some((x) => x.kind === 'raft') ? (
+                    <p className="muted tdoc-conn-note">
+                      ✓ Connected to {connectors.filter((x) => x.kind === 'raft').map((x) => x.server_slug || 'a server').join(', ')}. Connect another only if some of your agents live on a different Raft server.
+                    </p>
+                  ) : null}
+                  <RaftConnectButton label={connectors.some((x) => x.kind === 'raft') ? 'Connect another Raft server' : 'Connect with Raft'} />
                   <details className="tdoc-conn-alt">
                     <summary>Or let an agent connect itself</summary>
                     <code>{CONNECT_AGENT_PROMPT}</code>
