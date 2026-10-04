@@ -622,7 +622,7 @@ t('a session carries its account, so a new doc looks like theirs', () => {
   // Resolved once here rather than in each place that asks: the ownership test
   // is synchronous and cannot look it up, which is why it could only read what
   // the session already carried.
-  assert(worker.includes('const acct = session && session.account_id;'), 'the ownership test still reads it from the session');
+  assert(worker.includes('sessionOwnsAccount(session, docAcct)'), 'the ownership test still reads it from the session');
   assert((worker.match(/isDocOwnerSession\(/g) || []).length >= 8, 'and there are many askers, all now reading a filled-in value');
 });
 

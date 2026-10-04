@@ -46,6 +46,7 @@ const box = {};
 vm.createContext(box);
 vm.runInContext([
   'normalizeGithubLogin', 'normalizeEmail', 'sessionLogin', 'sessionPrincipal',
+  'sessionAccountIds', 'sessionOwnsAccount',
   'actorKey', 'actorDisplayName', 'normalizeActorKey', 'normalizeInvitee', 'isAllowlisted',
   'isOwnerSession', 'isDocOwnerSession', 'hostedGithubLogin', 'canCommentOnDoc',
   'canMutate',

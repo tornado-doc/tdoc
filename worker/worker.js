@@ -267,6 +267,25 @@ function sessionPrincipal(session) {
   return sessionLogin(session) || normalizeEmail(session && session.email) || '';
 }
 
+// One human can arrive through two provider-backed accounts that already
+// existed before the providers were linked (for example: an email account,
+// then GitHub through Clerk). Keep the original account ids -- tokens and
+// audit records stay immutable -- but let the browser session carry the
+// other ids the provider proved belong to the same person.
+function sessionAccountIds(session) {
+  const ids = [];
+  const add = (id) => {
+    if (typeof id === 'string' && id && !ids.includes(id)) ids.push(id);
+  };
+  add(session && session.account_id);
+  for (const id of (session && Array.isArray(session.linked_account_ids) ? session.linked_account_ids : [])) add(id);
+  return ids.slice(0, 8);
+}
+
+function sessionOwnsAccount(session, accountId) {
+  return typeof accountId === 'string' && accountId && sessionAccountIds(session).includes(accountId);
+}
+
 // The stable key an identity is recorded under: a GitHub handle stays a bare
 // handle (every comment, inbox and allowlist entry ever written uses that
 // shape, and none of them are getting rewritten), and an identity with no
@@ -314,9 +333,8 @@ function isDocOwnerSession(env, session, meta) {
   // this is what makes a doc published through an email-keyed account
   // manageable from the browser by the same person, whatever button they
   // signed in with.
-  const acct = session && session.account_id;
   const docAcct = meta && meta.hosted && meta.hosted.account_id;
-  if (acct && docAcct && acct === docAcct) return true;
+  if (sessionOwnsAccount(session, docAcct)) return true;
   const login = sessionLogin(session);
   if (!login) return false;
   const hostedLogin = hostedGithubLogin(meta);
@@ -2428,6 +2446,10 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
   let ghHandle = (bridged && bridged.handle)
     || (account_id && idpRec && normalizeGithubLogin(idpRec.handle))
     || null;
+  let linkedAccountIds = sessionAccountIds({
+    account_id,
+    linked_account_ids: idpRec && idpRec.linked_account_ids,
+  }).filter((id) => id !== account_id);
   if (!ghHandle && sub) {
     const gh = await probeGithub();
     if (gh && gh.handle) {
@@ -2437,6 +2459,29 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
         // the old first-party flow extended to GitHub's /user.
         ghHandle = gh.handle;
       } else {
+        const githubAccountId = gh.ghId ? await accountIdByIdp(env, 'github', gh.ghId) : null;
+        // Both stable provider ids point at existing accounts. This happens
+        // when somebody first used email, then later chose their GitHub
+        // identity inside the same Clerk user. It is proof of one human, not
+        // a display-name/email guess: let this browser session own both old
+        // account records instead of silently stranding one set of docs.
+        if (githubAccountId && githubAccountId !== account_id) {
+          const named = await lookupHostedAccount(env, gh.handle);
+          const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
+          if (named && named.account_id === githubAccountId
+              && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
+            linkedAccountIds = sessionAccountIds({
+              account_id,
+              linked_account_ids: [...linkedAccountIds, githubAccountId],
+            }).filter((id) => id !== account_id);
+            ghHandle = gh.handle;
+            if (idpRec) {
+              idpRec.handle = gh.handle;
+              idpRec.linked_account_ids = linkedAccountIds;
+              await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
+            }
+          }
+        }
         // An account resolved by email or by a link that predates the
         // bridge (or was written by a mint) carries no handle. Restore
         // only what this account already owns: the handle must resolve
@@ -2445,7 +2490,7 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
         // recycled name pointing anywhere else stays where it is.
         const named = await lookupHostedAccount(env, gh.handle);
         const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
-        if (named && named.account_id === account_id
+        if (!ghHandle && named && named.account_id === account_id
             && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
           ghHandle = gh.handle;
           // Written back so the heal is permanent — but only onto a
@@ -2468,6 +2513,7 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
     oidc: true,
     created: new Date().toISOString(),
     ...(account_id ? { account_id } : {}),
+    ...(linkedAccountIds.length ? { linked_account_ids: linkedAccountIds } : {}),
     ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
     // The verified handle becomes the session login, so the actor key
     // stays handle-shaped: old comments stay editable, handle invites
