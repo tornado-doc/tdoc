@@ -38,7 +38,7 @@ function waitForServer(port, timeout = 5_000) {
 // Somebody's app: not tdoc, knows nothing about tdoc.
 const APP_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Acme dashboard</title>
-<style>body{font:16px system-ui;margin:0}main{max-width:640px;margin:40px auto;padding:0 24px}.card{border:1px solid #ddd;border-radius:8px;padding:16px;margin:0 0 12px}button{background:#111;color:#fff;border:0;padding:8px 14px;border-radius:6px}</style>
+<style>body{font:16px system-ui;margin:0}main{max-width:640px;margin:80px auto 40px;padding:0 24px}nav{position:fixed;z-index:2147483644;top:0;left:0;right:0;height:48px;padding:0 24px;display:flex;align-items:center;background:#fff;border-bottom:1px solid #ddd}.card{border:1px solid #ddd;border-radius:8px;padding:16px;margin:0 0 12px}button{background:#111;color:#fff;border:0;padding:8px 14px;border-radius:6px}</style>
 </head><body><main>
 <nav><b>Dashboard</b> · Projects · Settings</nav>
 <section class="card"><h2>Weekly active users</h2><p>1,284 · +12%</p></section>
@@ -168,11 +168,18 @@ const APP_HTML = `<!doctype html>
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
       const banner = page.locator('#tdoc-feedback-root .tdoc-fb-banner');
       await banner.waitFor({ timeout: 3000 });
-      const positions = await page.evaluate(() => ({
-        navBottom: document.querySelector('nav').getBoundingClientRect().bottom,
-        bannerTop: document.querySelector('#tdoc-feedback-root .tdoc-fb-banner').getBoundingClientRect().top,
-      }));
-      assert(positions.bannerTop >= positions.navBottom, `picking banner covers host navigation: ${JSON.stringify(positions)}`);
+      const feedbackWins = await page.evaluate(() => {
+        const banner = document.querySelector('#tdoc-feedback-root .tdoc-fb-banner');
+        const r = banner.getBoundingClientRect();
+        const nav = document.querySelector('nav');
+        return {
+          overlaps: r.top < nav.getBoundingClientRect().bottom,
+          rootZ: Number(getComputedStyle(document.getElementById('tdoc-feedback-root')).zIndex),
+          navZ: Number(getComputedStyle(nav).zIndex),
+        };
+      });
+      assert(feedbackWins.overlaps && feedbackWins.rootZ > feedbackWins.navZ,
+        `feedback chrome is not above the host top bar: ${JSON.stringify(feedbackWins)}`);
       await page.locator('#invite').click();
       assert((await page.evaluate(() => window.__clicked)) === 1, 'picking let the click through to the app');
       await page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]').first().waitFor({ timeout: 3000 });
@@ -181,8 +188,28 @@ const APP_HTML = `<!doctype html>
     });
 
     await test('the list shows every comment on the app and opens its card', async () => {
+      const before = await page.evaluate(() => ({
+        marginRight: document.documentElement.style.marginRight,
+        main: document.querySelector('main').getBoundingClientRect().toJSON(),
+      }));
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
-      await page.locator('#tdoc-feedback-root .tdoc-fb-panel').waitFor({ timeout: 3000 });
+      const panel = page.locator('#tdoc-feedback-root .tdoc-fb-panel');
+      await panel.waitFor({ timeout: 3000 });
+      await page.waitForTimeout(200);
+      const overlay = await page.evaluate(() => {
+        const panel = document.querySelector('#tdoc-feedback-root .tdoc-fb-panel');
+        const p = panel.getBoundingClientRect();
+        const m = document.querySelector('main').getBoundingClientRect();
+        return {
+          marginRight: document.documentElement.style.marginRight,
+          main: m.toJSON(), panel: p.toJSON(),
+          topRightIsPanel: Boolean(document.elementFromPoint(innerWidth - 8, 8)?.closest('.tdoc-fb-panel')),
+        };
+      });
+      assert(overlay.marginRight === before.marginRight && overlay.main.left === before.main.left && overlay.main.width === before.main.width,
+        `feedback list shifted the host app: ${JSON.stringify({ before, overlay })}`);
+      assert(overlay.panel.top === 0 && overlay.panel.right === 1200 && overlay.topRightIsPanel,
+        `feedback list is not a top-layer right overlay: ${JSON.stringify(overlay)}`);
       const items = page.locator('#tdoc-feedback-root .tdoc-fb-item');
       assert((await items.count()) >= 1, 'list is empty');
       assert((await items.first().innerText()).includes('This button does nothing'), 'list item lacks the comment');

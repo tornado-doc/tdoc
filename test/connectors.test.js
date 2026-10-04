@@ -141,7 +141,9 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
 
   await t('an unlinked agent on a connected Raft server takes the seat on its doc', async () => {
     const ctx = await seedRaft();
-    await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-b', 'X-Tdoc-Raft-Agent-Name': encodeURIComponent('小c') });
+    const reply = await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-b', 'X-Tdoc-Raft-Agent-Name': encodeURIComponent('小c') });
+    const posted = await reply.json();
+    assert(posted.author.provider === 'raft' && posted.author.handle === '@小c', JSON.stringify(posted.author));
     const r = await targetsOf(ctx);
     assert(r.default && r.default.source === 'doc' && r.default.agent_sub === 'agent-b' && r.default.agent_name === '小c' && r.default.server_slug === 'acme', JSON.stringify(r.default));
   });

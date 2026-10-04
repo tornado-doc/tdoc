@@ -19,7 +19,7 @@ if (window.top === window && !window.__TDOC_FEEDBACK__) {
   style.id = 'tdoc-feedback-styles';
   style.textContent = `${chromeCss}
 ${uiCss}
-    #tdoc-feedback-root { position: fixed; inset: 0; z-index: 2147483640; pointer-events: none; }
+    #tdoc-feedback-root { position: fixed; inset: 0; z-index: 2147483645; pointer-events: none; }
     #tdoc-feedback-root * { box-sizing: border-box; }
     #tdoc-feedback-root .tdoc-hover-outline { position: fixed; }
     #tdoc-feedback-root .tdoc-pin { position: fixed; z-index: 2147483642; }
@@ -85,7 +85,10 @@ ${uiCss}
       display: flex; flex-direction: column; background: #fff; color: #1a1a1a;
       border-left: 1px solid #e8e7e3; box-shadow: -8px 0 28px rgba(0,0,0,.08);
       font: 13px/1.45 system-ui, -apple-system, sans-serif;
+      animation: tdoc-fb-panel-in .16s ease-out;
     }
+    @keyframes tdoc-fb-panel-in { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+    @media (prefers-reduced-motion: reduce) { #tdoc-feedback-root .tdoc-fb-panel { animation: none; } }
     #tdoc-feedback-root .tdoc-fb-panel header {
       display: flex; align-items: center; gap: 8px; padding: 14px 10px 12px 14px; border-bottom: 1px solid #efeeea;
     }
@@ -519,20 +522,6 @@ ${uiCss}
 
   const PANEL_WIDTH = 340;
   const POLL_MS = 15_000;
-  // Keep our panel, picking banner and floating cards below the host app's
-  // own top navigation/tabs. This stays zero on pages with no top chrome.
-  const hostTopInset = () => {
-    let bottom = 0;
-    for (const el of document.querySelectorAll('header, nav, [role="tablist"]')) {
-      if (host.contains(el)) continue;
-      const r = el.getBoundingClientRect();
-      if (r.width < innerWidth * .35 || r.top < -2 || r.top > 180 || r.bottom > 240) continue;
-      const s = getComputedStyle(el);
-      if (s.display === 'none' || s.visibility === 'hidden') continue;
-      bottom = Math.max(bottom, r.bottom);
-    }
-    return bottom ? Math.ceil(bottom + 8) : 0;
-  };
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
     const a = anchor || {};
@@ -595,7 +584,7 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ all, pageUrl, filter, setFilter, onPick, onOpen, onClose, onRefresh, refreshing, topInset }) {
+  function ListPanel({ all, pageUrl, filter, setFilter, onPick, onOpen, onClose, onRefresh, refreshing }) {
     const shown = all.filter((c) => !c.deleted && (filter === 'all' || threadPhase(c) === filter));
     const here = shown.filter((c) => c.anchor.url === pageUrl);
     const elsewhere = new Map();
@@ -621,7 +610,7 @@ ${uiCss}
       );
     };
     return (
-      <aside className="tdoc-fb-panel" aria-label="Feedback on this app" style={topInset ? { top: topInset } : null}>
+      <aside className="tdoc-fb-panel" aria-label="Feedback on this app">
         <header>
           <strong>Feedback</strong>
           <span className="tdoc-fb-filter" role="group" aria-label="Show">
@@ -832,19 +821,6 @@ ${uiCss}
       return () => document.removeEventListener('keydown', keydown, true);
     }, [surface, load]);
 
-    // The list docks instead of floating over the app: the page gives up the
-    // panel's width while it is open, so the app's own top bar and right
-    // edge (an account menu, buttons) stay visible and clickable beside it.
-    useEffect(() => {
-      if (!shown || !panelOpen) return undefined;
-      const root = document.documentElement;
-      const prior = root.style.marginRight;
-      const priorTransition = root.style.transition;
-      root.style.transition = 'margin-right .15s ease';
-      root.style.marginRight = `${PANEL_WIDTH}px`;
-      return () => { root.style.marginRight = prior; root.style.transition = priorTransition; };
-    }, [shown, panelOpen]);
-
     // Hash-route navigation is a new page: reload which comments are here.
     useEffect(() => {
       if (!shown) return undefined;
@@ -908,8 +884,6 @@ ${uiCss}
     const pins = comments.filter((c) => !c.deleted).map((comment) => ({ comment, element: elementFor(comment) }));
     const openCount = allComments.filter(isOpen).length;
     const ready = summarizeHandoffSurfaces(allComments.filter((c) => !c.deleted)).ready;
-    const topInset = hostTopInset();
-
     if (!shown) {
       return (
         <button className="tdoc-comment-pill tdoc-feedback-mode tdoc-feedback-idle" type="button" title="tdoc feedback" onClick={() => show({ intent: 'bookmark' })}>
@@ -924,9 +898,9 @@ ${uiCss}
     const placeCard = (element) => {
       const rect = element?.getBoundingClientRect();
       const width = innerWidth - rightInset;
-      if (!rect) return { top: Math.max(60, topInset + 12), left: Math.max(8, width - 300) };
+      if (!rect) return { top: 60, left: Math.max(8, width - 300) };
       const left = rect.right + 294 < width ? rect.right + 10 : Math.max(8, Math.min(rect.left - 290, width - 300));
-      return { top: Math.max(topInset + 12, rect.top), left };
+      return { top: Math.max(12, rect.top), left };
     };
     const openFromList = (c, local) => {
       if (!local) {
@@ -947,7 +921,7 @@ ${uiCss}
     return (
       <>
         {(picking || reanchorId) && !selected ? (
-          <div className="tdoc-fb-banner" role="status" style={topInset ? { top: topInset + 14 } : null}>
+          <div className="tdoc-fb-banner" role="status">
             {reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it'}
             <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
           </div>
@@ -1020,12 +994,11 @@ ${uiCss}
             onClose={() => setPanelOpen(false)}
             onRefresh={refresh}
             refreshing={refreshing}
-            topInset={topInset}
           />
         ) : null}
 
         {notice ? (
-          <section className="tdoc-popup tdoc-feedback-notice" style={{ top: Math.max(64, topInset + 12), right: 18 + rightInset, left: 'auto' }}>
+          <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
             <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" onClick={() => setNotice(null)}>×</button></div>
             <p>{notice.error}</p>
             <div className="foot"><span /><button className="submit" type="button" onClick={async () => {
