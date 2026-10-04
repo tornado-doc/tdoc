@@ -168,7 +168,8 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     const kinds = list.connectors.map((c) => c.kind).sort().join(',');
     assert(kinds === 'raft,webhook', `connectors ${kinds}`);
     const raft = list.connectors.find((c) => c.kind === 'raft');
-    assert(raft.server_slug === 'acme' && raft.agents.length === 1, JSON.stringify(raft));
+    assert(raft.server_slug === 'acme' && raft.agents.length === 2, JSON.stringify(raft));
+    assert(list.default && list.default.agent_name === 'beta', `most recently active agent is not the automatic fallback: ${JSON.stringify(list.default)}`);
     const rm = await worker.fetch(post('/api/me/connectors/remove', ctx.owner.cookie, { provider: 'raft', server_id: 'S1' }), ctx.env, {});
     assert(rm.status === 200, `remove ${rm.status}`);
     const r = await targetsOf(ctx);

@@ -39,20 +39,11 @@ export function ConnectorsBody() {
   const [made, setMade] = useState(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState('');
-  const [defaults, setDefaults] = useState({});
-  const [editingDefault, setEditingDefault] = useState({});
   useEffect(() => {
     const q = new URLSearchParams(location.search);
     if (q.get('connected') === 'raft') setNotice('Raft server connected. Agents on it now get comments on the docs they write.');
     else if (q.get('error')) setNotice(`Could not connect: ${q.get('error').replace(/_/g, ' ')}.`);
   }, []);
-  const saveDefault = async (c) => {
-    const name = (defaults[c.id] || '').trim();
-    if (!name) return;
-    try { await call('/api/me/connectors/raft/default', { server_id: c.server_id, agent_name: name }); setDefaults((d) => ({ ...d, [c.id]: '' })); await load(); }
-    catch (err) { setNotice(err.message); }
-  };
-
   const load = useCallback(async () => {
     try {
       const b = await call('/api/me/connectors');
@@ -68,7 +59,8 @@ export function ConnectorsBody() {
     try {
       const b = await call('/api/me/connectors/test', keyOf(t));
       const d = b.delivery || {};
-      setResults((r) => ({ ...r, [idOf(t)]: d.status === 'delivered' ? 'Delivered ✓' : `Not delivered: ${deliveryErrorText(d.error) || 'unknown'}` }));
+      const accepted = t.provider === 'raft' ? 'Accepted by Raft ✓' : 'Delivered ✓';
+      setResults((r) => ({ ...r, [idOf(t)]: d.status === 'delivered' ? accepted : `Not delivered: ${deliveryErrorText(d.error) || 'unknown'}` }));
     } catch (err) { setResults((r) => ({ ...r, [idOf(t)]: err.message })); }
   };
 
@@ -100,7 +92,7 @@ export function ConnectorsBody() {
   return (
     <>
         <p className="muted" style={{ marginTop: 0 }}>
-          Where tdoc sends comments when you press Send to agent or @agent. The agent that wrote a doc gets its comments first; the top one here is the default for everything else.
+          The agent working on a doc gets its comments. If no agent has worked on it yet, tdoc automatically uses your most recently active connected agent.
         </p>
         {notice ? <p className="muted" role="status">{notice}</p> : null}
 
@@ -114,15 +106,13 @@ export function ConnectorsBody() {
               const sample = isRaft ? (c.agents || [])[0] : c.target;
               const title = isRaft ? `Raft · ${c.server_slug || 'server'}` : (readableHandle(c.target) || 'Webhook');
               const names = isRaft ? (c.agents || []).map((a) => readableHandle(a) || a.agent_sub) : [];
-              const isDefault = targets[0] && sample && idOf(targets[0]) === idOf(sample);
-              const editing = Boolean(editingDefault[c.id]);
               return (
                 <section key={c.id} className="tdoc-connector tdoc-conn-card">
                   <div className="tdoc-conn-card-head">
                     <span className="tdoc-connector-logo"><ProviderMark target={isRaft ? { provider: 'raft' } : c.target} size={22} /></span>
                     <div className="tdoc-conn-card-title">
                       <strong>{title}</strong>
-                      {isDefault ? <span className="tdoc-connector-badge">Default</span> : null}
+                      <span className="tdoc-connector-badge">Connected</span>
                     </div>
                     <div className="tdoc-conn-card-actions">
                       {sample ? <button type="button" className="tdoc-fbspace-btn" onClick={() => test(sample)}>Send test</button> : null}
@@ -132,31 +122,15 @@ export function ConnectorsBody() {
                   <dl className="tdoc-conn-facts">
                     {isRaft ? (
                       <>
-                        <div><dt>Default agent</dt><dd>{names.length ? names.join(', ') : 'none yet'}</dd></div>
+                        <div><dt>Fallback</dt><dd>{names.length ? names[0] : 'Automatic after an agent first publishes or replies'}</dd></div>
                         <div><dt>Routing</dt><dd>Any agent on this server gets the comments on docs it wrote.</dd></div>
+                        <div><dt>Delivery</dt><dd>tdoc shows when Raft accepts a handoff, then when the agent replies.</dd></div>
                       </>
                     ) : (
                       <div><dt>Endpoint</dt><dd>{detailOf(c.target)}</dd></div>
                     )}
                     {sample && results[idOf(sample)] ? <div><dt>Last test</dt><dd>{results[idOf(sample)]}</dd></div> : null}
                   </dl>
-                  {isRaft ? (editing ? (
-                    <form className="tdoc-conn-inline-form" onSubmit={(e) => { e.preventDefault(); saveDefault(c); setEditingDefault((m) => ({ ...m, [c.id]: false })); }}>
-                      <input
-                        type="text"
-                        autoFocus
-                        placeholder="@agent-handle"
-                        value={defaults[c.id] || ''}
-                        onChange={(e) => setDefaults((d) => ({ ...d, [c.id]: e.target.value }))}
-                      />
-                      <button type="submit" className="tdoc-fbspace-btn primary" disabled={!(defaults[c.id] || '').trim()}>Save</button>
-                      <button type="button" className="tdoc-fbspace-btn" onClick={() => setEditingDefault((m) => ({ ...m, [c.id]: false }))}>Cancel</button>
-                    </form>
-                  ) : (
-                    <button type="button" className="tdoc-link-btn" onClick={() => setEditingDefault((m) => ({ ...m, [c.id]: true }))}>
-                      {names.length ? 'Change default agent' : 'Set a default agent'}
-                    </button>
-                  )) : null}
                 </section>
               );
             })}

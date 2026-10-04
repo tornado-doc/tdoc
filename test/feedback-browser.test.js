@@ -86,11 +86,9 @@ const APP_HTML = `<!doctype html>
     });
 
     await test('clicking the bookmark loads the client; the connect popup hands a token back to the app', async () => {
-      // Whether the popup opens straight away (a bookmark click is a user
-      // gesture; headless Chromium allows it regardless) or the browser blocks
-      // it and the client falls back to a notice whose button carries the
-      // gesture, the app ends up holding a token for its own feedback space.
-      const popupPromise = context.waitForEvent('page', { timeout: 4000 }).catch(() => null);
+      // Reproduce a browser-blocked first attempt. The next user click must be
+      // a genuinely new attempt, not the rejected Promise from the first one.
+      await page.evaluate(() => { window.__tdocRealOpen = window.open; window.open = () => null; });
       // What the bookmark does, minus the bookmarks bar.
       await page.evaluate((src) => {
         const s = document.createElement('script');
@@ -101,13 +99,11 @@ const APP_HTML = `<!doctype html>
       }, `${tdocBase}/feedback.js`);
       await page.waitForFunction(() => window.tdocFeedback && window.tdocFeedback.base);
       assert((await page.evaluate(() => window.tdocFeedback.base)) === tdocBase, 'client did not learn its origin from the script URL');
-      let popup = await popupPromise;
-      if (!popup) {
-        const connectButton = page.locator('#tdoc-feedback-root .tdoc-feedback-notice button.submit');
-        await connectButton.waitFor({ timeout: 5000 });
-        assert((await connectButton.innerText()).includes('Connect'), 'notice does not offer to connect');
-        [popup] = await Promise.all([context.waitForEvent('page'), connectButton.click()]);
-      }
+      const connectButton = page.locator('#tdoc-feedback-root .tdoc-feedback-notice button.submit');
+      await connectButton.waitFor({ timeout: 5000 });
+      assert((await connectButton.innerText()).includes('Connect'), 'notice does not offer to connect');
+      await page.evaluate(() => { window.open = window.__tdocRealOpen; });
+      const [popup] = await Promise.all([context.waitForEvent('page'), connectButton.click()]);
       await popup.waitForLoadState().catch(() => {});
       assert(popup.url().startsWith(`${tdocBase}/feedback/connect?origin=${encodeURIComponent(appBase)}`), `popup went to ${popup.url()}`);
       await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), `tdoc-feedback:${tdocBase}`);

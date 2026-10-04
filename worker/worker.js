@@ -6855,6 +6855,22 @@ async function touchDocAgent(env, slug, target) {
   return true;
 }
 
+// The account fallback is automatic too: whichever connected agent most
+// recently did real work becomes the first choice for a doc that has never
+// had an agent. This is routing state, not a setting a person should have to
+// type and maintain on the Connectors page.
+async function touchAccountAgent(env, accountId, target) {
+  const t = normalizeNotifyTarget(target);
+  if (!accountId || !t) return false;
+  const prev = await accountNotifyTargets(env, accountId);
+  const rest = prev.filter((x) => !sameNotifyTarget(x, t));
+  await env.META.put(`account-notify:${accountId}`, JSON.stringify([
+    { ...t, last_touched: new Date().toISOString() },
+    ...rest,
+  ].slice(0, NOTIFY_AGENTS_MAX)));
+  return true;
+}
+
 // Which agent is acting on this doc. The follow-up seat is earned by doing the
 // work (publishing or replying); this decides whose work it was.
 //
@@ -10571,7 +10587,12 @@ export default {
       // Silent by design — a Raft identity is optional and its absence must
       // not fail a reply that is otherwise fine.
       const replyingAgent = await actingAgent(env, req, auth.actor);
-      if (replyingAgent) { try { await touchDocAgent(env, slug, replyingAgent); } catch {} }
+      if (replyingAgent) {
+        try {
+          await touchDocAgent(env, slug, replyingAgent);
+          await touchAccountAgent(env, auth.actor.account_id, replyingAgent);
+        } catch {}
+      }
       // One answer per human turn. A round that re-reads comments.json after
       // somebody deleted the agent's reply would otherwise post the same words
       // in the same place; the log remembers what the fold forgot. `force`
@@ -10888,7 +10909,10 @@ export default {
         // failure — nobody's publish should fail over who gets notified.
         try {
           const publishingAgent = await actingAgent(env, req, auth.actor);
-          if (publishingAgent) await touchDocAgent(env, slug, publishingAgent);
+          if (publishingAgent) {
+            await touchDocAgent(env, slug, publishingAgent);
+            await touchAccountAgent(env, auth.actor.account_id, publishingAgent);
+          }
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
         }

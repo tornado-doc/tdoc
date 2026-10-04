@@ -196,20 +196,13 @@ ${uiCss}
   let connecting = null;
   function connect() {
     if (connecting) return connecting;
-    connecting = new Promise((resolve, reject) => {
+    const attempt = new Promise((resolve, reject) => {
       const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}`;
-      const popup = window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
-      if (!popup) {
-        const error = new Error('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.');
-        error.status = 0;
-        error.blocked = true;
-        reject(error);
-        return;
-      }
+      let popup = null;
+      let watch = null;
       const done = (fn) => (value) => {
         window.removeEventListener('message', onMessage);
         clearInterval(watch);
-        connecting = null;
         fn(value);
       };
       const finish = done(resolve);
@@ -222,8 +215,19 @@ ${uiCss}
         writeSession(session);
         finish(session);
       };
+      // Listen before opening. A signed-in popup can answer immediately, and
+      // registering afterwards leaves the app waiting for a message it missed.
       window.addEventListener('message', onMessage);
-      const watch = setInterval(() => {
+      popup = window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+      if (!popup) {
+        window.removeEventListener('message', onMessage);
+        const error = new Error('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.');
+        error.status = 0;
+        error.blocked = true;
+        reject(error);
+        return;
+      }
+      watch = setInterval(() => {
         if (popup.closed) {
           const error = new Error('The tdoc window was closed before connecting.');
           error.status = 0;
@@ -231,6 +235,13 @@ ${uiCss}
         }
       }, 500);
     });
+    // Every attempt, including a browser-blocked popup, must release the
+    // single-flight slot. Otherwise the first rejected Promise is cached and
+    // every later click fails without even trying to open a window.
+    connecting = attempt.then(
+      (session) => { connecting = null; return session; },
+      (error) => { connecting = null; throw error; },
+    );
     return connecting;
   }
 
@@ -971,7 +982,14 @@ ${uiCss}
           <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
             <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" onClick={() => setNotice(null)}>×</button></div>
             <p>{notice.error}</p>
-            <div className="foot"><span /><button className="submit" type="button" onClick={async () => { setNotice(null); apply(await call({ type: 'tdoc-feedback-signin', pageUrl: canonical() })); }}>Connect tdoc</button></div>
+            <div className="foot"><span /><button className="submit" type="button" onClick={async () => {
+              setNotice(null);
+              const result = await call({ type: 'tdoc-feedback-signin', pageUrl: canonical() });
+              // This button is the continuation of "leave a comment", not a
+              // standalone account setting. After a successful first connect,
+              // put the person back where they were headed: picking an element.
+              if (apply(result)) setPicking(true);
+            }}>Connect tdoc</button></div>
           </section>
         ) : null}
 
